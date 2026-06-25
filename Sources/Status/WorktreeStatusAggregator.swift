@@ -3,7 +3,7 @@ import Foundation
 protocol WorktreeStatusDelegate: AnyObject {
     func worktreeStatusDidUpdate(_ status: WorktreeStatus)
     func paneStatusDidChange(worktreePath: String, paneIndex: Int,
-                             oldStatus: AgentStatus, newStatus: AgentStatus,
+                             oldStatus: SailorStatus, newStatus: SailorStatus,
                              lastMessage: String)
 }
 
@@ -63,7 +63,7 @@ class WorktreeStatusAggregator {
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }
 
-    func agentDidUpdate(terminalID: String, status: AgentStatus, lastMessage: String, lastUserPrompt: String = "") {
+    func agentDidUpdate(terminalID: String, status: SailorStatus, lastMessage: String, lastUserPrompt: String = "") {
         guard let worktreePath = terminalToWorktree[terminalID] else { return }
 
         let now = Date()

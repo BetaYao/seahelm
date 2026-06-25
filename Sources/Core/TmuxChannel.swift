@@ -2,8 +2,8 @@ import Foundation
 
 /// Fallback channel: communicates with any agent via tmux commands.
 /// Works with any CLI tool — no agent-side support needed.
-class TmuxChannel: AgentChannel {
-    let channelType: AgentChannelType = .tmux
+class TmuxChannel: SailorChannel {
+    let channelType: SailorChannelType = .tmux
     let sessionName: String
 
     init(sessionName: String) {
@@ -63,8 +63,8 @@ class TmuxChannel: AgentChannel {
 
 /// Fallback channel: communicates with any agent via zmx commands.
 /// Works with any CLI tool — no agent-side support needed.
-class ZmxChannel: AgentChannel {
-    let channelType: AgentChannelType = .zmx
+class ZmxChannel: SailorChannel {
+    let channelType: SailorChannelType = .zmx
     let sessionName: String
 
     init(sessionName: String) {

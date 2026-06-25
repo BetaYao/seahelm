@@ -2,7 +2,7 @@ import AppKit
 
 /// Small status indicator dot with color
 class StatusBadge: NSView {
-    var status: AgentStatus = .unknown {
+    var status: SailorStatus = .unknown {
         didSet { needsDisplay = true }
     }
 

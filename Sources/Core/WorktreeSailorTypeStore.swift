@@ -4,12 +4,12 @@ import Foundation
 /// path, so the card badge reflects the user's pick immediately — instead of
 /// waiting for seahelm to detect the agent from terminal output. Stored as JSON
 /// alongside config.json (`~/.config/seahelm/worktree-agents.json`).
-final class WorktreeAgentTypeStore {
-    static let shared = WorktreeAgentTypeStore()
+final class WorktreeSailorTypeStore {
+    static let shared = WorktreeSailorTypeStore()
 
     private let fileURL = Config.configDir.appendingPathComponent("worktree-agents.json")
     private let lock = NSLock()
-    private var map: [String: String]   // worktreePath -> AgentType.rawValue
+    private var map: [String: String]   // worktreePath -> SailorType.rawValue
 
     private init() {
         if let data = try? Data(contentsOf: fileURL),
@@ -21,13 +21,13 @@ final class WorktreeAgentTypeStore {
     }
 
     /// The agent type the user picked when creating this worktree, if recorded.
-    func agentType(forWorktree path: String) -> AgentType? {
+    func agentType(forWorktree path: String) -> SailorType? {
         lock.lock(); defer { lock.unlock() }
-        return map[path].flatMap { AgentType(rawValue: $0) }
+        return map[path].flatMap { SailorType(rawValue: $0) }
     }
 
     /// Record (and persist) the chosen agent type for a worktree path.
-    func set(_ type: AgentType, forWorktree path: String) {
+    func set(_ type: SailorType, forWorktree path: String) {
         lock.lock()
         map[path] = type.rawValue
         let snapshot = map

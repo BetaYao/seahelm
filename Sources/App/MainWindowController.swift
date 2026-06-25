@@ -423,8 +423,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         positionStandardWindowButtons()
     }
 
-    private func performWorktreeCreate(task: String, repoPath: String, agentType: AgentType, reuseEnv: Bool) {
-        let currentPath = tabCoordinator.selectedAgent?.worktreePath
+    private func performWorktreeCreate(task: String, repoPath: String, agentType: SailorType, reuseEnv: Bool) {
+        let currentPath = tabCoordinator.selectedSailor?.worktreePath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let branches = WorktreeCreator.listBranches(repoPath: repoPath)
@@ -432,7 +432,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             do {
                 let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
                 let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
-                WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
+                WorktreeSailorTypeStore.shared.set(agentType, forWorktree: info.path)
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
@@ -457,7 +457,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func currentWorktreeRefs() -> [WorktreeRef] {
-        ShipLog.shared.allAgents().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
+        ShipLog.shared.allSailors().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
     }
 
     private func makeBridgeRouter() -> BridgeCommandRouter {
@@ -476,7 +476,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 guard let tid = ShipLog.shared.agent(forWorktree: path)?.id else { return }
                 ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
             },
-            activeAgentCount: { ShipLog.shared.allAgents().count },
+            activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.agent(forWorktree: path)?.branch ?? "" },
             projectForPath: { path in ShipLog.shared.agent(forWorktree: path)?.project ?? "" }
         )
@@ -608,7 +608,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private static let tabIdleCollapseInterval: TimeInterval = 8 * 3600
 
     private func refreshWorktreeTabs() {
-        let selectedPath = tabCoordinator.selectedAgent?.worktreePath
+        let selectedPath = tabCoordinator.selectedSailor?.worktreePath
         let now = Date()
         let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, statusColor: NSColor, isSelected: Bool, collapsed: Bool) in
             let path = entry.info.path
@@ -642,7 +642,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func refreshFocusedWorktreeCapsule() {
-        guard let agent = tabCoordinator.selectedAgent else {
+        guard let agent = tabCoordinator.selectedSailor else {
             titleBar.updateFocusedWorktree(title: "", path: "")
             return
         }
@@ -1058,7 +1058,7 @@ extension MainWindowController: WorktreeStatusDelegate {
         tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
-    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
         tabCoordinator.handlePaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex, oldStatus: oldStatus, newStatus: newStatus, lastMessage: lastMessage)
     }
 }
@@ -1289,7 +1289,7 @@ extension MainWindowController {
             )
         case .broadcastOrder:
             guard let task = order.action.payload else { return }
-            for agent in ShipLog.shared.allAgents() {
+            for agent in ShipLog.shared.allSailors() {
                 ShipLog.shared.sendCommand(to: agent.id, command: task)
             }
         default:

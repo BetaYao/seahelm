@@ -6,12 +6,12 @@ struct NotificationEntry: Identifiable {
     let workspaceName: String
     let branch: String
     let worktreePath: String
-    let status: AgentStatus
+    let status: SailorStatus
     let message: String
     var isRead: Bool
     let paneIndex: Int?  // nil for single-pane worktrees
 
-    init(workspaceName: String = "", branch: String, worktreePath: String, status: AgentStatus, message: String, paneIndex: Int? = nil) {
+    init(workspaceName: String = "", branch: String, worktreePath: String, status: SailorStatus, message: String, paneIndex: Int? = nil) {
         self.id = UUID()
         self.timestamp = Date()
         self.workspaceName = workspaceName

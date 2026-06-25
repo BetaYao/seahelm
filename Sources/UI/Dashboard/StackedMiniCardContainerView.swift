@@ -13,7 +13,7 @@ final class StackedMiniCardContainerView: NSView {
     private(set) var ghostViews: [NSView] = []
 
     /// The container owns click handling. miniCardView.delegate must remain nil.
-    weak var delegate: AgentCardDelegate?
+    weak var delegate: SailorCardDelegate?
     /// Delegate for drag-to-reorder in sidebar. Set by DashboardViewController.
     weak var reorderDelegate: MiniCardReorderDelegate?
 

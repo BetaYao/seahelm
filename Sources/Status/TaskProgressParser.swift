@@ -45,7 +45,7 @@ struct TaskProgressParser {
     // MARK: - Public API
 
     /// Parse task progress from viewport text. Returns nil if no task list found (< 2 task lines).
-    static func parse(content: String, agentType: AgentType) -> Result? {
+    static func parse(content: String, agentType: SailorType) -> Result? {
         guard !content.isEmpty else { return nil }
 
         var completed = 0

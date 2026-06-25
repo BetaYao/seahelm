@@ -100,9 +100,9 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.data?["model"] as? String, "gpt-5.4")
     }
 
-    // MARK: - Event → AgentStatus mapping
+    // MARK: - Event → SailorStatus mapping
 
-    func testEventToAgentStatus() {
+    func testEventToSailorStatus() {
         XCTAssertEqual(WebhookEventType.sessionStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseEnd.agentStatus(data: nil), .running)

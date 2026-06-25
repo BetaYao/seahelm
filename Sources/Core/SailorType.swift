@@ -1,6 +1,6 @@
 import Foundation
 
-enum AgentType: String, Codable, CaseIterable {
+enum SailorType: String, Codable, CaseIterable {
     // AI Agents
     case claudeCode
     case codex
@@ -112,7 +112,7 @@ enum AgentType: String, Codable, CaseIterable {
     // MARK: - AI Agent detection from terminal content
 
     // Ordered by specificity to avoid false matches (e.g., "opencode" before "code")
-    private static let detectionPatterns: [(pattern: String, type: AgentType)] = [
+    private static let detectionPatterns: [(pattern: String, type: SailorType)] = [
         ("opencode", .openCode),
         ("claude", .claudeCode),
         ("codex", .codex),
@@ -126,7 +126,7 @@ enum AgentType: String, Codable, CaseIterable {
     ]
 
     /// Detect agent type from lowercased terminal content (for AI agents)
-    static func detect(fromLowercased content: String) -> AgentType {
+    static func detect(fromLowercased content: String) -> SailorType {
         for (pattern, type) in detectionPatterns {
             if content.contains(pattern) {
                 return type
@@ -137,7 +137,7 @@ enum AgentType: String, Codable, CaseIterable {
 
     // MARK: - Shell command detection from command line
 
-    private static let commandMap: [String: AgentType] = [
+    private static let commandMap: [String: SailorType] = [
         "brew": .brew, "btop": .btop, "top": .top, "htop": .htop,
         "docker": .docker, "npm": .npm, "npx": .npm,
         "yarn": .yarn, "make": .make, "cargo": .cargo, "go": .go,
@@ -147,7 +147,7 @@ enum AgentType: String, Codable, CaseIterable {
 
     /// Detect shell task type from a command line string.
     /// Handles full paths (/usr/local/bin/brew) and env prefixes (ENV=val make).
-    static func detect(fromCommand command: String) -> AgentType {
+    static func detect(fromCommand command: String) -> SailorType {
         let tokens = command.split(separator: " ", maxSplits: 10)
         guard !tokens.isEmpty else { return .unknown }
 

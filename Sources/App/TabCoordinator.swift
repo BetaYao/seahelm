@@ -45,9 +45,9 @@ class TabCoordinator {
         return f
     }()
 
-    var selectedAgent: AgentDisplayInfo? {
+    var selectedSailor: SailorDisplayInfo? {
         guard let dashboard = dashboardVC else { return nil }
-        let index = dashboard.selectedAgentIndex
+        let index = dashboard.selectedSailorIndex
         let agents = dashboard.agents
         guard index < agents.count else { return nil }
         return agents[index]
@@ -74,7 +74,7 @@ class TabCoordinator {
             queue: orders,
             notify: { action in
                 feed.record(action)
-                let status: AgentStatus = action.kind == .watchError ? .error : .waiting
+                let status: SailorStatus = action.kind == .watchError ? .error : .waiting
                 NotificationManager.shared.notify(
                     worktreePath: action.worktreePath,
                     workspaceName: action.project,
@@ -126,7 +126,7 @@ class TabCoordinator {
 
         if let dashboard = dashboardVC {
             delegate?.tabCoordinator(self, embedViewController: dashboard)
-            dashboard.updateAgents(buildAgentDisplayInfos())
+            dashboard.updateSailors(buildSailorDisplayInfos())
         }
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -220,7 +220,7 @@ class TabCoordinator {
         }
         if configChanged { saveConfig() }
 
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
@@ -229,10 +229,10 @@ class TabCoordinator {
 
     // MARK: - Build Agent Display Infos
 
-    func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
-        let agents = ShipLog.shared.allAgents()
+    func buildSailorDisplayInfos() -> [SailorDisplayInfo] {
+        let agents = ShipLog.shared.allSailors()
         var seen = Set<String>()
-        var result: [AgentDisplayInfo] = []
+        var result: [SailorDisplayInfo] = []
 
         for agent in agents {
             guard let station = agent.station else { continue }
@@ -255,7 +255,7 @@ class TabCoordinator {
             let isMain = matchedWorktree?.info.isMainWorktree ?? false
             let freshBranch = matchedWorktree?.info.branch ?? agent.branch
 
-            result.append(AgentDisplayInfo(
+            result.append(SailorDisplayInfo(
                 id: agent.id,
                 name: freshBranch,
                 project: agent.project,
@@ -264,8 +264,8 @@ class TabCoordinator {
                 mostRecentMessage: mostRecentMessage,
                 lastUserPrompt: mostRecentUserPrompt,
                 mostRecentPaneIndex: mostRecentPaneIndex,
-                totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
-                roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
+                totalDuration: SailorDisplayHelpers.formatDuration(agent.totalDuration),
+                roundDuration: SailorDisplayHelpers.formatDuration(agent.roundDuration),
                 station: station,
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
@@ -381,7 +381,7 @@ class TabCoordinator {
                     ShipLog.shared.reorder(paths: cardOrder)
                 }
 
-                self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
+                self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
                 self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
                 if allWorktreeInfos.isEmpty {
@@ -407,7 +407,7 @@ class TabCoordinator {
                         guard let self else { return }
                         let canon = WorktreeDiscovery.canonicalPath(worktreePath)
                         let agent = ShipLog.shared.agent(forWorktree: worktreePath)
-                            ?? ShipLog.shared.allAgents().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
+                            ?? ShipLog.shared.allSailors().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
                         self.suggestionFeed.set(
                             worktreePath: worktreePath,
                             branch: agent?.branch ?? "",
@@ -483,7 +483,7 @@ class TabCoordinator {
         }
         if configChanged { saveConfig() }
 
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -579,7 +579,7 @@ class TabCoordinator {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -619,7 +619,7 @@ class TabCoordinator {
         activeTabIndex = -1
         delegate?.tabCoordinatorRequestClearContentContainer(self)
 
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         switchToTab(0)
@@ -712,7 +712,7 @@ class TabCoordinator {
         }
 
         workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         return true
@@ -727,7 +727,7 @@ class TabCoordinator {
     }
 
     func saveSelectedWorktree() {
-        if let agent = selectedAgent {
+        if let agent = selectedSailor {
             config.selectedWorktreePath = agent.worktreePath
         }
     }
@@ -735,7 +735,7 @@ class TabCoordinator {
     func restoreSessionState() {
         // Restore selected agent card from config
         if let savedPath = config.selectedWorktreePath {
-            dashboardVC?.selectAgent(byWorktreePath: savedPath)
+            dashboardVC?.selectSailor(byWorktreePath: savedPath)
         }
     }
 
@@ -775,17 +775,17 @@ class TabCoordinator {
         integrateNewWorktrees(repoRoot: repoPath, allDiscovered: allDiscovered, newWorktrees: [info])
 
         // Focus the newly created worktree's minicard
-        dashboardVC?.selectAgent(byWorktreePath: info.path)
+        dashboardVC?.selectSailor(byWorktreePath: info.path)
     }
 
     // MARK: - Status Update Forwarding
 
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos())
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
-    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let repoPath = worktreeRepoCache[worktreePath] ?? WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
@@ -832,7 +832,7 @@ class TabCoordinator {
     }
 
     func selectTab(forWorktree path: String) {
-        dashboardVC?.selectAgent(byWorktreePath: path)
+        dashboardVC?.selectSailor(byWorktreePath: path)
         saveSelectedWorktree()
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -846,8 +846,8 @@ class TabCoordinator {
         if workspaceManager.tabs.contains(where: { tab in
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
-            dashboardVC?.updateAgents(buildAgentDisplayInfos())
-            dashboardVC?.selectAgent(byWorktreePath: worktreePath)
+            dashboardVC?.updateSailors(buildSailorDisplayInfos())
+            dashboardVC?.selectSailor(byWorktreePath: worktreePath)
             saveSelectedWorktree()
             delegate?.tabCoordinatorRequestUpdateTitleBar(self)
             return
@@ -867,7 +867,7 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
                 self.openRepoTab(repoPath: repoPath) { [weak self] in
-                    self?.dashboardVC?.selectAgent(byWorktreePath: worktreePath)
+                    self?.dashboardVC?.selectSailor(byWorktreePath: worktreePath)
                     self?.saveSelectedWorktree()
                     if let self {
                         self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)

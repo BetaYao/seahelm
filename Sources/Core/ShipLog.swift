@@ -1,7 +1,7 @@
 import Foundation
 
 protocol ShipLogDelegate: AnyObject {
-    func agentDidUpdate(_ info: AgentInfo)
+    func agentDidUpdate(_ info: SailorInfo)
 }
 
 /// Single source of truth for all agent information.
@@ -19,12 +19,12 @@ class ShipLog {
     /// Tracks when each terminal entered its current status (for holdSeconds calculation).
     private var statusEnteredAt: [String: Date] = [:]
 
-    private var agents: [String: AgentInfo] = [:]       // keyed by terminal ID
+    private var agents: [String: SailorInfo] = [:]       // keyed by terminal ID
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
     /// Strong references to channels (keyed by terminal ID)
-    private var channels: [String: AgentChannel] = [:]
+    private var channels: [String: SailorChannel] = [:]
     private var backendsByPath: [String: String] = [:]
     /// External channels (WeCom, future: Slack, etc.) — keyed by channelId
     private var externalChannels: [String: ExternalChannel] = [:]
@@ -36,7 +36,7 @@ class ShipLog {
     /// Test helper: register an agent entry without a real Station.
     func registerForTesting(terminalID: String, worktreePath: String, branch: String, project: String) {
         lock.lock(); defer { lock.unlock() }
-        agents[terminalID] = AgentInfo(
+        agents[terminalID] = SailorInfo(
             id: terminalID, worktreePath: worktreePath, agentType: .unknown,
             project: project, branch: branch, status: .unknown, lastMessage: "",
             commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
@@ -57,7 +57,7 @@ class ShipLog {
         let terminalID = station.id
 
         // Create a default channel if we have a session name
-        var channel: AgentChannel?
+        var channel: SailorChannel?
         if let sessionName = tmuxSessionName {
             if backend == "tmux" {
                 channel = TmuxChannel(sessionName: sessionName)
@@ -68,7 +68,7 @@ class ShipLog {
         }
         backendsByPath[worktreePath] = backend
 
-        let info = AgentInfo(
+        let info = SailorInfo(
             id: terminalID,
             worktreePath: worktreePath,
             agentType: .unknown,
@@ -139,7 +139,7 @@ class ShipLog {
 
     // MARK: - Updates
 
-    func updateStatus(terminalID: String, status: AgentStatus,
+    func updateStatus(terminalID: String, status: SailorStatus,
                       lastMessage: String, roundDuration: TimeInterval,
                       tasks: [TaskItem] = [], lastUserPrompt: String = "") {
         lock.lock()
@@ -247,7 +247,7 @@ class ShipLog {
     /// - shell task (isShellTask) → any type allowed
     /// - AI agent (isAIAgent) → only another AI agent allowed (no demotion)
     /// When type supports hooks, upgrades backend channel → HooksChannel.
-    func updateDetection(terminalID: String, commandLine: String?, agentType: AgentType) {
+    func updateDetection(terminalID: String, commandLine: String?, agentType: SailorType) {
         lock.lock()
         guard var info = agents[terminalID] else {
             lock.unlock()
@@ -337,7 +337,7 @@ class ShipLog {
     }
 
     /// Get the channel for a specific agent (for direct access)
-    func channel(for terminalID: String) -> AgentChannel? {
+    func channel(for terminalID: String) -> SailorChannel? {
         lock.lock()
         defer { lock.unlock() }
         return channels[terminalID]
@@ -464,7 +464,7 @@ class ShipLog {
 
     // MARK: - Queries
 
-    func allAgents() -> [AgentInfo] {
+    func allSailors() -> [SailorInfo] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -472,7 +472,7 @@ class ShipLog {
     }
 
     /// Look up agent by terminal ID
-    func agent(for terminalID: String) -> AgentInfo? {
+    func agent(for terminalID: String) -> SailorInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -480,7 +480,7 @@ class ShipLog {
     }
 
     /// Convenience lookup by worktree path via reverse index
-    func agent(forWorktree worktreePath: String) -> AgentInfo? {
+    func agent(forWorktree worktreePath: String) -> SailorInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -488,7 +488,7 @@ class ShipLog {
         return agents[tid]
     }
 
-    func agentsForProject(_ project: String) -> [AgentInfo] {
+    func agentsForProject(_ project: String) -> [SailorInfo] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -583,7 +583,7 @@ class ShipLog {
             reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")
 
         case "status":
-            let agents = allAgents()
+            let agents = allSailors()
             if agents.isEmpty {
                 reply(to: cmd.rawMessage, content: "No agents running.")
                 return
@@ -595,7 +595,7 @@ class ShipLog {
             reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
 
         case "list":
-            let agents = allAgents()
+            let agents = allSailors()
             if agents.isEmpty {
                 reply(to: cmd.rawMessage, content: "No agents registered.")
                 return

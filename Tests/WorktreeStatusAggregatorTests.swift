@@ -5,13 +5,13 @@ final class WorktreeStatusAggregatorTests: XCTestCase {
 
     class MockDelegate: WorktreeStatusDelegate {
         var lastUpdatedStatus: WorktreeStatus?
-        var paneChanges: [(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String)] = []
+        var paneChanges: [(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String)] = []
 
         func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
             lastUpdatedStatus = status
         }
 
-        func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+        func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
             paneChanges.append((worktreePath, paneIndex, oldStatus, newStatus, lastMessage))
         }
     }

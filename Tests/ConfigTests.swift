@@ -72,18 +72,18 @@ final class ConfigTests: XCTestCase {
     // MARK: - Agent Detect Config
 
     func testDefaultAgentDetect_HasClaude() {
-        let agents = AgentDetectConfig.default.agents
+        let agents = SailorDetectConfig.default.agents
         XCTAssertTrue(agents.contains(where: { $0.name == "claude" }))
     }
 
     func testClaudeAgent_HasRules() {
-        let claude = AgentDetectConfig.default.agents.first(where: { $0.name == "claude" })!
+        let claude = SailorDetectConfig.default.agents.first(where: { $0.name == "claude" })!
         XCTAssertFalse(claude.rules.isEmpty)
         XCTAssertEqual(claude.defaultStatus, "Idle")
         XCTAssertFalse(claude.messageSkipPatterns.isEmpty)
     }
 
-    func testDecodeExistingAgentDetectAddsMissingDefaultAgents() throws {
+    func testDecodeExistingSailorDetectAddsMissingDefaultSailors() throws {
         let json = """
         {
             "agent_detect": {
@@ -105,7 +105,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.agentDetect.agents.contains(where: { $0.name == "codex" }))
     }
 
-    func testDecodeExistingAgentDetectMergesMissingDefaultRulePatterns() throws {
+    func testDecodeExistingSailorDetectMergesMissingDefaultRulePatterns() throws {
         let json = """
         {
             "agent_detect": {
@@ -141,7 +141,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(codex.messageSkipPatterns.contains("tip"))
     }
 
-    func testDecodeExistingClaudeAgentDetectMergesTaskProgressRunningPatterns() throws {
+    func testDecodeExistingClaudeSailorDetectMergesTaskProgressRunningPatterns() throws {
         let json = """
         {
             "agent_detect": {
@@ -218,11 +218,11 @@ final class ConfigTests: XCTestCase {
     }
 
     func testAgentDetectConfig_EncodeDecodeRoundtrip() throws {
-        let original = AgentDetectConfig.default
+        let original = SailorDetectConfig.default
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(original)
-        let decoded = try JSONDecoder().decode(AgentDetectConfig.self, from: data)
+        let decoded = try JSONDecoder().decode(SailorDetectConfig.self, from: data)
 
         XCTAssertEqual(decoded.agents.count, original.agents.count)
         for (orig, dec) in zip(original.agents, decoded.agents) {
@@ -398,7 +398,7 @@ final class ConfigTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let config = try JSONDecoder().decode(AgentDetectConfig.self, from: json)
+        let config = try JSONDecoder().decode(SailorDetectConfig.self, from: json)
         XCTAssertEqual(config.agents.count, 1)
         XCTAssertEqual(config.agents[0].name, "myagent")
         XCTAssertEqual(config.agents[0].rules[0].status, "Running")

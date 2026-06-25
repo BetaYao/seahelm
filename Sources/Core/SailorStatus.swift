@@ -1,6 +1,6 @@
 import AppKit
 
-enum AgentStatus: String, Codable {
+enum SailorStatus: String, Codable {
     case running = "Running"
     case idle = "Idle"
     case waiting = "Waiting"

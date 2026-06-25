@@ -6,7 +6,7 @@ final class MiniCardView: NSView {
         static let secondaryPointSize: CGFloat = 10
     }
 
-    weak var delegate: AgentCardDelegate?
+    weak var delegate: SailorCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
     var isKeyboardFocused: Bool = false { didSet { updateAppearance() } }
@@ -19,7 +19,7 @@ final class MiniCardView: NSView {
     private var statusDots: [NSView] = []
     private var durationLeadingConstraint: NSLayoutConstraint?
     // Line 4: repo badge + worktree branch
-    private let agentBadge = AgentBadgeView()
+    private let agentBadge = SailorBadgeView()
     private let repoWorktreeLabel = NSTextField(labelWithString: "")
     private var repoLeadingDefault: NSLayoutConstraint!
     private var repoLeadingAfterBadge: NSLayoutConstraint!
@@ -38,7 +38,7 @@ final class MiniCardView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = [], agentType: AgentType = .unknown) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [SailorStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = [], agentType: SailorType = .unknown) {
         agentId = id
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
 
@@ -64,7 +64,7 @@ final class MiniCardView: NSView {
         statusDots.forEach { $0.removeFromSuperview() }
         statusDots.removeAll()
         durationLeadingConstraint?.isActive = false
-        let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
+        let statuses = paneStatuses.isEmpty ? [SailorStatus(rawValue: status) ?? .unknown] : paneStatuses
         var previousDot: NSView? = nil
         for agentStatus in statuses {
             let dot = NSView()
@@ -88,12 +88,12 @@ final class MiniCardView: NSView {
             durationLeadingConstraint?.isActive = true
         }
 
-        let compactTotal = AgentDisplayHelpers.compactDuration(totalDuration)
-        let compactRound = AgentDisplayHelpers.compactDuration(roundDuration)
+        let compactTotal = SailorDisplayHelpers.compactDuration(totalDuration)
+        let compactRound = SailorDisplayHelpers.compactDuration(roundDuration)
         durationLabel.stringValue = "\u{23F1} \(compactTotal) \u{00B7} \(compactRound)"
 
         statusTextLabel.stringValue = status.capitalized
-        statusTextLabel.textColor = AgentDisplayHelpers.statusColor(status)
+        statusTextLabel.textColor = SailorDisplayHelpers.statusColor(status)
 
         updateAppearance()
     }
@@ -264,7 +264,7 @@ final class MiniCardView: NSView {
 }
 
 /// Small rounded pill showing an icon + name in a brand color. Used for the repo chip.
-final class AgentBadgeView: NSView {
+final class SailorBadgeView: NSView {
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
 

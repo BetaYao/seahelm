@@ -15,14 +15,14 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestShowChanges(worktreePath: String)
 }
 
-// MARK: - AgentDisplayInfo
+// MARK: - SailorDisplayInfo
 
-struct AgentDisplayInfo {
+struct SailorDisplayInfo {
     let id: String          // terminal ID (from Station.id)
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
-    let paneStatuses: [AgentStatus]     // per-pane statuses
+    let paneStatuses: [SailorStatus]     // per-pane statuses
     let mostRecentMessage: String       // message from most recently updated pane
     let lastUserPrompt: String          // most recent user prompt text
     let mostRecentPaneIndex: Int
@@ -49,7 +49,7 @@ struct AgentDisplayInfo {
 
 // MARK: - DashboardViewController
 
-class DashboardViewController: NSViewController, AgentCardDelegate {
+class DashboardViewController: NSViewController, SailorCardDelegate {
     enum LayoutMetrics {
         static let focusPanelCornerRadius: CGFloat = 10
         static let containerHorizontalInset: CGFloat = 0
@@ -82,7 +82,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     /// Set by MainWindowController — forwards split events to TerminalCoordinator
     weak var splitContainerDelegate: SplitContainerDelegate?
 
-    var selectedAgentId: String = ""
+    var selectedSailorId: String = ""
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
 
@@ -96,8 +96,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     var idleWorktreePaths: Set<String> = []
     private var worktreeIdleExpanded = false
 
-    var selectedAgentIndex: Int {
-        agents.firstIndex(where: { $0.id == selectedAgentId }) ?? 0
+    var selectedSailorIndex: Int {
+        agents.firstIndex(where: { $0.id == selectedSailorId }) ?? 0
     }
 
     /// Cached SplitContainerView per worktree path
@@ -107,7 +107,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     private(set) var activeSplitContainer: SplitContainerView?
 
     // Data
-    private(set) var agents: [AgentDisplayInfo] = []
+    private(set) var agents: [SailorDisplayInfo] = []
 
     private let layoutTopInset: CGFloat = 8
 
@@ -163,20 +163,20 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
 
     // MARK: - Public API
 
-    func updateAgents(_ newAgents: [AgentDisplayInfo]) {
+    func updateSailors(_ newSailors: [SailorDisplayInfo]) {
         let oldIds = Set(agents.map { $0.id })
-        let newIds = Set(newAgents.map { $0.id })
+        let newIds = Set(newSailors.map { $0.id })
         let structureChanged = oldIds != newIds
 
         #if DEBUG
         if structureChanged, !oldIds.isEmpty {
             let added = newIds.subtracting(oldIds)
             let removed = oldIds.subtracting(newIds)
-            NSLog("DashboardVC.updateAgents: structureChanged — added=%@ removed=%@", "\(added)", "\(removed)")
+            NSLog("DashboardVC.updateSailors: structureChanged — added=%@ removed=%@", "\(added)", "\(removed)")
         }
         #endif
 
-        agents = newAgents
+        agents = newSailors
 
         if isInDState {
             focusController.refreshCards(agents.map { $0.id })
@@ -194,9 +194,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             leftRightContainer.isHidden = false
         }
 
-        // Validate selectedAgentId
-        if !agents.contains(where: { $0.id == selectedAgentId }) {
-            selectedAgentId = agents.first?.id ?? ""
+        // Validate selectedSailorId
+        if !agents.contains(where: { $0.id == selectedSailorId }) {
+            selectedSailorId = agents.first?.id ?? ""
         }
 
         if structureChanged {
@@ -208,12 +208,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     }
 
     private func syncSidePanelToSelection() {
-        let path = agents.first(where: { $0.id == selectedAgentId })?.worktreePath
+        let path = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
         sidePanelVC.setWorktree(path)
     }
 
-    private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
-        // Count mismatch means structure changed — handled by structureChanged check in updateAgents
+    private func updateFocusLayoutInPlace(_ sorted: [SailorDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
+        // Count mismatch means structure changed — handled by structureChanged check in updateSailors
         guard sorted.count == miniCards.count else { return }
 
         // Re-embed split container if it was detached (e.g. after tab switch),
@@ -222,7 +222,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         // periodic updates (branch refresh, status polling).
         if activeSplitContainer == nil, view.window != nil,
            !(view.window?.firstResponder is GhosttyNSView) {
-            embedSplitContainerForSelectedAgent()
+            embedSplitContainerForSelectedSailor()
         }
         for (index, agent) in sorted.enumerated() {
             miniCards[index].configure(paneCount: agent.paneCount)
@@ -241,10 +241,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                 isMainWorktree: agent.isMainWorktree,
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents,
-                agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
+                agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
                     ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
-            miniCards[index].isSelected = (agent.id == selectedAgentId)
+            miniCards[index].isSelected = (agent.id == selectedSailorId)
         }
     }
 
@@ -254,11 +254,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         activeSplitWorktreePath = nil
     }
 
-    func selectAgent(byWorktreePath path: String) {
+    func selectSailor(byWorktreePath path: String) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
-        selectedAgentId = agent.id
+        selectedSailorId = agent.id
         detachTerminals()
-        embedSplitContainerForSelectedAgent()
+        embedSplitContainerForSelectedSailor()
         updateMiniCardSelection()
         syncSidePanelToSelection()
     }
@@ -362,7 +362,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                            repoPathsProvider: @escaping () -> [String],
                            onAddRepo: @escaping () -> Void,
                            onSubmitCommand: @escaping (String) -> Void,
-                           onCreate: @escaping (String, String, AgentType, Bool) -> Void) {
+                           onCreate: @escaping (String, String, SailorType, Bool) -> Void) {
         inlineCreateView.configure(repoPaths: repoPaths)
         inlineCreateView.repoPathsProvider = repoPathsProvider
         inlineCreateView.onAddRepo = onAddRepo
@@ -383,7 +383,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
 
     // MARK: - Sorting
 
-    private func sortedAgents() -> [AgentDisplayInfo] {
+    private func sortedAgents() -> [SailorDisplayInfo] {
         agents.sorted { a, b in
             statusOrder(a.status) < statusOrder(b.status)
         }
@@ -404,12 +404,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     }
 
     private func rebuildFocusLayout() {
-        if let selected = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first {
-            selectedAgentId = selected.id
+        if let selected = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first {
+            selectedSailorId = selected.id
             // Only embed when the dashboard is visible to avoid stealing
             // surfaces from the active repo tab's split container.
             if view.window != nil {
-                embedSplitContainerForSelectedAgent()
+                embedSplitContainerForSelectedSailor()
             }
         }
         populateWorktreeCards()
@@ -442,7 +442,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         }
     }
 
-    private func makeMiniCard(for agent: AgentDisplayInfo, width: CGFloat) -> StackedMiniCardContainerView {
+    private func makeMiniCard(for agent: SailorDisplayInfo, width: CGFloat) -> StackedMiniCardContainerView {
         let container = StackedMiniCardContainerView()
         container.delegate = self
         container.reorderDelegate = self
@@ -457,10 +457,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             isMainWorktree: agent.isMainWorktree,
             tasks: agent.tasks,
             activityEvents: agent.activityEvents,
-            agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
+            agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
                 ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
         )
-        container.isSelected = (agent.id == selectedAgentId)
+        container.isSelected = (agent.id == selectedSailorId)
         container.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: width),
@@ -692,10 +692,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     /// Embed the selected agent's split container into the focus panel.
     /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
     /// VC as first responder so arrow keys keep driving the nav ring.
-    func embedSplitContainerForSelectedAgent(focusTerminal: Bool = true) {
+    func embedSplitContainerForSelectedSailor(focusTerminal: Bool = true) {
         let container = focusLayoutRefs.focusPanel.terminalContainer
 
-        guard let agent = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first else { return }
+        guard let agent = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
 
         // Skip re-embed if the same split container is already active for this worktree
@@ -800,14 +800,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
 
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
-            focusedWorktreePath: agents.first(where: { $0.id == selectedAgentId })?.worktreePath
+            focusedWorktreePath: agents.first(where: { $0.id == selectedSailorId })?.worktreePath
         )
         focusController.captureSnapshot(snapshot)
 
         let cardIds = agents.map { $0.id }
         let initial = snapshot.focusedWorktreePath
             .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
-            ?? (selectedAgentId.isEmpty ? nil : selectedAgentId)
+            ?? (selectedSailorId.isEmpty ? nil : selectedSailorId)
         focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
 
         view.window?.makeFirstResponder(self)
@@ -831,8 +831,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         if restoreSnapshot,
            let path = snapshot?.focusedWorktreePath,
            let original = agents.first(where: { $0.worktreePath == path }),
-           original.id != selectedAgentId {
-            selectAgent(byWorktreePath: path)
+           original.id != selectedSailorId {
+            selectSailor(byWorktreePath: path)
         }
 
         if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
@@ -943,7 +943,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     }
 
     /// The agent currently focused by the nav ring, if a card is focused.
-    private var focusedAgent: AgentDisplayInfo? {
+    private var focusedSailor: SailorDisplayInfo? {
         guard case .card(let agentId) = focusController.focusedTarget else { return nil }
         return agents.first(where: { $0.id == agentId })
     }
@@ -962,17 +962,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             onEnterTerminal?()
             handleReturnInDState()
         case .deleteFocused:
-            guard let agent = focusedAgent else { return }
+            guard let agent = focusedSailor else { return }
             guard !agent.isMainWorktree else {
                 windowKeyboardMode?.flashHint("main worktree 不可删除")
                 return
             }
             windowKeyboardMode?.beginDelete(agentId: agent.id)
         case .showChanges:
-            guard let agent = focusedAgent else { return }
+            guard let agent = focusedSailor else { return }
             dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
         case .browseFiles:
-            guard let agent = focusedAgent else { return }
+            guard let agent = focusedSailor else { return }
             dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
         case .newWorktree:
             // Leave the D-state focus ring before opening the form so no stale card
@@ -999,7 +999,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             guard let agent = agents.first(where: { $0.id == agentId }) else {
                 exitDashboardNavigation(restoreSnapshot: true); return
             }
-            selectAgent(byWorktreePath: agent.worktreePath)
+            selectSailor(byWorktreePath: agent.worktreePath)
             exitDashboardNavigation(restoreSnapshot: false)
         }
     }
@@ -1018,18 +1018,18 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     /// Return then commits via `handleReturnInDState`.
     private func previewFocusedCard() {
         guard case .card(let agentId) = focusController.focusedTarget else { return }
-        guard let agent = agents.first(where: { $0.id == agentId }), agent.id != selectedAgentId else { return }
+        guard let agent = agents.first(where: { $0.id == agentId }), agent.id != selectedSailorId else { return }
 
-        selectedAgentId = agent.id
+        selectedSailorId = agent.id
         detachTerminals()
-        embedSplitContainerForSelectedAgent(focusTerminal: false)
+        embedSplitContainerForSelectedSailor(focusTerminal: false)
         updateMiniCardSelection()
         // Re-assert nav visuals: embedding mutated the panel's subviews.
         applyKeyboardFocusVisuals()
         applyDimOverlayIfNeeded()
     }
 
-    // MARK: - AgentCardDelegate
+    // MARK: - SailorCardDelegate
 
     func agentCardClicked(agentId: String) {
         // Mouse click exits D-state — mouse takes over from keyboard.
@@ -1040,8 +1040,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         dismissCenterOverlay()
         // Click selects agent and embeds its split container
         detachTerminals()
-        selectedAgentId = agentId
-        embedSplitContainerForSelectedAgent()
+        selectedSailorId = agentId
+        embedSplitContainerForSelectedSailor()
         updateMiniCardSelection()
         syncSidePanelToSelection()
         dashboardDelegate?.dashboardDidChangeSelection(self)
@@ -1076,7 +1076,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     private func updateMiniCardSelection() {
         let refs = focusLayoutRefs
         for card in refs.miniCards {
-            card.isSelected = (card.agentId == selectedAgentId)
+            card.isSelected = (card.agentId == selectedSailorId)
         }
     }
 }
@@ -1106,7 +1106,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
         guard newOrder.count == agents.count else { return }
 
         // Rebuild agents in the new order
-        var reordered: [AgentDisplayInfo] = []
+        var reordered: [SailorDisplayInfo] = []
         for id in newOrder {
             if let agent = agents.first(where: { $0.id == id }) {
                 reordered.append(agent)
@@ -1178,9 +1178,9 @@ extension DashboardViewController: StationDelegate {
         // Find the agent whose station recovered
         guard let agent = agents.first(where: { $0.station === station }) else { return }
         // Re-embed the split container for the active agent
-        if agent.id == selectedAgentId {
+        if agent.id == selectedSailorId {
             invalidateSplitContainer(forPath: agent.worktreePath)
-            embedSplitContainerForSelectedAgent()
+            embedSplitContainerForSelectedSailor()
         }
     }
 
@@ -1216,7 +1216,7 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
     }
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
-        let worktreePath = agents.first(where: { $0.id == selectedAgentId })?.worktreePath ?? ""
+        let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
         let title = "Changes: \(URL(fileURLWithPath: path).lastPathComponent)"
         showCenterOverlay(DiffReviewView(worktreePath: worktreePath), title: title)
     }

@@ -102,7 +102,7 @@ final class StackedMiniCardContainerViewTests: XCTestCase {
         XCTAssertTrue(spy.showChangesIds.isEmpty)
     }
 
-    func testShowChangesMenuActionForwardsAgentId() throws {
+    func testShowChangesMenuActionForwardsSailorId() throws {
         let container = StackedMiniCardContainerView()
         let spy = InspectorDelegateSpy()
         container.delegate = spy
@@ -140,7 +140,7 @@ final class StackedMiniCardContainerViewTests: XCTestCase {
     }
 }
 
-private final class InspectorDelegateSpy: AgentCardDelegate {
+private final class InspectorDelegateSpy: SailorCardDelegate {
     var browseIds: [String] = []
     var showChangesIds: [String] = []
 

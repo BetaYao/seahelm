@@ -11,7 +11,7 @@ class StatusPublisher {
     private var surfaces: [String: Station] = [:]         // keyed by terminal ID
     /// Reverse mapping: terminal ID → worktree path (for delegate callbacks and webhook provider)
     private var worktreePaths: [String: String] = [:]
-    private var agentConfig: AgentDetectConfig
+    private var agentConfig: SailorDetectConfig
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
@@ -27,18 +27,18 @@ class StatusPublisher {
     // Cache: skip detection when viewport text hasn't changed
     private var lastViewportHashes: [String: UInt64] = [:]           // keyed by terminal ID
     // Pre-lowercased agent names for faster matching
-    private var lowercasedAgentNames: [(name: String, def: AgentDef)] = []
+    private var lowercasedSailorNames: [(name: String, def: SailorDef)] = []
 
-    init(agentConfig: AgentDetectConfig = .default) {
+    init(agentConfig: SailorDetectConfig = .default) {
         self.agentConfig = agentConfig
-        rebuildAgentNameCache()
+        rebuildSailorNameCache()
         webhookProvider.onStatusChanged = { [weak self] worktreePath in
             self?.scheduleWebhookRefresh(for: worktreePath)
         }
     }
 
-    private func rebuildAgentNameCache() {
-        lowercasedAgentNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
+    private func rebuildSailorNameCache() {
+        lowercasedSailorNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
     }
 
     func start(trees: [String: SplitTree]) {
@@ -176,8 +176,8 @@ class StatusPublisher {
             }
             lock.unlock()
 
-            let existingAgentType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
-            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingAgentType)
+            let existingSailorType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
+            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingSailorType)
             ShipLog.shared.updateStatus(
                 terminalID: terminalID,
                 status: hookStatus,
@@ -228,8 +228,8 @@ class StatusPublisher {
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
-            let existingAgentType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
-            let agentDef = findAgentDef(inLowercased: lowerContent, existingAgentType: existingAgentType)
+            let existingSailorType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
+            let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
 
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
             let scanReport = ScanDecoder(
@@ -241,7 +241,7 @@ class StatusPublisher {
             ).decode()
             let textStatus = scanReport?.status ?? .unknown
             let hookStatus = webhookProvider.status(for: worktreePath)
-            let detected = AgentStatus.highestPriority([textStatus, hookStatus])
+            let detected = SailorStatus.highestPriority([textStatus, hookStatus])
 
             // Prefer structured webhook message over terminal text scan
             let webhookMessage = webhookProvider.lastMessage(for: worktreePath)
@@ -251,8 +251,8 @@ class StatusPublisher {
             let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
 
             // Feed ShipLog with structured data on every poll
-            let detectedAgentType = AgentType.detect(fromLowercased: lowerContent)
-            let agentType = detectedAgentType == .unknown ? existingAgentType : detectedAgentType
+            let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
+            let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
 
             lock.lock()
             let oldStatus = tracker.currentStatus
@@ -304,21 +304,21 @@ class StatusPublisher {
     }
 
     /// Find agent definition using pre-lowercased content and names
-    private func findAgentDef(inLowercased lowerContent: String, existingAgentType: AgentType) -> AgentDef? {
-        Self.findAgentDef(
+    private func findSailorDef(inLowercased lowerContent: String, existingSailorType: SailorType) -> SailorDef? {
+        Self.findSailorDef(
             inLowercased: lowerContent,
-            existingAgentType: existingAgentType,
-            candidates: lowercasedAgentNames
+            existingSailorType: existingSailorType,
+            candidates: lowercasedSailorNames
         )
     }
 
-    static func findAgentDef(
+    static func findSailorDef(
         inLowercased lowerContent: String,
-        existingAgentType: AgentType,
-        candidates: [(name: String, def: AgentDef)]
-    ) -> AgentDef? {
-        if existingAgentType.isAIAgent {
-            let name = existingAgentType.displayName.lowercased()
+        existingSailorType: SailorType,
+        candidates: [(name: String, def: SailorDef)]
+    ) -> SailorDef? {
+        if existingSailorType.isAIAgent {
+            let name = existingSailorType.displayName.lowercased()
             if let def = candidates.first(where: { $0.name == name })?.def {
                 return def
             }
@@ -332,7 +332,7 @@ class StatusPublisher {
         return nil
     }
 
-    func status(for terminalID: String) -> AgentStatus {
+    func status(for terminalID: String) -> SailorStatus {
         lock.lock()
         defer { lock.unlock() }
         return trackers[terminalID]?.currentStatus ?? .unknown

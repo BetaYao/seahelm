@@ -1,6 +1,6 @@
 import AppKit
 
-protocol AgentCardDelegate: AnyObject {
+protocol SailorCardDelegate: AnyObject {
     func agentCardClicked(agentId: String)
     func agentCardDoubleClicked(agentId: String)
     func agentCardDidRequestBrowseFiles(agentId: String)
@@ -9,7 +9,7 @@ protocol AgentCardDelegate: AnyObject {
     func agentCardDidRequestCloseRepo(agentId: String)
 }
 
-extension AgentCardDelegate {
+extension SailorCardDelegate {
     func agentCardDoubleClicked(agentId: String) {}
     func agentCardDidRequestBrowseFiles(agentId: String) {}
     func agentCardDidRequestShowChanges(agentId: String) {}
@@ -17,7 +17,7 @@ extension AgentCardDelegate {
     func agentCardDidRequestCloseRepo(agentId: String) {}
 }
 
-final class AgentCardView: NSView {
+final class SailorCardView: NSView {
     override var acceptsFirstResponder: Bool { false }
 
     enum Typography {
@@ -26,7 +26,7 @@ final class AgentCardView: NSView {
         static let secondaryPointSize: CGFloat = 11
     }
 
-    weak var delegate: AgentCardDelegate?
+    weak var delegate: SailorCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateBorder() } }
 
@@ -47,7 +47,7 @@ final class AgentCardView: NSView {
     private let paneCountLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var currentStatus: String = ""
-    private var currentPaneStatuses: [AgentStatus] = []
+    private var currentPaneStatuses: [SailorStatus] = []
     private var projectLeadingConstraint: NSLayoutConstraint?
     private(set) var clickRecognizer: NSClickGestureRecognizer!
 
@@ -60,7 +60,7 @@ final class AgentCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = [], tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = []) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [SailorStatus] = [], tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
@@ -89,7 +89,7 @@ final class AgentCardView: NSView {
         statusDots.removeAll()
         projectLeadingConstraint?.isActive = false
 
-        let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
+        let statuses = paneStatuses.isEmpty ? [SailorStatus(rawValue: status) ?? .unknown] : paneStatuses
         currentPaneStatuses = statuses
         var previousDot: NSView? = nil
         for agentStatus in statuses {
@@ -338,8 +338,8 @@ enum TaskListRenderer {
         guard !tasks.isEmpty else { return nil }
 
         let result = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: AgentCardView.Typography.secondaryPointSize, weight: .regular)
-        let boldFont = NSFont.monospacedSystemFont(ofSize: AgentCardView.Typography.secondaryPointSize, weight: .bold)
+        let font = NSFont.monospacedSystemFont(ofSize: SailorCardView.Typography.secondaryPointSize, weight: .regular)
+        let boldFont = NSFont.monospacedSystemFont(ofSize: SailorCardView.Typography.secondaryPointSize, weight: .bold)
         let mutedColor = SemanticColors.muted
         let textColor = SemanticColors.text
         let successColor = SemanticColors.running

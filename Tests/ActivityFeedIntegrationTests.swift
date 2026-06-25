@@ -3,7 +3,7 @@ import XCTest
 
 final class ActivityFeedIntegrationTests: XCTestCase {
     func testCardConfigureWithActivityEvents() {
-        let card = AgentCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let card = SailorCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let events = [
             ActivityEvent(tool: "Read", detail: "main.swift", isError: false, timestamp: Date()),
             ActivityEvent(tool: "Bash", detail: "test failed", isError: true, timestamp: Date(timeIntervalSinceNow: -5)),
@@ -34,7 +34,7 @@ final class ActivityFeedIntegrationTests: XCTestCase {
     }
 
     func testTasksTakePriorityOverFeed() {
-        let card = AgentCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let card = SailorCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let events = [
             ActivityEvent(tool: "Read", detail: "main.swift", isError: false, timestamp: Date()),
         ]
@@ -67,7 +67,7 @@ final class ActivityFeedIntegrationTests: XCTestCase {
     }
 
     func testLastMessageShownWhenNoTasksOrEvents() {
-        let card = AgentCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let card = SailorCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
 
         card.configure(
             id: "test-1",
@@ -89,7 +89,7 @@ final class ActivityFeedIntegrationTests: XCTestCase {
     }
 
     func testEmptyActivityEventsShowsLastMessage() {
-        let card = AgentCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let card = SailorCardView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
 
         card.configure(
             id: "test-1",

@@ -19,11 +19,11 @@ class StatusPublisherThreadTests: XCTestCase {
 
     func testAgentDefSelectionUsesExistingCodexType() {
         let content = "Would you like to run the following command?"
-        let candidates = AgentDetectConfig.default.agents.map { ($0.name.lowercased(), $0) }
+        let candidates = SailorDetectConfig.default.agents.map { ($0.name.lowercased(), $0) }
 
-        let agentDef = StatusPublisher.findAgentDef(
+        let agentDef = StatusPublisher.findSailorDef(
             inLowercased: content.lowercased(),
-            existingAgentType: .codex,
+            existingSailorType: .codex,
             candidates: candidates
         )
 

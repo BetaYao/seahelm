@@ -5,7 +5,7 @@ struct BridgeCommandRouter {
     let createWorktree: (String) -> Void
     let orderExisting: (String, String) -> Void
     let commit: (String) -> Void
-    let activeAgentCount: () -> Int
+    let activeSailorCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
 
@@ -25,7 +25,7 @@ struct BridgeCommandRouter {
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",
-                                          message: "广播给 \(activeAgentCount()) 个 agent", payload: task))
+                                          message: "广播给 \(activeSailorCount()) 个 agent", payload: task))
         }
     }
 }

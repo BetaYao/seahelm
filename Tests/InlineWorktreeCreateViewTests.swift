@@ -5,7 +5,7 @@ final class InlineWorktreeCreateViewTests: XCTestCase {
     func testSubmitInvokesCallbackWithTaskDescriptionAndValues() {
         let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/Users/me/repoA", "/Users/me/repoB"])
-        var captured: (String, String, AgentType, Bool)?
+        var captured: (String, String, SailorType, Bool)?
         view.onCreate = { task, repo, agentType, reuse in captured = (task, repo, agentType, reuse) }
 
         view.setNameForTesting("Fix flaky login redirect")
@@ -57,29 +57,29 @@ final class InlineWorktreeCreateViewTests: XCTestCase {
         XCTAssertGreaterThan(choices.count, 1, "need >1 AI agent for a meaningful cycle test")
 
         // Start pinned to the first choice, then step forward one at a time.
-        view.selectedAgentType = choices[0]
+        view.selectedSailorType = choices[0]
         for i in 1..<choices.count {
-            view.cycleAgent(1)
-            XCTAssertEqual(view.selectedAgentType, choices[i])
+            view.cycleSailor(1)
+            XCTAssertEqual(view.selectedSailorType, choices[i])
         }
     }
 
-    func testCycleAgentForwardWrapsAtEnd() {
+    func testCycleSailorForwardWrapsAtEnd() {
         let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
         let choices = InlineWorktreeCreateView.agentChoices
-        view.selectedAgentType = choices[choices.count - 1]
-        view.cycleAgent(1)
-        XCTAssertEqual(view.selectedAgentType, choices[0])
+        view.selectedSailorType = choices[choices.count - 1]
+        view.cycleSailor(1)
+        XCTAssertEqual(view.selectedSailorType, choices[0])
     }
 
     func testCycleAgentBackwardWrapsAtStart() {
         let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
         let choices = InlineWorktreeCreateView.agentChoices
-        view.selectedAgentType = choices[0]
-        view.cycleAgent(-1)
-        XCTAssertEqual(view.selectedAgentType, choices[choices.count - 1])
+        view.selectedSailorType = choices[0]
+        view.cycleSailor(-1)
+        XCTAssertEqual(view.selectedSailorType, choices[choices.count - 1])
     }
 
     // MARK: - Repo chip cycling (Phase 6)

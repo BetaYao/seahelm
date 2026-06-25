@@ -6,7 +6,7 @@ final class ShipLogIngestTests: XCTestCase {
     override func setUp() {
         super.setUp()
         ShipLog.shared.onStatusTransition = nil
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
     }
@@ -18,7 +18,7 @@ final class ShipLogIngestTests: XCTestCase {
         DispatchQueue.main.async { drained.fulfill() }
         wait(for: [drained], timeout: 1)
         ShipLog.shared.onStatusTransition = nil
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()

@@ -7,7 +7,7 @@ struct ScanDecoder: SignalDecoder {
     let processStatus: ProcessStatus
     let shellInfo: ShellPhaseInfo?
     let content: String
-    let agentDef: AgentDef?
+    let agentDef: SailorDef?
 
     func decode() -> StatusReport? {
         let status = detector.detect(

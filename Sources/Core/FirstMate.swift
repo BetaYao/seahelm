@@ -41,8 +41,8 @@ struct StatusTransition {
     let branch: String
     let project: String
     let terminalID: String
-    let oldStatus: AgentStatus
-    let newStatus: AgentStatus
+    let oldStatus: SailorStatus
+    let newStatus: SailorStatus
     let holdSeconds: Double
     let isCompletionSignal: Bool
 }

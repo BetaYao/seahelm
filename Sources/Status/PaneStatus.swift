@@ -3,7 +3,7 @@ import Foundation
 struct PaneStatus {
     let paneIndex: Int        // 1-based, follows SplitTree leaf order
     let terminalID: String    // Station.id
-    var status: AgentStatus
+    var status: SailorStatus
     var lastMessage: String
     var lastUserPrompt: String
     var lastUpdated: Date     // When status or message last changed
@@ -16,7 +16,7 @@ struct WorktreeStatus {
     var mostRecentMessage: String     // That pane's lastMessage
     var mostRecentUserPrompt: String  // That pane's lastUserPrompt
 
-    var statuses: [AgentStatus] {
+    var statuses: [SailorStatus] {
         panes.map(\.status)
     }
 
@@ -24,7 +24,7 @@ struct WorktreeStatus {
         panes.contains { $0.status.isUrgent }
     }
 
-    var highestPriority: AgentStatus {
-        AgentStatus.highestPriority(panes.map(\.status))
+    var highestPriority: SailorStatus {
+        SailorStatus.highestPriority(panes.map(\.status))
     }
 }

@@ -2,7 +2,7 @@ import XCTest
 @testable import seahelm
 
 final class FirstMateCoordinatorTests: XCTestCase {
-    private func tx(_ new: AgentStatus, hold: Double = 0, completion: Bool = false) -> StatusTransition {
+    private func tx(_ new: SailorStatus, hold: Double = 0, completion: Bool = false) -> StatusTransition {
         StatusTransition(worktreePath: "/wt/x", branch: "b", project: "p", terminalID: "t",
                          oldStatus: .running, newStatus: new, holdSeconds: hold,
                          isCompletionSignal: completion)

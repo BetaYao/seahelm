@@ -10,7 +10,7 @@ final class ShipLogTests: XCTestCase {
     /// Helper: register a test agent without a real surface.
     /// Returns the terminal ID (surface.id) for use in subsequent calls.
     @discardableResult
-    private func registerTestAgent(
+    private func registerTestSailor(
         path: String, branch: String = "main", project: String = "TestProject",
         startedAt: Date? = nil
     ) -> String {
@@ -25,13 +25,13 @@ final class ShipLogTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Clear shared state between tests
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
@@ -40,9 +40,9 @@ final class ShipLogTests: XCTestCase {
     // MARK: - Registration
 
     func testRegisterAndQuery() {
-        let tid = registerTestAgent(path: "/tmp/repo/main", project: "MyProject")
+        let tid = registerTestSailor(path: "/tmp/repo/main", project: "MyProject")
 
-        let agents = ShipLog.shared.allAgents()
+        let agents = ShipLog.shared.allSailors()
         XCTAssertEqual(agents.count, 1)
         XCTAssertEqual(agents[0].id, tid)
         XCTAssertEqual(agents[0].worktreePath, "/tmp/repo/main")
@@ -53,10 +53,10 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUnregister() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
         ShipLog.shared.unregister(terminalID: tid)
 
-        XCTAssertEqual(ShipLog.shared.allAgents().count, 0)
+        XCTAssertEqual(ShipLog.shared.allSailors().count, 0)
         XCTAssertNil(ShipLog.shared.agent(for: tid))
         XCTAssertNil(ShipLog.shared.agent(forWorktree: "/tmp/repo/main"))
     }
@@ -78,7 +78,7 @@ final class ShipLogTests: XCTestCase {
     // MARK: - Status Updates
 
     func testUpdateStatus() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateStatus(
             terminalID: tid,
@@ -107,7 +107,7 @@ final class ShipLogTests: XCTestCase {
     // MARK: - Detection Updates (type upgrade rules)
 
     func testUpdateDetectionFromUnknown() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
@@ -116,7 +116,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionAIAgentCannotDemoteToShellTask() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         // Set to AI agent first
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
@@ -128,7 +128,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionAIAgentCanUpgradeToAnotherAIAgent() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .codex)
         // Another AI agent should be allowed
@@ -139,7 +139,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionShellTaskCanBeReplaced() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
         // Shell task can be replaced by any type
@@ -150,7 +150,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionShellTaskCanBeReplacedByShellTask() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .make)
@@ -160,7 +160,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionIgnoresUnknownType() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .unknown)
 
@@ -169,7 +169,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUpdateDetectionSetsCommandLine() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: "brew install ffmpeg", agentType: .brew)
 
@@ -181,7 +181,7 @@ final class ShipLogTests: XCTestCase {
     // MARK: - Worktree Lookup
 
     func testAgentForWorktree() {
-        let tid = registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestSailor(path: "/tmp/repo/main")
 
         let agent = ShipLog.shared.agent(forWorktree: "/tmp/repo/main")
         XCTAssertNotNil(agent)
@@ -196,32 +196,32 @@ final class ShipLogTests: XCTestCase {
     // MARK: - Ordering
 
     func testAllAgentsPreservesInsertionOrder() {
-        let tidA = registerTestAgent(path: "/a", branch: "a")
-        let tidB = registerTestAgent(path: "/b", branch: "b")
-        let tidC = registerTestAgent(path: "/c", branch: "c")
+        let tidA = registerTestSailor(path: "/a", branch: "a")
+        let tidB = registerTestSailor(path: "/b", branch: "b")
+        let tidC = registerTestSailor(path: "/c", branch: "c")
 
-        let ids = ShipLog.shared.allAgents().map { $0.id }
+        let ids = ShipLog.shared.allSailors().map { $0.id }
         XCTAssertEqual(ids, [tidA, tidB, tidC])
     }
 
     func testReorderWithWorktreePaths() {
-        registerTestAgent(path: "/a", branch: "a")
-        registerTestAgent(path: "/b", branch: "b")
-        registerTestAgent(path: "/c", branch: "c")
+        registerTestSailor(path: "/a", branch: "a")
+        registerTestSailor(path: "/b", branch: "b")
+        registerTestSailor(path: "/c", branch: "c")
 
         // reorder accepts worktree paths
         ShipLog.shared.reorder(paths: ["/c", "/a", "/b"])
 
-        let worktreePaths = ShipLog.shared.allAgents().map { $0.worktreePath }
+        let worktreePaths = ShipLog.shared.allSailors().map { $0.worktreePath }
         XCTAssertEqual(worktreePaths, ["/c", "/a", "/b"])
     }
 
     // MARK: - Project Filtering
 
     func testAgentsForProject() {
-        registerTestAgent(path: "/repo1/main", branch: "main", project: "Repo1")
-        registerTestAgent(path: "/repo2/main", branch: "main", project: "Repo2")
-        registerTestAgent(path: "/repo1/feature", branch: "feature", project: "Repo1")
+        registerTestSailor(path: "/repo1/main", branch: "main", project: "Repo1")
+        registerTestSailor(path: "/repo2/main", branch: "main", project: "Repo2")
+        registerTestSailor(path: "/repo1/feature", branch: "feature", project: "Repo1")
 
         let repo1Agents = ShipLog.shared.agentsForProject("Repo1")
         XCTAssertEqual(repo1Agents.count, 2)
@@ -232,7 +232,7 @@ final class ShipLogTests: XCTestCase {
 
     func testTotalDurationComputedFromStartedAt() {
         let fiveMinutesAgo = Date().addingTimeInterval(-300)
-        let tid = registerTestAgent(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
+        let tid = registerTestSailor(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
 
         let agent = ShipLog.shared.agent(for: tid)!
         XCTAssertGreaterThan(agent.totalDuration, 299)
@@ -240,7 +240,7 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testTotalDurationZeroWhenNoStartedAt() {
-        let tid = registerTestAgent(path: "/tmp/repo/main", startedAt: nil)
+        let tid = registerTestSailor(path: "/tmp/repo/main", startedAt: nil)
 
         let agent = ShipLog.shared.agent(for: tid)!
         XCTAssertEqual(agent.totalDuration, 0)

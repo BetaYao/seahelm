@@ -16,9 +16,9 @@ class StatusDetector {
         processStatus: ProcessStatus,
         shellInfo: ShellPhaseInfo?,
         content: String,
-        agentDef: AgentDef?,
+        agentDef: SailorDef?,
         lowercasedContent: String? = nil
-    ) -> AgentStatus {
+    ) -> SailorStatus {
         // Priority 1: Process lifecycle overrides everything
         switch processStatus {
         case .exited: return .exited
@@ -104,10 +104,10 @@ class StatusDetector {
     }
 }
 
-// MARK: - AgentDef status detection
+// MARK: - SailorDef status detection
 
 
-extension AgentDef {
+extension SailorDef {
     /// Get pre-lowercased rules (computed inline for efficiency)
     private var lowercasedRules: [(status: String, patterns: [String])] {
         rules.map { rule in
@@ -121,23 +121,23 @@ extension AgentDef {
     }
 
     /// Apply rules in order; first match wins
-    func detectStatus(from content: String) -> AgentStatus {
+    func detectStatus(from content: String) -> SailorStatus {
         return detectStatus(fromLowercased: content.lowercased())
     }
 
     /// Apply rules using pre-lowercased content to avoid redundant lowercasing.
     /// Only scans the last ~10 lines to avoid false positives from old command output
     /// (e.g. "0 errors" from a successful cargo build triggering Error status).
-    func detectStatus(fromLowercased lower: String) -> AgentStatus {
+    func detectStatus(fromLowercased lower: String) -> SailorStatus {
         let tail = Self.lastLines(of: lower, count: 10)
         for (status, patterns) in lowercasedRules {
             for pattern in patterns {
                 if tail.contains(pattern) {
-                    return AgentStatus(rawValue: status) ?? .unknown
+                    return SailorStatus(rawValue: status) ?? .unknown
                 }
             }
         }
-        return AgentStatus(rawValue: defaultStatus) ?? .idle
+        return SailorStatus(rawValue: defaultStatus) ?? .idle
     }
 
     /// Extract the last N lines from a string efficiently (no array allocation).
@@ -202,11 +202,11 @@ extension AgentDef {
 
 /// Tracks status changes; Unknown preserves current state
 class DebouncedStatusTracker {
-    private(set) var currentStatus: AgentStatus = .unknown
+    private(set) var currentStatus: SailorStatus = .unknown
 
     /// Update with detected status. Returns true if status changed.
     @discardableResult
-    func update(status: AgentStatus) -> Bool {
+    func update(status: SailorStatus) -> Bool {
         // Unknown means "no data" — don't change
         guard status != .unknown else { return false }
         guard status != currentStatus else { return false }
@@ -214,7 +214,7 @@ class DebouncedStatusTracker {
         return true
     }
 
-    func forceStatus(_ status: AgentStatus) {
+    func forceStatus(_ status: SailorStatus) {
         currentStatus = status
     }
 
@@ -223,9 +223,9 @@ class DebouncedStatusTracker {
     }
 }
 
-// MARK: - AgentStatus extensions
+// MARK: - SailorStatus extensions
 
-extension AgentStatus {
+extension SailorStatus {
     var priority: UInt8 {
         switch self {
         case .error:   return 6
@@ -245,7 +245,7 @@ extension AgentStatus {
         self == .running || self == .waiting
     }
 
-    static func highestPriority(_ statuses: [AgentStatus]) -> AgentStatus {
+    static func highestPriority(_ statuses: [SailorStatus]) -> SailorStatus {
         statuses.max(by: { $0.priority < $1.priority }) ?? .unknown
     }
 }

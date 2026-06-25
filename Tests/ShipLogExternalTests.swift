@@ -29,14 +29,14 @@ final class ShipLogExternalTests: XCTestCase {
         super.setUp()
         ShipLog.shared.unregisterAllExternalChannels()
         // Clean up any agents from other tests
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
         ShipLog.shared.unregisterAllExternalChannels()
-        for agent in ShipLog.shared.allAgents() {
+        for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
@@ -77,7 +77,7 @@ final class ShipLogExternalTests: XCTestCase {
         XCTAssertTrue(ch.sentMessages[0].content.contains("/status"))
     }
 
-    func testStatusCommandNoAgents() {
+    func testStatusCommandNoSailors() {
         let ch = MockExternalChannel()
         ShipLog.shared.registerChannel(ch)
         ShipLog.shared.handleInbound(makeMessage(content: "/status"))
@@ -86,7 +86,7 @@ final class ShipLogExternalTests: XCTestCase {
         XCTAssertTrue(ch.sentMessages[0].content.contains("No agent"))
     }
 
-    func testListCommandNoAgents() {
+    func testListCommandNoSailors() {
         let ch = MockExternalChannel()
         ShipLog.shared.registerChannel(ch)
         ShipLog.shared.handleInbound(makeMessage(content: "/list"))

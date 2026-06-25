@@ -8,7 +8,7 @@ final class BridgeCommandRouterTests: XCTestCase {
                     committed: @escaping (String) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
-                            commit: committed, activeAgentCount: agentCount,
+                            commit: committed, activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
     }
 

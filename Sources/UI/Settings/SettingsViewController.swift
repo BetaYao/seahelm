@@ -66,7 +66,7 @@ class SettingsViewController: NSViewController {
         // Tab 2: Agent Detection
         let agentTab = NSTabViewItem(identifier: "agents")
         agentTab.label = "Agent Detection"
-        agentTab.view = buildAgentTab()
+        agentTab.view = buildSailorTab()
         tabView.addTabViewItem(agentTab)
 
         // Tab 3: WeCom Bot
@@ -220,7 +220,7 @@ class SettingsViewController: NSViewController {
 
     // MARK: - Agent Detection Tab
 
-    private func buildAgentTab() -> NSView {
+    private func buildSailorTab() -> NSView {
         let view = NSView()
 
         let infoLabel = NSTextField(labelWithString: "Agent detection rules (JSON). Edit and save to apply.")
@@ -449,7 +449,7 @@ class SettingsViewController: NSViewController {
         // Parse agent detection JSON
         let jsonString = ruleTextView.string
         if let data = jsonString.data(using: .utf8),
-           let agentConfig = try? JSONDecoder().decode(AgentDetectConfig.self, from: data) {
+           let agentConfig = try? JSONDecoder().decode(SailorDetectConfig.self, from: data) {
             config.agentDetect = agentConfig
         }
 

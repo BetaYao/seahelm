@@ -5,10 +5,10 @@ final class DashboardViewControllerClickTests: XCTestCase {
 
     // MARK: - Single-click
 
-    func testSingleClickUpdatesSelectedAgentId() {
+    func testSingleClickUpdatesSelectedSailorId() {
         let vc = DashboardViewController()
         vc.agentCardClicked(agentId: "agent-1")
-        XCTAssertEqual(vc.selectedAgentId, "agent-1")
+        XCTAssertEqual(vc.selectedSailorId, "agent-1")
     }
 
     func testSingleClickDoesNotCallDelegate() {
@@ -22,7 +22,7 @@ final class DashboardViewControllerClickTests: XCTestCase {
 
     // MARK: - Double-click on unknown agentId (guard path)
 
-    func testDoubleClickWithUnknownAgentIdIsNoop() {
+    func testDoubleClickWithUnknownSailorIdIsNoop() {
         let vc = DashboardViewController()
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
@@ -36,9 +36,9 @@ final class DashboardViewControllerClickTests: XCTestCase {
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
         vc.loadViewIfNeeded()
-        vc.updateAgents([
-            makeAgent(id: "agent-a", worktreePath: "/repo/a"),
-            makeAgent(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.agentCardClicked(agentId: "agent-a")
 
@@ -48,14 +48,14 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertNil(spy.changesPath)
     }
 
-    func testShowChangesRequestUsesRightClickedAgentWorktreePath() {
+    func testShowChangesRequestUsesRightClickedSailorWorktreePath() {
         let vc = DashboardViewController()
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
         vc.loadViewIfNeeded()
-        vc.updateAgents([
-            makeAgent(id: "agent-a", worktreePath: "/repo/a"),
-            makeAgent(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.agentCardClicked(agentId: "agent-a")
 
@@ -68,9 +68,9 @@ final class DashboardViewControllerClickTests: XCTestCase {
 
 // MARK: - Test helpers
 
-private func makeAgent(id: String, worktreePath: String) -> AgentDisplayInfo {
+private func makeSailor(id: String, worktreePath: String) -> SailorDisplayInfo {
     let surface = Station()
-    return AgentDisplayInfo(
+    return SailorDisplayInfo(
         id: id,
         name: id,
         project: "proj",

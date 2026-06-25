@@ -1,19 +1,19 @@
 import Foundation
 
-struct AgentInfo {
+struct SailorInfo {
     let id: String                     // terminal ID (Station.id)
     let worktreePath: String           // associated worktree path
-    var agentType: AgentType           // detected from terminal content
+    var agentType: SailorType           // detected from terminal content
     let project: String                // repo display name
     let branch: String                 // git branch
-    var status: AgentStatus            // current status
+    var status: SailorStatus            // current status
     var lastMessage: String            // latest message
     var lastUserPrompt: String = ""    // most recent user prompt text
     var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
     weak var station: Station? // weak ref, MainWindowController owns
-    var channel: AgentChannel?         // communication channel (strong ref, ShipLog owns)
+    var channel: SailorChannel?         // communication channel (strong ref, ShipLog owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
     var activityEvents: [ActivityEvent] = []

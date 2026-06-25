@@ -45,7 +45,7 @@ class NotificationManager: NSObject {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
-    func shouldNotify(terminalID: String, oldStatus: AgentStatus, newStatus: AgentStatus) -> Bool {
+    func shouldNotify(terminalID: String, oldStatus: SailorStatus, newStatus: SailorStatus) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
         if let last = lastNotified[terminalID], Date().timeIntervalSince(last) < cooldown {
@@ -55,7 +55,7 @@ class NotificationManager: NSObject {
         return true
     }
 
-    static func formatTitle(status: AgentStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
+    static func formatTitle(status: SailorStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
         let target = displayTarget(workspaceName: workspaceName, branch: branch)
         let base: String
         switch status {
@@ -71,7 +71,7 @@ class NotificationManager: NSObject {
     }
 
     static func formatTitle(
-        status: AgentStatus,
+        status: SailorStatus,
         workspaceName: String,
         branch: String,
         paneIndex: Int,
@@ -101,7 +101,7 @@ class NotificationManager: NSObject {
     }
 
     static func formatBody(
-        status: AgentStatus,
+        status: SailorStatus,
         workspaceName: String,
         branch: String,
         lastMessage: String,
@@ -215,7 +215,7 @@ class NotificationManager: NSObject {
         return String(body.prefix(maxBodyLength - 3)) + "..."
     }
 
-    static func formatSystemTitle(status: AgentStatus) -> String {
+    static func formatSystemTitle(status: SailorStatus) -> String {
         switch status {
         case .idle:
             return "Finished successfully"
@@ -236,7 +236,7 @@ class NotificationManager: NSObject {
         return target
     }
 
-    static func formatSystemBody(status: AgentStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "") -> String {
+    static func formatSystemBody(status: SailorStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "") -> String {
         let trimmedPrompt = lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedPrompt.isEmpty {
             return truncateBody(sanitizeMessage(trimmedPrompt))
@@ -248,7 +248,7 @@ class NotificationManager: NSObject {
     /// `isFocusedPane`: true when this pane is the currently focused pane — suppresses system notification.
     func notify(terminalID: String, worktreePath: String, workspaceName: String, branch: String,
                 paneIndex: Int, paneCount: Int,
-                oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String,
+                oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String,
                 lastUserPrompt: String = "",
                 isFocusedPane: Bool) {
         guard shouldNotify(terminalID: terminalID, oldStatus: oldStatus, newStatus: newStatus) else { return }
@@ -304,8 +304,8 @@ class NotificationManager: NSObject {
         worktreePath: String,
         workspaceName: String,
         branch: String,
-        oldStatus: AgentStatus,
-        newStatus: AgentStatus,
+        oldStatus: SailorStatus,
+        newStatus: SailorStatus,
         lastMessage: String = "",
         lastUserPrompt: String = ""
     ) {

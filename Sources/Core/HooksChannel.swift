@@ -3,11 +3,11 @@ import Foundation
 /// Communication channel for Claude Code via Hooks.
 /// Receives structured events through the existing WebhookServer,
 /// sends commands via backend channel (zmx by default).
-class HooksChannel: AgentChannel {
-    let channelType: AgentChannelType = .hooks
+class HooksChannel: SailorChannel {
+    let channelType: SailorChannelType = .hooks
     let supportsStructuredEvents = true
 
-    private let transport: AgentChannel
+    private let transport: SailorChannel
     private let lock = NSLock()
 
     /// Accumulated hook events for this agent session
@@ -21,7 +21,7 @@ class HooksChannel: AgentChannel {
         }
     }
 
-    // MARK: - AgentChannel
+    // MARK: - SailorChannel
 
     /// Send command via backend channel (hooks don't provide an input channel)
     func sendCommand(_ command: String) {

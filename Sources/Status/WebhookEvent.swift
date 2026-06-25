@@ -16,7 +16,7 @@ enum WebhookEventType: String {
     case cwdChanged = "cwd_changed"
     case suggest = "suggest"
 
-    func agentStatus(data: [String: Any]?) -> AgentStatus {
+    func agentStatus(data: [String: Any]?) -> SailorStatus {
         switch self {
         case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .userPrompt, .toolUseFailed:
             return .running

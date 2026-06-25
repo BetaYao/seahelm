@@ -18,7 +18,7 @@ final class DialogPresenter {
 
     func makeQuickSwitcher(quickSwitcherDelegate: QuickSwitcherDelegate) -> QuickSwitcherViewController {
         let worktreeInfos = tabCoordinator?.allWorktrees.map { $0.info } ?? []
-        var statuses: [String: AgentStatus] = [:]
+        var statuses: [String: SailorStatus] = [:]
         if let stationManager = terminalCoordinator?.stationManager {
             for (path, _) in stationManager.all {
                 statuses[path] = statusPublisher?.status(for: path)
