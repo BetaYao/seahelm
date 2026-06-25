@@ -51,6 +51,30 @@ struct StatusTransition {
 
 /// Pure rule engine: status-transition edge + config → action list. No IO, no singletons.
 enum FirstMate {
+    /// Unified entry: folds the agent-suggestion path into the same pure rule engine.
+    /// `.suggest` events become a red-zone suggestNextOrder carrying options; everything
+    /// else derives a StatusTransition and runs the standard rules.
+    static func evaluate(_ outcome: IngestOutcome, config: FirstMateConfig) -> [FirstMateAction] {
+        guard config.enabled else { return [] }
+
+        if case .suggest(let options) = outcome.event.kind {
+            guard !options.isEmpty else { return [] }
+            let i = outcome.info
+            return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
+                                    worktreePath: i.worktreePath, branch: i.branch,
+                                    project: i.project, terminalID: i.id,
+                                    message: "", options: options)]
+        }
+
+        guard outcome.statusChanged || outcome.isCompletionSignal else { return [] }
+        let t = StatusTransition(
+            worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,
+            project: outcome.info.project, terminalID: outcome.info.id,
+            oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
+            holdSeconds: outcome.holdSeconds, isCompletionSignal: outcome.isCompletionSignal)
+        return evaluate(t, config: config)
+    }
+
     static func evaluate(_ t: StatusTransition, config: FirstMateConfig) -> [FirstMateAction] {
         guard config.enabled else { return [] }
 
