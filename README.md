@@ -14,40 +14,6 @@ Download:
 下载：
 [`Apple Silicon`](https://github.com/BetaYao/pmux/releases/latest) · [`Intel`](https://github.com/BetaYao/pmux/releases/latest)
 
-## Screenshots
-
-### Dashboard
-
-![Dashboard](assets/screenshots/1.png)
-
-Your active worktrees, agents, and statuses, all visible at once.
-
-一眼看到所有活跃的 worktree、agent 和状态，不再靠记忆切窗口。
-
-### Focus Panel
-
-![Focus Panel](assets/screenshots/2.png)
-
-Stay inside one worktree, split the view, and keep parallel tasks moving.
-
-在一个 worktree 里深入推进任务，同时保留 split pane 的并行能力。
-
-### Notification History
-
-![Notification History](assets/screenshots/3.png)
-
-See what just happened and jump back into the right context immediately.
-
-回看刚刚发生了什么，并快速跳回真正需要处理的现场。
-
-### System Notification
-
-![System Notification](assets/screenshots/4.png)
-
-Notifications stay tied to the actual work: result, target, and recent prompt.
-
-通知不再只是“有事发生了”，而是明确告诉你结果、目标和对应 prompt。
-
 ## 中文
 
 ### 产品定位
