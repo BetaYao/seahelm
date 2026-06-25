@@ -34,7 +34,8 @@ final class ShipLogIngestTests: XCTestCase {
         ShipLog.shared.ingest(NormalizedEvent(
             terminalID: "t-ingest-1", source: .scan,
             kind: .screenObserved(status: .waiting, message: "need input",
-                                  activity: [], commandLine: nil, agentType: .unknown)))
+                                  activity: [], commandLine: nil, agentType: .unknown,
+                                  roundDuration: 0, tasks: [])))
         XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-1")?.status, .waiting)
     }
 
@@ -48,7 +49,8 @@ final class ShipLogIngestTests: XCTestCase {
         ShipLog.shared.ingest(NormalizedEvent(
             terminalID: "t-ingest-2", source: .scan,
             kind: .screenObserved(status: .running, message: "doing stuff",
-                                  activity: [], commandLine: nil, agentType: .unknown)))
+                                  activity: [], commandLine: nil, agentType: .unknown,
+                                  roundDuration: 0, tasks: [])))
         XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-2")?.lastMessage, "doing stuff")
     }
 
@@ -57,7 +59,8 @@ final class ShipLogIngestTests: XCTestCase {
         ShipLog.shared.ingest(NormalizedEvent(
             terminalID: "t-nonexistent-99", source: .scan,
             kind: .screenObserved(status: .waiting, message: "hello",
-                                  activity: [], commandLine: nil, agentType: .unknown)))
+                                  activity: [], commandLine: nil, agentType: .unknown,
+                                  roundDuration: 0, tasks: [])))
         XCTAssertNil(ShipLog.shared.sailor(for: "t-nonexistent-99"))
     }
 

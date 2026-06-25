@@ -168,7 +168,10 @@ class StatusPublisher {
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
             let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
             let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
-            let normalized = ScanDecoder(
+            let webhookTasks = webhookProvider.tasks(for: worktreePath)
+
+            // Detect status first (without roundDuration); tracker update gives us roundDur below
+            let partialDecoded = ScanDecoder(
                 terminalID: terminalID,
                 detector: detector,
                 processStatus: processStatus,
@@ -176,17 +179,15 @@ class StatusPublisher {
                 content: content,
                 agentDef: agentDef,
                 commandLine: nil,
-                agentType: agentType
+                agentType: agentType,
+                roundDuration: 0,
+                tasks: webhookTasks
             ).decode()
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
-            if let normalized {
-                ShipLog.shared.ingest(normalized)
-            }
-
             // Keep tracker in sync for roundDuration tracking
             let textStatus: SailorStatus
-            if case .screenObserved(let s, _, _, _, _) = normalized?.kind { textStatus = s } else { textStatus = .unknown }
+            if case .screenObserved(let s, _, _, _, _, _, _) = partialDecoded?.kind { textStatus = s } else { textStatus = .unknown }
 
             lock.lock()
             let oldStatus = tracker.currentStatus
@@ -202,6 +203,17 @@ class StatusPublisher {
                 }
             }
             lock.unlock()
+
+            // Rebuild with real roundDuration now that tracker has been updated
+            if let partial = partialDecoded,
+               case .screenObserved(let s, let msg, let acts, let cl, let at, _, _) = partial.kind {
+                let normalized = NormalizedEvent(
+                    terminalID: terminalID, source: .scan,
+                    kind: .screenObserved(status: s, message: msg, activity: acts,
+                                          commandLine: cl, agentType: at,
+                                          roundDuration: roundDur, tasks: webhookTasks))
+                ShipLog.shared.ingest(normalized)
+            }
 
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(

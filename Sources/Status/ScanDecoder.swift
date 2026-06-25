@@ -11,6 +11,8 @@ struct ScanDecoder: SignalDecoder {
     let agentDef: SailorDef?
     let commandLine: String?
     let agentType: SailorType
+    let roundDuration: TimeInterval
+    let tasks: [TaskItem]
 
     func decode() -> NormalizedEvent? {
         let status = detector.detect(
@@ -22,7 +24,8 @@ struct ScanDecoder: SignalDecoder {
         let events = detector.extractActivityEvents(from: content)
         let kind = NormalizedEventKind.screenObserved(
             status: status, message: "", activity: events,
-            commandLine: commandLine, agentType: agentType)
+            commandLine: commandLine, agentType: agentType,
+            roundDuration: roundDuration, tasks: tasks)
         return NormalizedEvent(terminalID: terminalID, source: .scan, kind: kind)
     }
 }

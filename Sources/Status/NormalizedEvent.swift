@@ -23,7 +23,9 @@ enum NormalizedEventKind {
                         message: String,
                         activity: [ActivityEvent],
                         commandLine: String?,
-                        agentType: SailorType)
+                        agentType: SailorType,
+                        roundDuration: TimeInterval,
+                        tasks: [TaskItem])
 }
 
 struct NormalizedEvent {

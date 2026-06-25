@@ -24,7 +24,8 @@ final class FirstMateCoordinator {
 
     func handle(_ outcome: IngestOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
-        let isSuggest: Bool = { if case .suggest = outcome.event.kind { return true }; return false }()
+        let isSuggest: Bool
+        if case .suggest = outcome.event.kind { isSuggest = true } else { isSuggest = false }
         guard outcome.statusChanged || outcome.isCompletionSignal || isSuggest else { return }
         let t = StatusTransition(
             worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,

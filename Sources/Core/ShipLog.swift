@@ -174,8 +174,10 @@ class ShipLog {
         var message = current.lastMessage
 
         switch event.kind {
-        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType):
+        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType, let roundDuration, let tasks):
             next.scanStatus = status
+            next.roundDuration = roundDuration
+            if !tasks.isEmpty { next.tasks = tasks }
             if !msg.isEmpty { message = msg }
             if let cl = commandLine { next.commandLine = cl }
             if agentType != .unknown { next.agentType = agentType }
@@ -198,6 +200,7 @@ class ShipLog {
             next.activityEvents.removeAll()
             isCompletion = true
         case .notification(let level, let text):
+            // Intentionally preserves prior hookStatus for neutral notifications (old code returned .unknown, losing context).
             switch level {
             case "error": next.hookStatus = .error
             case "warning": next.hookStatus = .waiting
@@ -207,6 +210,7 @@ class ShipLog {
         case .taskUpdate(let items):
             next.tasks = items
         case .suggest:
+            // Intentionally preserves prior hookStatus; suggest events carry options only, not status.
             break   // does not touch status; passed through via outcome.event
         }
 

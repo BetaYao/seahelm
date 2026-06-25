@@ -13,7 +13,8 @@ final class ShipLogTransitionTests: XCTestCase {
         }
         head.ingest(NormalizedEvent(terminalID: "tt", source: .scan,
             kind: .screenObserved(status: .waiting, message: "?",
-                                  activity: [], commandLine: nil, agentType: .unknown)))
+                                  activity: [], commandLine: nil, agentType: .unknown,
+                                  roundDuration: 0, tasks: [])))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .waiting)
         XCTAssertEqual(captured?.info.worktreePath, "/wt/z")

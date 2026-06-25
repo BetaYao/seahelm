@@ -34,9 +34,27 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
                                               kind: .sessionStarted(label: "Session started")))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
-                                  commandLine: nil, agentType: .claudeCode)))
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 0, tasks: [])))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .running)  // highestPriority(scan=idle, hook=running)
+    }
+
+    func testScreenObservedCarriesRoundDurationAndTasks() {
+        // Regression test for C1/C2: roundDuration and tasks must flow through ingest(.screenObserved)
+        let stubTask = TaskItem(id: "t-1", subject: "Write tests", status: .inProgress)
+        var captured: IngestOutcome?
+        let exp = expectation(description: "outcome")
+        ShipLog.shared.onOutcome = { o in captured = o; exp.fulfill() }
+        ShipLog.shared.ingest(NormalizedEvent(
+            terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .running, message: "", activity: [],
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 42.5, tasks: [stubTask])))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured?.info.roundDuration, 42.5)
+        XCTAssertEqual(captured?.info.tasks.count, 1)
+        XCTAssertEqual(captured?.info.tasks.first?.id, "t-1")
     }
 
     func testAgentStoppedFailureIsCompletionWithError() {
