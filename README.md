@@ -1,12 +1,12 @@
 # Seahelm
 
-**A macOS workspace for coding agents, git worktrees, and parallel development.**
+**A native macOS workspace for coding agents, git worktrees, and parallel development.**
 
-**一个为 coding agent、git worktree 和并行开发准备的 macOS 工作台。**
+**一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。**
 
-Seahelm brings the moving parts of modern AI-assisted development into one place: repos, worktrees, panes, runs, prompts, and notifications.
+Seahelm brings the moving parts of modern AI-assisted development into one place: repos, worktrees, panes, agent runs, diffs, prompts, and notifications.
 
-当开发日常变成多个仓库、多个分支、多个 worktree、多个 agent 同时推进时，Seahelm 用一个 macOS 界面把这些上下文整理到一起。
+当开发日常变成多个仓库、多个分支、多个 worktree、多个 agent 同时推进时，Seahelm 用一个原生 macOS 界面把这些上下文整理到一起。
 
 Download:
 [`Apple Silicon`](https://github.com/BetaYao/pmux/releases/latest) · [`Intel`](https://github.com/BetaYao/pmux/releases/latest)
@@ -70,6 +70,7 @@ Seahelm 不打算替代终端。
 - 你可以同时管理多个仓库和多个 git worktree
 - 你可以在一个 worktree 里拆多个 pane，让多个 agent 并行推进
 - 你可以更快看见谁在运行、谁在等你、谁已经完成、谁真的失败了
+- 你可以直接在侧边栏浏览文件树、阅读代码、预览 Markdown、审查 git diff，而不必离开当前 worktree
 - 你可以从通知直接回到对应上下文，而不是重新找窗口、找 tab、找目录
 
 重点不是把更多信息堆到屏幕上，而是让并行开发这件事变得更清楚、更轻松。
@@ -80,6 +81,7 @@ Seahelm 不打算替代终端。
 - 基于 Ghostty 的终端能力，保留终端工作流的速度和手感
 - Dashboard 一屏总览所有 worktree、agent 和状态
 - Focus Panel 支持 split pane，让一个 worktree 也能自然并行
+- 侧边栏内置文件树、代码编辑器（CodeEditSourceEditor）、Markdown 预览和 git diff 审查
 - 通知按 pane 精确归因，不再是模糊的“某个任务完成了”
 - Notification History 保留刚刚发生了什么，并支持快速跳回现场
 - 适合 Claude Code、Codex 等 agent 并行使用
@@ -112,10 +114,17 @@ Seahelm 不是替代终端，而是让这套终端工作流更像一个完整产
 
 ### 本地开发
 
-本地构建：
+从 `project.yml` 生成 Xcode 工程（需要 [XcodeGen](https://github.com/yonaskolb/XcodeGen)）：
 
 ```bash
-xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug build
+xcodegen generate
+```
+
+本地构建（`CodeEditSourceEditor` 引入了 SwiftLint 构建插件，命令行构建需要跳过插件校验）：
+
+```bash
+xcodebuild -project seahelm.xcodeproj -scheme seahelm \
+  -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
 ```
 
 运行 UI 测试：
@@ -151,7 +160,7 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug build
 
 ### 发布流程
 
-1. 更新 `project.yml` 里的版本号。
+1. 更新 `project.yml` 里的版本号（`MARKETING_VERSION`）。
 2. 提交并推送到默认分支。
 3. 创建并推送 tag，比如 `git tag v2.0.0 && git push origin v2.0.0`。
 4. 等待 `Release` workflow 完成。
@@ -178,6 +187,7 @@ Seahelm turns that into a workspace you can actually operate from.
 - Ghostty-backed terminal surfaces
 - A dashboard that shows the real state of your active work
 - Split panes inside a worktree so multiple agents can move in parallel
+- A side panel with a file tree, an embedded code editor, Markdown preview, and git diff review — without leaving the current worktree
 - Status aggregation that makes it easier to see what needs attention
 - Notification history that lets you jump back into context
 - System notifications tied to the actual target and recent prompt
@@ -208,6 +218,18 @@ It moves the experience from:
 - implicit status to visible status
 - noisy notifications to actionable notifications
 - single-threaded development to parallel execution
+- "go find the diff somewhere else" to reviewing files and changes in place
+
+### Architecture
+
+Seahelm is a four-layer Swift + AppKit app (macOS 14.0+):
+
+- **App coordinators** (`Sources/App/`) own the window, tabs, split panes, and side panels
+- **UI layer** (`Sources/UI/`) renders the dashboard, repo tabs, splits, title bar, and the worktree side panel (file tree, editor, Markdown preview, diff review)
+- **Core services** (`Sources/Core/`, `Sources/Status/`) drive agent-state tracking and the status-detection pipeline
+- **Terminal & system** (`Sources/Terminal/`, `Sources/Git/`) wrap the Ghostty C API and git worktree discovery
+
+See [`CLAUDE.md`](CLAUDE.md) for a detailed architecture overview.
 
 ### Download
 
@@ -219,10 +241,17 @@ If you just want to try it:
 
 ### Local Development
 
-Build locally:
+Generate the Xcode project from `project.yml` (requires [XcodeGen](https://github.com/yonaskolb/XcodeGen)):
 
 ```bash
-xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug build
+xcodegen generate
+```
+
+Build locally (`CodeEditSourceEditor` pulls in the SwiftLint build-tool plugin, so headless builds must skip plugin validation):
+
+```bash
+xcodebuild -project seahelm.xcodeproj -scheme seahelm \
+  -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
 ```
 
 Run UI tests:
@@ -258,7 +287,7 @@ If the following repository secrets are configured, the workflow will also sign,
 
 ### Release Process
 
-1. Update the version in `project.yml`.
+1. Update the version (`MARKETING_VERSION`) in `project.yml`.
 2. Commit and push to the default branch.
 3. Create and push a tag, for example `git tag v2.0.0 && git push origin v2.0.0`.
 4. Wait for the `Release` workflow to finish.
