@@ -14,6 +14,32 @@ Download:
 下载：
 [`Apple Silicon`](https://github.com/BetaYao/pmux/releases/latest) · [`Intel`](https://github.com/BetaYao/pmux/releases/latest)
 
+## Screenshots
+
+### Workspace
+
+![Workspace](assets/screenshots/workspace.png)
+
+Every repo and worktree as a tab, a live terminal, and the sidebar — one place to drive parallel work.
+
+每个仓库和 worktree 都是一个 tab，配上实时终端和侧边栏，并行开发集中在一个界面里操作。
+
+### File browser & code editor
+
+![File browser and code editor](assets/screenshots/code-editor.png)
+
+Browse the worktree's file tree and read code with syntax highlighting — without leaving Seahelm.
+
+直接浏览 worktree 的文件树、带语法高亮地阅读代码，不用切到别的编辑器。
+
+### Git diff review
+
+![Git diff review](assets/screenshots/diff-review.png)
+
+Review what changed in a worktree, file by file, right next to the terminal.
+
+在终端旁边逐个文件审查 worktree 的改动。
+
 ## 中文
 
 ### 产品定位
