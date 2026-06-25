@@ -92,6 +92,7 @@
 		6006C4A2E23A115982B8C1C9 /* TitleBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 449EC6B0526B8105F5F11256 /* TitleBarPage.swift */; };
 		62E1DFF3457248FF5F30594F /* DiffReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27293C9549D95350D5CA8E80 /* DiffReviewView.swift */; };
 		62FF9B7688CD065BE7DEBF35 /* TodoStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC2859D1D589D68F33F0552 /* TodoStoreTests.swift */; };
+		64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */; };
 		65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC183C3A20588D380EF62682 /* TabSelectionTests.swift */; };
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
@@ -102,6 +103,7 @@
 		6E3811A22D6C43E5C3E7ADB2 /* TitleBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A716BFAF7279E4FF4E5327 /* TitleBarView.swift */; };
 		6E42728E3CA8DE873A074FD0 /* AgentChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5A39B8771184C83A422E99 /* AgentChannel.swift */; };
 		6F46B38545D8EA067171AF5B /* EditorTheme+Seahelm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */; };
+		6FB485F91B83E2BDF0D1DA3B /* StatusReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F08D704B0AB752F9B8709B /* StatusReport.swift */; };
 		708FA82605788117E6142639 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */; };
 		71937D0C72752C62DFBB63C1 /* WorktreeAgentTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999DBD13511B3A8C4F4D4B8E /* WorktreeAgentTypeStore.swift */; };
 		7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */; };
@@ -224,6 +226,7 @@
 		E6504D88753F06A85C9E1424 /* BridgeConfirmFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF658BBFA55756895B6848A /* BridgeConfirmFlow.swift */; };
 		E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */; };
 		EA4CB7D6CFBBA74792B00BB6 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52EF0C4896EE233186B21980 /* GatewayState.swift */; };
+		EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */; };
 		EBE5F0C17B4DDC6FBD06BB53 /* ActivityFeedRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */; };
 		EC13CCF117877683F85E52FA /* MenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */; };
 		EF25AD093968ED3CBC4A960B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C6B4297D134649B185BC65 /* DividerView.swift */; };
@@ -274,6 +277,7 @@
 		0DCA172C011937C216A42CCE /* seahelmUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seahelmUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1320CBDF38D301E85655F40B /* InlineWorktreeCreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineWorktreeCreateView.swift; sourceTree = "<group>"; };
 		14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
+		14F08D704B0AB752F9B8709B /* StatusReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusReport.swift; sourceTree = "<group>"; };
 		159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestGuidanceWriter.swift; sourceTree = "<group>"; };
 		15F5768E08C69D03F768727F /* UnifiedModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedModalView.swift; sourceTree = "<group>"; };
 		176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarViewTests.swift; sourceTree = "<group>"; };
@@ -336,6 +340,7 @@
 		5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedTests.swift; sourceTree = "<group>"; };
 		5A12EC1A8AE8D2CC60BA5732 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
 		5B4CB5436AAB9C042D5AF800 /* ReturnToPortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPortTests.swift; sourceTree = "<group>"; };
+		5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalDecoderTests.swift; sourceTree = "<group>"; };
 		5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBuilder.swift; sourceTree = "<group>"; };
 		5CF8D45DC59BA85924DB8D9E /* PaneTransferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransferTests.swift; sourceTree = "<group>"; };
 		5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNode.swift; sourceTree = "<group>"; };
@@ -422,6 +427,7 @@
 		B5BDC0C3284F3CAF4BD18C62 /* WorktreeTitleResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolverTests.swift; sourceTree = "<group>"; };
 		B64B6D9AE47DFBCFCF626885 /* SplitNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNodeTests.swift; sourceTree = "<group>"; };
 		B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigTests.swift; sourceTree = "<group>"; };
+		B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalDecoder.swift; sourceTree = "<group>"; };
 		B953D23003F184833FA1CFBA /* PanelCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelCoordinator.swift; sourceTree = "<group>"; };
 		BA242C3631BD163C19CFDD38 /* DashboardFocusControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFocusControllerTests.swift; sourceTree = "<group>"; };
 		BA5AC9B69F940E48036F7270 /* seahelm-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "seahelm-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -692,8 +698,10 @@
 				C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */,
 				9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */,
 				0D19639EE57241F8A021EBD2 /* PaneStatus.swift */,
+				B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */,
 				ED6A0AE5886DB08F5B0D024C /* StatusDetector.swift */,
 				57EF78A5043DF5162290DDE4 /* StatusPublisher.swift */,
+				14F08D704B0AB752F9B8709B /* StatusReport.swift */,
 				84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */,
 				9F66DA28CC57BFA18891872D /* WebhookEvent.swift */,
 				341F000DDD743CB7E278357D /* WebhookServer.swift */,
@@ -816,6 +824,7 @@
 				7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */,
 				2269C1AD32C500F6012CFA2E /* ShipLogTests.swift */,
 				0B8ABD117D5B106998086A53 /* ShipLogTransitionTests.swift */,
+				5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */,
 				E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */,
 				B64B6D9AE47DFBCFCF626885 /* SplitNodeTests.swift */,
 				8C36661174534F5E9602CB91 /* StackedMiniCardContainerViewTests.swift */,
@@ -1139,6 +1148,7 @@
 				15E702C37FE649AE0B93C724 /* ShipLogExternalTests.swift in Sources */,
 				95B5B78B68CCC1D9B6610AC4 /* ShipLogTests.swift in Sources */,
 				6CC09A4697C9EDE89CC73BD6 /* ShipLogTransitionTests.swift in Sources */,
+				EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */,
 				E2066652132155948F7F9B1F /* SplitContainerLayoutTests.swift in Sources */,
 				BE5BDE49F57C10D9024D8379 /* SplitNodeTests.swift in Sources */,
 				4E46C5AB11FEAF2E6BEAFCA1 /* StackedMiniCardContainerViewTests.swift in Sources */,
@@ -1286,6 +1296,7 @@
 				57B1D5979538741ABFEB708F /* SettingsViewController.swift in Sources */,
 				459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */,
 				1945A6AC8F512F03D83EBB70 /* ShipLog.swift in Sources */,
+				64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */,
 				2BC7A5243BDCCBADED457B44 /* SplitContainerView.swift in Sources */,
 				CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */,
 				BC59B36704952688AFE19EDC /* SplitTree.swift in Sources */,
@@ -1294,6 +1305,7 @@
 				AA44F31E55A3443F4FED6247 /* StatusBarView.swift in Sources */,
 				8EAE24B6C81EA826474EEC90 /* StatusDetector.swift in Sources */,
 				FAA6371DC6AF759AC571414B /* StatusPublisher.swift in Sources */,
+				6FB485F91B83E2BDF0D1DA3B /* StatusReport.swift in Sources */,
 				1063EE7F5505310F9DEE6E07 /* SuggestGuidanceWriter.swift in Sources */,
 				D06D2FB5E3B5D03D48D51229 /* SuggestionFeed.swift in Sources */,
 				C408C1ADE18D06AD8E80FE05 /* SurfaceRegistry.swift in Sources */,
