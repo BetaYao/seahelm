@@ -8,8 +8,14 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
                                           branch: "main", project: "proj")
     }
     override func tearDown() {
-        ShipLog.shared.unregister(terminalID: "t1")
+        // Stop receiving, then drain any async outcomes still queued on main so they
+        // cannot leak into the next test's onOutcome handler (ShipLog.shared is a singleton
+        // and notifyObservers delivers via DispatchQueue.main.async).
         ShipLog.shared.onOutcome = nil
+        let drain = expectation(description: "drain main queue")
+        DispatchQueue.main.async { drain.fulfill() }
+        wait(for: [drain], timeout: 1)
+        ShipLog.shared.unregister(terminalID: "t1")
         super.tearDown()
     }
 
