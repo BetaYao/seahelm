@@ -78,7 +78,18 @@ class HooksChannel: SailorChannel {
     // MARK: - Private
 
     private func extractMessage(from event: WebhookEvent) -> String? {
-        HookDecoder(event: event).mappedMessage
+        switch HookDecoder.kind(for: event) {
+        case .sessionStarted(let label): return label
+        case .userPrompt(let text): return text
+        case .toolUse(let ae): return "Using \(ae.tool)"
+        case .awaitingInput(let text): return text
+        case .agentStopped: return nil
+        case .notification(_, let text): return text.isEmpty ? nil : text
+        case .suggest: return nil
+        case .taskUpdate: return nil
+        case .screenObserved: return nil
+        case .none: return nil
+        }
     }
 }
 

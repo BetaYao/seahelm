@@ -232,14 +232,20 @@ class StatusPublisher {
             let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
 
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
-            let scanReport = ScanDecoder(
+            let detectedSailorTypeForDecode = SailorType.detect(fromLowercased: lowerContent)
+            let agentTypeForDecode = detectedSailorTypeForDecode == .unknown ? existingSailorType : detectedSailorTypeForDecode
+            let scanEvent = ScanDecoder(
+                terminalID: terminalID,
                 detector: detector,
                 processStatus: processStatus,
                 shellInfo: nil,
                 content: content,
-                agentDef: agentDef
+                agentDef: agentDef,
+                commandLine: nil,
+                agentType: agentTypeForDecode
             ).decode()
-            let textStatus = scanReport?.status ?? .unknown
+            let textStatus: SailorStatus
+            if case .screenObserved(let s, _, _, _, _) = scanEvent?.kind { textStatus = s } else { textStatus = .unknown }
             let hookStatus = webhookProvider.status(for: worktreePath)
             let detected = SailorStatus.highestPriority([textStatus, hookStatus])
 
@@ -277,8 +283,10 @@ class StatusPublisher {
             // Activity events from the scan report are applied only when no webhook events exist.
             let webhookEvents = ShipLog.shared.sailor(for: terminalID)?.activityEvents ?? []
             let reportForIngest: StatusReport
-            if webhookEvents.isEmpty, let scan = scanReport {
-                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: scan.activityEvents)
+            var scanActivityEvents: [ActivityEvent] = []
+            if case .screenObserved(_, _, let acts, _, _) = scanEvent?.kind { scanActivityEvents = acts }
+            if webhookEvents.isEmpty, !scanActivityEvents.isEmpty {
+                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: scanActivityEvents)
             } else {
                 reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: [])
             }

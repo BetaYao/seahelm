@@ -2,15 +2,18 @@ import XCTest
 @testable import seahelm
 
 final class SignalDecoderTests: XCTestCase {
-    func testStubDecoderProducesReport() {
+    func testStubDecoderProducesEvent() {
         struct StubDecoder: SignalDecoder {
-            func decode() -> StatusReport? {
-                StatusReport(status: .waiting, lastMessage: "hi", activityEvents: [])
+            func decode() -> NormalizedEvent? {
+                NormalizedEvent(terminalID: "t1", source: .scan,
+                                kind: .agentStopped(success: true))
             }
         }
-        let report = StubDecoder().decode()
-        XCTAssertEqual(report?.status, .waiting)
-        XCTAssertEqual(report?.lastMessage, "hi")
-        XCTAssertEqual(report?.activityEvents.count, 0)
+        let event = StubDecoder().decode()
+        XCTAssertNotNil(event)
+        guard case .agentStopped(let success) = event?.kind else {
+            return XCTFail("wrong kind")
+        }
+        XCTAssertTrue(success)
     }
 }

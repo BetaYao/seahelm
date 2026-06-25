@@ -1,15 +1,18 @@
 import Foundation
 
-/// 主动通道的信号员:扫屏文本 + 进程状态 → StatusReport。
+/// 主动通道的信号员:扫屏文本 + 进程状态 → NormalizedEvent(.screenObserved)。
 /// 取数(瞭望员)发生在 StatusPublisher;本类型只负责解码。
 struct ScanDecoder: SignalDecoder {
+    let terminalID: String
     let detector: StatusDetector
     let processStatus: ProcessStatus
     let shellInfo: ShellPhaseInfo?
     let content: String
     let agentDef: SailorDef?
+    let commandLine: String?
+    let agentType: SailorType
 
-    func decode() -> StatusReport? {
+    func decode() -> NormalizedEvent? {
         let status = detector.detect(
             processStatus: processStatus,
             shellInfo: shellInfo,
@@ -17,7 +20,9 @@ struct ScanDecoder: SignalDecoder {
             agentDef: agentDef
         )
         let events = detector.extractActivityEvents(from: content)
-        // lastMessage 由调用方(StatusPublisher)用既有逻辑补,先留空串占位
-        return StatusReport(status: status, lastMessage: "", activityEvents: events)
+        let kind = NormalizedEventKind.screenObserved(
+            status: status, message: "", activity: events,
+            commandLine: commandLine, agentType: agentType)
+        return NormalizedEvent(terminalID: terminalID, source: .scan, kind: kind)
     }
 }

@@ -1,68 +1,46 @@
 import Foundation
 
-/// 被动通道的信号员:Claude Code 钩子事件 → StatusReport。
-/// 无瞭望员——水手主动喊报告(webhook 推送),本类型只负责解码。
+/// 被动通道的信号员:webhook 事件 → NormalizedEvent。
+/// 映射表见 spec「14 种 webhook 事件 → Kind 对齐表」。
 struct HookDecoder: SignalDecoder {
+    let terminalID: String
     let event: WebhookEvent
 
-    func decode() -> StatusReport? {
-        let status = event.event.agentStatus(data: event.data)
-        let message = mappedMessage ?? ""
-        let events = activityEvents
-        return StatusReport(status: status, lastMessage: message, activityEvents: events)
+    func decode() -> NormalizedEvent? {
+        guard let kind = Self.kind(for: event) else { return nil }
+        return NormalizedEvent(terminalID: terminalID, source: .hook(event.source), kind: kind)
     }
 
-    // MARK: - Internal helpers (canonical mapping; HooksChannel delegates here)
-
-    var mappedMessage: String? {
+    /// Pure mapping. Returns nil for events that produce no station event (cwd_changed).
+    static func kind(for event: WebhookEvent) -> NormalizedEventKind? {
         switch event.event {
-        case .toolUseStart:
-            if let tool = event.data?["tool_name"] as? String {
-                return "Using \(tool)"
-            }
-        case .toolUseEnd:
-            if let tool = event.data?["tool_name"] as? String {
-                return "Done: \(tool)"
-            }
-        case .agentStop:
-            if let reason = event.data?["stop_reason"] as? String {
-                return "Stopped: \(reason)"
-            }
-        case .error:
-            return event.data?["message"] as? String
-        case .prompt:
-            return event.data?["message"] as? String ?? "Waiting for input"
-        case .notification:
-            return event.data?["message"] as? String ?? event.data?["title"] as? String
         case .sessionStart:
-            return "Session started"
+            return .sessionStarted(label: "Session started")
         case .worktreeCreate:
-            return "Creating worktree"
-        case .userPrompt:
-            return "Processing prompt"
-        case .toolUseFailed:
-            if let tool = event.data?["tool_name"] as? String {
-                return "Failed: \(tool)"
-            }
-            return "Tool failed"
-        case .stopFailure:
-            return event.data?["error"] as? String ?? "API error"
+            return .sessionStarted(label: "Creating worktree")
         case .subagentStart:
-            return "Subagent started"
+            return .sessionStarted(label: "Subagent started")
+        case .userPrompt:
+            return .userPrompt(event.data?["message"] as? String ?? "Processing prompt")
+        case .toolUseStart, .toolUseEnd, .toolUseFailed:
+            return .toolUse(ActivityEventExtractor.extract(from: event))
+        case .prompt:
+            return .awaitingInput(event.data?["message"] as? String ?? "Waiting for input")
+        case .agentStop:
+            return .agentStopped(success: true)
+        case .stopFailure:
+            return .agentStopped(success: false)
+        case .notification:
+            let level = event.data?["level"] as? String ?? "info"
+            let text = event.data?["message"] as? String ?? event.data?["title"] as? String ?? ""
+            return .notification(level: level, text: text)
+        case .error:
+            return .notification(level: "error", text: event.data?["message"] as? String ?? "Error")
+        case .suggest:
+            let options = (event.data?["options"] as? [String]) ?? []
+            return .suggest(options: options)
         case .cwdChanged:
             return nil
-        case .suggest:
-            return nil
-        }
-        return nil
-    }
-
-    private var activityEvents: [ActivityEvent] {
-        switch event.event {
-        case .toolUseStart, .toolUseEnd, .toolUseFailed:
-            return [ActivityEventExtractor.extract(from: event)]
-        default:
-            return []
         }
     }
 }

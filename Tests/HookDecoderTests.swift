@@ -18,63 +18,59 @@ final class HookDecoderTests: XCTestCase {
         )
     }
 
-    func testAgentStopMapsToIdle() {
+    func testAgentStopMapsToAgentStopped() {
         let event = makeEvent(type: .agentStop, data: ["stop_reason": "end_turn"])
-        let report = HookDecoder(event: event).decode()
-        XCTAssertNotNil(report)
-        XCTAssertEqual(report?.status, .idle)
-        XCTAssertEqual(report?.lastMessage, "Stopped: end_turn")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .agentStopped(let success)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertTrue(success)
     }
 
-    func testAgentStopWithoutReasonHasEmptyMessage() {
-        let event = makeEvent(type: .agentStop)
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.status, .idle)
-        XCTAssertEqual(report?.lastMessage, "")
+    func testStopFailureMapsToAgentStoppedFailure() {
+        let event = makeEvent(type: .stopFailure)
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .agentStopped(let success)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertFalse(success)
     }
 
-    func testToolUseStartMapsToRunning() {
+    func testToolUseStartMapsToToolUse() {
         let event = makeEvent(type: .toolUseStart, data: ["tool_name": "Bash"])
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.status, .running)
-        XCTAssertEqual(report?.lastMessage, "Using Bash")
-        XCTAssertEqual(report?.activityEvents.count, 1)
-        XCTAssertEqual(report?.activityEvents.first?.tool, "Bash")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .toolUse(let ae)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(ae.tool, "Bash")
     }
 
-    func testPromptMapsToWaiting() {
+    func testPromptMapsToAwaitingInput() {
         let event = makeEvent(type: .prompt, data: ["message": "Continue?"])
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.status, .waiting)
-        XCTAssertEqual(report?.lastMessage, "Continue?")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .awaitingInput(let text)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(text, "Continue?")
     }
 
-    func testErrorMapsToError() {
+    func testErrorMapsToNotificationError() {
         let event = makeEvent(type: .error, data: ["message": "Something went wrong"])
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.status, .error)
-        XCTAssertEqual(report?.lastMessage, "Something went wrong")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .notification(let level, let text)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(level, "error")
+        XCTAssertEqual(text, "Something went wrong")
     }
 
-    func testSessionStartMapsToRunning() {
+    func testSessionStartMapsToSessionStarted() {
         let event = makeEvent(type: .sessionStart)
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.status, .running)
-        XCTAssertEqual(report?.lastMessage, "Session started")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .sessionStarted(let label)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(label, "Session started")
     }
 
-    func testToolUseEndProducesActivityEvent() {
+    func testToolUseEndProducesToolUseActivity() {
         let event = makeEvent(type: .toolUseEnd, data: ["tool_name": "Read"])
-        let report = HookDecoder(event: event).decode()
-        XCTAssertEqual(report?.activityEvents.count, 1)
-        XCTAssertEqual(report?.lastMessage, "Done: Read")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .toolUse(let ae)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(ae.tool, "Read")
     }
 
-    func testCwdChangedProducesEmptyMessage() {
+    func testCwdChangedProducesNil() {
         let event = makeEvent(type: .cwdChanged)
-        let report = HookDecoder(event: event).decode()
-        // cwdChanged → .running, empty message
-        XCTAssertEqual(report?.status, .running)
-        XCTAssertEqual(report?.lastMessage, "")
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        XCTAssertNil(normalized)
     }
 }
