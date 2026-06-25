@@ -54,10 +54,10 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertNil(result)
     }
 
-    // MARK: - TerminalSurfaceManager Transfer Tests
+    // MARK: - StationManager Transfer Tests
 
     func testTransferTreeRekeys() {
-        let manager = TerminalSurfaceManager()
+        let manager = StationManager()
         let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
         let tree = manager.tree(for: info, backend: "local")
 
@@ -69,7 +69,7 @@ final class PaneTransferTests: XCTestCase {
     }
 
     func testTransferTreeReturnsNilForUnknownPath() {
-        let manager = TerminalSurfaceManager()
+        let manager = StationManager()
         let result = manager.transferTree(fromPath: "/nonexistent", toPath: "/dest")
         XCTAssertNil(result)
     }

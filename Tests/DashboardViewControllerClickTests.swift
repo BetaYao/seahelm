@@ -69,7 +69,7 @@ final class DashboardViewControllerClickTests: XCTestCase {
 // MARK: - Test helpers
 
 private func makeAgent(id: String, worktreePath: String) -> AgentDisplayInfo {
-    let surface = TerminalSurface()
+    let surface = Station()
     return AgentDisplayInfo(
         id: id,
         name: id,
@@ -81,10 +81,10 @@ private func makeAgent(id: String, worktreePath: String) -> AgentDisplayInfo {
         mostRecentPaneIndex: 1,
         totalDuration: "00:00:00",
         roundDuration: "00:00:00",
-        surface: surface,
+        station: surface,
         worktreePath: worktreePath,
         paneCount: 1,
-        paneSurfaces: [surface],
+        paneStations: [surface],
         isMainWorktree: false,
         tasks: [],
         activityEvents: []

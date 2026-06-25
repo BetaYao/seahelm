@@ -8,7 +8,7 @@ class StatusPublisher {
     private let detector = StatusDetector()
     private var trackers: [String: DebouncedStatusTracker] = [:]  // keyed by terminal ID
     private var timer: Timer?
-    private var surfaces: [String: TerminalSurface] = [:]         // keyed by terminal ID
+    private var surfaces: [String: Station] = [:]         // keyed by terminal ID
     /// Reverse mapping: terminal ID → worktree path (for delegate callbacks and webhook provider)
     private var worktreePaths: [String: String] = [:]
     private var agentConfig: AgentDetectConfig
@@ -48,13 +48,13 @@ class StatusPublisher {
         self.worktreePaths = [:]
         for (worktreePath, tree) in trees {
             for leaf in tree.allLeaves {
-                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                    self.surfaces[surface.id] = surface
-                    self.worktreePaths[surface.id] = worktreePath
+                if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                    self.surfaces[station.id] = station
+                    self.worktreePaths[station.id] = worktreePath
                 }
             }
         }
-        // Create trackers for each surface
+        // Create trackers for each station
         for terminalID in self.surfaces.keys {
             if trackers[terminalID] == nil {
                 trackers[terminalID] = DebouncedStatusTracker()
@@ -66,7 +66,7 @@ class StatusPublisher {
         for (worktreePath, tree) in trees {
             let leaves = tree.allLeaves
             for (index, leaf) in leaves.enumerated() {
-                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+                aggregator?.registerTerminal(leaf.stationId, worktreePath: worktreePath, leafIndex: index)
             }
         }
 
@@ -91,13 +91,13 @@ class StatusPublisher {
         self.worktreePaths = [:]
         for (worktreePath, tree) in trees {
             for leaf in tree.allLeaves {
-                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                    self.surfaces[surface.id] = surface
-                    self.worktreePaths[surface.id] = worktreePath
+                if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                    self.surfaces[station.id] = station
+                    self.worktreePaths[station.id] = worktreePath
                 }
             }
         }
-        // Add trackers for new surfaces
+        // Add trackers for new stations
         for terminalID in self.surfaces.keys {
             if trackers[terminalID] == nil {
                 trackers[terminalID] = DebouncedStatusTracker()
@@ -108,7 +108,7 @@ class StatusPublisher {
         for (worktreePath, tree) in trees {
             let leaves = tree.allLeaves
             for (index, leaf) in leaves.enumerated() {
-                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+                aggregator?.registerTerminal(leaf.stationId, worktreePath: worktreePath, leafIndex: index)
             }
         }
 
@@ -198,7 +198,7 @@ class StatusPublisher {
         }
     }
 
-    private func pollAll(_ surfaceSnapshot: [String: TerminalSurface], preferredPaths: Set<String>, pollCycle: Int, paths: [String: String]) {
+    private func pollAll(_ surfaceSnapshot: [String: Station], preferredPaths: Set<String>, pollCycle: Int, paths: [String: String]) {
         for (terminalID, surface) in surfaceSnapshot {
             let worktreePath = paths[terminalID] ?? ""
             guard Self.shouldPollPath(worktreePath, preferredPaths: preferredPaths, pollCycle: pollCycle, nonPreferredStride: self.nonPreferredPollStride) else {

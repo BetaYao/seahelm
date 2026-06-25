@@ -46,9 +46,9 @@ class SplitContainerView: NSView, DividerDelegate {
         leafFrames = Self.computeFrames(node: tree.root, in: bounds)
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
-                  let view = surfaceViews[leaf.surfaceId] else { continue }
+                  let view = surfaceViews[leaf.stationId] else { continue }
             // Deactivate any Auto Layout constraints and switch to frame-based positioning.
-            // TerminalSurface.create() sets up Auto Layout, but SplitContainerView uses frames.
+            // Station.create() sets up Auto Layout, but SplitContainerView uses frames.
             if !view.translatesAutoresizingMaskIntoConstraints {
                 NSLayoutConstraint.deactivate(view.constraints)
                 // Also remove constraints from superview that reference this view
@@ -82,9 +82,9 @@ class SplitContainerView: NSView, DividerDelegate {
             }
 
             // Notify Ghostty of the new size
-            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                surface.syncContentScale()
-                surface.syncSize()
+            if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                station.syncContentScale()
+                station.syncSize()
             }
         }
         layoutDividers(node: tree.root, in: bounds)
@@ -243,7 +243,7 @@ class SplitContainerView: NSView, DividerDelegate {
         guard let tree else { return }
         let targetId = tree.focusedId
         if let leaf = tree.allLeaves.first(where: { $0.id == targetId }),
-           let view = surfaceViews[leaf.surfaceId],
+           let view = surfaceViews[leaf.stationId],
            window?.firstResponder !== view {
             window?.makeFirstResponder(view)
         }

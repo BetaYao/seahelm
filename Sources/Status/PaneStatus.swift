@@ -2,7 +2,7 @@ import Foundation
 
 struct PaneStatus {
     let paneIndex: Int        // 1-based, follows SplitTree leaf order
-    let terminalID: String    // TerminalSurface.id
+    let terminalID: String    // Station.id
     var status: AgentStatus
     var lastMessage: String
     var lastUserPrompt: String

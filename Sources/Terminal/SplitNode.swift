@@ -5,9 +5,9 @@ enum SplitAxis: String, Codable {
     case vertical    // top / bottom
 }
 
-/// Runtime split tree node. Leaves hold live TerminalSurface references.
+/// Runtime split tree node. Leaves hold live Station references.
 indirect enum SplitNode {
-    case leaf(id: String, surfaceId: String, sessionName: String)
+    case leaf(id: String, stationId: String, sessionName: String)
     case split(id: String, axis: SplitAxis, ratio: CGFloat, first: SplitNode, second: SplitNode)
 
     var id: String {
@@ -27,14 +27,14 @@ indirect enum SplitNode {
 
     struct LeafInfo {
         let id: String
-        let surfaceId: String
+        let stationId: String
         let sessionName: String
     }
 
     var allLeaves: [LeafInfo] {
         switch self {
-        case .leaf(let id, let surfaceId, let sessionName):
-            return [LeafInfo(id: id, surfaceId: surfaceId, sessionName: sessionName)]
+        case .leaf(let id, let stationId, let sessionName):
+            return [LeafInfo(id: id, stationId: stationId, sessionName: sessionName)]
         case .split(_, _, _, let first, let second):
             return first.allLeaves + second.allLeaves
         }
@@ -145,7 +145,7 @@ indirect enum SplitNode {
 
 // MARK: - Codable representation for config persistence
 
-/// Serializable split layout (no live surface references).
+/// Serializable split layout (no live station references).
 indirect enum CodableSplitNode: Codable {
     case leaf(sessionName: String)
     case split(axis: String, ratio: Double, first: CodableSplitNode, second: CodableSplitNode)

@@ -16,14 +16,14 @@ private class MockTerminalCoordinatorDelegate: TerminalCoordinatorDelegate {
 
 final class TerminalCoordinatorTests: XCTestCase {
 
-    func testSurfaceManagerAccess() {
+    func testStationManagerAccess() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        XCTAssertNotNil(coordinator.surfaceManager)
+        XCTAssertNotNil(coordinator.stationManager)
     }
 
     func testSaveSplitLayoutPersistsToConfig() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        let tree = SplitTree(worktreePath: "/tmp/test", rootLeafId: "leaf-1", surfaceId: "surface-1", sessionName: "test")
+        let tree = SplitTree(worktreePath: "/tmp/test", rootLeafId: "leaf-1", stationId: "surface-1", sessionName: "test")
         coordinator.saveSplitLayout(tree)
         XCTAssertNotNil(coordinator.config.splitLayouts["/tmp/test"])
     }

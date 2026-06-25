@@ -58,7 +58,7 @@ final class TabCoordinatorTests: XCTestCase {
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
         let info = WorktreeInfo(path: "/tmp/test-wt", branch: "feature", commitHash: "", isMainWorktree: false)
-        let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", surfaceId: "surface-1", sessionName: "test")
+        let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", stationId: "surface-1", sessionName: "test")
         coordinator.allWorktrees.append((info: info, tree: tree))
 
         coordinator.worktreeDidDelete(info)
@@ -73,8 +73,8 @@ final class TabCoordinatorTests: XCTestCase {
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
         let deleted = WorktreeInfo(path: "/repo/.worktrees/feature", branch: "feature", commitHash: "def67890", isMainWorktree: false)
-        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", surfaceId: "surface-main", sessionName: "main")
-        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-feature", surfaceId: "surface-feature", sessionName: "feature")
+        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", stationId: "surface-main", sessionName: "main")
+        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-feature", stationId: "surface-feature", sessionName: "feature")
 
         let tabIndex = coordinator.workspaceManager.addTab(repoPath: "/repo", worktrees: [main, deleted])
         coordinator.allWorktrees.append((info: main, tree: mainTree))
@@ -99,8 +99,8 @@ final class TabCoordinatorTests: XCTestCase {
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
         let deleted = WorktreeInfo(path: "/repo/.worktrees/deleted", branch: "deleted", commitHash: "def67890", isMainWorktree: false)
         let added = WorktreeInfo(path: "/repo/.worktrees/added", branch: "added", commitHash: "1234abcd", isMainWorktree: false)
-        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", surfaceId: "surface-main", sessionName: "main")
-        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-deleted", surfaceId: "surface-deleted", sessionName: "deleted")
+        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", stationId: "surface-main", sessionName: "main")
+        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-deleted", stationId: "surface-deleted", sessionName: "deleted")
 
         let tabIndex = coordinator.workspaceManager.addTab(repoPath: "/repo", worktrees: [main, deleted])
         coordinator.allWorktrees.append((info: main, tree: mainTree))

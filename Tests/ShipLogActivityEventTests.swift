@@ -38,8 +38,8 @@ final class ShipLogActivityEventTests: XCTestCase {
 
     func testUpsertLatestActivityEventReplacesMatchingNewestEvent() {
         let head = ShipLog.shared
-        let surface = TerminalSurface()
-        head.register(surface: surface, worktreePath: "/tmp/project", branch: "main", project: "project", startedAt: nil)
+        let surface = Station()
+        head.register(station: surface, worktreePath: "/tmp/project", branch: "main", project: "project", startedAt: nil)
         defer { head.unregister(terminalID: surface.id) }
 
         let first = ActivityEvent(tool: "Bash", detail: "swift test", isError: false, timestamp: Date())

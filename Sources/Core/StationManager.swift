@@ -1,27 +1,27 @@
 import Foundation
 
 /// Manages the lifecycle of SplitTree instances, keyed by worktree path.
-class TerminalSurfaceManager {
+class StationManager {
     private var trees: [String: SplitTree] = [:]
 
     /// Get or create a SplitTree for the given worktree info.
-    /// Creates a single-leaf tree and registers the surface in SurfaceRegistry.
+    /// Creates a single-leaf tree and registers the station in StationRegistry.
     func tree(for info: WorktreeInfo, backend: String) -> SplitTree {
         if let existing = trees[info.path] {
             return existing
         }
-        let surface = TerminalSurface()
+        let station = Station()
         let sessionName = backend != "local" ? SessionManager.persistentSessionName(for: info.path) : ""
         if backend != "local" {
-            surface.sessionName = sessionName
-            surface.backend = backend
+            station.sessionName = sessionName
+            station.backend = backend
         }
-        SurfaceRegistry.shared.register(surface)
+        StationRegistry.shared.register(station)
         let leafId = UUID().uuidString
         let splitTree = SplitTree(
             worktreePath: info.path,
             rootLeafId: leafId,
-            surfaceId: surface.id,
+            stationId: station.id,
             sessionName: sessionName
         )
         trees[info.path] = splitTree
@@ -45,22 +45,22 @@ class TerminalSurfaceManager {
     func removeTree(forPath path: String) -> SplitTree? {
         guard let tree = trees.removeValue(forKey: path) else { return nil }
         for leaf in tree.allLeaves {
-            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                surface.destroy()
+            if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                station.destroy()
             }
-            SurfaceRegistry.shared.unregister(leaf.surfaceId)
+            StationRegistry.shared.unregister(leaf.stationId)
         }
         return tree
     }
 
-    /// Remove all trees, destroying each surface.
+    /// Remove all trees, destroying each station.
     func removeAll() {
         for (_, tree) in trees {
             for leaf in tree.allLeaves {
-                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                    surface.destroy()
+                if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                    station.destroy()
                 }
-                SurfaceRegistry.shared.unregister(leaf.surfaceId)
+                StationRegistry.shared.unregister(leaf.stationId)
             }
         }
         trees.removeAll()
@@ -86,12 +86,12 @@ class TerminalSurfaceManager {
         return tree
     }
 
-    // MARK: - Legacy surface accessors (for ShipLog / backward compat)
+    // MARK: - Primary station accessor (for ShipLog / backward compat)
 
-    /// Returns the primary (first) surface for the given worktree path, if any.
-    func primarySurface(forPath path: String) -> TerminalSurface? {
+    /// Returns the primary (first) station for the given worktree path, if any.
+    func primaryStation(forPath path: String) -> Station? {
         guard let tree = trees[path],
               let firstLeaf = tree.allLeaves.first else { return nil }
-        return SurfaceRegistry.shared.surface(forId: firstLeaf.surfaceId)
+        return StationRegistry.shared.station(forId: firstLeaf.stationId)
     }
 }

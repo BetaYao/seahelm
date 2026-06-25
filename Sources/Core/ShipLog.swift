@@ -7,7 +7,7 @@ protocol ShipLogDelegate: AnyObject {
 /// Single source of truth for all agent information.
 /// Consumers query ShipLog instead of assembling data from multiple sources.
 /// Also manages communication channels for each agent.
-/// Primary key: terminal ID (TerminalSurface.id).
+/// Primary key: terminal ID (Station.id).
 class ShipLog {
     static let shared = ShipLog()
 
@@ -33,13 +33,13 @@ class ShipLog {
     private init() {}
 
     #if DEBUG
-    /// Test helper: register an agent entry without a real TerminalSurface.
+    /// Test helper: register an agent entry without a real Station.
     func registerForTesting(terminalID: String, worktreePath: String, branch: String, project: String) {
         lock.lock(); defer { lock.unlock() }
         agents[terminalID] = AgentInfo(
             id: terminalID, worktreePath: worktreePath, agentType: .unknown,
             project: project, branch: branch, status: .unknown, lastMessage: "",
-            commandLine: nil, roundDuration: 0, startedAt: nil, surface: nil,
+            commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
             channel: nil, taskProgress: TaskProgress())
         worktreeIndex[worktreePath, default: []].append(terminalID)
         if !orderedIDs.contains(terminalID) { orderedIDs.append(terminalID) }
@@ -48,13 +48,13 @@ class ShipLog {
 
     // MARK: - Registration
 
-    func register(surface: TerminalSurface, worktreePath: String, branch: String,
+    func register(station: Station, worktreePath: String, branch: String,
                   project: String, startedAt: Date?,
                   tmuxSessionName: String? = nil, backend: String = "zmx") {
         lock.lock()
         defer { lock.unlock() }
 
-        let terminalID = surface.id
+        let terminalID = station.id
 
         // Create a default channel if we have a session name
         var channel: AgentChannel?
@@ -79,7 +79,7 @@ class ShipLog {
             commandLine: nil,
             roundDuration: 0,
             startedAt: startedAt,
-            surface: surface,
+            station: station,
             channel: channel,
             taskProgress: TaskProgress()
         )

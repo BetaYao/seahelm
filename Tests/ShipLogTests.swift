@@ -2,7 +2,7 @@ import XCTest
 @testable import seahelm
 
 /// Tests for ShipLog singleton.
-/// Note: We avoid creating TerminalSurface instances in tests because they
+/// Note: We avoid creating Station instances in tests because they
 /// require Ghostty/Metal initialization. Instead we test the data management
 /// logic by registering agents and verifying queries.
 final class ShipLogTests: XCTestCase {
@@ -14,9 +14,9 @@ final class ShipLogTests: XCTestCase {
         path: String, branch: String = "main", project: String = "TestProject",
         startedAt: Date? = nil
     ) -> String {
-        let surface = TerminalSurface()
+        let surface = Station()
         ShipLog.shared.register(
-            surface: surface, worktreePath: path, branch: branch, project: project,
+            station: surface, worktreePath: path, branch: branch, project: project,
             startedAt: startedAt
         )
         return surface.id
@@ -62,9 +62,9 @@ final class ShipLogTests: XCTestCase {
     }
 
     func testUnregisterCleansUpBackendsByPath() {
-        let surface = TerminalSurface()
+        let surface = Station()
         ShipLog.shared.register(
-            surface: surface, worktreePath: "/tmp/test-repo/main",
+            station: surface, worktreePath: "/tmp/test-repo/main",
             branch: "main", project: "test", startedAt: nil,
             tmuxSessionName: "amux-test-main", backend: "zmx"
         )

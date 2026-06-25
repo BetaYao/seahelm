@@ -1,7 +1,7 @@
 import Foundation
 
 struct AgentInfo {
-    let id: String                     // terminal ID (TerminalSurface.id)
+    let id: String                     // terminal ID (Station.id)
     let worktreePath: String           // associated worktree path
     var agentType: AgentType           // detected from terminal content
     let project: String                // repo display name
@@ -12,7 +12,7 @@ struct AgentInfo {
     var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
-    weak var surface: TerminalSurface? // weak ref, MainWindowController owns
+    weak var station: Station? // weak ref, MainWindowController owns
     var channel: AgentChannel?         // communication channel (strong ref, ShipLog owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items

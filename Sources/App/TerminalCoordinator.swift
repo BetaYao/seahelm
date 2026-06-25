@@ -8,7 +8,7 @@ protocol TerminalCoordinatorDelegate: AnyObject {
 class TerminalCoordinator {
     weak var delegate: TerminalCoordinatorDelegate?
     var config: Config
-    let surfaceManager = TerminalSurfaceManager()
+    let stationManager = StationManager()
     var webhookServer: WebhookServer?
 
     /// Closure to access the active SplitContainerView for split pane operations.
@@ -27,10 +27,10 @@ class TerminalCoordinator {
         if backend != "local",
            let savedLayout = config.splitLayouts[info.path],
            let restored = SplitTree.restore(from: savedLayout, worktreePath: info.path, backend: backend) {
-            surfaceManager.registerTree(restored, forPath: info.path)
+            stationManager.registerTree(restored, forPath: info.path)
             return restored
         }
-        return surfaceManager.tree(for: info, backend: backend)
+        return stationManager.tree(for: info, backend: backend)
     }
 
     func saveSplitLayout(_ tree: SplitTree) {
@@ -45,19 +45,19 @@ class TerminalCoordinator {
               let tree = container.tree else { return }
 
         let sessionName = tree.nextSessionName()
-        let surface = TerminalSurface()
-        surface.sessionName = sessionName
-        surface.backend = config.backend
-        SurfaceRegistry.shared.register(surface)
+        let station = Station()
+        station.sessionName = sessionName
+        station.backend = config.backend
+        StationRegistry.shared.register(station)
 
         let leafId = UUID().uuidString
-        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newSurfaceId: surface.id, newSessionName: sessionName)
+        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
 
         // Create the terminal
-        _ = surface.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
+        _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
 
         // Register view and re-layout
-        container.surfaceViews[surface.id] = surface.view
+        container.surfaceViews[station.id] = station.view
         container.layoutTree()
 
         // Focus the new pane. Runs deferred so it fires after _createWithCommand's own
@@ -68,8 +68,8 @@ class TerminalCoordinator {
             guard let container,
                   let tree = container.tree,
                   let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
-                  let newSurface = SurfaceRegistry.shared.surface(forId: newLeaf.surfaceId),
-                  let termView = newSurface.view else { return }
+                  let newStation = StationRegistry.shared.station(forId: newLeaf.stationId),
+                  let termView = newStation.view else { return }
             container.window?.makeFirstResponder(termView)
         }
 
@@ -86,31 +86,31 @@ class TerminalCoordinator {
         // Kill zmx session
         SessionManager.killSession(closed.sessionName, backend: config.backend)
 
-        // Remove surface
-        if let surface = SurfaceRegistry.shared.surface(forId: closed.surfaceId) {
-            surface.view?.removeFromSuperview()
-            surface.destroy()
+        // Remove station
+        if let station = StationRegistry.shared.station(forId: closed.stationId) {
+            station.view?.removeFromSuperview()
+            station.destroy()
         }
-        SurfaceRegistry.shared.unregister(closed.surfaceId)
-        container.surfaceViews.removeValue(forKey: closed.surfaceId)
+        StationRegistry.shared.unregister(closed.stationId)
+        container.surfaceViews.removeValue(forKey: closed.stationId)
         container.layoutTree()
 
         // Focus new leaf
         if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
-           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId),
-           let terminalView = focusSurface.view {
+           let focusStation = StationRegistry.shared.station(forId: focusedLeaf.stationId),
+           let terminalView = focusStation.view {
             container.window?.makeFirstResponder(terminalView)
         }
 
         // Re-sync session layout after Ghostty processes the pixel resize.
-        // Mirrors the two-pass async pattern in TerminalSurface.create():
+        // Mirrors the two-pass async pattern in Station.create():
         // pass 1 re-triggers the size, pass 2 reads the new grid (after Ghostty computed it).
         if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
-           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId) {
+           let focusStation = StationRegistry.shared.station(forId: focusedLeaf.stationId) {
             DispatchQueue.main.async {
-                focusSurface.syncSize()
+                focusStation.syncSize()
                 DispatchQueue.main.async {
-                    focusSurface.refreshSessionLayout()
+                    focusStation.refreshSessionLayout()
                 }
             }
         }
@@ -124,8 +124,8 @@ class TerminalCoordinator {
         if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {
             if let tree = container.tree,
                let leaf = tree.root.findLeaf(id: newFocusId),
-               let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
-               let view = surface.view {
+               let station = StationRegistry.shared.station(forId: leaf.stationId),
+               let view = station.view {
                 container.window?.makeFirstResponder(view)
             }
         }
@@ -214,7 +214,7 @@ class TerminalCoordinator {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        surfaceManager.removeTree(forPath: info.path)
+        stationManager.removeTree(forPath: info.path)
 
         // Notify delegate immediately so the UI card disappears instantly
         delegate?.terminalCoordinator(self, didDeleteWorktree: info)
@@ -246,6 +246,6 @@ class TerminalCoordinator {
     func cleanup() {
         webhookServer?.stop()
         webhookServer = nil
-        surfaceManager.removeAll()
+        stationManager.removeAll()
     }
 }

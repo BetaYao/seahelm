@@ -1,14 +1,14 @@
 import AppKit
 
-protocol TerminalSurfaceDelegate: AnyObject {
-    /// Called when a stale session was detected and the surface was recreated.
-    /// The delegate should re-embed `surface.view` into the appropriate container.
-    func terminalSurfaceDidRecover(_ surface: TerminalSurface)
+protocol StationDelegate: AnyObject {
+    /// Called when a stale session was detected and the station was recreated.
+    /// The delegate should re-embed `station.view` into the appropriate container.
+    func stationDidRecover(_ station: Station)
 }
 
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
-/// Each worktree gets one TerminalSurface instance.
-class TerminalSurface {
+/// Each worktree gets one Station instance.
+class Station {
     /// Unique identifier for this terminal instance (used as primary key in ShipLog)
     let id: String = UUID().uuidString
 
@@ -22,7 +22,7 @@ class TerminalSurface {
     /// Persistence backend for the sessionName above.
     var backend: String = "zmx"
     /// Delegate notified when a stale session is recovered.
-    weak var delegate: TerminalSurfaceDelegate?
+    weak var delegate: StationDelegate?
 
     private var recoveryTimer: DispatchWorkItem?
     private static let recoveryDelay: TimeInterval = 3.0
@@ -121,7 +121,7 @@ class TerminalSurface {
         self.view = view
         self.containerView = container
         view.surface = s
-        view.terminalSurface = self
+        view.station = self
 
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
@@ -369,7 +369,7 @@ class TerminalSurface {
         let text = readViewportText() ?? ""
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
 
-        NSLog("TerminalSurface: zmx session '%@' appears stale — recovering", sessionName)
+        NSLog("Station: zmx session '%@' appears stale — recovering", sessionName)
         recoverZmxSession(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
     }
 
@@ -389,7 +389,7 @@ class TerminalSurface {
                 // Recreate with a fresh zmx attach
                 let zmxCommand = "zmx attach \(sessionName)"
                 self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
-                self.delegate?.terminalSurfaceDidRecover(self)
+                self.delegate?.stationDidRecover(self)
             }
         }
     }
@@ -407,7 +407,7 @@ class TerminalSurface {
             .contains { $0.contains("name=\(sessionName)") }
         guard stillAlive else { return }
 
-        NSLog("TerminalSurface: zmx session '%@' still alive after kill — force cleaning", sessionName)
+        NSLog("Station: zmx session '%@' still alive after kill — force cleaning", sessionName)
 
         // Find and kill the daemon process via its socket
         if let socketDir = Self.zmxSocketDir() {
@@ -416,7 +416,7 @@ class TerminalSurface {
             if let lsofOutput = ProcessRunner.output(["lsof", "-t", socketPath]),
                let pid = Int32(lsofOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 kill(pid, SIGKILL)
-                NSLog("TerminalSurface: sent SIGKILL to zmx daemon pid %d", pid)
+                NSLog("Station: sent SIGKILL to zmx daemon pid %d", pid)
                 // Brief wait for process to exit
                 usleep(100_000) // 100ms
             }
@@ -462,7 +462,7 @@ class TerminalSurface {
 /// Forwards keyboard and mouse events to the Ghostty C API.
 class GhosttyNSView: NSView, NSTextInputClient {
     var surface: ghostty_surface_t?
-    weak var terminalSurface: TerminalSurface?
+    weak var station: Station?
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     /// Called when this view becomes first responder (e.g. on mouse click).
@@ -540,7 +540,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         needsDisplay = true
 
         // Resize backend session layout if needed (tmux only)
-        terminalSurface?.refreshSessionLayout()
+        station?.refreshSessionLayout()
     }
 
     override func becomeFirstResponder() -> Bool {

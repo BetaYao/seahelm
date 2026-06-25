@@ -378,7 +378,7 @@ class MainWindowController: NSWindowController {
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
-dashboard.surfaceManager = terminalCoordinator.surfaceManager
+dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
@@ -920,7 +920,7 @@ private extension MainWindowController {
             DispatchQueue.main.async {
                 for path in summary.deletedPaths {
                     guard let item = self.tabCoordinator.allWorktrees.first(where: { $0.info.path == path }) else { continue }
-                    self.terminalCoordinator.surfaceManager.removeTree(forPath: path)
+                    self.terminalCoordinator.stationManager.removeTree(forPath: path)
                     self.tabCoordinator.worktreeDidDelete(item.info)
                 }
                 self.tabCoordinator.saveSelectedWorktree()
@@ -1253,7 +1253,7 @@ extension MainWindowController: TabCoordinatorDelegate {
 
 extension MainWindowController: TerminalCoordinatorDelegate {
     func terminalCoordinatorDidUpdateSurfaces(_ coordinator: TerminalCoordinator) {
-        statusPublisher.updateSurfaces(coordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(coordinator.stationManager.all)
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {

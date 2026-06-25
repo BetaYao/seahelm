@@ -81,7 +81,7 @@ enum SessionManager {
         let output = listOutput ?? ProcessRunner.output(["zmx", "list"]) ?? ""
         let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
         for sessionName in orphaned {
-            TerminalSurface.forceKillZmxSession(sessionName)
+            Station.forceKillZmxSession(sessionName)
         }
         return orphaned
     }
@@ -92,7 +92,7 @@ enum SessionManager {
             if backend == "tmux" {
                 ProcessRunner.runSync(["tmux", "kill-session", "-t", name])
             } else {
-                TerminalSurface.forceKillZmxSession(name)
+                Station.forceKillZmxSession(name)
             }
         }
     }

@@ -106,7 +106,7 @@ class TabCoordinator {
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
                   let leafId = notification.userInfo?["focusedLeafId"] as? String else { return }
             // Save session name (stable across launches) instead of leaf ID
-            if let tree = self.terminalCoordinator.surfaceManager.tree(forPath: worktreePath),
+            if let tree = self.terminalCoordinator.stationManager.tree(forPath: worktreePath),
                let leaf = tree.allLeaves.first(where: { $0.id == leafId }) {
                 self.config.focusedPaneIds[worktreePath] = leaf.sessionName
             }
@@ -204,8 +204,8 @@ class TabCoordinator {
                 ?? URL(fileURLWithPath: repoPath).lastPathComponent
             let started = config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-            if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
+            if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
+                ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -221,7 +221,7 @@ class TabCoordinator {
         if configChanged { saveConfig() }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
         return tabIndex
@@ -235,15 +235,15 @@ class TabCoordinator {
         var result: [AgentDisplayInfo] = []
 
         for agent in agents {
-            guard let surface = agent.surface else { continue }
+            guard let station = agent.station else { continue }
             guard !seen.contains(agent.worktreePath) else { continue }
             seen.insert(agent.worktreePath)
 
-            let tree = terminalCoordinator.surfaceManager.tree(forPath: agent.worktreePath)
+            let tree = terminalCoordinator.stationManager.tree(forPath: agent.worktreePath)
             let paneCount = tree?.leafCount ?? 1
-            let paneSurfaces: [TerminalSurface] = tree?.allLeaves.compactMap {
-                SurfaceRegistry.shared.surface(forId: $0.surfaceId)
-            } ?? [surface]
+            let paneStations: [Station] = tree?.allLeaves.compactMap {
+                StationRegistry.shared.station(forId: $0.stationId)
+            } ?? [station]
 
             let ws = statusAggregator.status(for: agent.worktreePath)
             let paneStatuses = ws?.statuses ?? [agent.status]
@@ -266,10 +266,10 @@ class TabCoordinator {
                 mostRecentPaneIndex: mostRecentPaneIndex,
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
-                surface: surface,
+                station: station,
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
-                paneSurfaces: paneSurfaces,
+                paneStations: paneStations,
                 isMainWorktree: isMain,
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents
@@ -373,8 +373,8 @@ class TabCoordinator {
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
                     let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                    if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                        ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                    if let surface = self.terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
+                        ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                     }
                 }
                 if !cardOrder.isEmpty {
@@ -389,7 +389,7 @@ class TabCoordinator {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(trees: self.terminalCoordinator.surfaceManager.all)
+                self.statusPublisher.start(trees: self.terminalCoordinator.stationManager.all)
                 self.updateStatusPollPreferences()
 
                 // Restore last session state (tab, worktree, pane)
@@ -466,8 +466,8 @@ class TabCoordinator {
                 worktreeRepoCache[info.path] = repoRoot
 
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                    ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
+                    ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
                 }
             }
         }
@@ -484,7 +484,7 @@ class TabCoordinator {
         if configChanged { saveConfig() }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
@@ -515,7 +515,7 @@ class TabCoordinator {
         let sourcePath = transfer.sourceWorktreePath
 
         // 1. Transfer the SplitTree from source → new worktree path
-        guard let transferredTree = terminalCoordinator.surfaceManager.transferTree(fromPath: sourcePath, toPath: newInfo.path) else {
+        guard let transferredTree = terminalCoordinator.stationManager.transferTree(fromPath: sourcePath, toPath: newInfo.path) else {
             NSLog("[TabCoordinator] Transfer failed: no tree at \(sourcePath), falling back to fresh tree")
             let tree = terminalCoordinator.resolveTree(for: newInfo)
             allWorktrees.append((info: newInfo, tree: tree))
@@ -534,9 +534,9 @@ class TabCoordinator {
             ShipLog.shared.unregister(terminalID: oldAgent.id)
         }
         for leaf in transferredTree.allLeaves {
-            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+            if let station = StationRegistry.shared.station(forId: leaf.stationId) {
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
-                ShipLog.shared.register(surface: surface, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -549,7 +549,7 @@ class TabCoordinator {
 
         // 6. Create a fresh tree for the source worktree (e.g., main)
         if let sourceInfo = allDiscoveredWorktrees.first(where: { $0.path == transfer.sourceWorktreePath }) {
-            let freshTree = terminalCoordinator.surfaceManager.tree(for: sourceInfo, backend: runtimeBackend)
+            let freshTree = terminalCoordinator.stationManager.tree(for: sourceInfo, backend: runtimeBackend)
             if let idx = allWorktrees.firstIndex(where: { $0.info.path == sourceInfo.path }) {
                 allWorktrees[idx] = (info: sourceInfo, tree: freshTree)
             } else {
@@ -557,8 +557,8 @@ class TabCoordinator {
             }
             worktreeRepoCache[sourceInfo.path] = repoRoot
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
-            if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: sourceInfo.path) {
-                ShipLog.shared.register(surface: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+            if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
+                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }
@@ -580,7 +580,7 @@ class TabCoordinator {
         }
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -593,13 +593,13 @@ class TabCoordinator {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            let primarySurface = terminalCoordinator.surfaceManager.primarySurface(forPath: worktree.path)
-            terminalCoordinator.surfaceManager.removeTree(forPath: worktree.path)
+            let primaryStation = terminalCoordinator.stationManager.primaryStation(forPath: worktree.path)
+            terminalCoordinator.stationManager.removeTree(forPath: worktree.path)
 
             if let agent = ShipLog.shared.agent(forWorktree: worktree.path) {
                 ShipLog.shared.unregister(terminalID: agent.id)
-            } else if let primarySurface {
-                ShipLog.shared.unregister(terminalID: primarySurface.id)
+            } else if let primaryStation {
+                ShipLog.shared.unregister(terminalID: primaryStation.id)
             }
             if runtimeBackend != "local" {
                 let sessionName = SessionManager.persistentSessionName(for: worktree.path)
@@ -620,7 +620,7 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestClearContentContainer(self)
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         switchToTab(0)
     }
@@ -687,7 +687,7 @@ class TabCoordinator {
         if !deletedWorktrees.isEmpty {
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
             for deleted in deletedWorktrees {
-                terminalCoordinator.surfaceManager.removeTree(forPath: deleted.path)
+                terminalCoordinator.stationManager.removeTree(forPath: deleted.path)
                 worktreeDidDelete(deleted)
             }
             changed = true
@@ -713,7 +713,7 @@ class TabCoordinator {
 
         workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         return true
     }

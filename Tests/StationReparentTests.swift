@@ -1,8 +1,8 @@
 import XCTest
 @testable import seahelm
 
-/// Tests that terminal surfaces fill their container after reparent.
-class TerminalSurfaceReparentTests: XCTestCase {
+/// Tests that terminal stations fill their container after reparent.
+class StationReparentTests: XCTestCase {
 
     // MARK: - GhosttyNSView Auto Layout Tests
 
@@ -314,12 +314,12 @@ class TerminalSurfaceReparentTests: XCTestCase {
         XCTAssertEqual(view.pasteCallCount, 0)
     }
 
-    // MARK: - TerminalSurface create graceful failure
+    // MARK: - Station create graceful failure
 
     func testCreateWithCommandGracefulFailure() {
-        let surface = TerminalSurface()
+        let station = Station()
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        let result = surface.create(in: container, workingDirectory: "/tmp", sessionName: nil)
+        let result = station.create(in: container, workingDirectory: "/tmp", sessionName: nil)
         // Without GhosttyBridge initialized, this should return false gracefully
         XCTAssertFalse(result)
     }

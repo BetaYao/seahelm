@@ -18,7 +18,7 @@ protocol DashboardDelegate: AnyObject {
 // MARK: - AgentDisplayInfo
 
 struct AgentDisplayInfo {
-    let id: String          // terminal ID (from TerminalSurface.id)
+    let id: String          // terminal ID (from Station.id)
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
@@ -28,10 +28,10 @@ struct AgentDisplayInfo {
     let mostRecentPaneIndex: Int
     let totalDuration: String   // "HH:MM:SS" format
     let roundDuration: String   // "HH:MM:SS" format
-    let surface: TerminalSurface
+    let station: Station
     let worktreePath: String    // needed to lazily create the terminal
     let paneCount: Int          // number of split panes (1 = no badge)
-    let paneSurfaces: [TerminalSurface]  // all pane surfaces in leaf order
+    let paneStations: [Station]  // all pane stations in leaf order
     let isMainWorktree: Bool    // true = base repo, false = git worktree
     let tasks: [TaskItem]              // webhook-tracked task items
     let activityEvents: [ActivityEvent]
@@ -77,7 +77,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     var onRequestNewWorktree: (() -> Void)?
 
     /// Set by TabCoordinator during setup
-    weak var surfaceManager: TerminalSurfaceManager?
+    weak var stationManager: StationManager?
 
     /// Set by MainWindowController — forwards split events to TerminalCoordinator
     weak var splitContainerDelegate: SplitContainerDelegate?
@@ -720,23 +720,23 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             splitContainers[worktreePath] = splitView
         }
 
-        // Populate surface views from SurfaceRegistry
-        guard let tree = surfaceManager?.tree(forPath: worktreePath) else { return }
+        // Populate surface views from StationRegistry
+        guard let tree = stationManager?.tree(forPath: worktreePath) else { return }
         var surfaceViews: [String: NSView] = [:]
         for leaf in tree.allLeaves {
-            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                // Ensure surface is created
-                if surface.surface == nil {
-                    let surfaceId = leaf.surfaceId
-                    _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName) { [weak splitView] in
+            if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                // Ensure station is created
+                if station.surface == nil {
+                    let stationId = leaf.stationId
+                    _ = station.create(in: container, workingDirectory: worktreePath, sessionName: station.sessionName) { [weak splitView] in
                         // Async backend (tmux): register the view once creation finishes
-                        guard let splitView, let termView = surface.view else { return }
-                        splitView.surfaceViews[surfaceId] = termView
+                        guard let splitView, let termView = station.view else { return }
+                        splitView.surfaceViews[stationId] = termView
                         splitView.layoutTree()
                     }
                 }
-                if let termView = surface.view {
-                    surfaceViews[leaf.surfaceId] = termView
+                if let termView = station.view {
+                    surfaceViews[leaf.stationId] = termView
                 }
             }
         }
@@ -767,8 +767,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
 
         let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
         if let leaf = leafToFocus,
-           let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
-           let termView = surface.view {
+           let station = StationRegistry.shared.station(forId: leaf.stationId),
+           let termView = station.view {
             // Immediate attempt (works when hierarchy is stable)
             termView.window?.makeFirstResponder(termView)
             // Deferred attempt (catches cases where the hierarchy hasn't settled yet)
@@ -843,7 +843,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                 guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
                 let focusedId = tree.focusedId
                 if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
-                   let termView = container.surfaceViews[leaf.surfaceId] {
+                   let termView = container.surfaceViews[leaf.stationId] {
                     self.view.window?.makeFirstResponder(termView)
                 }
             }
@@ -1164,19 +1164,19 @@ extension DashboardViewController: MiniCardReorderDelegate {
             guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
             let focusedId = tree.focusedId
             if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
-               let termView = container.surfaceViews[leaf.surfaceId] {
+               let termView = container.surfaceViews[leaf.stationId] {
                 self.view.window?.makeFirstResponder(termView)
             }
         }
     }
 }
 
-extension DashboardViewController: TerminalSurfaceDelegate {
-    func terminalSurfaceDidRecover(_ surface: TerminalSurface) {
+extension DashboardViewController: StationDelegate {
+    func stationDidRecover(_ station: Station) {
         // Only re-embed when the dashboard is visible
         guard view.window != nil else { return }
-        // Find the agent whose surface recovered
-        guard let agent = agents.first(where: { $0.surface === surface }) else { return }
+        // Find the agent whose station recovered
+        guard let agent = agents.first(where: { $0.station === station }) else { return }
         // Re-embed the split container for the active agent
         if agent.id == selectedAgentId {
             invalidateSplitContainer(forPath: agent.worktreePath)
