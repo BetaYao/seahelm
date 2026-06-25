@@ -12,9 +12,9 @@ struct HookDecoder: SignalDecoder {
         return StatusReport(status: status, lastMessage: message, activityEvents: events)
     }
 
-    // MARK: - Private helpers (canonical mapping; HooksChannel delegates here)
+    // MARK: - Internal helpers (canonical mapping; HooksChannel delegates here)
 
-    private var mappedMessage: String? {
+    var mappedMessage: String? {
         switch event.event {
         case .toolUseStart:
             if let tool = event.data?["tool_name"] as? String {

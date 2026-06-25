@@ -192,6 +192,29 @@ class ShipLog {
         }
     }
 
+    /// Unified entry point: unpack a StatusReport and apply to ShipLog.
+    /// All channels (active scan, passive hook) funnel through here.
+    /// roundDuration and tasks are supplied by the caller when the report doesn't carry them
+    /// (e.g. ScanDecoder leaves lastMessage blank; StatusPublisher fills it in via messageOverride).
+    func ingest(terminalID: String, report: StatusReport,
+                lastUserPrompt: String = "",
+                messageOverride: String? = nil,
+                roundDuration: TimeInterval = 0,
+                tasks: [TaskItem] = []) {
+        let message = messageOverride ?? report.lastMessage
+        updateStatus(
+            terminalID: terminalID,
+            status: report.status,
+            lastMessage: message,
+            roundDuration: roundDuration,
+            tasks: tasks,
+            lastUserPrompt: lastUserPrompt
+        )
+        for event in report.activityEvents {
+            upsertLatestActivityEvent(event, forTerminalID: terminalID)
+        }
+    }
+
     /// Update task progress for an agent
     func updateTaskProgress(terminalID: String, totalTasks: Int,
                             completedTasks: Int, currentTask: String?) {
@@ -346,13 +369,9 @@ class ShipLog {
 
         hooks?.handleWebhookEvent(event)
 
-        // Decode the event via HookDecoder and apply activity events.
-        // report.status and report.lastMessage are wired up in the upcoming ingest task (Task 5).
-        let report = HookDecoder(event: event).decode()
-        if let report = report {
-            for activityEvent in report.activityEvents {
-                upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
-            }
+        // Decode the event via HookDecoder and route through ingest.
+        if let report = HookDecoder(event: event).decode() {
+            ingest(terminalID: tid, report: report)
         }
 
         // agentStop: clear activity buffer and fire completion signal

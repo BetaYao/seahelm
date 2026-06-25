@@ -231,14 +231,15 @@ class StatusPublisher {
             let existingAgentType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
             let agentDef = findAgentDef(inLowercased: lowerContent, existingAgentType: existingAgentType)
 
-            // detector.detect() can be slow — do NOT hold the lock here
-            let textStatus = detector.detect(
+            // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
+            let scanReport = ScanDecoder(
+                detector: detector,
                 processStatus: processStatus,
                 shellInfo: nil,
                 content: content,
-                agentDef: agentDef,
-                lowercasedContent: lowerContent
-            )
+                agentDef: agentDef
+            ).decode()
+            let textStatus = scanReport?.status ?? .unknown
             let hookStatus = webhookProvider.status(for: worktreePath)
             let detected = AgentStatus.highestPriority([textStatus, hookStatus])
 
@@ -269,17 +270,26 @@ class StatusPublisher {
             lock.unlock()
 
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-            ShipLog.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks, lastUserPrompt: lastUserPrompt)
 
-            // Extract activity events from terminal text (for non-webhook agents)
-            // Only if no webhook events exist (webhook takes priority)
+            // Route through ingest: pass a report with the merged detected status and
+            // supply caller-computed values (lastMessage, roundDuration, tasks) that
+            // ScanDecoder intentionally leaves blank.
+            // Activity events from the scan report are applied only when no webhook events exist.
             let webhookEvents = ShipLog.shared.agent(for: terminalID)?.activityEvents ?? []
-            if webhookEvents.isEmpty {
-                let textEvents = detector.extractActivityEvents(from: content)
-                if !textEvents.isEmpty {
-                    ShipLog.shared.updateActivityEvents(textEvents, forTerminalID: terminalID)
-                }
+            let reportForIngest: StatusReport
+            if webhookEvents.isEmpty, let scan = scanReport {
+                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: scan.activityEvents)
+            } else {
+                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: [])
             }
+            ShipLog.shared.ingest(
+                terminalID: terminalID,
+                report: reportForIngest,
+                lastUserPrompt: lastUserPrompt,
+                messageOverride: lastMessage,
+                roundDuration: roundDur,
+                tasks: webhookTasks
+            )
 
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(

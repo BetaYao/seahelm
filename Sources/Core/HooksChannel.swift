@@ -78,7 +78,7 @@ class HooksChannel: AgentChannel {
     // MARK: - Private
 
     private func extractMessage(from event: WebhookEvent) -> String? {
-        HookDecoder(event: event).decode().flatMap { $0.lastMessage.isEmpty ? nil : $0.lastMessage }
+        HookDecoder(event: event).mappedMessage
     }
 }
 
