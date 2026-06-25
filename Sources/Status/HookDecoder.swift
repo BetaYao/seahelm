@@ -12,7 +12,7 @@ struct HookDecoder: SignalDecoder {
         return StatusReport(status: status, lastMessage: message, activityEvents: events)
     }
 
-    // MARK: - Private helpers (mirrored from HooksChannel.extractMessage)
+    // MARK: - Private helpers (canonical mapping; HooksChannel delegates here)
 
     private var mappedMessage: String? {
         switch event.event {

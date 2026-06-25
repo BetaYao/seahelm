@@ -346,7 +346,8 @@ class ShipLog {
 
         hooks?.handleWebhookEvent(event)
 
-        // Decode the event via HookDecoder and apply activity events
+        // Decode the event via HookDecoder and apply activity events.
+        // report.status and report.lastMessage are wired up in the upcoming ingest task (Task 5).
         let report = HookDecoder(event: event).decode()
         if let report = report {
             for activityEvent in report.activityEvents {
