@@ -242,7 +242,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents,
                 agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                    ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
+                    ?? ShipLog.shared.sailor(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
             miniCards[index].isSelected = (agent.id == selectedSailorId)
         }
@@ -458,7 +458,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             tasks: agent.tasks,
             activityEvents: agent.activityEvents,
             agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
+                ?? ShipLog.shared.sailor(forWorktree: agent.worktreePath)?.agentType ?? .unknown
         )
         container.isSelected = (agent.id == selectedSailorId)
         container.translatesAutoresizingMaskIntoConstraints = false

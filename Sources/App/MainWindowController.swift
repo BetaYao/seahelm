@@ -469,16 +469,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
             },
             orderExisting: { path, task in
-                guard let tid = ShipLog.shared.agent(forWorktree: path)?.id else { return }
+                guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
                 ShipLog.shared.sendCommand(to: tid, command: task)
             },
             commit: { path in
-                guard let tid = ShipLog.shared.agent(forWorktree: path)?.id else { return }
+                guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
                 ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
-            branchForPath: { path in ShipLog.shared.agent(forWorktree: path)?.branch ?? "" },
-            projectForPath: { path in ShipLog.shared.agent(forWorktree: path)?.project ?? "" }
+            branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
+            projectForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.project ?? "" }
         )
     }
 
@@ -616,7 +616,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let name = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
             let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 32)
 
-            let agent = ShipLog.shared.agent(forWorktree: path)
+            let agent = ShipLog.shared.sailor(forWorktree: path)
             let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
             let isSelected = path == selectedPath
 
@@ -648,7 +648,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         let path = agent.worktreePath
         // Prefer prompt/branch already on the display info; fall back to ShipLog.
-        let info = ShipLog.shared.agent(forWorktree: path)
+        let info = ShipLog.shared.sailor(forWorktree: path)
         let prompt = info?.lastUserPrompt ?? ""
         let branch = info?.branch ?? ""
         capsuleToken += 1
@@ -1280,7 +1280,7 @@ extension MainWindowController {
         case .suggestNextOrder:
             let worktreePath = order.action.worktreePath
             guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath),
-                  let terminalID = ShipLog.shared.agent(forWorktree: worktreePath)?.id else { return }
+                  let terminalID = ShipLog.shared.sailor(forWorktree: worktreePath)?.id else { return }
             ShipLog.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             terminalCoordinator.deleteWorktreeForReturnToPort(

@@ -406,7 +406,7 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onSuggestions = { [weak self] worktreePath, options in
                         guard let self else { return }
                         let canon = WorktreeDiscovery.canonicalPath(worktreePath)
-                        let agent = ShipLog.shared.agent(forWorktree: worktreePath)
+                        let agent = ShipLog.shared.sailor(forWorktree: worktreePath)
                             ?? ShipLog.shared.allSailors().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
                         self.suggestionFeed.set(
                             worktreePath: worktreePath,
@@ -530,7 +530,7 @@ class TabCoordinator {
 
         // 3. Re-register transferred surfaces in ShipLog under new worktree
         // Unregister all old agents for the source path first
-        while let oldAgent = ShipLog.shared.agent(forWorktree: sourcePath) {
+        while let oldAgent = ShipLog.shared.sailor(forWorktree: sourcePath) {
             ShipLog.shared.unregister(terminalID: oldAgent.id)
         }
         for leaf in transferredTree.allLeaves {
@@ -575,7 +575,7 @@ class TabCoordinator {
             let remaining = workspaceManager.tabs[tabIndex].worktrees.filter { $0.path != info.path }
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
         }
-        if let agent = ShipLog.shared.agent(forWorktree: info.path) {
+        if let agent = ShipLog.shared.sailor(forWorktree: info.path) {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
@@ -596,7 +596,7 @@ class TabCoordinator {
             let primaryStation = terminalCoordinator.stationManager.primaryStation(forPath: worktree.path)
             terminalCoordinator.stationManager.removeTree(forPath: worktree.path)
 
-            if let agent = ShipLog.shared.agent(forWorktree: worktree.path) {
+            if let agent = ShipLog.shared.sailor(forWorktree: worktree.path) {
                 ShipLog.shared.unregister(terminalID: agent.id)
             } else if let primaryStation {
                 ShipLog.shared.unregister(terminalID: primaryStation.id)
@@ -758,7 +758,7 @@ class TabCoordinator {
     }
 
     func dashboardDidRequestDelete(_ terminalID: String, window: NSWindow?) {
-        guard let agent = ShipLog.shared.agent(for: terminalID) else { return }
+        guard let agent = ShipLog.shared.sailor(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)

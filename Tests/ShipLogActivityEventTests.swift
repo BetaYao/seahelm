@@ -48,7 +48,7 @@ final class ShipLogActivityEventTests: XCTestCase {
         head.upsertLatestActivityEvent(first, forTerminalID: surface.id)
         head.upsertLatestActivityEvent(second, forTerminalID: surface.id)
 
-        let events = head.agent(for: surface.id)?.activityEvents ?? []
+        let events = head.sailor(for: surface.id)?.activityEvents ?? []
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].tool, "Bash")
         XCTAssertTrue(events[0].isError)

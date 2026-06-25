@@ -176,7 +176,7 @@ class StatusPublisher {
             }
             lock.unlock()
 
-            let existingSailorType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
+            let existingSailorType = ShipLog.shared.sailor(for: terminalID)?.agentType ?? .unknown
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingSailorType)
             ShipLog.shared.updateStatus(
                 terminalID: terminalID,
@@ -228,7 +228,7 @@ class StatusPublisher {
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
-            let existingSailorType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
+            let existingSailorType = ShipLog.shared.sailor(for: terminalID)?.agentType ?? .unknown
             let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
 
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
@@ -275,7 +275,7 @@ class StatusPublisher {
             // supply caller-computed values (lastMessage, roundDuration, tasks) that
             // ScanDecoder intentionally leaves blank.
             // Activity events from the scan report are applied only when no webhook events exist.
-            let webhookEvents = ShipLog.shared.agent(for: terminalID)?.activityEvents ?? []
+            let webhookEvents = ShipLog.shared.sailor(for: terminalID)?.activityEvents ?? []
             let reportForIngest: StatusReport
             if webhookEvents.isEmpty, let scan = scanReport {
                 reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: scan.activityEvents)

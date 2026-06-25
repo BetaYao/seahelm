@@ -57,8 +57,8 @@ final class ShipLogTests: XCTestCase {
         ShipLog.shared.unregister(terminalID: tid)
 
         XCTAssertEqual(ShipLog.shared.allSailors().count, 0)
-        XCTAssertNil(ShipLog.shared.agent(for: tid))
-        XCTAssertNil(ShipLog.shared.agent(forWorktree: "/tmp/repo/main"))
+        XCTAssertNil(ShipLog.shared.sailor(for: tid))
+        XCTAssertNil(ShipLog.shared.sailor(forWorktree: "/tmp/repo/main"))
     }
 
     func testUnregisterCleansUpBackendsByPath() {
@@ -71,8 +71,8 @@ final class ShipLogTests: XCTestCase {
 
         ShipLog.shared.unregister(terminalID: surface.id)
 
-        XCTAssertNil(ShipLog.shared.agent(for: surface.id))
-        XCTAssertNil(ShipLog.shared.agent(forWorktree: "/tmp/test-repo/main"))
+        XCTAssertNil(ShipLog.shared.sailor(for: surface.id))
+        XCTAssertNil(ShipLog.shared.sailor(forWorktree: "/tmp/test-repo/main"))
     }
 
     // MARK: - Status Updates
@@ -87,7 +87,7 @@ final class ShipLogTests: XCTestCase {
             roundDuration: 30.0
         )
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.status, .running)
         XCTAssertEqual(agent?.lastMessage, "Editing file.swift")
         XCTAssertEqual(agent?.roundDuration, 30.0)
@@ -101,7 +101,7 @@ final class ShipLogTests: XCTestCase {
             lastMessage: "test",
             roundDuration: 0
         )
-        XCTAssertNil(ShipLog.shared.agent(for: "nonexistent-id"))
+        XCTAssertNil(ShipLog.shared.sailor(for: "nonexistent-id"))
     }
 
     // MARK: - Detection Updates (type upgrade rules)
@@ -111,7 +111,7 @@ final class ShipLogTests: XCTestCase {
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
@@ -123,7 +123,7 @@ final class ShipLogTests: XCTestCase {
         // Attempt to demote to shell task — should be blocked
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
@@ -134,7 +134,7 @@ final class ShipLogTests: XCTestCase {
         // Another AI agent should be allowed
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
@@ -145,7 +145,7 @@ final class ShipLogTests: XCTestCase {
         // Shell task can be replaced by any type
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
@@ -155,7 +155,7 @@ final class ShipLogTests: XCTestCase {
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .make)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .make)
     }
 
@@ -164,7 +164,7 @@ final class ShipLogTests: XCTestCase {
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .unknown)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.agentType, .unknown)
     }
 
@@ -173,7 +173,7 @@ final class ShipLogTests: XCTestCase {
 
         ShipLog.shared.updateDetection(terminalID: tid, commandLine: "brew install ffmpeg", agentType: .brew)
 
-        let agent = ShipLog.shared.agent(for: tid)
+        let agent = ShipLog.shared.sailor(for: tid)
         XCTAssertEqual(agent?.commandLine, "brew install ffmpeg")
         XCTAssertEqual(agent?.agentType, .brew)
     }
@@ -183,14 +183,14 @@ final class ShipLogTests: XCTestCase {
     func testAgentForWorktree() {
         let tid = registerTestSailor(path: "/tmp/repo/main")
 
-        let agent = ShipLog.shared.agent(forWorktree: "/tmp/repo/main")
+        let agent = ShipLog.shared.sailor(forWorktree: "/tmp/repo/main")
         XCTAssertNotNil(agent)
         XCTAssertEqual(agent?.id, tid)
         XCTAssertEqual(agent?.worktreePath, "/tmp/repo/main")
     }
 
     func testAgentForWorktreeReturnsNilForUnknown() {
-        XCTAssertNil(ShipLog.shared.agent(forWorktree: "/nonexistent"))
+        XCTAssertNil(ShipLog.shared.sailor(forWorktree: "/nonexistent"))
     }
 
     // MARK: - Ordering
@@ -223,7 +223,7 @@ final class ShipLogTests: XCTestCase {
         registerTestSailor(path: "/repo2/main", branch: "main", project: "Repo2")
         registerTestSailor(path: "/repo1/feature", branch: "feature", project: "Repo1")
 
-        let repo1Agents = ShipLog.shared.agentsForProject("Repo1")
+        let repo1Agents = ShipLog.shared.sailorsForProject("Repo1")
         XCTAssertEqual(repo1Agents.count, 2)
         XCTAssertTrue(repo1Agents.allSatisfy { $0.project == "Repo1" })
     }
@@ -234,7 +234,7 @@ final class ShipLogTests: XCTestCase {
         let fiveMinutesAgo = Date().addingTimeInterval(-300)
         let tid = registerTestSailor(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
 
-        let agent = ShipLog.shared.agent(for: tid)!
+        let agent = ShipLog.shared.sailor(for: tid)!
         XCTAssertGreaterThan(agent.totalDuration, 299)
         XCTAssertLessThan(agent.totalDuration, 302)
     }
@@ -242,7 +242,7 @@ final class ShipLogTests: XCTestCase {
     func testTotalDurationZeroWhenNoStartedAt() {
         let tid = registerTestSailor(path: "/tmp/repo/main", startedAt: nil)
 
-        let agent = ShipLog.shared.agent(for: tid)!
+        let agent = ShipLog.shared.sailor(for: tid)!
         XCTAssertEqual(agent.totalDuration, 0)
     }
 

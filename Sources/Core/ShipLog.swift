@@ -369,15 +369,14 @@ class ShipLog {
 
         hooks?.handleWebhookEvent(event)
 
-        // Decode the event via HookDecoder and route through ingest.
-        if let report = HookDecoder(event: event).decode() {
-            ingest(terminalID: tid, report: report)
-        }
-
-        // agentStop: clear activity buffer and fire completion signal
-        if event.event == .agentStop {
+        // Extract activity events from tool use events (passive — no status write)
+        switch event.event {
+        case .toolUseStart, .toolUseEnd, .toolUseFailed:
+            let activityEvent = ActivityEventExtractor.extract(from: event)
+            upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
+        case .agentStop:
             clearActivityEvents(forTerminalID: tid)
-            if let info = agent(for: tid) {
+            if let info = sailor(for: tid) {
                 let t = StatusTransition(
                     worktreePath: info.worktreePath, branch: info.branch,
                     project: info.project, terminalID: tid,
@@ -385,6 +384,8 @@ class ShipLog {
                     holdSeconds: 0, isCompletionSignal: true)
                 DispatchQueue.main.async { [weak self] in self?.onStatusTransition?(t) }
             }
+        default:
+            break
         }
     }
 
@@ -471,8 +472,8 @@ class ShipLog {
         return orderedIDs.compactMap { agents[$0] }
     }
 
-    /// Look up agent by terminal ID
-    func agent(for terminalID: String) -> SailorInfo? {
+    /// Look up sailor by terminal ID
+    func sailor(for terminalID: String) -> SailorInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -480,7 +481,7 @@ class ShipLog {
     }
 
     /// Convenience lookup by worktree path via reverse index
-    func agent(forWorktree worktreePath: String) -> SailorInfo? {
+    func sailor(forWorktree worktreePath: String) -> SailorInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -488,7 +489,7 @@ class ShipLog {
         return agents[tid]
     }
 
-    func agentsForProject(_ project: String) -> [SailorInfo] {
+    func sailorsForProject(_ project: String) -> [SailorInfo] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -614,7 +615,7 @@ class ShipLog {
             }
             let project = String(parts[0])
             let command = String(parts[1])
-            let matched = agentsForProject(project)
+            let matched = sailorsForProject(project)
             guard let target = matched.first else {
                 reply(to: cmd.rawMessage, content: "未找到 project: \(project)")
                 return

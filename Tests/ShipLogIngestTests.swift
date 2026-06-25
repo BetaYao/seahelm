@@ -33,7 +33,7 @@ final class ShipLogIngestTests: XCTestCase {
         )
         let report = StatusReport(status: .waiting, lastMessage: "need input", activityEvents: [])
         ShipLog.shared.ingest(terminalID: "t-ingest-1", report: report, lastUserPrompt: "")
-        XCTAssertEqual(ShipLog.shared.agent(for: "t-ingest-1")?.status, .waiting)
+        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-1")?.status, .waiting)
     }
 
     func testIngestUpdatesLastMessage() {
@@ -45,14 +45,14 @@ final class ShipLogIngestTests: XCTestCase {
         )
         let report = StatusReport(status: .running, lastMessage: "doing stuff", activityEvents: [])
         ShipLog.shared.ingest(terminalID: "t-ingest-2", report: report, lastUserPrompt: "")
-        XCTAssertEqual(ShipLog.shared.agent(for: "t-ingest-2")?.lastMessage, "doing stuff")
+        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-2")?.lastMessage, "doing stuff")
     }
 
     func testIngestForUnknownTerminalIsNoop() {
         // Should not crash for unregistered terminal
         let report = StatusReport(status: .waiting, lastMessage: "hello", activityEvents: [])
         ShipLog.shared.ingest(terminalID: "t-nonexistent-99", report: report, lastUserPrompt: "")
-        XCTAssertNil(ShipLog.shared.agent(for: "t-nonexistent-99"))
+        XCTAssertNil(ShipLog.shared.sailor(for: "t-nonexistent-99"))
     }
 
     func testIngestLastUserPrompt() {
@@ -64,6 +64,6 @@ final class ShipLogIngestTests: XCTestCase {
         )
         let report = StatusReport(status: .waiting, lastMessage: "waiting", activityEvents: [])
         ShipLog.shared.ingest(terminalID: "t-ingest-3", report: report, lastUserPrompt: "user asked something")
-        XCTAssertEqual(ShipLog.shared.agent(for: "t-ingest-3")?.lastUserPrompt, "user asked something")
+        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-3")?.lastUserPrompt, "user asked something")
     }
 }
