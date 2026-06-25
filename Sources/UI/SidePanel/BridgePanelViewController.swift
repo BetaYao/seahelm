@@ -24,12 +24,14 @@ final class BridgePanelViewController: NSViewController {
         order.action.options ?? ["Approve"]
     }
 
-    /// Card = header (20) + 2 message lines (32) + button row (28) + paddings (16),
-    /// plus 28 per extra button row when options wrap (>3 buttons per row).
+    /// Card = top pad (6) + title (16) + message block + button block + bottom pad (8).
+    /// Buttons are stacked vertically (one full-width button per option) so long option
+    /// text never clips in a narrow panel. Message block is omitted when the message is empty.
     static func cardHeight(for order: PendingOrder) -> CGFloat {
         let buttons = buttonTitles(for: order).count
-        let rows = max(1, Int(ceil(Double(buttons) / 3.0)))
-        return 20 + 32 + CGFloat(rows) * 28 + 16
+        let messageBlock: CGFloat = order.action.message.isEmpty ? 0 : (2 + 30) // gap + 2 lines
+        let buttonBlock = 6 + CGFloat(buttons) * 24 + CGFloat(max(0, buttons - 1)) * 4
+        return 6 + 16 + messageBlock + buttonBlock + 8
     }
 
     // MARK: - Private state
@@ -366,8 +368,9 @@ private final class OrderCardView: NSTableCellView {
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        buttonRow.orientation = .horizontal
-        buttonRow.spacing = 6
+        buttonRow.orientation = .vertical
+        buttonRow.alignment = .leading
+        buttonRow.spacing = 4
         buttonRow.translatesAutoresizingMaskIntoConstraints = false
 
         dismissButton.title = "✕"
@@ -395,7 +398,8 @@ private final class OrderCardView: NSTableCellView {
 
             buttonRow.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 6),
             buttonRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            buttonRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            buttonRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            buttonRow.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
         ])
     }
 
@@ -418,6 +422,7 @@ private final class OrderCardView: NSTableCellView {
         titleLabel.stringValue = "● \(order.action.project) · \(order.action.branch)"
         titleLabel.textColor = Theme.textPrimary
         messageLabel.stringValue = order.action.message
+        messageLabel.isHidden = order.action.message.isEmpty
 
         buttonRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let titles = BridgePanelViewController.buttonTitles(for: order)
@@ -429,8 +434,12 @@ private final class OrderCardView: NSTableCellView {
             b.controlSize = .small
             b.tag = i
             b.toolTip = title
+            b.alignment = .left
+            (b.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
             if dangerous { b.contentTintColor = .systemOrange }
             buttonRow.addArrangedSubview(b)
+            // Full-width button so long option text stays on its own row (no horizontal clip).
+            b.widthAnchor.constraint(equalTo: buttonRow.widthAnchor).isActive = true
         }
     }
 

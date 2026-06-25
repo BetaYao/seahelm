@@ -33,7 +33,7 @@ final class FirstMateCoordinator {
             let action = FirstMateAction(kind: .suggestNextOrder, zone: .red,
                                          worktreePath: info.worktreePath, branch: info.branch,
                                          project: info.project, terminalID: info.id,
-                                         message: "\(info.branch) suggestions", options: options)
+                                         message: "", options: options)
             queue.upsert(action)
             return
         }
