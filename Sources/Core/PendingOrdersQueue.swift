@@ -43,4 +43,11 @@ final class PendingOrdersQueue {
         orders.removeAll { $0.id == id }
         if orders.count != before { onChange?() }
     }
+
+    /// Remove any pending suggest order for the given worktree path.
+    func resolveSuggest(worktreePath: String) {
+        let before = orders.count
+        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.worktreePath == worktreePath }
+        if orders.count != before { onChange?() }
+    }
 }

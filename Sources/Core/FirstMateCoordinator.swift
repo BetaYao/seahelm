@@ -24,6 +24,9 @@ final class FirstMateCoordinator {
 
     func handle(_ outcome: IngestOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
+        if case .userPrompt = outcome.event.kind {
+            queue.resolveSuggest(worktreePath: outcome.info.worktreePath)
+        }
         if case .suggest(let options) = outcome.event.kind {
             guard !options.isEmpty else { return }
             let info = outcome.info

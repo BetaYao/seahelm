@@ -12,6 +12,7 @@ final class BridgePanelViewController: NSViewController {
     }
     var onNavigateToWorktree: ((String) -> Void)?
     var onApprove: ((PendingOrder) -> Void)?
+    /// Called when the user picks a suggestion chip. The handler is responsible for resolving the order (e.g. via queue.resolve) after acting.
     var onSuggestionTapped: ((PendingOrder, String) -> Void)?
 
     // MARK: - Static helpers
@@ -279,7 +280,7 @@ final class BridgePanelViewController: NSViewController {
         guard row >= 0, row < pendingOrders.count else { return }
         let order = pendingOrders[row]
         let dangerous = Self.dangerousKinds.contains(order.action.kind)
-        if let card = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? OrderCardView {
+        if let card = tableView.view(atColumn: 0, row: row, makeIfNecessary: true) as? OrderCardView {
             card.selectOption(index, dangerous: dangerous)
         } else {
             applyOption(order, index: index)
@@ -349,6 +350,7 @@ private final class OrderCardView: NSTableCellView {
     private var onOption: ((Int) -> Void)?
     private var onDismiss: (() -> Void)?
     private var armedDangerousIndex: Int?
+    private var dangerousIndexes: Set<Int> = []
 
     override init(frame: NSRect) { super.init(frame: frame); setup() }
     required init?(coder: NSCoder) { fatalError() }
@@ -385,6 +387,7 @@ private final class OrderCardView: NSTableCellView {
             dismissButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             dismissButton.widthAnchor.constraint(equalToConstant: 18),
+            dismissButton.heightAnchor.constraint(equalToConstant: 18),
 
             messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -419,6 +422,7 @@ private final class OrderCardView: NSTableCellView {
         buttonRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let titles = BridgePanelViewController.buttonTitles(for: order)
         let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)
+        dangerousIndexes = dangerous ? Set(0..<titles.count) : []
         for (i, title) in titles.enumerated() {
             let b = NSButton(title: "\(i + 1) \(title)", target: self, action: #selector(tappedOption(_:)))
             b.bezelStyle = .rounded
@@ -442,7 +446,7 @@ private final class OrderCardView: NSTableCellView {
     }
 
     @objc private func tappedOption(_ sender: NSButton) {
-        let dangerous = sender.contentTintColor == .systemOrange
+        let dangerous = dangerousIndexes.contains(sender.tag)
         selectOption(sender.tag, dangerous: dangerous)
     }
     @objc private func tappedDismiss() { onDismiss?() }
