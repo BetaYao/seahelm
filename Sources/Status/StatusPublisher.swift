@@ -176,9 +176,9 @@ class StatusPublisher {
             }
             lock.unlock()
 
-            let existingAgentType = AgentHead.shared.agent(for: terminalID)?.agentType ?? .unknown
-            AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingAgentType)
-            AgentHead.shared.updateStatus(
+            let existingAgentType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
+            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingAgentType)
+            ShipLog.shared.updateStatus(
                 terminalID: terminalID,
                 status: hookStatus,
                 lastMessage: lastMessage,
@@ -228,7 +228,7 @@ class StatusPublisher {
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
-            let existingAgentType = AgentHead.shared.agent(for: terminalID)?.agentType ?? .unknown
+            let existingAgentType = ShipLog.shared.agent(for: terminalID)?.agentType ?? .unknown
             let agentDef = findAgentDef(inLowercased: lowerContent, existingAgentType: existingAgentType)
 
             // detector.detect() can be slow — do NOT hold the lock here
@@ -249,7 +249,7 @@ class StatusPublisher {
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
             let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
 
-            // Feed AgentHead with structured data on every poll
+            // Feed ShipLog with structured data on every poll
             let detectedAgentType = AgentType.detect(fromLowercased: lowerContent)
             let agentType = detectedAgentType == .unknown ? existingAgentType : detectedAgentType
 
@@ -268,16 +268,16 @@ class StatusPublisher {
             }
             lock.unlock()
 
-            AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks, lastUserPrompt: lastUserPrompt)
+            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
+            ShipLog.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks, lastUserPrompt: lastUserPrompt)
 
             // Extract activity events from terminal text (for non-webhook agents)
             // Only if no webhook events exist (webhook takes priority)
-            let webhookEvents = AgentHead.shared.agent(for: terminalID)?.activityEvents ?? []
+            let webhookEvents = ShipLog.shared.agent(for: terminalID)?.activityEvents ?? []
             if webhookEvents.isEmpty {
                 let textEvents = detector.extractActivityEvents(from: content)
                 if !textEvents.isEmpty {
-                    AgentHead.shared.updateActivityEvents(textEvents, forTerminalID: terminalID)
+                    ShipLog.shared.updateActivityEvents(textEvents, forTerminalID: terminalID)
                 }
             }
 

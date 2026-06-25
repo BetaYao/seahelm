@@ -13,7 +13,7 @@ struct AgentInfo {
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
     weak var surface: TerminalSurface? // weak ref, MainWindowController owns
-    var channel: AgentChannel?         // communication channel (strong ref, AgentHead owns)
+    var channel: AgentChannel?         // communication channel (strong ref, ShipLog owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
     var activityEvents: [ActivityEvent] = []

@@ -6,7 +6,7 @@ final class ActivityEventPipelineTests: XCTestCase {
     func testExtractorProducesValidEvents() {
         let data: [String: Any] = [
             "tool_name": "Read",
-            "tool_input": ["file_path": "/Users/dev/project/Sources/Core/AgentHead.swift"],
+            "tool_input": ["file_path": "/Users/dev/project/Sources/Core/ShipLog.swift"],
         ]
         let event = WebhookEvent(
             source: "claude-code",
@@ -19,7 +19,7 @@ final class ActivityEventPipelineTests: XCTestCase {
 
         let activity = ActivityEventExtractor.extract(from: event)
         XCTAssertEqual(activity.tool, "Read")
-        XCTAssertEqual(activity.detail, "Core/AgentHead.swift")
+        XCTAssertEqual(activity.detail, "Core/ShipLog.swift")
         XCTAssertFalse(activity.isError)
     }
 
@@ -48,7 +48,7 @@ final class ActivityEventPipelineTests: XCTestCase {
         let tools = ["Read", "Edit", "Bash", "Grep", "Write"]
         for tool in tools {
             let event = ActivityEvent(tool: tool, detail: "test", isError: false, timestamp: Date())
-            AgentHead.appendToRingBuffer(&buffer, event: event, maxSize: 20)
+            ShipLog.appendToRingBuffer(&buffer, event: event, maxSize: 20)
         }
         XCTAssertEqual(buffer[0].tool, "Write")
         XCTAssertEqual(buffer[4].tool, "Read")

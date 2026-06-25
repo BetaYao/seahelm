@@ -1,16 +1,16 @@
-// Tests/AgentHeadActivityEventTests.swift
+// Tests/ShipLogActivityEventTests.swift
 import XCTest
 @testable import seahelm
 
-final class AgentHeadActivityEventTests: XCTestCase {
+final class ShipLogActivityEventTests: XCTestCase {
 
     func testAppendActivityEventAddsToFront() {
         var events: [ActivityEvent] = []
         let event1 = ActivityEvent(tool: "Read", detail: "a.swift", isError: false, timestamp: Date())
         let event2 = ActivityEvent(tool: "Edit", detail: "b.swift", isError: false, timestamp: Date())
 
-        AgentHead.appendToRingBuffer(&events, event: event1, maxSize: 20)
-        AgentHead.appendToRingBuffer(&events, event: event2, maxSize: 20)
+        ShipLog.appendToRingBuffer(&events, event: event1, maxSize: 20)
+        ShipLog.appendToRingBuffer(&events, event: event2, maxSize: 20)
 
         XCTAssertEqual(events.count, 2)
         XCTAssertEqual(events[0].tool, "Edit")
@@ -21,7 +21,7 @@ final class AgentHeadActivityEventTests: XCTestCase {
         var events: [ActivityEvent] = []
         for i in 0..<25 {
             let event = ActivityEvent(tool: "Read", detail: "file\(i).swift", isError: false, timestamp: Date())
-            AgentHead.appendToRingBuffer(&events, event: event, maxSize: 20)
+            ShipLog.appendToRingBuffer(&events, event: event, maxSize: 20)
         }
         XCTAssertEqual(events.count, 20)
         XCTAssertEqual(events[0].detail, "file24.swift")
@@ -30,14 +30,14 @@ final class AgentHeadActivityEventTests: XCTestCase {
     func testClearActivityEventsEmptiesBuffer() {
         var events: [ActivityEvent] = []
         let event = ActivityEvent(tool: "Read", detail: "a.swift", isError: false, timestamp: Date())
-        AgentHead.appendToRingBuffer(&events, event: event, maxSize: 20)
+        ShipLog.appendToRingBuffer(&events, event: event, maxSize: 20)
         XCTAssertEqual(events.count, 1)
         events.removeAll()
         XCTAssertTrue(events.isEmpty)
     }
 
     func testUpsertLatestActivityEventReplacesMatchingNewestEvent() {
-        let head = AgentHead.shared
+        let head = ShipLog.shared
         let surface = TerminalSurface()
         head.register(surface: surface, worktreePath: "/tmp/project", branch: "main", project: "project", startedAt: nil)
         defer { head.unregister(terminalID: surface.id) }

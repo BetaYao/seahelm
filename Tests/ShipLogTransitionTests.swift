@@ -1,9 +1,9 @@
 import XCTest
 @testable import seahelm
 
-final class AgentHeadTransitionTests: XCTestCase {
+final class ShipLogTransitionTests: XCTestCase {
     func testStatusChangeFiresTransitionObserver() {
-        let head = AgentHead.shared
+        let head = ShipLog.shared
         let exp = expectation(description: "transition fired")
         var captured: StatusTransition?
         head.onStatusTransition = { t in

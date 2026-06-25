@@ -387,7 +387,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboard.sidePanelVC.watchFeed = tabCoordinator.watchFeed
         dashboard.sidePanelVC.suggestionFeed = tabCoordinator.suggestionFeed
         dashboard.sidePanelVC.onSuggestionTapped = { [weak self] item, optionText in
-            AgentHead.shared.sendCommand(to: item.terminalID, command: optionText)
+            ShipLog.shared.sendCommand(to: item.terminalID, command: optionText)
             self?.tabCoordinator.suggestionFeed.clear(worktreePath: item.worktreePath)
         }
         dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
@@ -457,7 +457,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
     }
 
     private func currentWorktreeRefs() -> [WorktreeRef] {
-        AgentHead.shared.allAgents().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
+        ShipLog.shared.allAgents().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
     }
 
     private func makeBridgeRouter() -> BridgeCommandRouter {
@@ -469,16 +469,16 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
                 self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
             },
             orderExisting: { path, task in
-                guard let tid = AgentHead.shared.agent(forWorktree: path)?.id else { return }
-                AgentHead.shared.sendCommand(to: tid, command: task)
+                guard let tid = ShipLog.shared.agent(forWorktree: path)?.id else { return }
+                ShipLog.shared.sendCommand(to: tid, command: task)
             },
             commit: { path in
-                guard let tid = AgentHead.shared.agent(forWorktree: path)?.id else { return }
-                AgentHead.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
+                guard let tid = ShipLog.shared.agent(forWorktree: path)?.id else { return }
+                ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
             },
-            activeAgentCount: { AgentHead.shared.allAgents().count },
-            branchForPath: { path in AgentHead.shared.agent(forWorktree: path)?.branch ?? "" },
-            projectForPath: { path in AgentHead.shared.agent(forWorktree: path)?.project ?? "" }
+            activeAgentCount: { ShipLog.shared.allAgents().count },
+            branchForPath: { path in ShipLog.shared.agent(forWorktree: path)?.branch ?? "" },
+            projectForPath: { path in ShipLog.shared.agent(forWorktree: path)?.project ?? "" }
         )
     }
 
@@ -616,7 +616,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             let name = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
             let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 32)
 
-            let agent = AgentHead.shared.agent(forWorktree: path)
+            let agent = ShipLog.shared.agent(forWorktree: path)
             let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
             let isSelected = path == selectedPath
 
@@ -647,8 +647,8 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             return
         }
         let path = agent.worktreePath
-        // Prefer prompt/branch already on the display info; fall back to AgentHead.
-        let info = AgentHead.shared.agent(forWorktree: path)
+        // Prefer prompt/branch already on the display info; fall back to ShipLog.
+        let info = ShipLog.shared.agent(forWorktree: path)
         let prompt = info?.lastUserPrompt ?? ""
         let branch = info?.branch ?? ""
         capsuleToken += 1
@@ -1183,18 +1183,18 @@ extension MainWindowController: SettingsDelegate {
 
         // Hot-reload external channels on config change
         if oldWecomBot != config.wecomBot || oldWechat != config.wechat {
-            AgentHead.shared.unregisterAllExternalChannels()
+            ShipLog.shared.unregisterAllExternalChannels()
 
             if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
                 let channel = WeComBotChannel(config: wecomConfig)
-                AgentHead.shared.registerChannel(channel)
+                ShipLog.shared.registerChannel(channel)
                 channel.connect()
                 NSLog("[Settings] WeCom bot reconnecting: \(wecomConfig.resolvedName)")
             }
 
             if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
                 let channel = WeChatChannel(config: wechatConfig)
-                AgentHead.shared.registerChannel(channel)
+                ShipLog.shared.registerChannel(channel)
                 channel.connect()
                 NSLog("[Settings] WeChat reconnecting")
             }
@@ -1280,8 +1280,8 @@ extension MainWindowController {
         case .suggestNextOrder:
             let worktreePath = order.action.worktreePath
             guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath),
-                  let terminalID = AgentHead.shared.agent(forWorktree: worktreePath)?.id else { return }
-            AgentHead.shared.sendCommand(to: terminalID, command: task)
+                  let terminalID = ShipLog.shared.agent(forWorktree: worktreePath)?.id else { return }
+            ShipLog.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             terminalCoordinator.deleteWorktreeForReturnToPort(
                 path: order.action.worktreePath,
@@ -1289,8 +1289,8 @@ extension MainWindowController {
             )
         case .broadcastOrder:
             guard let task = order.action.payload else { return }
-            for agent in AgentHead.shared.allAgents() {
-                AgentHead.shared.sendCommand(to: agent.id, command: task)
+            for agent in ShipLog.shared.allAgents() {
+                ShipLog.shared.sendCommand(to: agent.id, command: task)
             }
         default:
             break

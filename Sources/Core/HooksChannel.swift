@@ -35,7 +35,7 @@ class HooksChannel: AgentChannel {
 
     // MARK: - Hook Events
 
-    /// Called by AgentHead when a WebhookEvent arrives for this agent
+    /// Called by ShipLog when a WebhookEvent arrives for this agent
     func handleWebhookEvent(_ event: WebhookEvent) {
         let hookEvent = HookEvent(
             timestamp: Date(),

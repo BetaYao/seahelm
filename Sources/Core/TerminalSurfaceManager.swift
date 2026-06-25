@@ -86,7 +86,7 @@ class TerminalSurfaceManager {
         return tree
     }
 
-    // MARK: - Legacy surface accessors (for AgentHead / backward compat)
+    // MARK: - Legacy surface accessors (for ShipLog / backward compat)
 
     /// Returns the primary (first) surface for the given worktree path, if any.
     func primarySurface(forPath path: String) -> TerminalSurface? {

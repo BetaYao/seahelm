@@ -91,7 +91,7 @@ class TabCoordinator {
                 WorktreeTaskStore.shared.task(forWorktree: worktreePath) != nil
             }
         )
-        AgentHead.shared.onStatusTransition = { [weak self] t in
+        ShipLog.shared.onStatusTransition = { [weak self] t in
             self?.firstMate?.handle(t)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
@@ -114,7 +114,7 @@ class TabCoordinator {
         }
     }
 
-    deinit { AgentHead.shared.onStatusTransition = nil }
+    deinit { ShipLog.shared.onStatusTransition = nil }
 
     // MARK: - Tab Switching
 
@@ -205,7 +205,7 @@ class TabCoordinator {
             let started = config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
             if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -230,7 +230,7 @@ class TabCoordinator {
     // MARK: - Build Agent Display Infos
 
     func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
-        let agents = AgentHead.shared.allAgents()
+        let agents = ShipLog.shared.allAgents()
         var seen = Set<String>()
         var result: [AgentDisplayInfo] = []
 
@@ -366,7 +366,7 @@ class TabCoordinator {
 
                 self.allWorktrees = allWorktreeInfos
 
-                // Register all agents with AgentHead
+                // Register all agents with ShipLog
                 for (info, _) in allWorktreeInfos {
                     let repo = self.worktreeRepoCache[info.path] ?? WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
@@ -374,11 +374,11 @@ class TabCoordinator {
                     let started = self.config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
                     let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                     if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                        AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                        ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                     }
                 }
                 if !cardOrder.isEmpty {
-                    AgentHead.shared.reorder(paths: cardOrder)
+                    ShipLog.shared.reorder(paths: cardOrder)
                 }
 
                 self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
@@ -406,8 +406,8 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onSuggestions = { [weak self] worktreePath, options in
                         guard let self else { return }
                         let canon = WorktreeDiscovery.canonicalPath(worktreePath)
-                        let agent = AgentHead.shared.agent(forWorktree: worktreePath)
-                            ?? AgentHead.shared.allAgents().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
+                        let agent = ShipLog.shared.agent(forWorktree: worktreePath)
+                            ?? ShipLog.shared.allAgents().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
                         self.suggestionFeed.set(
                             worktreePath: worktreePath,
                             branch: agent?.branch ?? "",
@@ -422,9 +422,9 @@ class TabCoordinator {
                     }
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         self?.statusPublisher.webhookProvider.handleEvent(event)
-                        AgentHead.shared.handleWebhookEvent(event)
+                        ShipLog.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
-                        // AgentHead.shared.updateTodoFromWebhook(event)
+                        // ShipLog.shared.updateTodoFromWebhook(event)
                     }
                     server.start()
                     self.terminalCoordinator.webhookServer = server
@@ -467,7 +467,7 @@ class TabCoordinator {
 
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                 if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                    AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                    ShipLog.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
                 }
             }
         }
@@ -528,15 +528,15 @@ class TabCoordinator {
         allWorktrees.append((info: newInfo, tree: transferredTree))
         worktreeRepoCache[newInfo.path] = repoRoot
 
-        // 3. Re-register transferred surfaces in AgentHead under new worktree
+        // 3. Re-register transferred surfaces in ShipLog under new worktree
         // Unregister all old agents for the source path first
-        while let oldAgent = AgentHead.shared.agent(forWorktree: sourcePath) {
-            AgentHead.shared.unregister(terminalID: oldAgent.id)
+        while let oldAgent = ShipLog.shared.agent(forWorktree: sourcePath) {
+            ShipLog.shared.unregister(terminalID: oldAgent.id)
         }
         for leaf in transferredTree.allLeaves {
             if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
-                AgentHead.shared.register(surface: surface, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(surface: surface, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -558,7 +558,7 @@ class TabCoordinator {
             worktreeRepoCache[sourceInfo.path] = repoRoot
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
             if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: sourceInfo.path) {
-                AgentHead.shared.register(surface: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(surface: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }
@@ -575,8 +575,8 @@ class TabCoordinator {
             let remaining = workspaceManager.tabs[tabIndex].worktrees.filter { $0.path != info.path }
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
         }
-        if let agent = AgentHead.shared.agent(forWorktree: info.path) {
-            AgentHead.shared.unregister(terminalID: agent.id)
+        if let agent = ShipLog.shared.agent(forWorktree: info.path) {
+            ShipLog.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
@@ -596,10 +596,10 @@ class TabCoordinator {
             let primarySurface = terminalCoordinator.surfaceManager.primarySurface(forPath: worktree.path)
             terminalCoordinator.surfaceManager.removeTree(forPath: worktree.path)
 
-            if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
-                AgentHead.shared.unregister(terminalID: agent.id)
+            if let agent = ShipLog.shared.agent(forWorktree: worktree.path) {
+                ShipLog.shared.unregister(terminalID: agent.id)
             } else if let primarySurface {
-                AgentHead.shared.unregister(terminalID: primarySurface.id)
+                ShipLog.shared.unregister(terminalID: primarySurface.id)
             }
             if runtimeBackend != "local" {
                 let sessionName = SessionManager.persistentSessionName(for: worktree.path)
@@ -758,7 +758,7 @@ class TabCoordinator {
     }
 
     func dashboardDidRequestDelete(_ terminalID: String, window: NSWindow?) {
-        guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
+        guard let agent = ShipLog.shared.agent(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)

@@ -38,7 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Auto-connect WeCom bot if configured
         if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
             let channel = WeComBotChannel(config: wecomConfig)
-            AgentHead.shared.registerChannel(channel)
+            ShipLog.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] WeCom bot auto-connecting: \(wecomConfig.resolvedName)")
         }
@@ -46,7 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Auto-connect WeChat if configured
         if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
             let channel = WeChatChannel(config: wechatConfig)
-            AgentHead.shared.registerChannel(channel)
+            ShipLog.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] WeChat auto-connecting")
         }

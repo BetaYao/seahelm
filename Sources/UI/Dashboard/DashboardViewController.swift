@@ -242,7 +242,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents,
                 agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                    ?? AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
+                    ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
             miniCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -458,7 +458,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             tasks: agent.tasks,
             activityEvents: agent.activityEvents,
             agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                ?? AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
+                ?? ShipLog.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
         )
         container.isSelected = (agent.id == selectedAgentId)
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -1117,7 +1117,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
         // Sync the stored miniCards array to match the new stack order
         leftRightMiniCards = refs.stack.arrangedSubviews.compactMap { $0 as? StackedMiniCardContainerView }
 
-        // Persist — pass worktree paths directly to avoid ID→AgentHead lookup failures
+        // Persist — pass worktree paths directly to avoid ID→ShipLog lookup failures
         dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 

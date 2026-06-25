@@ -1,17 +1,17 @@
 import Foundation
 
-protocol AgentHeadDelegate: AnyObject {
+protocol ShipLogDelegate: AnyObject {
     func agentDidUpdate(_ info: AgentInfo)
 }
 
 /// Single source of truth for all agent information.
-/// Consumers query AgentHead instead of assembling data from multiple sources.
+/// Consumers query ShipLog instead of assembling data from multiple sources.
 /// Also manages communication channels for each agent.
 /// Primary key: terminal ID (TerminalSurface.id).
-class AgentHead {
-    static let shared = AgentHead()
+class ShipLog {
+    static let shared = ShipLog()
 
-    weak var delegate: AgentHeadDelegate?
+    weak var delegate: ShipLogDelegate?
 
     /// First Mate observer: status-edge and completion signals, called on main thread.
     var onStatusTransition: ((StatusTransition) -> Void)?
@@ -483,7 +483,7 @@ class AgentHead {
     ///   - StopFailure → "failed"
     ///   - SubagentStart → update progress
     func updateTodoFromWebhook(_ event: WebhookEvent) {
-        // Not yet implemented — will be filled when AgentHead status
+        // Not yet implemented — will be filled when ShipLog status
         // pipeline is connected to TodoStore.
     }
 

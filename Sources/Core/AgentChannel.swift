@@ -1,6 +1,6 @@
 import Foundation
 
-/// Communication channel between AgentHead and a sub-agent.
+/// Communication channel between ShipLog and a sub-agent.
 /// Each agent gets one channel based on its type and capabilities.
 protocol AgentChannel: AnyObject {
     /// The type of channel (for diagnostics and logging)

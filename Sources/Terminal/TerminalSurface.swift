@@ -9,7 +9,7 @@ protocol TerminalSurfaceDelegate: AnyObject {
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
 /// Each worktree gets one TerminalSurface instance.
 class TerminalSurface {
-    /// Unique identifier for this terminal instance (used as primary key in AgentHead)
+    /// Unique identifier for this terminal instance (used as primary key in ShipLog)
     let id: String = UUID().uuidString
 
     /// The NSView that Ghostty renders into (layer-backed, Metal)
