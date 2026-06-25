@@ -13,7 +13,7 @@ enum CodexHooksSetup {
     ]
 
     private static func hookCommand(port: UInt16) -> String {
-        "/bin/sh -lc '/usr/bin/curl -fsS -X POST http://localhost:\(port)/webhook -H \"Content-Type: application/json\" --data-binary @- >/dev/null 2>&1 || true'"
+        "/bin/sh -lc '/usr/bin/curl -fsS -X POST http://localhost:\(port)/webhook -H \"Content-Type: application/json\" --data-binary @- 2>/dev/null || true'"
     }
 
     private static func hookConfig(port: UInt16) -> [[String: Any]] {
@@ -121,11 +121,14 @@ enum CodexHooksSetup {
         let config = hookConfig(port: port)
         var changed = false
 
+        let expectedCommand = hookCommand(port: port)
         for event in requiredEvents {
-            if hooks[event] == nil {
+            let current = hooks[event] as? [[String: Any]]
+            let currentCommand = (current?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
+            if current == nil || currentCommand != expectedCommand {
                 hooks[event] = config
                 changed = true
-                NSLog("[CodexHooksSetup] Added missing hook: \(event)")
+                NSLog("[CodexHooksSetup] Installed/updated hook: \(event)")
             }
         }
 

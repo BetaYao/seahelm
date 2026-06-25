@@ -408,10 +408,18 @@ class TabCoordinator {
                         self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId)
                     }
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
-                        self?.statusPublisher.webhookProvider.handleEvent(event)
+                        guard let self else { return nil }
+                        if let block = StopHookResponder.blockBody(
+                            for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
+                            // Blocking Stop: agent will continue and call seahelm-suggest.
+                            // Do NOT ingest this stop as completion (avoid premature idle).
+                            return block
+                        }
+                        self.statusPublisher.webhookProvider.handleEvent(event)
                         ShipLog.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // ShipLog.shared.updateTodoFromWebhook(event)
+                        return nil
                     }
                     server.start()
                     self.terminalCoordinator.webhookServer = server

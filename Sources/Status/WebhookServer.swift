@@ -5,10 +5,10 @@ class WebhookServer {
     private var listener4: NWListener?  // IPv4 loopback
     private var listener6: NWListener?  // IPv6 loopback
     private let port: UInt16
-    private let onEvent: (WebhookEvent) -> Void
+    private let onEvent: (WebhookEvent) -> String?
     private let queue = DispatchQueue(label: "seahelm.webhook-server")
 
-    init(port: UInt16, onEvent: @escaping (WebhookEvent) -> Void) {
+    init(port: UInt16, onEvent: @escaping (WebhookEvent) -> String?) {
         self.port = port
         self.onEvent = onEvent
     }
@@ -129,8 +129,9 @@ class WebhookServer {
 
         do {
             let event = try WebhookEvent.parse(from: body)
-            onEvent(event)
-            sendResponse(connection: connection, statusCode: 200, body: "")
+            let responseBody = onEvent(event) ?? ""
+
+            sendResponse(connection: connection, statusCode: 200, body: responseBody)
         } catch {
             NSLog("[WebhookServer] Parse error: \(error)")
             sendResponse(connection: connection, statusCode: 400, body: "Bad Request")

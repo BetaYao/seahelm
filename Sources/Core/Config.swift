@@ -258,6 +258,21 @@ private extension Array where Element == String {
 struct WebhookConfig: Codable {
     var enabled: Bool = true
     var port: UInt16 = 7070
+    var suggestOnStop: Bool = true
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, port
+        case suggestOnStop = "suggest_on_stop"
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 7070
+        suggestOnStop = try c.decodeIfPresent(Bool.self, forKey: .suggestOnStop) ?? true
+    }
 }
 
 struct UpdateConfig: Codable {

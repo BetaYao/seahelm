@@ -17,10 +17,11 @@ final class WebhookServerTests: XCTestCase {
         super.setUp()
         _receivedEvents = []
         server = WebhookServer(port: testPort) { [weak self] event in
-            guard let self = self else { return }
+            guard let self = self else { return nil }
             self.lock.lock()
             self._receivedEvents.append(event)
             self.lock.unlock()
+            return nil
         }
     }
 
