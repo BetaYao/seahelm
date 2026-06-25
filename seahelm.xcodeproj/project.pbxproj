@@ -26,7 +26,6 @@
 		10D70ABC6FF1371989A62258 /* ClaudeUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 258A1C3E5F11466A79C1CAF3 /* ClaudeUsageSummaryProvider.swift */; };
 		11A1C0D06C900171E03F3ED5 /* UpdateError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E5E4022C54782A3B4B4760 /* UpdateError.swift */; };
 		13005279CEAF281DCBE08040 /* NotificationManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D0B8A444B60E3445EC7977 /* NotificationManagerTests.swift */; };
-		14798C833FF6D471D4E42D44 /* BridgeConfirmFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F84013E850F5884E3FBD43 /* BridgeConfirmFlowTests.swift */; };
 		15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */; };
 		15E702C37FE649AE0B93C724 /* ShipLogExternalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */; };
 		16E24E68FDE6B856E82C30AF /* BackendResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D951D3F02BA788C6D9288A /* BackendResolver.swift */; };
@@ -231,7 +230,6 @@
 		E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */; };
 		E47E4013682E902810866AF4 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A12EC1A8AE8D2CC60BA5732 /* GhosttyBridge.swift */; };
 		E5020C3F03A4093F06D0F2E4 /* FileTreeOutlineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */; };
-		E6504D88753F06A85C9E1424 /* BridgeConfirmFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF658BBFA55756895B6848A /* BridgeConfirmFlow.swift */; };
 		E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */; };
 		EA4CB7D6CFBBA74792B00BB6 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52EF0C4896EE233186B21980 /* GatewayState.swift */; };
 		EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */; };
@@ -428,7 +426,6 @@
 		9B7CFA3A43F14388537AD63B /* SailorType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorType.swift; sourceTree = "<group>"; };
 		9B818999765D614712A04F53 /* UpdateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistory.swift; sourceTree = "<group>"; };
-		9CF658BBFA55756895B6848A /* BridgeConfirmFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConfirmFlow.swift; sourceTree = "<group>"; };
 		9DE6E5E60B65B88BB4328F40 /* WeComFrameParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParserTests.swift; sourceTree = "<group>"; };
 		9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
 		9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorActivityTests.swift; sourceTree = "<group>"; };
@@ -475,7 +472,6 @@
 		C503BF300C7305DE3D68B844 /* KeyboardModeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardModeController.swift; sourceTree = "<group>"; };
 		C537B2B1B68C50EF9685736B /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 		C71C3A59719695387993016D /* FuzzyMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatch.swift; sourceTree = "<group>"; };
-		C7F84013E850F5884E3FBD43 /* BridgeConfirmFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConfirmFlowTests.swift; sourceTree = "<group>"; };
 		CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 		CD8F0A0F456C94284935BE32 /* RegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegressionTests.swift; sourceTree = "<group>"; };
@@ -698,7 +694,6 @@
 		6533B40EB024D4B8CECA89AB /* SidePanel */ = {
 			isa = PBXGroup;
 			children = (
-				9CF658BBFA55756895B6848A /* BridgeConfirmFlow.swift */,
 				F647B139CCD0468E41CBBB6F /* BridgePanelViewController.swift */,
 				3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */,
 				D43DCAEEFB34DDC4D03467C3 /* CodeEditorView.swift */,
@@ -814,7 +809,6 @@
 				32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */,
 				7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */,
 				446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */,
-				C7F84013E850F5884E3FBD43 /* BridgeConfirmFlowTests.swift */,
 				72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */,
 				ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */,
 				20D815BD3789070197196037 /* CodexHooksSetupTests.swift */,
@@ -1147,7 +1141,6 @@
 				E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */,
 				EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */,
 				A90FADB8FDAA218DAEA7D694 /* BridgeCommandRouterTests.swift in Sources */,
-				14798C833FF6D471D4E42D44 /* BridgeConfirmFlowTests.swift in Sources */,
 				6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */,
 				6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */,
 				2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */,
@@ -1277,7 +1270,6 @@
 				16E24E68FDE6B856E82C30AF /* BackendResolver.swift in Sources */,
 				B2A3720360222C93BA542DF0 /* BridgeCommand.swift in Sources */,
 				4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */,
-				E6504D88753F06A85C9E1424 /* BridgeConfirmFlow.swift in Sources */,
 				E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */,
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
 				D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */,

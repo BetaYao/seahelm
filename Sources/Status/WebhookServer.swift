@@ -129,7 +129,7 @@ class WebhookServer {
 
         do {
             let event = try WebhookEvent.parse(from: body)
-            let responseBody = onEvent(event) ?? ""
+            let responseBody = onEvent(event) ?? "{}"
 
             sendResponse(connection: connection, statusCode: 200, body: responseBody)
         } catch {
