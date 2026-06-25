@@ -23,6 +23,19 @@ final class PendingOrdersQueue {
         onChange?()
     }
 
+    /// Replace-on-same-id. Used for suggest orders where a newer suggestion supersedes the older.
+    func upsert(_ action: FirstMateAction) {
+        let id = Self.key(action)
+        let order = PendingOrder(id: id, action: action)
+        if let idx = orders.firstIndex(where: { $0.id == id }) {
+            guard orders[idx] != order else { return }
+            orders[idx] = order
+        } else {
+            orders.append(order)
+        }
+        onChange?()
+    }
+
     func all() -> [PendingOrder] { orders }
 
     func resolve(id: String) {

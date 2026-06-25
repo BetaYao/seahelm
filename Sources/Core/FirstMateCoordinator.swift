@@ -24,9 +24,17 @@ final class FirstMateCoordinator {
 
     func handle(_ outcome: IngestOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
-        let isSuggest: Bool
-        if case .suggest = outcome.event.kind { isSuggest = true } else { isSuggest = false }
-        guard outcome.statusChanged || outcome.isCompletionSignal || isSuggest else { return }
+        if case .suggest(let options) = outcome.event.kind {
+            guard !options.isEmpty else { return }
+            let info = outcome.info
+            let action = FirstMateAction(kind: .suggestNextOrder, zone: .red,
+                                         worktreePath: info.worktreePath, branch: info.branch,
+                                         project: info.project, terminalID: info.id,
+                                         message: "\(info.branch) suggestions", options: options)
+            queue.upsert(action)
+            return
+        }
+        guard outcome.statusChanged || outcome.isCompletionSignal else { return }
         let t = StatusTransition(
             worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,
             project: outcome.info.project, terminalID: outcome.info.id,

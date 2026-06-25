@@ -21,10 +21,11 @@ struct FirstMateAction: Equatable {
     let terminalID: String
     let message: String
     let payload: String?
+    let options: [String]?
 
     init(kind: FirstMateActionKind, zone: FirstMateZone, worktreePath: String,
          branch: String, project: String, terminalID: String, message: String,
-         payload: String? = nil) {
+         payload: String? = nil, options: [String]? = nil) {
         self.kind = kind
         self.zone = zone
         self.worktreePath = worktreePath
@@ -33,6 +34,7 @@ struct FirstMateAction: Equatable {
         self.terminalID = terminalID
         self.message = message
         self.payload = payload
+        self.options = options
     }
 }
 
