@@ -125,7 +125,8 @@ enum CodexHooksSetup {
         for event in requiredEvents {
             let current = hooks[event] as? [[String: Any]]
             let currentCommand = (current?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
-            if current == nil || currentCommand != expectedCommand {
+            let isSeahelmOwned = currentCommand?.contains("/webhook") ?? false
+            if current == nil || (isSeahelmOwned && currentCommand != expectedCommand) {
                 hooks[event] = config
                 changed = true
                 NSLog("[CodexHooksSetup] Installed/updated hook: \(event)")
