@@ -11,6 +11,50 @@ struct HookDecoder: SignalDecoder {
         return NormalizedEvent(terminalID: terminalID, source: .hook(event.source), kind: kind)
     }
 
+    /// Per-event human-readable message (canonical mapping used by HooksChannel).
+    static func message(for event: WebhookEvent) -> String? {
+        switch event.event {
+        case .toolUseStart:
+            if let tool = event.data?["tool_name"] as? String {
+                return "Using \(tool)"
+            }
+        case .toolUseEnd:
+            if let tool = event.data?["tool_name"] as? String {
+                return "Done: \(tool)"
+            }
+        case .agentStop:
+            if let reason = event.data?["stop_reason"] as? String {
+                return "Stopped: \(reason)"
+            }
+        case .error:
+            return event.data?["message"] as? String
+        case .prompt:
+            return event.data?["message"] as? String ?? "Waiting for input"
+        case .notification:
+            return event.data?["message"] as? String ?? event.data?["title"] as? String
+        case .sessionStart:
+            return "Session started"
+        case .worktreeCreate:
+            return "Creating worktree"
+        case .userPrompt:
+            return "Processing prompt"
+        case .toolUseFailed:
+            if let tool = event.data?["tool_name"] as? String {
+                return "Failed: \(tool)"
+            }
+            return "Tool failed"
+        case .stopFailure:
+            return event.data?["error"] as? String ?? "API error"
+        case .subagentStart:
+            return "Subagent started"
+        case .cwdChanged:
+            return nil
+        case .suggest:
+            return nil
+        }
+        return nil
+    }
+
     /// Pure mapping. Returns nil for events that produce no station event (cwd_changed).
     static func kind(for event: WebhookEvent) -> NormalizedEventKind? {
         switch event.event {
