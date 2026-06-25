@@ -28,10 +28,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     var watchFeed: WatchFeed? {
         didSet { bridgeVC?.watchFeed = watchFeed }
     }
-    var suggestionFeed: SuggestionFeed? {
-        didSet { bridgeVC?.suggestionFeed = suggestionFeed }
-    }
-    var onSuggestionTapped: ((SuggestionItem, String) -> Void)?
+    var onSuggestionTapped: ((PendingOrder, String) -> Void)?
     var onBridgeNavigate: ((String) -> Void)?
     var onBridgeApprove: ((PendingOrder) -> Void)?
 
@@ -190,8 +187,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         let vc = BridgePanelViewController()
         vc.queue = pendingOrdersQueue
         vc.watchFeed = watchFeed
-        vc.suggestionFeed = suggestionFeed
-        vc.onSuggestionTapped = { [weak self] item, optionText in self?.onSuggestionTapped?(item, optionText) }
+        vc.onSuggestionTapped = { [weak self] order, optionText in self?.onSuggestionTapped?(order, optionText) }
         vc.onNavigateToWorktree = { [weak self] path in self?.onBridgeNavigate?(path) }
         vc.onApprove = { [weak self] order in self?.onBridgeApprove?(order) }
         addChild(vc)

@@ -36,7 +36,6 @@ class TabCoordinator {
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
     let watchFeed = WatchFeed()
-    let suggestionFeed = SuggestionFeed()
     private(set) var firstMate: FirstMateCoordinator!
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -402,18 +401,6 @@ class TabCoordinator {
                 if self.config.webhook.enabled {
                     self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
                         self?.handleNewWorktreeFromHook(worktreePath)
-                    }
-                    self.statusPublisher.webhookProvider.onSuggestions = { [weak self] worktreePath, options in
-                        guard let self else { return }
-                        let canon = WorktreeDiscovery.canonicalPath(worktreePath)
-                        let agent = ShipLog.shared.sailor(forWorktree: worktreePath)
-                            ?? ShipLog.shared.allSailors().first { WorktreeDiscovery.canonicalPath($0.worktreePath) == canon }
-                        self.suggestionFeed.set(
-                            worktreePath: worktreePath,
-                            branch: agent?.branch ?? "",
-                            terminalID: agent?.id ?? "",
-                            options: options
-                        )
                     }
                     self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId in
                         guard let self else { return }

@@ -1,7 +1,7 @@
 import AppKit
 
 /// First Mate tab — shows red-zone pending orders (top) and green-zone watch entries (below).
-/// Keyboard: j/k move selection, Enter approve/expand, n dismiss, x clear watch, → navigate.
+/// Keyboard: j/k move selection, 1-9 pick options, n dismiss, x clear watch, → navigate.
 final class BridgePanelViewController: NSViewController {
 
     var queue: PendingOrdersQueue? {
@@ -12,18 +12,29 @@ final class BridgePanelViewController: NSViewController {
     }
     var onNavigateToWorktree: ((String) -> Void)?
     var onApprove: ((PendingOrder) -> Void)?
-    var suggestionFeed: SuggestionFeed? {
-        didSet { rebindSuggestions() }
+    var onSuggestionTapped: ((PendingOrder, String) -> Void)?
+
+    // MARK: - Static helpers
+
+    /// Kinds that require a two-step [!! Confirm] before executing.
+    static let dangerousKinds: Set<FirstMateActionKind> = [.autoCommit, .returnToPort]
+
+    static func buttonTitles(for order: PendingOrder) -> [String] {
+        order.action.options ?? ["Approve"]
     }
-    var onSuggestionTapped: ((SuggestionItem, String) -> Void)?
+
+    /// Card = header (20) + 2 message lines (32) + button row (28) + paddings (16),
+    /// plus 28 per extra button row when options wrap (>3 buttons per row).
+    static func cardHeight(for order: PendingOrder) -> CGFloat {
+        let buttons = buttonTitles(for: order).count
+        let rows = max(1, Int(ceil(Double(buttons) / 3.0)))
+        return 20 + 32 + CGFloat(rows) * 28 + 16
+    }
 
     // MARK: - Private state
 
     private var pendingOrders: [PendingOrder] = []
-    private var expandedOrderIds: Set<String> = []
     private var watchItems: [WatchItem] = []
-    /// Flattened (item, option) pairs, one per rendered chip row.
-    private var suggestionRows: [(item: SuggestionItem, option: String)] = []
 
     // MARK: - Views
 
@@ -37,13 +48,8 @@ final class BridgePanelViewController: NSViewController {
     private let watchTableView = NSTableView()
     private let watchScrollView = NSScrollView()
 
-    private let suggestHeader = NSTextField(labelWithString: "Suggestions")
-    private let suggestTableView = NSTableView()
-    private let suggestScrollView = NSScrollView()
-
     /// Layer-backed views whose CGColors must be re-resolved when the
-    /// effective appearance changes (light/dark switch). `.cgColor` snapshots
-    /// the color at resolve time, so we re-apply via `resolvedCGColor`.
+    /// effective appearance changes (light/dark switch).
     private var dividers: [NSView] = []
 
     // MARK: - Lifecycle
@@ -74,7 +80,6 @@ final class BridgePanelViewController: NSViewController {
 
         setupOrdersSection()
         setupWatchSection()
-        setupSuggestSection()
 
         view = root
     }
@@ -96,6 +101,7 @@ final class BridgePanelViewController: NSViewController {
         ordersTableView.addTableColumn(col)
         ordersTableView.headerView = nil
         ordersTableView.rowHeight = 28
+        ordersTableView.usesAutomaticRowHeights = false
         ordersTableView.dataSource = self
         ordersTableView.delegate = self
         ordersTableView.tag = 1
@@ -116,9 +122,6 @@ final class BridgePanelViewController: NSViewController {
         addFullWidthArranged(makeDivider())
     }
 
-    /// Add an arranged subview and pin its width to the stack so it fills the
-    /// full panel width (vertical NSStackView won't stretch the cross-axis on
-    /// its own without an explicit constraint).
     private func addFullWidthArranged(_ subview: NSView) {
         stackView.addArrangedSubview(subview)
         subview.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
@@ -151,38 +154,7 @@ final class BridgePanelViewController: NSViewController {
         let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 80)
         addFullWidthArranged(section)
 
-        // Even split: pin Watch scroll height equal to Orders scroll height.
-        // Both floors are 80 pt so the equal constraint cannot conflict at minimum size.
         watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor).isActive = true
-    }
-
-    private func setupSuggestSection() {
-        suggestHeader.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        suggestHeader.textColor = Theme.textSecondary
-        suggestHeader.translatesAutoresizingMaskIntoConstraints = false
-
-        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("SuggestCol"))
-        col.title = ""
-        suggestTableView.addTableColumn(col)
-        suggestTableView.headerView = nil
-        suggestTableView.rowHeight = 26
-        suggestTableView.dataSource = self
-        suggestTableView.delegate = self
-        suggestTableView.tag = 3
-        suggestTableView.setAccessibilityIdentifier("bridge.suggestTable")
-        suggestTableView.allowsEmptySelection = true
-        suggestTableView.backgroundColor = .clear
-
-        suggestScrollView.documentView = suggestTableView
-        suggestScrollView.drawsBackground = false
-        suggestScrollView.hasVerticalScroller = true
-        suggestScrollView.autohidesScrollers = true
-        suggestScrollView.translatesAutoresizingMaskIntoConstraints = false
-        suggestTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-
-        addFullWidthArranged(makeDivider())
-        let section = makeSectionContainer(header: suggestHeader, scroll: suggestScrollView, minHeight: 60)
-        addFullWidthArranged(section)
     }
 
     private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {
@@ -230,25 +202,10 @@ final class BridgePanelViewController: NSViewController {
         if isViewLoaded { reloadWatch() }
     }
 
-    private func rebindSuggestions() {
-        suggestionFeed?.onChange = { [weak self] in
-            DispatchQueue.main.async { self?.reloadSuggestions() }
-        }
-        if isViewLoaded { reloadSuggestions() }
-    }
-
-    private func reloadSuggestions() {
-        let items = suggestionFeed?.all() ?? []
-        suggestionRows = items.flatMap { item in item.options.map { (item, $0) } }
-        suggestHeader.stringValue = suggestionRows.isEmpty ? "Suggestions" : "Suggestions · \(suggestionRows.count)"
-        suggestTableView.reloadData()
-    }
-
     private func reload() {
         pendingOrders = queue?.all() ?? []
         ordersHeader.stringValue = "Pending Orders · \(pendingOrders.count)"
         ordersTableView.reloadData()
-        watchTableView.reloadData()
     }
 
     private func reloadWatch() {
@@ -271,12 +228,12 @@ final class BridgePanelViewController: NSViewController {
             moveSelection(in: activeTable, by: 1)
         case "k":
             moveSelection(in: activeTable, by: -1)
-        case "\r":
-            handleEnter(in: activeTable)
         case "n":
             handleDismiss(in: activeTable)
         case "x":
             handleClearWatch()
+        case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+            handleDigit(Int(key)! - 1, in: activeTable)
         default:
             if event.keyCode == 124 { // right arrow
                 handleNavigate(in: activeTable)
@@ -293,24 +250,6 @@ final class BridgePanelViewController: NSViewController {
         let next = max(0, min(count - 1, (current == -1 ? (delta > 0 ? 0 : count - 1) : current + delta)))
         tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
         tableView.scrollRowToVisible(next)
-    }
-
-    private func handleEnter(in tableView: NSTableView) {
-        guard tableView.tag == 1 else { return }
-        let row = tableView.selectedRow
-        guard row >= 0, row < pendingOrders.count else { return }
-        let order = pendingOrders[row]
-        let isExpanded = expandedOrderIds.contains(order.id)
-        let decision = BridgeConfirmFlow.onEnter(kind: order.action.kind, expanded: isExpanded)
-        switch decision {
-        case .expand:
-            expandedOrderIds.insert(order.id)
-            ordersTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
-        case .execute:
-            expandedOrderIds.remove(order.id)
-            onApprove?(order)
-            queue?.resolve(id: order.id)
-        }
     }
 
     private func handleDismiss(in tableView: NSTableView) {
@@ -333,6 +272,29 @@ final class BridgePanelViewController: NSViewController {
         let order = pendingOrders[row]
         onNavigateToWorktree?(order.action.worktreePath)
     }
+
+    private func handleDigit(_ index: Int, in tableView: NSTableView) {
+        guard tableView.tag == 1 else { return }
+        let row = tableView.selectedRow
+        guard row >= 0, row < pendingOrders.count else { return }
+        let order = pendingOrders[row]
+        let dangerous = Self.dangerousKinds.contains(order.action.kind)
+        if let card = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? OrderCardView {
+            card.selectOption(index, dangerous: dangerous)
+        } else {
+            applyOption(order, index: index)
+        }
+    }
+
+    private func applyOption(_ order: PendingOrder, index: Int) {
+        if let options = order.action.options {
+            guard index < options.count else { return }
+            onSuggestionTapped?(order, options[index])
+        } else {
+            onApprove?(order)
+            queue?.resolve(id: order.id)
+        }
+    }
 }
 
 // MARK: - NSTableViewDataSource / Delegate
@@ -341,152 +303,158 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
     func numberOfRows(in tableView: NSTableView) -> Int {
         switch tableView.tag {
         case 1: return pendingOrders.count
-        case 3: return suggestionRows.count
         default: return watchItems.count
         }
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        if tableView.tag == 3 {
-            guard row < suggestionRows.count else { return nil }
-            let pair = suggestionRows[row]
-            let id = NSUserInterfaceItemIdentifier("SuggestCell")
-            let cell: SuggestionCellView
-            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? SuggestionCellView {
-                cell = reused
-            } else {
-                cell = SuggestionCellView()
-                cell.identifier = id
-            }
-            cell.configure(branch: pair.item.branch, option: pair.option,
-                           onTap: { [weak self] in self?.onSuggestionTapped?(pair.item, pair.option) })
-            return cell
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if tableView.tag == 1, row < pendingOrders.count {
+            return Self.cardHeight(for: pendingOrders[row])
         }
+        return tableView.tag == 1 ? 28 : 22
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         if tableView.tag == 1 {
             guard row < pendingOrders.count else { return nil }
             let order = pendingOrders[row]
-            let isExpanded = expandedOrderIds.contains(order.id)
-            let id = NSUserInterfaceItemIdentifier("OrderCell")
-            let cell: OrderCellView
-            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? OrderCellView {
-                cell = reused
-            } else {
-                cell = OrderCellView()
-                cell.identifier = id
-            }
-            cell.configure(order: order, expanded: isExpanded,
-                           onApprove: { [weak self] in self?.approveOrder(order) },
+            let id = NSUserInterfaceItemIdentifier("OrderCard")
+            let card = (tableView.makeView(withIdentifier: id, owner: self) as? OrderCardView) ?? OrderCardView()
+            card.identifier = id
+            card.configure(order: order,
+                           onOption: { [weak self] idx in self?.applyOption(order, index: idx) },
                            onDismiss: { [weak self] in self?.queue?.resolve(id: order.id) })
-            return cell
+            return card
         } else {
             guard row < watchItems.count else { return nil }
             let item = watchItems[row]
-            let id = NSUserInterfaceItemIdentifier("WatchCell")
-            let cell: WatchCellView
-            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? WatchCellView {
-                cell = reused
-            } else {
-                cell = WatchCellView()
-                cell.identifier = id
-            }
-            cell.configure(item: item)
-            return cell
+            let id = NSUserInterfaceItemIdentifier("WatchCard")
+            let card = (tableView.makeView(withIdentifier: id, owner: self) as? WatchCardView) ?? WatchCardView()
+            card.identifier = id
+            card.configure(item: item)
+            return card
         }
     }
 }
 
-// MARK: - Private helpers
+// MARK: - OrderCardView
 
-private extension BridgePanelViewController {
-    func approveOrder(_ order: PendingOrder) {
-        let isExpanded = expandedOrderIds.contains(order.id)
-        let decision = BridgeConfirmFlow.onEnter(kind: order.action.kind, expanded: isExpanded)
-        switch decision {
-        case .expand:
-            expandedOrderIds.insert(order.id)
-            if let idx = pendingOrders.firstIndex(where: { $0.id == order.id }) {
-                ordersTableView.reloadData(forRowIndexes: IndexSet(integer: idx), columnIndexes: IndexSet(integer: 0))
-            }
-        case .execute:
-            expandedOrderIds.remove(order.id)
-            onApprove?(order)
-            queue?.resolve(id: order.id)
-        }
-    }
-}
-
-// MARK: - OrderCellView
-
-private final class OrderCellView: NSTableCellView {
+private final class OrderCardView: NSTableCellView {
+    private let titleLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
-    private let approveButton = NSButton()
+    private let buttonRow = NSStackView()
     private let dismissButton = NSButton()
+    private var trackingArea: NSTrackingArea?
 
-    private var onApprove: (() -> Void)?
+    private var onOption: ((Int) -> Void)?
     private var onDismiss: (() -> Void)?
+    private var armedDangerousIndex: Int?
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        setup()
-    }
+    override init(frame: NSRect) { super.init(frame: frame); setup() }
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        messageLabel.font = NSFont.systemFont(ofSize: 12)
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        messageLabel.font = NSFont.systemFont(ofSize: 11)
+        messageLabel.textColor = Theme.textSecondary
+        messageLabel.maximumNumberOfLines = 2
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        approveButton.bezelStyle = .inline
-        approveButton.title = "✓"
-        approveButton.contentTintColor = .systemGreen
-        approveButton.isBordered = false
-        approveButton.target = self
-        approveButton.action = #selector(tappedApprove)
-        approveButton.translatesAutoresizingMaskIntoConstraints = false
+        buttonRow.orientation = .horizontal
+        buttonRow.spacing = 6
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
 
-        dismissButton.bezelStyle = .inline
         dismissButton.title = "✕"
-        dismissButton.contentTintColor = .systemRed
         dismissButton.isBordered = false
+        dismissButton.contentTintColor = Theme.textSecondary
         dismissButton.target = self
         dismissButton.action = #selector(tappedDismiss)
+        dismissButton.isHidden = true
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(messageLabel)
-        addSubview(approveButton)
-        addSubview(dismissButton)
-
+        addSubview(titleLabel); addSubview(messageLabel); addSubview(buttonRow); addSubview(dismissButton)
         NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -4),
+
+            dismissButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            dismissButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dismissButton.widthAnchor.constraint(equalToConstant: 20),
+            dismissButton.widthAnchor.constraint(equalToConstant: 18),
 
-            approveButton.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -4),
-            approveButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            approveButton.widthAnchor.constraint(equalToConstant: 20),
-
+            messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            messageLabel.trailingAnchor.constraint(equalTo: approveButton.leadingAnchor, constant: -4),
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
+            buttonRow.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 6),
+            buttonRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            buttonRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
         ])
     }
 
-    func configure(order: PendingOrder, expanded: Bool, onApprove: @escaping () -> Void, onDismiss: @escaping () -> Void) {
-        self.onApprove = onApprove
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = trackingArea { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                               owner: self, userInfo: nil)
+        addTrackingArea(t); trackingArea = t
+    }
+    override func mouseEntered(with event: NSEvent) { dismissButton.isHidden = false }
+    override func mouseExited(with event: NSEvent) { dismissButton.isHidden = true }
+
+    func configure(order: PendingOrder,
+                   onOption: @escaping (Int) -> Void,
+                   onDismiss: @escaping () -> Void) {
+        self.onOption = onOption
         self.onDismiss = onDismiss
-        let prefix = expanded ? "⚠ " : ""
-        messageLabel.stringValue = prefix + order.action.message
-        messageLabel.textColor = expanded ? .systemOrange : Theme.textPrimary
-        approveButton.title = expanded ? "!!" : "✓"
+        self.armedDangerousIndex = nil
+        titleLabel.stringValue = "● \(order.action.project) · \(order.action.branch)"
+        titleLabel.textColor = Theme.textPrimary
+        messageLabel.stringValue = order.action.message
+
+        buttonRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let titles = BridgePanelViewController.buttonTitles(for: order)
+        let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)
+        for (i, title) in titles.enumerated() {
+            let b = NSButton(title: "\(i + 1) \(title)", target: self, action: #selector(tappedOption(_:)))
+            b.bezelStyle = .rounded
+            b.controlSize = .small
+            b.tag = i
+            b.toolTip = title
+            if dangerous { b.contentTintColor = .systemOrange }
+            buttonRow.addArrangedSubview(b)
+        }
     }
 
-    @objc private func tappedApprove() { onApprove?() }
+    @discardableResult
+    func selectOption(_ index: Int, dangerous: Bool) -> Bool {
+        if dangerous && armedDangerousIndex != index {
+            armedDangerousIndex = index
+            if let b = buttonRow.arrangedSubviews[safe: index] as? NSButton { b.title = "!! Confirm" }
+            return false
+        }
+        onOption?(index)
+        return true
+    }
+
+    @objc private func tappedOption(_ sender: NSButton) {
+        let dangerous = sender.contentTintColor == .systemOrange
+        selectOption(sender.tag, dangerous: dangerous)
+    }
     @objc private func tappedDismiss() { onDismiss?() }
 }
 
-// MARK: - WatchCellView
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
 
-private final class WatchCellView: NSTableCellView {
+// MARK: - WatchCardView
+
+private final class WatchCardView: NSTableCellView {
     private let iconLabel = NSTextField(labelWithString: "")
     private let branchLabel = NSTextField(labelWithString: "")
     private let msgLabel = NSTextField(labelWithString: "")
@@ -535,55 +503,4 @@ private final class WatchCellView: NSTableCellView {
         branchLabel.stringValue = item.branch
         msgLabel.stringValue = item.message
     }
-}
-
-// MARK: - SuggestionCellView
-
-private final class SuggestionCellView: NSTableCellView {
-    private let branchLabel = NSTextField(labelWithString: "")
-    private let button = NSButton()
-    private var onTap: (() -> Void)?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        setup()
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func setup() {
-        branchLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        branchLabel.textColor = Theme.textSecondary
-        branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        button.bezelStyle = .rounded
-        button.controlSize = .small
-        button.font = NSFont.systemFont(ofSize: 11)
-        button.lineBreakMode = .byTruncatingTail
-        button.target = self
-        button.action = #selector(tapped)
-        button.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(branchLabel)
-        addSubview(button)
-
-        NSLayoutConstraint.activate([
-            branchLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            branchLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            branchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 90),
-
-            button.leadingAnchor.constraint(equalTo: branchLabel.trailingAnchor, constant: 6),
-            button.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
-            button.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    func configure(branch: String, option: String, onTap: @escaping () -> Void) {
-        self.onTap = onTap
-        branchLabel.stringValue = branch
-        button.title = option
-        button.toolTip = option
-    }
-
-    @objc private func tapped() { onTap?() }
 }
