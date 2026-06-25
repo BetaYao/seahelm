@@ -22,6 +22,18 @@ final class FirstMateCoordinator {
         self.hasOrders = hasOrders
     }
 
+    func handle(_ outcome: IngestOutcome) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let isSuggest: Bool = { if case .suggest = outcome.event.kind { return true }; return false }()
+        guard outcome.statusChanged || outcome.isCompletionSignal || isSuggest else { return }
+        let t = StatusTransition(
+            worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,
+            project: outcome.info.project, terminalID: outcome.info.id,
+            oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
+            holdSeconds: outcome.holdSeconds, isCompletionSignal: outcome.isCompletionSignal)
+        handle(t)
+    }
+
     func handle(_ t: StatusTransition) {
         dispatchPrecondition(condition: .onQueue(.main))
         for action in FirstMate.evaluate(t, config: config) {

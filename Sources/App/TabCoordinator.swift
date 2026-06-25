@@ -92,15 +92,7 @@ class TabCoordinator {
             }
         )
         ShipLog.shared.onOutcome = { [weak self] outcome in
-            guard outcome.statusChanged || outcome.isCompletionSignal else { return }
-            let info = outcome.info
-            let t = StatusTransition(
-                worktreePath: info.worktreePath, branch: info.branch,
-                project: info.project, terminalID: info.id,
-                oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
-                holdSeconds: outcome.holdSeconds,
-                isCompletionSignal: outcome.isCompletionSignal)
-            self?.firstMate?.handle(t)
+            self?.firstMate?.handle(outcome)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
             guard let self,
