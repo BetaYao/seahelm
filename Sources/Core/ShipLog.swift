@@ -13,13 +13,14 @@ class ShipLog {
 
     weak var delegate: ShipLogDelegate?
 
-    /// First Mate observer: status-edge and completion signals, called on main thread.
-    var onStatusTransition: ((StatusTransition) -> Void)?
+    /// Single output stream: one IngestOutcome per recorded event, delivered on the main thread.
+    var onOutcome: ((IngestOutcome) -> Void)?
 
     /// Tracks when each terminal entered its current status (for holdSeconds calculation).
     private var statusEnteredAt: [String: Date] = [:]
 
     private var agents: [String: SailorInfo] = [:]       // keyed by terminal ID
+    private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
@@ -151,63 +152,116 @@ class ShipLog {
                                           lastMessage: lastMessage, roundDuration: roundDuration,
                                           tasks: tasks, lastUserPrompt: lastUserPrompt)
         let info = reduced.info
-        let previousStatus = reduced.previousStatus
         let changed = reduced.changed
         agents[terminalID] = info
-        let hasExternalChannels = !externalChannels.isEmpty
         lock.unlock()
 
         if changed {
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.agentDidUpdate(info)
             }
+        }
+    }
 
-            if previousStatus != status {
-                let now = Date()
-                lock.lock()
-                let entered = statusEnteredAt[terminalID] ?? now
-                statusEnteredAt[terminalID] = now
-                lock.unlock()
-                let hold = now.timeIntervalSince(entered)
-                let transition = StatusTransition(
-                    worktreePath: info.worktreePath, branch: info.branch,
-                    project: info.project, terminalID: terminalID,
-                    oldStatus: previousStatus, newStatus: status,
-                    holdSeconds: hold, isCompletionSignal: false)
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStatusTransition?(transition)
-                }
+    /// THE single write entry. Faithfully record, then reduce to a station snapshot + outcome.
+    func ingest(_ event: NormalizedEvent) {
+        lock.lock()
+        appendToRingBufferLog(event)
+        guard let current = agents[event.terminalID] else { lock.unlock(); return }
+
+        var next = current
+        var isCompletion = false
+        var message = current.lastMessage
+
+        switch event.kind {
+        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType):
+            next.scanStatus = status
+            if !msg.isEmpty { message = msg }
+            if let cl = commandLine { next.commandLine = cl }
+            if agentType != .unknown { next.agentType = agentType }
+            if !activity.isEmpty { next.activityEvents = activity }
+        case .sessionStarted(let label):
+            next.hookStatus = .running
+            message = label
+        case .userPrompt(let text):
+            next.hookStatus = .running
+            next.lastUserPrompt = text
+        case .toolUse(let ev):
+            next.hookStatus = .running
+            Self.upsertLatest(&next.activityEvents, event: ev, maxSize: 20)
+            message = ev.detail.isEmpty ? message : ev.detail
+        case .awaitingInput(let text):
+            next.hookStatus = .waiting
+            message = text
+        case .agentStopped(let success):
+            next.hookStatus = success ? .idle : .error
+            next.activityEvents.removeAll()
+            isCompletion = true
+        case .notification(let level, let text):
+            switch level {
+            case "error": next.hookStatus = .error
+            case "warning": next.hookStatus = .waiting
+            default: break
             }
+            if !text.isEmpty { message = text }
+        case .taskUpdate(let items):
+            next.tasks = items
+        case .suggest:
+            break   // does not touch status; passed through via outcome.event
+        }
 
-            // Notify external channels on critical status transitions
-            if hasExternalChannels && previousStatus != status
-                && (status == .waiting || status == .error) {
-                let text = "[\(info.project)] \(status.icon) \(status.rawValue): \(lastMessage)"
-                broadcast(text, format: .markdown)
+        next.lastMessage = message
+        let oldStatus = current.status
+        let newStatus = SailorStatus.highestPriority([next.scanStatus, next.hookStatus])
+        next.status = newStatus
+        agents[event.terminalID] = next
+
+        let now = Date()
+        let statusChanged = oldStatus != newStatus
+        var hold: Double = 0
+        if statusChanged {
+            let entered = statusEnteredAt[event.terminalID] ?? now
+            hold = now.timeIntervalSince(entered)
+            statusEnteredAt[event.terminalID] = now
+        }
+        let hasExternalChannels = !externalChannels.isEmpty
+        lock.unlock()
+
+        let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
+                                    oldStatus: oldStatus, newStatus: newStatus,
+                                    holdSeconds: hold, isCompletionSignal: isCompletion,
+                                    event: event)
+        notifyObservers(outcome, hasExternalChannels: hasExternalChannels)
+    }
+
+    /// All observer delivery hops to main for ordering. Subscribers never run on the scan queue.
+    private func notifyObservers(_ outcome: IngestOutcome, hasExternalChannels: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.agentDidUpdate(outcome.info)
+            self.onOutcome?(outcome)
+            if hasExternalChannels && outcome.statusChanged
+                && (outcome.newStatus == .waiting || outcome.newStatus == .error) {
+                let i = outcome.info
+                self.broadcast("[\(i.project)] \(outcome.newStatus.icon) \(outcome.newStatus.rawValue): \(i.lastMessage)",
+                               format: .markdown)
             }
         }
     }
 
-    /// Unified entry point: unpack a StatusReport and apply to ShipLog.
-    /// All channels (active scan, passive hook) funnel through here.
-    /// roundDuration and tasks are supplied by the caller when the report doesn't carry them
-    /// (e.g. ScanDecoder leaves lastMessage blank; StatusPublisher fills it in via messageOverride).
-    func ingest(terminalID: String, report: StatusReport,
-                lastUserPrompt: String = "",
-                messageOverride: String? = nil,
-                roundDuration: TimeInterval = 0,
-                tasks: [TaskItem] = []) {
-        let message = messageOverride ?? report.lastMessage
-        updateStatus(
-            terminalID: terminalID,
-            status: report.status,
-            lastMessage: message,
-            roundDuration: roundDuration,
-            tasks: tasks,
-            lastUserPrompt: lastUserPrompt
-        )
-        for event in report.activityEvents {
-            upsertLatestActivityEvent(event, forTerminalID: terminalID)
+    private func appendToRingBufferLog(_ event: NormalizedEvent) {
+        var log = eventLog[event.terminalID] ?? []
+        log.insert(event, at: 0)
+        if log.count > 50 { log.removeLast() }
+        eventLog[event.terminalID] = log
+    }
+
+    /// Ring-buffer upsert used by reduce for .toolUse (mirrors upsertLatestActivityEvent).
+    static func upsertLatest(_ buffer: inout [ActivityEvent], event: ActivityEvent, maxSize: Int) {
+        if let latest = buffer.first, latest.tool == event.tool, latest.detail == event.detail {
+            buffer[0] = event
+        } else {
+            appendToRingBuffer(&buffer, event: event, maxSize: maxSize)
         }
     }
 
@@ -361,27 +415,11 @@ class ShipLog {
             break
         }
 
-        let hooks = channel(for: tid) as? HooksChannel
-
-        hooks?.handleWebhookEvent(event)
-
-        // Extract activity events from tool use events (passive — no status write)
-        switch event.event {
-        case .toolUseStart, .toolUseEnd, .toolUseFailed:
-            let activityEvent = ActivityEventExtractor.extract(from: event)
-            upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
-        case .agentStop:
-            clearActivityEvents(forTerminalID: tid)
-            if let info = sailor(for: tid) {
-                let t = StatusTransition(
-                    worktreePath: info.worktreePath, branch: info.branch,
-                    project: info.project, terminalID: tid,
-                    oldStatus: info.status, newStatus: info.status,
-                    holdSeconds: 0, isCompletionSignal: true)
-                DispatchQueue.main.async { [weak self] in self?.onStatusTransition?(t) }
-            }
-        default:
-            break
+        // cwd_changed only updates routing (handled above via worktreeIndex); no station event.
+        guard let event2 = HookDecoder(terminalID: tid, event: event).decode() else { return }
+        ingest(event2)
+        if let hooks = channel(for: tid) as? HooksChannel {
+            hooks.handleWebhookEvent(event)
         }
     }
 

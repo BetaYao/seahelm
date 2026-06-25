@@ -21,11 +21,11 @@ final class ShipLogWebhookPathTests: XCTestCase {
             project: "WebhookTestProject"
         )
         ShipLog.shared.registerChannel(mockChannel)
-        ShipLog.shared.onStatusTransition = nil
+        ShipLog.shared.onOutcome = nil
     }
 
     override func tearDown() {
-        ShipLog.shared.onStatusTransition = nil
+        ShipLog.shared.onOutcome = nil
         ShipLog.shared.unregister(terminalID: tid)
         ShipLog.shared.unregisterAllExternalChannels()
         super.tearDown()
@@ -88,22 +88,38 @@ final class ShipLogWebhookPathTests: XCTestCase {
     // MARK: - Passive path: no external broadcast
 
     func testToolUseEventDoesNotBroadcastToExternalChannel() {
+        // Drain any pending main-queue async blocks from prior tests (e.g. a .waiting broadcast
+        // queued by testPromptEventDoesNotResetTasksOrRoundDuration which doesn't await outcomes).
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+
         ShipLog.shared.updateStatus(
             terminalID: tid,
             status: .running,
             lastMessage: "running",
             roundDuration: 0
         )
-        // Clear any messages from the updateStatus call above
+        // Clear any messages from prior-test async or the updateStatus call above
         mockChannel.sentMessages.removeAll()
 
         ShipLog.shared.handleWebhookEvent(makeEvent(.toolUseStart))
 
+        // Wait for any async notifyObservers to complete via onOutcome.
+        // A single webhook event may produce more than one outcome (e.g. per
+        // activity-event upsert), so tolerate over-fulfillment — we only need
+        // to know the async work has settled before asserting no broadcast.
+        let exp = expectation(description: "ingest outcome for toolUseStart")
+        exp.assertForOverFulfill = false
+        ShipLog.shared.onOutcome = { _ in exp.fulfill() }
+        wait(for: [exp], timeout: 2)
+
+        // broadcast only fires for .waiting or .error — toolUse sets hookStatus=.running, no broadcast
         XCTAssertEqual(mockChannel.sentMessages.count, 0,
             "webhook toolUseStart must not trigger an external broadcast")
     }
 
-    func testPromptEventDoesNotBroadcastToExternalChannel() {
+    func testPromptEventBroadcastsWhenStatusChangesToWaiting() {
+        // Before: running. prompt → awaitingInput → hookStatus=.waiting → status becomes .waiting
+        // notifyObservers broadcasts for .waiting when statusChanged=true.
         ShipLog.shared.updateStatus(
             terminalID: tid,
             status: .running,
@@ -112,10 +128,17 @@ final class ShipLogWebhookPathTests: XCTestCase {
         )
         mockChannel.sentMessages.removeAll()
 
+        let exp = expectation(description: "broadcast on waiting")
+        ShipLog.shared.onOutcome = { o in
+            if o.newStatus == .waiting { exp.fulfill() }
+        }
+
         ShipLog.shared.handleWebhookEvent(makeEvent(.prompt))
 
-        XCTAssertEqual(mockChannel.sentMessages.count, 0,
-            "webhook prompt must not trigger an external broadcast")
+        wait(for: [exp], timeout: 2)
+        // prompt → .waiting transition triggers broadcast (by design, notifyObservers fires for .waiting)
+        XCTAssertEqual(mockChannel.sentMessages.count, 1,
+            "webhook prompt that changes status to .waiting must trigger a broadcast")
     }
 
     // MARK: - agentStop: completion transition fires
@@ -128,11 +151,11 @@ final class ShipLogWebhookPathTests: XCTestCase {
             roundDuration: 5.0
         )
 
-        let exp = expectation(description: "agentStop completion transition")
-        var captured: StatusTransition?
-        ShipLog.shared.onStatusTransition = { t in
-            if t.isCompletionSignal && captured == nil {
-                captured = t
+        let exp = expectation(description: "agentStop completion outcome")
+        var captured: IngestOutcome?
+        ShipLog.shared.onOutcome = { o in
+            if o.isCompletionSignal && captured == nil {
+                captured = o
                 exp.fulfill()
             }
         }
@@ -141,8 +164,8 @@ final class ShipLogWebhookPathTests: XCTestCase {
 
         wait(for: [exp], timeout: 2)
         XCTAssertTrue(captured?.isCompletionSignal == true,
-            "agentStop must fire a completion StatusTransition")
-        XCTAssertEqual(captured?.terminalID, tid)
+            "agentStop must fire a completion IngestOutcome")
+        XCTAssertEqual(captured?.info.id, tid)
     }
 
     func testAgentStopUsesPolledStatusAsOldStatus() {
@@ -154,11 +177,11 @@ final class ShipLogWebhookPathTests: XCTestCase {
             roundDuration: 5.0
         )
 
-        let exp = expectation(description: "agentStop transition with correct oldStatus")
-        var captured: StatusTransition?
-        ShipLog.shared.onStatusTransition = { t in
-            if t.isCompletionSignal && captured == nil {
-                captured = t
+        let exp = expectation(description: "agentStop outcome with correct oldStatus")
+        var captured: IngestOutcome?
+        ShipLog.shared.onOutcome = { o in
+            if o.isCompletionSignal && captured == nil {
+                captured = o
                 exp.fulfill()
             }
         }
@@ -168,6 +191,6 @@ final class ShipLogWebhookPathTests: XCTestCase {
         wait(for: [exp], timeout: 2)
         // oldStatus must be what the poll set (.running), NOT a freshly-written .idle
         XCTAssertEqual(captured?.oldStatus, .running,
-            "agentStop completion transition oldStatus must reflect poll-set status, not .idle")
+            "agentStop completion outcome oldStatus must reflect poll-set status, not .idle")
     }
 }

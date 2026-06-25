@@ -91,7 +91,15 @@ class TabCoordinator {
                 WorktreeTaskStore.shared.task(forWorktree: worktreePath) != nil
             }
         )
-        ShipLog.shared.onStatusTransition = { [weak self] t in
+        ShipLog.shared.onOutcome = { [weak self] outcome in
+            guard outcome.statusChanged || outcome.isCompletionSignal else { return }
+            let info = outcome.info
+            let t = StatusTransition(
+                worktreePath: info.worktreePath, branch: info.branch,
+                project: info.project, terminalID: info.id,
+                oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
+                holdSeconds: outcome.holdSeconds,
+                isCompletionSignal: outcome.isCompletionSignal)
             self?.firstMate?.handle(t)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
@@ -114,7 +122,7 @@ class TabCoordinator {
         }
     }
 
-    deinit { ShipLog.shared.onStatusTransition = nil }
+    deinit { ShipLog.shared.onOutcome = nil }
 
     // MARK: - Tab Switching
 

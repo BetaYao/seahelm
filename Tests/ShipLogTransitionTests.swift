@@ -2,22 +2,23 @@ import XCTest
 @testable import seahelm
 
 final class ShipLogTransitionTests: XCTestCase {
-    func testStatusChangeFiresTransitionObserver() {
+    func testStatusChangeFiresOutcomeObserver() {
         let head = ShipLog.shared
-        let exp = expectation(description: "transition fired")
-        var captured: StatusTransition?
-        head.onStatusTransition = { t in
-            if captured == nil { captured = t; exp.fulfill() }
-        }
+        let exp = expectation(description: "outcome fired")
+        var captured: IngestOutcome?
         head.registerForTesting(terminalID: "tt", worktreePath: "/wt/z",
                                 branch: "feat-z", project: "repoz")
-        head.updateStatus(terminalID: "tt", status: .waiting,
-                          lastMessage: "?", roundDuration: 0)
+        head.onOutcome = { o in
+            if o.statusChanged && captured == nil { captured = o; exp.fulfill() }
+        }
+        head.ingest(NormalizedEvent(terminalID: "tt", source: .scan,
+            kind: .screenObserved(status: .waiting, message: "?",
+                                  activity: [], commandLine: nil, agentType: .unknown)))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .waiting)
-        XCTAssertEqual(captured?.worktreePath, "/wt/z")
+        XCTAssertEqual(captured?.info.worktreePath, "/wt/z")
         XCTAssertFalse(captured?.isCompletionSignal ?? true)
-        head.onStatusTransition = nil
+        head.onOutcome = nil
         head.unregister(terminalID: "tt")
     }
 }

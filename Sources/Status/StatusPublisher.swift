@@ -32,9 +32,7 @@ class StatusPublisher {
     init(agentConfig: SailorDetectConfig = .default) {
         self.agentConfig = agentConfig
         rebuildSailorNameCache()
-        webhookProvider.onStatusChanged = { [weak self] worktreePath in
-            self?.scheduleWebhookRefresh(for: worktreePath)
-        }
+        // webhook status changes are now handled via handleWebhookEvent → ingest
     }
 
     private func rebuildSailorNameCache() {
@@ -134,70 +132,6 @@ class StatusPublisher {
         }
     }
 
-    private func scheduleWebhookRefresh(for worktreePath: String) {
-        lock.lock()
-        let pathSnapshot = worktreePaths
-        lock.unlock()
-        pollQueue.async { [weak self] in
-            self?.refreshWebhookDrivenStatus(for: worktreePath, paths: pathSnapshot)
-        }
-    }
-
-    private func refreshWebhookDrivenStatus(for worktreePath: String, paths: [String: String]) {
-        let terminalIDs = paths.compactMap { terminalID, path in
-            path == worktreePath ? terminalID : nil
-        }
-        guard !terminalIDs.isEmpty else { return }
-
-        let hookStatus = webhookProvider.status(for: worktreePath)
-        guard hookStatus != .unknown else { return }
-
-        let lastMessage = webhookProvider.lastMessage(for: worktreePath) ?? ""
-        let webhookTasks = webhookProvider.tasks(for: worktreePath)
-        let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
-
-        for terminalID in terminalIDs {
-            lock.lock()
-            let tracker = trackers[terminalID] ?? {
-                let t = DebouncedStatusTracker()
-                trackers[terminalID] = t
-                return t
-            }()
-            let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: hookStatus)
-            lastMessages[terminalID] = lastMessage
-            let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
-            if statusChanged {
-                if hookStatus == .running && oldStatus != .running {
-                    runningStartTimes[terminalID] = Date()
-                } else if hookStatus != .running && oldStatus == .running {
-                    runningStartTimes[terminalID] = nil
-                }
-            }
-            lock.unlock()
-
-            let existingSailorType = ShipLog.shared.sailor(for: terminalID)?.agentType ?? .unknown
-            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingSailorType)
-            ShipLog.shared.updateStatus(
-                terminalID: terminalID,
-                status: hookStatus,
-                lastMessage: lastMessage,
-                roundDuration: roundDur,
-                tasks: webhookTasks,
-                lastUserPrompt: lastUserPrompt
-            )
-
-            DispatchQueue.main.async { [weak self] in
-                self?.aggregator?.agentDidUpdate(
-                    terminalID: terminalID,
-                    status: hookStatus,
-                    lastMessage: lastMessage,
-                    lastUserPrompt: lastUserPrompt
-                )
-            }
-        }
-    }
-
     private func pollAll(_ surfaceSnapshot: [String: Station], preferredPaths: Set<String>, pollCycle: Int, paths: [String: String]) {
         for (terminalID, surface) in surfaceSnapshot {
             let worktreePath = paths[terminalID] ?? ""
@@ -232,9 +166,9 @@ class StatusPublisher {
             let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
 
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
-            let detectedSailorTypeForDecode = SailorType.detect(fromLowercased: lowerContent)
-            let agentTypeForDecode = detectedSailorTypeForDecode == .unknown ? existingSailorType : detectedSailorTypeForDecode
-            let scanEvent = ScanDecoder(
+            let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
+            let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            let normalized = ScanDecoder(
                 terminalID: terminalID,
                 detector: detector,
                 processStatus: processStatus,
@@ -242,69 +176,39 @@ class StatusPublisher {
                 content: content,
                 agentDef: agentDef,
                 commandLine: nil,
-                agentType: agentTypeForDecode
+                agentType: agentType
             ).decode()
+            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
+
+            if let normalized {
+                ShipLog.shared.ingest(normalized)
+            }
+
+            // Keep tracker in sync for roundDuration tracking
             let textStatus: SailorStatus
-            if case .screenObserved(let s, _, _, _, _) = scanEvent?.kind { textStatus = s } else { textStatus = .unknown }
-            let hookStatus = webhookProvider.status(for: worktreePath)
-            let detected = SailorStatus.highestPriority([textStatus, hookStatus])
-
-            // Prefer structured webhook message over terminal text scan
-            let webhookMessage = webhookProvider.lastMessage(for: worktreePath)
-            let terminalMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
-            let lastMessage = webhookMessage ?? (terminalMessage.isEmpty ? nil : terminalMessage) ?? ""
-            let webhookTasks = webhookProvider.tasks(for: worktreePath)
-            let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
-
-            // Feed ShipLog with structured data on every poll
-            let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
-            let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            if case .screenObserved(let s, _, _, _, _) = normalized?.kind { textStatus = s } else { textStatus = .unknown }
 
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: detected)
+            let statusChanged = tracker.update(status: textStatus)
+            let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             lastMessages[terminalID] = lastMessage
             let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
-            // Track round duration: record when entering Running, clear when leaving
             if statusChanged {
-                if detected == .running && oldStatus != .running {
+                if textStatus == .running && oldStatus != .running {
                     runningStartTimes[terminalID] = Date()
-                } else if detected != .running && oldStatus == .running {
+                } else if textStatus != .running && oldStatus == .running {
                     runningStartTimes[terminalID] = nil
                 }
             }
             lock.unlock()
 
-            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-
-            // Route through ingest: pass a report with the merged detected status and
-            // supply caller-computed values (lastMessage, roundDuration, tasks) that
-            // ScanDecoder intentionally leaves blank.
-            // Activity events from the scan report are applied only when no webhook events exist.
-            let webhookEvents = ShipLog.shared.sailor(for: terminalID)?.activityEvents ?? []
-            let reportForIngest: StatusReport
-            var scanActivityEvents: [ActivityEvent] = []
-            if case .screenObserved(_, _, let acts, _, _) = scanEvent?.kind { scanActivityEvents = acts }
-            if webhookEvents.isEmpty, !scanActivityEvents.isEmpty {
-                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: scanActivityEvents)
-            } else {
-                reportForIngest = StatusReport(status: detected, lastMessage: "", activityEvents: [])
-            }
-            ShipLog.shared.ingest(
-                terminalID: terminalID,
-                report: reportForIngest,
-                lastUserPrompt: lastUserPrompt,
-                messageOverride: lastMessage,
-                roundDuration: roundDur,
-                tasks: webhookTasks
-            )
-
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(
                     terminalID: terminalID,
-                    status: detected,
+                    status: textStatus,
                     lastMessage: lastMessage,
-                    lastUserPrompt: lastUserPrompt
+                    lastUserPrompt: ""
                 )
             }
 

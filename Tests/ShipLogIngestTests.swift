@@ -5,19 +5,19 @@ final class ShipLogIngestTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        ShipLog.shared.onStatusTransition = nil
+        ShipLog.shared.onOutcome = nil
         for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
-        // Drain pending main-queue async blocks (status transitions) before clearing the callback,
-        // so they don't fire into the next test's onStatusTransition handler.
+        // Drain pending main-queue async blocks before clearing the callback,
+        // so they don't fire into the next test's onOutcome handler.
         let drained = expectation(description: "main queue drained")
         DispatchQueue.main.async { drained.fulfill() }
         wait(for: [drained], timeout: 1)
-        ShipLog.shared.onStatusTransition = nil
+        ShipLog.shared.onOutcome = nil
         for agent in ShipLog.shared.allSailors() {
             ShipLog.shared.unregister(terminalID: agent.id)
         }
@@ -31,8 +31,10 @@ final class ShipLogIngestTests: XCTestCase {
             branch: "main",
             project: "IngestTest"
         )
-        let report = StatusReport(status: .waiting, lastMessage: "need input", activityEvents: [])
-        ShipLog.shared.ingest(terminalID: "t-ingest-1", report: report, lastUserPrompt: "")
+        ShipLog.shared.ingest(NormalizedEvent(
+            terminalID: "t-ingest-1", source: .scan,
+            kind: .screenObserved(status: .waiting, message: "need input",
+                                  activity: [], commandLine: nil, agentType: .unknown)))
         XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-1")?.status, .waiting)
     }
 
@@ -43,15 +45,19 @@ final class ShipLogIngestTests: XCTestCase {
             branch: "main",
             project: "IngestTest"
         )
-        let report = StatusReport(status: .running, lastMessage: "doing stuff", activityEvents: [])
-        ShipLog.shared.ingest(terminalID: "t-ingest-2", report: report, lastUserPrompt: "")
+        ShipLog.shared.ingest(NormalizedEvent(
+            terminalID: "t-ingest-2", source: .scan,
+            kind: .screenObserved(status: .running, message: "doing stuff",
+                                  activity: [], commandLine: nil, agentType: .unknown)))
         XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-2")?.lastMessage, "doing stuff")
     }
 
     func testIngestForUnknownTerminalIsNoop() {
         // Should not crash for unregistered terminal
-        let report = StatusReport(status: .waiting, lastMessage: "hello", activityEvents: [])
-        ShipLog.shared.ingest(terminalID: "t-nonexistent-99", report: report, lastUserPrompt: "")
+        ShipLog.shared.ingest(NormalizedEvent(
+            terminalID: "t-nonexistent-99", source: .scan,
+            kind: .screenObserved(status: .waiting, message: "hello",
+                                  activity: [], commandLine: nil, agentType: .unknown)))
         XCTAssertNil(ShipLog.shared.sailor(for: "t-nonexistent-99"))
     }
 
@@ -62,8 +68,9 @@ final class ShipLogIngestTests: XCTestCase {
             branch: "main",
             project: "IngestTest"
         )
-        let report = StatusReport(status: .waiting, lastMessage: "waiting", activityEvents: [])
-        ShipLog.shared.ingest(terminalID: "t-ingest-3", report: report, lastUserPrompt: "user asked something")
+        ShipLog.shared.ingest(NormalizedEvent(
+            terminalID: "t-ingest-3", source: .hook("claude-code"),
+            kind: .userPrompt("user asked something")))
         XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-3")?.lastUserPrompt, "user asked something")
     }
 }
