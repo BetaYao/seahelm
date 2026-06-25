@@ -11,6 +11,8 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
+    func dashboardDidRequestBrowseFiles(worktreePath: String)
+    func dashboardDidRequestShowChanges(worktreePath: String)
 }
 
 // MARK: - AgentDisplayInfo
@@ -133,6 +135,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         vc.delegate = self
         return vc
     }()
+
+    // Center overlay
+    private var centerOverlay: CenterOverlayView?
 
     // Empty state
     private let emptyStateView = NSView()
@@ -284,6 +289,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
 
         switch pane {
         case .bridge:   sidePanelVC.selectTab(.firstMate)
+        case .file:     sidePanelVC.selectTab(.files)
+        case .change:   sidePanelVC.selectTab(.changes)
         }
 
         guard isLeftColumnCollapsed else { return }
@@ -961,6 +968,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                 return
             }
             windowKeyboardMode?.beginDelete(agentId: agent.id)
+        case .showChanges:
+            guard let agent = focusedAgent else { return }
+            dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
+        case .browseFiles:
+            guard let agent = focusedAgent else { return }
+            dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
         case .newWorktree:
             // Leave the D-state focus ring before opening the form so no stale card
             // visuals remain and a stray key in the form isn't read as a nav chord.
@@ -1023,6 +1036,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         if isInDState {
             exitDashboardNavigation(restoreSnapshot: false)
         }
+        // Close any open file/diff overlay so the terminal is shown.
+        dismissCenterOverlay()
         // Click selects agent and embeds its split container
         detachTerminals()
         selectedAgentId = agentId
@@ -1046,6 +1061,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     func agentCardDidRequestCloseRepo(agentId: String) {
         guard let agent = agents.first(where: { $0.id == agentId }) else { return }
         dashboardDelegate?.dashboardDidRequestCloseRepo(agent.project)
+    }
+
+    func agentCardDidRequestBrowseFiles(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
+    }
+
+    func agentCardDidRequestShowChanges(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
     }
 
     private func updateMiniCardSelection() {
@@ -1095,6 +1120,55 @@ extension DashboardViewController: MiniCardReorderDelegate {
         // Persist — pass worktree paths directly to avoid ID→AgentHead lookup failures
         dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
+
+    // MARK: - Center Overlay
+
+    /// Shows a full-cover overlay over the center terminal panel.
+    /// Any existing overlay is removed first.
+    @discardableResult
+    func showCenterOverlay(
+        _ content: NSView,
+        title: String,
+        onSave: (() -> Void)? = nil,
+        onPreview: (() -> Void)? = nil
+    ) -> CenterOverlayView {
+        dismissCenterOverlay()
+
+        let overlay = CenterOverlayView(
+            title: title, content: content, onSave: onSave, onPreview: onPreview
+        ) { [weak self] in
+            self?.dismissCenterOverlay()
+        }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        leftRightFocusPanel.addSubview(overlay)
+
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: leftRightFocusPanel.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leftRightFocusPanel.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: leftRightFocusPanel.bottomAnchor),
+        ])
+
+        centerOverlay = overlay
+        overlay.window?.makeFirstResponder(overlay)
+        return overlay
+    }
+
+    /// Removes the center overlay and restores first responder to the active terminal pane.
+    func dismissCenterOverlay() {
+        guard let overlay = centerOverlay else { return }
+        overlay.removeFromSuperview()
+        centerOverlay = nil
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
+            let focusedId = tree.focusedId
+            if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
+               let termView = container.surfaceViews[leaf.surfaceId] {
+                self.view.window?.makeFirstResponder(termView)
+            }
+        }
+    }
 }
 
 extension DashboardViewController: TerminalSurfaceDelegate {
@@ -1114,7 +1188,39 @@ extension DashboardViewController: TerminalSurfaceDelegate {
 
 // MARK: - WorktreeSidePanelDelegate
 
-extension DashboardViewController: WorktreeSidePanelDelegate {}
+extension DashboardViewController: WorktreeSidePanelDelegate {
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
+        let title = URL(fileURLWithPath: path).lastPathComponent
+
+        // Editable, syntax-highlighted editor for UTF-8 text; fall back to the
+        // read-only placeholder for binary / oversized files.
+        guard let editor = CodeEditorView(path: path) else {
+            showCenterOverlay(FileContentView(path: path), title: title)
+            return
+        }
+
+        weak var overlayRef: CenterOverlayView?
+        let overlay = showCenterOverlay(
+            editor,
+            title: title,
+            onSave: { [weak editor] in editor?.save() },
+            onPreview: editor.isPreviewable ? { [weak editor] in
+                guard let editor else { return }
+                overlayRef?.setPreviewing(editor.togglePreview())
+            } : nil
+        )
+        overlayRef = overlay
+        editor.onDirtyChange = { [weak overlay] dirty in
+            overlay?.setDirty(dirty)
+        }
+    }
+
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
+        let worktreePath = agents.first(where: { $0.id == selectedAgentId })?.worktreePath ?? ""
+        let title = "Changes: \(URL(fileURLWithPath: path).lastPathComponent)"
+        showCenterOverlay(DiffReviewView(worktreePath: worktreePath), title: title)
+    }
+}
 
 private final class FlippedStackView: NSStackView {
     override var isFlipped: Bool { true }

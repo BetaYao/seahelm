@@ -19,6 +19,8 @@ enum KeyboardAction: Equatable {
     case jumpToCard(Int)        // 0-based
     case enterTerminal
     case deleteFocused
+    case showChanges
+    case browseFiles
     case newWorktree
 }
 

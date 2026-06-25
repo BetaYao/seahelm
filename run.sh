@@ -32,17 +32,17 @@ if [[ "$CLEAN_RESTART" -eq 1 ]]; then
   rm -rf "$BUILD_DIR"
 fi
 
-echo "==> Building Seamux..."
-xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug \
+echo "==> Building Seahelm..."
+xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   -skipPackagePluginValidation \
   build
 
-APP="$BUILD_DIR/Build/Products/Debug/seamux.app"
+APP="$BUILD_DIR/Build/Products/Debug/seahelm.app"
 
-echo "==> Killing existing Seamux..."
-killall seamux 2>/dev/null || true
+echo "==> Killing existing Seahelm..."
+killall seahelm 2>/dev/null || true
 sleep 1
 
-echo "==> Launching Seamux (Ctrl+C to quit)..."
-"$APP/Contents/MacOS/seamux"
+echo "==> Launching Seahelm (Ctrl+C to quit)..."
+"$APP/Contents/MacOS/seahelm"

@@ -7,10 +7,23 @@ options:
   minimumXcodeGenVersion: "2.40"
   defaultConfig: Debug
 
+packages:
+  CodeEditSourceEditor:
+    url: https://github.com/CodeEditApp/CodeEditSourceEditor
+    exactVersion: 0.15.2
+  CodeEditLanguages:
+    url: https://github.com/CodeEditApp/CodeEditLanguages
+    exactVersion: 0.1.20
+
 targets:
   seahelm:
     type: application
     platform: macOS
+    dependencies:
+      - package: CodeEditSourceEditor
+        product: CodeEditSourceEditor
+      - package: CodeEditLanguages
+        product: CodeEditLanguages
     sources:
       - path: Sources
         type: group

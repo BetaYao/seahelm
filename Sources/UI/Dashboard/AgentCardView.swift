@@ -3,12 +3,16 @@ import AppKit
 protocol AgentCardDelegate: AnyObject {
     func agentCardClicked(agentId: String)
     func agentCardDoubleClicked(agentId: String)
+    func agentCardDidRequestBrowseFiles(agentId: String)
+    func agentCardDidRequestShowChanges(agentId: String)
     func agentCardDidRequestDelete(agentId: String)
     func agentCardDidRequestCloseRepo(agentId: String)
 }
 
 extension AgentCardDelegate {
     func agentCardDoubleClicked(agentId: String) {}
+    func agentCardDidRequestBrowseFiles(agentId: String) {}
+    func agentCardDidRequestShowChanges(agentId: String) {}
     func agentCardDidRequestDelete(agentId: String) {}
     func agentCardDidRequestCloseRepo(agentId: String) {}
 }

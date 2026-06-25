@@ -998,6 +998,14 @@ extension MainWindowController: DashboardDelegate {
         saveConfig()
     }
 
+    func dashboardDidRequestBrowseFiles(worktreePath: String) {
+        tabCoordinator.dashboardVC?.selectLeftPane(.file)
+    }
+
+    func dashboardDidRequestShowChanges(worktreePath: String) {
+        tabCoordinator.dashboardVC?.selectLeftPane(.change)
+    }
+
 }
 
 // MARK: - SplitContainerDelegate

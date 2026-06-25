@@ -4,6 +4,8 @@ import AppKit
 /// (Worktrees are no longer a pane — they live in a title-bar popover.)
 enum LeftPane: Int, CaseIterable {
     case bridge = 0
+    case file = 1
+    case change = 2
 }
 
 protocol TitleBarDelegate: AnyObject {
@@ -152,6 +154,8 @@ final class TitleBarView: NSView {
         // Pane switchers: bridge only.
         let panes: [(LeftPane, String, String)] = [
             (.bridge, "sailboat", "First Mate"),
+            (.file, "folder", "Files"),
+            (.change, "plusminus", "Changes"),
         ]
         for (pane, symbol, label) in panes {
             let btn = NSButton()
