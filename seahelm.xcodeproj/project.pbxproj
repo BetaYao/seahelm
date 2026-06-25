@@ -93,6 +93,7 @@
 		62E1DFF3457248FF5F30594F /* DiffReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27293C9549D95350D5CA8E80 /* DiffReviewView.swift */; };
 		62FF9B7688CD065BE7DEBF35 /* TodoStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC2859D1D589D68F33F0552 /* TodoStoreTests.swift */; };
 		64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */; };
+		65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */; };
 		65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC183C3A20588D380EF62682 /* TabSelectionTests.swift */; };
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
@@ -229,6 +230,7 @@
 		EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */; };
 		EBE5F0C17B4DDC6FBD06BB53 /* ActivityFeedRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */; };
 		EC13CCF117877683F85E52FA /* MenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */; };
+		EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5943C79014C5FE35819487C /* ScanDecoder.swift */; };
 		EF25AD093968ED3CBC4A960B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C6B4297D134649B185BC65 /* DividerView.swift */; };
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
@@ -321,6 +323,7 @@
 		42F821C1D0FA64C98C0E1E1B /* StatusBarModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarModeTests.swift; sourceTree = "<group>"; };
 		446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommandRouterTests.swift; sourceTree = "<group>"; };
 		449EC6B0526B8105F5F11256 /* TitleBarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarPage.swift; sourceTree = "<group>"; };
+		46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoderTests.swift; sourceTree = "<group>"; };
 		4775959C72857610AC1F12DC /* WorktreeStatusAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusAggregator.swift; sourceTree = "<group>"; };
 		47B0201979B7976AC0A77D56 /* ActivityEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEvent.swift; sourceTree = "<group>"; };
 		49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
@@ -415,6 +418,7 @@
 		A1A716BFAF7279E4FF4E5327 /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
 		A49DE692E146DF04DADA3B50 /* WeChatChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatChannel.swift; sourceTree = "<group>"; };
 		A51B009382FE3586E735355D /* CodexHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetup.swift; sourceTree = "<group>"; };
+		A5943C79014C5FE35819487C /* ScanDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoder.swift; sourceTree = "<group>"; };
 		A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineController.swift; sourceTree = "<group>"; };
 		A6F12DC83A838ABCF3346194 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
@@ -698,6 +702,7 @@
 				C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */,
 				9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */,
 				0D19639EE57241F8A021EBD2 /* PaneStatus.swift */,
+				A5943C79014C5FE35819487C /* ScanDecoder.swift */,
 				B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */,
 				ED6A0AE5886DB08F5B0D024C /* StatusDetector.swift */,
 				57EF78A5043DF5162290DDE4 /* StatusPublisher.swift */,
@@ -813,6 +818,7 @@
 				D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */,
 				14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */,
 				5B4CB5436AAB9C042D5AF800 /* ReturnToPortTests.swift */,
+				46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */,
 				03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */,
 				64D9CDBF2943FC278A6A09D2 /* SemVerTests.swift */,
 				DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */,
@@ -1137,6 +1143,7 @@
 				58A4DC34C98D37D2E6B90D09 /* PendingOrdersQueueTests.swift in Sources */,
 				8BB5F6D554A6F5BE68613FBA /* ProcessRunnerTests.swift in Sources */,
 				C309311CA5316E705F68CA77 /* ReturnToPortTests.swift in Sources */,
+				65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */,
 				9ACCE5E25F983F07EEE326A7 /* SeahelmSuggestInstallerTests.swift in Sources */,
 				9EEDB774BA368ABF037C6750 /* SemVerTests.swift in Sources */,
 				88FC5A9FA39ABA172ED4FAD7 /* SessionLaunchCommandTests.swift in Sources */,
@@ -1288,6 +1295,7 @@
 				07D61705F36F11CF9B8CF316 /* ProcessRunner.swift in Sources */,
 				9E70B1DBD63DBC4873DC38EB /* QuickSwitcherViewController.swift in Sources */,
 				7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */,
+				EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */,
 				F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */,
 				0BDECDE46CD02F6B74AD6A16 /* SemVer.swift in Sources */,
 				F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */,
