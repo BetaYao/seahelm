@@ -143,20 +143,16 @@ class ShipLog {
                       lastMessage: String, roundDuration: TimeInterval,
                       tasks: [TaskItem] = [], lastUserPrompt: String = "") {
         lock.lock()
-        guard var info = agents[terminalID] else {
+        guard let current = agents[terminalID] else {
             lock.unlock()
             return
         }
-        let previousStatus = info.status
-        let changed = info.status != status || info.lastMessage != lastMessage
-            || info.tasks.count != tasks.count
-        info.status = status
-        info.lastMessage = lastMessage
-        if !lastUserPrompt.isEmpty {
-            info.lastUserPrompt = lastUserPrompt
-        }
-        info.roundDuration = roundDuration
-        info.tasks = tasks
+        let reduced = SailorReducer.apply(to: current, status: status,
+                                          lastMessage: lastMessage, roundDuration: roundDuration,
+                                          tasks: tasks, lastUserPrompt: lastUserPrompt)
+        let info = reduced.info
+        let previousStatus = reduced.previousStatus
+        let changed = reduced.changed
         agents[terminalID] = info
         let hasExternalChannels = !externalChannels.isEmpty
         lock.unlock()

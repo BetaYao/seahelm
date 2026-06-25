@@ -17,6 +17,8 @@ struct SailorInfo {
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
     var activityEvents: [ActivityEvent] = []
+    var scanStatus: SailorStatus = .unknown   // latest screen-scan observation (component)
+    var hookStatus: SailorStatus = .unknown   // webhook-accumulated inference (component)
 
     /// Total duration computed live from startedAt
     var totalDuration: TimeInterval {

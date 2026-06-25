@@ -111,6 +111,7 @@
 		6F46B38545D8EA067171AF5B /* EditorTheme+Seahelm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */; };
 		6FB485F91B83E2BDF0D1DA3B /* StatusReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F08D704B0AB752F9B8709B /* StatusReport.swift */; };
 		708FA82605788117E6142639 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */; };
+		718906FE9DB3F7AC492BA652 /* SailorReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */; };
 		7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */; };
 		731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */; };
 		73B16CF9CCB46AADB3214B8F /* WorktreeSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2BF20167E8DC36DDF09077 /* WorktreeSidePanelViewController.swift */; };
@@ -148,6 +149,7 @@
 		9B2031117C016123927B4E93 /* CodexUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */; };
 		9B491C853EC9D44767FD6F90 /* PanelCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */; };
 		9B78DBBAF5994540D7C95C0B /* ExternalChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */; };
+		9BC46FE4C86C7A21C60F8F65 /* SailorReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */; };
 		9C55DE7AD6C3DCE23F18B842 /* PendingOrdersQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */; };
 		9D4C05D0F41DC020F00986BA /* SailorDisplayHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */; };
 		9E6B89CACF0F49A0029E3BD1 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = B032E95F9035447EBF27883B /* GitDiff.swift */; };
@@ -423,6 +425,7 @@
 		9DE6E5E60B65B88BB4328F40 /* WeComFrameParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParserTests.swift; sourceTree = "<group>"; };
 		9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
 		9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorActivityTests.swift; sourceTree = "<group>"; };
+		9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducer.swift; sourceTree = "<group>"; };
 		9F66DA28CC57BFA18891872D /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
 		A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
 		A1A716BFAF7279E4FF4E5327 /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
@@ -432,6 +435,7 @@
 		A5943C79014C5FE35819487C /* ScanDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoder.swift; sourceTree = "<group>"; };
 		A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineController.swift; sourceTree = "<group>"; };
 		A6F12DC83A838ABCF3346194 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
+		A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducerTests.swift; sourceTree = "<group>"; };
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		B032E95F9035447EBF27883B /* GitDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiff.swift; sourceTree = "<group>"; };
@@ -575,6 +579,7 @@
 				910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */,
 				83A953BA5BA82E18C03F5294 /* SailorChannel.swift */,
 				BA6D55A3BC776F3500FE595B /* SailorInfo.swift */,
+				9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */,
 				DCDDD8680C8FD209F2BB3CD1 /* SailorStatus.swift */,
 				9B7CFA3A43F14388537AD63B /* SailorType.swift */,
 				E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */,
@@ -827,6 +832,7 @@
 				D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */,
 				14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */,
 				5B4CB5436AAB9C042D5AF800 /* ReturnToPortTests.swift */,
+				A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */,
 				A4307D4828267A1F187FE65E /* SailorTypeTests.swift */,
 				46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */,
 				03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */,
@@ -1155,6 +1161,7 @@
 				58A4DC34C98D37D2E6B90D09 /* PendingOrdersQueueTests.swift in Sources */,
 				8BB5F6D554A6F5BE68613FBA /* ProcessRunnerTests.swift in Sources */,
 				C309311CA5316E705F68CA77 /* ReturnToPortTests.swift in Sources */,
+				718906FE9DB3F7AC492BA652 /* SailorReducerTests.swift in Sources */,
 				F684668DAD5AD32B13566824 /* SailorTypeTests.swift in Sources */,
 				65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */,
 				9ACCE5E25F983F07EEE326A7 /* SeahelmSuggestInstallerTests.swift in Sources */,
@@ -1309,6 +1316,7 @@
 				F4980A324663FD9EF612E785 /* SailorChannel.swift in Sources */,
 				9D4C05D0F41DC020F00986BA /* SailorDisplayHelpers.swift in Sources */,
 				631679E607CF3BC0BD973CD4 /* SailorInfo.swift in Sources */,
+				9BC46FE4C86C7A21C60F8F65 /* SailorReducer.swift in Sources */,
 				B8C02C585F290AD6D6F19006 /* SailorStatus.swift in Sources */,
 				062B7EF5CA8F90AF2091FB7C /* SailorType.swift in Sources */,
 				EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */,
