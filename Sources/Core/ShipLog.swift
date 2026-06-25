@@ -346,12 +346,16 @@ class ShipLog {
 
         hooks?.handleWebhookEvent(event)
 
-        // Extract activity events from tool use events
-        switch event.event {
-        case .toolUseStart, .toolUseEnd, .toolUseFailed:
-            let activityEvent = ActivityEventExtractor.extract(from: event)
-            upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
-        case .agentStop:
+        // Decode the event via HookDecoder and apply activity events
+        let report = HookDecoder(event: event).decode()
+        if let report = report {
+            for activityEvent in report.activityEvents {
+                upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
+            }
+        }
+
+        // agentStop: clear activity buffer and fire completion signal
+        if event.event == .agentStop {
             clearActivityEvents(forTerminalID: tid)
             if let info = agent(for: tid) {
                 let t = StatusTransition(
@@ -361,8 +365,6 @@ class ShipLog {
                     holdSeconds: 0, isCompletionSignal: true)
                 DispatchQueue.main.async { [weak self] in self?.onStatusTransition?(t) }
             }
-        default:
-            break
         }
     }
 
