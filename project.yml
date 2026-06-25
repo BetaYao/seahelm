@@ -1,0 +1,81 @@
+name: seahelm
+options:
+  bundleIdPrefix: com.seahelm
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.1"
+  minimumXcodeGenVersion: "2.40"
+  defaultConfig: Debug
+
+targets:
+  seahelm:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        type: group
+      - path: Assets.xcassets
+      - path: ghostty.h
+        type: file
+        buildPhase: none
+      - path: seahelm-Bridging-Header.h
+        type: file
+        buildPhase: none
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.app
+        PRODUCT_NAME: seahelm
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/seahelm-Bridging-Header.h"
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)"
+        LIBRARY_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64"
+        OTHER_LDFLAGS:
+          - "-lghostty"
+          - "-lc++"
+          - "-framework"
+          - Metal
+          - "-framework"
+          - QuartzCore
+          - "-framework"
+          - IOSurface
+          - "-framework"
+          - UniformTypeIdentifiers
+          - "-framework"
+          - Carbon
+
+  seahelmTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        type: group
+    dependencies:
+      - target: seahelm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  seahelmUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+        type: group
+    dependencies:
+      - target: seahelm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: seahelm

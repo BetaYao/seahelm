@@ -1,0 +1,31 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserdata
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+
+# GhosttyKit build artifacts (symlink to cached build)
+GhosttyKit.xcframework
+
+# Ghostty build output
+ghostty/zig-out/
+ghostty/.zig-cache/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# SPM
+.build/
+.superpowers/
+dist/
+*.profraw
+*.profdata
+*.xccovreport
+*.xccovarchive
+
+# Git worktrees
+.worktrees/
