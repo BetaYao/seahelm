@@ -67,12 +67,13 @@ struct NormalizedEvent {
 
 enum Kind {
     // —— 事件原生 ——
-    case sessionStarted
-    case toolUse(ActivityEvent)               // start/end/failed 都落成一条 activity
-    case userPrompt(String)
-    case taskUpdate([TaskItem])
-    case agentStopped(success: Bool)          // 完成信号来源
-    case notification(level: String, text: String)
+    case sessionStarted(label: String)        // session_start / worktree_create / subagent_start(label 区分文案;不重置 station)
+    case userPrompt(String)                   // user_prompt(用户提交)→ running,存 lastUserPrompt
+    case toolUse(ActivityEvent)               // tool_use_start/end/failed 都落成一条 activity
+    case awaitingInput(String)                // prompt(agent 在等输入)→ waiting  ← 唯一产 waiting 的 hook 事件
+    case agentStopped(success: Bool)          // agent_stop(true) / stop_failure(false);均为完成信号
+    case notification(level: String, text: String)  // notification / error(error 折叠为 level:"error")
+    case taskUpdate([TaskItem])               // 暂无 1:1 webhook 来源,留给 MCP/派生
     case suggest(options: [String])           // agent 拟的候选指令(并入 Order,见第三段)
 
     // —— 状态原生(扫屏)——
@@ -83,6 +84,29 @@ enum Kind {
                         agentType: AgentType)
 }
 ```
+
+> `cwd_changed` **不产 `NormalizedEvent`**:它只更新 `cwd→worktree→tid` 路由表(ingest 之前那层),`HookDecoder` 对它返回 nil。
+
+### 14 种 webhook 事件 → Kind 对齐表(以 `HookDecoder` 现状为基准)
+
+| webhook event | → Kind | reduce 设 `hookStatus` | message / payload | activity | completion |
+|---|---|---|---|---|---|
+| `session_start` | `.sessionStarted("Session started")` | running | label | — | — |
+| `worktree_create` | `.sessionStarted("Creating worktree")` | running | label | — | — |
+| `subagent_start` | `.sessionStarted("Subagent started")` | running | label | — | — |
+| `user_prompt` | `.userPrompt(text)` | running | 存 lastUserPrompt | — | — |
+| `tool_use_start` | `.toolUse(ev)` | running | "Using <tool>" | upsert | — |
+| `tool_use_end` | `.toolUse(ev)` | running | "Done: <tool>" | upsert | — |
+| `tool_use_failed` | `.toolUse(ev)` | running(非 error) | "Failed: <tool>" | upsert | — |
+| `prompt` | `.awaitingInput(text)` | **waiting** | text / "Waiting for input" | — | — |
+| `notification` | `.notification(level, text)` | level→error/waiting,default 不改 | text/title | — | — |
+| `error` | `.notification("error", text)` | error | data.message | — | — |
+| `agent_stop` | `.agentStopped(success: true)` | idle | "Stopped: <reason>" | clear | ✅ |
+| `stop_failure` | `.agentStopped(success: false)` | error | data.error / "API error" | clear | ✅ |
+| `cwd_changed` | (不产事件,仅更路由表) | — | cwd→tid | — | — |
+| `suggest` | `.suggest(options)` | 不改 | options[] | — | — |
+
+**相对现状的行为变化(已确认采纳):** `stop_failure` 从"仅 error 状态"改为 `.agentStopped(success:false)` —— 即它成为**完成信号**(置 `isCompletionSignal`、清 activity),`hookStatus` 落 error。FirstMate 由此能区分"正常完成"与"失败完成"。
 
 ### SignalDecoder 契约
 
@@ -108,8 +132,12 @@ protocol SignalDecoder {
 - **防死循环**:Stop 输入带 `stop_hook_active`;被 block 后第二次 Stop 该字段为 `true`,服务器返回空 `{}` 放行。
 - **状态联动坑**:`stop_hook_active == false` 且触发 block 的那次 Stop **不当 completion 信号**(不置 idle、不清 activity,agent 还要继续);只有 `stop_hook_active == true` 的真 Stop 才走 `.agentStopped` 语义。
 - CLAUDE.md 注入(`SuggestGuidanceWriter`)降级为兜底,主力是 Stop-hook reason。
-- 配置:`config.webhook.suggestOnStop`(默认开)。Codex 的 Stop block 协议未验证,先只在 Claude Code 落地,Codex 标 TODO。
+- 配置:`config.webhook.suggestOnStop`(默认开)。
 - HTTP hook 支持 `decision:block` 已核对 Claude Code 官方机制确认;**无需把 HTTP hook 改成 command hook**。
+- **Codex 协议同款,可移植**(已核对 Codex 官方 hooks 文档):Stop 上 `decision:"block"+reason` 同样生成 continuation prompt,防循环字段也叫 `stop_hook_active`,裁决逻辑两端共用。但两端**传输不同**,Codex 侧有一处必改:
+  - Claude Code 是 `type:"http"`,直接读 HTTP 响应 body,天然拿得到 block JSON。
+  - Codex 是 `type:"command"`,现状命令 `curl ... >/dev/null 2>&1 || true` 把 **stdout 丢弃**,Codex 靠读 stdout 拿决策,故当前永远 no-op。**改 `CodexHooksSetup.hookCommand`:去掉 stdout 的 `>/dev/null`,只压 stderr**(`curl -fsS ... --data-binary @- 2>/dev/null || true`)。
+  - 附带约束:经 Codex command hook 来的请求,server **必须回合法 JSON 或空**(非 block 时回 `{}`),否则 Codex 解析 stdout 报错;http 路径无此约束。
 
 ---
 
@@ -170,11 +198,13 @@ var hookStatus: AgentStatus   // webhook 事件累积出的推断值(由 reduce 
 | 事件 kind | reduce 做的事(原出处) |
 |---|---|
 | `.screenObserved` | 更新 `scanStatus = 观测值`;更新 message/commandLine/agentType/activity;**末尾重算对外 status = highestPriority([scanStatus, hookStatus])** |
-| `.sessionStarted`/`.toolUse(start)` | `hookStatus = running`;`.toolUse` 还 upsert 进 activityEvents 环形缓冲(原 ShipLog:392);末尾重算 |
-| `.agentStopped` | `hookStatus = idle`;置 `isCompletionSignal` delta;清 activity(原 ShipLog:354);末尾重算 |
-| `.userPrompt` | 更新 lastUserPrompt(`.prompt`→`hookStatus = waiting`,见 WebhookEventType 现状) |
-| `.taskUpdate` | 更新 tasks/taskProgress |
-| `.notification` | level → `hookStatus` 参与合并(error→error / warning→waiting);末尾重算 |
+| `.sessionStarted(label)` | `hookStatus = running`;message = label;**不重置** station 状态;末尾重算 |
+| `.userPrompt(text)` | `hookStatus = running`;更新 lastUserPrompt = text;末尾重算 |
+| `.toolUse(ev)` | `hookStatus = running`;upsert ev 进 activityEvents 环形缓冲(原 ShipLog:392);末尾重算 |
+| `.awaitingInput(text)` | `hookStatus = waiting`;message = text;末尾重算 |
+| `.agentStopped(success)` | success ? `hookStatus = idle` : `hookStatus = error`;置 `isCompletionSignal` delta;清 activity(原 ShipLog:354);末尾重算 |
+| `.notification(level, text)` | level → `hookStatus`(error→error / warning→waiting / 其它→不改);message = text;末尾重算 |
+| `.taskUpdate` | 更新 tasks/taskProgress(暂无 webhook 来源) |
 | `.suggest` | **不动 status**,delta 标记带 options 透传给下游 |
 
 ### IngestOutcome(唯一出口)
@@ -283,11 +313,33 @@ struct PendingOrder {
 }
 ```
 
-- 同一队列,按 kind 区分渲染:options 类 → 多选 chips(点一个 = 选定该 order);单动作类 → 批/否按钮。
 - **去重键已拍板**:
   - suggest 类(`kind == .suggestNextOrder`)→ 按 `worktreePath` **覆盖**(新建议替换旧建议,单 worktree 至多一条)—— 沿用原 `SuggestionFeed` 语义。这恰好等价于"`worktreePath + suggestNextOrder`",与下面的规则键自然不冲突。
   - 规则类(`returnToPort` / `broadcastOrder` / `autoCommit` …)→ 按 `worktreePath + kind` **幂等**(已存在则不重复入队)—— 沿用原 `PendingOrdersQueue` 语义。
-- suggest order 与规则 order **可同 worktree 共存**(键不同),不互相覆盖。视觉是否分组留待实现期定。
+- suggest order 与规则 order **可同 worktree 共存**(键不同),不互相覆盖。
+
+### Bridge 面板 UI:Pending Orders 卡片化(统一形态)
+
+红区"单动作 order"与"多选项 suggestion"是**同一种东西**——都是"待你拍板的 red-zone 待办";"批/否"不过是只有两个候选的特例。统一成**一种卡片**,一个 table 到底,**不再有独立 Suggestions 区**。
+
+**红区卡片结构(`OrderCardView`):**
+```
+┌───────────────────────────────  ✕ ┐   ← 角落 ✕:hover 显形 / 键盘 n,= 忽略整条 → resolve(order)
+│ ● seahelm · refactor/pipeline      │   ← 第1行:● project · branch(状态点色 = SailorStatus.color)
+│ Reduce 已抽出,分量合并完成,待确认  │   ← 第2行:lastMessage 短版(最多 2 行 truncate)
+│ [1 跑测试] [2 提 PR] [3 改 reduce] │   ← 按钮行:候选,左起编号 1..N
+└────────────────────────────────────┘
+```
+- `action.options != nil`(suggestion)→ N 个候选按钮;点/按数字 N = `sendCommand(option)` + `resolve(order)`,**无二次确认**(只是选指令)。
+- `action.options == nil`(单动作)→ 一个 `[1 批准]`;点/按 1 = `onApprove(order)`。
+- **危险动作二次确认**:`autoCommit` / `returnToPort` 按 1 后,按钮变 `[!! 确认]`,需再按一次。复用现有 `BridgeConfirmFlow`(expand→execute),仅把"整行变橙"改成"按钮变 `[!! 确认]`"。
+
+**绿区 Watch 扁卡片(`WatchCardView`):**
+- 一行:`图标 project · branch — message`,**无按钮行、无 ✕**(沿用 `x` 清除键)。比红卡矮,视觉自然区分"只通知" vs "要动手"。
+
+**键盘:** `j/k` 跨红卡移动焦点;`1`–`9` 选当前卡片第 N 个候选(单动作的 `[批准]` = 1);`n` 忽略当前卡片;`→` 跳转该 worktree。
+
+**代码影响:** `OrderCellView` → `OrderCardView`;删除独立 Suggestions section/table 与 `SuggestionCellView`;`WatchCellView` → 扁 `WatchCardView`;红区一个 table,按 `action.options` 是否为 nil 渲染不同按钮行;卡片行高自适应。回调 `onApprove: (PendingOrder)` / `onSuggestionTapped: (PendingOrder, String)`。
 
 ### ④ ExternalChannel broadcast(WeCom/WeChat,独立订阅者)
 沿用现状的 `broadcast(text, format:)`,作为第四个订阅者,不分三类。是否按 watch/order 分模板推外部,留作后续单独议题。
@@ -313,7 +365,7 @@ struct PendingOrder {
 3. **`ingest(StatusReport)` → `ingest(NormalizedEvent)`**,产出 `IngestOutcome`;删除 `WebhookStatusProvider.onStatusChanged → scheduleWebhookRefresh` 直连路径,webhook 收口到 `handleWebhookEvent` 一条入口。
 4. **下游改订阅 `IngestOutcome`**:broadcast 改成订阅者薄适配器;FirstMate 入口从 `StatusTransition` 改 `IngestOutcome`(加高频事件过滤);删 `updateStatus` 里的内联 broadcast 与 `onStatusTransition` 直连。
 5. **`SuggestionFeed` 并入 `PendingOrder`**(扩 `options` 字段,按上节去重键)。现状 `SuggestionFeed` 已完整接线(`TabCoordinator`/`BridgePanelViewController`),这是一次真实迁移而非新增。
-6. **suggestion 可靠性:Stop hook 反向触发**(独立于 1–5,可单独做)。改 `WebhookServer` 响应,支持 `Stop` 返回 `decision:block`;加 `suggestOnStop` 配置;处理 `stop_hook_active` 防循环 + 状态联动坑。承接仍走 `seahelm-suggest` shell tool。
+6. **suggestion 可靠性:Stop hook 反向触发**(独立于 1–5,可单独做)。改 `WebhookServer` 响应,支持 `Stop` 返回 `decision:block`;加 `suggestOnStop` 配置;处理 `stop_hook_active` 防循环 + 状态联动坑。承接仍走 `seahelm-suggest` shell tool。Codex 协议同款,但需改 `CodexHooksSetup.hookCommand` 放开 stdout(去掉 `>/dev/null`),且 server 对 command-hook 请求必回合法 JSON 或空 `{}`。
 7. **(未来)`MCPDecoder` / `ShellDecoder`** —— 代码尚无,新增设计,不阻塞 1–6。
 
 ## 雷区(不改)
@@ -331,7 +383,7 @@ struct PendingOrder {
 
 ## 待实现期确认的真实接口(读源定,非占位)
 
-- `WebhookEvent` → `NormalizedEvent.Kind` 各 case 的精确映射(读 `WebhookEvent.swift`、`WebhookStatusProvider.swift`)。
+- ~~`WebhookEvent` → `NormalizedEvent.Kind` 各 case 的精确映射~~ —— **已对齐**,见第一段「14 种 webhook 事件 → Kind 对齐表」。
 - MCP / shell 来源的具体事件载荷与对应 case(读现有 MCP/shell 接入点,若尚无则本段为新增设计)。
 - `PendingOrdersQueue` / `FirstMateCoordinator` 现有接线,改为订阅 `IngestOutcome` 的具体改法。
 - `FirstMate.evaluateTransition` 从现 `evaluate(StatusTransition)` 主体平移。
