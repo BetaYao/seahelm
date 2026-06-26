@@ -387,6 +387,44 @@ class ShipLog {
         DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }
     }
 
+    // MARK: - Background-task tracking (for suggestion gating)
+
+    /// Worktree paths that currently have background work running (subagent / shell / cron).
+    /// While busy, agent suggestions are suppressed — the agent will auto-resume, so it's
+    /// not a real end-of-turn. Source of truth: the Stop/SubagentStop `background_tasks` field,
+    /// plus SubagentStart (which precedes any voluntary seahelm-suggest call).
+    private var backgroundBusy: Set<String> = []
+
+    /// Update background-busy state from any incoming webhook event.
+    func updateBackgroundBusy(from event: WebhookEvent) {
+        switch event.event {
+        case .subagentStart:
+            setBackgroundBusy(cwd: event.cwd, busy: true)
+        case .agentStop, .subagentStop:
+            setBackgroundBusy(cwd: event.cwd, busy: StopHookResponder.hasRunningBackgroundTask(event.data))
+        default:
+            break
+        }
+    }
+
+    /// True if the worktree owning `cwd` currently has background work running.
+    func isBackgroundBusy(cwd: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return false }
+        return backgroundBusy.contains(path)
+    }
+
+    private func setBackgroundBusy(cwd: String, busy: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return }
+        if busy { backgroundBusy.insert(path) } else { backgroundBusy.remove(path) }
+    }
+
+    /// Resolve a cwd to the worktree path it belongs to. Caller must hold `lock`.
+    private func worktreePathLocked(forCwd cwd: String) -> String? {
+        worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.key
+    }
+
     /// Send a command to a specific agent.
     /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
     /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,

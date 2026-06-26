@@ -17,6 +17,7 @@
 		07D61705F36F11CF9B8CF316 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */; };
 		07E1EDC22723371B9A378E85 /* ShipLogIngestOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5BEB6A7FAB71EC076FA2D9 /* ShipLogIngestOutcomeTests.swift */; };
 		08C794DACF3DFA5DA3086EC5 /* FirstMateActionPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE109A6863FFA98DF4B192C7 /* FirstMateActionPayloadTests.swift */; };
+		0B70E1B677DA00DDA3168F2A /* ShipLogBackgroundBusyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55B6549EAB4EF4A5F2D05E3 /* ShipLogBackgroundBusyTests.swift */; };
 		0BDECDE46CD02F6B74AD6A16 /* SemVer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D413F175A4E9C458F6EC77 /* SemVer.swift */; };
 		0C553E03E27CDC10711D9EDD /* NewBranchDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1768F75790892B5D280CBC0 /* NewBranchDialog.swift */; };
 		0DA6D2D48F320DFB8671C67C /* ClaudeStatuslineBridgeInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */; };
@@ -498,6 +499,7 @@
 		D18A2E8441934257374C57B2 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		D241FA217901216F43E4BDBE /* DashboardFocusController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFocusController.swift; sourceTree = "<group>"; };
 		D43DCAEEFB34DDC4D03467C3 /* CodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeEditorView.swift; sourceTree = "<group>"; };
+		D55B6549EAB4EF4A5F2D05E3 /* ShipLogBackgroundBusyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogBackgroundBusyTests.swift; sourceTree = "<group>"; };
 		D56E02C4A6D726C18E655451 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRenderer.swift; sourceTree = "<group>"; };
 		D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEventTests.swift; sourceTree = "<group>"; };
@@ -874,6 +876,7 @@
 				9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */,
 				36FC6278CE9A15F68E6FAE89 /* ShellEscapeTests.swift */,
 				89EF6FF04DDD099C95A100C3 /* ShipLogActivityEventTests.swift */,
+				D55B6549EAB4EF4A5F2D05E3 /* ShipLogBackgroundBusyTests.swift */,
 				7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */,
 				0E5BEB6A7FAB71EC076FA2D9 /* ShipLogIngestOutcomeTests.swift */,
 				5E39B8D0CAEA529E6BA78F29 /* ShipLogIngestTests.swift */,
@@ -1223,6 +1226,7 @@
 				B489F50E6BDE70E1F24CB076 /* SessionTitleLookupTests.swift in Sources */,
 				BCEFB12FC9264290C08C5D51 /* ShellEscapeTests.swift in Sources */,
 				DF8657B7BF0500DF52C1DFB4 /* ShipLogActivityEventTests.swift in Sources */,
+				0B70E1B677DA00DDA3168F2A /* ShipLogBackgroundBusyTests.swift in Sources */,
 				15E702C37FE649AE0B93C724 /* ShipLogExternalTests.swift in Sources */,
 				07E1EDC22723371B9A378E85 /* ShipLogIngestOutcomeTests.swift in Sources */,
 				C0F42D1E677166C1F4CE3642 /* ShipLogIngestTests.swift in Sources */,
