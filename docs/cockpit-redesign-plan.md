@@ -63,9 +63,13 @@
 - [x] tab 元组贯穿 `MainWindowController.refreshWorktreeTabs` → `setWorktreeTabs`。
 - [ ] tab 的按键提示数字(1–5)**延后**，随键位体系一起做。
 
-### WP-6 键位体系（最后阶段，单独设计）
-- [ ] 统一设计开合键、`w`/`?`、overlay 内导航键，处理与现有 hjkl/d/c/f/n 及 INSERT 透传的冲突。
-- [ ] `KeyboardModeController.swift` / `MainWindowController.swift` 接入。
+### WP-6 键位体系 — v1 已落地
+- [x] NORMAL 模式：`space` 开合驾驶舱 · `?` 开合键位帮助 overlay · `Esc` 关闭最上层驾驶舱面（help → cockpit）后再回退原"退出导航"。
+- [x] 驾驶舱命令输入框聚焦时 `Esc`（`cancelOperation`）：先收补全菜单，否则关驾驶舱。
+- [x] 新建 `KeyboardHelpOverlay`（`?` 双栏 NORMAL/HELM 键位图，Bare TUI）。
+- [x] 状态栏 NORMAL hint 增补 `space Helm · ? keys`。
+- [x] INSERT(终端聚焦)下这些键天然透传（dashboard 非响应者）。
+- [ ] **后续可选**：overlay 内 `j/k` 选卡 / `1–3` 选项 / `Tab` Orders↔Watch / `i` 聚焦输入（现卡片被点中时已支持 j/k/1-9；命令输入为主路径）。
 
 ## 验证
 - 单测：`CommandDispatcher`、`computeMenu` 补全（纯逻辑可 TDD）。

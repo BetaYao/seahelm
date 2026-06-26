@@ -182,6 +182,10 @@ final class HelmCockpitController: NSViewController {
             self?.hideMenu()
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
+        commandInput.onCancel = { [weak self] in
+            guard let self else { return }
+            if self.menuContainer.isHidden == false { self.hideMenu() } else { self.closeTopmost() }
+        }
 
         NSLayoutConstraint.activate([
             // Panel anchored bottom-center, fixed width, capped height.
@@ -303,6 +307,45 @@ final class HelmCockpitController: NSViewController {
             orb.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             orb.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
         ])
+    }
+
+    // MARK: - Keyboard entry points
+
+    private var helpOverlay: KeyboardHelpOverlay?
+
+    /// Toggle the command center (bound to `space` in dashboard NORMAL mode).
+    func toggleCockpit() { toggle() }
+
+    /// Open the center on the Watch tab (bound to `w`). For now just opens it.
+    func openCockpit() { if !isOpen { toggle() } }
+
+    /// Toggle the `?` keyboard help overlay.
+    func toggleHelp() {
+        if helpOverlay != nil { dismissHelp(); return }
+        let overlay = KeyboardHelpOverlay()
+        overlay.onDismiss = { [weak self] in self?.dismissHelp() }
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        helpOverlay = overlay
+    }
+
+    private func dismissHelp() {
+        helpOverlay?.removeFromSuperview()
+        helpOverlay = nil
+    }
+
+    /// Esc handler: close the topmost cockpit surface. Returns true if it closed
+    /// something (so the caller stops propagating the Esc).
+    @discardableResult
+    func closeTopmost() -> Bool {
+        if helpOverlay != nil { dismissHelp(); return true }
+        if isOpen { toggle(); return true }
+        return false
     }
 
     // MARK: - Open / close

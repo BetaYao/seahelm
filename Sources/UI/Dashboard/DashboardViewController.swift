@@ -942,6 +942,21 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
         }
 
+        // Helm cockpit keys (NORMAL mode). space toggles the cockpit, ? the help
+        // overlay; Esc closes the topmost cockpit surface before falling back to
+        // the legacy "exit nav" behavior.
+        if event.keyCode == 53 {  // Esc
+            if helmCockpit.closeTopmost() { return }
+        }
+        if flags.isDisjoint(with: [.command, .control, .option]) {
+            if event.keyCode == 49 {  // space
+                helmCockpit.toggleCockpit(); return
+            }
+            if event.characters == "?" {
+                helmCockpit.toggleHelp(); return
+            }
+        }
+
         // Escape with no pending → exit nav (legacy behavior)
         if event.keyCode == 53 && flags.isEmpty {
             exitDashboardNavigation(restoreSnapshot: true); return

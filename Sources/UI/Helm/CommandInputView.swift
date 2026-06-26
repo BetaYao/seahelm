@@ -15,6 +15,8 @@ final class CommandInputView: NSView {
 
     var onTextChanged: ((String) -> Void)?
     var onSubmit: ((String) -> Void)?
+    /// Esc pressed while the field is focused (used to close the cockpit).
+    var onCancel: (() -> Void)?
 
     private let field = NSTextField()
 
@@ -110,5 +112,13 @@ final class CommandInputView: NSView {
 extension CommandInputView: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         onTextChanged?(field.stringValue)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            onCancel?()
+            return true
+        }
+        return false
     }
 }

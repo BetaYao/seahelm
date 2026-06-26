@@ -84,7 +84,7 @@ final class KeyboardModeController {
             case .insert:
                 return "INSERT  ·  \u{2318}esc \u{2192} normal"
             case .normal:
-                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter term  ·  \u{2318}esc back  ·  d del  ·  c diff  ·  f files  ·  n new"
+                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter term  ·  space Helm  ·  d del  ·  c diff  ·  f files  ·  n new  ·  ? keys"
             }
         }
     }
