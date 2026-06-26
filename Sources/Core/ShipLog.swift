@@ -372,12 +372,19 @@ class ShipLog {
 
     // MARK: - Channel Communication
 
-    /// Send a command to a specific agent
+    /// Send a command to a specific agent.
+    /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
+    /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,
+    /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
+    /// only when the surface isn't available (e.g. pane not currently rendered).
     func sendCommand(to terminalID: String, command: String) {
+        if let station = StationRegistry.shared.station(forId: terminalID) {
+            DispatchQueue.main.async { station.sendText(command + "\r") }
+            return
+        }
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
-
         channel?.sendCommand(command)
     }
 
