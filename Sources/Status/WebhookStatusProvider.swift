@@ -239,6 +239,8 @@ class WebhookStatusProvider {
             return data?["error"] as? String ?? "API error"
         case .subagentStart:
             return "Subagent started"
+        case .subagentStop:
+            return nil
         case .cwdChanged:
             return nil
         case .suggest:

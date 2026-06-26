@@ -47,6 +47,8 @@ struct HookDecoder: SignalDecoder {
             return event.data?["error"] as? String ?? "API error"
         case .subagentStart:
             return "Subagent started"
+        case .subagentStop:
+            return nil
         case .cwdChanged:
             return nil
         case .suggest:
@@ -83,7 +85,8 @@ struct HookDecoder: SignalDecoder {
         case .suggest:
             let options = (event.data?["options"] as? [String]) ?? []
             return .suggest(options: options)
-        case .cwdChanged:
+        case .subagentStop, .cwdChanged:
+            // A subagent finishing must not drive the main station's status.
             return nil
         }
     }
