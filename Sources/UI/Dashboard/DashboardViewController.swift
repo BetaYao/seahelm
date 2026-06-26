@@ -90,7 +90,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private var leftColumnWidthCollapsed: NSLayoutConstraint?
     private var isLeftColumnCollapsed = false
     /// Which of the panes the left column currently shows.
-    private var currentLeftPane: LeftPane = .bridge
+    private var currentLeftPane: LeftPane = .file
 
     /// Worktree paths idle > 8h — collapsed under the expander in the popover list.
     var idleWorktreePaths: Set<String> = []
@@ -131,13 +131,17 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // bridge/file/change side panel (one pane visible at a time).
     private let leftColumnContainer = NSView()
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
-        let vc = WorktreeSidePanelViewController(worktreePath: nil)
+        let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
         return vc
     }()
 
     // Center overlay
     private var centerOverlay: CenterOverlayView?
+
+    // Helm cockpit (WP-2) — bottom-center radar orb + floating command center,
+    // layered on top of everything. Fed the live queue/feed by MainWindowController.
+    private(set) lazy var helmCockpit = HelmCockpitController()
 
     // Empty state
     private let emptyStateView = NSView()
@@ -159,6 +163,26 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         // Show the 3-column layout immediately; hide empty state
         leftRightContainer.isHidden = false
+
+        // DISABLED: installing the Helm cockpit here prevents the main window
+        // from ever being ordered on-screen (window is created but stays
+        // off-screen with blank content). Re-enable once HelmCockpitController /
+        // its eager BridgePanelViewController view-load is fixed.
+        // installHelmCockpit(in: root)
+    }
+
+    /// Layer the Helm cockpit on top of the whole dashboard. Its container passes
+    /// clicks through everywhere except the orb and the open command panel.
+    private func installHelmCockpit(in root: NSView) {
+        addChild(helmCockpit)
+        helmCockpit.view.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(helmCockpit.view)
+        NSLayoutConstraint.activate([
+            helmCockpit.view.topAnchor.constraint(equalTo: root.topAnchor),
+            helmCockpit.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            helmCockpit.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            helmCockpit.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
     }
 
     // MARK: - Public API
@@ -281,14 +305,15 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
 
-        let isBridge = (pane == .bridge)
-        // The status + input bar belongs to the bridge pane only.
-        leftBottomBar.isHidden = !isBridge
-        sidePanelBottomToBar?.isActive = isBridge
-        sidePanelBottomToContainer?.isActive = !isBridge
+        // The fleet-status + new-worktree bar used to live only on the bridge pane;
+        // First Mate moved to the Helm cockpit, so the bar is now always visible
+        // (worktree creation must stay reachable on Files/Changes).
+        leftBottomBar.isHidden = false
+        sidePanelBottomToBar?.isActive = true
+        sidePanelBottomToContainer?.isActive = false
 
         switch pane {
-        case .bridge:   sidePanelVC.selectTab(.firstMate)
+        case .bridge:   sidePanelVC.selectTab(.files)  // legacy enum value — bridge tab removed
         case .file:     sidePanelVC.selectTab(.files)
         case .change:   sidePanelVC.selectTab(.changes)
         }
@@ -659,8 +684,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         sidePanelBottomToBar = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftBottomBar.topAnchor, constant: -6)
         sidePanelBottomToContainer = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor)
 
-        // Default to the bridge (First Mate) pane.
-        selectLeftPane(.bridge)
+        // Default to the Files pane (First Mate now lives in the Helm cockpit).
+        selectLeftPane(.file)
     }
 
     private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {

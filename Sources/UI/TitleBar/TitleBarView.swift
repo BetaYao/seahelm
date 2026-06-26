@@ -51,7 +51,7 @@ final class TitleBarView: NSView {
     private let leftClusterStack = NSStackView()
     private let themeButton = NSButton()
     private var paneButtons: [LeftPane: NSButton] = [:]
-    private var selectedLeftPane: LeftPane = .bridge
+    private var selectedLeftPane: LeftPane = .file
 
     // Fixed worktree-list icon at the front of the tab strip; opens a popover.
     private let tabWorktreeButton = NSButton()
@@ -151,9 +151,9 @@ final class TitleBarView: NSView {
                                action: #selector(themeClicked))
         leftClusterStack.addArrangedSubview(themeButton)
 
-        // Pane switchers: bridge only.
+        // Pane switchers. First Mate moved to the bottom-center Helm cockpit, so
+        // the sailboat tab is gone; Files + Changes remain.
         let panes: [(LeftPane, String, String)] = [
-            (.bridge, "sailboat", "First Mate"),
             (.file, "folder", "Files"),
             (.change, "plusminus", "Changes"),
         ]
@@ -253,7 +253,7 @@ final class TitleBarView: NSView {
         ])
     }
 
-    func setWorktreeTabs(_ tabs: [(path: String, title: String, statusColor: NSColor, isSelected: Bool, collapsed: Bool)]) {
+    func setWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, isSelected: Bool, collapsed: Bool)]) {
         worktreeTabPaths = tabs.map(\.path)
         tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -262,7 +262,9 @@ final class TitleBarView: NSView {
 
         var selectedButton: WorktreeTabButton?
         for tab in active {
-            let btn = WorktreeTabButton(path: tab.path, title: tab.title, statusColor: tab.statusColor, isSelected: tab.isSelected)
+            let btn = WorktreeTabButton(path: tab.path, title: tab.title,
+                                        agentGlyph: tab.agentGlyph, agentColor: tab.agentColor,
+                                        statusColor: tab.statusColor, isSelected: tab.isSelected)
             btn.onTap = { [weak self] path in
                 self?.delegate?.titleBarDidSelectWorktree(path)
             }
@@ -530,10 +532,11 @@ private final class WorktreeTabButton: NSView {
     var onTap: ((String) -> Void)?
     private let path: String
     private let dotView = NSView()
+    private let glyphLabel = NSTextField(labelWithString: "")
     private let label = NSTextField(labelWithString: "")
     private var hovered = false
 
-    init(path: String, title: String, statusColor: NSColor, isSelected: Bool) {
+    init(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, isSelected: Bool) {
         self.path = path
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -545,6 +548,14 @@ private final class WorktreeTabButton: NSView {
         dotView.layer?.backgroundColor = statusColor.cgColor
         dotView.translatesAutoresizingMaskIntoConstraints = false
 
+        // Agent sigil (✻ Claude / ⟡ Codex / …). Hidden when there's no AI agent.
+        glyphLabel.font = AppFont.mono(size: 11, weight: .bold)
+        glyphLabel.textColor = agentColor
+        glyphLabel.alignment = .center
+        glyphLabel.translatesAutoresizingMaskIntoConstraints = false
+        glyphLabel.stringValue = agentGlyph ?? ""
+        glyphLabel.isHidden = (agentGlyph == nil)
+
         label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         label.textColor = isSelected ? SemanticColors.text : SemanticColors.muted
         label.lineBreakMode = .byTruncatingTail
@@ -554,14 +565,22 @@ private final class WorktreeTabButton: NSView {
         label.stringValue = title
 
         addSubview(dotView)
+        addSubview(glyphLabel)
         addSubview(label)
+
+        // When the glyph is hidden it collapses to zero width so the title sits
+        // right after the dot.
+        let glyphWidth = glyphLabel.widthAnchor.constraint(equalToConstant: agentGlyph == nil ? 0 : 12)
 
         NSLayoutConstraint.activate([
             dotView.widthAnchor.constraint(equalToConstant: 6),
             dotView.heightAnchor.constraint(equalToConstant: 6),
             dotView.centerYAnchor.constraint(equalTo: centerYAnchor),
             dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            label.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 4),
+            glyphLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 4),
+            glyphLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            glyphWidth,
+            label.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: agentGlyph == nil ? 0 : 4),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(equalToConstant: 22),

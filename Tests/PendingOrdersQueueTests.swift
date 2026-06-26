@@ -40,7 +40,7 @@ final class PendingOrdersQueueTests: XCTestCase {
     func testOnChangeFiresOnEnqueueAndResolve() {
         let q = PendingOrdersQueue()
         var count = 0
-        q.onChange = { count += 1 }
+        q.addObserver({ count += 1 })
         q.enqueue(action(.suggestNextOrder))
         let id = q.all()[0].id
         q.resolve(id: id)

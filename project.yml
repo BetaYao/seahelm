@@ -27,6 +27,7 @@ targets:
     sources:
       - path: Sources
         type: group
+      - path: Resources/Fonts
       - path: Assets.xcassets
       - path: ghostty.h
         type: file

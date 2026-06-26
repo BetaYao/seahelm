@@ -15,7 +15,25 @@ struct WatchItem: Equatable, Identifiable {
 final class WatchFeed {
     private var items: [WatchItem] = []
     private var counter = 0
-    var onChange: (() -> Void)?
+
+    /// Multiple surfaces observe the feed (sidebar First Mate tab + Helm cockpit).
+    /// Token-based so a recreated observer can unregister its old closure.
+    private var observers: [Int: () -> Void] = [:]
+    private var nextToken = 0
+
+    @discardableResult
+    func addObserver(_ block: @escaping () -> Void) -> Int {
+        let token = nextToken
+        nextToken += 1
+        observers[token] = block
+        return token
+    }
+
+    func removeObserver(_ token: Int?) {
+        if let token { observers.removeValue(forKey: token) }
+    }
+
+    private func notify() { observers.values.forEach { $0() } }
 
     func record(_ action: FirstMateAction) {
         let id = "\(action.worktreePath)#\(action.kind)"
@@ -32,7 +50,7 @@ final class WatchFeed {
             items.sort { $0.seq < $1.seq }
             items = Array(items.dropFirst(items.count - 20))
         }
-        onChange?()
+        notify()
     }
 
     func all() -> [WatchItem] {
@@ -42,6 +60,6 @@ final class WatchFeed {
     func clear(id: String) {
         let before = items.count
         items.removeAll { $0.id == id }
-        if items.count != before { onChange?() }
+        if items.count != before { notify() }
     }
 }

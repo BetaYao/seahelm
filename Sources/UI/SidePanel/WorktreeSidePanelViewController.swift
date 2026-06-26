@@ -66,8 +66,8 @@ final class WorktreeSidePanelViewController: NSViewController {
         tabBar.distribution = .fillEqually
         tabBar.translatesAutoresizingMaskIntoConstraints = false
 
+        // First Mate moved to the Helm cockpit; only Files + Changes remain here.
         let tabs: [(SidePanelTab, String, String)] = [
-            (.firstMate, "sailboat", "First Mate"),
             (.files, "folder", "Files"),
             (.changes, "list.bullet.rectangle", "Changes"),
         ]
@@ -369,7 +369,7 @@ extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDel
             cellView.identifier = id
 
             let badgeLabel = NSTextField(labelWithString: "")
-            badgeLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            badgeLabel.font = AppFont.mono(size: 11, weight: .semibold)
             badgeLabel.translatesAutoresizingMaskIntoConstraints = false
             badgeLabel.tag = 100
 

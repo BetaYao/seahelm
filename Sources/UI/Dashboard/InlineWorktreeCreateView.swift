@@ -107,7 +107,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         applyColors()
 
         promptTextView.placeholderString = "Describe the task…"
-        promptTextView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        promptTextView.font = AppFont.mono(size: 13, weight: .regular)
         promptTextView.delegate = self
         promptTextView.translatesAutoresizingMaskIntoConstraints = false
         promptTextView.onFocusChange = { [weak self] focused in
@@ -791,7 +791,7 @@ private final class PromptTextView: NSTextView {
 
     func setPlainText(_ value: String) {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .font: font ?? AppFont.mono(size: 13, weight: .regular),
             .foregroundColor: textColor ?? SemanticColors.text
         ]
         textStorage?.setAttributedString(NSAttributedString(string: value, attributes: attributes))
@@ -824,7 +824,7 @@ private final class PromptTextView: NSTextView {
         guard plainText.isEmpty, !placeholderString.isEmpty else { return }
 
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .font: font ?? AppFont.mono(size: 13, weight: .regular),
             .foregroundColor: SemanticColors.muted
         ]
         placeholderString.draw(

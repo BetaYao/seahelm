@@ -43,7 +43,7 @@ final class FileContentView: NSView {
         textView.isSelectable = true
         textView.backgroundColor = SemanticColors.panel
         textView.textColor = SemanticColors.text
-        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        textView.font = AppFont.mono(size: NSFont.smallSystemFontSize, weight: .regular)
         textView.string = text
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = true

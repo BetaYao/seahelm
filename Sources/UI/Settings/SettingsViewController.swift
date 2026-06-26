@@ -177,7 +177,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(cacheLabel)
 
         cacheSizeField.stringValue = "\(config.terminalRowCacheSize)"
-        cacheSizeField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        cacheSizeField.font = AppFont.mono(size: 12, weight: .regular)
         cacheSizeField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(cacheSizeField)
 
@@ -236,7 +236,7 @@ class SettingsViewController: NSViewController {
 
         ruleTextView.isEditable = true
         ruleTextView.isSelectable = true
-        ruleTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        ruleTextView.font = AppFont.mono(size: 11, weight: .regular)
         ruleTextView.textContainerInset = NSSize(width: 6, height: 6)
         ruleTextView.isAutomaticQuoteSubstitutionEnabled = false
         ruleTextView.isAutomaticDashSubstitutionEnabled = false
@@ -284,7 +284,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(botIdLabel)
 
         wecomBotIdField.placeholderString = "aib-xxxxxxxx"
-        wecomBotIdField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wecomBotIdField.font = AppFont.mono(size: 12, weight: .regular)
         wecomBotIdField.stringValue = config.wecomBot?.botId ?? ""
         wecomBotIdField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wecomBotIdField)
@@ -296,7 +296,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(secretLabel)
 
         wecomSecretField.placeholderString = "认证密钥"
-        wecomSecretField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wecomSecretField.font = AppFont.mono(size: 12, weight: .regular)
         wecomSecretField.stringValue = config.wecomBot?.secret ?? ""
         wecomSecretField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wecomSecretField)
@@ -378,7 +378,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(tokenLabel)
 
         wechatTokenField.placeholderString = "QR 扫码获取的 bot_token"
-        wechatTokenField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wechatTokenField.font = AppFont.mono(size: 12, weight: .regular)
         wechatTokenField.stringValue = config.wechat?.botToken ?? ""
         wechatTokenField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wechatTokenField)
@@ -505,7 +505,7 @@ extension SettingsViewController: NSTableViewDelegate {
         let cell = NSView()
 
         let label = NSTextField(labelWithString: path)
-        label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        label.font = AppFont.mono(size: 11, weight: .regular)
         label.textColor = Theme.textPrimary
         label.lineBreakMode = .byTruncatingHead
         label.frame = NSRect(x: 4, y: 1, width: 500, height: 20)

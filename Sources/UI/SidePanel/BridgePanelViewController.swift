@@ -5,13 +5,31 @@ import AppKit
 final class BridgePanelViewController: NSViewController {
 
     var queue: PendingOrdersQueue? {
-        didSet { rebind() }
+        didSet {
+            oldValue?.removeObserver(queueToken); queueToken = nil
+            rebind()
+        }
     }
     var watchFeed: WatchFeed? {
-        didSet { rebindWatch() }
+        didSet {
+            oldValue?.removeObserver(watchToken); watchToken = nil
+            rebindWatch()
+        }
+    }
+
+    private var queueToken: Int?
+    private var watchToken: Int?
+
+    deinit {
+        queue?.removeObserver(queueToken)
+        watchFeed?.removeObserver(watchToken)
     }
     var onNavigateToWorktree: ((String) -> Void)?
     var onApprove: ((PendingOrder) -> Void)?
+    /// Fired after each reload with the current pending-order count. Lets a host
+    /// (e.g. the Helm cockpit orb badge) reflect the count without taking over the
+    /// queue's single `onChange` closure.
+    var onOrdersCountChanged: ((Int) -> Void)?
     /// Called when the user picks a suggestion chip. The handler is responsible for resolving the order (e.g. via queue.resolve) after acting.
     var onSuggestionTapped: ((PendingOrder, String) -> Void)?
 
@@ -194,14 +212,14 @@ final class BridgePanelViewController: NSViewController {
     // MARK: - Data
 
     private func rebind() {
-        queue?.onChange = { [weak self] in
+        queueToken = queue?.addObserver { [weak self] in
             DispatchQueue.main.async { self?.reload() }
         }
         if isViewLoaded { reload() }
     }
 
     private func rebindWatch() {
-        watchFeed?.onChange = { [weak self] in
+        watchToken = watchFeed?.addObserver { [weak self] in
             DispatchQueue.main.async { self?.reloadWatch() }
         }
         if isViewLoaded { reloadWatch() }
@@ -211,6 +229,7 @@ final class BridgePanelViewController: NSViewController {
         pendingOrders = queue?.all() ?? []
         ordersHeader.stringValue = "Pending Orders · \(pendingOrders.count)"
         ordersTableView.reloadData()
+        onOrdersCountChanged?(pendingOrders.count)
     }
 
     private func reloadWatch() {
@@ -484,7 +503,7 @@ private final class WatchCardView: NSTableCellView {
         iconLabel.font = NSFont.systemFont(ofSize: 11)
         iconLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        branchLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        branchLabel.font = AppFont.mono(size: 11, weight: .medium)
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
 
