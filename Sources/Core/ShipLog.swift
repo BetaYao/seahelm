@@ -382,6 +382,7 @@ class ShipLog {
         let tid = worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
         guard let tid, var info = agents[tid] else { lock.unlock(); return }
         info.lastMessage = trimmed
+        info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
         agents[tid] = info
         lock.unlock()
         DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }

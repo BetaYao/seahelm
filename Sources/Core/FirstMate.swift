@@ -61,9 +61,11 @@ enum FirstMate {
             guard !options.isEmpty else { return [] }
             let i = outcome.info
             // Short summary of the agent's final message above the option buttons so the user
-            // has context to choose. Sourced from the Stop hook's last_assistant_message
-            // (stashed into lastMessage by the blocking Stop); the card truncates to 2 lines.
-            let summary = String(i.lastMessage.prefix(200))
+            // has context to choose. Prefer lastAssistantMessage (Stop hook's
+            // last_assistant_message, never clobbered by screen scans) over lastMessage,
+            // which a poll may have overwritten with the `seahelm-suggest …` command line.
+            let prose = i.lastAssistantMessage.isEmpty ? i.lastMessage : i.lastAssistantMessage
+            let summary = String(prose.prefix(200))
             return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
