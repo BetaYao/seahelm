@@ -69,7 +69,7 @@
 - [x] 新建 `KeyboardHelpOverlay`（`?` 双栏 NORMAL/HELM 键位图，Bare TUI）。
 - [x] 状态栏 NORMAL hint 增补 `space Helm · ? keys`。
 - [x] INSERT(终端聚焦)下这些键天然透传（dashboard 非响应者）。
-- [ ] **后续可选**：overlay 内 `j/k` 选卡 / `1–3` 选项 / `Tab` Orders↔Watch / `i` 聚焦输入（现卡片被点中时已支持 j/k/1-9；命令输入为主路径）。
+- [x] **overlay 内全键盘导航**：驾驶舱打开即进"导航态"（聚焦 Orders 表，非输入框）；`j/k` 选卡 · `1–9` 选项 · `n` 关单 · `x` 清 watch · `→` 跳 worktree（复用 bridge 既有逻辑）· `Tab` 在 Orders/Watch 表间切焦点（`insertTab:`）· `i` 聚焦命令输入框 · `Esc` 两级（输入框→收菜单/回导航；导航→关驾驶舱，经 `cancelOperation:`）。
 
 ## 验证
 - 单测：`CommandDispatcher`、`computeMenu` 补全（纯逻辑可 TDD）。

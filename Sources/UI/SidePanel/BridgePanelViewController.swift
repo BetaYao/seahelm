@@ -240,6 +240,25 @@ final class BridgePanelViewController: NSViewController {
 
     // MARK: - Keyboard
 
+    /// `i` pressed while a table is focused — host focuses the command input.
+    var onFocusInput: (() -> Void)?
+    /// Esc pressed while a table is focused — host closes the cockpit.
+    var onEscape: (() -> Void)?
+
+    /// Make the Orders table the keyboard responder (used when the cockpit opens
+    /// in navigation mode rather than focusing the command input).
+    func focusOrdersTable() {
+        view.window?.makeFirstResponder(ordersTableView)
+        if ordersTableView.numberOfRows > 0, ordersTableView.selectedRow < 0 {
+            ordersTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+    }
+
+    // Esc / Tab arrive as responder-chain actions (NSTableView maps them via
+    // interpretKeyEvents rather than bubbling raw keyDown).
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
+    override func insertTab(_ sender: Any?) { toggleActiveTable() }
+
     override func keyDown(with event: NSEvent) {
         guard let key = event.characters else { super.keyDown(with: event); return }
 
@@ -248,6 +267,8 @@ final class BridgePanelViewController: NSViewController {
             : (watchTableView.window?.firstResponder === watchTableView ? watchTableView : ordersTableView)
 
         switch key {
+        case "i":
+            onFocusInput?()
         case "j":
             moveSelection(in: activeTable, by: 1)
         case "k":
@@ -264,6 +285,16 @@ final class BridgePanelViewController: NSViewController {
             } else {
                 super.keyDown(with: event)
             }
+        }
+    }
+
+    /// Tab switches keyboard focus between the Orders and Watch tables.
+    private func toggleActiveTable() {
+        let toWatch = ordersTableView.window?.firstResponder === ordersTableView
+        let target = toWatch ? watchTableView : ordersTableView
+        view.window?.makeFirstResponder(target)
+        if target.numberOfRows > 0, target.selectedRow < 0 {
+            target.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         }
     }
 

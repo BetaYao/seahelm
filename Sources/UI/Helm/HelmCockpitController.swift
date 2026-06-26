@@ -184,8 +184,15 @@ final class HelmCockpitController: NSViewController {
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onCancel = { [weak self] in
             guard let self else { return }
-            if self.menuContainer.isHidden == false { self.hideMenu() } else { self.closeTopmost() }
+            // Esc in the input: collapse the menu first; otherwise step back to
+            // table navigation (a second Esc there closes the cockpit).
+            if !self.menuContainer.isHidden { self.hideMenu() }
+            else { self.bridgeVC.focusOrdersTable() }
         }
+
+        // Keyboard navigation hooks (i focuses input, Esc closes the cockpit).
+        bridgeVC.onFocusInput = { [weak self] in self?.commandInput.focusInput() }
+        bridgeVC.onEscape = { [weak self] in self?.closeTopmost() }
 
         NSLayoutConstraint.activate([
             // Panel anchored bottom-center, fixed width, capped height.
@@ -358,7 +365,9 @@ final class HelmCockpitController: NSViewController {
         panel.isHidden = !isOpen
         if isOpen {
             dismissCard()  // opening the cockpit supersedes any transient card
-            DispatchQueue.main.async { [weak self] in self?.commandInput.focusInput() }
+            // Open in navigation mode: j/k select cards, 1–9 pick options,
+            // Tab switches Orders/Watch, i focuses the command input, Esc closes.
+            DispatchQueue.main.async { [weak self] in self?.bridgeVC.focusOrdersTable() }
         } else {
             hideMenu()
         }
