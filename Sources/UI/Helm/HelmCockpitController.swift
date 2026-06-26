@@ -101,9 +101,12 @@ final class HelmCockpitController: NSViewController {
         root.translatesAutoresizingMaskIntoConstraints = false
         view = root
 
+        // Orb must be in the hierarchy before the panel: setupPanel activates a
+        // `panel.bottom == orb.top` constraint, which throws (no common ancestor)
+        // if orb hasn't been added yet.
         setupScrim(in: root)
-        setupPanel(in: root)
         setupOrb(in: root)
+        setupPanel(in: root)
 
         bridgeVC.onOrdersCountChanged = { [weak self] count in self?.orb.setBadge(count) }
     }

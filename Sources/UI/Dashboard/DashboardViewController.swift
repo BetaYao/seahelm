@@ -164,11 +164,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // Show the 3-column layout immediately; hide empty state
         leftRightContainer.isHidden = false
 
-        // DISABLED: installing the Helm cockpit here prevents the main window
-        // from ever being ordered on-screen (window is created but stays
-        // off-screen with blank content). Re-enable once HelmCockpitController /
-        // its eager BridgePanelViewController view-load is fixed.
-        // installHelmCockpit(in: root)
+        // Re-enabled: the off-screen-window regression was an NSException thrown
+        // in HelmCockpitController.loadView (a panel↔orb constraint activated
+        // before the orb was in the hierarchy). Fixed by ordering setupOrb first.
+        installHelmCockpit(in: root)
     }
 
     /// Layer the Helm cockpit on top of the whole dashboard. Its container passes
