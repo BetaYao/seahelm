@@ -17,7 +17,9 @@ final class HelmCockpitController: NSViewController {
     private static let scrim      = NSColor(srgbRed: 0x03/255, green: 0x10/255, blue: 0x15/255, alpha: 0.6)
     private static let radar      = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
     private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
+    private static let inkDim      = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)
     private static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
+    private static let onAccent   = NSColor(srgbRed: 0x06/255, green: 0x20/255, blue: 0x28/255, alpha: 1)
 
     // MARK: - Passthrough container
 
@@ -71,6 +73,9 @@ final class HelmCockpitController: NSViewController {
     /// query, returns matching (name, desc) rows.
     var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
 
+    /// Drive the radar sweep: animate while any agent is running/waiting.
+    func setRadarActive(_ active: Bool) { orb.setActive(active) }
+
     // MARK: - Views
 
     private let orb = HelmOrbView()
@@ -78,7 +83,18 @@ final class HelmCockpitController: NSViewController {
     private let panel = NSView()
     private let commandInput = CommandInputView()
     private let menuContainer = NSView()
+    private let ordersTab = NSButton()
+    private let watchTab = NSButton()
+    private var section: BridgePanelViewController.Section = .orders
     private var isOpen = false
+
+    // Autocomplete menu state (for keyboard navigation).
+    private var menuRows: [MenuRowButton] = []
+    private var menuItems: [(name: String, desc: String)] = []
+    private var menuSel = 0
+    private var menuTrigger: Character = "/"
+    private var menuToken = ""
+    private var menuFullText = ""
 
     // Floating-card state
     private var seenOrderIds: Set<String> = []
@@ -147,6 +163,25 @@ final class HelmCockpitController: NSViewController {
         title.textColor = Self.ink
         title.translatesAutoresizingMaskIntoConstraints = false
 
+        let subtitle = NSTextField(labelWithString: "· 舰长的舵手")
+        subtitle.font = AppFont.mono(size: 11, weight: .regular)
+        subtitle.textColor = Self.inkFaint
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+
+        // Orders / Watch segmented tabs.
+        for (btn, sel) in [(ordersTab, #selector(selectOrders)), (watchTab, #selector(selectWatch))] {
+            btn.isBordered = false
+            btn.wantsLayer = true
+            btn.layer?.cornerRadius = 4
+            btn.target = self
+            btn.action = sel
+            btn.translatesAutoresizingMaskIntoConstraints = false
+        }
+        let tabsRow = NSStackView(views: [ordersTab, watchTab])
+        tabsRow.orientation = .horizontal
+        tabsRow.spacing = 4
+        tabsRow.translatesAutoresizingMaskIntoConstraints = false
+
         let close = NSButton(title: "✕", target: self, action: #selector(toggle))
         close.isBordered = false
         close.contentTintColor = Self.inkFaint
@@ -156,8 +191,15 @@ final class HelmCockpitController: NSViewController {
         header.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(glyph)
         header.addSubview(title)
+        header.addSubview(subtitle)
+        header.addSubview(tabsRow)
         header.addSubview(close)
         panel.addSubview(header)
+
+        bridgeVC.onCountsChanged = { [weak self] orders, watch in
+            self?.updateTabTitles(orders: orders, watch: watch)
+        }
+        updateTabTitles(orders: 0, watch: 0)
 
         // Command input sits between the header and the Orders/Watch list.
         let divider = NSView()
@@ -185,6 +227,7 @@ final class HelmCockpitController: NSViewController {
             self?.hideMenu()
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
+        commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
         commandInput.onCancel = { [weak self] in
             guard let self else { return }
             // Esc in the input: collapse the menu first; otherwise step back to
@@ -196,11 +239,15 @@ final class HelmCockpitController: NSViewController {
         // Keyboard navigation hooks (i focuses input, Esc closes the cockpit).
         bridgeVC.onFocusInput = { [weak self] in self?.commandInput.focusInput() }
         bridgeVC.onEscape = { [weak self] in self?.closeTopmost() }
+        bridgeVC.onToggleSection = { [weak self] s in
+            self?.section = s
+            self?.restyleTabs()
+        }
 
         NSLayoutConstraint.activate([
             // Panel anchored bottom-center, fixed width, capped height.
             panel.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            panel.widthAnchor.constraint(equalToConstant: 380),
+            panel.widthAnchor.constraint(equalToConstant: 560),
             panel.bottomAnchor.constraint(equalTo: orb.topAnchor, constant: -12),
             panel.heightAnchor.constraint(lessThanOrEqualTo: root.heightAnchor, multiplier: 0.64),
             panel.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
@@ -214,6 +261,10 @@ final class HelmCockpitController: NSViewController {
             glyph.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             title.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 9),
             title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            subtitle.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 8),
+            subtitle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            tabsRow.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -10),
+            tabsRow.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             close.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -10),
             close.centerYAnchor.constraint(equalTo: header.centerYAnchor),
 
@@ -231,9 +282,11 @@ final class HelmCockpitController: NSViewController {
             bridgeVC.view.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
             bridgeVC.view.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
 
-            menuContainer.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 4),
-            menuContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 10),
-            menuContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -10),
+            // Dropdown's top edge aligns with the input box's bottom (not below the
+            // hint row), and matches the box's horizontal span.
+            menuContainer.topAnchor.constraint(equalTo: commandInput.boxBottomAnchor, constant: 4),
+            menuContainer.leadingAnchor.constraint(equalTo: commandInput.boxLeadingAnchor),
+            menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
         ])
     }
 
@@ -286,7 +339,12 @@ final class HelmCockpitController: NSViewController {
             stack.bottomAnchor.constraint(equalTo: menuContainer.bottomAnchor, constant: -4),
         ])
 
-        for item in items.prefix(6) {
+        menuRows = []
+        menuItems = Array(items.prefix(6))
+        menuTrigger = trigger
+        menuToken = token
+        menuFullText = fullText
+        for item in menuItems {
             let row = MenuRowButton(name: item.name, desc: item.desc,
                                     triggerSymbol: String(trigger), triggerColor: triggerColor)
             row.onPick = { [weak self] in
@@ -294,20 +352,47 @@ final class HelmCockpitController: NSViewController {
             }
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            menuRows.append(row)
         }
         menuContainer.isHidden = false
+        setMenuSelection(0)
+    }
+
+    private func setMenuSelection(_ i: Int) {
+        guard !menuRows.isEmpty else { return }
+        menuSel = max(0, min(menuRows.count - 1, i))
+        for (idx, row) in menuRows.enumerated() { row.setSelected(idx == menuSel) }
+    }
+
+    private func acceptMenuSelection() {
+        guard menuSel < menuItems.count else { return }
+        applyCompletion(name: menuItems[menuSel].name, trigger: menuTrigger,
+                        token: menuToken, fullText: menuFullText)
+    }
+
+    /// Arrow/Enter routed from the input while the menu is open. Returns true if consumed.
+    private func handleMenuKey(_ key: CommandInputView.MenuKey) -> Bool {
+        guard !menuContainer.isHidden, !menuRows.isEmpty else { return false }
+        switch key {
+        case .up:     setMenuSelection(menuSel - 1)
+        case .down:   setMenuSelection(menuSel + 1)
+        case .accept: acceptMenuSelection()
+        }
+        return true
     }
 
     private func applyCompletion(name: String, trigger: Character, token: String, fullText: String) {
         let base = String(fullText.dropLast(token.count))
-        commandInput.text = base + String(trigger) + name + " "
         hideMenu()
-        commandInput.focusInput()
+        commandInput.setTextAndFocusEnd(base + String(trigger) + name + " ")
     }
 
     private func hideMenu() {
         menuContainer.isHidden = true
         menuContainer.subviews.forEach { $0.removeFromSuperview() }
+        menuRows = []
+        menuItems = []
+        menuSel = 0
     }
 
     private func setupOrb(in root: NSView) {
@@ -315,7 +400,9 @@ final class HelmCockpitController: NSViewController {
         root.addSubview(orb)
         NSLayoutConstraint.activate([
             orb.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            orb.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            // root now extends to the window bottom (over the status bar); a small
+            // margin bottom-aligns the orb with the status bar.
+            orb.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -3),
         ])
     }
 
@@ -325,6 +412,14 @@ final class HelmCockpitController: NSViewController {
 
     /// Toggle the command center (bound to `space` in dashboard NORMAL mode).
     func toggleCockpit() { toggle() }
+
+    /// Open the cockpit with the command input pre-filled and focused (used by the
+    /// new-worktree entry point, which prefills `/new `).
+    func openWithCommand(_ prefix: String) {
+        if !isOpen { toggle() }
+        commandInput.text = prefix
+        DispatchQueue.main.async { [weak self] in self?.commandInput.focusInput() }
+    }
 
     /// Open the center on the Watch tab (bound to `w`). For now just opens it.
     func openCockpit() { if !isOpen { toggle() } }
@@ -360,6 +455,41 @@ final class HelmCockpitController: NSViewController {
 
     // MARK: - Open / close
 
+    // MARK: - Orders / Watch tabs
+
+    @objc private func selectOrders() { setSection(.orders) }
+    @objc private func selectWatch() { setSection(.watch) }
+
+    private func setSection(_ s: BridgePanelViewController.Section) {
+        section = s
+        bridgeVC.showSection(s)
+        restyleTabs()
+    }
+
+    private var lastOrders = 0
+    private var lastWatch = 0
+    private func updateTabTitles(orders: Int, watch: Int) {
+        lastOrders = orders; lastWatch = watch
+        restyleTabs()
+    }
+
+    private func restyleTabs() {
+        styleTab(ordersTab, label: "  Orders · \(lastOrders)  ", on: section == .orders)
+        styleTab(watchTab, label: "  Watch · \(lastWatch)  ", on: section == .watch)
+    }
+
+    private func styleTab(_ btn: NSButton, label: String, on: Bool) {
+        let color = on ? Self.onAccent : Self.inkDim
+        btn.attributedTitle = NSAttributedString(string: label, attributes: [
+            .font: AppFont.mono(size: 11, weight: .bold),
+            .foregroundColor: color,
+        ])
+        btn.layer?.backgroundColor = (on ? Self.radar : NSColor.clear).cgColor
+        btn.contentTintColor = color
+        // Pad the flat button a touch via its content insets.
+        (btn.cell as? NSButtonCell)?.imageScaling = .scaleNone
+    }
+
     @objc private func scrimClicked() { if isOpen { toggle() } }
 
     @objc private func toggle() {
@@ -368,6 +498,7 @@ final class HelmCockpitController: NSViewController {
         panel.isHidden = !isOpen
         if isOpen {
             dismissCard()  // opening the cockpit supersedes any transient card
+            setSection(.orders)  // always open on the Orders tab
             // Open in navigation mode: j/k select cards, 1–9 pick options,
             // Tab switches Orders/Watch, i focuses the command input, Esc closes.
             DispatchQueue.main.async { [weak self] in self?.bridgeVC.focusOrdersTable() }
@@ -448,14 +579,36 @@ private final class MenuRowButton: NSView {
     private static let inkFaint = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
     private static let hoverBg  = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 0.10)
 
+    private static let selBg    = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 0.16)
+
     var onPick: (() -> Void)?
     private var trackingArea: NSTrackingArea?
+    private var selected = false
+    private let accentBar = NSView()
+
+    func setSelected(_ on: Bool) {
+        selected = on
+        layer?.backgroundColor = (on ? Self.selBg : NSColor.clear).cgColor
+        accentBar.isHidden = !on
+    }
 
     init(name: String, desc: String, triggerSymbol: String, triggerColor: NSColor) {
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+        accentBar.wantsLayer = true
+        accentBar.layer?.backgroundColor = triggerColor.cgColor
+        accentBar.isHidden = true
+        accentBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(accentBar)
+        NSLayoutConstraint.activate([
+            accentBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            accentBar.topAnchor.constraint(equalTo: topAnchor),
+            accentBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            accentBar.widthAnchor.constraint(equalToConstant: 2),
+        ])
 
         let sym = NSTextField(labelWithString: triggerSymbol)
         sym.font = AppFont.mono(size: 12, weight: .bold)
@@ -497,7 +650,9 @@ private final class MenuRowButton: NSView {
         addTrackingArea(t); trackingArea = t
     }
     override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = Self.hoverBg.cgColor }
-    override func mouseExited(with event: NSEvent) { layer?.backgroundColor = NSColor.clear.cgColor }
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = (selected ? Self.selBg : NSColor.clear).cgColor
+    }
     // mouseDown (not click recognizer) so the field editor's resignFirstResponder
     // doesn't swallow the first interaction with the menu.
     override func mouseDown(with event: NSEvent) { onPick?() }

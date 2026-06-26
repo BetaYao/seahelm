@@ -42,14 +42,22 @@ final class BridgePanelViewController: NSViewController {
         order.action.options ?? ["Approve"]
     }
 
-    /// Card = top pad (6) + title (16) + message block + button block + bottom pad (8).
-    /// Buttons are stacked vertically (one full-width button per option) so long option
-    /// text never clips in a narrow panel. Message block is omitted when the message is empty.
+    /// Bare-TUI card: top(11) + title row(18) + message(measured) + chip row(30) + bottom(11).
+    /// The question is measured at a deliberately-narrow width so the predicted height is
+    /// never short of what the real (wider) layout needs — avoids bottom clipping.
     static func cardHeight(for order: PendingOrder) -> CGFloat {
-        let buttons = buttonTitles(for: order).count
-        let messageBlock: CGFloat = order.action.message.isEmpty ? 0 : (2 + 30) // gap + 2 lines
-        let buttonBlock = 6 + CGFloat(buttons) * 24 + CGFloat(max(0, buttons - 1)) * 4
-        return 6 + 16 + messageBlock + buttonBlock + 8
+        let titleRow: CGFloat = 18
+        let chipRow: CGFloat = 30  // buttonTitles always yields ≥1 chip
+        let msg = order.action.message
+        var messageBlock: CGFloat = 0
+        if !msg.isEmpty {
+            let bounds = (msg as NSString).boundingRect(
+                with: CGSize(width: 500, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: AppFont.mono(size: 12.5)])
+            messageBlock = ceil(bounds.height) + 9 // + gap above
+        }
+        return 11 + titleRow + messageBlock + 11 + chipRow + 11
     }
 
     // MARK: - Private state
@@ -72,6 +80,19 @@ final class BridgePanelViewController: NSViewController {
     /// Layer-backed views whose CGColors must be re-resolved when the
     /// effective appearance changes (light/dark switch).
     private var dividers: [NSView] = []
+
+    // Tabbed sections (cockpit shows one at a time; the segmented control lives
+    // in the cockpit header).
+    enum Section { case orders, watch }
+    private var ordersSectionView: NSView?
+    private var watchSectionView: NSView?
+    /// Fired on reload with (ordersCount, watchCount) for the header tabs.
+    var onCountsChanged: ((Int, Int) -> Void)?
+
+    func showSection(_ section: Section) {
+        ordersSectionView?.isHidden = (section != .orders)
+        watchSectionView?.isHidden = (section != .watch)
+    }
 
     // MARK: - Lifecycle
 
@@ -129,6 +150,8 @@ final class BridgePanelViewController: NSViewController {
         ordersTableView.setAccessibilityIdentifier("bridge.ordersTable")
         ordersTableView.allowsEmptySelection = true
         ordersTableView.backgroundColor = .clear
+        ordersTableView.selectionHighlightStyle = .none
+        ordersTableView.intercellSpacing = NSSize(width: 0, height: 8)
 
         ordersScrollView.documentView = ordersTableView
         ordersScrollView.drawsBackground = false
@@ -138,9 +161,10 @@ final class BridgePanelViewController: NSViewController {
 
         ordersTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        let section = makeSectionContainer(header: ordersHeader, scroll: ordersScrollView, minHeight: 80)
+        let section = makeSectionContainer(header: ordersHeader, scroll: ordersScrollView, minHeight: 80,
+                                           showHeader: false)
         addFullWidthArranged(section)
-        addFullWidthArranged(makeDivider())
+        ordersSectionView = section
     }
 
     private func addFullWidthArranged(_ subview: NSView) {
@@ -172,30 +196,36 @@ final class BridgePanelViewController: NSViewController {
         watchScrollView.translatesAutoresizingMaskIntoConstraints = false
         watchTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 60)
+        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 60,
+                                           showHeader: false)
         addFullWidthArranged(section)
-
-        // Watch is secondary (only notifications) — give it ~1/3 of the vertical space,
-        // Orders ~2/3. (multiplier 0.5 ⇒ watch height = half of orders ⇒ 1/3 of the total.)
-        watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor, multiplier: 0.5).isActive = true
+        watchSectionView = section
+        section.isHidden = true  // Orders is the default tab
     }
 
-    private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {
+    private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat,
+                                      showHeader: Bool = true) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(header)
         container.addSubview(scroll)
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
-            header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+        var constraints: [NSLayoutConstraint] = [
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight),
-        ])
+        ]
+        if showHeader {
+            container.addSubview(header)
+            constraints += [
+                header.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+                header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+                header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+                scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            ]
+        } else {
+            constraints.append(scroll.topAnchor.constraint(equalTo: container.topAnchor, constant: 6))
+        }
+        NSLayoutConstraint.activate(constraints)
         return container
     }
 
@@ -230,12 +260,14 @@ final class BridgePanelViewController: NSViewController {
         ordersHeader.stringValue = "Pending Orders · \(pendingOrders.count)"
         ordersTableView.reloadData()
         onOrdersCountChanged?(pendingOrders.count)
+        onCountsChanged?(pendingOrders.count, watchItems.count)
     }
 
     private func reloadWatch() {
         watchItems = watchFeed?.all() ?? []
         watchHeader.stringValue = watchItems.isEmpty ? "Watch" : "Watch · \(watchItems.count)"
         watchTableView.reloadData()
+        onCountsChanged?(pendingOrders.count, watchItems.count)
     }
 
     // MARK: - Keyboard
@@ -289,8 +321,14 @@ final class BridgePanelViewController: NSViewController {
     }
 
     /// Tab switches keyboard focus between the Orders and Watch tables.
+    /// Tab toggles the visible section (Orders ⇄ Watch) and focuses its table.
+    /// The host restyles its header tabs via `onToggleSection`.
+    var onToggleSection: ((Section) -> Void)?
     private func toggleActiveTable() {
-        let toWatch = ordersTableView.window?.firstResponder === ordersTableView
+        let toWatch = !(watchSectionView?.isHidden == false)  // currently showing Orders → go Watch
+        let section: Section = toWatch ? .watch : .orders
+        showSection(section)
+        onToggleSection?(section)
         let target = toWatch ? watchTableView : ordersTableView
         view.window?.makeFirstResponder(target)
         if target.numberOfRows > 0, target.selectedRow < 0 {
@@ -362,9 +400,22 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
         }
     }
 
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let table = notification.object as? NSTableView, table.tag == 1 else { return }
+        // Cards are opaque, so reflect selection by toggling their accent bar.
+        for row in 0..<table.numberOfRows {
+            if let card = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? OrderCardView {
+                card.setSelected(row == table.selectedRow)
+            }
+        }
+    }
+
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         if tableView.tag == 1, row < pendingOrders.count {
             return Self.cardHeight(for: pendingOrders[row])
+        }
+        if tableView.tag == 2, row < watchItems.count {
+            return WatchCardView.height(for: watchItems[row])
         }
         return tableView.tag == 1 ? 28 : 22
     }
@@ -377,8 +428,8 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
             let card = (tableView.makeView(withIdentifier: id, owner: self) as? OrderCardView) ?? OrderCardView()
             card.identifier = id
             card.configure(order: order,
-                           onOption: { [weak self] idx in self?.applyOption(order, index: idx) },
-                           onDismiss: { [weak self] in self?.queue?.resolve(id: order.id) })
+                           onOption: { [weak self] idx in self?.applyOption(order, index: idx) })
+            card.setSelected(row == tableView.selectedRow)
             return card
         } else {
             guard row < watchItems.count else { return nil }
@@ -392,17 +443,123 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
     }
 }
 
+// MARK: - Bare-TUI palette & helpers (prototype THEME.A)
+
+private enum Bare {
+    static let cardBg     = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
+    static let panelAlt   = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
+    static let line       = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
+    static let lineStrong = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
+    static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
+    static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)
+    static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
+    static let accent     = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
+    static let orange     = NSColor(srgbRed: 0xff/255, green: 0x8a/255, blue: 0x3d/255, alpha: 1)
+    static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
+    static let red        = NSColor(srgbRed: 0xe8/255, green: 0x46/255, blue: 0x35/255, alpha: 1)
+    static let onAccent   = NSColor(srgbRed: 0x06/255, green: 0x20/255, blue: 0x28/255, alpha: 1)
+
+    /// (glyph, short name, colour) for the agent owning a worktree.
+    static func agent(worktreePath: String) -> (glyph: String, name: String, color: NSColor) {
+        let type = ShipLog.shared.sailor(forWorktree: worktreePath)?.agentType
+        let glyph = type?.tabGlyph ?? "✻"
+        let name: String
+        switch type {
+        case .claudeCode: name = "claude"
+        case .codex:      name = "codex"
+        case .openCode:   name = "opencode"
+        case .gemini:     name = "gemini"
+        default:          name = (type?.displayName ?? "agent").lowercased()
+        }
+        let color: NSColor
+        switch type {
+        case .claudeCode: color = orange
+        case .codex:      color = cornflower
+        default:          color = accent
+        }
+        return (glyph, name, color)
+    }
+}
+
+// MARK: - OptionChipButton
+
+/// A flat Bare-TUI option chip: `[n] label`. Primary (index 0) is accent-filled.
+private final class OptionChipButton: NSView {
+    var onPick: (() -> Void)?
+    private let badge = NSTextField(labelWithString: "")
+    private let labelField = NSTextField(labelWithString: "")
+    private let primary: Bool
+
+    init(index: Int, title: String, primary: Bool) {
+        self.primary = primary
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        translatesAutoresizingMaskIntoConstraints = false
+
+        badge.font = AppFont.mono(size: 9.5, weight: .bold)
+        badge.alignment = .center
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 3
+        badge.stringValue = "\(index + 1)"
+        badge.translatesAutoresizingMaskIntoConstraints = false
+
+        labelField.font = AppFont.mono(size: 12, weight: .regular)
+        labelField.lineBreakMode = .byTruncatingTail
+        labelField.stringValue = title
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(badge); addSubview(labelField)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 28),
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: 15),
+            badge.heightAnchor.constraint(equalToConstant: 15),
+            labelField.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 7),
+            labelField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -11),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        applyStyle()
+        let click = NSClickGestureRecognizer(target: self, action: #selector(tapped))
+        addGestureRecognizer(click)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setTitle(_ t: String) { labelField.stringValue = t }
+
+    private func applyStyle() {
+        if primary {
+            layer?.backgroundColor = Bare.accent.cgColor
+            layer?.borderWidth = 0
+            labelField.textColor = Bare.onAccent
+            badge.textColor = Bare.onAccent
+            badge.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.18).cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = Bare.lineStrong.cgColor
+            labelField.textColor = Bare.ink
+            badge.textColor = Bare.ink
+            badge.layer?.backgroundColor = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.13).cgColor
+        }
+    }
+
+    @objc private func tapped() { onPick?() }
+}
+
 // MARK: - OrderCardView
 
 private final class OrderCardView: NSTableCellView {
-    private let titleLabel = NSTextField(labelWithString: "")
+    private let accentBar = NSView()
+    private let glyphLabel = NSTextField(labelWithString: "")
+    private let agentLabel = NSTextField(labelWithString: "")
+    private let taskLabel = NSTextField(labelWithString: "")
+    private let urgencyLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
-    private let buttonRow = NSStackView()
-    private let dismissButton = NSButton()
-    private var trackingArea: NSTrackingArea?
+    private let chipRow = NSStackView()
 
     private var onOption: ((Int) -> Void)?
-    private var onDismiss: (() -> Void)?
     private var armedDangerousIndex: Int?
     private var dangerousIndexes: Set<Int> = []
 
@@ -410,88 +567,104 @@ private final class OrderCardView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 0
+        layer?.backgroundColor = Bare.panelAlt.cgColor
 
-        messageLabel.font = NSFont.systemFont(ofSize: 11)
-        messageLabel.textColor = Theme.textSecondary
-        messageLabel.maximumNumberOfLines = 2
-        messageLabel.lineBreakMode = .byTruncatingTail
+        accentBar.wantsLayer = true
+        accentBar.layer?.backgroundColor = NSColor.clear.cgColor
+        accentBar.translatesAutoresizingMaskIntoConstraints = false
+
+        glyphLabel.font = AppFont.mono(size: 12, weight: .bold)
+        glyphLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        agentLabel.font = AppFont.mono(size: 12, weight: .medium)
+        agentLabel.textColor = Bare.ink
+        agentLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        taskLabel.font = AppFont.mono(size: 11, weight: .regular)
+        taskLabel.textColor = Bare.inkFaint
+        taskLabel.lineBreakMode = .byTruncatingTail
+        taskLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        urgencyLabel.font = AppFont.mono(size: 10, weight: .bold)
+        urgencyLabel.alignment = .right
+        urgencyLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        messageLabel.font = AppFont.mono(size: 12.5, weight: .regular)
+        messageLabel.textColor = Bare.ink
+        messageLabel.maximumNumberOfLines = 0
+        messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        buttonRow.orientation = .vertical
-        buttonRow.alignment = .leading
-        buttonRow.spacing = 4
-        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+        chipRow.orientation = .horizontal
+        chipRow.alignment = .centerY
+        chipRow.spacing = 7
+        chipRow.translatesAutoresizingMaskIntoConstraints = false
 
-        dismissButton.title = "✕"
-        dismissButton.isBordered = false
-        dismissButton.contentTintColor = Theme.textSecondary
-        dismissButton.target = self
-        dismissButton.action = #selector(tappedDismiss)
-        dismissButton.isHidden = true
-        dismissButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(accentBar); addSubview(glyphLabel); addSubview(agentLabel)
+        addSubview(taskLabel); addSubview(urgencyLabel); addSubview(messageLabel); addSubview(chipRow)
 
-        addSubview(titleLabel); addSubview(messageLabel); addSubview(buttonRow); addSubview(dismissButton)
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -4),
+            accentBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            accentBar.topAnchor.constraint(equalTo: topAnchor),
+            accentBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            accentBar.widthAnchor.constraint(equalToConstant: 2),
 
-            dismissButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            dismissButton.widthAnchor.constraint(equalToConstant: 18),
-            dismissButton.heightAnchor.constraint(equalToConstant: 18),
+            glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            agentLabel.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+            agentLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: 8),
+            taskLabel.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+            taskLabel.leadingAnchor.constraint(equalTo: agentLabel.trailingAnchor, constant: 8),
+            taskLabel.trailingAnchor.constraint(lessThanOrEqualTo: urgencyLabel.leadingAnchor, constant: -8),
+            urgencyLabel.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+            urgencyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
 
-            messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            messageLabel.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 9),
+            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
 
-            buttonRow.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 6),
-            buttonRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            buttonRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            buttonRow.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
+            chipRow.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 11),
+            chipRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            chipRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
+            chipRow.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -11),
         ])
+        taskLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = trackingArea { removeTrackingArea(t) }
-        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-                               owner: self, userInfo: nil)
-        addTrackingArea(t); trackingArea = t
+    /// Show a left accent bar when this card is the keyboard-selected row.
+    func setSelected(_ selected: Bool) {
+        accentBar.layer?.backgroundColor = (selected ? Bare.accent : NSColor.clear).cgColor
+        layer?.backgroundColor = (selected ? Bare.cardBg : Bare.panelAlt).cgColor
     }
-    override func mouseEntered(with event: NSEvent) { dismissButton.isHidden = false }
-    override func mouseExited(with event: NSEvent) { dismissButton.isHidden = true }
 
-    func configure(order: PendingOrder,
-                   onOption: @escaping (Int) -> Void,
-                   onDismiss: @escaping () -> Void) {
+    func configure(order: PendingOrder, onOption: @escaping (Int) -> Void) {
         self.onOption = onOption
-        self.onDismiss = onDismiss
         self.armedDangerousIndex = nil
-        titleLabel.stringValue = "● \(order.action.project) · \(order.action.branch)"
-        titleLabel.textColor = Theme.textPrimary
+
+        let meta = Bare.agent(worktreePath: order.action.worktreePath)
+        glyphLabel.stringValue = meta.glyph
+        glyphLabel.textColor = meta.color
+        agentLabel.stringValue = meta.name
+        taskLabel.stringValue = order.action.branch.isEmpty ? order.action.project : order.action.branch
+
+        let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)
+        urgencyLabel.stringValue = dangerous ? "HIGH" : "NORMAL"
+        urgencyLabel.textColor = dangerous ? Bare.red : Bare.accent
+
         messageLabel.stringValue = order.action.message
         messageLabel.isHidden = order.action.message.isEmpty
 
-        buttonRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        chipRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let titles = BridgePanelViewController.buttonTitles(for: order)
-        let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)
         dangerousIndexes = dangerous ? Set(0..<titles.count) : []
         for (i, title) in titles.enumerated() {
-            let b = NSButton(title: "\(i + 1) \(title)", target: self, action: #selector(tappedOption(_:)))
-            b.bezelStyle = .rounded
-            b.controlSize = .small
-            b.tag = i
-            b.toolTip = title
-            b.alignment = .left
-            (b.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-            if dangerous { b.contentTintColor = .systemOrange }
-            buttonRow.addArrangedSubview(b)
-            // Full-width button so long option text stays on its own row (no horizontal clip).
-            b.widthAnchor.constraint(equalTo: buttonRow.widthAnchor).isActive = true
+            let chip = OptionChipButton(index: i, title: title, primary: i == 0)
+            chip.onPick = { [weak self] in
+                self?.selectOption(i, dangerous: self?.dangerousIndexes.contains(i) ?? false)
+            }
+            chipRow.addArrangedSubview(chip)
         }
     }
 
@@ -499,18 +672,12 @@ private final class OrderCardView: NSTableCellView {
     func selectOption(_ index: Int, dangerous: Bool) -> Bool {
         if dangerous && armedDangerousIndex != index {
             armedDangerousIndex = index
-            if let b = buttonRow.arrangedSubviews[safe: index] as? NSButton { b.title = "!! Confirm" }
+            if let chip = chipRow.arrangedSubviews[safe: index] as? OptionChipButton { chip.setTitle("!! Confirm") }
             return false
         }
         onOption?(index)
         return true
     }
-
-    @objc private func tappedOption(_ sender: NSButton) {
-        let dangerous = dangerousIndexes.contains(sender.tag)
-        selectOption(sender.tag, dangerous: dangerous)
-    }
-    @objc private func tappedDismiss() { onDismiss?() }
 }
 
 private extension Array {
@@ -520,8 +687,9 @@ private extension Array {
 // MARK: - WatchCardView
 
 private final class WatchCardView: NSTableCellView {
-    private let iconLabel = NSTextField(labelWithString: "")
-    private let branchLabel = NSTextField(labelWithString: "")
+    private let dot = NSView()
+    private let agentLabel = NSTextField(labelWithString: "")
+    private let taskLabel = NSTextField(labelWithString: "")
     private let msgLabel = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
@@ -530,42 +698,65 @@ private final class WatchCardView: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Two-line height: dot/name row + up to 2 message lines.
+    static func height(for item: WatchItem) -> CGFloat {
+        let bounds = (item.message as NSString).boundingRect(
+            with: CGSize(width: 470, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: AppFont.mono(size: 12)])
+        let msgH = min(ceil(bounds.height), 36) // cap at ~2 lines
+        return 9 + 16 + 3 + msgH + 9
+    }
+
     private func setup() {
-        iconLabel.font = NSFont.systemFont(ofSize: 11)
-        iconLabel.translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = Bare.panelAlt.cgColor
 
-        branchLabel.font = AppFont.mono(size: 11, weight: .medium)
-        branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3.5
+        dot.translatesAutoresizingMaskIntoConstraints = false
 
-        msgLabel.font = NSFont.systemFont(ofSize: 11)
-        msgLabel.textColor = Theme.textSecondary
+        agentLabel.font = AppFont.mono(size: 11.5, weight: .medium)
+        agentLabel.textColor = Bare.ink
+        agentLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        taskLabel.font = AppFont.mono(size: 11, weight: .regular)
+        taskLabel.textColor = Bare.inkFaint
+        taskLabel.lineBreakMode = .byTruncatingTail
+        taskLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        msgLabel.font = AppFont.mono(size: 12, weight: .regular)
+        msgLabel.textColor = Bare.inkDim
+        msgLabel.maximumNumberOfLines = 2
         msgLabel.lineBreakMode = .byTruncatingTail
         msgLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(iconLabel)
-        addSubview(branchLabel)
-        addSubview(msgLabel)
+        addSubview(dot); addSubview(agentLabel); addSubview(taskLabel); addSubview(msgLabel)
 
         NSLayoutConstraint.activate([
-            iconLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            iconLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconLabel.widthAnchor.constraint(equalToConstant: 16),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            dot.topAnchor.constraint(equalTo: topAnchor, constant: 13),
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
 
-            branchLabel.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 4),
-            branchLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            branchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 100),
+            agentLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 11),
+            agentLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            taskLabel.leadingAnchor.constraint(equalTo: agentLabel.trailingAnchor, constant: 8),
+            taskLabel.centerYAnchor.constraint(equalTo: agentLabel.centerYAnchor),
+            taskLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
 
-            msgLabel.leadingAnchor.constraint(equalTo: branchLabel.trailingAnchor, constant: 6),
-            msgLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            msgLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            msgLabel.leadingAnchor.constraint(equalTo: agentLabel.leadingAnchor),
+            msgLabel.topAnchor.constraint(equalTo: agentLabel.bottomAnchor, constant: 3),
+            msgLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
         ])
+        taskLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 
     func configure(item: WatchItem) {
-        iconLabel.stringValue = item.kind == .watchError ? "⚠" : "⏳"
-        iconLabel.textColor = item.kind == .watchError ? .systemRed : .systemYellow
-        branchLabel.stringValue = item.branch
+        let meta = Bare.agent(worktreePath: item.worktreePath)
+        dot.layer?.backgroundColor = (item.kind == .watchError ? Bare.red : meta.color).cgColor
+        agentLabel.stringValue = meta.name
+        taskLabel.stringValue = item.branch
         msgLabel.stringValue = item.message
     }
 }

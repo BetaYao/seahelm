@@ -432,7 +432,17 @@ class ShipLog {
     /// only when the surface isn't available (e.g. pane not currently rendered).
     func sendCommand(to terminalID: String, command: String) {
         if let station = StationRegistry.shared.station(forId: terminalID) {
-            DispatchQueue.main.async { station.sendText(command + "\r") }
+            // Send the text first, then the Enter as a separate write. Agent TUIs
+            // (Claude Code, codex) treat a `\r` arriving in the same burst as the
+            // pasted text as a literal newline (multiline input) instead of a
+            // submit, so the order text lands but never sends. A short gap lets the
+            // TUI finish ingesting the paste before the Return submits it.
+            DispatchQueue.main.async {
+                station.sendText(command)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    station.sendText("\r")
+                }
+            }
             return
         }
         lock.lock()

@@ -409,6 +409,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.helmCockpit.onApprove = { [weak self] order in
             self?.handleBridgeApprove(order)
         }
+        // Install the cockpit into the window content view spanning the content
+        // container AND the status bar, so the radar orb bottom-aligns with the
+        // status bar. (force-load dashboard.view first so its child VC is ready.)
+        _ = dashboard.view
+        if let host = contentContainer.superview {
+            dashboard.installCockpit(in: host, top: contentContainer.topAnchor)
+        }
         dashboard.helmCockpit.onSubmitCommand = { [weak self] text in
             self?.submitBridgeCommand(text)
         }
@@ -418,7 +425,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         dashboard.onEnterTerminal = { [weak self] in self?.keyboardMode.enterInsert() }
         dashboard.onRequestNewWorktree = { [weak self] in
-            self?.keyboardMode.beginCreateForm()
+            // Opens the Helm cockpit with `/new ` prefilled (the inline creator and
+            // its createForm keyboard substate were removed).
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
         }
         dashboard.onInlineCreateFormEnd = { [weak self] in
@@ -657,11 +665,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func refreshWorktreeTabs() {
         let selectedPath = tabCoordinator.selectedSailor?.worktreePath
         let now = Date()
-        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, isSelected: Bool, collapsed: Bool) in
+        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool) in
             let path = entry.info.path
+            let paneCount = terminalCoordinator.stationManager.tree(forPath: path)?.leafCount ?? 1
             let repo = tabCoordinator.repoName(forWorktree: path)
             let name = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
-            let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 32)
+            // Keep more text than the inline tab needs — the overflow menu wraps it to 2 lines.
+            let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 56)
 
             let agent = ShipLog.shared.sailor(forWorktree: path)
             let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
@@ -683,9 +693,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
             let collapsed = isIdle && !isSelected && !entry.info.isMainWorktree
 
-            return (path: path, title: title, agentGlyph: agentGlyph, agentColor: agentColor, statusColor: statusColor, isSelected: isSelected, collapsed: collapsed)
+            return (path: path, title: title, agentGlyph: agentGlyph, agentColor: agentColor, statusColor: statusColor, paneCount: paneCount, isSelected: isSelected, collapsed: collapsed)
         }
         titleBar.setWorktreeTabs(tabs)
+
+        // Radar animates only while some agent is actively running or waiting.
+        let radarActive = ShipLog.shared.allSailors().contains {
+            $0.status == .running || $0.status == .waiting
+        }
+        dashboardVC?.helmCockpit.setRadarActive(radarActive)
 
         tabCoordinator.dashboardVC?.updateFleetSummary(
             repos: tabCoordinator.workspaceManager.tabs.count,

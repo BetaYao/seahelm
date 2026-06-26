@@ -28,8 +28,10 @@ final class FocusPanelView: NSView {
             layer?.shadowOffset = .zero
             layer?.masksToBounds = false
         } else {
+            // No card chrome: the centre panel is flush and border-less. The
+            // accent border above is kept only as the keyboard-focus indicator.
             layer?.borderColor = nil
-            layer?.borderWidth = 1
+            layer?.borderWidth = 0
             layer?.masksToBounds = true
             layer?.shadowOpacity = 0
         }
@@ -37,10 +39,10 @@ final class FocusPanelView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 0
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        layer?.borderWidth = 1
+        layer?.borderWidth = 0
         setAccessibilityIdentifier("dashboard.focusPanel")
         setupTerminalContainer()
     }

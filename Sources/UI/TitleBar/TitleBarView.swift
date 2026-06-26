@@ -205,11 +205,9 @@ final class TitleBarView: NSView {
                                identifier: "titlebar.worktreeList", label: "Worktrees",
                                action: #selector(worktreeListClicked))
         addSubview(tabWorktreeButton)
-        // Expanded: align to the centre content's left edge. Collapsed: the
-        // centre content slides under the traffic lights, so instead tuck the
-        // worktree icon right after the left icon cluster.
+        // Tabs always tuck right after the left icon cluster — no middle gap.
         worktreeButtonExpandedLeading = tabWorktreeButton.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: Layout.centerContentLeftEdge - Layout.toolbarLeadingInset)
+            equalTo: leftClusterStack.trailingAnchor, constant: 10)
         worktreeButtonCollapsedLeading = tabWorktreeButton.leadingAnchor.constraint(
             equalTo: leftClusterStack.trailingAnchor, constant: 10)
         worktreeButtonExpandedLeading?.isActive = true
@@ -253,7 +251,7 @@ final class TitleBarView: NSView {
         ])
     }
 
-    func setWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, isSelected: Bool, collapsed: Bool)]) {
+    func setWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool)]) {
         worktreeTabPaths = tabs.map(\.path)
         tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -264,7 +262,8 @@ final class TitleBarView: NSView {
         for tab in active {
             let btn = WorktreeTabButton(path: tab.path, title: tab.title,
                                         agentGlyph: tab.agentGlyph, agentColor: tab.agentColor,
-                                        statusColor: tab.statusColor, isSelected: tab.isSelected)
+                                        statusColor: tab.statusColor, paneCount: tab.paneCount,
+                                        isSelected: tab.isSelected)
             btn.onTap = { [weak self] path in
                 self?.delegate?.titleBarDidSelectWorktree(path)
             }
@@ -304,7 +303,9 @@ final class TitleBarView: NSView {
             let item = NSMenuItem(title: tab.title, action: #selector(overflowItemClicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = tab.path
-            item.image = Self.statusDotImage(color: tab.statusColor)
+            // Custom 2-line view (repo line + branch line) so long titles don't truncate.
+            item.view = OverflowItemView(title: tab.title, statusColor: tab.statusColor,
+                                         target: self, action: #selector(overflowItemClicked(_:)), item: item)
             menu.addItem(item)
         }
         menu.popUp(positioning: nil,
@@ -534,21 +535,17 @@ private final class WorktreeTabButton: NSView {
     private let dotView = NSView()
     private let glyphLabel = NSTextField(labelWithString: "")
     private let label = NSTextField(labelWithString: "")
+    private let paneCountLabel = NSTextField(labelWithString: "")
     private var hovered = false
 
-    init(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, isSelected: Bool) {
+    init(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool) {
         self.path = path
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 5
 
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 3
-        dotView.layer?.backgroundColor = statusColor.cgColor
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Agent sigil (✻ Claude / ⟡ Codex / …). Hidden when there's no AI agent.
+        // Agent sigil (✻ Claude / ⟡ Codex / …) — leads the tab. Hidden when no AI agent.
         glyphLabel.font = AppFont.mono(size: 11, weight: .bold)
         glyphLabel.textColor = agentColor
         glyphLabel.alignment = .center
@@ -564,28 +561,50 @@ private final class WorktreeTabButton: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.stringValue = title
 
-        addSubview(dotView)
+        // Status dot — trails the label.
+        dotView.wantsLayer = true
+        dotView.layer?.cornerRadius = 3
+        dotView.layer?.backgroundColor = statusColor.cgColor
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Pane-count number — after the dot. Hidden for a single pane.
+        paneCountLabel.font = AppFont.mono(size: 10, weight: .medium)
+        paneCountLabel.textColor = SemanticColors.muted
+        paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        paneCountLabel.stringValue = "\(paneCount)"
+        paneCountLabel.isHidden = (paneCount <= 1)
+
         addSubview(glyphLabel)
         addSubview(label)
+        addSubview(dotView)
+        addSubview(paneCountLabel)
 
-        // When the glyph is hidden it collapses to zero width so the title sits
-        // right after the dot.
+        // When the glyph is hidden it collapses to zero width so the title leads.
         let glyphWidth = glyphLabel.widthAnchor.constraint(equalToConstant: agentGlyph == nil ? 0 : 12)
+        // When the count is hidden it collapses so the dot trails the tab.
+        let countWidth = paneCountLabel.widthAnchor.constraint(equalToConstant: paneCount <= 1 ? 0 : 10)
 
         NSLayoutConstraint.activate([
+            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            glyphLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            glyphWidth,
+
+            label.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: agentGlyph == nil ? 0 : 5),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+
             dotView.widthAnchor.constraint(equalToConstant: 6),
             dotView.heightAnchor.constraint(equalToConstant: 6),
             dotView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            glyphLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 4),
-            glyphLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            glyphWidth,
-            label.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: agentGlyph == nil ? 0 : 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dotView.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+
+            paneCountLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: paneCount <= 1 ? 0 : 4),
+            paneCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countWidth,
+            paneCountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
             heightAnchor.constraint(equalToConstant: 22),
             // Cap very long titles so a single tab can't dominate the strip.
-            widthAnchor.constraint(lessThanOrEqualToConstant: 200),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 220),
         ])
         // Let the label truncate (tail) instead of stretching the tab.
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -658,5 +677,92 @@ private final class HoverTrackingView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         onHoverChanged?(false)
+    }
+}
+
+// MARK: - OverflowItemView
+
+/// A 2-line custom menu item for the worktree overflow pulldown: repo on the
+/// first line, branch on the second, with a status dot — so long titles wrap
+/// instead of truncating.
+private final class OverflowItemView: NSView {
+    private weak var item: NSMenuItem?
+    private weak var actionTarget: AnyObject?
+    private let action: Selector
+    private let dot = NSView()
+    private var trackingArea: NSTrackingArea?
+
+    init(title: String, statusColor: NSColor, target: AnyObject, action: Selector, item: NSMenuItem) {
+        self.item = item
+        self.actionTarget = target
+        self.action = action
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 44))
+        wantsLayer = true
+        autoresizingMask = [.width]
+
+        let repo: String
+        let branch: String
+        if let r = title.range(of: " · ") {
+            repo = String(title[..<r.lowerBound])
+            branch = String(title[r.upperBound...])
+        } else {
+            repo = title
+            branch = ""
+        }
+
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3
+        dot.layer?.backgroundColor = statusColor.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dot)
+
+        let repoLabel = NSTextField(labelWithString: repo)
+        repoLabel.font = AppFont.mono(size: 12, weight: .medium)
+        repoLabel.textColor = SemanticColors.text
+        repoLabel.lineBreakMode = .byTruncatingTail
+        repoLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(repoLabel)
+
+        let branchLabel = NSTextField(labelWithString: branch)
+        branchLabel.font = AppFont.mono(size: 11, weight: .regular)
+        branchLabel.textColor = SemanticColors.muted
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.isHidden = branch.isEmpty
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(branchLabel)
+
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            dot.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            dot.widthAnchor.constraint(equalToConstant: 6),
+            dot.heightAnchor.constraint(equalToConstant: 6),
+
+            repoLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 9),
+            repoLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            repoLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+
+            branchLabel.leadingAnchor.constraint(equalTo: repoLabel.leadingAnchor),
+            branchLabel.topAnchor.constraint(equalTo: repoLabel.bottomAnchor, constant: 2),
+            branchLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = trackingArea { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                               owner: self, userInfo: nil)
+        addTrackingArea(t); trackingArea = t
+    }
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.25).cgColor
+    }
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+    override func mouseUp(with event: NSEvent) {
+        if let item, let target = actionTarget { _ = NSApp.sendAction(action, to: target, from: item) }
+        enclosingMenuItem?.menu?.cancelTracking()
     }
 }

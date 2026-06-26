@@ -20,8 +20,17 @@ final class HelmOrbView: NSView {
 
     private let badgeLabel = NSTextField(labelWithString: "")
     private let badgeContainer = NSView()
-    private let sweepLayer = CAShapeLayer()
+    /// Rotating conic-gradient sweep wedge (the radar beam), clipped to a disc.
+    private let sweepLayer = CAGradientLayer()
+    /// Two faint concentric rings inside the beam.
+    private let ring1 = CAShapeLayer()
+    private let ring2 = CAShapeLayer()
+    /// Bright center pip (drawn above the sweep).
+    private let pipLayer = CAShapeLayer()
     private var badgeCount = 0
+    /// Sweep only animates while at least one agent is running/waiting; otherwise
+    /// the radar sits still (rings + center pip, no beam).
+    private var isActive = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -36,12 +45,34 @@ final class HelmOrbView: NSView {
         widthAnchor.constraint(equalToConstant: 44).isActive = true
         heightAnchor.constraint(equalToConstant: 44).isActive = true
 
-        // Base disc + ring drawn in draw(_:). Rotating sweep arc is a layer.
-        sweepLayer.fillColor = NSColor.clear.cgColor
-        sweepLayer.strokeColor = Self.radar.withAlphaComponent(0.5).cgColor
-        sweepLayer.lineWidth = 1.5
-        sweepLayer.lineCap = .round
+        // Radar beam: a conic gradient that's transparent for most of the circle
+        // and ramps up to the radar colour over a trailing wedge (matches the
+        // prototype `conic-gradient(transparent 0–248°, radar 318°, transparent 360°)`).
+        sweepLayer.type = .conic
+        sweepLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        sweepLayer.endPoint = CGPoint(x: 0.5, y: 0.0)
+        sweepLayer.colors = [
+            NSColor.clear.cgColor,
+            NSColor.clear.cgColor,
+            Self.radar.cgColor,
+            NSColor.clear.cgColor,
+        ]
+        sweepLayer.locations = [0.0, 0.689, 0.883, 1.0]
+        sweepLayer.opacity = 0.5
+        sweepLayer.isHidden = true  // static until an agent is running/waiting
         layer?.addSublayer(sweepLayer)
+
+        // Concentric rings.
+        for (ring, alpha) in [(ring1, CGFloat(0.22)), (ring2, CGFloat(0.16))] {
+            ring.fillColor = NSColor.clear.cgColor
+            ring.strokeColor = Self.radar.withAlphaComponent(alpha).cgColor
+            ring.lineWidth = 1
+            layer?.addSublayer(ring)
+        }
+
+        // Center pip on top of the sweep.
+        pipLayer.fillColor = Self.radar.cgColor
+        layer?.addSublayer(pipLayer)
 
         // Pending badge (top-right)
         badgeContainer.wantsLayer = true
@@ -75,28 +106,57 @@ final class HelmOrbView: NSView {
 
     override func layout() {
         super.layout()
-        // Sweep arc sits just inside the ring.
-        let inset: CGFloat = 5
-        let rect = bounds.insetBy(dx: inset, dy: inset)
-        let path = CGMutablePath()
-        path.addArc(center: CGPoint(x: rect.midX, y: rect.midY),
-                    radius: rect.width / 2,
-                    startAngle: 0, endAngle: .pi * 0.55, clockwise: false)
-        sweepLayer.path = path
-        sweepLayer.frame = bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        // Sweep fills the disc (inset past the outer ring) and is clipped round.
+        let sweepRect = bounds.insetBy(dx: 3, dy: 3)
+        sweepLayer.frame = sweepRect
+        sweepLayer.cornerRadius = sweepRect.width / 2
+        sweepLayer.masksToBounds = true
+
+        // Rings at increasing inset.
+        ring1.path = ringPath(inset: 7)
+        ring2.path = ringPath(inset: 13)
+        ring1.frame = bounds
+        ring2.frame = bounds
+
+        // Center pip.
+        let pipR: CGFloat = 3
+        pipLayer.path = CGPath(ellipseIn: CGRect(x: bounds.midX - pipR, y: bounds.midY - pipR,
+                                                 width: pipR * 2, height: pipR * 2), transform: nil)
+        pipLayer.frame = bounds
+
+        CATransaction.commit()
         startSweepIfNeeded()
     }
 
+    private func ringPath(inset: CGFloat) -> CGPath {
+        let r = bounds.insetBy(dx: inset, dy: inset)
+        return CGPath(ellipseIn: r, transform: nil)
+    }
+
+    /// Drive the sweep on/off. Active = some agent running/waiting.
+    func setActive(_ active: Bool) {
+        guard active != isActive else { return }
+        isActive = active
+        sweepLayer.isHidden = !active
+        if active {
+            startSweepIfNeeded()
+        } else {
+            sweepLayer.removeAnimation(forKey: "spin")
+        }
+    }
+
     private func startSweepIfNeeded() {
+        guard isActive else { sweepLayer.isHidden = true; return }
         guard sweepLayer.animation(forKey: "spin") == nil else { return }
         let spin = CABasicAnimation(keyPath: "transform.rotation.z")
         spin.fromValue = 0
         spin.toValue = -CGFloat.pi * 2
         spin.duration = 3.6
         spin.repeatCount = .infinity
-        // Rotate about the layer center.
-        sweepLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        sweepLayer.frame = bounds
+        // anchorPoint is 0.5,0.5 by default → rotates about the sweep's own center.
         sweepLayer.add(spin, forKey: "spin")
     }
 
@@ -115,11 +175,7 @@ final class HelmOrbView: NSView {
         Self.ring.setStroke()
         disc.lineWidth = 1
         disc.stroke()
-
-        // Center pip
-        let pip = NSBezierPath(ovalIn: NSRect(x: bounds.midX - 3, y: bounds.midY - 3, width: 6, height: 6))
-        Self.radar.setFill()
-        pip.fill()
+        // Sweep wedge, rings, and center pip are layers (see setup/layout).
     }
 
     override func mouseDown(with event: NSEvent) {
