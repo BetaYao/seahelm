@@ -7,10 +7,6 @@ protocol PanelCoordinatorDelegate: AnyObject {
 class PanelCoordinator: NSObject {
     weak var delegate: PanelCoordinatorDelegate?
     weak var titleBar: TitleBarView?
-
-    func notificationPanelDidSelectItem(_ entry: NotificationEntry) {
-        delegate?.panelCoordinator(self, navigateToWorktreePath: entry.worktreePath, paneIndex: entry.paneIndex)
-    }
 }
 
 // MARK: - NotificationHistoryDelegate
