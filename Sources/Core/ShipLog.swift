@@ -440,8 +440,10 @@ class ShipLog {
             // TUI finish ingesting the paste before the Return submits it.
             DispatchQueue.main.async {
                 station.sendText(command)
+                // Submit via a real Return key event (not "\r" text), after a beat
+                // so the TUI finishes ingesting the pasted text first.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    station.sendText("\r")
+                    station.sendEnterKey()
                 }
             }
             return
