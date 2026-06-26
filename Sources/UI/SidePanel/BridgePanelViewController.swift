@@ -154,10 +154,12 @@ final class BridgePanelViewController: NSViewController {
         watchScrollView.translatesAutoresizingMaskIntoConstraints = false
         watchTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 80)
+        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 60)
         addFullWidthArranged(section)
 
-        watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor).isActive = true
+        // Watch is secondary (only notifications) — give it ~1/3 of the vertical space,
+        // Orders ~2/3. (multiplier 0.5 ⇒ watch height = half of orders ⇒ 1/3 of the total.)
+        watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor, multiplier: 0.5).isActive = true
     }
 
     private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {

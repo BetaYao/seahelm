@@ -372,6 +372,21 @@ class ShipLog {
 
     // MARK: - Channel Communication
 
+    /// Record the agent's final prose (Stop hook `last_assistant_message`) for a worktree
+    /// WITHOUT changing status — used to give suggestion cards a summary line. Resolves
+    /// cwd → terminal the same way `handleWebhookEvent` does.
+    func noteAssistantMessage(cwd: String, message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lock.lock()
+        let tid = worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
+        guard let tid, var info = agents[tid] else { lock.unlock(); return }
+        info.lastMessage = trimmed
+        agents[tid] = info
+        lock.unlock()
+        DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }
+    }
+
     /// Send a command to a specific agent.
     /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
     /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,

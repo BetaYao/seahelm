@@ -60,10 +60,14 @@ enum FirstMate {
         if case .suggest(let options) = outcome.event.kind {
             guard !options.isEmpty else { return [] }
             let i = outcome.info
+            // Short summary of the agent's final message above the option buttons so the user
+            // has context to choose. Sourced from the Stop hook's last_assistant_message
+            // (stashed into lastMessage by the blocking Stop); the card truncates to 2 lines.
+            let summary = String(i.lastMessage.prefix(200))
             return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
-                                    message: "", options: options)]
+                                    message: summary, options: options)]
         }
 
         guard outcome.statusChanged || outcome.isCompletionSignal else { return [] }
