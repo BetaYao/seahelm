@@ -244,7 +244,7 @@ class NewBranchDialog: NSViewController {
     
     private func setupBranchField() {
         branchField.placeholderString = "e.g., feature/new-thread"
-        branchField.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        branchField.font = AppFont.mono(size: 13, weight: .regular)
         branchField.setAccessibilityIdentifier("dialog.newBranch.nameField")
         styleTextField(branchField)
     }

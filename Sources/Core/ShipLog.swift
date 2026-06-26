@@ -372,12 +372,85 @@ class ShipLog {
 
     // MARK: - Channel Communication
 
-    /// Send a command to a specific agent
+    /// Record the agent's final prose (Stop hook `last_assistant_message`) for a worktree
+    /// WITHOUT changing status — used to give suggestion cards a summary line. Resolves
+    /// cwd → terminal the same way `handleWebhookEvent` does.
+    func noteAssistantMessage(cwd: String, message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lock.lock()
+        let tid = worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
+        guard let tid, var info = agents[tid] else { lock.unlock(); return }
+        info.lastMessage = trimmed
+        info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
+        agents[tid] = info
+        lock.unlock()
+        DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }
+    }
+
+    // MARK: - Background-task tracking (for suggestion gating)
+
+    /// Worktree paths that currently have background work running (subagent / shell / cron).
+    /// While busy, agent suggestions are suppressed — the agent will auto-resume, so it's
+    /// not a real end-of-turn. Source of truth: the Stop/SubagentStop `background_tasks` field,
+    /// plus SubagentStart (which precedes any voluntary seahelm-suggest call).
+    private var backgroundBusy: Set<String> = []
+
+    /// Update background-busy state from any incoming webhook event.
+    func updateBackgroundBusy(from event: WebhookEvent) {
+        switch event.event {
+        case .subagentStart:
+            setBackgroundBusy(cwd: event.cwd, busy: true)
+        case .agentStop, .subagentStop:
+            setBackgroundBusy(cwd: event.cwd, busy: StopHookResponder.hasRunningBackgroundTask(event.data))
+        default:
+            break
+        }
+    }
+
+    /// True if the worktree owning `cwd` currently has background work running.
+    func isBackgroundBusy(cwd: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return false }
+        return backgroundBusy.contains(path)
+    }
+
+    private func setBackgroundBusy(cwd: String, busy: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return }
+        if busy { backgroundBusy.insert(path) } else { backgroundBusy.remove(path) }
+    }
+
+    /// Resolve a cwd to the worktree path it belongs to. Caller must hold `lock`.
+    private func worktreePathLocked(forCwd cwd: String) -> String? {
+        worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.key
+    }
+
+    /// Send a command to a specific agent.
+    /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
+    /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,
+    /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
+    /// only when the surface isn't available (e.g. pane not currently rendered).
     func sendCommand(to terminalID: String, command: String) {
+        if let station = StationRegistry.shared.station(forId: terminalID) {
+            // Send the text first, then the Enter as a separate write. Agent TUIs
+            // (Claude Code, codex) treat a `\r` arriving in the same burst as the
+            // pasted text as a literal newline (multiline input) instead of a
+            // submit, so the order text lands but never sends. A short gap lets the
+            // TUI finish ingesting the paste before the Return submits it.
+            DispatchQueue.main.async {
+                station.sendText(command)
+                // Submit via a real Return key event (not "\r" text), after a beat
+                // so the TUI finishes ingesting the pasted text first.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    station.sendEnterKey()
+                }
+            }
+            return
+        }
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
-
         channel?.sendCommand(command)
     }
 

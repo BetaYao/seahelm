@@ -41,7 +41,10 @@ final class StatusBarView: NSView {
         wantsLayer = true
         layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
 
-        for label in [usageLabel, notificationLabel, shortcutsLabel] {
+        // notificationLabel ("xx unread") intentionally not added to the bar —
+        // the center unread summary was removed. Property kept as a no-op sink
+        // for updateNotification(_:) / tests.
+        for label in [usageLabel, shortcutsLabel] {
             label.font = NSFont.systemFont(ofSize: 10, weight: .regular)
             label.textColor = SemanticColors.muted
             label.lineBreakMode = .byTruncatingTail
@@ -50,7 +53,6 @@ final class StatusBarView: NSView {
             addSubview(label)
         }
         shortcutsLabel.alignment = .right
-        notificationLabel.alignment = .center
 
         modeLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
         modeLabel.textColor = SemanticColors.muted
@@ -64,12 +66,9 @@ final class StatusBarView: NSView {
             modeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             usageLabel.leadingAnchor.constraint(equalTo: modeLabel.trailingAnchor, constant: 10),
             usageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            notificationLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            notificationLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             shortcutsLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             shortcutsLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            usageLabel.trailingAnchor.constraint(lessThanOrEqualTo: notificationLabel.leadingAnchor, constant: -8),
-            notificationLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutsLabel.leadingAnchor, constant: -8),
+            usageLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutsLabel.leadingAnchor, constant: -8),
         ])
     }
 

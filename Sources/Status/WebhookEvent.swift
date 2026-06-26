@@ -13,12 +13,14 @@ enum WebhookEventType: String {
     case toolUseFailed = "tool_use_failed"
     case stopFailure = "stop_failure"
     case subagentStart = "subagent_start"
+    case subagentStop = "subagent_stop"
     case cwdChanged = "cwd_changed"
     case suggest = "suggest"
 
     func agentStatus(data: [String: Any]?) -> SailorStatus {
         switch self {
-        case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .userPrompt, .toolUseFailed:
+        case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .subagentStop, .userPrompt, .toolUseFailed:
+            // A subagent finishing does NOT mean the main agent is idle — it usually resumes.
             return .running
         case .agentStop:
             return .idle
@@ -46,7 +48,8 @@ enum WebhookEventType: String {
         case "SessionStart": return .sessionStart
         case "PreToolUse": return .toolUseStart
         case "PostToolUse": return .toolUseEnd
-        case "Stop", "SubagentStop": return .agentStop
+        case "Stop": return .agentStop
+        case "SubagentStop": return .subagentStop
         case "Notification": return .notification
         case "WorktreeCreate": return .worktreeCreate
         case "UserPromptSubmit": return .userPrompt

@@ -131,6 +131,8 @@ protocol SignalDecoder {
 - 现状 Claude Code 的 `Stop` 走 HTTP hook 打到 webhook。**改 `WebhookServer` 的响应**:当 `hook_event_name == "Stop"` 且 `stop_hook_active == false` 且 `suggestOnStop` 开启 且 cwd 命中 worktree 时,返回 `200` + body `{"decision":"block","reason":"结束本轮前调用 seahelm-suggest 给出 2-5 个下一步候选;勿以文字列出"}`,把 agent 拉回来强制产出 suggestion。
 - **防死循环**:Stop 输入带 `stop_hook_active`;被 block 后第二次 Stop 该字段为 `true`,服务器返回空 `{}` 放行。
 - **状态联动坑**:`stop_hook_active == false` 且触发 block 的那次 Stop **不当 completion 信号**(不置 idle、不清 activity,agent 还要继续);只有 `stop_hook_active == true` 的真 Stop 才走 `.agentStopped` 语义。
+- **后台任务挂起时不推建议**(已实测确认):Claude Code 的 `Stop` payload 带官方字段 `background_tasks: [{id,type,status,...}]`(子 agent / shell / 另有 `session_crons`)。主 agent 在等后台任务时 Stop 仍触发但 `background_tasks` 含 `status=="running"` 项;真正空闲才是 `[]`。**`StopHookResponder` 在 `background_tasks` 有 running 项时返回 nil**(不 block、不推建议),等后台跑完、agent 真正最终 Stop 时才推。
+- **`SubagentStop` 与 `Stop` 拆分**:二者原本都映射成 `.agentStop`。现新增 `WebhookEventType.subagentStop`——**只有主 agent 的 `Stop` 驱动 completion/建议**;`SubagentStop`(子 agent 结束)不置主站 idle、不 block(`HookDecoder.kind` 对它返回 nil)。
 - CLAUDE.md 注入(`SuggestGuidanceWriter`)降级为兜底,主力是 Stop-hook reason。
 - 配置:`config.webhook.suggestOnStop`(默认开)。
 - HTTP hook 支持 `decision:block` 已核对 Claude Code 官方机制确认;**无需把 HTTP hook 改成 command hook**。

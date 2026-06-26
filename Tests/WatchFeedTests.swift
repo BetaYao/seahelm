@@ -64,7 +64,7 @@ final class WatchFeedTests: XCTestCase {
         feed.record(makeAction())
         let id = feed.all().first!.id
         var fired = false
-        feed.onChange = { fired = true }
+        feed.addObserver({ fired = true })
         feed.clear(id: id)
         XCTAssertTrue(fired)
     }
@@ -72,7 +72,7 @@ final class WatchFeedTests: XCTestCase {
     func testClearNonExistentDoesNotFireOnChange() {
         let feed = WatchFeed()
         var fired = false
-        feed.onChange = { fired = true }
+        feed.addObserver({ fired = true })
         feed.clear(id: "nonexistent#watchWaiting")
         XCTAssertFalse(fired)
     }
@@ -80,7 +80,7 @@ final class WatchFeedTests: XCTestCase {
     func testRecordFiresOnChange() {
         let feed = WatchFeed()
         var count = 0
-        feed.onChange = { count += 1 }
+        feed.addObserver({ count += 1 })
         feed.record(makeAction())
         XCTAssertEqual(count, 1)
     }

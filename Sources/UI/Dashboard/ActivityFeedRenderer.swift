@@ -42,8 +42,8 @@ enum ActivityFeedRenderer {
         }
 
         let result = NSMutableAttributedString()
-        let monoFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let monoMedium = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
+        let monoFont = AppFont.mono(size: fontSize, weight: .regular)
+        let monoMedium = AppFont.mono(size: fontSize, weight: .medium)
 
         result.append(NSAttributedString(string: marker, attributes: [
             .font: monoFont,

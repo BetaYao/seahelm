@@ -27,28 +27,18 @@ final class FirstMateCoordinator {
         if case .userPrompt = outcome.event.kind {
             queue.resolveSuggest(worktreePath: outcome.info.worktreePath)
         }
-        if case .suggest(let options) = outcome.event.kind {
-            guard !options.isEmpty else { return }
-            let info = outcome.info
-            let action = FirstMateAction(kind: .suggestNextOrder, zone: .red,
-                                         worktreePath: info.worktreePath, branch: info.branch,
-                                         project: info.project, terminalID: info.id,
-                                         message: "", options: options)
-            queue.upsert(action)
-            return
-        }
-        guard outcome.statusChanged || outcome.isCompletionSignal else { return }
-        let t = StatusTransition(
-            worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,
-            project: outcome.info.project, terminalID: outcome.info.id,
-            oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
-            holdSeconds: outcome.holdSeconds, isCompletionSignal: outcome.isCompletionSignal)
-        handle(t)
+        route(FirstMate.evaluate(outcome, config: config))
     }
 
     func handle(_ t: StatusTransition) {
         dispatchPrecondition(condition: .onQueue(.main))
-        for action in FirstMate.evaluate(t, config: config) {
+        route(FirstMate.evaluate(t, config: config))
+    }
+
+    /// Pure routing of decided actions to side-effect closures / the queue.
+    /// All adjudication lives in FirstMate.evaluate; this only dispatches.
+    private func route(_ actions: [FirstMateAction]) {
+        for action in actions {
             switch action.zone {
             case .green:
                 switch action.kind {
@@ -61,7 +51,11 @@ final class FirstMateCoordinator {
                 }
             case .red:
                 switch action.kind {
+                case .suggestNextOrder where action.options != nil:
+                    // Agent-supplied suggestion: replace any prior one for this worktree.
+                    queue.upsert(action)
                 case .suggestNextOrder:
+                    // Rule-derived "ask next order": only when other orders already exist.
                     if hasOrders(action.worktreePath) { queue.enqueue(action) }
                 default:
                     queue.enqueue(action)

@@ -79,7 +79,7 @@ final class SailorCardView: NSView {
             clearFeedLabels()
             messageLabel.isHidden = false
             messageLabel.attributedStringValue = NSAttributedString(string: lastMessage, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular),
+                .font: AppFont.mono(size: Typography.secondaryPointSize, weight: .regular),
                 .foregroundColor: SemanticColors.muted,
             ])
         }
@@ -140,7 +140,7 @@ final class SailorCardView: NSView {
         addSubview(terminalContainer)
 
         // Message label — shown in grid mode when no live terminal is embedded
-        messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        messageLabel.font = AppFont.mono(size: Typography.secondaryPointSize, weight: .regular)
         messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.maximumNumberOfLines = 0
@@ -338,8 +338,8 @@ enum TaskListRenderer {
         guard !tasks.isEmpty else { return nil }
 
         let result = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: SailorCardView.Typography.secondaryPointSize, weight: .regular)
-        let boldFont = NSFont.monospacedSystemFont(ofSize: SailorCardView.Typography.secondaryPointSize, weight: .bold)
+        let font = AppFont.mono(size: SailorCardView.Typography.secondaryPointSize, weight: .regular)
+        let boldFont = AppFont.mono(size: SailorCardView.Typography.secondaryPointSize, weight: .bold)
         let mutedColor = SemanticColors.muted
         let textColor = SemanticColors.text
         let successColor = SemanticColors.running

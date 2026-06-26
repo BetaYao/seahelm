@@ -11,7 +11,7 @@ class DividerView: NSView {
     let axis: SplitAxis
     weak var delegate: DividerDelegate?
 
-    static let thickness: CGFloat = 4
+    static let thickness: CGFloat = 1
 
     private var isDragging = false
     private var dragStartPoint: CGPoint = .zero

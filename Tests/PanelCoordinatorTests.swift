@@ -1,43 +1,11 @@
 import XCTest
 @testable import seahelm
 
-private class MockPanelCoordinatorDelegate: PanelCoordinatorDelegate {
-    var navigateCalled = false
-    var lastWorktreePath: String?
-    var lastPaneIndex: Int?
-
-    func panelCoordinator(_ coordinator: PanelCoordinator, navigateToWorktreePath path: String, paneIndex: Int?) {
-        navigateCalled = true
-        lastWorktreePath = path
-        lastPaneIndex = paneIndex
-    }
-}
-
 final class PanelCoordinatorTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
         NotificationHistory.shared.clear()
-    }
-
-    func testSelectNotificationNavigatesWithPaneIndex() {
-        let coordinator = PanelCoordinator()
-        let delegate = MockPanelCoordinatorDelegate()
-        coordinator.delegate = delegate
-
-        let entry = NotificationEntry(
-            branch: "main",
-            worktreePath: "/repo",
-            status: .waiting,
-            message: "Need input",
-            paneIndex: 2
-        )
-
-        coordinator.notificationPanelDidSelectItem(entry)
-
-        XCTAssertTrue(delegate.navigateCalled)
-        XCTAssertEqual(delegate.lastWorktreePath, "/repo")
-        XCTAssertEqual(delegate.lastPaneIndex, 2)
     }
 
     func testSelectPrimaryCapsuleNotificationPrefersSelectedWorktreeEntries() {

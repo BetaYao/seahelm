@@ -51,6 +51,36 @@ struct StatusTransition {
 
 /// Pure rule engine: status-transition edge + config → action list. No IO, no singletons.
 enum FirstMate {
+    /// Unified entry: folds the agent-suggestion path into the same pure rule engine.
+    /// `.suggest` events become a red-zone suggestNextOrder carrying options; everything
+    /// else derives a StatusTransition and runs the standard rules.
+    static func evaluate(_ outcome: IngestOutcome, config: FirstMateConfig) -> [FirstMateAction] {
+        guard config.enabled else { return [] }
+
+        if case .suggest(let options) = outcome.event.kind {
+            guard !options.isEmpty else { return [] }
+            let i = outcome.info
+            // Short summary of the agent's final message above the option buttons so the user
+            // has context to choose. Prefer lastAssistantMessage (Stop hook's
+            // last_assistant_message, never clobbered by screen scans) over lastMessage,
+            // which a poll may have overwritten with the `seahelm-suggest …` command line.
+            let prose = i.lastAssistantMessage.isEmpty ? i.lastMessage : i.lastAssistantMessage
+            let summary = String(prose.prefix(200))
+            return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
+                                    worktreePath: i.worktreePath, branch: i.branch,
+                                    project: i.project, terminalID: i.id,
+                                    message: summary, options: options)]
+        }
+
+        guard outcome.statusChanged || outcome.isCompletionSignal else { return [] }
+        let t = StatusTransition(
+            worktreePath: outcome.info.worktreePath, branch: outcome.info.branch,
+            project: outcome.info.project, terminalID: outcome.info.id,
+            oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
+            holdSeconds: outcome.holdSeconds, isCompletionSignal: outcome.isCompletionSignal)
+        return evaluate(t, config: config)
+    }
+
     static func evaluate(_ t: StatusTransition, config: FirstMateConfig) -> [FirstMateAction] {
         guard config.enabled else { return [] }
 

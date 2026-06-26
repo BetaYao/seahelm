@@ -90,7 +90,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private var leftColumnWidthCollapsed: NSLayoutConstraint?
     private var isLeftColumnCollapsed = false
     /// Which of the panes the left column currently shows.
-    private var currentLeftPane: LeftPane = .bridge
+    private var currentLeftPane: LeftPane = .file
 
     /// Worktree paths idle > 8h — collapsed under the expander in the popover list.
     var idleWorktreePaths: Set<String> = []
@@ -117,27 +117,27 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private let leftRightSidebarScroll = NonFirstResponderScrollView()
     private let leftRightSidebarStack = FlippedStackView()
     private var leftRightMiniCards: [StackedMiniCardContainerView] = []
+    // The inline worktree creator is no longer shown (the cockpit `/new` command
+    // replaces it); the object is kept only so the existing setup/report wiring
+    // in MainWindowController still compiles.
     private let inlineCreateView = InlineWorktreeCreateView()
     private var inlineCreateHeightConstraint: NSLayoutConstraint?
-
-    // First Mate bottom bar: fleet status line + the task input. Shown only on
-    // the bridge pane (the input lives here now, not in the worktree pane).
-    private let leftBottomBar = NSView()
-    private let fleetStatusLabel = NSTextField(labelWithString: "")
-    private var sidePanelBottomToBar: NSLayoutConstraint?
-    private var sidePanelBottomToContainer: NSLayoutConstraint?
 
     // Left column container — hosts the worktree list, inline create, and the
     // bridge/file/change side panel (one pane visible at a time).
     private let leftColumnContainer = NSView()
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
-        let vc = WorktreeSidePanelViewController(worktreePath: nil)
+        let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
         return vc
     }()
 
     // Center overlay
     private var centerOverlay: CenterOverlayView?
+
+    // Helm cockpit (WP-2) — bottom-center radar orb + floating command center,
+    // layered on top of everything. Fed the live queue/feed by MainWindowController.
+    private(set) lazy var helmCockpit = HelmCockpitController()
 
     // Empty state
     private let emptyStateView = NSView()
@@ -159,6 +159,26 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         // Show the 3-column layout immediately; hide empty state
         leftRightContainer.isHidden = false
+
+        // The Helm cockpit is installed by MainWindowController into the window
+        // content view (so the orb can sit over the status bar), not here.
+    }
+
+    /// Layer the Helm cockpit on top of `host`, spanning from `top` down to the
+    /// host bottom. MainWindowController passes the window content view + the
+    /// content-container top, so the cockpit covers the dashboard AND the status
+    /// bar — letting the radar orb bottom-align with the status bar.
+    /// Its passthrough container forwards clicks everywhere except the orb/panel.
+    func installCockpit(in host: NSView, top: NSLayoutYAxisAnchor) {
+        addChild(helmCockpit)
+        helmCockpit.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(helmCockpit.view)
+        NSLayoutConstraint.activate([
+            helmCockpit.view.topAnchor.constraint(equalTo: top),
+            helmCockpit.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            helmCockpit.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            helmCockpit.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
     }
 
     // MARK: - Public API
@@ -281,14 +301,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
 
-        let isBridge = (pane == .bridge)
-        // The status + input bar belongs to the bridge pane only.
-        leftBottomBar.isHidden = !isBridge
-        sidePanelBottomToBar?.isActive = isBridge
-        sidePanelBottomToContainer?.isActive = !isBridge
-
         switch pane {
-        case .bridge:   sidePanelVC.selectTab(.firstMate)
+        case .bridge:   sidePanelVC.selectTab(.files)  // legacy enum value — bridge tab removed
         case .file:     sidePanelVC.selectTab(.files)
         case .change:   sidePanelVC.selectTab(.changes)
         }
@@ -337,15 +351,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if worktreePopover.isShown { worktreePopover.close() }
     }
 
-    /// Update the First Mate fleet status line (repos · worktrees · hidden).
-    func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {
-        var parts = [
-            "\(repos) repo\(repos == 1 ? "" : "s")",
-            "\(worktrees) worktree\(worktrees == 1 ? "" : "s")",
-        ]
-        if hidden > 0 { parts.append("\(hidden) hidden") }
-        fleetStatusLabel.stringValue = parts.joined(separator: " · ")
-    }
+    /// Fleet status line was removed with the left bottom bar; kept as a no-op so
+    /// the existing caller compiles. (Could move into the status bar later.)
+    func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {}
 
     private func animateColumnLayout(_ extra: @escaping () -> Void) {
         NSAnimationContext.runAnimationGroup { context in
@@ -370,7 +378,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         inlineCreateView.onCreate = onCreate
     }
 
-    func focusInlineCreate() { inlineCreateView.focusNameField() }
+    func focusInlineCreate() {
+        // New-worktree creation moved to the Helm cockpit: open it with `/new `
+        // prefilled so the user types the task and submits.
+        helmCockpit.openWithCommand("/new ")
+    }
 
     /// Called when the inline create form ends (submit or cancel) so the owner
     /// can exit `.createForm` and restore the nav ring.
@@ -574,28 +586,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.documentView = leftRightSidebarStack
 
-        // First Mate bottom bar: fleet status line + task input.
-        leftBottomBar.translatesAutoresizingMaskIntoConstraints = false
-        leftColumnContainer.addSubview(leftBottomBar)
+        // The First Mate bottom bar (fleet status + task input) was removed — the
+        // command line now lives in the Helm cockpit (`/new` creates worktrees).
 
-        fleetStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        fleetStatusLabel.textColor = Theme.textSecondary
-        fleetStatusLabel.lineBreakMode = .byTruncatingTail
-        fleetStatusLabel.maximumNumberOfLines = 1
-        fleetStatusLabel.cell?.usesSingleLineMode = true
-        fleetStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        fleetStatusLabel.setAccessibilityIdentifier("bridge.fleetStatus")
-        leftBottomBar.addSubview(fleetStatusLabel)
-
-        inlineCreateView.translatesAutoresizingMaskIntoConstraints = false
-        leftBottomBar.addSubview(inlineCreateView)
-        inlineCreateView.onPreferredHeightChange = { [weak self] height, animated in
-            self?.setInlineCreateHeight(height, animated: animated)
-        }
-        let inlineHeight = inlineCreateView.heightAnchor.constraint(equalToConstant: inlineCreateView.preferredHeight)
-        inlineCreateHeightConstraint = inlineHeight
-
-        // Bridge/file/change side panel — fills the column, hidden until selected.
+        // File/change side panel — fills the column, hidden until selected.
         addChild(sidePanelVC)
         sidePanelVC.view.translatesAutoresizingMaskIntoConstraints = false
         leftColumnContainer.addSubview(sidePanelVC.view)
@@ -604,17 +598,21 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
         leftRightFocusPanel.setCornerMask(
             [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner],
-            radius: LayoutMetrics.focusPanelCornerRadius
+            radius: 0
         )
         leftRightContainer.addSubview(leftRightFocusPanel)
 
         let spacing = LayoutMetrics.columnSpacing
         let edge: CGFloat = 8
 
-        // Fixed width for the left column; centre fills the rest.
+        // Fixed width for the left column; centre fills the rest. The column
+        // starts collapsed (hidden) — the user reveals it with Cmd+B / the
+        // title-bar pane icons.
         leftColumnWidthExpanded = leftColumnContainer.widthAnchor.constraint(equalToConstant: LayoutMetrics.leftColumnWidth)
         leftColumnWidthCollapsed = leftColumnContainer.widthAnchor.constraint(equalToConstant: 0)
-        leftColumnWidthExpanded?.isActive = true
+        leftColumnWidthCollapsed?.isActive = true
+        isLeftColumnCollapsed = true
+        leftColumnContainer.alphaValue = 0
 
         NSLayoutConstraint.activate([
             leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
@@ -622,45 +620,29 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
             leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
 
-            // Left column container
+            // Left column container — flush to the window's left edge, so when it
+            // collapses (width 0) the centre terminal sits flush left too (no strip).
             leftColumnContainer.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftColumnContainer.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor, constant: edge),
-            leftColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
+            leftColumnContainer.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
+            leftColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
 
-            // Bottom bar pinned to the container bottom (shown only on bridge).
-            leftBottomBar.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
-            leftBottomBar.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            leftBottomBar.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
-
-            fleetStatusLabel.topAnchor.constraint(equalTo: leftBottomBar.topAnchor, constant: 4),
-            fleetStatusLabel.leadingAnchor.constraint(equalTo: leftBottomBar.leadingAnchor, constant: 10),
-            fleetStatusLabel.trailingAnchor.constraint(equalTo: leftBottomBar.trailingAnchor, constant: -10),
-
-            inlineCreateView.topAnchor.constraint(equalTo: fleetStatusLabel.bottomAnchor, constant: 6),
-            inlineCreateView.leadingAnchor.constraint(equalTo: leftBottomBar.leadingAnchor),
-            inlineCreateView.trailingAnchor.constraint(equalTo: leftBottomBar.trailingAnchor),
-            inlineCreateView.bottomAnchor.constraint(equalTo: leftBottomBar.bottomAnchor),
-            inlineHeight,
-
-            // Side panel fills the column; bottom toggled vs the bar in selectLeftPane.
+            // Side panel fills the whole column now that the bottom bar is gone.
             sidePanelVC.view.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
             sidePanelVC.view.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
             sidePanelVC.view.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
+            sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
 
-            // Centre column fills from the left container to the right edge
+            // Centre terminal panel: flush to left/right/bottom — no gap, no card.
             leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor, constant: spacing),
-            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
-            leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -edge),
+            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
+            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor),
         ])
 
-        // Side-panel bottom toggles between sitting above the bridge bar and
-        // filling to the container bottom (file/change panes).
-        sidePanelBottomToBar = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftBottomBar.topAnchor, constant: -6)
-        sidePanelBottomToContainer = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor)
-
-        // Default to the bridge (First Mate) pane.
-        selectLeftPane(.bridge)
+        // Pre-select the Files pane WITHOUT expanding the column (it stays
+        // collapsed by default; selectLeftPane would force-expand it).
+        currentLeftPane = .file
+        sidePanelVC.selectTab(.files)
     }
 
     private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {
@@ -915,6 +897,21 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 return
             }
             mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
+        }
+
+        // Helm cockpit keys (NORMAL mode). space toggles the cockpit, ? the help
+        // overlay; Esc closes the topmost cockpit surface before falling back to
+        // the legacy "exit nav" behavior.
+        if event.keyCode == 53 {  // Esc
+            if helmCockpit.closeTopmost() { return }
+        }
+        if flags.isDisjoint(with: [.command, .control, .option]) {
+            if event.keyCode == 49 {  // space
+                helmCockpit.toggleCockpit(); return
+            }
+            if event.characters == "?" {
+                helmCockpit.toggleHelp(); return
+            }
         }
 
         // Escape with no pending → exit nav (legacy behavior)

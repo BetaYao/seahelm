@@ -116,7 +116,7 @@ final class DiffReviewView: NSView {
         diffTextView.setAccessibilityIdentifier("diffReview.text")
         diffTextView.isEditable = false
         diffTextView.isSelectable = true
-        diffTextView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        diffTextView.font = AppFont.mono(size: 12, weight: .regular)
         diffTextView.backgroundColor = Theme.background
         diffTextView.textColor = Theme.textPrimary
         diffTextView.textContainerInset = NSSize(width: 8, height: 8)
@@ -192,12 +192,12 @@ final class DiffReviewView: NSView {
 
     private func render(_ filesToRender: [DiffFile]) {
         let attributed = NSMutableAttributedString()
-        let monoFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let monoFont = AppFont.mono(size: 12, weight: .regular)
 
         for file in filesToRender {
             let fileHeader = "\n━━━ \(file.path) (+\(file.additions) -\(file.deletions)) ━━━\n\n"
             attributed.append(NSAttributedString(string: fileHeader, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                .font: AppFont.mono(size: 12, weight: .bold),
                 .foregroundColor: Theme.accent,
             ]))
 

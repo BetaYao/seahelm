@@ -162,7 +162,7 @@ extension NotificationHistoryViewController: NSTableViewDelegate {
         let timeStr = timeFormatter.string(from: entry.timestamp)
 
         let timeLabel = NSTextField(labelWithString: timeStr)
-        timeLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        timeLabel.font = AppFont.mono(size: 10, weight: .regular)
         timeLabel.textColor = Theme.textSecondary
         timeLabel.frame = NSRect(x: 30, y: 30, width: 40, height: 14)
         cell.addSubview(timeLabel)

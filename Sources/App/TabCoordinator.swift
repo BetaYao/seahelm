@@ -409,10 +409,21 @@ class TabCoordinator {
                     }
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         guard let self else { return nil }
+                        // Track per-worktree background-task state (subagent/shell/cron).
+                        ShipLog.shared.updateBackgroundBusy(from: event)
+                        // Drop a (voluntary) suggestion while background work is still running —
+                        // the agent will auto-resume, so it isn't a real end-of-turn yet.
+                        if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
+                            return nil
+                        }
                         if let block = StopHookResponder.blockBody(
                             for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
                             // Blocking Stop: agent will continue and call seahelm-suggest.
-                            // Do NOT ingest this stop as completion (avoid premature idle).
+                            // Do NOT ingest this stop as completion (avoid premature idle), but
+                            // stash the agent's final message so the suggestion card can show it.
+                            if let msg = event.data?["last_assistant_message"] as? String {
+                                ShipLog.shared.noteAssistantMessage(cwd: event.cwd, message: msg)
+                            }
                             return block
                         }
                         self.statusPublisher.webhookProvider.handleEvent(event)

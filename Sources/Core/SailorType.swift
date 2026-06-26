@@ -109,6 +109,20 @@ enum SailorType: String, Codable, CaseIterable {
         !isAIAgent && self != .unknown
     }
 
+    /// Short glyph shown before a worktree tab title (cockpit redesign).
+    /// AI agents get a sigil (Claude ✻ / Codex ⟡ / others ◆); shell tasks get
+    /// a terminal mark; unknown gets none.
+    var tabGlyph: String? {
+        switch self {
+        case .claudeCode: return "✻"
+        case .codex:      return "⟡"
+        case .openCode:   return "◇"
+        case .gemini:     return "✦"
+        case .unknown:    return nil
+        default:          return isAIAgent ? "◆" : "❯"
+        }
+    }
+
     // MARK: - AI Agent detection from terminal content
 
     // Ordered by specificity to avoid false matches (e.g., "opencode" before "code")

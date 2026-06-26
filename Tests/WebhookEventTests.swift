@@ -125,7 +125,7 @@ final class WebhookEventTests: XCTestCase {
         {"hook_event_name":"SubagentStop","session_id":"sess_abc","cwd":"/tmp/project"}
         """.data(using: .utf8)!
         let event = try WebhookEvent.parse(from: json)
-        XCTAssertEqual(event.event, .agentStop)
+        XCTAssertEqual(event.event, .subagentStop)
         XCTAssertEqual(event.source, "claude-code")
     }
 

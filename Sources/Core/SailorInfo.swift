@@ -7,7 +7,11 @@ struct SailorInfo {
     let project: String                // repo display name
     let branch: String                 // git branch
     var status: SailorStatus            // current status
-    var lastMessage: String            // latest message
+    var lastMessage: String            // latest message (may be a scanned command line)
+    /// The agent's final prose (Stop hook `last_assistant_message`). Set only by
+    /// noteAssistantMessage and never overwritten by screen scans, so suggestion
+    /// cards can show the real explanation rather than the `seahelm-suggest …` line.
+    var lastAssistantMessage: String = ""
     var lastUserPrompt: String = ""    // most recent user prompt text
     var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round

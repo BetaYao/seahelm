@@ -9,6 +9,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let orphanCleanupInterval: TimeInterval = 300
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register bundled JetBrains Mono before any view builds its fonts.
+        AppFont.registerBundledFonts()
+
         // Ensure notification delegate is set before any notification response arrives
         _ = NotificationManager.shared
 

@@ -33,4 +33,37 @@ final class StopHookResponderTests: XCTestCase {
                              cwd: "/wt", timestamp: nil, data: nil)
         XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
     }
+
+    func testSubagentStopNeverBlocks() {
+        // SubagentStop is now a distinct event and must not trigger a suggestion block.
+        let e = WebhookEvent(source: "claude-code", sessionId: "s", event: .subagentStop,
+                             cwd: "/wt", timestamp: nil, data: ["stop_hook_active": false])
+        XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+    }
+
+    func testRunningBackgroundTaskSkipsBlock() {
+        // Main Stop fired while a background shell task is still running → do not suggest.
+        let data: [String: Any] = [
+            "stop_hook_active": false,
+            "background_tasks": [
+                ["id": "b1", "type": "shell", "status": "running", "description": "sleep 75"]
+            ],
+        ]
+        let e = WebhookEvent(source: "claude-code", sessionId: "s", event: .agentStop,
+                             cwd: "/wt", timestamp: nil, data: data)
+        XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+    }
+
+    func testCompletedBackgroundTasksStillBlock() {
+        // No running background tasks → genuine idle → block/suggest as normal.
+        let data: [String: Any] = [
+            "stop_hook_active": false,
+            "background_tasks": [
+                ["id": "b1", "type": "shell", "status": "completed", "description": "done"]
+            ],
+        ]
+        let e = WebhookEvent(source: "claude-code", sessionId: "s", event: .agentStop,
+                             cwd: "/wt", timestamp: nil, data: data)
+        XCTAssertNotNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+    }
 }

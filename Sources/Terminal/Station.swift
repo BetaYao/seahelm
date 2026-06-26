@@ -265,6 +265,28 @@ class Station {
         }
     }
 
+    /// Send a real Return key press+release (not a `\r` via the text path). Agent
+    /// TUIs (Claude Code, codex) treat a `\r` arriving through text/paste as a
+    /// literal newline, but a genuine Enter key event as submit. Used to send a
+    /// command after `sendText` so it actually executes.
+    func sendEnterKey() {
+        guard let surface else { return }
+        let returnKeycode: UInt32 = 36  // macOS kVK_Return
+        var press = ghostty_input_key_s()
+        press.action = GHOSTTY_ACTION_PRESS
+        press.keycode = returnKeycode
+        press.mods = GHOSTTY_MODS_NONE
+        "\r".withCString { cStr in
+            press.text = cStr
+            _ = ghostty_surface_key(surface, press)
+        }
+        var release = ghostty_input_key_s()
+        release.action = GHOSTTY_ACTION_RELEASE
+        release.keycode = returnKeycode
+        release.mods = GHOSTTY_MODS_NONE
+        _ = ghostty_surface_key(surface, release)
+    }
+
     func readViewportText() -> String? {
         guard let surface else { return nil }
 
