@@ -290,6 +290,8 @@ final class BridgePanelViewController: NSViewController {
     // interpretKeyEvents rather than bubbling raw keyDown).
     override func cancelOperation(_ sender: Any?) { onEscape?() }
     override func insertTab(_ sender: Any?) { toggleActiveTable() }
+    /// Enter on a selected order navigates to its pane (when no option was picked).
+    override func insertNewline(_ sender: Any?) { handleNavigate(in: ordersTableView) }
 
     override func keyDown(with event: NSEvent) {
         guard let key = event.characters else { super.keyDown(with: event); return }
@@ -429,6 +431,7 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
             card.identifier = id
             card.configure(order: order,
                            onOption: { [weak self] idx in self?.applyOption(order, index: idx) })
+            card.onNavigate = { [weak self] in self?.onNavigateToWorktree?(order.action.worktreePath) }
             card.setSelected(row == tableView.selectedRow)
             return card
         } else {
@@ -560,6 +563,8 @@ private final class OrderCardView: NSTableCellView {
     private let chipRow = NSStackView()
 
     private var onOption: ((Int) -> Void)?
+    /// Clicking the card body (anywhere but an option chip) navigates to its pane.
+    var onNavigate: (() -> Void)?
     private var armedDangerousIndex: Int?
     private var dangerousIndexes: Set<Int> = []
 
@@ -570,6 +575,9 @@ private final class OrderCardView: NSTableCellView {
         wantsLayer = true
         layer?.cornerRadius = 0
         layer?.backgroundColor = Bare.panelAlt.cgColor
+
+        let click = NSClickGestureRecognizer(target: self, action: #selector(cardClicked(_:)))
+        addGestureRecognizer(click)
 
         accentBar.wantsLayer = true
         accentBar.layer?.backgroundColor = NSColor.clear.cgColor
@@ -677,6 +685,13 @@ private final class OrderCardView: NSTableCellView {
         }
         onOption?(index)
         return true
+    }
+
+    @objc private func cardClicked(_ g: NSClickGestureRecognizer) {
+        // Clicks inside the option-chip row are handled by the chips themselves.
+        let pt = g.location(in: self)
+        if chipRow.frame.contains(pt) { return }
+        onNavigate?()
     }
 }
 

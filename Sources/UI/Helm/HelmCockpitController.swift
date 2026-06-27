@@ -59,7 +59,13 @@ final class HelmCockpitController: NSViewController {
         didSet { bridgeVC.onSuggestionTapped = onSuggestionTapped }
     }
     var onNavigate: ((String) -> Void)? {
-        didSet { bridgeVC.onNavigateToWorktree = onNavigate }
+        didSet {
+            // Navigating to a pane should close the cockpit so the pane is visible.
+            bridgeVC.onNavigateToWorktree = { [weak self] path in
+                if self?.isOpen == true { self?.toggle() }
+                self?.onNavigate?(path)
+            }
+        }
     }
     var onApprove: ((PendingOrder) -> Void)? {
         didSet { bridgeVC.onApprove = onApprove }
