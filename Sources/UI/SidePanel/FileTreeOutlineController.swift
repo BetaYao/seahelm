@@ -1,4 +1,58 @@
 import AppKit
+import CoreServices
+
+// MARK: - DirectoryWatcher
+
+/// Recursively watches a directory subtree via FSEvents and reports changed
+/// paths (coalesced) on a background queue. Used to keep the file tree in sync
+/// with external writes (agents, Finder, git).
+final class DirectoryWatcher {
+    private var stream: FSEventStreamRef?
+    private let onChange: ([String]) -> Void
+    private let queue = DispatchQueue(label: "seahelm.filetree.watcher")
+
+    /// Returns nil if the FSEvents stream could not be created.
+    init?(path: String, onChange: @escaping ([String]) -> Void) {
+        self.onChange = onChange
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: nil, release: nil, copyDescription: nil
+        )
+        let flags = UInt32(
+            kFSEventStreamCreateFlagFileEvents
+            | kFSEventStreamCreateFlagNoDefer
+            | kFSEventStreamCreateFlagUseCFTypes
+        )
+        let callback: FSEventStreamCallback = { _, info, numEvents, eventPaths, _, _ in
+            guard let info else { return }
+            let watcher = Unmanaged<DirectoryWatcher>.fromOpaque(info).takeUnretainedValue()
+            let paths = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
+            guard numEvents > 0 else { return }
+            watcher.onChange(paths)
+        }
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault, callback, &context, [path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.3, flags
+        ) else { return nil }
+
+        self.stream = stream
+        FSEventStreamSetDispatchQueue(stream, queue)
+        FSEventStreamStart(stream)
+    }
+
+    func stop() {
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
+    }
+
+    deinit { stop() }
+}
 
 // MARK: - FileTreeNode
 
@@ -21,6 +75,12 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private var rootPath: String?
     private var rootNodes: [FileTreeNode] = []
+
+    /// Watches the worktree subtree so external file changes (agents writing
+    /// files, Finder edits, git) refresh the tree without a manual reload.
+    private var watcher: DirectoryWatcher?
+    /// Debounces bursts of FSEvents into a single main-thread refresh.
+    private var pendingRefresh: DispatchWorkItem?
 
     /// When true, dotfiles are listed. Toggled from the side panel / context menu.
     var showHidden: Bool = false {
@@ -64,6 +124,49 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     func setRoot(_ path: String?) {
         rootPath = path
         reload()
+        startWatching(path)
+    }
+
+    // MARK: - Filesystem watching
+
+    private func startWatching(_ path: String?) {
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
+        watcher?.stop()
+        watcher = nil
+        guard let path else { return }
+        watcher = DirectoryWatcher(path: path) { [weak self] paths in
+            // Ignore pure-.git churn (index/commit writes) — it would otherwise
+            // reload the tree constantly with no user-visible change.
+            let relevant = paths.contains { !$0.contains("/.git/") && !$0.hasSuffix("/.git") }
+            guard relevant else { return }
+            self?.scheduleExternalRefresh()
+        }
+    }
+
+    /// Coalesce a burst of external changes into one refresh on the main thread,
+    /// preserving folder expansion and the current selection.
+    private func scheduleExternalRefresh() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pendingRefresh?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.refreshFromDisk() }
+            self.pendingRefresh = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        }
+    }
+
+    private func refreshFromDisk() {
+        let expanded = currentExpandedPaths()
+        let selectedPath = (outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode)?
+            .url.standardizedFileURL.path
+        for node in rootNodes { node.children = nil }
+        reload()
+        restoreExpansion(expanded)
+        if let selectedPath, let node = findNode(for: URL(fileURLWithPath: selectedPath)) {
+            let row = outlineView.row(forItem: node)
+            if row >= 0 { outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        }
     }
 
     private func reload() {
