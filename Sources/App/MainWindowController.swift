@@ -386,8 +386,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.sidePanelVC.pendingOrdersQueue = tabCoordinator.pendingOrders
         dashboard.sidePanelVC.watchFeed = tabCoordinator.watchFeed
         dashboard.sidePanelVC.onSuggestionTapped = { [weak self] order, optionText in
-            ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
-            self?.tabCoordinator.pendingOrders.resolve(id: order.id)
+            self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
         dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
             self?.tabCoordinator.selectTab(forWorktree: path)
@@ -400,8 +399,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.helmCockpit.pendingOrdersQueue = tabCoordinator.pendingOrders
         dashboard.helmCockpit.watchFeed = tabCoordinator.watchFeed
         dashboard.helmCockpit.onSuggestionTapped = { [weak self] order, optionText in
-            ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
-            self?.tabCoordinator.pendingOrders.resolve(id: order.id)
+            self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
         dashboard.helmCockpit.onNavigate = { [weak self] path in
             self?.tabCoordinator.selectTab(forWorktree: path)
@@ -501,7 +499,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 ("broadcast", "向全员广播通知"),
             ]
         case "@":
-            pool = ShipLog.shared.allSailors().map { ($0.branch, "worktree · \($0.project)") }
+            let repos = tabCoordinator.config.workspacePaths.map {
+                (URL(fileURLWithPath: $0).lastPathComponent, "repo · \($0)")
+            }
+            let worktrees = ShipLog.shared.allSailors().map { ($0.branch, "worktree · \($0.project)") }
+            pool = repos + worktrees
         case "#":
             pool = [
                 ("claude", "Claude Code"),
@@ -518,9 +520,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func makeBridgeRouter() -> BridgeCommandRouter {
         BridgeCommandRouter(
             queue: tabCoordinator.pendingOrders,
-            createWorktree: { [weak self] task in
+            createWorktree: { [weak self] task, repoHint in
                 guard let self else { return }
-                let repoPath = self.tabCoordinator.config.workspacePaths.first ?? ""
+                let paths = self.tabCoordinator.config.workspacePaths
+                let repoPath = repoHint ?? paths.first ?? ""
                 self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
             },
             orderExisting: { path, task in
@@ -531,14 +534,66 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
                 ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
             },
+            returnWorktree: { [weak self] path in
+                self?.enqueueReturnCard(forPath: path)
+            },
+            returnAll: { [weak self] in
+                guard let self else { return }
+                let worktrees = self.tabCoordinator.allWorktrees
+                    .map(\.info)
+                    .filter { !$0.isMainWorktree }
+                for info in worktrees {
+                    self.enqueueReturnCard(forPath: info.path)
+                }
+            },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
             projectForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.project ?? "" }
         )
     }
 
+    /// Run a merge check for `path` on a background thread and enqueue a
+    /// return-to-port card with appropriate options once the check completes.
+    private func enqueueReturnCard(forPath path: String) {
+        let repoCache = tabCoordinator.worktreeRepoCache
+        let queue = tabCoordinator.pendingOrders
+        let sailor = ShipLog.shared.sailor(forWorktree: path)
+        let branch = sailor?.branch
+            ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
+            ?? URL(fileURLWithPath: path).lastPathComponent
+        let project = sailor?.project
+            ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
+            ?? ""
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let repoPath = repoCache[path] ?? WorktreeDiscovery.findRepoRoot(from: path) ?? path
+            let check = WorktreeDeleter.mergeCheckForOnlineMainOrMaster(
+                worktreePath: path, repoPath: repoPath)
+
+            let options: [String]
+            let zone: FirstMateZone
+            if check.canDelete {
+                options = ["Delete", "Delete + Branch"]
+                zone = .green
+            } else {
+                options = ["Force delete"]
+                zone = .red
+            }
+
+            let action = FirstMateAction(
+                kind: .returnToPort, zone: zone,
+                worktreePath: path, branch: branch, project: project,
+                terminalID: "",
+                message: check.reason,
+                options: options)
+
+            DispatchQueue.main.async { queue.enqueue(action) }
+        }
+    }
+
     func submitBridgeCommand(_ text: String) {
-        switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs()) {
+        switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs(),
+                                         repoPaths: tabCoordinator.config.workspacePaths) {
         case .success(let command):
             makeBridgeRouter().route(command)
         case .failure:
@@ -1342,9 +1397,26 @@ extension MainWindowController: KeyboardModeDelegate {
     }
 }
 
-// MARK: - Bridge Approve
+// MARK: - Bridge Actions
 
 extension MainWindowController {
+    /// Routes a suggestion chip tap. `returnToPort` chips trigger actual deletion;
+    /// all other kinds forward the option text to the agent terminal.
+    func handleSuggestionTapped(order: PendingOrder, optionText: String) {
+        if order.action.kind == .returnToPort {
+            let deleteBranch = optionText.contains("Branch")
+            let force = optionText.contains("Force")
+            terminalCoordinator.deleteWorktreeForReturnToPort(
+                path: order.action.worktreePath,
+                branch: order.action.branch,
+                deleteBranch: deleteBranch,
+                force: force)
+        } else {
+            ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
+        }
+        tabCoordinator.pendingOrders.resolve(id: order.id)
+    }
+
     func handleBridgeApprove(_ order: PendingOrder) {
         switch order.action.kind {
         case .suggestNextOrder:

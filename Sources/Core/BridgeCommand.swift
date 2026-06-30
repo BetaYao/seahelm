@@ -6,10 +6,11 @@ struct WorktreeRef: Equatable {
 }
 
 enum BridgeCommand: Equatable {
-    case newWorktree(task: String)
+    case newWorktree(task: String, repoHint: String? = nil)
     case orderExisting(worktreePath: String, task: String)
     case commit(worktreePath: String)
     case returnToPort(worktreePath: String)
+    case returnAll
     case broadcast(task: String)
 }
 
@@ -22,10 +23,27 @@ enum BridgeCommandError: Error, Equatable {
 
 /// Pure parser: text + worktree list → BridgeCommand or error. No IO, no singletons.
 enum BridgeCommandParser {
-    static func parse(_ text: String, worktrees: [WorktreeRef]) -> Result<BridgeCommand, BridgeCommandError> {
+    /// Extract a leading `@name` token from text, returning (repoPath, cleanedText).
+    /// Matches against repo directory names (case-insensitive). Returns nil repoPath if no match.
+    static func extractRepoHint(_ text: String, repoPaths: [String]) -> (repoPath: String?, task: String) {
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: true)
+        guard let first = tokens.first, first.hasPrefix("@") else { return (nil, text) }
+        let name = String(first.dropFirst()).lowercased()
+        let matched = repoPaths.first {
+            URL(fileURLWithPath: $0).lastPathComponent.lowercased() == name
+        }
+        let rest = tokens.dropFirst().joined(separator: " ")
+        return (matched, rest.isEmpty ? text : rest)
+    }
+
+    static func parse(_ text: String, worktrees: [WorktreeRef],
+                      repoPaths: [String] = []) -> Result<BridgeCommand, BridgeCommandError> {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failure(.emptyTask) }
-        guard trimmed.hasPrefix("/") else { return .success(.newWorktree(task: trimmed)) }
+        guard trimmed.hasPrefix("/") else {
+            let (hint, task) = extractRepoHint(trimmed, repoPaths: repoPaths)
+            return task.isEmpty ? .failure(.emptyTask) : .success(.newWorktree(task: task, repoHint: hint))
+        }
 
         let body = String(trimmed.dropFirst())
         let parts = body.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
@@ -42,7 +60,9 @@ enum BridgeCommandParser {
 
         switch verb {
         case "new":
-            return rest.isEmpty ? .failure(.emptyTask) : .success(.newWorktree(task: rest))
+            if rest.isEmpty { return .failure(.emptyTask) }
+            let (hint, task) = extractRepoHint(rest, repoPaths: repoPaths)
+            return task.isEmpty ? .failure(.emptyTask) : .success(.newWorktree(task: task, repoHint: hint))
         case "order":
             return resolveBranch("order").flatMap { r in
                 r.tail.isEmpty ? .failure(.emptyTask) : .success(.orderExisting(worktreePath: r.path, task: r.tail))
@@ -50,6 +70,7 @@ enum BridgeCommandParser {
         case "commit":
             return resolveBranch("commit").map { .commit(worktreePath: $0.path) }
         case "return":
+            if rest.isEmpty { return .success(.returnAll) }
             return resolveBranch("return").map { .returnToPort(worktreePath: $0.path) }
         case "broadcast":
             return rest.isEmpty ? .failure(.emptyTask) : .success(.broadcast(task: rest))

@@ -3,21 +3,33 @@ import XCTest
 
 final class BridgeCommandRouterTests: XCTestCase {
     func makeRouter(queue: PendingOrdersQueue,
-                    created: @escaping (String) -> Void = { _ in },
+                    created: @escaping (String, String?) -> Void = { _, _ in },
                     ordered: @escaping (String, String) -> Void = { _, _ in },
                     committed: @escaping (String) -> Void = { _ in },
+                    returnWorktree: @escaping (String) -> Void = { _ in },
+                    returnAll: @escaping () -> Void = {},
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
-                            commit: committed, activeSailorCount: agentCount,
+                            commit: committed, returnWorktree: returnWorktree,
+                            returnAll: returnAll, activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
     }
 
     func testNewWorktreeCallsClosureNotQueue() {
         let q = PendingOrdersQueue()
-        var got: String?
-        makeRouter(queue: q, created: { got = $0 }).route(.newWorktree(task: "do it"))
-        XCTAssertEqual(got, "do it")
+        var got: (String, String?)?
+        makeRouter(queue: q, created: { got = ($0, $1) }).route(.newWorktree(task: "do it"))
+        XCTAssertEqual(got?.0, "do it")
+        XCTAssertNil(got?.1)
         XCTAssertTrue(q.all().isEmpty)
+    }
+
+    func testNewWorktreeWithRepoHintPassesHint() {
+        let q = PendingOrdersQueue()
+        var got: (String, String?)?
+        makeRouter(queue: q, created: { got = ($0, $1) }).route(.newWorktree(task: "fix it", repoHint: "/repos/alpha"))
+        XCTAssertEqual(got?.0, "fix it")
+        XCTAssertEqual(got?.1, "/repos/alpha")
     }
 
     func testOrderCallsClosure() {
@@ -37,12 +49,20 @@ final class BridgeCommandRouterTests: XCTestCase {
         XCTAssertTrue(q.all().isEmpty)
     }
 
-    func testReturnEnqueuesRed() {
+    func testReturnToPortCallsReturnWorktreeClosure() {
         let q = PendingOrdersQueue()
-        makeRouter(queue: q).route(.returnToPort(worktreePath: "/p"))
-        XCTAssertEqual(q.all().count, 1)
-        XCTAssertEqual(q.all().first?.action.kind, .returnToPort)
-        XCTAssertEqual(q.all().first?.action.worktreePath, "/p")
+        var got: String?
+        makeRouter(queue: q, returnWorktree: { got = $0 }).route(.returnToPort(worktreePath: "/p"))
+        XCTAssertEqual(got, "/p")
+        XCTAssertTrue(q.all().isEmpty)
+    }
+
+    func testReturnAllCallsReturnAllClosure() {
+        let q = PendingOrdersQueue()
+        var called = false
+        makeRouter(queue: q, returnAll: { called = true }).route(.returnAll)
+        XCTAssertTrue(called)
+        XCTAssertTrue(q.all().isEmpty)
     }
 
     func testBroadcastEnqueuesWithPayloadAndCount() {

@@ -66,4 +66,32 @@ final class StopHookResponderTests: XCTestCase {
                              cwd: "/wt", timestamp: nil, data: data)
         XCTAssertNotNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
     }
+
+    private func stop(active: Bool?, lastMessage: String) -> WebhookEvent {
+        var data: [String: Any] = ["last_assistant_message": lastMessage]
+        if let active { data["stop_hook_active"] = active }
+        return WebhookEvent(source: "claude-code", sessionId: "s", event: .agentStop,
+                            cwd: "/wt", timestamp: nil, data: data)
+    }
+
+    func testQuestionEnglishDoesNotBlock() {
+        XCTAssertNil(StopHookResponder.blockBody(
+            for: stop(active: false, lastMessage: "Did the deployment finish?"), suggestOnStop: true))
+    }
+
+    func testQuestionChineseDoesNotBlock() {
+        XCTAssertNil(StopHookResponder.blockBody(
+            for: stop(active: false, lastMessage: "部署完了吗？能贴一下终端输出吗？"), suggestOnStop: true))
+    }
+
+    func testStatementStillBlocks() {
+        XCTAssertNotNil(StopHookResponder.blockBody(
+            for: stop(active: false, lastMessage: "I've fixed the bug and all tests pass."), suggestOnStop: true))
+    }
+
+    func testIsAskingQuestionTrimming() {
+        XCTAssertTrue(StopHookResponder.isAskingQuestion(["last_assistant_message": "Ready?\n"]))
+        XCTAssertFalse(StopHookResponder.isAskingQuestion(["last_assistant_message": "Done."]))
+        XCTAssertFalse(StopHookResponder.isAskingQuestion(nil))
+    }
 }

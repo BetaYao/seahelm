@@ -200,15 +200,17 @@ class TerminalCoordinator {
 
     /// Delete a worktree without the confirm alert — caller already confirmed
     /// (e.g. First Mate return-to-port approval). Does full surface teardown.
-    func deleteWorktreeForReturnToPort(path: String, branch: String) {
+    func deleteWorktreeForReturnToPort(path: String, branch: String,
+                                       deleteBranch: Bool = false, force: Bool = false) {
         let info = WorktreeInfo(path: path, branch: branch, commitHash: "", isMainWorktree: false)
-        // Compute dirty-state / repo-root off the main thread — both shell out to
-        // git synchronously and would otherwise stall the UI on large repos.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
             let repoPath = WorktreeDiscovery.findRepoRoot(from: path) ?? path
+            // If the caller didn't request force, check for uncommitted changes and
+            // force-remove so git doesn't refuse on a dirty worktree.
+            let shouldForce = force || WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
             DispatchQueue.main.async {
-                self?.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
+                self?.performDeleteWorktree(info, repoPath: repoPath,
+                                            deleteBranch: deleteBranch, force: shouldForce)
             }
         }
     }

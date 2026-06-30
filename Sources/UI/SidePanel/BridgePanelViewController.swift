@@ -432,6 +432,7 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
             card.configure(order: order,
                            onOption: { [weak self] idx in self?.applyOption(order, index: idx) })
             card.onNavigate = { [weak self] in self?.onNavigateToWorktree?(order.action.worktreePath) }
+            card.onDismiss = { [weak self] in self?.queue?.resolve(id: order.id) }
             card.setSelected(row == tableView.selectedRow)
             return card
         } else {
@@ -559,12 +560,15 @@ private final class OrderCardView: NSTableCellView {
     private let agentLabel = NSTextField(labelWithString: "")
     private let taskLabel = NSTextField(labelWithString: "")
     private let urgencyLabel = NSTextField(labelWithString: "")
+    private let dismissButton = NSButton()
     private let messageLabel = NSTextField(labelWithString: "")
     private let chipRow = NSStackView()
 
     private var onOption: ((Int) -> Void)?
     /// Clicking the card body (anywhere but an option chip) navigates to its pane.
     var onNavigate: (() -> Void)?
+    /// Ignore the suggestion — remove it without acting on any option.
+    var onDismiss: (() -> Void)?
     private var armedDangerousIndex: Int?
     private var dangerousIndexes: Set<Int> = []
 
@@ -599,6 +603,16 @@ private final class OrderCardView: NSTableCellView {
         urgencyLabel.alignment = .right
         urgencyLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        dismissButton.title = "✕"
+        dismissButton.font = AppFont.mono(size: 11, weight: .regular)
+        dismissButton.isBordered = false
+        dismissButton.contentTintColor = Bare.inkFaint
+        dismissButton.setButtonType(.momentaryChange)
+        dismissButton.target = self
+        dismissButton.action = #selector(tappedDismiss)
+        dismissButton.toolTip = "忽略此 suggestion"
+        dismissButton.translatesAutoresizingMaskIntoConstraints = false
+
         messageLabel.font = AppFont.mono(size: 12.5, weight: .regular)
         messageLabel.textColor = Bare.ink
         messageLabel.maximumNumberOfLines = 0
@@ -611,7 +625,8 @@ private final class OrderCardView: NSTableCellView {
         chipRow.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(accentBar); addSubview(glyphLabel); addSubview(agentLabel)
-        addSubview(taskLabel); addSubview(urgencyLabel); addSubview(messageLabel); addSubview(chipRow)
+        addSubview(taskLabel); addSubview(urgencyLabel); addSubview(dismissButton)
+        addSubview(messageLabel); addSubview(chipRow)
 
         NSLayoutConstraint.activate([
             accentBar.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -627,7 +642,10 @@ private final class OrderCardView: NSTableCellView {
             taskLabel.leadingAnchor.constraint(equalTo: agentLabel.trailingAnchor, constant: 8),
             taskLabel.trailingAnchor.constraint(lessThanOrEqualTo: urgencyLabel.leadingAnchor, constant: -8),
             urgencyLabel.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
-            urgencyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            urgencyLabel.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -10),
+            dismissButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+            dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            dismissButton.widthAnchor.constraint(equalToConstant: 16),
 
             messageLabel.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 9),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -693,6 +711,8 @@ private final class OrderCardView: NSTableCellView {
         if chipRow.frame.contains(pt) { return }
         onNavigate?()
     }
+
+    @objc private func tappedDismiss() { onDismiss?() }
 }
 
 private extension Array {

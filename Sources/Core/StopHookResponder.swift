@@ -19,8 +19,18 @@ enum StopHookResponder {
         // auto-resume when it finishes, so this Stop is not a real end-of-turn.
         // `background_tasks` is an official Stop-hook payload field (subagents + shell tasks).
         if hasRunningBackgroundTask(event.data) { return nil }
+        // Don't interrupt when Claude is asking the user a question — forcing a
+        // suggestion call in that state causes the agent to repeat its question.
+        if isAskingQuestion(event.data) { return nil }
         let escaped = reason.replacingOccurrences(of: "\"", with: "\\\"")
         return "{\"decision\":\"block\",\"reason\":\"\(escaped)\"}"
+    }
+
+    /// True if the last assistant message looks like a question to the user.
+    static func isAskingQuestion(_ data: [String: Any]?) -> Bool {
+        guard let msg = data?["last_assistant_message"] as? String else { return false }
+        let trimmed = msg.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasSuffix("?") || trimmed.hasSuffix("？")
     }
 
     /// True if the Stop payload reports any background task still running.

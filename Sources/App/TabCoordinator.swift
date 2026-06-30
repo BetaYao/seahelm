@@ -407,8 +407,20 @@ class TabCoordinator {
                         NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName)")
                         self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId)
                     }
+                    // Per-session timestamps: when we last blocked a session for suggestions,
+                    // and when a user prompt last arrived for that session. If the user sent a
+                    // message AFTER our last block, Claude's next stop is a response to explicit
+                    // user direction — suppress the suggestion block so Claude can respond cleanly
+                    // without mixing suggestion overhead into the user-directed response.
+                    var sessionBlockedAt: [String: Date] = [:]
+                    var sessionUserPromptedAt: [String: Date] = [:]
+
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         guard let self else { return nil }
+                        // Track when the user sent a message to this session.
+                        if event.event == .userPrompt {
+                            sessionUserPromptedAt[event.sessionId] = Date()
+                        }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         ShipLog.shared.updateBackgroundBusy(from: event)
                         // Drop a (voluntary) suggestion while background work is still running —
@@ -416,11 +428,21 @@ class TabCoordinator {
                         if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
                             return nil
                         }
-                        if let block = StopHookResponder.blockBody(
+                        // Suppress the suggestion block when the user sent a message after our
+                        // last block — Claude is responding to explicit user direction and doesn't
+                        // need suggestion overhead layered on top of the user-directed response.
+                        if event.event == .agentStop,
+                           let blockedAt = sessionBlockedAt[event.sessionId],
+                           let promptedAt = sessionUserPromptedAt[event.sessionId],
+                           promptedAt > blockedAt {
+                            sessionBlockedAt.removeValue(forKey: event.sessionId)
+                            sessionUserPromptedAt.removeValue(forKey: event.sessionId)
+                        } else if let block = StopHookResponder.blockBody(
                             for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
                             // Blocking Stop: agent will continue and call seahelm-suggest.
                             // Do NOT ingest this stop as completion (avoid premature idle), but
                             // stash the agent's final message so the suggestion card can show it.
+                            sessionBlockedAt[event.sessionId] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
                                 ShipLog.shared.noteAssistantMessage(cwd: event.cwd, message: msg)
                             }
