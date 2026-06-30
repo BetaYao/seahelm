@@ -706,9 +706,11 @@ private final class OrderCardView: NSTableCellView {
     }
 
     @objc private func cardClicked(_ g: NSClickGestureRecognizer) {
-        // Clicks inside the option-chip row are handled by the chips themselves.
+        // Clicks inside the option-chip row are handled by the chips themselves;
+        // clicks on the dismiss (✕) button must dismiss, not navigate.
         let pt = g.location(in: self)
         if chipRow.frame.contains(pt) { return }
+        if dismissButton.frame.contains(pt) { onDismiss?(); return }
         onNavigate?()
     }
 

@@ -150,8 +150,8 @@ enum WorktreeCreator {
             return "task-\(formatter.string(from: Date()))"
         }
 
-        if joined.count <= 48 { return joined }
-        let end = joined.index(joined.startIndex, offsetBy: 48)
+        if joined.count <= 20 { return joined }
+        let end = joined.index(joined.startIndex, offsetBy: 20)
         return String(joined[..<end]).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 

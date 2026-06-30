@@ -573,10 +573,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let options: [String]
             let zone: FirstMateZone
             if check.canDelete {
-                options = ["Delete", "Delete + Branch"]
+                options = ["Remove", "Remove + Branch"]
                 zone = .green
             } else {
-                options = ["Force delete"]
+                options = ["Force remove"]
                 zone = .red
             }
 
@@ -1405,7 +1405,7 @@ extension MainWindowController {
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
         if order.action.kind == .returnToPort {
             let deleteBranch = optionText.contains("Branch")
-            let force = optionText.contains("Force")
+            let force = optionText.lowercased().contains("force")
             terminalCoordinator.deleteWorktreeForReturnToPort(
                 path: order.action.worktreePath,
                 branch: order.action.branch,

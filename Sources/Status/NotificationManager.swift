@@ -228,8 +228,12 @@ class NotificationManager: NSObject {
         }
     }
 
-    static func formatSystemSubtitle(workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
-        let target = displayTarget(workspaceName: workspaceName, branch: branch)
+    static func formatSystemSubtitle(workspaceName: String, branch: String, paneIndex: Int, paneCount: Int,
+                                      sessionTitle: String? = nil) -> String {
+        var target = displayTarget(workspaceName: workspaceName, branch: branch)
+        if let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            target += " · \(title)"
+        }
         if paneCount > 1 {
             return "\(target) [Pane \(paneIndex)]"
         }
@@ -253,6 +257,7 @@ class NotificationManager: NSObject {
                 isFocusedPane: Bool) {
         guard shouldNotify(terminalID: terminalID, oldStatus: oldStatus, newStatus: newStatus) else { return }
 
+        let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
         let title = Self.formatSystemTitle(status: newStatus)
         let content = UNMutableNotificationContent()
         content.title = title
@@ -260,7 +265,8 @@ class NotificationManager: NSObject {
             workspaceName: workspaceName,
             branch: branch,
             paneIndex: paneIndex,
-            paneCount: paneCount
+            paneCount: paneCount,
+            sessionTitle: sessionTitle
         )
 
         content.body = Self.formatSystemBody(
@@ -324,6 +330,7 @@ class NotificationManager: NSObject {
         // Always add to in-app history
         let historyMessage: String
         let content = UNMutableNotificationContent()
+        let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
 
         switch newStatus {
         case .waiting:
@@ -332,7 +339,8 @@ class NotificationManager: NSObject {
                 workspaceName: workspaceName,
                 branch: branch,
                 paneIndex: 1,
-                paneCount: 1
+                paneCount: 1,
+                sessionTitle: sessionTitle
             )
             content.body = Self.formatSystemBody(
                 status: newStatus,
@@ -349,7 +357,8 @@ class NotificationManager: NSObject {
                 workspaceName: workspaceName,
                 branch: branch,
                 paneIndex: 1,
-                paneCount: 1
+                paneCount: 1,
+                sessionTitle: sessionTitle
             )
             content.body = Self.formatSystemBody(
                 status: newStatus,
@@ -366,7 +375,8 @@ class NotificationManager: NSObject {
                 workspaceName: workspaceName,
                 branch: branch,
                 paneIndex: 1,
-                paneCount: 1
+                paneCount: 1,
+                sessionTitle: sessionTitle
             )
             content.body = Self.formatSystemBody(
                 status: newStatus,
