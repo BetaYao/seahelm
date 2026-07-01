@@ -297,8 +297,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         return isLeftColumnCollapsed
     }
 
-    /// Switch the left column between its four panes. Driven by the title-bar
-    /// pane-switch icons. Expands the column first if it was collapsed.
+    /// Switch the left column's active pane. Driven by the title-bar pane-switch
+    /// icons. Expands the column first if it was collapsed.
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
 
@@ -407,8 +407,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         populateWorktreeCards()
     }
 
-    /// Build the worktree mini-card list (popover content). Idle worktrees
-    /// (in `idleWorktreePaths`) collapse below a "N hidden" expander row.
+    /// Build the worktree mini-card list (shown in the sidebar's Worktrees tab).
+    /// Idle worktrees (in `idleWorktreePaths`) collapse below a "N hidden" expander row.
     private func populateWorktreeCards() {
         let refs = focusLayoutRefs
         refs.miniCards.forEach { $0.removeFromSuperview() }
@@ -553,7 +553,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         leftColumnContainer.setAccessibilityIdentifier("dashboard.leftColumn")
         leftRightContainer.addSubview(leftColumnContainer)
 
-        // Worktree list (now hosted in a title-bar popover, not the left column).
+        // Worktree list (handed to the sidebar's Worktrees tab as worktreesTabView).
         leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.hasVerticalScroller = true
         leftRightSidebarScroll.scrollerStyle = .overlay
