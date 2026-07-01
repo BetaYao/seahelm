@@ -147,13 +147,13 @@ final class CommandInputView: NSView {
 
     func focusInput() { window?.makeFirstResponder(field) }
 
-    /// Show a busy state while an async command (e.g. `/new`) runs: disable
-    /// editing, swap the placeholder to a progress message, and spin.
-    func setLoading(_ loading: Bool) {
+    /// Show a busy state while an async command runs: disable editing, swap the
+    /// placeholder to `message`, and spin.
+    func setLoading(_ loading: Bool, message: String = "处理中…") {
         if loading {
             savedPlaceholder = field.placeholderString
             field.stringValue = ""
-            field.placeholderString = "创建 worktree 中…"
+            field.placeholderString = message
             field.isEditable = false
             field.isSelectable = false
             spinner.startAnimation(nil)

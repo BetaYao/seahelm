@@ -414,8 +414,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         if let host = contentContainer.superview {
             dashboard.installCockpit(in: host, top: contentContainer.topAnchor)
         }
-        dashboard.helmCockpit.onSubmitCommand = { [weak self] text, onWorktreeCreated in
-            self?.submitBridgeCommand(text, onWorktreeCreated: onWorktreeCreated) ?? false
+        dashboard.helmCockpit.onSubmitCommand = { [weak self] text, onOutcome in
+            self?.submitBridgeCommand(text, onOutcome: onOutcome) ?? false
         }
         dashboard.helmCockpit.commandMenuProvider = { [weak self] trigger, query in
             self?.helmMenuItems(trigger: trigger, query: query) ?? []
@@ -569,7 +569,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Run a merge check for `path` on a background thread and enqueue a
     /// return-to-port card with appropriate options once the check completes.
-    private func enqueueReturnCard(forPath path: String) {
+    private func enqueueReturnCard(forPath path: String, onEnqueued: (() -> Void)? = nil) {
         let repoCache = tabCoordinator.worktreeRepoCache
         let queue = tabCoordinator.pendingOrders
         let sailor = ShipLog.shared.sailor(forWorktree: path)
@@ -602,29 +602,50 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 message: check.reason,
                 options: options)
 
-            DispatchQueue.main.async { queue.enqueue(action) }
+            DispatchQueue.main.async {
+                queue.enqueue(action)
+                onEnqueued?()
+            }
         }
     }
 
-    /// Submit a Helm command. Returns `true` if it kicked off asynchronous
-    /// worktree creation (so the caller can show a loading state); `onWorktreeCreated`
-    /// then fires with success/failure when the new tab is ready. Non-creation
-    /// commands route synchronously and return `false`.
+    /// Submit a Helm command. Returns `true` if it kicked off async work (so the
+    /// caller shows a loading spinner); `onOutcome` then fires when the work
+    /// completes — `.navigated` for a new tab, `.presented` for an order card,
+    /// `.failed` on error. Synchronous commands route immediately and return `false`.
     @discardableResult
-    func submitBridgeCommand(_ text: String, onWorktreeCreated: ((Bool) -> Void)? = nil) -> Bool {
+    func submitBridgeCommand(_ text: String, onOutcome: ((HelmCommandOutcome) -> Void)? = nil) -> Bool {
         switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs(),
                                          repoPaths: tabCoordinator.config.workspacePaths) {
         case .success(let command):
-            if case .newWorktree(let task, let repoHint) = command {
+            switch command {
+            case .newWorktree(let task, let repoHint):
                 let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
                 performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
                                       reuseEnv: false) { path in
-                    onWorktreeCreated?(path != nil)
+                    onOutcome?(path != nil ? .navigated : .failed)
                 }
                 return true
+
+            case .returnToPort(let path):
+                enqueueReturnCard(forPath: path) { onOutcome?(.presented) }
+                return true
+
+            case .returnAll:
+                let worktrees = tabCoordinator.allWorktrees.map(\.info).filter { !$0.isMainWorktree }
+                guard !worktrees.isEmpty else { NSSound.beep(); return false }
+                let group = DispatchGroup()
+                for info in worktrees {
+                    group.enter()
+                    enqueueReturnCard(forPath: info.path) { group.leave() }
+                }
+                group.notify(queue: .main) { onOutcome?(.presented) }
+                return true
+
+            default:
+                makeBridgeRouter().route(command)
+                return false
             }
-            makeBridgeRouter().route(command)
-            return false
         case .failure:
             NSSound.beep()
             return false

@@ -1,5 +1,13 @@
 import AppKit
 
+/// Outcome of an async Helm command, reported back to the cockpit so it can drop
+/// its loading spinner and react appropriately.
+enum HelmCommandOutcome {
+    case navigated   // moved to a new tab (e.g. /new) — close the cockpit
+    case presented   // dropped an order card (e.g. /return) — show Orders, stay open
+    case failed      // error — beep
+}
+
 /// WP-2 core cockpit. A full-bleed, click-through overlay layered on top of the
 /// dashboard. It floats two things at bottom-center:
 ///   • the radar orb (always visible) — toggles the panel
@@ -71,12 +79,12 @@ final class HelmCockpitController: NSViewController {
         didSet { bridgeVC.onApprove = onApprove }
     }
 
-    /// Submit a raw command line (`/new …`, `@branch …`, free text). Wired to the
-    /// existing BridgeCommandParser/Router via MainWindowController.
-    /// Returns `true` if the command kicked off async worktree creation; the
-    /// `@escaping (Bool) -> Void` completion then fires with success/failure so
-    /// the cockpit can drop its loading state and dismiss to reveal the new tab.
-    var onSubmitCommand: ((String, @escaping (Bool) -> Void) -> Bool)?
+    /// Submit a raw command line (`/new …`, `/return …`, `@branch …`, free text).
+    /// Wired to BridgeCommandParser/Router via MainWindowController.
+    /// Returns `true` if the command kicked off async work (so the cockpit shows a
+    /// loading spinner); the completion then fires with the outcome so the cockpit
+    /// can drop the spinner and either dismiss (navigated) or reveal Orders (presented).
+    var onSubmitCommand: ((String, @escaping (HelmCommandOutcome) -> Void) -> Bool)?
 
     /// Autocomplete data source: given a trigger (`/`, `@`, `#`) and a lowercased
     /// query, returns matching (name, desc) rows.
@@ -234,18 +242,26 @@ final class HelmCockpitController: NSViewController {
         commandInput.onSubmit = { [weak self] text in
             guard let self else { return }
             self.hideMenu()
-            let startedAsync = self.onSubmitCommand?(text) { [weak self] success in
+            let startedAsync = self.onSubmitCommand?(text) { [weak self] outcome in
                 guard let self else { return }
                 self.commandInput.setLoading(false)
-                if success {
+                switch outcome {
+                case .navigated:
                     // The new tab is ready and already selected behind us — close
                     // the cockpit so the user lands on it.
                     if self.isOpen { self.toggle() }
-                } else {
+                case .presented:
+                    // A card was dropped into Orders — surface it, stay open.
+                    self.setSection(.orders)
+                case .failed:
                     NSSound.beep()
                 }
             } ?? false
-            if startedAsync { self.commandInput.setLoading(true) }
+            if startedAsync {
+                let trimmed = text.trimmingCharacters(in: .whitespaces)
+                let message = trimmed.hasPrefix("/return") ? "检查合并状态…" : "创建 worktree 中…"
+                self.commandInput.setLoading(true, message: message)
+            }
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
