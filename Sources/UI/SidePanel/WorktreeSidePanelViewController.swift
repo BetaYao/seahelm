@@ -4,6 +4,7 @@ enum SidePanelTab: Int {
     case firstMate = 0
     case files = 1
     case changes = 2
+    case worktrees = 3
 }
 
 protocol WorktreeSidePanelDelegate: AnyObject {
@@ -19,6 +20,10 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     private let tabBar = NSStackView()
     private let contentView = NSView()
+
+    /// Host-provided view (the cross-project worktree card list) shown for the
+    /// `.worktrees` tab. Set by the dashboard, which owns the card data.
+    var worktreesTabView: NSView?
 
     // First Mate tab
     private var bridgeVC: BridgePanelViewController?
@@ -180,7 +185,24 @@ final class WorktreeSidePanelViewController: NSViewController {
                 return
             }
             showChangesTab(path)
+        case .worktrees:
+            showWorktreesTab()
         }
+    }
+
+    private func showWorktreesTab() {
+        guard let listView = worktreesTabView else {
+            showPlaceholder("No worktrees", identifier: "sidePanel.worktreesPlaceholder")
+            return
+        }
+        listView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(listView)
+        NSLayoutConstraint.activate([
+            listView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            listView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            listView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            listView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
     }
 
     private func showFirstMateTab() {
