@@ -188,4 +188,19 @@ enum SessionManager {
         }
         return true
     }
+
+    /// Block until a session named `name` exists, or `timeoutSeconds` elapses.
+    /// Returns whether the session exists at the end. Call off the main thread.
+    /// Used to decouple "the agent session is up" from "the agent has exited":
+    /// `zmx run` blocks for the agent's whole lifetime, so the session is spawned
+    /// on a detached thread and the caller waits only for it to come up.
+    static func waitUntilSessionExists(name: String, backend: String, timeoutSeconds: Double) -> Bool {
+        guard backend == "tmux" || backend == "zmx" else { return true }
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            if sessionExists(name: name, backend: backend) { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return sessionExists(name: name, backend: backend)
+    }
 }

@@ -466,12 +466,20 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
-                    SessionManager.createDetachedSession(
-                        name: SessionManager.persistentSessionName(for: info.path),
-                        backend: self.runtimeBackend,
-                        cwd: info.path,
-                        agentCommandLine: agentCommandLine
-                    )
+                    let sessionName = SessionManager.persistentSessionName(for: info.path)
+                    let backend = self.runtimeBackend
+                    // `zmx run` blocks until the (long-lived) agent exits, so spawn the
+                    // session on a detached thread and wait only until it exists —
+                    // otherwise handleNewBranch + onComplete below would never run and
+                    // the cockpit would spin forever.
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        SessionManager.createDetachedSession(
+                            name: sessionName, backend: backend,
+                            cwd: info.path, agentCommandLine: agentCommandLine
+                        )
+                    }
+                    _ = SessionManager.waitUntilSessionExists(
+                        name: sessionName, backend: backend, timeoutSeconds: 5.0)
                 }
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
