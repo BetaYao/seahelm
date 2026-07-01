@@ -1069,7 +1069,7 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidToggleWorktreeList(from sourceView: NSView) {
-        tabCoordinator.dashboardVC?.toggleWorktreePopover(from: sourceView)
+        tabCoordinator.dashboardVC?.openWorktreesTab()
     }
 
     func titleBarDidSelectWorktree(_ path: String) {

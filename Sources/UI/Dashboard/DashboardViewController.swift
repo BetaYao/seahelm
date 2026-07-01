@@ -156,6 +156,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         setupEmptyState()
         setupLeftRightLayout()
+        sidePanelVC.worktreesTabView = leftRightSidebarScroll
 
         // Show the 3-column layout immediately; hide empty state
         leftRightContainer.isHidden = false
@@ -307,6 +308,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         case .change:   sidePanelVC.selectTab(.changes)
         }
 
+        expandLeftColumnIfCollapsed()
+    }
+
+    /// Expand the left column if it is currently collapsed (no-op otherwise).
+    func expandLeftColumnIfCollapsed() {
         guard isLeftColumnCollapsed else { return }
         isLeftColumnCollapsed = false
         leftColumnWidthExpanded?.isActive = true
@@ -316,39 +322,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
     }
 
-    // MARK: - Worktree popover
-
-    private lazy var worktreePopover: NSPopover = {
-        let pop = NSPopover()
-        pop.behavior = .transient
-        let vc = NSViewController()
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 520))
-        host.addSubview(leftRightSidebarScroll)
-        NSLayoutConstraint.activate([
-            host.widthAnchor.constraint(equalToConstant: 320),
-            host.heightAnchor.constraint(equalToConstant: 520),
-            leftRightSidebarScroll.topAnchor.constraint(equalTo: host.topAnchor, constant: 8),
-            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
-            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -8),
-            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -8),
-        ])
-        vc.view = host
-        pop.contentViewController = vc
-        return pop
-    }()
-
-    /// Toggle the worktree list popover anchored to the title-bar worktree icon.
-    func toggleWorktreePopover(from sourceView: NSView) {
-        if worktreePopover.isShown {
-            worktreePopover.close()
-        } else {
-            populateWorktreeCards()
-            worktreePopover.show(relativeTo: sourceView.bounds, of: sourceView, preferredEdge: .maxY)
-        }
-    }
-
-    func closeWorktreePopover() {
-        if worktreePopover.isShown { worktreePopover.close() }
+    /// Open the global Worktrees tab in the left sidebar: refresh the card list,
+    /// select the tab, and expand the column if collapsed. Replaces the old
+    /// floating worktree popover.
+    func openWorktreesTab() {
+        populateWorktreeCards()
+        sidePanelVC.selectTab(.worktrees)
+        expandLeftColumnIfCollapsed()
     }
 
     /// Fleet status line was removed with the left bottom bar; kept as a no-op so
@@ -1042,8 +1022,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         updateMiniCardSelection()
         syncSidePanelToSelection()
         dashboardDelegate?.dashboardDidChangeSelection(self)
-        // Selecting from the worktree popover dismisses it.
-        closeWorktreePopover()
     }
 
     func agentCardDoubleClicked(agentId: String) {
