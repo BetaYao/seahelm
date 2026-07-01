@@ -288,7 +288,7 @@ class MainWindowController: NSWindowController {
     @objc func cleanOrphanSessions() {
         let configSnapshot = config
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard ProcessRunner.commandExists("zmx") else {
+            guard ZmxLocator.isAvailable else {
                 DispatchQueue.main.async {
                     let alert = NSAlert()
                     alert.messageText = "zmx is not available"

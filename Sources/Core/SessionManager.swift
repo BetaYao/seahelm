@@ -78,7 +78,7 @@ enum SessionManager {
         activeSessionNames: Set<String>,
         listOutput: String? = nil
     ) -> [String] {
-        let output = listOutput ?? ProcessRunner.output(["zmx", "list"]) ?? ""
+        let output = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
         let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
         for sessionName in orphaned {
             Station.forceKillZmxSession(sessionName)
@@ -145,7 +145,7 @@ enum SessionManager {
             // needed. Wrap only in a login shell that cd's and `clear`s the
             // echoed command line before the agent renders inline.
             let inner = "cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
-            return [["zmx", "run", name, shell, "-lic", inner]]
+            return [[ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
         default:
             return []
         }
@@ -158,7 +158,7 @@ enum SessionManager {
             // has-session exits 0 (no stdout) when present → output() non-nil.
             return ProcessRunner.output(["tmux", "has-session", "-t", name]) != nil
         case "zmx":
-            let list = ProcessRunner.output(["zmx", "list"]) ?? ""
+            let list = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
             return parseZmxSessionNames(listOutput: list).contains(name)
         default:
             return false

@@ -77,7 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// call so newly added/removed worktrees and split layouts are reflected.
     private func cleanOrphanZmxSessions() {
         DispatchQueue.global(qos: .utility).async {
-            guard ProcessRunner.commandExists("zmx") else { return }
+            guard ZmxLocator.isAvailable else { return }
             let config = Config.load()
             let worktreePaths = config.workspacePaths.flatMap { repoPath in
                 WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)

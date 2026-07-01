@@ -58,7 +58,7 @@ class Station {
             }
 
             if backend == "zmx" {
-                let zmxCommand = "zmx attach \(sessionName)"
+                let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
                 _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
                 if surface != nil {
                     scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
@@ -418,7 +418,7 @@ class Station {
                 self.destroy()
 
                 // Recreate with a fresh zmx attach
-                let zmxCommand = "zmx attach \(sessionName)"
+                let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
                 self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
                 self.delegate?.stationDidRecover(self)
             }
@@ -429,10 +429,10 @@ class Station {
     /// socket file if the graceful `zmx kill` fails (e.g. unreachable session).
     static func forceKillZmxSession(_ sessionName: String) {
         // Try graceful kill first
-        ProcessRunner.runSync(["zmx", "kill", sessionName])
+        ProcessRunner.runSync([ZmxLocator.executable(), "kill", sessionName])
 
         // Check if session is still alive by parsing `zmx list`
-        guard let listOutput = ProcessRunner.output(["zmx", "list"]) else { return }
+        guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return }
         let stillAlive = listOutput
             .components(separatedBy: "\n")
             .contains { $0.contains("name=\(sessionName)") }
@@ -458,7 +458,7 @@ class Station {
 
     /// Parse the zmx socket directory from `zmx version` output.
     private static func zmxSocketDir() -> String? {
-        guard let versionOutput = ProcessRunner.output(["zmx", "version"]) else { return nil }
+        guard let versionOutput = ProcessRunner.output([ZmxLocator.executable(), "version"]) else { return nil }
         for line in versionOutput.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("socket_dir") {

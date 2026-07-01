@@ -73,13 +73,13 @@ class ZmxChannel: SailorChannel {
 
     /// Send a text command via zmx run.
     func sendCommand(_ command: String) {
-        let args = ["zmx", "run", sessionName, command]
+        let args = [ZmxLocator.executable(), "run", sessionName, command]
         runZmx(args)
     }
 
     /// Read the last N lines of terminal output via zmx history.
     func readOutput(lines: Int = 50) -> String? {
-        let args = ["zmx", "history", sessionName]
+        let args = [ZmxLocator.executable(), "history", sessionName]
         guard let output = runZmxWithOutput(args) else {
             return nil
         }
