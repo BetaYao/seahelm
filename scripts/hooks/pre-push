@@ -1,0 +1,19 @@
+#!/bin/bash
+# seahelm pre-push hook — non-blocking heads-up when a newer zmx release exists.
+# NEVER blocks the push (always exits 0). Failures (offline, etc.) are silent.
+#
+# Source of truth: scripts/hooks/pre-push, symlinked into .git/hooks by
+# scripts/install-hooks.sh. Works whether invoked via the symlink or directly.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+CHECK="$ROOT/scripts/check-zmx.sh"
+
+if [ -x "$CHECK" ]; then
+  out="$("$CHECK" 2>/dev/null)"
+  if [ "$?" -eq 10 ]; then   # 10 = update available
+    echo >&2
+    echo "$out" | sed 's/^/  /' >&2
+    echo >&2
+  fi
+fi
+
+exit 0
