@@ -32,7 +32,11 @@ targets:
           RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin"
           "${SRCROOT}/scripts/fetch-zmx.sh" "${RES}/zmx"
           if [ "${CODE_SIGNING_ALLOWED:-YES}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-            codesign --force --options runtime --timestamp=none \
+            # Release builds need a secure timestamp for notarization; skip it in
+            # Debug so local builds don't pay a network round-trip per sign.
+            TS="--timestamp"
+            [ "${CONFIGURATION:-Debug}" = "Debug" ] && TS="--timestamp=none"
+            codesign --force --options runtime $TS \
               --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/zmx"
           fi
     sources:

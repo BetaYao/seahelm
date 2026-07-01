@@ -63,7 +63,7 @@ enum BackendResolver {
 
             var zmxVersion: String?
             if preferred == "zmx" && zmxAvailable {
-                zmxVersion = ProcessRunner.output(["zmx", "version"])
+                zmxVersion = ProcessRunner.output([ZmxLocator.executable(), "version"])
             }
 
             var targetBackend = resolvePreferredBackend(
