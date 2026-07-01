@@ -385,13 +385,22 @@ class Station {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.recoveryDelay, execute: work)
     }
 
-    private func checkZmxHealth(sessionName: String, container: NSView, workingDirectory: String?) {
-        // If the surface was already destroyed or has content, nothing to do
-        guard let _ = surface else { return }
-        let text = readViewportText() ?? ""
-        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+    /// Decide whether a zmx-attached surface should be torn down and re-attached.
+    /// A freshly-attached shell legitimately shows a blank/short viewport for the
+    /// first few seconds, so an empty viewport must NOT trigger recovery — only a
+    /// genuinely exited attach process (the session is gone) warrants it. Keying
+    /// on "viewport empty" was killing live plain-terminal panes, leaving them
+    /// unresponsive until the user closed them with Cmd+W.
+    static func shouldRecoverZmxSession(processExited: Bool) -> Bool {
+        processExited
+    }
 
-        NSLog("Station: zmx session '%@' appears stale — recovering", sessionName)
+    private func checkZmxHealth(sessionName: String, container: NSView, workingDirectory: String?) {
+        // If the surface was already destroyed, nothing to do.
+        guard surface != nil else { return }
+        guard Station.shouldRecoverZmxSession(processExited: processStatus == .exited) else { return }
+
+        NSLog("Station: zmx session '%@' attach exited — recovering", sessionName)
         recoverZmxSession(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
     }
 
