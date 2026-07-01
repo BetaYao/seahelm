@@ -414,8 +414,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         if let host = contentContainer.superview {
             dashboard.installCockpit(in: host, top: contentContainer.topAnchor)
         }
-        dashboard.helmCockpit.onSubmitCommand = { [weak self] text in
-            self?.submitBridgeCommand(text)
+        dashboard.helmCockpit.onSubmitCommand = { [weak self] text, onWorktreeCreated in
+            self?.submitBridgeCommand(text, onWorktreeCreated: onWorktreeCreated) ?? false
         }
         dashboard.helmCockpit.commandMenuProvider = { [weak self] trigger, query in
             self?.helmMenuItems(trigger: trigger, query: query) ?? []
@@ -448,7 +448,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
         positionStandardWindowButtons()
     }
 
-    private func performWorktreeCreate(task: String, repoPath: String, agentType: SailorType, reuseEnv: Bool) {
+    /// Creates a worktree off the main thread. `onComplete` fires on the main
+    /// thread with the new worktree's path on success, or nil on failure —
+    /// lets the caller (e.g. the Helm cockpit) drop its loading state and
+    /// dismiss once the new tab is ready.
+    private func performWorktreeCreate(task: String, repoPath: String, agentType: SailorType, reuseEnv: Bool,
+                                       onComplete: ((String?) -> Void)? = nil) {
         let currentPath = tabCoordinator.selectedSailor?.worktreePath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -471,11 +476,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
                     self.dashboardVC?.inlineCreateReportSuccess()
+                    onComplete?(info.path)
                 }
             } catch {
                 DispatchQueue.main.async {
                     NSSound.beep()
                     self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
+                    onComplete?(nil)
                 }
             }
         }
@@ -591,13 +598,28 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    func submitBridgeCommand(_ text: String) {
+    /// Submit a Helm command. Returns `true` if it kicked off asynchronous
+    /// worktree creation (so the caller can show a loading state); `onWorktreeCreated`
+    /// then fires with success/failure when the new tab is ready. Non-creation
+    /// commands route synchronously and return `false`.
+    @discardableResult
+    func submitBridgeCommand(_ text: String, onWorktreeCreated: ((Bool) -> Void)? = nil) -> Bool {
         switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs(),
                                          repoPaths: tabCoordinator.config.workspacePaths) {
         case .success(let command):
+            if case .newWorktree(let task, let repoHint) = command {
+                let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
+                performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
+                                      reuseEnv: false) { path in
+                    onWorktreeCreated?(path != nil)
+                }
+                return true
+            }
             makeBridgeRouter().route(command)
+            return false
         case .failure:
             NSSound.beep()
+            return false
         }
     }
 

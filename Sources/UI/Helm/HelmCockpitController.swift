@@ -73,7 +73,10 @@ final class HelmCockpitController: NSViewController {
 
     /// Submit a raw command line (`/new …`, `@branch …`, free text). Wired to the
     /// existing BridgeCommandParser/Router via MainWindowController.
-    var onSubmitCommand: ((String) -> Void)?
+    /// Returns `true` if the command kicked off async worktree creation; the
+    /// `@escaping (Bool) -> Void` completion then fires with success/failure so
+    /// the cockpit can drop its loading state and dismiss to reveal the new tab.
+    var onSubmitCommand: ((String, @escaping (Bool) -> Void) -> Bool)?
 
     /// Autocomplete data source: given a trigger (`/`, `@`, `#`) and a lowercased
     /// query, returns matching (name, desc) rows.
@@ -229,8 +232,20 @@ final class HelmCockpitController: NSViewController {
         panel.addSubview(menuContainer)
 
         commandInput.onSubmit = { [weak self] text in
-            self?.onSubmitCommand?(text)
-            self?.hideMenu()
+            guard let self else { return }
+            self.hideMenu()
+            let startedAsync = self.onSubmitCommand?(text) { [weak self] success in
+                guard let self else { return }
+                self.commandInput.setLoading(false)
+                if success {
+                    // The new tab is ready and already selected behind us — close
+                    // the cockpit so the user lands on it.
+                    if self.isOpen { self.toggle() }
+                } else {
+                    NSSound.beep()
+                }
+            } ?? false
+            if startedAsync { self.commandInput.setLoading(true) }
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }

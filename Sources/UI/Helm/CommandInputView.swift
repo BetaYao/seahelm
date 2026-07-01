@@ -26,6 +26,8 @@ final class CommandInputView: NSView {
     private let field = FocusReportingTextField()
     private var hintRow: NSView?
     private let box = NSView()
+    private let spinner = NSProgressIndicator()
+    private var savedPlaceholder: String?
 
     /// Anchors of the bordered input box, so the host can align the autocomplete
     /// dropdown to the box's bottom edge (not below the hint row).
@@ -80,6 +82,12 @@ final class CommandInputView: NSView {
         }
         box.addSubview(field)
 
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(spinner)
+
         let hint = makeHintRow()
         hint.isHidden = true  // only shown while the field is focused
         hintRow = hint
@@ -100,6 +108,9 @@ final class CommandInputView: NSView {
             field.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
             field.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
             field.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+
+            spinner.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
+            spinner.centerYAnchor.constraint(equalTo: box.centerYAnchor),
 
             hint.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 2),
             hint.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor),
@@ -135,6 +146,24 @@ final class CommandInputView: NSView {
     }
 
     func focusInput() { window?.makeFirstResponder(field) }
+
+    /// Show a busy state while an async command (e.g. `/new`) runs: disable
+    /// editing, swap the placeholder to a progress message, and spin.
+    func setLoading(_ loading: Bool) {
+        if loading {
+            savedPlaceholder = field.placeholderString
+            field.stringValue = ""
+            field.placeholderString = "创建 worktree 中…"
+            field.isEditable = false
+            field.isSelectable = false
+            spinner.startAnimation(nil)
+        } else {
+            field.placeholderString = savedPlaceholder ?? field.placeholderString
+            field.isEditable = true
+            field.isSelectable = true
+            spinner.stopAnimation(nil)
+        }
+    }
 
     /// Set the text, focus the field, and place the caret at the END (not a
     /// select-all, which would wipe the value on the next keystroke).
