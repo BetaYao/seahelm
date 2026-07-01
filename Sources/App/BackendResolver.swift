@@ -58,7 +58,7 @@ enum BackendResolver {
 
     static func resolveAsync(preferred: String, completion: @escaping (Resolution) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let zmxAvailable = ProcessRunner.commandExists("zmx")
+            let zmxAvailable = ZmxLocator.isAvailable
             let tmuxAvailable = ProcessRunner.commandExists("tmux")
 
             var zmxVersion: String?
@@ -73,12 +73,8 @@ enum BackendResolver {
             )
 
             var warningMessage: String?
-            if preferred == "zmx" {
-                if !zmxAvailable {
-                    warningMessage = "zmx is not installed. Install with `brew install neurosnap/tap/zmx`."
-                } else if let version = zmxVersion, !isSupportedZmxVersion(version) {
-                    warningMessage = "zmx version is too old. Please upgrade to zmx 0.4.2+ for stability."
-                }
+            if preferred == "zmx", let version = zmxVersion, !isSupportedZmxVersion(version) {
+                warningMessage = "Bundled zmx version is unexpectedly unsupported (\(version))."
             }
 
             if warningMessage != nil, targetBackend == "zmx" {
@@ -105,21 +101,7 @@ enum BackendResolver {
         alert.informativeText = "\(warningMessage)\nCurrent backend: \(resolution.backend)."
         alert.alertStyle = .warning
 
-        if configBackend == "zmx" && !resolution.zmxAvailable {
-            alert.addButton(withTitle: "Copy Install Command")
-            alert.addButton(withTitle: "Open zmx Docs")
-            alert.addButton(withTitle: "OK")
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString("brew install neurosnap/tap/zmx", forType: .string)
-            } else if response == .alertSecondButtonReturn,
-                      let url = URL(string: "https://zmx.sh") {
-                NSWorkspace.shared.open(url)
-            }
-        } else {
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
