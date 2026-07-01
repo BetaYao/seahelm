@@ -1168,20 +1168,6 @@ extension DashboardViewController: MiniCardReorderDelegate {
     }
 }
 
-extension DashboardViewController: StationDelegate {
-    func stationDidRecover(_ station: Station) {
-        // Only re-embed when the dashboard is visible
-        guard view.window != nil else { return }
-        // Find the agent whose station recovered
-        guard let agent = agents.first(where: { $0.station === station }) else { return }
-        // Re-embed the split container for the active agent
-        if agent.id == selectedSailorId {
-            invalidateSplitContainer(forPath: agent.worktreePath)
-            embedSplitContainerForSelectedSailor()
-        }
-    }
-
-}
 
 // MARK: - WorktreeSidePanelDelegate
 

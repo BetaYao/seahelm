@@ -83,6 +83,11 @@ class SplitContainerView: NSView, DividerDelegate {
 
             // Notify Ghostty of the new size
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
+                // Wire recovery re-embed to this container: layoutTree runs on every
+                // embed/relayout, so the station's delegate always points at whichever
+                // container currently displays it. Without this the delegate stayed nil
+                // and a recovered (recreated) surface was orphaned — a dead pane.
+                station.delegate = self
                 station.syncContentScale()
                 station.syncSize()
             }
@@ -305,5 +310,29 @@ class SplitContainerView: NSView, DividerDelegate {
         tree?.updateRatio(splitId: splitNodeId, newRatio: 0.5)
         layoutTree()
         delegate?.splitContainerDidChangeLayout(self)
+    }
+}
+
+// MARK: - StationDelegate (session recovery re-embed)
+
+extension SplitContainerView: StationDelegate {
+    /// A station recreated its surface (e.g. zmx recovery). Re-register the new
+    /// view for its leaf and relayout so input reaches the live surface.
+    func stationDidRecover(_ station: Station) {
+        guard let view = station.view else { return }
+        reembedRecoveredView(stationId: station.id, view: view)
+    }
+
+    /// Swap in a recovered view for `stationId`, relayout (which reparents it into
+    /// this container), and restore keyboard focus if that leaf was focused.
+    /// Factored out from `stationDidRecover` so the re-embed can be unit-tested
+    /// without a live Ghostty surface.
+    func reembedRecoveredView(stationId: String, view: NSView) {
+        surfaceViews[stationId] = view
+        layoutTree()
+        if let tree, let leaf = tree.allLeaves.first(where: { $0.stationId == stationId }),
+           tree.focusedId == leaf.id {
+            window?.makeFirstResponder(view)
+        }
     }
 }
