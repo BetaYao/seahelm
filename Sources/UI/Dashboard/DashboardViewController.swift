@@ -416,25 +416,32 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         guard !agents.isEmpty else { leftRightMiniCards = []; return }
 
-        let fixedWidth = refs.scrollView.bounds.width > 0 ? refs.scrollView.bounds.width : 304
-
         // One card per agent, kept parallel to `agents` for in-place updates.
-        let cards = agents.map { makeMiniCard(for: $0, width: fixedWidth) }
+        // Cards are width-pinned to the stack in addToSidebar (after they're added).
+        let cards = agents.map { makeMiniCard(for: $0) }
         leftRightMiniCards = cards
 
         let activeCards = zip(agents, cards).filter { !idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
         let idleCards = zip(agents, cards).filter { idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
 
-        activeCards.forEach { refs.stack.addArrangedSubview($0) }
+        activeCards.forEach { addToSidebar($0, stack: refs.stack) }
         if !idleCards.isEmpty {
-            refs.stack.addArrangedSubview(makeIdleExpanderRow(hiddenCount: idleCards.count, width: fixedWidth))
+            addToSidebar(makeIdleExpanderRow(hiddenCount: idleCards.count), stack: refs.stack)
             if worktreeIdleExpanded {
-                idleCards.forEach { refs.stack.addArrangedSubview($0) }
+                idleCards.forEach { addToSidebar($0, stack: refs.stack) }
             }
         }
     }
 
-    private func makeMiniCard(for agent: SailorDisplayInfo, width: CGFloat) -> StackedMiniCardContainerView {
+    /// Add a row to the sidebar stack and pin its width to the stack. The width
+    /// constraint can only be activated once both views share the stack as a
+    /// common ancestor, so it must happen after `addArrangedSubview`.
+    private func addToSidebar(_ view: NSView, stack: NSStackView) {
+        stack.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    private func makeMiniCard(for agent: SailorDisplayInfo) -> StackedMiniCardContainerView {
         let container = StackedMiniCardContainerView()
         container.delegate = self
         container.reorderDelegate = self
@@ -454,14 +461,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         )
         container.isSelected = (agent.id == selectedSailorId)
         container.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(equalToConstant: width),
-            container.heightAnchor.constraint(equalToConstant: 84),
-        ])
+        // Width is pinned to the stack once the card is added to it (see
+        // pinToSidebarWidth) — activating it here would have no common ancestor.
+        container.heightAnchor.constraint(equalToConstant: 84).isActive = true
         return container
     }
 
-    private func makeIdleExpanderRow(hiddenCount: Int, width: CGFloat) -> NSView {
+    private func makeIdleExpanderRow(hiddenCount: Int) -> NSView {
         let title = worktreeIdleExpanded
             ? "▾ Hide \(hiddenCount) idle"
             : "▸ \(hiddenCount) idle worktree\(hiddenCount == 1 ? "" : "s")"
@@ -473,10 +479,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         btn.alignment = .left
         btn.translatesAutoresizingMaskIntoConstraints = false
         btn.setAccessibilityIdentifier("worktree.idleExpander")
-        NSLayoutConstraint.activate([
-            btn.widthAnchor.constraint(equalToConstant: width),
-            btn.heightAnchor.constraint(equalToConstant: 26),
-        ])
+        // Width is pinned once added to the stack (see pinToSidebarWidth).
+        btn.heightAnchor.constraint(equalToConstant: 26).isActive = true
         return btn
     }
 
@@ -565,6 +569,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         leftRightSidebarStack.alignment = .leading
         leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.documentView = leftRightSidebarStack
+        // Pin the stack to the scroll's visible width so cards fill the column
+        // (no horizontal scroll) regardless of when they're populated.
+        leftRightSidebarStack.widthAnchor.constraint(
+            equalTo: leftRightSidebarScroll.contentView.widthAnchor).isActive = true
 
         // The First Mate bottom bar (fleet status + task input) was removed — the
         // command line now lives in the Helm cockpit (`/new` creates worktrees).

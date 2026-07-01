@@ -198,9 +198,9 @@ final class WorktreeSidePanelViewController: NSViewController {
         listView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(listView)
         NSLayoutConstraint.activate([
-            listView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            listView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            listView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            listView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            listView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            listView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
             listView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
     }
