@@ -83,10 +83,10 @@ backend exists.
 ### 2. Bundling & build
 
 - **Fetch-with-checksum build phase** (not committed to git):
-  - A script downloads the **pinned** zmx release for both arches
-    (arm64 + x86_64) from GitHub releases, verifies each against a committed
-    SHA-256, and `lipo -create`s them into a universal binary at
-    `Contents/Resources/bin/zmx`.
+  - A script downloads the **pinned** zmx release for **arm64** (Apple Silicon
+    only — the sole supported target) from GitHub releases, verifies it against a
+    committed SHA-256, and places it at `Contents/Resources/bin/zmx`. No `lipo` /
+    universal step.
   - The pinned version + checksums live in a committed file
     (e.g. `Vendor/zmx.pin`); upgrades are a deliberate edit.
   - The script is **idempotent/cached**: if the destination already matches the
@@ -130,6 +130,6 @@ backend exists.
 
 - No user-facing behavior change except: no install step, no nag dialog,
   deterministic zmx version across all installs.
-- App bundle grows ~2 MB (universal zmx).
+- App bundle grows ~1.6 MB (arm64 zmx).
 - First build after this change requires network to fetch zmx; subsequent builds
   are cached.
