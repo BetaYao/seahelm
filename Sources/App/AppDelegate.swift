@@ -82,6 +82,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let worktreePaths = config.workspacePaths.flatMap { repoPath in
                 WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
             }
+            // If discovery returned nothing while workspaces exist, it likely failed
+            // transiently (git lock, timing). Skipping avoids classifying every live
+            // session as orphan and force-killing attached panes.
+            guard !(worktreePaths.isEmpty && !config.workspacePaths.isEmpty) else { return }
             let activeSessionNames = SessionManager.expectedSessionNames(
                 config: config,
                 discoveredWorktreePaths: worktreePaths

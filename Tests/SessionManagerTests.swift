@@ -82,4 +82,23 @@ class SessionManagerTests: XCTestCase {
 
         XCTAssertEqual(orphaned, ["amux-repo-main-1"])
     }
+
+    func testOrphanZmxSessionNamesNeverReapsAttachedSessions() {
+        // Regression: the orphan sweep force-killed sessions purely by name, so a
+        // live pane (clients=1) whose name wasn't in the expected set got killed
+        // mid-use — "Process exited. Press any key to close the terminal."
+        // An attached session (clients>=1) must never be reaped, even if orphaned.
+        let output = """
+        name=amux-repo-attached\tpid=1\tclients=1\tstart_dir=/tmp/a
+        name=amux-repo-detached\tpid=2\tclients=0\tstart_dir=/tmp/d
+        """
+
+        let orphaned = SessionManager.orphanZmxSessionNames(
+            activeSessionNames: [],   // neither is "expected"
+            listOutput: output
+        )
+
+        XCTAssertEqual(orphaned, ["amux-repo-detached"],
+                       "a session with a live client must never be reaped as orphan")
+    }
 }

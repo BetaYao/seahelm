@@ -69,8 +69,28 @@ enum SessionManager {
     }
 
     static func orphanZmxSessionNames(activeSessionNames: Set<String>, listOutput: String) -> [String] {
-        parseZmxSessionNames(listOutput: listOutput)
-            .filter { $0.hasPrefix("amux-") && !activeSessionNames.contains($0) }
+        listOutput.components(separatedBy: .newlines).compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let name = zmxListField(trimmed, "name=")
+                ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
+            guard name.hasPrefix("amux-"), !activeSessionNames.contains(name) else { return nil }
+            // Never reap a session with a live client — a pane is attached to it
+            // right now. Killing it would end the user's session mid-use
+            // ("Process exited. Press any key to close the terminal.").
+            let clients = Int(zmxListField(trimmed, "clients=") ?? "0") ?? 0
+            return clients >= 1 ? nil : name
+        }
+    }
+
+    /// Extract a `key=value` field (value runs up to the next whitespace) from a
+    /// `zmx list` line, or nil if absent.
+    private static func zmxListField(_ line: String, _ key: String) -> String? {
+        guard let range = line.range(of: key) else { return nil }
+        let suffix = line[range.upperBound...]
+        let end = suffix.firstIndex(where: \.isWhitespace) ?? suffix.endIndex
+        let value = String(suffix[..<end])
+        return value.isEmpty ? nil : value
     }
 
     @discardableResult
