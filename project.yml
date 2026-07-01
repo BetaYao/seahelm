@@ -24,11 +24,25 @@ targets:
         product: CodeEditSourceEditor
       - package: CodeEditLanguages
         product: CodeEditLanguages
+    preBuildScripts:
+      - name: "Embed and sign bundled zmx"
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin"
+          "${SRCROOT}/scripts/fetch-zmx.sh" "${RES}/zmx"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+            codesign --force --options runtime --timestamp=none \
+              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/zmx"
+          fi
     sources:
       - path: Sources
         type: group
       - path: Resources/Fonts
       - path: Assets.xcassets
+      - path: Resources/licenses
+        type: folder
+        buildPhase: resources
       - path: ghostty.h
         type: file
         buildPhase: none

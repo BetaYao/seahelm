@@ -240,6 +240,7 @@
 		E3B3F5D302481F3DF776ED95 /* ConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */; };
 		E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */; };
 		E47E4013682E902810866AF4 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A12EC1A8AE8D2CC60BA5732 /* GhosttyBridge.swift */; };
+		E4C319ACAC1EE3D055B48264 /* licenses in Resources */ = {isa = PBXBuildFile; fileRef = 36D5F3B1BC616505486ACBA0 /* licenses */; };
 		E5020C3F03A4093F06D0F2E4 /* FileTreeOutlineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */; };
 		E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */; };
 		EA4CB7D6CFBBA74792B00BB6 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52EF0C4896EE233186B21980 /* GatewayState.swift */; };
@@ -341,6 +342,7 @@
 		35D82D53B83B8C48E71D9E57 /* TerminalCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinator.swift; sourceTree = "<group>"; };
 		367B1FA3E6F3BC5A0EB975D2 /* NotificationHistoryViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryViewController.swift; sourceTree = "<group>"; };
 		36A62BF0D9481F17D7071390 /* SplitPanePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPanePage.swift; sourceTree = "<group>"; };
+		36D5F3B1BC616505486ACBA0 /* licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = licenses; path = Resources/licenses; sourceTree = SOURCE_ROOT; };
 		36FC6278CE9A15F68E6FAE89 /* ShellEscapeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscapeTests.swift; sourceTree = "<group>"; };
 		3737CB607E821B5D3EFDBDAF /* ZmxLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxLocator.swift; sourceTree = "<group>"; };
 		3739136E1FD54C22498ABA66 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
@@ -979,6 +981,7 @@
 			children = (
 				23B112FAA14CF6135A4F7202 /* Assets.xcassets */,
 				E02B47C1F399F29F6BDC084B /* ghostty.h */,
+				36D5F3B1BC616505486ACBA0 /* licenses */,
 				BA5AC9B69F940E48036F7270 /* seahelm-Bridging-Header.h */,
 				4A4AF88F647ABEEA4F45FCFF /* Fonts */,
 				F3B227896288D770B7C78831 /* Sources */,
@@ -1069,6 +1072,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 541252A3435ECA358E7853EF /* Build configuration list for PBXNativeTarget "seahelm" */;
 			buildPhases = (
+				3763F5E56F6A12443B0393C2 /* Embed and sign bundled zmx */,
 				F03FF9473419A754054908EA /* Sources */,
 				21283461340CBF88A3E68FC9 /* Resources */,
 				B903EB00832368C62C8A20D8 /* Frameworks */,
@@ -1173,10 +1177,33 @@
 				89C41D7167472A785EA66D4F /* JetBrainsMono-Bold.ttf in Resources */,
 				756AC63650FCD59FB6D44243 /* JetBrainsMono-Medium.ttf in Resources */,
 				346BF50E3F02C947F8D62DB5 /* JetBrainsMono-Regular.ttf in Resources */,
+				E4C319ACAC1EE3D055B48264 /* licenses in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3763F5E56F6A12443B0393C2 /* Embed and sign bundled zmx */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed and sign bundled zmx";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nRES=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin\"\n\"${SRCROOT}/scripts/fetch-zmx.sh\" \"${RES}/zmx\"\nif [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  codesign --force --options runtime --timestamp=none \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \"${RES}/zmx\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AC074FECCD61E1AF28EBAD18 /* Sources */ = {
