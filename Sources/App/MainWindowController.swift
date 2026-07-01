@@ -569,9 +569,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Run a merge check for `path` on a background thread and enqueue a
     /// return-to-port card with appropriate options once the check completes.
-    private func enqueueReturnCard(forPath path: String, onEnqueued: (() -> Void)? = nil) {
+    /// Resolve a `/return` for one worktree. If it is clean AND fully merged,
+    /// remove it immediately (no confirmation). Otherwise enqueue a red
+    /// "Force remove" card requiring explicit confirmation. `onDone` fires on the
+    /// main thread once resolved (deleted or carded).
+    private func enqueueReturnCard(forPath path: String, onDone: (() -> Void)? = nil) {
         let repoCache = tabCoordinator.worktreeRepoCache
         let queue = tabCoordinator.pendingOrders
+        let coordinator = terminalCoordinator
         let sailor = ShipLog.shared.sailor(forWorktree: path)
         let branch = sailor?.branch
             ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
@@ -585,26 +590,21 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let check = WorktreeDeleter.mergeCheckForOnlineMainOrMaster(
                 worktreePath: path, repoPath: repoPath)
 
-            let options: [String]
-            let zone: FirstMateZone
-            if check.canDelete {
-                options = ["Remove", "Remove + Branch"]
-                zone = .green
-            } else {
-                options = ["Force remove"]
-                zone = .red
-            }
-
-            let action = FirstMateAction(
-                kind: .returnToPort, zone: zone,
-                worktreePath: path, branch: branch, project: project,
-                terminalID: "",
-                message: check.reason,
-                options: options)
-
             DispatchQueue.main.async {
-                queue.enqueue(action)
-                onEnqueued?()
+                if check.canDelete {
+                    // Clean + fully merged → safe to remove directly, no confirm.
+                    coordinator.deleteWorktreeForReturnToPort(
+                        path: path, branch: branch, deleteBranch: false, force: false)
+                } else {
+                    // Dirty or unmerged → require explicit "Force remove" confirmation.
+                    queue.enqueue(FirstMateAction(
+                        kind: .returnToPort, zone: .red,
+                        worktreePath: path, branch: branch, project: project,
+                        terminalID: "",
+                        message: check.reason,
+                        options: ["Force remove"]))
+                }
+                onDone?()
             }
         }
     }
