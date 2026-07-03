@@ -148,7 +148,11 @@ class WorktreeStatusAggregator {
             mostRecentMessage: mostRecent.lastMessage,
             mostRecentUserPrompt: mostRecent.lastUserPrompt
         )
+        // Skip the delegate (and the UI refresh chain behind it) when nothing
+        // visible actually changed — e.g. a poll that re-detected the same state.
+        let unchanged = worktreeStatuses[worktreePath] == ws
         worktreeStatuses[worktreePath] = ws
+        guard !unchanged else { return }
         delegate?.worktreeStatusDidUpdate(ws)
     }
 }

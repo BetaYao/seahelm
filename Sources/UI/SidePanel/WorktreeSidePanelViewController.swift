@@ -49,6 +49,9 @@ final class WorktreeSidePanelViewController: NSViewController {
     private var changesTableView: NSTableView?
     private var changesScrollView: NSScrollView?
     private var changedFiles: [GitChangedFile] = []
+    /// Bumped each time the changes tab starts a (background) reload; stale
+    /// completions from an earlier reload are discarded.
+    private var changesLoadGeneration = 0
 
     var selectedTabForTesting: SidePanelTab { selectedTab }
     var worktreePathForTesting: String? { worktreePath }
@@ -298,7 +301,23 @@ final class WorktreeSidePanelViewController: NSViewController {
     }
 
     private func showChangesTab(_ path: String) {
-        changedFiles = GitDiff.changedFileEntries(worktreePath: path)
+        // `git status` can take hundreds of ms on large repos — run it off the
+        // main thread. The generation counter drops stale results if the user
+        // switched tab/worktree (or re-entered) before the scan finished.
+        changesLoadGeneration += 1
+        let generation = changesLoadGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let entries = GitDiff.changedFileEntries(worktreePath: path)
+            DispatchQueue.main.async {
+                guard let self, self.changesLoadGeneration == generation,
+                      self.selectedTab == .changes, self.worktreePath == path else { return }
+                self.presentChanges(entries)
+            }
+        }
+    }
+
+    private func presentChanges(_ entries: [GitChangedFile]) {
+        changedFiles = entries
 
         if changedFiles.isEmpty {
             showPlaceholder("No changes", identifier: "sidePanel.changesEmpty")

@@ -2,6 +2,7 @@ import AppKit
 
 protocol DividerDelegate: AnyObject {
     func dividerDidMove(_ splitNodeId: String, newRatio: CGFloat)
+    func dividerDidEndDrag(_ splitNodeId: String)
     func dividerDidDoubleClick(_ splitNodeId: String)
 }
 
@@ -59,7 +60,10 @@ class DividerView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        isDragging = false
+        if isDragging {
+            isDragging = false
+            delegate?.dividerDidEndDrag(splitNodeId)
+        }
     }
 
     override func updateTrackingAreas() {

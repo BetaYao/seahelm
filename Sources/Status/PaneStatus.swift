@@ -1,6 +1,6 @@
 import Foundation
 
-struct PaneStatus {
+struct PaneStatus: Equatable {
     let paneIndex: Int        // 1-based, follows SplitTree leaf order
     let terminalID: String    // Station.id
     var status: SailorStatus
@@ -9,7 +9,7 @@ struct PaneStatus {
     var lastUpdated: Date     // When status or message last changed
 }
 
-struct WorktreeStatus {
+struct WorktreeStatus: Equatable {
     let worktreePath: String
     var panes: [PaneStatus]           // Ordered by SplitTree leaf position
     var mostRecentPaneIndex: Int      // Pane whose lastMessage is displayed

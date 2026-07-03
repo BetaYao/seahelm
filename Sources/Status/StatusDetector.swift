@@ -10,6 +10,12 @@ enum ProcessStatus {
 /// Deterministic status detection: ProcessStatus > ShellPhase > TextPatterns > Unknown
 class StatusDetector {
 
+    // Compiled once — these run per-pane on every poll cycle.
+    // ⏺ ToolName(args) or ✗ ToolName(args)
+    private static let activityCirclePattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([⏺✗])\s+(\w+)\((.+?)\)"#)
+    // ▸ ToolName   detail or ✗ ToolName   detail
+    private static let activityArrowPattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([▸✗])\s+(\w+)\s{2,}(.+)$"#)
+
     /// Detect agent status from available signals (priority order).
     /// Accepts an optional pre-lowercased content string to avoid redundant lowercasing.
     func detect(
@@ -59,12 +65,8 @@ class StatusDetector {
 
         var events: [ActivityEvent] = []
         let lines = text.components(separatedBy: .newlines)
-
-        // Regex patterns for Claude Code terminal output
-        // ⏺ ToolName(args) or ✗ ToolName(args)
-        let circlePattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([⏺✗])\s+(\w+)\((.+?)\)"#)
-        // ▸ ToolName   detail or ✗ ToolName   detail
-        let arrowPattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([▸✗])\s+(\w+)\s{2,}(.+)$"#)
+        let circlePattern = Self.activityCirclePattern
+        let arrowPattern = Self.activityArrowPattern
 
         for line in lines {
             let nsLine = line as NSString

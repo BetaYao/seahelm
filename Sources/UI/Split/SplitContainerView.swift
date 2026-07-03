@@ -101,6 +101,28 @@ class SplitContainerView: NSView, DividerDelegate {
         updateDimOverlays()
     }
 
+    /// Lightweight relayout for divider drags: recompute frames and move the
+    /// already-embedded views. Skips everything layoutTree does beyond that
+    /// (constraint teardown, focus-closure wiring, forced surface size sync) —
+    /// GhosttyNSView.setFrameSize already syncs the surface size with a debounce.
+    private func applyFramesOnly() {
+        guard let tree = tree else { return }
+        leafFrames = Self.computeFrames(node: tree.root, in: bounds)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for leaf in tree.allLeaves {
+            guard let frame = leafFrames[leaf.id],
+                  let view = surfaceViews[leaf.stationId],
+                  view.superview == self else { continue }
+            view.frame = frame
+        }
+        layoutDividers(node: tree.root, in: bounds)
+        for (id, overlay) in dimOverlays {
+            if let frame = leafFrames[id] { overlay.frame = frame }
+        }
+        CATransaction.commit()
+    }
+
     // MARK: - Dim overlays
 
     /// Update semi-transparent overlays that dim unfocused panes.
@@ -301,7 +323,14 @@ class SplitContainerView: NSView, DividerDelegate {
     }
 
     func dividerDidMove(_ splitNodeId: String, newRatio: CGFloat) {
+        // Fires on every mouse-move during a drag — take the frames-only path.
+        // The full layoutTree (constraint teardown, focus closures, forced
+        // surface size sync) and layout persistence run once at drag end.
         tree?.updateRatio(splitId: splitNodeId, newRatio: newRatio)
+        applyFramesOnly()
+    }
+
+    func dividerDidEndDrag(_ splitNodeId: String) {
         layoutTree()
         delegate?.splitContainerDidChangeLayout(self)
     }

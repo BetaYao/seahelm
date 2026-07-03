@@ -184,7 +184,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     // MARK: - Public API
 
-    func updateSailors(_ newSailors: [SailorDisplayInfo]) {
+    /// `changedWorktreePath` narrows the in-place refresh to one card when the
+    /// caller knows only that worktree's status changed; nil refreshes all cards.
+    func updateSailors(_ newSailors: [SailorDisplayInfo], changedWorktreePath: String? = nil) {
         let oldIds = Set(agents.map { $0.id })
         let newIds = Set(newSailors.map { $0.id })
         let structureChanged = oldIds != newIds
@@ -223,7 +225,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if structureChanged {
             rebuildFocusLayout()
         } else {
-            updateFocusLayoutInPlace(agents, miniCards: focusLayoutRefs.miniCards, focusPanel: focusLayoutRefs.focusPanel)
+            updateFocusLayoutInPlace(agents, miniCards: focusLayoutRefs.miniCards, focusPanel: focusLayoutRefs.focusPanel,
+                                     changedWorktreePath: changedWorktreePath)
         }
         syncSidePanelToSelection()
     }
@@ -233,7 +236,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         sidePanelVC.setWorktree(path)
     }
 
-    private func updateFocusLayoutInPlace(_ sorted: [SailorDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
+    private func updateFocusLayoutInPlace(_ sorted: [SailorDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView,
+                                          changedWorktreePath: String? = nil) {
         // Count mismatch means structure changed — handled by structureChanged check in updateSailors
         guard sorted.count == miniCards.count else { return }
 
@@ -246,6 +250,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             embedSplitContainerForSelectedSailor()
         }
         for (index, agent) in sorted.enumerated() {
+            // Selection highlight is cheap and may change for any card; the full
+            // reconfigure below is not — skip cards the caller says didn't change.
+            miniCards[index].isSelected = (agent.id == selectedSailorId)
+            if let changed = changedWorktreePath, agent.worktreePath != changed { continue }
             miniCards[index].configure(paneCount: agent.paneCount)
             miniCards[index].layoutChildren()
             WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
@@ -265,7 +273,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
                     ?? ShipLog.shared.sailor(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
-            miniCards[index].isSelected = (agent.id == selectedSailorId)
         }
     }
 
