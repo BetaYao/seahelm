@@ -167,6 +167,13 @@ class TabCoordinator {
     func addRepo(at path: String) {
         WorktreeDiscovery.discoverAsync(repoPath: path) { [weak self] worktrees in
             guard let self else { return }
+            // A failed discovery on a vanished directory must not fall through to
+            // persisting `path` — that's how a deleted worktree once got stuck in
+            // workspace_paths as a phantom repo.
+            if worktrees.isEmpty, !FileManager.default.fileExists(atPath: path) {
+                NSLog("[TabCoordinator] Refusing to add nonexistent repo path: \(path)")
+                return
+            }
             // Resolve to main worktree path so the display name reflects the repo root directory
             let repoPath = worktrees.first(where: { $0.isMainWorktree })?.path ?? path
 
@@ -224,6 +231,37 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
         return tabIndex
+    }
+
+    /// Drop per-worktree config entries whose directory no longer exists, so a
+    /// deleted worktree doesn't leave timestamps/layouts/session names behind
+    /// forever. Runs once per loadWorkspaces.
+    private func pruneStaleWorktreeConfigEntries() {
+        var changed = false
+        func prune<V>(_ map: inout [String: V]) {
+            for path in map.keys where !FileManager.default.fileExists(atPath: path) {
+                map.removeValue(forKey: path)
+                changed = true
+            }
+        }
+        prune(&config.worktreeStartedAt)
+        prune(&config.worktreeLastActivityAt)
+        prune(&config.splitLayouts)
+        prune(&config.focusedPaneIds)
+        for (repo, worktree) in config.activeWorktreePaths where !FileManager.default.fileExists(atPath: worktree) {
+            config.activeWorktreePaths.removeValue(forKey: repo)
+            changed = true
+        }
+        if let selected = config.selectedWorktreePath, !FileManager.default.fileExists(atPath: selected) {
+            config.selectedWorktreePath = nil
+            changed = true
+        }
+        let prunedOrder = config.cardOrder.filter { FileManager.default.fileExists(atPath: $0) }
+        if prunedOrder != config.cardOrder {
+            config.cardOrder = prunedOrder
+            changed = true
+        }
+        if changed { saveConfig() }
     }
 
     // MARK: - Build Agent Display Infos
@@ -303,9 +341,19 @@ class TabCoordinator {
             var discoveredWorktrees: [(repoPath: String, worktrees: [WorktreeInfo])] = []
             var resolvedPaths: [String] = []
             for repoPath in repoPaths {
+                // Self-heal: a workspace path whose directory vanished (deleted
+                // worktree/repo) is dropped instead of resurrected as a phantom
+                // "main" tab on every launch.
+                guard FileManager.default.fileExists(atPath: repoPath) else {
+                    NSLog("[TabCoordinator] Pruning nonexistent workspace path: \(repoPath)")
+                    continue
+                }
                 let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
                 // Resolve to main worktree path so display name reflects the repo root
                 let resolved = worktrees.first(where: { $0.isMainWorktree })?.path ?? repoPath
+                // Two entries can resolve to the same repo root (e.g. a worktree
+                // added by mistake alongside its main repo) — keep one tab.
+                guard !resolvedPaths.contains(resolved) else { continue }
                 discoveredWorktrees.append((resolved, worktrees))
                 resolvedPaths.append(resolved)
             }
@@ -314,10 +362,12 @@ class TabCoordinator {
                 guard let self else { return }
 
                 // Update config if any paths were resolved to their main worktree
+                // or pruned above.
                 if resolvedPaths != repoPaths {
                     self.config.workspacePaths = resolvedPaths
                     self.saveConfig()
                 }
+                self.pruneStaleWorktreeConfigEntries()
 
                 var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree)] = []
 
@@ -809,7 +859,7 @@ class TabCoordinator {
     // MARK: - Status Update Forwarding
 
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updateSailors(buildSailorDisplayInfos(), changedWorktreePath: status.worktreePath)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 

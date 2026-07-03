@@ -38,9 +38,30 @@ enum WorktreeDiscovery {
     }
 
     private static func _findRepoRootSync(from path: String) -> String? {
+        // `--show-toplevel` inside a linked worktree returns the *worktree's own*
+        // path, not the main repo — which once let a worktree get added to
+        // workspace_paths as if it were a repo. `--git-common-dir` always points
+        // at the main repo's .git, so its parent is the true repo root.
+        guard let commonDir = runGit(["rev-parse", "--git-common-dir"], at: path)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !commonDir.isEmpty else { return nil }
+        var url = URL(fileURLWithPath: commonDir)
+        // Relative form (".git" in the main worktree) — resolve against `path`.
+        if !commonDir.hasPrefix("/") {
+            url = URL(fileURLWithPath: path).appendingPathComponent(commonDir)
+        }
+        url = url.standardizedFileURL
+        // Non-bare repos: root is the directory containing .git.
+        if url.lastPathComponent == ".git" {
+            return url.deletingLastPathComponent().path
+        }
+        return url.path
+    }
+
+    private static func runGit(_ arguments: [String], at path: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["rev-parse", "--show-toplevel"]
+        process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: path)
 
         let pipe = Pipe()
@@ -56,7 +77,7 @@ enum WorktreeDiscovery {
 
         guard process.terminationStatus == 0 else { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(data: data, encoding: .utf8)
     }
 
     /// Async version: find repo root on background queue, callback on main
