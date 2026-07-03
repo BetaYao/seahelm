@@ -65,7 +65,10 @@ final class TitleBarView: NSView {
     private var scrollTrailingToOverflow: NSLayoutConstraint?
     private var scrollTrailingToEdge: NSLayoutConstraint?
     private var worktreeTabPaths: [String] = []
+    private var selectedTabPath: String?
     private var collapsedTabs: [(path: String, title: String, statusColor: NSColor)] = []
+    /// Live tab buttons keyed by worktree path, reused across setWorktreeTabs calls.
+    private var tabButtonsByPath: [String: WorktreeTabButton] = [:]
 
     // State
     private var isWindowHovered = false
@@ -96,8 +99,9 @@ final class TitleBarView: NSView {
     }
 
     func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true, canCleanWorktrees: Bool = false) {
-        // The clean-worktree control was removed; parameters kept for source compatibility.
-        layoutSubtreeIfNeeded()
+        // The clean-worktree control was removed; parameters kept for source
+        // compatibility. Nothing to update — in particular, no forced
+        // layoutSubtreeIfNeeded: this runs on every title-bar refresh.
     }
 
     func updateNotificationSummary(entry: NotificationEntry?, unreadCount: Int) {}
@@ -253,22 +257,44 @@ final class TitleBarView: NSView {
 
     func setWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool)]) {
         worktreeTabPaths = tabs.map(\.path)
-        tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let previousSelectedPath = selectedTabPath
+        selectedTabPath = tabs.first(where: \.isSelected)?.path
 
         let active = tabs.filter { !$0.collapsed }
         collapsedTabs = tabs.filter(\.collapsed).map { ($0.path, $0.title, $0.statusColor) }
 
+        // Reuse existing buttons keyed by path — this runs on every status
+        // update, and rebuilding every button (constraints, gestures, tracking
+        // areas) each time is far more expensive than updating in place.
+        var reused: [String: WorktreeTabButton] = [:]
+        var orderedButtons: [WorktreeTabButton] = []
         var selectedButton: WorktreeTabButton?
         for tab in active {
-            let btn = WorktreeTabButton(path: tab.path, title: tab.title,
-                                        agentGlyph: tab.agentGlyph, agentColor: tab.agentColor,
-                                        statusColor: tab.statusColor, paneCount: tab.paneCount,
-                                        isSelected: tab.isSelected)
-            btn.onTap = { [weak self] path in
-                self?.delegate?.titleBarDidSelectWorktree(path)
+            let btn: WorktreeTabButton
+            if let existing = tabButtonsByPath[tab.path] {
+                btn = existing
+            } else {
+                btn = WorktreeTabButton(path: tab.path)
+                btn.onTap = { [weak self] path in
+                    self?.delegate?.titleBarDidSelectWorktree(path)
+                }
             }
-            tabStripStack.addArrangedSubview(btn)
+            btn.update(title: tab.title, agentGlyph: tab.agentGlyph, agentColor: tab.agentColor,
+                       statusColor: tab.statusColor, paneCount: tab.paneCount, isSelected: tab.isSelected)
+            reused[tab.path] = btn
+            orderedButtons.append(btn)
             if tab.isSelected { selectedButton = btn }
+        }
+        for (path, btn) in tabButtonsByPath where reused[path] == nil {
+            btn.removeFromSuperview()
+        }
+        tabButtonsByPath = reused
+
+        // Only rebuild the stack's arrangement when membership or order changed.
+        let currentButtons = tabStripStack.arrangedSubviews.compactMap { $0 as? WorktreeTabButton }
+        if currentButtons != orderedButtons {
+            tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            orderedButtons.forEach { tabStripStack.addArrangedSubview($0) }
         }
 
         let hasTabs = !tabs.isEmpty
@@ -288,12 +314,39 @@ final class TitleBarView: NSView {
         scrollTrailingToOverflow?.isActive = collapsedCount > 0
         scrollTrailingToEdge?.isActive = collapsedCount == 0
 
-        // Keep the selected tab in view after layout settles.
-        if let selectedButton {
+        // Keep the selected tab in view after layout settles. Only needed when
+        // the selection actually moved — not on every status refresh.
+        if let selectedButton, selectedTabPath != previousSelectedPath {
             DispatchQueue.main.async {
                 selectedButton.scrollToVisible(selectedButton.bounds)
             }
         }
+    }
+
+    // MARK: - Keyboard worktree-tab navigation
+
+    /// Pure adjacency: the path `forward`/backward from `current` in `paths`, wrapping
+    /// around. Returns nil only when `paths` is empty. When `current` is nil or not in
+    /// the list, forward starts at the first tab and backward at the last. Includes all
+    /// tabs (collapsed ones too) so keyboard cycling reaches idle worktrees the overflow
+    /// menu hides.
+    static func adjacentPath(paths: [String], from current: String?, forward: Bool) -> String? {
+        guard !paths.isEmpty else { return nil }
+        guard let current, let idx = paths.firstIndex(of: current) else {
+            return forward ? paths.first : paths.last
+        }
+        let n = paths.count
+        let nextIdx = ((idx + (forward ? 1 : -1)) % n + n) % n
+        return paths[nextIdx]
+    }
+
+    /// Select the next/previous worktree tab via the same delegate path a click uses.
+    /// Fills the previously mouse-only titlebar gap (see docs/keyboard-redesign.md §7).
+    func selectAdjacentWorktree(forward: Bool) {
+        guard let path = TitleBarView.adjacentPath(
+            paths: worktreeTabPaths, from: selectedTabPath, forward: forward
+        ) else { return }
+        delegate?.titleBarDidSelectWorktree(path)
     }
 
     @objc private func overflowClicked() {
@@ -531,65 +584,64 @@ final class TitleBarView: NSView {
 
 private final class WorktreeTabButton: NSView {
     var onTap: ((String) -> Void)?
-    private let path: String
+    let path: String
     private let dotView = NSView()
     private let glyphLabel = NSTextField(labelWithString: "")
     private let label = NSTextField(labelWithString: "")
     private let paneCountLabel = NSTextField(labelWithString: "")
     private var hovered = false
+    private var isSelected = false
 
-    init(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool) {
+    // Constraint constants that depend on glyph/paneCount visibility — kept so
+    // update(...) can adjust them in place instead of rebuilding the button.
+    private var glyphWidthConstraint: NSLayoutConstraint!
+    private var labelLeadingConstraint: NSLayoutConstraint!
+    private var countWidthConstraint: NSLayoutConstraint!
+    private var countLeadingConstraint: NSLayoutConstraint!
+
+    init(path: String) {
         self.path = path
         super.init(frame: .zero)
+        glyphWidthConstraint = glyphLabel.widthAnchor.constraint(equalToConstant: 0)
+        labelLeadingConstraint = label.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: 0)
+        countWidthConstraint = paneCountLabel.widthAnchor.constraint(equalToConstant: 0)
+        countLeadingConstraint = paneCountLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 0)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 5
 
         // Agent sigil (✻ Claude / ⟡ Codex / …) — leads the tab. Hidden when no AI agent.
         glyphLabel.font = AppFont.mono(size: 11, weight: .bold)
-        glyphLabel.textColor = agentColor
         glyphLabel.alignment = .center
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
-        glyphLabel.stringValue = agentGlyph ?? ""
-        glyphLabel.isHidden = (agentGlyph == nil)
 
         label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        label.textColor = isSelected ? SemanticColors.text : SemanticColors.muted
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
         label.cell?.usesSingleLineMode = true
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.stringValue = title
 
         // Status dot — trails the label.
         dotView.wantsLayer = true
         dotView.layer?.cornerRadius = 3
-        dotView.layer?.backgroundColor = statusColor.cgColor
         dotView.translatesAutoresizingMaskIntoConstraints = false
 
         // Pane-count number — after the dot. Hidden for a single pane.
         paneCountLabel.font = AppFont.mono(size: 10, weight: .medium)
         paneCountLabel.textColor = SemanticColors.muted
         paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
-        paneCountLabel.stringValue = "\(paneCount)"
-        paneCountLabel.isHidden = (paneCount <= 1)
 
         addSubview(glyphLabel)
         addSubview(label)
         addSubview(dotView)
         addSubview(paneCountLabel)
 
-        // When the glyph is hidden it collapses to zero width so the title leads.
-        let glyphWidth = glyphLabel.widthAnchor.constraint(equalToConstant: agentGlyph == nil ? 0 : 12)
-        // When the count is hidden it collapses so the dot trails the tab.
-        let countWidth = paneCountLabel.widthAnchor.constraint(equalToConstant: paneCount <= 1 ? 0 : 10)
-
         NSLayoutConstraint.activate([
             glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             glyphLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            glyphWidth,
+            glyphWidthConstraint,
 
-            label.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: agentGlyph == nil ? 0 : 5),
+            labelLeadingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             dotView.widthAnchor.constraint(equalToConstant: 6),
@@ -597,9 +649,9 @@ private final class WorktreeTabButton: NSView {
             dotView.centerYAnchor.constraint(equalTo: centerYAnchor),
             dotView.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
 
-            paneCountLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: paneCount <= 1 ? 0 : 4),
+            countLeadingConstraint,
             paneCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            countWidth,
+            countWidthConstraint,
             paneCountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
 
             heightAnchor.constraint(equalToConstant: 22),
@@ -609,8 +661,6 @@ private final class WorktreeTabButton: NSView {
         // Let the label truncate (tail) instead of stretching the tab.
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        applySelectedStyle(isSelected)
-
         let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
         addGestureRecognizer(click)
 
@@ -618,6 +668,32 @@ private final class WorktreeTabButton: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Refresh the button's content in place. Called on every title-bar update,
+    /// so it only touches what actually changed.
+    func update(title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool) {
+        if glyphLabel.stringValue != (agentGlyph ?? "") || glyphLabel.isHidden != (agentGlyph == nil) {
+            glyphLabel.stringValue = agentGlyph ?? ""
+            glyphLabel.isHidden = (agentGlyph == nil)
+            // When the glyph is hidden it collapses to zero width so the title leads.
+            glyphWidthConstraint.constant = agentGlyph == nil ? 0 : 12
+            labelLeadingConstraint.constant = agentGlyph == nil ? 0 : 5
+        }
+        glyphLabel.textColor = agentColor
+        if label.stringValue != title { label.stringValue = title }
+        dotView.layer?.backgroundColor = statusColor.cgColor
+        let countText = "\(paneCount)"
+        if paneCountLabel.stringValue != countText || paneCountLabel.isHidden != (paneCount <= 1) {
+            paneCountLabel.stringValue = countText
+            paneCountLabel.isHidden = (paneCount <= 1)
+            // When the count is hidden it collapses so the dot trails the tab.
+            countWidthConstraint.constant = paneCount <= 1 ? 0 : 10
+            countLeadingConstraint.constant = paneCount <= 1 ? 0 : 4
+        }
+        self.isSelected = isSelected
+        label.textColor = isSelected ? SemanticColors.text : SemanticColors.muted
+        if !hovered { applySelectedStyle(isSelected) }
+    }
 
     private func applySelectedStyle(_ selected: Bool) {
         layer?.backgroundColor = selected
@@ -646,7 +722,7 @@ private final class WorktreeTabButton: NSView {
 
     override func mouseExited(with event: NSEvent) {
         hovered = false
-        applySelectedStyle(label.textColor == SemanticColors.text)
+        applySelectedStyle(isSelected)
     }
 }
 

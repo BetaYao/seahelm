@@ -121,6 +121,86 @@ extension KeyboardModeControllerTests {
     }
 }
 
+extension KeyboardModeControllerTests {
+    func testLeaderInactiveByDefault() {
+        let c = KeyboardModeController()
+        XCTAssertNil(c.leaderPath)
+        XCTAssertFalse(c.isLeaderActive)
+    }
+
+    func testOpenLeaderFromNormalRoot() {
+        let c = KeyboardModeController()
+        XCTAssertTrue(c.openLeader())
+        XCTAssertEqual(c.leaderPath, [])
+        XCTAssertTrue(c.isLeaderActive)
+    }
+
+    func testOpenLeaderBlockedInInsert() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        XCTAssertFalse(c.openLeader())
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testOpenLeaderBlockedDuringSubstate() {
+        let c = KeyboardModeController()
+        c.beginDelete(agentId: "a1")
+        XCTAssertFalse(c.openLeader())
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testDescendBuildsPath() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        c.descendLeader("s")
+        c.descendLeader("v")
+        XCTAssertEqual(c.leaderPath, ["s", "v"])
+    }
+
+    func testDescendIgnoredWhenInactive() {
+        let c = KeyboardModeController()
+        c.descendLeader("s")
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testLeaderBackPopsOneLevel() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        c.descendLeader("s")
+        XCTAssertTrue(c.leaderBack())        // still active at root
+        XCTAssertEqual(c.leaderPath, [])
+    }
+
+    func testLeaderBackFromRootCloses() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        XCTAssertFalse(c.leaderBack())       // closed
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testCloseLeaderClears() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        c.descendLeader("g")
+        c.closeLeader()
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testEnterInsertClosesLeader() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        c.enterInsert()
+        XCTAssertNil(c.leaderPath)
+    }
+
+    func testBeginDeleteClosesLeader() {
+        let c = KeyboardModeController()
+        c.openLeader()
+        c.beginDelete(agentId: "a1")
+        XCTAssertNil(c.leaderPath)
+    }
+}
+
 final class ModeSpy: KeyboardModeDelegate {
     var modeChangeCount = 0
     var lastMode: KeyboardMode?

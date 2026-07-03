@@ -11,7 +11,19 @@ final class KeyboardModeController {
     private(set) var mode: KeyboardMode = .normal
     private(set) var substate: KeyboardSubstate = .none
 
+    /// Descent path into the leader (`Space`) which-key tree, or nil when the leader
+    /// is inactive. `[]` means the leader is open at the root awaiting the first key;
+    /// each element is a chosen key one level deeper (e.g. `["s"]` = the `split ▸`
+    /// submenu). Rendering + the 400ms reveal delay live in the UI layer (WP-3); this
+    /// is the pure state machine only. The leader is only meaningful in NORMAL mode
+    /// with no blocking substate.
+    private(set) var leaderPath: [String]?
+
+    /// True while the leader menu is active (root or any submenu).
+    var isLeaderActive: Bool { leaderPath != nil }
+
     func enterInsert() {
+        closeLeader()
         setMode(.insert, substate: .none)
     }
 
@@ -32,7 +44,46 @@ final class KeyboardModeController {
         return false   // plain Esc passes through to the terminal
     }
 
+    // MARK: - Leader (Space / which-key)
+
+    /// Open the leader menu at the root. Only valid in NORMAL mode with no blocking
+    /// substate; otherwise a no-op. Returns true if the leader became active.
+    @discardableResult
+    func openLeader() -> Bool {
+        guard mode == .normal, substate == .none, leaderPath == nil else { return false }
+        leaderPath = []
+        return true
+    }
+
+    /// Descend one level by choosing `key` in the current leader menu. No-op when the
+    /// leader is inactive. Callers validate `key` against the menu tree (WP-3); this
+    /// only records the path.
+    func descendLeader(_ key: String) {
+        guard leaderPath != nil else { return }
+        leaderPath?.append(key)
+    }
+
+    /// Go back one level. From the root (`[]`) this closes the leader entirely.
+    /// Returns true if the leader is still active afterwards.
+    @discardableResult
+    func leaderBack() -> Bool {
+        guard var path = leaderPath else { return false }
+        if path.isEmpty {
+            leaderPath = nil
+            return false
+        }
+        path.removeLast()
+        leaderPath = path
+        return true
+    }
+
+    /// Close the leader unconditionally (e.g. after a command fires or on Esc).
+    func closeLeader() {
+        leaderPath = nil
+    }
+
     func beginDelete(agentId: String) {
+        closeLeader()
         setMode(.normal, substate: .deletePending(agentId: agentId))
     }
 
@@ -48,7 +99,7 @@ final class KeyboardModeController {
         setMode(.normal, substate: .none)
     }
 
-    func beginCreateForm() { setMode(.normal, substate: .createForm) }
+    func beginCreateForm() { closeLeader(); setMode(.normal, substate: .createForm) }
     func endCreateForm() {
         guard case .createForm = substate else { return }
         setMode(.normal, substate: .none)

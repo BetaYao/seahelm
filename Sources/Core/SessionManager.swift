@@ -75,10 +75,18 @@ enum SessionManager {
             let name = zmxListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
             guard name.hasPrefix("amux-"), !activeSessionNames.contains(name) else { return nil }
-            // Never reap a session with a live client — a pane is attached to it
-            // right now. Killing it would end the user's session mid-use
-            // ("Process exited. Press any key to close the terminal.").
-            let clients = Int(zmxListField(trimmed, "clients=") ?? "0") ?? 0
+            // Only reap a session we can *positively* confirm is idle. A busy
+            // daemon that misses the `zmx list` control-socket probe reports
+            // `status=unreachable`/`err=…` with no `clients=` field — but a pane
+            // may still be attached to it. Failing open there would end the
+            // user's session mid-use ("Process exited. Press any key to close
+            // the terminal."). So: skip anything unreachable/errored, skip when
+            // the clients count is absent (unknown), and reap only when we can
+            // read clients=0 from a reachable session.
+            if let status = zmxListField(trimmed, "status="), status != "reachable" { return nil }
+            if zmxListField(trimmed, "err=") != nil { return nil }
+            guard let clientsField = zmxListField(trimmed, "clients="),
+                  let clients = Int(clientsField) else { return nil }
             return clients >= 1 ? nil : name
         }
     }

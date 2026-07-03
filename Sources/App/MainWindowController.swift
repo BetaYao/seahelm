@@ -884,6 +884,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
         terminalCoordinator.resetSplitRatio()
     }
 
+    /// Keyboard cycle through worktree tabs (Ctrl+Tab / Ctrl+Shift+Tab), filling the
+    /// previously mouse-only titlebar gap (docs/keyboard-redesign.md §7).
+    func selectAdjacentWorktree(forward: Bool) {
+        titleBar.selectAdjacentWorktree(forward: forward)
+    }
+
 }
 
 class SeahelmWindow: NSWindow {
@@ -900,67 +906,62 @@ class SeahelmWindow: NSWindow {
         // Only handle split keybindings when dashboard has an active split container
         let hasSplitContext = mwc.tabCoordinator.dashboardVC?.activeSplitContainer != nil
 
-        // Arrow keys carry .numericPad and .function flags on macOS; strip them
-        // so modifier comparisons match what the user actually pressed.
-        let baseFlags = flags.subtracting([.numericPad, .function])
-
-        if hasSplitContext {
-            // Cmd+D: horizontal split
-            if flags == .command && event.charactersIgnoringModifiers == "d" {
-                mwc.splitFocusedPane(axis: .horizontal)
-                return true
-            }
-
-            // Cmd+Shift+D: vertical split
-            if flags == [.command, .shift] && event.charactersIgnoringModifiers?.lowercased() == "d" {
-                mwc.splitFocusedPane(axis: .vertical)
-                return true
-            }
-
-            // Cmd+Option+Arrows: focus navigation
-            if baseFlags == [.command, .option] {
-                switch event.keyCode {
-                case 123: mwc.moveFocus(.horizontal, positive: false); return true
-                case 124: mwc.moveFocus(.horizontal, positive: true); return true
-                case 125: mwc.moveFocus(.vertical, positive: true); return true
-                case 126: mwc.moveFocus(.vertical, positive: false); return true
-                default: break
-                }
-            }
-
-            // Cmd+Ctrl+Arrows: resize
-            if baseFlags == [.command, .control] {
-                switch event.keyCode {
-                case 123: mwc.resizeSplit(.horizontal, delta: -0.05); return true
-                case 124: mwc.resizeSplit(.horizontal, delta: 0.05); return true
-                case 125: mwc.resizeSplit(.vertical, delta: 0.05); return true
-                case 126: mwc.resizeSplit(.vertical, delta: -0.05); return true
-                default: break
-                }
-            }
-
-            // Cmd+Ctrl+=: reset ratio
-            if flags == [.command, .control] && event.charactersIgnoringModifiers == "=" {
-                mwc.resetSplitRatio()
-                return true
-            }
+        // Single source of truth for the window-level chord map (see GlobalKeymap).
+        guard let shortcut = GlobalKeymap.resolve(
+            chars: event.charactersIgnoringModifiers,
+            keyCode: event.keyCode,
+            flags: flags,
+            hasSplitContext: hasSplitContext
+        ) else {
+            return super.performKeyEquivalent(with: event)
         }
 
-        // Cmd+B: toggle left column collapse
-        if flags == .command && event.charactersIgnoringModifiers == "b" {
-            mwc.tabCoordinator.dashboardVC?.toggleLeftColumnCollapse()
-            return true
-        }
-
-        // Cmd+Esc: exit insert mode → normal (Cmd is intercepted before terminal)
-        if flags == .command && event.keyCode == 53 {
+        switch shortcut {
+        case .splitHorizontal:
+            mwc.splitFocusedPane(axis: .horizontal); return true
+        case .splitVertical:
+            mwc.splitFocusedPane(axis: .vertical); return true
+        case .moveFocus(let dir):
+            let (axis, positive) = Self.axisPositive(dir)
+            mwc.moveFocus(axis, positive: positive); return true
+        case .resize(let dir):
+            let (axis, delta) = Self.axisDelta(dir)
+            mwc.resizeSplit(axis, delta: delta); return true
+        case .resetRatio:
+            mwc.resetSplitRatio(); return true
+        case .nextWorktree:
+            mwc.selectAdjacentWorktree(forward: true); return true
+        case .prevWorktree:
+            mwc.selectAdjacentWorktree(forward: false); return true
+        case .toggleSidebar:
+            mwc.tabCoordinator.dashboardVC?.toggleLeftColumnCollapse(); return true
+        case .exitInsert:
             if mwc.keyboardMode.handleEsc(hasCommand: true, now: ProcessInfo.processInfo.systemUptime) {
                 mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
                 return true
             }
+            return super.performKeyEquivalent(with: event)
         }
+    }
 
-        return super.performKeyEquivalent(with: event)
+    /// Map a directional focus move to the (axis, positive) pair `moveFocus` expects.
+    static func axisPositive(_ dir: FocusDirection) -> (SplitAxis, Bool) {
+        switch dir {
+        case .left:  return (.horizontal, false)
+        case .right: return (.horizontal, true)
+        case .down:  return (.vertical, true)
+        case .up:    return (.vertical, false)
+        }
+    }
+
+    /// Map a directional resize to the (axis, delta) pair `resizeSplit` expects.
+    static func axisDelta(_ dir: FocusDirection) -> (SplitAxis, CGFloat) {
+        switch dir {
+        case .left:  return (.horizontal, -0.05)
+        case .right: return (.horizontal, 0.05)
+        case .down:  return (.vertical, 0.05)
+        case .up:    return (.vertical, -0.05)
+        }
     }
 
     override func sendEvent(_ event: NSEvent) {

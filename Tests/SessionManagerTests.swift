@@ -70,9 +70,9 @@ class SessionManagerTests: XCTestCase {
 
     func testOrphanZmxSessionNamesOnlyReturnsAmuxSessionsNotInActiveSet() {
         let output = """
-        name=amux-repo-main pid=123 cwd=/tmp/repo
-        name=amux-repo-main-1 pid=456 cwd=/tmp/repo
-        name=third-party pid=789 cwd=/tmp/other
+        name=amux-repo-main pid=123 clients=1 cwd=/tmp/repo
+        name=amux-repo-main-1 pid=456 clients=0 cwd=/tmp/repo
+        name=third-party pid=789 clients=0 cwd=/tmp/other
         """
 
         let orphaned = SessionManager.orphanZmxSessionNames(
@@ -100,5 +100,26 @@ class SessionManagerTests: XCTestCase {
 
         XCTAssertEqual(orphaned, ["amux-repo-detached"],
                        "a session with a live client must never be reaped as orphan")
+    }
+
+    func testOrphanZmxSessionNamesNeverReapsUnreachableSessions() {
+        // Regression: a busy daemon that misses the `zmx list` control-socket
+        // probe reports `status=unreachable`/`err=…` with no `clients=` field.
+        // The old guard read a missing clients count as 0 and reaped it, killing
+        // the live pane mid-use. Only positively-idle, reachable sessions
+        // (clients=0, no error) may be reaped.
+        let output = """
+          name=amux-repo-busy\terr=Timeout\tstatus=unreachable
+          name=amux-repo-nostatus\tpid=3\tstart_dir=/tmp/n
+          name=amux-repo-idle\tpid=4\tclients=0\tcreated=1\tstart_dir=/tmp/i
+        """
+
+        let orphaned = SessionManager.orphanZmxSessionNames(
+            activeSessionNames: [],   // none are "expected"
+            listOutput: output
+        )
+
+        XCTAssertEqual(orphaned, ["amux-repo-idle"],
+                       "only a reachable session with a known clients=0 may be reaped")
     }
 }
