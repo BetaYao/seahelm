@@ -9,6 +9,8 @@ struct BridgeCommandRouter {
     let returnWorktree: (String) -> Void
     /// Scan all non-main worktrees and enqueue return-to-port cards for each.
     let returnAll: () -> Void
+    /// Prompt (open panel) to add a repo to the workspace.
+    let addRepo: () -> Void
     let activeSailorCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
@@ -25,6 +27,8 @@ struct BridgeCommandRouter {
             returnWorktree(path)
         case .returnAll:
             returnAll()
+        case .addRepo:
+            addRepo()
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",

@@ -38,6 +38,26 @@ enum MenuBuilder {
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
+        // First Mate menu — opens the Helm cockpit with a slash command prefilled.
+        // Cmd+R is plain; the rest take Shift to avoid Cmd+C (copy) and Cmd+B (sidebar).
+        let firstMateMenuItem = NSMenuItem()
+        let firstMateMenu = NSMenu(title: "First Mate")
+        let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
+            ("Return to Port (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
+            ("Order Worktree (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
+            ("Commit Worktree (/commit)", #selector(MainWindowController.helmCommitCommand), "c", [.command, .shift]),
+            ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
+            ("Add Repo (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
+        ]
+        for (title, action, key, mods) in commands {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = mods
+            item.target = target
+            firstMateMenu.addItem(item)
+        }
+        firstMateMenuItem.submenu = firstMateMenu
+        mainMenu.addItem(firstMateMenuItem)
+
         // Edit menu (standard Cut/Copy/Paste/Undo/Redo)
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")

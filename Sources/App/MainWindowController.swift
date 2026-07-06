@@ -171,6 +171,7 @@ class MainWindowController: NSWindowController {
         window.delegate = self
 
         setupMenuShortcuts()
+        installFnDoubleTapMonitor()
         setupLayout()
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()
@@ -252,6 +253,79 @@ class MainWindowController: NSWindowController {
         // NewBranchDialog remain available but are no longer triggered here.
         tabCoordinator.switchToTab(0)
         dashboardVC?.focusInlineCreate()
+    }
+
+    // MARK: - First Mate command shortcuts
+
+    /// Open the Helm cockpit on the dashboard tab with a slash command prefilled.
+    private func openHelmCockpit(prefill: String) {
+        tabCoordinator.switchToTab(0)
+        dashboardVC?.helmCockpit.openWithCommand(prefill)
+    }
+
+    @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
+    @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
+    @objc func helmCommitCommand() { openHelmCockpit(prefill: "/commit ") }
+    @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
+    @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
+
+    /// Double-tap fn: show/hide the First Mate (Helm cockpit) panel.
+    func toggleFirstMatePanel() {
+        tabCoordinator.switchToTab(0)
+        dashboardVC?.helmCockpit.toggleCockpit()
+    }
+
+    // MARK: - Ctrl double-tap detection
+
+    private static let ctrlDoubleTapWindow: TimeInterval = 0.35
+    private static let leftControlKeyCode: UInt16 = 59
+
+    /// Detect a bare left-Ctrl double-tap (JetBrains-style) via a local event
+    /// monitor. A monitor sees flagsChanged before window dispatch, so it works
+    /// regardless of which view is first responder (terminal, cockpit text
+    /// field, …). Any keyDown between the two taps breaks the sequence so
+    /// Ctrl+C-style chords don't trigger it.
+    /// (fn was the original choice, but many third-party keyboards handle Fn in
+    /// firmware and never report it to macOS.)
+    private func installFnDoubleTapMonitor() {
+        fnTapMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown {
+                self.lastFnPressAt = 0
+                return event
+            }
+            guard event.keyCode == Self.leftControlKeyCode else { return event }
+            let isPress = event.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .contains(.control)
+            self.fnTapLog("flagsChanged keyCode=\(event.keyCode) isPress=\(isPress)")
+            guard isPress else { return event }
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - self.lastFnPressAt < Self.ctrlDoubleTapWindow {
+                self.lastFnPressAt = 0
+                self.fnTapLog("double-tap → toggleFirstMatePanel")
+                self.toggleFirstMatePanel()
+            } else {
+                self.lastFnPressAt = now
+            }
+            return event
+        }
+    }
+
+    private var fnTapMonitor: Any?
+    /// Timestamp of the last bare fn press; 0 when broken by another key.
+    private var lastFnPressAt: TimeInterval = 0
+
+    /// Temporary fn-double-tap diagnostics — appends to /tmp/seahelm-fntap.log.
+    private func fnTapLog(_ message: String) {
+        let line = "\(Date()) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let url = URL(fileURLWithPath: "/tmp/seahelm-fntap.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 
     @objc func closeCurrentTab() {
@@ -512,6 +586,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 ("commit", "提交并推送当前改动"),
                 ("return", "召回 agent · 结束会话"),
                 ("broadcast", "向全员广播通知"),
+                ("add", "添加一个 repo 到工作区"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -561,6 +636,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     self.enqueueReturnCard(forPath: info.path)
                 }
             },
+            addRepo: { [weak self] in
+                self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window)
+            },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
             projectForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.project ?? "" }
@@ -578,6 +656,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let queue = tabCoordinator.pendingOrders
         let coordinator = terminalCoordinator
         let sailor = ShipLog.shared.sailor(forWorktree: path)
+
+        // A worktree with a live agent must never be reaped by /return: neither
+        // deleted outright nor carded for "Force remove". Leave it untouched.
+        if sailor?.status == .running {
+            onDone?()
+            return
+        }
+
         let branch = sailor?.branch
             ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
             ?? URL(fileURLWithPath: path).lastPathComponent
@@ -1456,6 +1542,13 @@ extension MainWindowController {
     /// all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
         if order.action.kind == .returnToPort {
+            // Guard against a stale card: if the agent started running after the
+            // card was enqueued, refuse the reap and drop the card.
+            if ShipLog.shared.sailor(forWorktree: order.action.worktreePath)?.status == .running {
+                NSSound.beep()
+                tabCoordinator.pendingOrders.resolve(id: order.id)
+                return
+            }
             let deleteBranch = optionText.contains("Branch")
             let force = optionText.lowercased().contains("force")
             terminalCoordinator.deleteWorktreeForReturnToPort(
@@ -1477,6 +1570,11 @@ extension MainWindowController {
                   let terminalID = ShipLog.shared.sailor(forWorktree: worktreePath)?.id else { return }
             ShipLog.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
+            // Never reap a worktree whose agent is now running.
+            if ShipLog.shared.sailor(forWorktree: order.action.worktreePath)?.status == .running {
+                NSSound.beep()
+                break
+            }
             terminalCoordinator.deleteWorktreeForReturnToPort(
                 path: order.action.worktreePath,
                 branch: order.action.branch

@@ -12,6 +12,7 @@ enum BridgeCommand: Equatable {
     case returnToPort(worktreePath: String)
     case returnAll
     case broadcast(task: String)
+    case addRepo
 }
 
 enum BridgeCommandError: Error, Equatable {
@@ -74,6 +75,8 @@ enum BridgeCommandParser {
             return resolveBranch("return").map { .returnToPort(worktreePath: $0.path) }
         case "broadcast":
             return rest.isEmpty ? .failure(.emptyTask) : .success(.broadcast(task: rest))
+        case "add":
+            return .success(.addRepo)
         default:
             return .failure(.unknownCommand(verb))
         }

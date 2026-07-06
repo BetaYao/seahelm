@@ -290,35 +290,47 @@ class Station {
     func readViewportText() -> String? {
         guard let surface else { return nil }
 
+        // Hold ghosttyLock only for the C calls plus a raw byte copy. Building
+        // the String (UTF-8 validation + allocation over a full viewport) used
+        // to happen inside the lock, stalling main-thread input that contends
+        // for it during every background status poll.
+        var bytes: [UInt8]?
         ghosttyLock.lock()
-        defer { ghosttyLock.unlock() }
-
         let size = ghostty_surface_size(surface)
-        guard size.rows > 0, size.columns > 0 else { return nil }
+        if size.rows > 0, size.columns > 0 {
+            var selection = ghostty_selection_s()
+            selection.top_left = ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT,
+                coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+                x: 0,
+                y: 0
+            )
+            selection.bottom_right = ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT,
+                coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+                x: UInt32(size.columns - 1),
+                y: UInt32(size.rows - 1)
+            )
+            selection.rectangle = false
 
-        var selection = ghostty_selection_s()
-        selection.top_left = ghostty_point_s(
-            tag: GHOSTTY_POINT_VIEWPORT,
-            coord: GHOSTTY_POINT_COORD_TOP_LEFT,
-            x: 0,
-            y: 0
-        )
-        selection.bottom_right = ghostty_point_s(
-            tag: GHOSTTY_POINT_VIEWPORT,
-            coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
-            x: UInt32(size.columns - 1),
-            y: UInt32(size.rows - 1)
-        )
-        selection.rectangle = false
-
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_text(surface, selection, &text) else {
-            return nil
+            var text = ghostty_text_s()
+            if ghostty_surface_read_text(surface, selection, &text) {
+                if let ptr = text.text, text.text_len > 0 {
+                    ptr.withMemoryRebound(to: UInt8.self, capacity: Int(text.text_len)) {
+                        bytes = Array(UnsafeBufferPointer(start: $0, count: Int(text.text_len)))
+                    }
+                }
+                ghostty_surface_free_text(surface, &text)
+            }
         }
-        defer { ghostty_surface_free_text(surface, &text) }
+        ghosttyLock.unlock()
 
-        guard let ptr = text.text, text.text_len > 0 else { return nil }
-        return String(cString: ptr)
+        guard var buf = bytes else { return nil }
+        // Match String(cString:) semantics: the buffer is NUL-terminated and
+        // text_len may include the terminator.
+        if let nul = buf.firstIndex(of: 0) { buf.removeSubrange(nul...) }
+        guard !buf.isEmpty else { return nil }
+        return String(decoding: buf, as: UTF8.self)
     }
 
     /// Get the process status for status detection
