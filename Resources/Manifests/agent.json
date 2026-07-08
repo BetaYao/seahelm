@@ -1,0 +1,34 @@
+{
+  "id": "agent",
+  "version": "2026.07.08.1",
+  "min_engine_version": 1,
+  "aliases": ["opencode", "gemini", "cline", "goose", "amp", "aider", "cursor", "kiro"],
+  "default_status": "idle",
+  "message_skip_patterns": ["shift+tab", "accept edits", "to interrupt"],
+  "authority": "screen_only",
+  "rules": [
+    {
+      "id": "working_interrupt",
+      "state": "running",
+      "priority": 400,
+      "region": "bottom_lines:10",
+      "contains": ["to interrupt"],
+      "visible_working": true
+    },
+    {
+      "id": "error_line",
+      "state": "error",
+      "priority": 700,
+      "region": "bottom_lines:10",
+      "contains": ["error"]
+    },
+    {
+      "id": "waiting_prompt",
+      "state": "waiting",
+      "priority": 300,
+      "region": "bottom_lines:6",
+      "any": [{ "contains": ["?"] }, { "line_regex": ["^\\s*>\\s"] }],
+      "visible_blocker": true
+    }
+  ]
+}

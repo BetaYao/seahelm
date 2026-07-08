@@ -31,6 +31,10 @@ class ShipLog {
     private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
+    /// Monotonic event sequence, incremented under `lock` on every ingest.
+    /// Stamped onto each IngestOutcome for ordering / future subscriber replay.
+    private var globalSeq: UInt64 = 0
+
     private init() {}
 
     #if DEBUG
@@ -166,6 +170,8 @@ class ShipLog {
     /// THE single write entry. Faithfully record, then reduce to a station snapshot + outcome.
     func ingest(_ event: NormalizedEvent) {
         lock.lock()
+        globalSeq &+= 1
+        let seq = globalSeq
         appendToRingBufferLog(event)
         guard let current = agents[event.terminalID] else { lock.unlock(); return }
 
@@ -234,7 +240,7 @@ class ShipLog {
         let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
                                     oldStatus: oldStatus, newStatus: newStatus,
                                     holdSeconds: hold, isCompletionSignal: isCompletion,
-                                    event: event)
+                                    event: event, seq: seq)
         notifyObservers(outcome, hasExternalChannels: hasExternalChannels)
     }
 

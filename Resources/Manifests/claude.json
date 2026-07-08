@@ -1,0 +1,52 @@
+{
+  "id": "claude",
+  "version": "2026.07.08.1",
+  "min_engine_version": 1,
+  "aliases": ["claude-code"],
+  "default_status": "idle",
+  "message_skip_patterns": ["shift+tab", "accept edits", "to interrupt"],
+  "process": {
+    "exec_names": ["claude"],
+    "argv_contains": ["claude"],
+    "generic_runtimes": ["node", "bun", "deno"],
+    "env_hint": "SEAHELM_AGENT"
+  },
+  "authority": "session_only",
+  "rules": [
+    {
+      "id": "osc_title_working",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "regex": ["^[\\x{2800}-\\x{28FF}] "],
+      "visible_working": true
+    },
+    {
+      "id": "permission_prompt",
+      "state": "waiting",
+      "priority": 850,
+      "region": "bottom_lines:12",
+      "any": [
+        { "contains": ["(y/n)"] },
+        { "contains": ["(yes/no)"] },
+        { "contains": ["do you want to proceed?"] }
+      ],
+      "visible_blocker": true
+    },
+    {
+      "id": "error_line",
+      "state": "error",
+      "priority": 700,
+      "region": "bottom_lines:10",
+      "any": [{ "contains": ["error:"] }, { "line_regex": ["(?i)^\\s*error\\b"] }]
+    },
+    {
+      "id": "working_interrupt",
+      "state": "running",
+      "priority": 400,
+      "region": "bottom_lines:10",
+      "any": [{ "contains": ["to interrupt"] }, { "contains": ["(thinking)"] }, { "contains": ["moving to task"] }],
+      "visible_working": true
+    }
+  ]
+}
