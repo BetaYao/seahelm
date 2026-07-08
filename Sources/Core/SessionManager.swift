@@ -2,7 +2,7 @@ import Foundation
 import CommonCrypto
 
 enum SessionManager {
-    /// Maximum session name length to stay within tmux socket path limits.
+    /// Maximum session name length to keep backend session names bounded.
     private static let maxSessionNameLength = 40
 
     /// Generate a stable persistent session name from a worktree path.
@@ -114,14 +114,10 @@ enum SessionManager {
         return orphaned
     }
 
-    /// Kill a persistent session (tmux or zmx)
+    /// Kill a persistent zmx session.
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {
-            if backend == "tmux" {
-                ProcessRunner.runSync(["tmux", "kill-session", "-t", name])
-            } else {
-                Station.forceKillZmxSession(name)
-            }
+            Station.forceKillZmxSession(name)
         }
     }
 
@@ -131,18 +127,6 @@ enum SessionManager {
         var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         data.withUnsafeBytes { CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest) }
         return digest.prefix(3).map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// Resize a tmux session to match terminal grid size
-    static func resizeTmuxSession(_ sessionName: String, cols: Int, rows: Int) {
-        ProcessRunner.runSync(["tmux", "resize-window", "-t", sessionName, "-x", "\(cols)", "-y", "\(rows)"])
-        ProcessRunner.runSync(["tmux", "refresh-client", "-t", sessionName, "-S"])
-    }
-
-    /// Refresh a tmux client display (auto-resize + refresh)
-    static func refreshTmuxClient(_ sessionName: String) {
-        ProcessRunner.runSync(["tmux", "resize-window", "-t", sessionName, "-A"])
-        ProcessRunner.runSync(["tmux", "refresh-client", "-t", sessionName, "-S"])
     }
 
     // MARK: - Detached agent launch
@@ -159,13 +143,6 @@ enum SessionManager {
         shell: String
     ) -> [[String]] {
         switch backend {
-        case "tmux":
-            // Create the detached interactive shell in cwd, then type the agent
-            // command into it. The shell persists after the agent exits.
-            return [
-                ["tmux", "new-session", "-d", "-s", name, "-c", cwd],
-                ["tmux", "send-keys", "-t", name, "clear && \(agentCommandLine)", "Enter"],
-            ]
         case "zmx":
             // `zmx run` types the command into its own persistent interactive
             // shell (and appends a ZMX_TASK_COMPLETED marker), so the session
@@ -182,9 +159,6 @@ enum SessionManager {
     /// Whether a persistent session with `name` already exists for `backend`.
     static func sessionExists(name: String, backend: String) -> Bool {
         switch backend {
-        case "tmux":
-            // has-session exits 0 (no stdout) when present → output() non-nil.
-            return ProcessRunner.output(["tmux", "has-session", "-t", name]) != nil
         case "zmx":
             let list = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
             return parseZmxSessionNames(listOutput: list).contains(name)
@@ -203,7 +177,7 @@ enum SessionManager {
         cwd: String,
         agentCommandLine: String
     ) -> Bool {
-        guard backend == "tmux" || backend == "zmx" else { return false }
+        guard backend == "zmx" else { return false }
         if sessionExists(name: name, backend: backend) { return false }
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let commands = detachedLaunchCommands(
@@ -223,7 +197,7 @@ enum SessionManager {
     /// `zmx run` blocks for the agent's whole lifetime, so the session is spawned
     /// on a detached thread and the caller waits only for it to come up.
     static func waitUntilSessionExists(name: String, backend: String, timeoutSeconds: Double) -> Bool {
-        guard backend == "tmux" || backend == "zmx" else { return true }
+        guard backend == "zmx" else { return true }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
             if sessionExists(name: name, backend: backend) { return true }

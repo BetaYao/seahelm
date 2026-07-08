@@ -706,7 +706,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 if station.surface == nil {
                     let stationId = leaf.stationId
                     _ = station.create(in: container, workingDirectory: worktreePath, sessionName: station.sessionName) { [weak splitView] in
-                        // Async backend (tmux): register the view once creation finishes
+                        // Async backend: register the view once creation finishes
                         guard let splitView, let termView = station.view else { return }
                         splitView.surfaceViews[stationId] = termView
                         splitView.layoutTree()

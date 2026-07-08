@@ -7,25 +7,11 @@ enum BackendResolver {
         let zmxAvailable: Bool
     }
 
-    static func resolvePreferredBackend(preferred: String, zmxAvailable: Bool, tmuxAvailable: Bool) -> String {
-        switch preferred {
-        case "local":
-            if zmxAvailable { return "zmx" }
-            return tmuxAvailable ? "tmux" : "local"
-        case "tmux":
-            if zmxAvailable { return "zmx" }
-            return tmuxAvailable ? "tmux" : "local"
-        case "zmx":
-            if zmxAvailable {
-                return "zmx"
-            }
-            return tmuxAvailable ? "tmux" : "local"
-        default:
-            if zmxAvailable {
-                return "zmx"
-            }
-            return tmuxAvailable ? "tmux" : "local"
-        }
+    /// zmx is the only persistent backend; fall back to a plain local shell when
+    /// zmx is unavailable. `preferred == "local"` opts out of persistence.
+    static func resolvePreferredBackend(preferred: String, zmxAvailable: Bool) -> String {
+        if preferred == "local" { return zmxAvailable ? "zmx" : "local" }
+        return zmxAvailable ? "zmx" : "local"
     }
 
     static func isSupportedZmxVersion(_ rawVersion: String) -> Bool {
@@ -59,7 +45,6 @@ enum BackendResolver {
     static func resolveAsync(preferred: String, completion: @escaping (Resolution) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let zmxAvailable = ZmxLocator.isAvailable
-            let tmuxAvailable = ProcessRunner.commandExists("tmux")
 
             var zmxVersion: String?
             if preferred == "zmx" && zmxAvailable {
@@ -68,8 +53,7 @@ enum BackendResolver {
 
             var targetBackend = resolvePreferredBackend(
                 preferred: preferred,
-                zmxAvailable: zmxAvailable,
-                tmuxAvailable: tmuxAvailable
+                zmxAvailable: zmxAvailable
             )
 
             var warningMessage: String?
@@ -78,7 +62,7 @@ enum BackendResolver {
             }
 
             if warningMessage != nil, targetBackend == "zmx" {
-                targetBackend = tmuxAvailable ? "tmux" : "local"
+                targetBackend = "local"
             }
 
             let resolution = Resolution(

@@ -215,7 +215,7 @@ class TabCoordinator {
             let started = config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
             if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -427,7 +427,7 @@ class TabCoordinator {
                     let started = self.config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
                     let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                     if let surface = self.terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                        ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                        ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: self.runtimeBackend)
                     }
                 }
                 if !cardOrder.isEmpty {
@@ -552,7 +552,7 @@ class TabCoordinator {
 
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                 if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                    ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                    ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
                 }
             }
         }
@@ -634,7 +634,7 @@ class TabCoordinator {
         for leaf in transferredTree.allLeaves {
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
-                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
             }
         }
 
@@ -656,7 +656,7 @@ class TabCoordinator {
             worktreeRepoCache[sourceInfo.path] = repoRoot
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
             if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
-                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }

@@ -66,7 +66,7 @@ final class ShipLogTests: XCTestCase {
         ShipLog.shared.register(
             station: surface, worktreePath: "/tmp/test-repo/main",
             branch: "main", project: "test", startedAt: nil,
-            tmuxSessionName: "amux-test-main", backend: "zmx"
+            sessionName: "amux-test-main", backend: "zmx"
         )
 
         ShipLog.shared.unregister(terminalID: surface.id)

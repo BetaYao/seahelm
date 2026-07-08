@@ -55,7 +55,7 @@ class ShipLog {
 
     func register(station: Station, worktreePath: String, branch: String,
                   project: String, startedAt: Date?,
-                  tmuxSessionName: String? = nil, backend: String = "zmx") {
+                  sessionName: String? = nil, backend: String = "zmx") {
         lock.lock()
         defer { lock.unlock() }
 
@@ -63,12 +63,8 @@ class ShipLog {
 
         // Create a default channel if we have a session name
         var channel: SailorChannel?
-        if let sessionName = tmuxSessionName {
-            if backend == "tmux" {
-                channel = TmuxChannel(sessionName: sessionName)
-            } else {
-                channel = ZmxChannel(sessionName: sessionName)
-            }
+        if let sessionName = sessionName {
+            channel = ZmxChannel(sessionName: sessionName)
             channels[terminalID] = channel
         }
         backendsByPath[worktreePath] = backend
@@ -323,10 +319,6 @@ class ShipLog {
                 let hooks = HooksChannel(sessionName: zmx.sessionName, backend: backend)
                 channels[terminalID] = hooks
                 info.channel = hooks
-            } else if let tmux = channels[terminalID] as? TmuxChannel {
-                let hooks = HooksChannel(sessionName: tmux.sessionName, backend: backend)
-                channels[terminalID] = hooks
-                info.channel = hooks
             }
         }
 
@@ -358,8 +350,8 @@ class ShipLog {
 
                 // Upgrade channel for supported hook-based agents.
                 if (agentType == .claudeCode || agentType == .codex),
-                   let tmux = channels[terminalID] as? TmuxChannel {
-                    let hooks = HooksChannel(sessionName: tmux.sessionName)
+                   let zmx = channels[terminalID] as? ZmxChannel {
+                    let hooks = HooksChannel(sessionName: zmx.sessionName)
                     channels[terminalID] = hooks
                     info.channel = hooks
                 }
