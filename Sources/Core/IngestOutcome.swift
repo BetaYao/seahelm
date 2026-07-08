@@ -11,4 +11,8 @@ struct IngestOutcome {
     let holdSeconds: Double
     let isCompletionSignal: Bool
     let event: NormalizedEvent
+    /// Monotonic global sequence number assigned at ingest time. Strictly
+    /// increasing across all events; lets future socket subscribers replay via
+    /// `events_after(seq)` and detect dropped events. (mirrors herdr EventHub.sequence)
+    var seq: UInt64 = 0
 }

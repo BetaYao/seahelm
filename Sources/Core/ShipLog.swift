@@ -31,6 +31,10 @@ class ShipLog {
     private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
+    /// Monotonic event sequence, incremented under `lock` on every ingest.
+    /// Stamped onto each IngestOutcome for ordering / future subscriber replay.
+    private var globalSeq: UInt64 = 0
+
     private init() {}
 
     #if DEBUG
@@ -51,7 +55,7 @@ class ShipLog {
 
     func register(station: Station, worktreePath: String, branch: String,
                   project: String, startedAt: Date?,
-                  tmuxSessionName: String? = nil, backend: String = "zmx") {
+                  sessionName: String? = nil, backend: String = "zmx") {
         lock.lock()
         defer { lock.unlock() }
 
@@ -59,12 +63,8 @@ class ShipLog {
 
         // Create a default channel if we have a session name
         var channel: SailorChannel?
-        if let sessionName = tmuxSessionName {
-            if backend == "tmux" {
-                channel = TmuxChannel(sessionName: sessionName)
-            } else {
-                channel = ZmxChannel(sessionName: sessionName)
-            }
+        if let sessionName = sessionName {
+            channel = ZmxChannel(sessionName: sessionName)
             channels[terminalID] = channel
         }
         backendsByPath[worktreePath] = backend
@@ -164,8 +164,30 @@ class ShipLog {
     }
 
     /// THE single write entry. Faithfully record, then reduce to a station snapshot + outcome.
+    /// Combine the two status sources (screen scan vs agent hook) into one, using
+    /// the pane's manifest `authority` (herdr's single-authority-per-pane model):
+    ///   - full_lifecycle: hook is authoritative; screen only fills an unknown.
+    ///   - session_only (claude/codex): screen is authoritative (hooks miss
+    ///     permission/escape transitions); hook only fills an unknown.
+    ///   - screen_only / unknown: screen only.
+    /// An urgent state (waiting/error) from either source always surfaces — never
+    /// hide a blocked or errored agent behind an authority rule.
+    static func arbitrate(scan: SailorStatus, hook: SailorStatus, agentType: SailorType) -> SailorStatus {
+        let urgent = SailorStatus.highestPriority([scan, hook].filter { $0.isUrgent })
+        if urgent.isUrgent { return urgent }
+
+        let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        switch authority {
+        case "full_lifecycle": return hook != .unknown ? hook : scan
+        case "screen_only":    return scan
+        default:               return scan != .unknown ? scan : hook  // session_only
+        }
+    }
+
     func ingest(_ event: NormalizedEvent) {
         lock.lock()
+        globalSeq &+= 1
+        let seq = globalSeq
         appendToRingBufferLog(event)
         guard let current = agents[event.terminalID] else { lock.unlock(); return }
 
@@ -216,7 +238,8 @@ class ShipLog {
 
         next.lastMessage = message
         let oldStatus = current.status
-        let newStatus = SailorStatus.highestPriority([next.scanStatus, next.hookStatus])
+        let newStatus = Self.arbitrate(scan: next.scanStatus, hook: next.hookStatus,
+                                       agentType: next.agentType)
         next.status = newStatus
         agents[event.terminalID] = next
 
@@ -234,7 +257,7 @@ class ShipLog {
         let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
                                     oldStatus: oldStatus, newStatus: newStatus,
                                     holdSeconds: hold, isCompletionSignal: isCompletion,
-                                    event: event)
+                                    event: event, seq: seq)
         notifyObservers(outcome, hasExternalChannels: hasExternalChannels)
     }
 
@@ -317,10 +340,6 @@ class ShipLog {
                 let hooks = HooksChannel(sessionName: zmx.sessionName, backend: backend)
                 channels[terminalID] = hooks
                 info.channel = hooks
-            } else if let tmux = channels[terminalID] as? TmuxChannel {
-                let hooks = HooksChannel(sessionName: tmux.sessionName, backend: backend)
-                channels[terminalID] = hooks
-                info.channel = hooks
             }
         }
 
@@ -352,8 +371,8 @@ class ShipLog {
 
                 // Upgrade channel for supported hook-based agents.
                 if (agentType == .claudeCode || agentType == .codex),
-                   let tmux = channels[terminalID] as? TmuxChannel {
-                    let hooks = HooksChannel(sessionName: tmux.sessionName)
+                   let zmx = channels[terminalID] as? ZmxChannel {
+                    let hooks = HooksChannel(sessionName: zmx.sessionName)
                     channels[terminalID] = hooks
                     info.channel = hooks
                 }

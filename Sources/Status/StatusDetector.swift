@@ -23,6 +23,8 @@ class StatusDetector {
         shellInfo: ShellPhaseInfo?,
         content: String,
         agentDef: SailorDef?,
+        manifest: CompiledManifest? = nil,
+        osc: (title: String, progress: String) = ("", ""),
         lowercasedContent: String? = nil
     ) -> SailorStatus {
         // Priority 1: Process lifecycle overrides everything
@@ -48,13 +50,57 @@ class StatusDetector {
             }
         }
 
-        // Priority 3: Text pattern matching (fallback)
-        if let agent = agentDef, !content.isEmpty {
+        // Priority 3: Manifest rule engine (preferred), else legacy SailorDef rules.
+        if !content.isEmpty {
             let lower = lowercasedContent ?? content.lowercased()
-            return agent.detectStatus(fromLowercased: lower)
+            if let manifest {
+                let d = manifest.evaluate(DetectionInput(
+                    screen: lower, oscTitle: osc.title, oscProgress: osc.progress))
+                return d.state == .unknown ? manifest.defaultStatus : d.state
+            }
+            if let agent = agentDef {
+                return agent.detectStatus(fromLowercased: lower)
+            }
         }
 
         return .unknown
+    }
+
+    /// Like `detect`, but returns the rich Detection (state + visible_* flags +
+    /// matched rule id). Process lifecycle and OSC133 layers synthesize their own
+    /// visible flags so the debounce/authority layers can treat all sources
+    /// uniformly.
+    func detectDetailed(
+        processStatus: ProcessStatus,
+        shellInfo: ShellPhaseInfo?,
+        content: String,
+        manifest: CompiledManifest?,
+        osc: (title: String, progress: String) = ("", ""),
+        lowercasedContent: String? = nil
+    ) -> Detection {
+        switch processStatus {
+        case .exited: return Detection(state: .exited, visibleIdle: true)
+        case .error:  return Detection(state: .error, visibleBlocker: true)
+        case .unknown, .running: break
+        }
+
+        if let info = shellInfo {
+            switch info.phase {
+            case .running: return Detection(state: .running, visibleWorking: true)
+            case .input, .prompt: return Detection(state: .idle, visibleIdle: true)
+            case .output:
+                if let code = info.lastExitCode, code != 0 { return Detection(state: .error) }
+                return Detection(state: .idle, visibleIdle: true)
+            }
+        }
+
+        guard !content.isEmpty, let manifest else { return .unknown }
+        let lower = lowercasedContent ?? content.lowercased()
+        let d = manifest.evaluate(DetectionInput(screen: lower, oscTitle: osc.title, oscProgress: osc.progress))
+        if d.state == .unknown {
+            return Detection(state: manifest.defaultStatus, visibleIdle: manifest.defaultStatus == .idle)
+        }
+        return d
     }
 
     /// Extract activity events from terminal viewport text.
@@ -202,15 +248,34 @@ extension SailorDef {
 
 // MARK: - DebouncedStatusTracker
 
-/// Tracks status changes; Unknown preserves current state
+/// Tracks status changes; Unknown preserves current state.
+///
+/// A bare `running → idle` transition is *held* for `pendingIdleConfirmations`
+/// consecutive observations before it commits, to kill flicker when an agent
+/// momentarily looks idle mid-turn (our poll is coarse, so one extra confirmation
+/// ~= one poll cycle). A `visibleIdle` signal (process exit, OSC133 prompt, an
+/// explicit visible_idle rule) bypasses the hold and commits immediately.
 class DebouncedStatusTracker {
     private(set) var currentStatus: SailorStatus = .unknown
 
+    /// Consecutive plain-idle observations required to leave `running`.
+    var pendingIdleConfirmations = 2
+    private var pendingIdleCount = 0
+
     /// Update with detected status. Returns true if status changed.
     @discardableResult
-    func update(status: SailorStatus) -> Bool {
-        // Unknown means "no data" — don't change
+    func update(status: SailorStatus, visibleIdle: Bool = true) -> Bool {
+        // Unknown means "no data" — don't change.
         guard status != .unknown else { return false }
+
+        // Hold a bare running→idle flip until it is confirmed (unless a visible
+        // idle signal proves the agent really finished).
+        if currentStatus == .running, status == .idle, !visibleIdle {
+            pendingIdleCount += 1
+            if pendingIdleCount < pendingIdleConfirmations { return false }
+        }
+        pendingIdleCount = 0
+
         guard status != currentStatus else { return false }
         currentStatus = status
         return true
@@ -218,21 +283,25 @@ class DebouncedStatusTracker {
 
     func forceStatus(_ status: SailorStatus) {
         currentStatus = status
+        pendingIdleCount = 0
     }
 
     func reset() {
         currentStatus = .unknown
+        pendingIdleCount = 0
     }
 }
 
 // MARK: - SailorStatus extensions
 
 extension SailorStatus {
+    /// Rollup priority. `waiting` (agent blocked on the user) ranks highest so it
+    /// bubbles to the worktree badge — it is the state most in need of attention.
     var priority: UInt8 {
         switch self {
-        case .error:   return 6
-        case .exited:  return 5
-        case .waiting: return 4
+        case .waiting: return 6
+        case .error:   return 5
+        case .exited:  return 4
         case .running: return 3
         case .idle:    return 2
         case .unknown: return 1

@@ -47,6 +47,9 @@ targets:
       - path: Resources/licenses
         type: folder
         buildPhase: resources
+      - path: Resources/Manifests
+        type: folder
+        buildPhase: resources
       - path: ghostty.h
         type: file
         buildPhase: none

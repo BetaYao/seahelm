@@ -9,6 +9,7 @@ struct ScanDecoder: SignalDecoder {
     let shellInfo: ShellPhaseInfo?
     let content: String
     let agentDef: SailorDef?
+    var manifest: CompiledManifest? = nil
     let commandLine: String?
     let agentType: SailorType
     let roundDuration: TimeInterval
@@ -19,7 +20,8 @@ struct ScanDecoder: SignalDecoder {
             processStatus: processStatus,
             shellInfo: shellInfo,
             content: content,
-            agentDef: agentDef
+            agentDef: agentDef,
+            manifest: manifest
         )
         let events = detector.extractActivityEvents(from: content)
         let kind = NormalizedEventKind.screenObserved(

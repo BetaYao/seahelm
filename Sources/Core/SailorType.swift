@@ -95,6 +95,44 @@ enum SailorType: String, Codable, CaseIterable {
         }
     }
 
+    /// Manifest id used to resolve this agent's detection rules from ManifestStore.
+    /// Each known AI agent has its own manifest; anything else falls back to the
+    /// generic "agent" manifest.
+    var manifestId: String {
+        switch self {
+        case .claudeCode: return "claude"
+        case .codex:      return "codex"
+        case .openCode:   return "opencode"
+        case .gemini:     return "gemini"
+        case .cline:      return "cline"
+        case .goose:      return "goose"
+        case .amp:        return "amp"
+        case .aider:      return "aider"
+        case .cursor:     return "cursor"
+        case .kiro:       return "kiro"
+        default:          return "agent"
+        }
+    }
+
+    /// Reverse of `manifestId` for agents identifiable by process probe (those
+    /// whose manifest declares a `process` block). The generic "agent" manifest
+    /// has no process block, so the probe never returns it.
+    static func fromManifestId(_ id: String?) -> SailorType {
+        switch id {
+        case "claude":   return .claudeCode
+        case "codex":    return .codex
+        case "opencode": return .openCode
+        case "gemini":   return .gemini
+        case "cline":    return .cline
+        case "goose":    return .goose
+        case "amp":      return .amp
+        case "aider":    return .aider
+        case "cursor":   return .cursor
+        case "kiro":     return .kiro
+        default:         return .unknown
+        }
+    }
+
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,

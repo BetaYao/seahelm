@@ -116,9 +116,28 @@ class GhosttyBridge {
 
     // MARK: - Static callback helpers
 
+    /// Resolve the Station owning an action's target surface, if any.
+    private static func station(for target: ghostty_target_s) -> Station? {
+        guard target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface else { return nil }
+        return StationRegistry.shared.station(forSurface: surface)
+    }
+
     private static func handleAction(app: ghostty_app_t?, target: ghostty_target_s, action: ghostty_action_s) -> Bool {
         switch action.tag {
         case GHOSTTY_ACTION_SET_TITLE:
+            if let station = station(for: target),
+               let cstr = action.action.set_title.title {
+                station.setOscTitle(String(cString: cstr))
+            }
+            return true
+        case GHOSTTY_ACTION_PROGRESS_REPORT:
+            if let station = station(for: target) {
+                let r = action.action.progress_report
+                // Encode as ConEmu-style "state;percent" so manifest osc_progress
+                // rules can match (e.g. "^4;0" = done). state 0=remove,1=set,2=error…
+                let percent = r.progress < 0 ? "" : String(r.progress)
+                station.setOscProgress("\(r.state.rawValue);\(percent)")
+            }
             return true
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             return true

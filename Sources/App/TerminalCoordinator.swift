@@ -110,16 +110,11 @@ class TerminalCoordinator {
             container.window?.makeFirstResponder(terminalView)
         }
 
-        // Re-sync session layout after Ghostty processes the pixel resize.
-        // Mirrors the two-pass async pattern in Station.create():
-        // pass 1 re-triggers the size, pass 2 reads the new grid (after Ghostty computed it).
+        // Re-sync surface size after Ghostty processes the pixel resize.
         if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
            let focusStation = StationRegistry.shared.station(forId: focusedLeaf.stationId) {
             DispatchQueue.main.async {
                 focusStation.syncSize()
-                DispatchQueue.main.async {
-                    focusStation.refreshSessionLayout()
-                }
             }
         }
 

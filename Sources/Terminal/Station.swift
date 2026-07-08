@@ -17,6 +17,17 @@ class Station {
     private(set) var surface: ghostty_surface_t?
     private weak var containerView: NSView?
 
+    /// Latest OSC signals Ghostty surfaced for this pane, fed to the detection
+    /// engine's osc_title / osc_progress regions. Written from Ghostty's action
+    /// callback thread, read from the status-poll thread — guarded by oscLock.
+    private let oscLock = NSLock()
+    private var _oscTitle = ""
+    private var _oscProgress = ""
+    var oscTitle: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscTitle }
+    var oscProgress: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscProgress }
+    func setOscTitle(_ t: String) { oscLock.lock(); _oscTitle = t; oscLock.unlock() }
+    func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
+
     /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
     /// Persistence backend for the sessionName above.
@@ -47,29 +58,13 @@ class Station {
         }
 
         if let sessionName {
-            if backend == "tmux" {
-                // Check tmux session existence on background thread to avoid blocking UI
-                Self.tmuxSessionExistsAsync(sessionName) { [weak self] exists in
-                    guard let self else { return }
-                    let tmuxCommand: String
-                    if exists {
-                        tmuxCommand = "tmux attach-session -t \(sessionName) \\; set-option status off"
-                    } else {
-                        tmuxCommand = "tmux new-session -s \(sessionName) \\; set-option status off"
-                    }
-                    self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: tmuxCommand)
-                    completion?()
-                }
-                return true  // Surface creation is deferred
-            }
-
             if backend == "zmx" {
                 // If this pane runs an agent and the backend session no longer
                 // exists (e.g. reboot lost the zmx daemon), seed a fresh session
                 // running the agent's resume command before attaching, instead
                 // of attaching into an empty shell. Seeding needs blocking
                 // process calls, so defer to a background thread and attach on
-                // main (mirrors the deferred tmux path).
+                // main.
                 if let resumeCmd = agentSessionRef?.resumeCommandLine(), let cwd = workingDirectory {
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         Station.seedZmxSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
@@ -182,28 +177,6 @@ class Station {
         ghostty_surface_set_focus(s, false)  // Start unfocused; focus set via makeFirstResponder
     }
 
-    /// Check if a tmux session with given name exists (async, avoids blocking main thread)
-    private static func tmuxSessionExistsAsync(_ name: String, completion: @escaping (Bool) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["tmux", "has-session", "-t", name]
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
-            let exists: Bool
-            do {
-                try process.run()
-                process.waitUntilExit()
-                exists = process.terminationStatus == 0
-            } catch {
-                exists = false
-            }
-            DispatchQueue.main.async {
-                completion(exists)
-            }
-        }
-    }
-
     /// Reparent this terminal's view to a different container
     func reparent(to container: NSView) {
         guard let view, let surface else { return }
@@ -239,31 +212,6 @@ class Station {
                 view.window?.makeFirstResponder(view)
             }
             view.needsDisplay = true
-            // Third pass: read the grid size AFTER Ghostty has processed the resize
-            DispatchQueue.main.async { [weak self] in
-                self?.refreshSessionLayout()
-            }
-        }
-    }
-
-    /// Tell tmux to resize its window to match the terminal's actual grid size.
-    /// zmx handles size syncing automatically, so this is tmux-only behavior.
-    func refreshSessionLayout() {
-        guard backend == "tmux" else { return }
-        guard let sessionName, let surface else { return }
-        let gridSize = ghostty_surface_size(surface)
-        guard gridSize.columns > 0, gridSize.rows > 0 else { return }
-        let cols = Int(gridSize.columns)
-        let rows = Int(gridSize.rows)
-        DispatchQueue.global().async {
-            SessionManager.resizeTmuxSession(sessionName, cols: cols, rows: rows)
-        }
-    }
-
-    /// Static version for when we don't have the surface (tmux fallback).
-    static func refreshTmuxClient(_ sessionName: String) {
-        DispatchQueue.global().async {
-            SessionManager.refreshTmuxClient(sessionName)
         }
     }
 
@@ -631,9 +579,6 @@ class GhosttyNSView: NSView, NSTextInputClient {
         ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
         ghostty_surface_refresh(surface)
         needsDisplay = true
-
-        // Resize backend session layout if needed (tmux only)
-        station?.refreshSessionLayout()
     }
 
     override func becomeFirstResponder() -> Bool {

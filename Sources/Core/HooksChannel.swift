@@ -14,11 +14,7 @@ class HooksChannel: SailorChannel {
     private(set) var events: [HookEvent] = []
 
     init(sessionName: String, backend: String = "zmx") {
-        if backend == "tmux" {
-            self.transport = TmuxChannel(sessionName: sessionName)
-        } else {
-            self.transport = ZmxChannel(sessionName: sessionName)
-        }
+        self.transport = ZmxChannel(sessionName: sessionName)
     }
 
     // MARK: - SailorChannel

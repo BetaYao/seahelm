@@ -26,6 +26,13 @@ class StatusPublisher {
 
     // Cache: skip detection when viewport text hasn't changed
     private var lastViewportHashes: [String: UInt64] = [:]           // keyed by terminal ID
+
+    /// Process-tree agent identity cache (keyed by terminal ID) + the poll cycle
+    /// it was last refreshed on. Re-probed every `probeRefreshStride` cycles since
+    /// the sysctl walk is comparatively expensive.
+    private var probedTypes: [String: SailorType] = [:]
+    private var probedAtCycle: [String: Int] = [:]
+    private let probeRefreshStride = 5
     // Pre-lowercased agent names for faster matching
     private var lowercasedSailorNames: [(name: String, def: SailorDef)] = []
 
@@ -165,9 +172,13 @@ class StatusPublisher {
             let existingSailorType = ShipLog.shared.sailor(for: terminalID)?.agentType ?? .unknown
             let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
 
-            // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
-            let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
+            // Prefer process-tree identification over screen-text scraping; it is
+            // robust to wrappers (node→codex) and to agents that clear their name
+            // off screen. Falls back to text detection when the probe is unsure.
+            let probedType = probedSailorType(terminalID: terminalID, sessionName: surface.sessionName, pollCycle: pollCycle)
+            let detectedSailorType = probedType != .unknown ? probedType : SailorType.detect(fromLowercased: lowerContent)
             let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
 
             // Detect status first (without roundDuration); tracker update gives us roundDur below
@@ -178,6 +189,7 @@ class StatusPublisher {
                 shellInfo: nil,
                 content: content,
                 agentDef: agentDef,
+                manifest: manifest,
                 commandLine: nil,
                 agentType: agentType,
                 roundDuration: 0,
@@ -185,20 +197,26 @@ class StatusPublisher {
             ).decode()
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
-            // Keep tracker in sync for roundDuration tracking
-            let textStatus: SailorStatus
-            if case .screenObserved(let s, _, _, _, _, _, _) = partialDecoded?.kind { textStatus = s } else { textStatus = .unknown }
+            // Rich detection gives us the visible_idle signal for debounce.
+            let osc = (title: surface.oscTitle, progress: surface.oscProgress)
+            let detection = detector.detectDetailed(
+                processStatus: processStatus, shellInfo: nil, content: content,
+                manifest: manifest, osc: osc, lowercasedContent: lowerContent)
+            let textStatus = detection.state
 
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: textStatus)
+            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle)
+            // The debounced/committed status drives both pipelines, so a held
+            // running→idle flip does not leak into ShipLog either.
+            let committedStatus = tracker.currentStatus
             let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             lastMessages[terminalID] = lastMessage
             let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
             if statusChanged {
-                if textStatus == .running && oldStatus != .running {
+                if committedStatus == .running && oldStatus != .running {
                     runningStartTimes[terminalID] = Date()
-                } else if textStatus != .running && oldStatus == .running {
+                } else if committedStatus != .running && oldStatus == .running {
                     runningStartTimes[terminalID] = nil
                 }
             }
@@ -206,10 +224,10 @@ class StatusPublisher {
 
             // Rebuild with real roundDuration now that tracker has been updated
             if let partial = partialDecoded,
-               case .screenObserved(let s, let msg, let acts, let cl, let at, _, _) = partial.kind {
+               case .screenObserved(_, let msg, let acts, let cl, let at, _, _) = partial.kind {
                 let normalized = NormalizedEvent(
                     terminalID: terminalID, source: .scan,
-                    kind: .screenObserved(status: s, message: msg, activity: acts,
+                    kind: .screenObserved(status: committedStatus, message: msg, activity: acts,
                                           commandLine: cl, agentType: at,
                                           roundDuration: roundDur, tasks: webhookTasks))
                 ShipLog.shared.ingest(normalized)
@@ -218,13 +236,35 @@ class StatusPublisher {
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(
                     terminalID: terminalID,
-                    status: textStatus,
+                    status: committedStatus,
                     lastMessage: lastMessage,
-                    lastUserPrompt: ""
+                    lastUserPrompt: "",
+                    agentType: agentType
                 )
             }
 
         }
+    }
+
+    /// Cached process-tree agent identity for a pane. Re-probes at most every
+    /// `probeRefreshStride` cycles. Runs on the poll background queue.
+    private func probedSailorType(terminalID: String, sessionName: String?, pollCycle: Int) -> SailorType {
+        guard let sessionName else { return .unknown }
+        lock.lock()
+        let cached = probedTypes[terminalID]
+        let last = probedAtCycle[terminalID]
+        lock.unlock()
+        if let cached, let last, pollCycle - last < probeRefreshStride, cached != .unknown {
+            return cached
+        }
+        let type = SailorType.fromManifestId(ProcessProbe.identifyAgent(sessionName: sessionName))
+        lock.lock()
+        // Never downgrade a known identity to unknown on a transient probe miss.
+        if type != .unknown { probedTypes[terminalID] = type }
+        probedAtCycle[terminalID] = pollCycle
+        let result = probedTypes[terminalID] ?? .unknown
+        lock.unlock()
+        return result
     }
 
     /// Find agent definition using pre-lowercased content and names

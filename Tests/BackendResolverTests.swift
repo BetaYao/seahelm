@@ -6,63 +6,27 @@ final class BackendResolverTests: XCTestCase {
     // MARK: - resolvePreferredBackend
 
     func testZmxPreferredAndAvailable() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true, tmuxAvailable: true)
-        XCTAssertEqual(result, "zmx")
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true), "zmx")
     }
 
-    func testZmxPreferredButUnavailableFallsToTmux() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: true)
-        XCTAssertEqual(result, "tmux")
-    }
-
-    func testZmxPreferredBothUnavailableFallsToLocal() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: false)
-        XCTAssertEqual(result, "local")
-    }
-
-    func testTmuxPreferredZmxAvailableUpgradesToZmx() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "tmux", zmxAvailable: true, tmuxAvailable: true)
-        XCTAssertEqual(result, "zmx")
-    }
-
-    func testTmuxPreferredZmxUnavailableTmuxAvailable() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "tmux", zmxAvailable: false, tmuxAvailable: true)
-        XCTAssertEqual(result, "tmux")
-    }
-
-    func testTmuxPreferredBothUnavailableFallsToLocal() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "tmux", zmxAvailable: false, tmuxAvailable: false)
-        XCTAssertEqual(result, "local")
+    func testZmxPreferredButUnavailableFallsToLocal() {
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false), "local")
     }
 
     func testLocalPreferredZmxAvailableUpgradesToZmx() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
-        XCTAssertEqual(result, "zmx")
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: true), "zmx")
     }
 
-    func testLocalPreferredZmxUnavailableTmuxAvailableUpgradesToTmux() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: false, tmuxAvailable: true)
-        XCTAssertEqual(result, "tmux")
-    }
-
-    func testLocalPreferredBothUnavailableStaysLocal() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: false, tmuxAvailable: false)
-        XCTAssertEqual(result, "local")
+    func testLocalPreferredZmxUnavailableStaysLocal() {
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: false), "local")
     }
 
     func testUnknownPreferredZmxAvailableDefaultsToZmx() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "unknown", zmxAvailable: true, tmuxAvailable: true)
-        XCTAssertEqual(result, "zmx")
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "unknown", zmxAvailable: true), "zmx")
     }
 
-    func testUnknownPreferredZmxUnavailableTmuxAvailableDefaultsToTmux() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "unknown", zmxAvailable: false, tmuxAvailable: true)
-        XCTAssertEqual(result, "tmux")
-    }
-
-    func testUnknownPreferredBothUnavailableDefaultsToLocal() {
-        let result = BackendResolver.resolvePreferredBackend(preferred: "unknown", zmxAvailable: false, tmuxAvailable: false)
-        XCTAssertEqual(result, "local")
+    func testUnknownPreferredZmxUnavailableDefaultsToLocal() {
+        XCTAssertEqual(BackendResolver.resolvePreferredBackend(preferred: "unknown", zmxAvailable: false), "local")
     }
 
     // MARK: - isSupportedZmxVersion
