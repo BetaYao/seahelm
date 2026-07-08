@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v1"
+    private static let versionMarker = "# seahelm-cli v2"
 
     static func scriptContents() -> String {
         return #"""
@@ -51,7 +51,7 @@ enum SeahelmCliInstaller {
         def main():
             argv = sys.argv[1:]
             if not argv:
-                die("usage: seahelm <ping|session|pane|wait> ...", 2)
+                die("usage: seahelm <ping|session|pane|wait|events> ...", 2)
             g = argv[0]; a = argv[1:]
 
             if g == "ping":
@@ -59,6 +59,27 @@ enum SeahelmCliInstaller {
 
             if g == "session" and a[:1] == ["snapshot"]:
                 print(json.dumps(call("session.snapshot", {}).get("panes", []), indent=2)); return
+
+            if g == "events":
+                # seahelm events [--after N] [--pane P] [--type T ...]
+                params = {}
+                if has(a, "--after"): params["events_after"] = int(opt(a, "--after"))
+                if has(a, "--pane"): params["pane_id"] = opt(a, "--pane")
+                types = [a[i + 1] for i, x in enumerate(a) if x == "--type" and i + 1 < len(a)]
+                if types: params["types"] = types
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.connect(SOCK)
+                    s.sendall((json.dumps({"id": "cli", "method": "events.subscribe", "params": params}) + "\n").encode())
+                    for line in s.makefile("r"):
+                        line = line.strip()
+                        if line:
+                            print(line, flush=True)
+                except KeyboardInterrupt:
+                    pass
+                except Exception as e:
+                    die("socket error: %s" % e)
+                return
 
             if g == "wait":
                 if not a: die("usage: seahelm wait <output|agent-status> <pane> ...")

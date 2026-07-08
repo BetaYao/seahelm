@@ -261,12 +261,28 @@ class ShipLog {
         notifyObservers(outcome, hasExternalChannels: hasExternalChannels)
     }
 
+    /// Shape an ingest outcome into a control-API event dict for EventHub.
+    static func event(from o: IngestOutcome) -> [String: Any] {
+        [
+            "type": o.statusChanged ? "pane.status_changed" : "pane.updated",
+            "seq": o.seq,
+            "pane_id": o.info.id,
+            "session_name": o.info.station?.sessionName ?? "",
+            "status": o.newStatus.rawValue,
+            "old_status": o.oldStatus.rawValue,
+            "agent_type": o.info.agentType.rawValue,
+            "worktree_path": o.info.worktreePath,
+            "last_message": o.info.lastMessage,
+        ]
+    }
+
     /// All observer delivery hops to main for ordering. Subscribers never run on the scan queue.
     private func notifyObservers(_ outcome: IngestOutcome, hasExternalChannels: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.delegate?.agentDidUpdate(outcome.info)
             self.onOutcome?(outcome)
+            EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
             if hasExternalChannels && outcome.statusChanged
                 && (outcome.newStatus == .waiting || outcome.newStatus == .error) {
                 let i = outcome.info

@@ -326,6 +326,28 @@ final class ControlRouter {
         return s + "\n"
     }
 
+    /// Whether an event passes a subscription filter. `types` limits by event
+    /// `type`; `paneId` matches either the station id or the stable session name
+    /// (so an agent can filter on its own SEAHELM_PANE_ID).
+    static func eventPasses(_ event: [String: Any], types: Set<String>?, paneId: String?) -> Bool {
+        if let types {
+            guard let t = event["type"] as? String, types.contains(t) else { return false }
+        }
+        if let paneId {
+            let pid = event["pane_id"] as? String
+            let sname = event["session_name"] as? String
+            guard paneId == pid || paneId == sname else { return false }
+        }
+        return true
+    }
+
+    /// Frame a single streamed event as an envelope line.
+    static func encodeEvent(_ event: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["event": event]),
+              let s = String(data: data, encoding: .utf8) else { return "" }
+        return s + "\n"
+    }
+
     static func encodeParseError() -> String {
         "{\"id\":\"\",\"error\":{\"code\":\(ControlError.parse),\"message\":\"invalid JSON\"}}\n"
     }

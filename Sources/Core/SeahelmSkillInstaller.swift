@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v1 -->"
+    private static let versionMarker = "<!-- seahelm-skill v2 -->"
 
     static func skillContents() -> String {
         return """
@@ -61,6 +61,8 @@ enum SeahelmSkillInstaller {
                                                  # exit 0 if seen, 1 on timeout
         seahelm wait agent-status <pane> --status done [--timeout MS]
                                                  # exit 0 when status reached, 1 on timeout
+        seahelm events [--pane P] [--type pane.status_changed] [--after SEQ]
+                                                 # stream pane events as JSON lines (until killed)
         ```
 
         Output contract: `run`/`send-*` print nothing; `read` prints raw text;

@@ -82,23 +82,68 @@ final class ControlSocketServer {
 
     private func handleConnection(_ fd: Int32) {
         defer { close(fd) }
+        // Writing to a client that vanished mid-stream must not raise SIGPIPE.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+
+        // A subscribed connection is written from two threads (this read loop's
+        // responses + EventHub push callbacks), so serialize all writes.
+        let writeLock = NSLock()
+        func writeLine(_ s: String) {
+            guard !s.isEmpty else { return }
+            writeLock.lock(); defer { writeLock.unlock() }
+            _ = s.withCString { write(fd, $0, strlen($0)) }
+        }
+        var subToken: Int?
+        defer { if let t = subToken { EventHub.shared.unsubscribe(t) } }
+
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
         while running {
             let n = read(fd, &chunk, chunk.count)
             if n <= 0 { break }
             buffer.append(contentsOf: chunk[0..<n])
-            // Process complete lines.
             while let nl = buffer.firstIndex(of: 0x0A) {
                 let lineData = buffer.subdata(in: buffer.startIndex..<nl)
                 buffer.removeSubrange(buffer.startIndex...nl)
                 guard !lineData.isEmpty else { continue }
-                let response = respond(to: lineData)
-                _ = response.withCString { cstr in
-                    write(fd, cstr, strlen(cstr))
-                }
+                if handleSubscribe(lineData, writeLine: writeLine, subToken: &subToken) { continue }
+                writeLine(respond(to: lineData))
             }
         }
+    }
+
+    /// If the line is an `events.subscribe`, ack it, replay any missed events,
+    /// register a live subscriber, and return true. Otherwise return false so the
+    /// caller handles it as a normal request/response.
+    private func handleSubscribe(_ lineData: Data,
+                                 writeLine: @escaping (String) -> Void,
+                                 subToken: inout Int?) -> Bool {
+        guard let line = String(data: lineData, encoding: .utf8),
+              let req = ControlRouter.parseRequest(line),
+              req.method == "events.subscribe" else { return false }
+
+        let params = req.params
+        let types = (params["types"] as? [String]).map(Set.init)
+        let paneId = params["pane_id"] as? String
+
+        writeLine(ControlRouter.encodeResponse(id: req.id,
+            result: .ok(["subscribed": true, "seq": Int(EventHub.shared.currentSeq)])))
+
+        if let after = params["events_after"] as? Int {
+            for (_, event) in EventHub.shared.eventsAfter(UInt64(max(0, after)))
+                where ControlRouter.eventPasses(event, types: types, paneId: paneId) {
+                writeLine(ControlRouter.encodeEvent(event))
+            }
+        }
+
+        if subToken == nil {
+            subToken = EventHub.shared.subscribe { _, event in
+                guard ControlRouter.eventPasses(event, types: types, paneId: paneId) else { return }
+                writeLine(ControlRouter.encodeEvent(event))
+            }
+        }
+        return true
     }
 
     private func respond(to lineData: Data) -> String {
