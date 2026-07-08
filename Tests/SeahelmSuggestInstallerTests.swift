@@ -4,9 +4,13 @@ import XCTest
 final class SeahelmSuggestInstallerTests: XCTestCase {
     func testScriptContainsPortMarkerAndEndpoint() {
         let script = SeahelmSuggestInstaller.scriptContents(port: 7070)
-        XCTAssertTrue(script.contains("seahelm-suggest v1"))          // version marker
+        XCTAssertTrue(script.contains("seahelm-suggest v2"))          // version marker
         XCTAssertTrue(script.contains("SEAHELM_WEBHOOK_PORT:-7070"))   // default port w/ override
-        XCTAssertTrue(script.contains("/webhook"))
+        XCTAssertTrue(script.contains("/webhook"))                     // HTTP fallback retained
+        XCTAssertTrue(script.contains("nc -U -N -w 2"))                // prefers the control socket
+        XCTAssertTrue(script.contains("SEAHELM_SOCKET_PATH"))
+        XCTAssertTrue(script.contains("SEAHELM_PANE_ID"))              // pane targeting
+        XCTAssertTrue(script.contains("\"method\":\"suggest\""))
         XCTAssertTrue(script.contains("\"event\":\"suggest\""))
         XCTAssertTrue(script.hasPrefix("#!/bin/sh"))
     }

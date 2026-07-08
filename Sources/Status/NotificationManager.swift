@@ -45,14 +45,25 @@ class NotificationManager: NSObject {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
-    func shouldNotify(terminalID: String, oldStatus: SailorStatus, newStatus: SailorStatus) -> Bool {
+    /// Single gate for all notifications: only fire on a `running → (waiting |
+    /// error | idle)` edge, and not more than once per `cooldown` per key.
+    /// `cooldownKey` is a namespaced pane- or worktree-level identity (see
+    /// `cooldownKey(terminalID:worktreePath:)`), so the pane and worktree call
+    /// paths can never collide in `lastNotified`.
+    func shouldNotify(cooldownKey: String, oldStatus: SailorStatus, newStatus: SailorStatus) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
-        if let last = lastNotified[terminalID], Date().timeIntervalSince(last) < cooldown {
+        if let last = lastNotified[cooldownKey], Date().timeIntervalSince(last) < cooldown {
             return false
         }
-        lastNotified[terminalID] = Date()
+        lastNotified[cooldownKey] = Date()
         return true
+    }
+
+    /// Prefer a stable per-pane key (terminalID) when we have one, otherwise fall
+    /// back to the worktree. Namespaced so the two never alias.
+    private static func cooldownKey(terminalID: String, worktreePath: String) -> String {
+        terminalID.isEmpty ? "wt:\(worktreePath)" : "tid:\(terminalID)"
     }
 
     static func formatTitle(status: SailorStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
@@ -142,11 +153,30 @@ class NotificationManager: NSObject {
         if lower.contains("failed bash cd") || lower.contains(" cd ") {
             return "cd failed"
         }
+        // Check command-not-found before the generic "not found" (missing
+        // worktree) clause, which would otherwise swallow it.
+        if lower.contains("command not found") {
+            return "Command not found"
+        }
         if lower.contains("no such file") || lower.contains("directory not found") || lower.contains("not found") {
             return "Worktree missing"
         }
-        if lower.contains("permission denied") {
+        if lower.contains("permission denied") || lower.contains("eacces") {
             return "Permission denied"
+        }
+        // Broader agent/tool/API failures (Claude, Codex, and generic tools use
+        // varied wording; match on stable substrings rather than one phrasing).
+        if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("quota") || lower.contains("overloaded") {
+            return "Rate limited"
+        }
+        if lower.contains("timed out") || lower.contains("timeout") {
+            return "Timed out"
+        }
+        if lower.contains("connection") || lower.contains("network") || lower.contains("econnrefused") {
+            return "Network error"
+        }
+        if lower.contains("api error") || lower.contains("stream error") || lower.contains("server error") {
+            return "API error"
         }
         return nil
     }
@@ -159,14 +189,27 @@ class NotificationManager: NSObject {
             }
             return "Cannot open worktree directory"
         }
+        // Before the generic "not found" (missing worktree) clause.
+        if lower.contains("command not found") {
+            return sanitizeMessage(message)
+        }
         if lower.contains("no such file") || lower.contains("directory not found") || lower.contains("not found") {
             if let leaf = pathLeaf(in: message) {
                 return "\(leaf) worktree directory is missing"
             }
             return "Worktree directory is missing"
         }
-        if lower.contains("permission denied") {
+        if lower.contains("permission denied") || lower.contains("eacces") {
             return "Permission denied while opening worktree"
+        }
+        if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("quota") || lower.contains("overloaded") {
+            return "Agent hit a rate/usage limit"
+        }
+        if lower.contains("timed out") || lower.contains("timeout") {
+            return "Agent request timed out"
+        }
+        if lower.contains("connection") || lower.contains("network") || lower.contains("econnrefused") {
+            return "Network error reaching the agent"
         }
         return sanitizeMessage(message)
     }
@@ -248,19 +291,42 @@ class NotificationManager: NSObject {
         return formatBody(status: status, workspaceName: workspaceName, branch: branch, lastMessage: lastMessage)
     }
 
-    /// Per-pane notification with terminalID-based cooldown.
-    /// `isFocusedPane`: true when this pane is the currently focused pane — suppresses system notification.
-    func notify(terminalID: String, worktreePath: String, workspaceName: String, branch: String,
-                paneIndex: Int, paneCount: Int,
-                oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String,
-                lastUserPrompt: String = "",
-                isFocusedPane: Bool) {
-        guard shouldNotify(terminalID: terminalID, oldStatus: oldStatus, newStatus: newStatus) else { return }
+    /// The single notification entry point for the whole app.
+    ///
+    /// Behaviour:
+    ///  - Gated by `shouldNotify` (running → waiting/error/idle, per-key cooldown).
+    ///  - **Always** records to the in-app `NotificationHistory`.
+    ///  - Posts a macOS system notification unless the target is already visible
+    ///    to the user, i.e. the app is frontmost AND `isTargetVisible` (the
+    ///    worktree is the one currently on screen). If you're looking at a
+    ///    *different* worktree — even in the foreground — the banner still fires
+    ///    so you learn another agent needs you.
+    ///
+    /// - Parameters:
+    ///   - terminalID: stable per-pane id used for the cooldown key; pass "" for
+    ///     worktree-level callers (First Mate, inspection).
+    ///   - paneIndex/paneCount: 1-based; `paneCount > 1` adds a `[Pane N]` label
+    ///     and records the pane in history so a click can mark just that pane read.
+    ///   - isTargetVisible: whether this worktree is the one currently shown.
+    func notify(
+        worktreePath: String,
+        workspaceName: String,
+        branch: String,
+        paneIndex: Int = 1,
+        paneCount: Int = 1,
+        terminalID: String = "",
+        oldStatus: SailorStatus,
+        newStatus: SailorStatus,
+        lastMessage: String,
+        lastUserPrompt: String = "",
+        isTargetVisible: Bool = false
+    ) {
+        let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
+        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus, newStatus: newStatus) else { return }
 
         let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
-        let title = Self.formatSystemTitle(status: newStatus)
         let content = UNMutableNotificationContent()
-        content.title = title
+        content.title = Self.formatSystemTitle(status: newStatus)
         content.subtitle = Self.formatSystemSubtitle(
             workspaceName: workspaceName,
             branch: branch,
@@ -268,7 +334,6 @@ class NotificationManager: NSObject {
             paneCount: paneCount,
             sessionTitle: sessionTitle
         )
-
         content.body = Self.formatSystemBody(
             status: newStatus,
             workspaceName: workspaceName,
@@ -277,146 +342,42 @@ class NotificationManager: NSObject {
             lastUserPrompt: lastUserPrompt
         )
         content.sound = newStatus == .error ? .defaultCritical : .default
+        // Group all notifications for a worktree together in Notification Center.
+        content.threadIdentifier = worktreePath
+        // Let errors punch through Focus / Do Not Disturb.
+        if newStatus == .error {
+            content.interruptionLevel = .timeSensitive
+        }
 
+        // Always record to in-app history.
         let historyPaneIndex: Int? = paneCount > 1 ? paneIndex : nil
-        let entry = NotificationEntry(
+        NotificationHistory.shared.add(NotificationEntry(
             workspaceName: workspaceName,
             branch: branch,
             worktreePath: worktreePath,
             status: newStatus,
             message: content.body,
             paneIndex: historyPaneIndex
-        )
-        NotificationHistory.shared.add(entry)
+        ))
 
-        // Only suppress system notification for the currently focused pane
-        if isFocusedPane { return }
+        // Suppress the system banner only when the user can already see this
+        // target (frontmost AND the worktree is on screen).
+        if isTargetVisible && NSApp.isActive { return }
 
-        content.userInfo = ["worktreePath": worktreePath, "paneIndex": paneIndex]
+        var userInfo: [String: Any] = ["worktreePath": worktreePath]
+        if let historyPaneIndex { userInfo["paneIndex"] = historyPaneIndex }
+        content.userInfo = userInfo
         content.categoryIdentifier = Self.categoryIdentifier
 
-        let request = UNNotificationRequest(
-            identifier: "seahelm-\(worktreePath.hashValue)-\(paneIndex)",
-            content: content,
-            trigger: nil
-        )
+        // Stable identifier (String hashValue is randomized per process, so it
+        // can't reliably replace a prior notification across launches). The path
+        // + pane is stable and collision-free.
+        let identifier = paneCount > 1
+            ? "seahelm-\(worktreePath)-\(paneIndex)"
+            : "seahelm-\(worktreePath)"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { NSLog("Failed to send notification: \(error)") }
-        }
-    }
-
-    /// Notify when agent transitions to a notable state
-    func notify(
-        worktreePath: String,
-        workspaceName: String,
-        branch: String,
-        oldStatus: SailorStatus,
-        newStatus: SailorStatus,
-        lastMessage: String = "",
-        lastUserPrompt: String = ""
-    ) {
-        // Only notify for transitions TO these states
-        guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return }
-
-        // Only notify if it was previously running (agent finished something)
-        guard oldStatus == .running else { return }
-
-        // Cooldown per worktree
-        if let last = lastNotified[worktreePath], Date().timeIntervalSince(last) < cooldown {
-            return
-        }
-        lastNotified[worktreePath] = Date()
-
-        // Always add to in-app history
-        let historyMessage: String
-        let content = UNMutableNotificationContent()
-        let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
-
-        switch newStatus {
-        case .waiting:
-            content.title = Self.formatSystemTitle(status: newStatus)
-            content.subtitle = Self.formatSystemSubtitle(
-                workspaceName: workspaceName,
-                branch: branch,
-                paneIndex: 1,
-                paneCount: 1,
-                sessionTitle: sessionTitle
-            )
-            content.body = Self.formatSystemBody(
-                status: newStatus,
-                workspaceName: workspaceName,
-                branch: branch,
-                lastMessage: lastMessage,
-                lastUserPrompt: lastUserPrompt
-            )
-            content.sound = .default
-            historyMessage = content.body
-        case .error:
-            content.title = Self.formatSystemTitle(status: newStatus)
-            content.subtitle = Self.formatSystemSubtitle(
-                workspaceName: workspaceName,
-                branch: branch,
-                paneIndex: 1,
-                paneCount: 1,
-                sessionTitle: sessionTitle
-            )
-            content.body = Self.formatSystemBody(
-                status: newStatus,
-                workspaceName: workspaceName,
-                branch: branch,
-                lastMessage: lastMessage,
-                lastUserPrompt: lastUserPrompt
-            )
-            content.sound = .defaultCritical
-            historyMessage = content.body
-        case .idle:
-            content.title = Self.formatSystemTitle(status: newStatus)
-            content.subtitle = Self.formatSystemSubtitle(
-                workspaceName: workspaceName,
-                branch: branch,
-                paneIndex: 1,
-                paneCount: 1,
-                sessionTitle: sessionTitle
-            )
-            content.body = Self.formatSystemBody(
-                status: newStatus,
-                workspaceName: workspaceName,
-                branch: branch,
-                lastMessage: lastMessage,
-                lastUserPrompt: lastUserPrompt
-            )
-            content.sound = .default
-            historyMessage = content.body
-        default:
-            return
-        }
-
-        // Add to in-app history
-        let entry = NotificationEntry(
-            workspaceName: workspaceName,
-            branch: branch,
-            worktreePath: worktreePath,
-            status: newStatus,
-            message: historyMessage
-        )
-        NotificationHistory.shared.add(entry)
-
-        // Don't send system notification if app is frontmost
-        if NSApp.isActive { return }
-
-        content.userInfo = ["worktreePath": worktreePath]
-        content.categoryIdentifier = Self.categoryIdentifier
-
-        let request = UNNotificationRequest(
-            identifier: "seahelm-\(worktreePath.hashValue)",
-            content: content,
-            trigger: nil  // Deliver immediately
-        )
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                NSLog("Failed to send notification: \(error)")
-            }
         }
     }
 }

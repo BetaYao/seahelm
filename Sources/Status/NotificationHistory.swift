@@ -1,6 +1,6 @@
 import Foundation
 
-struct NotificationEntry: Identifiable {
+struct NotificationEntry: Identifiable, Codable {
     let id: UUID
     let timestamp: Date
     let workspaceName: String
@@ -25,14 +25,44 @@ struct NotificationEntry: Identifiable {
 }
 
 /// In-app notification history — stores recent agent status change notifications.
-class NotificationHistory {
-    static let shared = NotificationHistory()
+///
+/// Persistence mirrors the other JSON stores (`TodoStore`/`IdeaStore`): a
+/// debounced, atomic write on a background queue. `load()` must be called
+/// explicitly at startup (see `AppDelegate`), so the shared instance never
+/// reads the disk mid-construction. Pass `directory: nil` for an in-memory-only
+/// instance (used by tests so they never touch the user's real config).
+final class NotificationHistory {
+    static let shared = NotificationHistory(directory: Config.configDir)
     static let maxEntries = 100
 
     private(set) var entries: [NotificationEntry] = []
 
+    private let filePath: URL?
+    private let saveQueue = DispatchQueue(label: "com.seahelm.notification-history-save", qos: .utility)
+    private var pendingSave: DispatchWorkItem?
+
+    init(directory: URL?) {
+        self.filePath = directory?.appendingPathComponent("notifications.json")
+    }
+
     var unreadCount: Int {
         entries.filter { !$0.isRead }.count
+    }
+
+    func load() {
+        guard let filePath, FileManager.default.fileExists(atPath: filePath.path) else { return }
+        do {
+            let data = try Data(contentsOf: filePath)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            entries = try decoder.decode([NotificationEntry].self, from: data)
+            if entries.count > Self.maxEntries {
+                entries.removeLast(entries.count - Self.maxEntries)
+            }
+            NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+        } catch {
+            NSLog("[NotificationHistory] Failed to load: \(error)")
+        }
     }
 
     func add(_ entry: NotificationEntry) {
@@ -40,13 +70,13 @@ class NotificationHistory {
         if entries.count > Self.maxEntries {
             entries.removeLast(entries.count - Self.maxEntries)
         }
-        NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+        didMutate()
     }
 
     func markRead(id: UUID) {
         if let index = entries.firstIndex(where: { $0.id == id }) {
             entries[index].isRead = true
-            NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+            didMutate()
         }
     }
 
@@ -55,7 +85,7 @@ class NotificationHistory {
             $0.worktreePath == worktreePath && $0.paneIndex == paneIndex && !$0.isRead
         }) {
             entries[index].isRead = true
-            NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+            didMutate()
         }
     }
 
@@ -63,12 +93,39 @@ class NotificationHistory {
         for i in entries.indices {
             entries[i].isRead = true
         }
-        NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+        didMutate()
     }
 
     func clear() {
         entries.removeAll()
+        didMutate()
+    }
+
+    private func didMutate() {
         NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+        save()
+    }
+
+    private func save() {
+        guard let filePath else { return }
+        let snapshot = entries
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { Self.write(snapshot, to: filePath) }
+        pendingSave = work
+        saveQueue.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private static func write(_ snapshot: [NotificationEntry], to filePath: URL) {
+        do {
+            try FileManager.default.createDirectory(at: filePath.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(snapshot)
+            try data.write(to: filePath, options: .atomic)
+        } catch {
+            NSLog("[NotificationHistory] Failed to save: \(error)")
+        }
     }
 }
 

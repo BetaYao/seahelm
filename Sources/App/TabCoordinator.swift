@@ -78,6 +78,8 @@ class TabCoordinator {
             notify: { action in
                 feed.record(action)
                 let status: SailorStatus = action.kind == .watchError ? .error : .waiting
+                // First Mate watches are background attention signals — surface
+                // them even when frontmost (isTargetVisible defaults to false).
                 NotificationManager.shared.notify(
                     worktreePath: action.worktreePath,
                     workspaceName: action.project,
@@ -494,7 +496,12 @@ class TabCoordinator {
                     var sessionBlockedAt: [String: Date] = [:]
                     var sessionUserPromptedAt: [String: Date] = [:]
 
-                    let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
+                    // Shared inbound-event sink, serialized so the webhook and the
+                    // control socket can both feed it without racing the per-session
+                    // dictionaries below.
+                    let eventQueue = DispatchQueue(label: "seahelm.event-sink")
+                    let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
+                      eventQueue.sync {
                         guard let self else { return nil }
                         // Track when the user sent a message to this session.
                         if event.event == .userPrompt {
@@ -532,9 +539,19 @@ class TabCoordinator {
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // ShipLog.shared.updateTodoFromWebhook(event)
                         return nil
+                      }
                     }
+                    let server = WebhookServer(port: self.config.webhook.port) { handleEvent($0) }
                     server.start()
                     self.terminalCoordinator.webhookServer = server
+
+                    // Local control socket: reads (snapshot/read) + the same shared
+                    // event sink as the webhook, so suggest/hook can arrive over the
+                    // socket too. seahelm-suggest prefers this socket over HTTP.
+                    let control = ControlSocketServer(
+                        router: ControlRouter(dataSource: SeahelmControlDataSource(hookSink: handleEvent)))
+                    control.start()
+                    self.terminalCoordinator.controlSocketServer = control
                 }
             }
         }
@@ -916,33 +933,26 @@ class TabCoordinator {
         let terminalID = paneStatus?.terminalID ?? ""
         let lastUserPrompt = paneStatus?.lastUserPrompt ?? ""
 
-        // Determine if this pane is the currently focused one
-        let isFocused = isFocusedPane(worktreePath: worktreePath, paneIndex: paneIndex)
-
         NotificationManager.shared.notify(
-            terminalID: terminalID,
             worktreePath: worktreePath,
             workspaceName: workspaceName,
             branch: branch,
             paneIndex: paneIndex,
             paneCount: paneCount,
+            terminalID: terminalID,
             oldStatus: oldStatus,
             newStatus: newStatus,
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
-            isFocusedPane: isFocused
+            isTargetVisible: isWorktreeVisible(worktreePath)
         )
     }
 
-    /// Check if a specific worktree + pane is the currently focused pane.
-    private func isFocusedPane(worktreePath: String, paneIndex: Int) -> Bool {
-        guard let container = dashboardVC?.activeSplitContainer,
-              let tree = container.tree,
-              tree.worktreePath == worktreePath else { return false }
-        let leaves = tree.allLeaves
-        let zeroBasedIndex = paneIndex - 1
-        guard zeroBasedIndex >= 0, zeroBasedIndex < leaves.count else { return false }
-        return leaves[zeroBasedIndex].id == tree.focusedId
+    /// Whether this worktree is the one currently shown in the dashboard (all its
+    /// panes are on screen). Combined with app-frontmost in `NotificationManager`
+    /// to decide whether a system banner would be redundant.
+    private func isWorktreeVisible(_ worktreePath: String) -> Bool {
+        dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
     }
 
     // MARK: - Tab Selection
@@ -1037,7 +1047,8 @@ extension TabCoordinator {
                         branch: action.branch,
                         oldStatus: .running,
                         newStatus: .idle,
-                        lastMessage: combined
+                        lastMessage: combined,
+                        isTargetVisible: self.isWorktreeVisible(worktreePath)
                     )
                 }
                 // Record inspection result in watch feed

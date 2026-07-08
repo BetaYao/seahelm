@@ -1,0 +1,45 @@
+import XCTest
+@testable import seahelm
+
+final class SeahelmHookInstallerTests: XCTestCase {
+    func testScriptShape() {
+        let s = SeahelmHookInstaller.scriptContents(port: 7070)
+        XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
+        XCTAssertTrue(s.contains("seahelm-hook v1"))
+        XCTAssertTrue(s.contains("nc -U -N -w 5"))       // socket primary
+        XCTAssertTrue(s.contains("block_b64"))           // block extraction
+        XCTAssertTrue(s.contains("base64 -d"))
+        XCTAssertTrue(s.contains("/webhook"))            // HTTP fallback retained
+        XCTAssertTrue(s.contains("\"method\":\"hook\""))
+    }
+
+    func testInstallWritesExecutable() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("seahelm-hook-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        XCTAssertTrue(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp, port: 7070))
+        let path = tmp.appendingPathComponent("seahelm-hook").path
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        XCTAssertEqual(((attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111, 0o111)
+        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp, port: 7070)) // idempotent
+    }
+}
+
+final class ClaudeHooksMigrationTests: XCTestCase {
+    func testIsSeahelmManaged() {
+        let httpEntry: [[String: Any]] = [["hooks": [["type": "http", "url": "http://localhost:7070/webhook"]]]]
+        let cmdEntry: [[String: Any]] = [["hooks": [["type": "command", "command": "/x/seahelm-hook"]]]]
+        let userEntry: [[String: Any]] = [["hooks": [["type": "command", "command": "/usr/bin/my-linter"]]]]
+        XCTAssertTrue(ClaudeHooksSetup.isSeahelmManaged(httpEntry))
+        XCTAssertTrue(ClaudeHooksSetup.isSeahelmManaged(cmdEntry))
+        XCTAssertFalse(ClaudeHooksSetup.isSeahelmManaged(userEntry))
+        XCTAssertFalse(ClaudeHooksSetup.isSeahelmManaged(nil))
+    }
+
+    func testEntriesEqualCanonical() {
+        let a: [String: Any] = ["type": "command", "command": "/x", "extra": 1]
+        let b: [String: Any] = ["command": "/x", "extra": 1, "type": "command"]  // reordered
+        XCTAssertTrue(ClaudeHooksSetup.entriesEqual(a, b))
+        XCTAssertFalse(ClaudeHooksSetup.entriesEqual(a, ["type": "http"]))
+    }
+}

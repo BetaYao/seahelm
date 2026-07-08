@@ -10,6 +10,7 @@ class TerminalCoordinator {
     var config: Config
     let stationManager = StationManager()
     var webhookServer: WebhookServer?
+    var controlSocketServer: ControlSocketServer?
 
     /// Closure to access the active SplitContainerView for split pane operations.
     /// Provided by MainWindowController via DashboardViewController.
