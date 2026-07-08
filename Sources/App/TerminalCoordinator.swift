@@ -84,6 +84,68 @@ class TerminalCoordinator {
         saveSplitLayout(tree)
     }
 
+    /// Split a specific pane (by station id, or the focused one when nil) in the
+    /// active container. Returns the new pane's station id, or nil if the target
+    /// isn't in the active container. When `focus` is false the previously focused
+    /// pane keeps focus (the control API's `--no-focus`, for agents spawning a
+    /// sibling without stealing their own cursor). Must be called on the main thread.
+    @discardableResult
+    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool) -> String? {
+        guard let container = activeSplitContainer(),
+              let tree = container.tree else { return nil }
+
+        // Resolve the leaf to split. A caller-supplied station id must live in the
+        // active container; otherwise we can't split it here.
+        let previousFocus = tree.focusedId
+        let targetLeafId: String
+        if let sid = targetStationId {
+            guard let leaf = tree.allLeaves.first(where: { $0.stationId == sid }) else { return nil }
+            targetLeafId = leaf.id
+        } else {
+            targetLeafId = tree.focusedId
+        }
+
+        let sessionName = tree.nextSessionName()
+        let station = Station()
+        station.sessionName = sessionName
+        station.backend = config.backend
+        StationRegistry.shared.register(station)
+
+        let leafId = UUID().uuidString
+        // splitFocusedLeaf splits `focusedId`, so point it at the target first.
+        tree.focusedId = targetLeafId
+        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+
+        _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
+        container.surfaceViews[station.id] = station.view
+        container.layoutTree()
+
+        if focus {
+            let capturedLeafId = leafId
+            DispatchQueue.main.async { [weak container] in
+                guard let container, let tree = container.tree,
+                      let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
+                      let newStation = StationRegistry.shared.station(forId: newLeaf.stationId),
+                      let termView = newStation.view else { return }
+                container.window?.makeFirstResponder(termView)
+            }
+        } else {
+            // Keep focus where it was; do not steal the caller's cursor.
+            tree.focusedId = previousFocus
+            DispatchQueue.main.async { [weak container] in
+                guard let container, let tree = container.tree,
+                      let prevLeaf = tree.allLeaves.first(where: { $0.id == previousFocus }),
+                      let prevStation = StationRegistry.shared.station(forId: prevLeaf.stationId),
+                      let view = prevStation.view else { return }
+                container.window?.makeFirstResponder(view)
+            }
+        }
+
+        delegate?.terminalCoordinatorDidUpdateSurfaces(self)
+        saveSplitLayout(tree)
+        return station.id
+    }
+
     func closeFocusedPane() {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }

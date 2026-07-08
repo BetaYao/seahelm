@@ -545,8 +545,12 @@ class TabCoordinator {
                     // (snapshot/read) + the shared event sink for hook/suggest.
                     // (The HTTP webhook was retired once the socket path was
                     // verified end-to-end.)
+                    let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
+                    controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
+                        self?.terminalCoordinator.splitPane(targetStationId: targetStationId, axis: axis, focus: focus)
+                    }
                     let control = ControlSocketServer(
-                        router: ControlRouter(dataSource: SeahelmControlDataSource(hookSink: handleEvent)))
+                        router: ControlRouter(dataSource: controlDataSource))
                     control.start()
                     self.terminalCoordinator.controlSocketServer = control
                 }

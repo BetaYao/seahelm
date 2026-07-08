@@ -49,12 +49,17 @@ protocol ControlDataSource: AnyObject {
     func sendKeys(paneId: String, keys: [String]) -> Bool
     /// Current rolled-up status of a pane (SailorStatus raw value), or nil if unknown.
     func paneStatus(paneId: String) -> String?
+    /// Split a pane (nil = the focused pane) in the given direction
+    /// (right|left|down|up). Returns the new pane's id, or nil if the pane can't
+    /// be split here. `focus` false = don't steal the caller's cursor.
+    func splitPane(paneId: String?, direction: String, focus: Bool) -> String?
 }
 
 extension ControlDataSource {
     func sendText(paneId: String, text: String, enter: Bool) -> Bool { false }
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
     func paneStatus(paneId: String) -> String? { nil }
+    func splitPane(paneId: String?, direction: String, focus: Bool) -> String? { nil }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -173,6 +178,18 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
             }
             return .ok(["sent": true])
+
+        case "pane.split":
+            let paneId = (params["pane_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let direction = (params["direction"] as? String)?.lowercased() ?? "right"
+            guard ["right", "left", "down", "up"].contains(direction) else {
+                return .error(code: ControlError.invalidParams, message: "direction must be right|left|down|up")
+            }
+            let focus = params["focus"] as? Bool ?? true
+            guard let newId = dataSource?.splitPane(paneId: paneId, direction: direction, focus: focus) else {
+                return .error(code: ControlError.notFound, message: "cannot split pane")
+            }
+            return .ok(["pane_id": newId])
 
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)

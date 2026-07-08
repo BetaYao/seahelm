@@ -22,6 +22,11 @@ private final class FakeDataSource: ControlDataSource {
         sentKeys.append((paneId, keys)); return true
     }
     func paneStatus(paneId: String) -> String? { statuses[paneId] }
+    var splitCalls: [(pane: String?, direction: String, focus: Bool)] = []
+    var splitResult: String? = "new-pane"
+    func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
+        splitCalls.append((paneId, direction, focus)); return splitResult
+    }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -164,6 +169,42 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Split
+
+    func testSplitReturnsNewPaneId() {
+        let (r, ds) = router()
+        ds.splitResult = "p2"
+        guard case .ok(let d) = r.handle(method: "pane.split",
+                params: ["pane_id": "t1", "direction": "right", "focus": false]) else { return XCTFail() }
+        XCTAssertEqual(d["pane_id"] as? String, "p2")
+        XCTAssertEqual(ds.splitCalls.count, 1)
+        XCTAssertEqual(ds.splitCalls[0].pane, "t1")
+        XCTAssertEqual(ds.splitCalls[0].direction, "right")
+        XCTAssertFalse(ds.splitCalls[0].focus)
+    }
+
+    func testSplitDefaultsRightAndFocus() {
+        let (r, ds) = router()
+        _ = r.handle(method: "pane.split", params: [:])
+        XCTAssertNil(ds.splitCalls[0].pane)        // nil pane_id → focused
+        XCTAssertEqual(ds.splitCalls[0].direction, "right")
+        XCTAssertTrue(ds.splitCalls[0].focus)
+    }
+
+    func testSplitInvalidDirection() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.split",
+                params: ["direction": "sideways"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testSplitUnsplittable() {
+        let (r, ds) = router()
+        ds.splitResult = nil
+        guard case .error(let code, _) = r.handle(method: "pane.split", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
     }
 
     // MARK: - Wait primitives

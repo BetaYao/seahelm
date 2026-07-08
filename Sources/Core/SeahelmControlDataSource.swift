@@ -8,6 +8,10 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Returns an optional block-body string for blocking Stop hooks.
     private let hookSink: (WebhookEvent) -> String?
 
+    /// Set by the owner (TabCoordinator) to perform a split on the main thread.
+    /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
+    var splitHandler: ((String?, SplitAxis, Bool) -> String?)?
+
     init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
         self.hookSink = hookSink
     }
@@ -67,6 +71,15 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func paneStatus(paneId: String) -> String? {
         ShipLog.shared.sailor(for: paneId)?.status.rawValue
+    }
+
+    func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
+        guard let splitHandler else { return nil }
+        // right/left place panes side by side; down/up stack them.
+        let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
+        var newId: String?
+        runOnMain { newId = splitHandler(paneId, axis, focus) }
+        return newId
     }
 
     /// Ghostty input must run on the main thread; the control socket serves each
