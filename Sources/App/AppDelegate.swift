@@ -37,6 +37,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Load TODO and Ideas stores
         TodoStore.shared.load()
         IdeaStore.shared.load()
+        // Restore in-app notification history so it survives relaunch.
+        NotificationHistory.shared.load()
 
         // Auto-connect WeCom bot if configured
         if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {

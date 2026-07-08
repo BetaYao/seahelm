@@ -1,0 +1,119 @@
+import Foundation
+
+// MARK: - Control API protocol (herdr-style JSON-RPC over a Unix socket)
+//
+// Wire format: newline-delimited JSON, one request per line.
+//   request:  {"id": "r1", "method": "pane.read", "params": {...}}
+//   response: {"id": "r1", "result": {...}}   or   {"id": "r1", "error": {"code", "message"}}
+//
+// This file is the pure, transport-free core: request parsing, the method
+// router, and the ControlDataSource seam the app implements. ControlSocketServer
+// owns the Unix socket; tests drive ControlRouter with a fake data source.
+
+/// A pane's identity + state for `session.snapshot` / `pane.list`.
+struct PaneSnapshot {
+    let paneId: String        // stable terminal ID (durable, unlike herdr's compact ids)
+    let worktreePath: String
+    let branch: String
+    let project: String
+    let agentType: String
+    let status: String
+    let lastMessage: String
+
+    var dict: [String: Any] {
+        ["pane_id": paneId, "worktree_path": worktreePath, "branch": branch,
+         "project": project, "agent_type": agentType, "status": status,
+         "last_message": lastMessage]
+    }
+}
+
+/// The app-side data the control API reads/drives. Kept minimal for Phase 1
+/// (read-only); write methods (send_text/split) extend this later.
+protocol ControlDataSource: AnyObject {
+    func snapshotPanes() -> [PaneSnapshot]
+    /// Read a pane's terminal text. `source`: visible | recent | detection.
+    func readPane(paneId: String, source: String, lines: Int) -> String?
+}
+
+enum ControlResult {
+    case ok([String: Any])
+    case error(code: Int, message: String)
+}
+
+enum ControlError {
+    static let parse = -32700
+    static let invalidRequest = -32600
+    static let methodNotFound = -32601
+    static let invalidParams = -32602
+    static let notFound = -32004
+}
+
+/// Pure request router. No IO, no singletons — the data source is injected.
+final class ControlRouter {
+    // Strong: the data source is a stateless bridge to singletons, no cycle.
+    var dataSource: ControlDataSource?
+
+    init(dataSource: ControlDataSource? = nil) {
+        self.dataSource = dataSource
+    }
+
+    func handle(method: String, params: [String: Any]) -> ControlResult {
+        switch method {
+        case "ping":
+            return .ok(["pong": true])
+
+        case "session.snapshot", "pane.list":
+            let panes = dataSource?.snapshotPanes() ?? []
+            return .ok(["panes": panes.map(\.dict)])
+
+        case "pane.read":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            let source = params["source"] as? String ?? "visible"
+            let lines = (params["lines"] as? Int) ?? 100
+            guard let text = dataSource?.readPane(paneId: paneId, source: source, lines: lines) else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(["text": text])
+
+        default:
+            return .error(code: ControlError.methodNotFound, message: "unknown method: \(method)")
+        }
+    }
+
+    // MARK: - Framing (pure, testable)
+
+    /// Parse one request line. Returns (id, method, params) or a framed error
+    /// response JSON string if the line is malformed.
+    static func parseRequest(_ line: String) -> (id: String, method: String, params: [String: Any])? {
+        guard let data = line.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let method = obj["method"] as? String else {
+            return nil
+        }
+        let id = (obj["id"] as? String) ?? (obj["id"].map { "\($0)" } ?? "")
+        let params = obj["params"] as? [String: Any] ?? [:]
+        return (id, method, params)
+    }
+
+    /// Serialize a result into a single response line (newline-terminated).
+    static func encodeResponse(id: String, result: ControlResult) -> String {
+        var obj: [String: Any] = ["id": id]
+        switch result {
+        case .ok(let r):
+            obj["result"] = r
+        case .error(let code, let message):
+            obj["error"] = ["code": code, "message": message]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj),
+              let s = String(data: data, encoding: .utf8) else {
+            return "{\"id\":\"\(id)\",\"error\":{\"code\":\(ControlError.parse),\"message\":\"encode failed\"}}\n"
+        }
+        return s + "\n"
+    }
+
+    static func encodeParseError() -> String {
+        "{\"id\":\"\",\"error\":{\"code\":\(ControlError.parse),\"message\":\"invalid JSON\"}}\n"
+    }
+}

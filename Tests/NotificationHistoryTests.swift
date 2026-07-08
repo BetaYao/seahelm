@@ -6,8 +6,9 @@ class NotificationHistoryTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        history = NotificationHistory.shared
-        history.clear()
+        // In-memory instance (directory: nil) so tests never touch the user's
+        // real ~/.config/seahelm/notifications.json.
+        history = NotificationHistory(directory: nil)
     }
 
     func testAddEntry() {
@@ -92,5 +93,28 @@ class NotificationHistoryTests: XCTestCase {
         XCTAssertEqual(entry.status, .error)
         XCTAssertEqual(entry.message, "Build failed")
         XCTAssertNotNil(entry.id)
+    }
+
+    func testPersistenceRoundTripAcrossInstances() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("seahelm-nh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let writer = NotificationHistory(directory: dir)
+        writer.add(NotificationEntry(branch: "a", worktreePath: "/a", status: .idle, message: "done", paneIndex: 2))
+        writer.add(NotificationEntry(branch: "b", worktreePath: "/b", status: .error, message: "boom"))
+        // Debounced save (0.3s) — wait for it to flush to disk.
+        let flushed = expectation(description: "saved")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { flushed.fulfill() }
+        wait(for: [flushed], timeout: 2)
+
+        // A fresh instance over the same dir restores the entries after load().
+        let reader = NotificationHistory(directory: dir)
+        XCTAssertEqual(reader.entries.count, 0) // not loaded yet
+        reader.load()
+        XCTAssertEqual(reader.entries.count, 2)
+        XCTAssertEqual(reader.entries[0].branch, "b")           // newest first preserved
+        XCTAssertEqual(reader.entries[1].paneIndex, 2)
+        XCTAssertEqual(reader.entries[1].status, .idle)
     }
 }

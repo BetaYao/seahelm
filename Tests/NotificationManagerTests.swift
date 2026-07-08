@@ -100,4 +100,49 @@ final class NotificationManagerTests: XCTestCase {
 
         XCTAssertEqual(body, "Task completed")
     }
+
+    // MARK: - Broadened error classification (agent/tool/API wording)
+
+    private func errorTitle(_ message: String) -> String {
+        NotificationManager.formatTitle(
+            status: .error, workspaceName: "ws", branch: "br",
+            paneIndex: 1, paneCount: 1, lastMessage: message
+        )
+    }
+
+    func testRateLimitErrorTitle() {
+        XCTAssertEqual(errorTitle("Error: you have hit your usage limit for today"),
+                       "Rate limited — ws / br")
+        XCTAssertEqual(errorTitle("API request failed: overloaded_error"),
+                       "Rate limited — ws / br")
+    }
+
+    func testTimeoutErrorTitle() {
+        XCTAssertEqual(errorTitle("request timed out after 60s"), "Timed out — ws / br")
+    }
+
+    func testNetworkErrorTitle() {
+        XCTAssertEqual(errorTitle("connect ECONNREFUSED 127.0.0.1:443"), "Network error — ws / br")
+    }
+
+    func testCommandNotFoundTitle() {
+        XCTAssertEqual(errorTitle("zsh: command not found: pnpm"), "Command not found — ws / br")
+    }
+
+    func testApiErrorTitle() {
+        XCTAssertEqual(errorTitle("stream error: unexpected EOF"), "API error — ws / br")
+    }
+
+    func testExistingCdErrorStillClassifiedFirst() {
+        // Precedence preserved: cd failures still win over the new patterns.
+        XCTAssertEqual(errorTitle("Failed Bash cd /tmp/x — no such file"), "cd failed — ws / br")
+    }
+
+    func testRateLimitErrorBody() {
+        let body = NotificationManager.formatBody(
+            status: .error, workspaceName: "ws", branch: "br",
+            lastMessage: "Error: usage limit reached, retry after 5m"
+        )
+        XCTAssertEqual(body, "Agent hit a rate/usage limit")
+    }
 }
