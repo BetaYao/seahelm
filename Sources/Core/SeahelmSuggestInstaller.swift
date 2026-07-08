@@ -27,11 +27,12 @@ enum SeahelmSuggestInstaller {
         pane_field=""
         if [ -n "$pane" ]; then pane_field="\\"pane_id\\":\\"$(esc "$pane")\\","; fi
 
-        # 1) Unix control socket via nc -U (-N: half-close after our EOF so the
-        #    server closes and nc exits promptly).
+        # 1) Unix control socket. Plain `nc -U` (macOS/Apple nc supports neither
+        #    -N nor -w): it closes its write half on stdin EOF, our server replies
+        #    and closes, nc exits.
         if [ -S "$sock" ] && command -v nc >/dev/null 2>&1; then
           req='{"id":"suggest","method":"suggest","params":{'"$pane_field"'"cwd":"'"$cwd"'","options":['"$opts"']}}'
-          if printf '%s\\n' "$req" | nc -U -N -w 2 "$sock" >/dev/null 2>&1; then
+          if printf '%s\\n' "$req" | nc -U "$sock" >/dev/null 2>&1; then
             exit 0
           fi
         fi

@@ -6,7 +6,7 @@ final class SeahelmHookInstallerTests: XCTestCase {
         let s = SeahelmHookInstaller.scriptContents(port: 7070)
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
         XCTAssertTrue(s.contains("seahelm-hook v1"))
-        XCTAssertTrue(s.contains("nc -U -N -w 5"))       // socket primary
+        XCTAssertTrue(s.contains("nc -U \"$sock\""))     // socket primary (Apple-nc compatible)
         XCTAssertTrue(s.contains("block_b64"))           // block extraction
         XCTAssertTrue(s.contains("base64 -d"))
         XCTAssertTrue(s.contains("/webhook"))            // HTTP fallback retained

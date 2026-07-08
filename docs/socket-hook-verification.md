@@ -6,7 +6,7 @@
 约定:
 ```sh
 SOCK="$HOME/.config/seahelm/seahelm.sock"
-send() { printf '%s\n' "$1" | nc -U -N -w 3 "$SOCK"; }   # 发一条请求、打印响应
+send() { printf '%s\n' "$1" | nc -U "$SOCK"; }   # 发一条请求、打印响应 (Apple nc: 不加 -N/-w)
 ```
 
 ---

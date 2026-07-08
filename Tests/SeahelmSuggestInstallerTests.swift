@@ -7,7 +7,7 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
         XCTAssertTrue(script.contains("seahelm-suggest v2"))          // version marker
         XCTAssertTrue(script.contains("SEAHELM_WEBHOOK_PORT:-7070"))   // default port w/ override
         XCTAssertTrue(script.contains("/webhook"))                     // HTTP fallback retained
-        XCTAssertTrue(script.contains("nc -U -N -w 2"))                // prefers the control socket
+        XCTAssertTrue(script.contains("nc -U \"$sock\""))              // prefers the control socket (Apple-nc compatible)
         XCTAssertTrue(script.contains("SEAHELM_SOCKET_PATH"))
         XCTAssertTrue(script.contains("SEAHELM_PANE_ID"))              // pane targeting
         XCTAssertTrue(script.contains("\"method\":\"suggest\""))

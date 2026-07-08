@@ -21,11 +21,12 @@ enum SeahelmHookInstaller {
         payload="$(cat)"
         [ -n "$payload" ] || exit 0
 
-        # 1) Unix control socket. The block body comes back base64-encoded
-        #    (block_b64) so it survives a quote-safe sed extraction.
+        # 1) Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor
+        #    -w): it closes its write half on stdin EOF, the server replies with the
+        #    base64-encoded block body (block_b64) and closes, nc exits.
         if [ -S "$sock" ] && command -v nc >/dev/null 2>&1; then
           req='{"id":"h","method":"hook","params":'"$payload"'}'
-          resp="$(printf '%s\\n' "$req" | nc -U -N -w 5 "$sock" 2>/dev/null)"
+          resp="$(printf '%s\\n' "$req" | nc -U "$sock" 2>/dev/null)"
           if [ -n "$resp" ]; then
             b64="$(printf '%s' "$resp" | sed -n 's/.*"block_b64":"\\([A-Za-z0-9+/=]*\\)".*/\\1/p')"
             [ -n "$b64" ] && printf '%s' "$b64" | base64 -d 2>/dev/null
