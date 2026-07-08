@@ -149,7 +149,13 @@ enum SessionManager {
             // survives the agent exiting on its own — no `exec "$0"` trick
             // needed. Wrap only in a login shell that cd's and `clear`s the
             // echoed command line before the agent renders inline.
-            let inner = "cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
+            //
+            // Export the control-socket context first so the agent (and any tool
+            // it spawns, e.g. seahelm-suggest) can reach the multiplexer socket
+            // and knows it is running inside a seahelm pane.
+            let socketPath = ControlSocketServer.defaultSocketPath()
+            let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
+            let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
             return [[ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
         default:
             return []

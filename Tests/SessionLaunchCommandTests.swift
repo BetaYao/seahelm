@@ -11,13 +11,12 @@ final class SessionLaunchCommandTests: XCTestCase {
             shell: "/bin/zsh"
         )
         XCTAssertEqual(cmds.count, 1)
+        let socket = ControlSocketServer.defaultSocketPath()
+        let inner = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socket))"
+            + " && cd '/work/repo/feat' && clear && claude 'fix bug'"
         XCTAssertEqual(
             cmds[0],
-            [
-                ZmxLocator.executable(), "run", "amux-repo-feat",
-                "/bin/zsh", "-lic",
-                "cd '/work/repo/feat' && clear && claude 'fix bug'",
-            ]
+            [ZmxLocator.executable(), "run", "amux-repo-feat", "/bin/zsh", "-lic", inner]
         )
     }
 
