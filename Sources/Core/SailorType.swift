@@ -106,6 +106,17 @@ enum SailorType: String, Codable, CaseIterable {
         }
     }
 
+    /// Reverse of `manifestId` for the agents identifiable by process probe
+    /// (those whose manifest declares a `process` block). The generic "agent"
+    /// manifest has no process block, so the probe never returns it.
+    static func fromManifestId(_ id: String?) -> SailorType {
+        switch id {
+        case "claude": return .claudeCode
+        case "codex":  return .codex
+        default:       return .unknown
+        }
+    }
+
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,
