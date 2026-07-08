@@ -33,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
             CodexHooksSetup.ensureHooksConfigured()
             SeahelmSuggestInstaller.ensureInstalled()
+            SeahelmCliInstaller.ensureInstalled()
         }
         NSAppearance.current = NSApp.effectiveAppearance
 
