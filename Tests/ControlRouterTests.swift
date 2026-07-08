@@ -5,9 +5,10 @@ private final class FakeDataSource: ControlDataSource {
     var panes: [PaneSnapshot] = []
     var reads: [String: String] = [:]
     var ingested: [[String: Any]] = []
+    var blockReturn: String?
     func snapshotPanes() -> [PaneSnapshot] { panes }
     func readPane(paneId: String, source: String, lines: Int) -> String? { reads[paneId] }
-    func ingestHook(json: [String: Any]) -> String? { ingested.append(json); return nil }
+    func ingestHook(json: [String: Any]) -> String? { ingested.append(json); return blockReturn }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -84,6 +85,22 @@ final class ControlRouterTests: XCTestCase {
         _ = r.handle(method: "hook", params: ["event": "agent_stop", "session_id": "s1", "cwd": "/x"])
         XCTAssertEqual(ds.ingested.count, 1)
         XCTAssertEqual(ds.ingested[0]["event"] as? String, "agent_stop")
+    }
+
+    func testHookReturnsBlockAsBase64() {
+        let (r, ds) = router()
+        ds.blockReturn = #"{"decision":"block","reason":"go"}"#
+        guard case .ok(let d) = r.handle(method: "hook", params: ["event": "agent_stop"]),
+              let b64 = d["block_b64"] as? String,
+              let decoded = Data(base64Encoded: b64) else { return XCTFail() }
+        XCTAssertEqual(String(data: decoded, encoding: .utf8), #"{"decision":"block","reason":"go"}"#)
+    }
+
+    func testHookNoBlockOmitsField() {
+        let (r, ds) = router()
+        ds.blockReturn = nil
+        guard case .ok(let d) = r.handle(method: "hook", params: ["event": "agent_stop"]) else { return XCTFail() }
+        XCTAssertNil(d["block_b64"])
     }
 
     func testParseRequest() {

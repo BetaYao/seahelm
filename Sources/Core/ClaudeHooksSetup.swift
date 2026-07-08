@@ -4,10 +4,11 @@ import Foundation
 /// Merges non-destructively: existing hooks and settings are preserved.
 enum ClaudeHooksSetup {
 
-    /// Hook events seahelm requires, mapped to their webhook config.
-    /// Add new hooks here as seahelm gains features.
+    /// Hook events seahelm requires. Now uses a `command` hook running the
+    /// seahelm-hook bridge (socket-primary, HTTP fallback) instead of a direct
+    /// `type:"http"` hook — moves reporting onto the fs-scoped control socket.
     private static func requiredHooks(port: UInt16) -> [String: [[String: Any]]] {
-        let hookEntry: [String: Any] = ["type": "http", "url": "http://localhost:\(port)/webhook"]
+        let hookEntry: [String: Any] = ["type": "command", "command": SeahelmHookInstaller.scriptPath()]
         let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]
         return [
             "SessionStart": hookGroup,
@@ -23,6 +24,24 @@ enum ClaudeHooksSetup {
             "CwdChanged": hookGroup,
             "WorktreeCreate": hookGroup,
         ]
+    }
+
+    /// True if a hook entry is one seahelm previously installed (an http hook
+    /// pointing at our /webhook, or our seahelm-hook command) — safe to migrate.
+    static func isSeahelmManaged(_ entry: Any?) -> Bool {
+        guard let entry, let data = try? JSONSerialization.data(withJSONObject: entry),
+              let s = String(data: data, encoding: .utf8) else { return false }
+        return s.contains("/webhook") || s.contains("seahelm-hook")
+    }
+
+    /// Structural equality of two hook entries via canonical JSON (sorted keys),
+    /// so an already-correct config isn't needlessly rewritten.
+    static func entriesEqual(_ a: Any?, _ b: Any?) -> Bool {
+        func canon(_ v: Any?) -> String? {
+            guard let v, let d = try? JSONSerialization.data(withJSONObject: v, options: [.sortedKeys]) else { return nil }
+            return String(data: d, encoding: .utf8)
+        }
+        return canon(a) == canon(b)
     }
 
     /// Check and patch ~/.claude/settings.json on app launch.
@@ -50,10 +69,15 @@ enum ClaudeHooksSetup {
         var changed = false
 
         for (event, config) in required {
-            if hooks[event] == nil {
-                hooks[event] = config
-                changed = true
-                NSLog("[ClaudeHooksSetup] Added missing hook: \(event)")
+            // Install when missing, or migrate a seahelm-managed entry (old
+            // http→/webhook or a stale seahelm-hook command) to the current
+            // config. A user's own unrelated hook for this event is left alone.
+            if hooks[event] == nil || isSeahelmManaged(hooks[event]) {
+                if !entriesEqual(hooks[event], config) {
+                    hooks[event] = config
+                    changed = true
+                    NSLog("[ClaudeHooksSetup] Set hook: \(event)")
+                }
             }
         }
 

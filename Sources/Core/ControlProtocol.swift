@@ -83,8 +83,14 @@ final class ControlRouter {
 
         case "hook":
             // Raw webhook-shaped payload (parity with the HTTP webhook body).
+            // The optional block body (a Stop-hook `{"decision":"block",...}` JSON)
+            // is returned base64-encoded so the shell hook script can extract it
+            // with a trivial, quote-safe regex and `base64 -d` it to stdout.
             let block = dataSource?.ingestHook(json: params)
-            return .ok(block.map { ["block": $0] } ?? [:])
+            if let block, let b64 = block.data(using: .utf8)?.base64EncodedString() {
+                return .ok(["block_b64": b64])
+            }
+            return .ok([:])
 
         case "suggest":
             guard let options = params["options"] as? [String], !options.isEmpty else {

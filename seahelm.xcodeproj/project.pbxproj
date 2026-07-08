@@ -161,6 +161,7 @@
 		91AE9A595CB36E54847C8274 /* GlobalKeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F339357674536CA6736266 /* GlobalKeymapTests.swift */; };
 		92B45E68D04E8B1213AE4E84 /* CommandInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F9D4F50D54CA7F4CE5D29E /* CommandInputView.swift */; };
 		92DFDABD2CD56B3AC0F6F5F3 /* ActivityEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD54528A1D3989383AC18319 /* ActivityEventTests.swift */; };
+		92E9F0AABB7C9DCD16D9445F /* SeahelmHookInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */; };
 		935135368B8060F0E8F0D5CC /* DashboardPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A32006D6149A8DB956CF11B /* DashboardPage.swift */; };
 		935845E7D97598A3F09B3853 /* SeahelmControlDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09698EDB6719D1778DF79D4B /* SeahelmControlDataSource.swift */; };
 		93EFC966AC0956AF645C3B0E /* DialogPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54362D573E93E8E8D59A1517 /* DialogPage.swift */; };
@@ -272,6 +273,7 @@
 		EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5943C79014C5FE35819487C /* ScanDecoder.swift */; };
 		EC97D5CB826CD5F1B3DEAAF5 /* NormalizedEventDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */; };
 		EE61D03E90AEC25A247BE3C9 /* ManifestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBE28FEA6DE230823C9078B5 /* ManifestEngine.swift */; };
+		EEF9D35496F94C190A4F90EA /* SeahelmHookInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */; };
 		EF25AD093968ED3CBC4A960B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C6B4297D134649B185BC65 /* DividerView.swift */; };
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
@@ -476,6 +478,7 @@
 		8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookDecoder.swift; sourceTree = "<group>"; };
 		8DC6CD361867294E47A209E3 /* DialogPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogPresenter.swift; sourceTree = "<group>"; };
 		8E004E8B96865467209D3F2D /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstallerTests.swift; sourceTree = "<group>"; };
 		91039EC7A115582BDEDC649A /* DialogKeymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogKeymap.swift; sourceTree = "<group>"; };
 		9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPort.swift; sourceTree = "<group>"; };
@@ -514,6 +517,7 @@
 		ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEventDecoderTests.swift; sourceTree = "<group>"; };
 		B032E95F9035447EBF27883B /* GitDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiff.swift; sourceTree = "<group>"; };
 		B07FF7C768D8C4871A88AA48 /* WorkspaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManager.swift; sourceTree = "<group>"; };
+		B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstaller.swift; sourceTree = "<group>"; };
 		B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryStoreTests.swift; sourceTree = "<group>"; };
 		B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeaStore.swift; sourceTree = "<group>"; };
 		B5BDC0C3284F3CAF4BD18C62 /* WorktreeTitleResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolverTests.swift; sourceTree = "<group>"; };
@@ -672,6 +676,7 @@
 				DCDDD8680C8FD209F2BB3CD1 /* SailorStatus.swift */,
 				9B7CFA3A43F14388537AD63B /* SailorType.swift */,
 				09698EDB6719D1778DF79D4B /* SeahelmControlDataSource.swift */,
+				B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */,
 				E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */,
 				968213FDE4B08CF2A98DB961 /* SessionManager.swift */,
 				FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */,
@@ -948,6 +953,7 @@
 				A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */,
 				A4307D4828267A1F187FE65E /* SailorTypeTests.swift */,
 				46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */,
+				90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */,
 				03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */,
 				64D9CDBF2943FC278A6A09D2 /* SemVerTests.swift */,
 				DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */,
@@ -1338,6 +1344,7 @@
 				718906FE9DB3F7AC492BA652 /* SailorReducerTests.swift in Sources */,
 				F684668DAD5AD32B13566824 /* SailorTypeTests.swift in Sources */,
 				65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */,
+				92E9F0AABB7C9DCD16D9445F /* SeahelmHookInstallerTests.swift in Sources */,
 				9ACCE5E25F983F07EEE326A7 /* SeahelmSuggestInstallerTests.swift in Sources */,
 				9EEDB774BA368ABF037C6750 /* SemVerTests.swift in Sources */,
 				88FC5A9FA39ABA172ED4FAD7 /* SessionLaunchCommandTests.swift in Sources */,
@@ -1520,6 +1527,7 @@
 				062B7EF5CA8F90AF2091FB7C /* SailorType.swift in Sources */,
 				EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */,
 				935845E7D97598A3F09B3853 /* SeahelmControlDataSource.swift in Sources */,
+				EEF9D35496F94C190A4F90EA /* SeahelmHookInstaller.swift in Sources */,
 				F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */,
 				0BDECDE46CD02F6B74AD6A16 /* SemVer.swift in Sources */,
 				F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */,
