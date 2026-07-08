@@ -63,7 +63,8 @@ class WorktreeStatusAggregator {
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }
 
-    func agentDidUpdate(terminalID: String, status: SailorStatus, lastMessage: String, lastUserPrompt: String = "") {
+    func agentDidUpdate(terminalID: String, status: SailorStatus, lastMessage: String,
+                        lastUserPrompt: String = "", agentType: SailorType = .unknown) {
         guard let worktreePath = terminalToWorktree[terminalID] else { return }
 
         let now = Date()
@@ -85,13 +86,16 @@ class WorktreeStatusAggregator {
         let paneIndex = paneIndexForTerminal(terminalID, worktreePath: worktreePath)
         // Preserve existing prompt if new one is empty
         let effectivePrompt = lastUserPrompt.isEmpty ? (oldPaneState?.lastUserPrompt ?? "") : lastUserPrompt
+        // Preserve a known agent type across updates that report .unknown.
+        let effectiveType = agentType == .unknown ? (oldPaneState?.agentType ?? .unknown) : agentType
         let newPaneState = PaneStatus(
             paneIndex: paneIndex,
             terminalID: terminalID,
             status: status,
             lastMessage: lastMessage,
             lastUserPrompt: effectivePrompt,
-            lastUpdated: now
+            lastUpdated: now,
+            agentType: effectiveType
         )
         paneStates[terminalID] = newPaneState
 
@@ -130,7 +134,8 @@ class WorktreeStatusAggregator {
                     status: pane.status,
                     lastMessage: pane.lastMessage,
                     lastUserPrompt: pane.lastUserPrompt,
-                    lastUpdated: pane.lastUpdated
+                    lastUpdated: pane.lastUpdated,
+                    agentType: pane.agentType
                 )
                 paneStates[tid] = pane
                 panes.append(pane)
@@ -139,14 +144,17 @@ class WorktreeStatusAggregator {
 
         guard !panes.isEmpty else { return }
 
-        let mostRecent = panes.max(by: { $0.lastUpdated < $1.lastUpdated }) ?? panes[0]
+        // Representative pane = highest rollup rank (AI agents outrank shell tasks,
+        // then status priority). Status and message both come from it, so the tab
+        // badge and its message always describe the same pane.
+        let representative = panes.max { $0.rollupRank < $1.rollupRank } ?? panes[0]
 
         let ws = WorktreeStatus(
             worktreePath: worktreePath,
             panes: panes,
-            mostRecentPaneIndex: mostRecent.paneIndex,
-            mostRecentMessage: mostRecent.lastMessage,
-            mostRecentUserPrompt: mostRecent.lastUserPrompt
+            mostRecentPaneIndex: representative.paneIndex,
+            mostRecentMessage: representative.lastMessage,
+            mostRecentUserPrompt: representative.lastUserPrompt
         )
         // Skip the delegate (and the UI refresh chain behind it) when nothing
         // visible actually changed — e.g. a poll that re-detected the same state.

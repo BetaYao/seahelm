@@ -17,6 +17,38 @@ final class PaneStatusTests: XCTestCase {
         XCTAssertEqual(ws.statuses, [.running, .idle])
     }
 
+    func testRepresentativeIsAgentOverBusyShell() {
+        // Shell pane (npm) running forever must not mask a blocked AI agent.
+        let ws = WorktreeStatus(
+            worktreePath: "/repo/main",
+            panes: [
+                PaneStatus(paneIndex: 1, terminalID: "shell", status: .running, lastMessage: "webpack…",
+                           lastUserPrompt: "", lastUpdated: Date(), agentType: .npm),
+                PaneStatus(paneIndex: 2, terminalID: "agent", status: .waiting, lastMessage: "approve?",
+                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
+            ],
+            mostRecentPaneIndex: 1, mostRecentMessage: "webpack…", mostRecentUserPrompt: ""
+        )
+        XCTAssertEqual(ws.highestPriority, .waiting)
+        XCTAssertEqual(ws.representative?.paneIndex, 2)
+    }
+
+    func testRepresentativeStatusAndMessageSamePane() {
+        // Higher-priority pane owns both the badge status and the message.
+        let ws = WorktreeStatus(
+            worktreePath: "/repo/main",
+            panes: [
+                PaneStatus(paneIndex: 1, terminalID: "a", status: .idle, lastMessage: "idle msg",
+                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
+                PaneStatus(paneIndex: 2, terminalID: "b", status: .error, lastMessage: "boom",
+                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
+            ],
+            mostRecentPaneIndex: 1, mostRecentMessage: "idle msg", mostRecentUserPrompt: ""
+        )
+        XCTAssertEqual(ws.representative?.status, .error)
+        XCTAssertEqual(ws.representative?.lastMessage, "boom")
+    }
+
     func testWorktreeStatusHasUrgent() {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",

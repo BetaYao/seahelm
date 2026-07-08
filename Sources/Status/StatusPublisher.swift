@@ -222,7 +222,8 @@ class StatusPublisher {
                     terminalID: terminalID,
                     status: textStatus,
                     lastMessage: lastMessage,
-                    lastUserPrompt: ""
+                    lastUserPrompt: "",
+                    agentType: agentType
                 )
             }
 

@@ -237,11 +237,13 @@ class DebouncedStatusTracker {
 // MARK: - SailorStatus extensions
 
 extension SailorStatus {
+    /// Rollup priority. `waiting` (agent blocked on the user) ranks highest so it
+    /// bubbles to the worktree badge — it is the state most in need of attention.
     var priority: UInt8 {
         switch self {
-        case .error:   return 6
-        case .exited:  return 5
-        case .waiting: return 4
+        case .waiting: return 6
+        case .error:   return 5
+        case .exited:  return 4
         case .running: return 3
         case .idle:    return 2
         case .unknown: return 1
