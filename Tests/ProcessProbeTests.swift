@@ -53,6 +53,25 @@ final class ProcessProbeTests: XCTestCase {
         XCTAssertEqual(ProcessProbe.identify(procs: procs, manifests: ms), "claude")
     }
 
+    func testBundledManifestsAllLoadAndIdentify() {
+        // Every AI agent must have a loadable manifest with a process block, and
+        // the probe must map it back to the right SailorType.
+        let store = ManifestStore.shared
+        for id in ["claude", "codex", "opencode", "gemini", "cline", "goose", "amp", "aider", "cursor", "kiro"] {
+            guard let cm = store.manifest(for: id) else {
+                XCTFail("missing manifest \(id)"); continue
+            }
+            XCTAssertNotNil(cm.manifest.process, "\(id) has no process block")
+            XCTAssertNotEqual(SailorType.fromManifestId(id), .unknown, "\(id) has no SailorType")
+        }
+    }
+
+    func testIdentifyOpencodeFromProcess() {
+        let ms = ManifestStore.shared.all.map(\.manifest)
+        let procs = [p(7, 1, ["node", "/opt/opencode/bin/opencode"])]
+        XCTAssertEqual(ProcessProbe.identify(procs: procs, manifests: ms), "opencode")
+    }
+
     func testDescendantsWalk() {
         let all = [p(2, 1, ["zsh"]), p(3, 2, ["node"]), p(4, 3, ["codex"]), p(5, 1, ["unrelated"])]
         let d = ProcessProbe.descendants(of: 2, in: all).map(\.pid).sorted()

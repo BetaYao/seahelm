@@ -1,10 +1,16 @@
 {
-  "id": "agent",
+  "id": "kiro",
   "version": "2026.07.08.1",
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
   "message_skip_patterns": ["shift+tab", "accept edits", "to interrupt"],
+  "process": {
+    "exec_names": ["kiro"],
+    "argv_contains": ["kiro"],
+    "generic_runtimes": ["node","bun","deno"],
+    "env_hint": "SEAHELM_AGENT"
+  },
   "authority": "screen_only",
   "rules": [
     {
@@ -12,7 +18,7 @@
       "state": "running",
       "priority": 400,
       "region": "bottom_lines:10",
-      "contains": ["to interrupt"],
+      "any": [{ "contains": ["to interrupt"] }, { "contains": ["(thinking)"] }, { "contains": ["esc to interrupt"] }],
       "visible_working": true
     },
     {
@@ -20,14 +26,14 @@
       "state": "error",
       "priority": 700,
       "region": "bottom_lines:10",
-      "contains": ["error"]
+      "any": [{ "contains": ["error:"] }, { "line_regex": ["(?i)^\\s*error\\b"] }]
     },
     {
       "id": "waiting_prompt",
       "state": "waiting",
-      "priority": 300,
-      "region": "bottom_lines:6",
-      "any": [{ "contains": ["?"] }, { "line_regex": ["^\\s*>\\s"] }],
+      "priority": 850,
+      "region": "bottom_lines:8",
+      "any": [{ "contains": ["(y/n)"] }, { "contains": ["(yes/no)"] }, { "contains": ["do you want to proceed?"] }, { "contains": ["? "] }],
       "visible_blocker": true
     }
   ]
