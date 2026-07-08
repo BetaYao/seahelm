@@ -16,7 +16,7 @@ final class SuggestOrderTests: XCTestCase {
     func testSuggestOutcomeEnqueuesRedOrderWithOptions() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in true })
+            notify: { _ in }, runInspection: { _ in })
         coord.handle(suggestOutcome(options: ["run tests", "open PR"]))
         XCTAssertEqual(queue.all().count, 1)
         XCTAssertEqual(queue.all().first?.action.kind, .suggestNextOrder)
@@ -27,7 +27,7 @@ final class SuggestOrderTests: XCTestCase {
     func testNewSuggestReplacesOldForSameWorktree() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in true })
+            notify: { _ in }, runInspection: { _ in })
         coord.handle(suggestOutcome(options: ["old"]))
         coord.handle(suggestOutcome(options: ["new1", "new2"]))
         XCTAssertEqual(queue.all().count, 1)
@@ -37,7 +37,7 @@ final class SuggestOrderTests: XCTestCase {
     func testEmptyOptionsEnqueuesNothing() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in true })
+            notify: { _ in }, runInspection: { _ in })
         coord.handle(suggestOutcome(options: []))
         XCTAssertTrue(queue.all().isEmpty)
     }
@@ -45,7 +45,7 @@ final class SuggestOrderTests: XCTestCase {
     func testUserPromptClearsExistingSuggestOrder() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in true })
+            notify: { _ in }, runInspection: { _ in })
         // Enqueue a suggest order for /wt
         coord.handle(suggestOutcome(options: ["run tests"]))
         XCTAssertEqual(queue.all().count, 1, "suggest order should be enqueued")

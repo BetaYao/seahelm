@@ -12,8 +12,7 @@ final class FirstMateCoordinatorTests: XCTestCase {
         var notified: [FirstMateActionKind] = []
         let q = PendingOrdersQueue()
         let c = FirstMateCoordinator(config: .default, queue: q,
-            notify: { notified.append($0.kind) }, runInspection: { _ in },
-            hasOrders: { _ in true })
+            notify: { notified.append($0.kind) }, runInspection: { _ in })
         c.handle(tx(.error))
         XCTAssertEqual(notified, [.watchError])
         XCTAssertTrue(q.all().isEmpty)
@@ -22,23 +21,16 @@ final class FirstMateCoordinatorTests: XCTestCase {
     func testCompletionRunsInspection() {
         var inspected = 0
         let c = FirstMateCoordinator(config: .default, queue: PendingOrdersQueue(),
-            notify: { _ in }, runInspection: { if $0.kind == .inspect { inspected += 1 } },
-            hasOrders: { _ in false })
+            notify: { _ in }, runInspection: { if $0.kind == .inspect { inspected += 1 } })
         c.handle(tx(.idle, completion: true))
         XCTAssertEqual(inspected, 1)
     }
 
-    func testSuggestNextOrderEnqueuedOnlyWhenOrdersExist() {
-        let q1 = PendingOrdersQueue()
-        let c1 = FirstMateCoordinator(config: .default, queue: q1,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in false })
-        c1.handle(tx(.idle, completion: false))
-        XCTAssertTrue(q1.all().isEmpty, "no orders → no enqueue")
-
-        let q2 = PendingOrdersQueue()
-        let c2 = FirstMateCoordinator(config: .default, queue: q2,
-            notify: { _ in }, runInspection: { _ in }, hasOrders: { _ in true })
-        c2.handle(tx(.idle, completion: false))
-        XCTAssertEqual(q2.all().map(\.action.kind), [.suggestNextOrder])
+    func testBareIdleEnqueuesNothing() {
+        let q = PendingOrdersQueue()
+        let c = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        c.handle(tx(.idle, completion: false))
+        XCTAssertTrue(q.all().isEmpty, "bare idle no longer auto-suggests")
     }
 }

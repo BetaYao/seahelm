@@ -7,7 +7,6 @@ struct FirstMateConfig: Codable, Equatable {
     var inspectionCommands: [String]
     var autoReview: Bool
     var autoCommit: Bool
-    var autoSuggestNextOrder: Bool
     var channels: [String]
 
     static let `default` = FirstMateConfig(
@@ -17,20 +16,18 @@ struct FirstMateConfig: Codable, Equatable {
         inspectionCommands: [],
         autoReview: true,
         autoCommit: false,
-        autoSuggestNextOrder: true,
         channels: ["local"]
     )
 
     init(enabled: Bool, waitingTimeoutSec: Double, autoInspect: Bool,
          inspectionCommands: [String], autoReview: Bool, autoCommit: Bool,
-         autoSuggestNextOrder: Bool, channels: [String]) {
+         channels: [String]) {
         self.enabled = enabled
         self.waitingTimeoutSec = waitingTimeoutSec
         self.autoInspect = autoInspect
         self.inspectionCommands = inspectionCommands
         self.autoReview = autoReview
         self.autoCommit = autoCommit
-        self.autoSuggestNextOrder = autoSuggestNextOrder
         self.channels = channels
     }
 
@@ -43,7 +40,6 @@ struct FirstMateConfig: Codable, Equatable {
         inspectionCommands = try c.decodeIfPresent([String].self, forKey: .inspectionCommands) ?? d.inspectionCommands
         autoReview = try c.decodeIfPresent(Bool.self, forKey: .autoReview) ?? d.autoReview
         autoCommit = try c.decodeIfPresent(Bool.self, forKey: .autoCommit) ?? d.autoCommit
-        autoSuggestNextOrder = try c.decodeIfPresent(Bool.self, forKey: .autoSuggestNextOrder) ?? d.autoSuggestNextOrder
         channels = try c.decodeIfPresent([String].self, forKey: .channels) ?? d.channels
     }
 }

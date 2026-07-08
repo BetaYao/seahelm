@@ -107,8 +107,6 @@ enum FirstMate {
             if config.autoCommit {
                 actions.append(make(.autoCommit, .green, "\(t.branch) auto-commit"))
             }
-        } else if t.newStatus == .idle && config.autoSuggestNextOrder {
-            actions.append(make(.suggestNextOrder, .red, "\(t.branch) idle, suggest next?"))
         }
 
         return actions

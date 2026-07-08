@@ -8,18 +8,15 @@ final class FirstMateCoordinator {
     private let queue: PendingOrdersQueue
     private let notify: (FirstMateAction) -> Void
     private let runInspection: (FirstMateAction) -> Void
-    private let hasOrders: (String) -> Bool
 
     init(config: FirstMateConfig,
          queue: PendingOrdersQueue,
          notify: @escaping (FirstMateAction) -> Void,
-         runInspection: @escaping (FirstMateAction) -> Void,
-         hasOrders: @escaping (String) -> Bool) {
+         runInspection: @escaping (FirstMateAction) -> Void) {
         self.config = config
         self.queue = queue
         self.notify = notify
         self.runInspection = runInspection
-        self.hasOrders = hasOrders
     }
 
     func handle(_ outcome: IngestOutcome) {
@@ -51,12 +48,9 @@ final class FirstMateCoordinator {
                 }
             case .red:
                 switch action.kind {
-                case .suggestNextOrder where action.options != nil:
+                case .suggestNextOrder:
                     // Agent-supplied suggestion: replace any prior one for this worktree.
                     queue.upsert(action)
-                case .suggestNextOrder:
-                    // Rule-derived "ask next order": only when other orders already exist.
-                    if hasOrders(action.worktreePath) { queue.enqueue(action) }
                 default:
                     queue.enqueue(action)
                 }

@@ -9,7 +9,6 @@ final class FirstMateConfigTests: XCTestCase {
         XCTAssertTrue(c.autoInspect)
         XCTAssertTrue(c.autoReview)
         XCTAssertFalse(c.autoCommit)
-        XCTAssertTrue(c.autoSuggestNextOrder)
     }
 
     func testConfigDecodesMissingFirstMateAsDefault() throws {
@@ -22,7 +21,7 @@ final class FirstMateConfigTests: XCTestCase {
         let json = """
         {"firstMate":{"enabled":false,"waitingTimeoutSec":10,"autoInspect":false,
         "inspectionCommands":["make test"],"autoReview":false,"autoCommit":true,
-        "autoSuggestNextOrder":false,"channels":["local"]}}
+        "channels":["local"]}}
         """.data(using: .utf8)!
         let cfg = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertFalse(cfg.firstMate.enabled)

@@ -91,9 +91,6 @@ class TabCoordinator {
             },
             runInspection: { [weak self] action in
                 self?.runFirstMateInspection(action)
-            },
-            hasOrders: { worktreePath in
-                WorktreeTaskStore.shared.task(forWorktree: worktreePath) != nil
             }
         )
         ShipLog.shared.onOutcome = { [weak self] outcome in
