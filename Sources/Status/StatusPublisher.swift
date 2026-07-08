@@ -168,6 +168,7 @@ class StatusPublisher {
             // ScanDecoder runs detect() + extractActivityEvents() — do NOT hold the lock here
             let detectedSailorType = SailorType.detect(fromLowercased: lowerContent)
             let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
 
             // Detect status first (without roundDuration); tracker update gives us roundDur below
@@ -178,6 +179,7 @@ class StatusPublisher {
                 shellInfo: nil,
                 content: content,
                 agentDef: agentDef,
+                manifest: manifest,
                 commandLine: nil,
                 agentType: agentType,
                 roundDuration: 0,

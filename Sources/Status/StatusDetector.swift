@@ -23,6 +23,8 @@ class StatusDetector {
         shellInfo: ShellPhaseInfo?,
         content: String,
         agentDef: SailorDef?,
+        manifest: CompiledManifest? = nil,
+        osc: (title: String, progress: String) = ("", ""),
         lowercasedContent: String? = nil
     ) -> SailorStatus {
         // Priority 1: Process lifecycle overrides everything
@@ -48,10 +50,17 @@ class StatusDetector {
             }
         }
 
-        // Priority 3: Text pattern matching (fallback)
-        if let agent = agentDef, !content.isEmpty {
+        // Priority 3: Manifest rule engine (preferred), else legacy SailorDef rules.
+        if !content.isEmpty {
             let lower = lowercasedContent ?? content.lowercased()
-            return agent.detectStatus(fromLowercased: lower)
+            if let manifest {
+                let d = manifest.evaluate(DetectionInput(
+                    screen: lower, oscTitle: osc.title, oscProgress: osc.progress))
+                return d.state == .unknown ? manifest.defaultStatus : d.state
+            }
+            if let agent = agentDef {
+                return agent.detectStatus(fromLowercased: lower)
+            }
         }
 
         return .unknown

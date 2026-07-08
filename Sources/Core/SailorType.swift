@@ -95,6 +95,17 @@ enum SailorType: String, Codable, CaseIterable {
         }
     }
 
+    /// Manifest id used to resolve this agent's detection rules from ManifestStore.
+    /// Known AI agents map to their own id; the rest share the generic "agent"
+    /// manifest (which lists them as aliases).
+    var manifestId: String {
+        switch self {
+        case .claudeCode: return "claude"
+        case .codex:      return "codex"
+        default:          return "agent"
+        }
+    }
+
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,
