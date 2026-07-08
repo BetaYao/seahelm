@@ -65,10 +65,35 @@ enum WebhookEventType: String {
 struct WebhookEvent {
     let source: String
     let sessionId: String
+    /// Absolute path to the agent's native session/transcript file, when the
+    /// payload carries one (Claude's `transcript_path`, or a generic payload's
+    /// `session_path`). Used to build a path-kind `AgentSessionRef` for agents
+    /// that resume by path. Nil when absent.
+    let sessionPath: String?
     let event: WebhookEventType
     let cwd: String
     let timestamp: String?
     let data: [String: Any]?
+
+    /// Explicit memberwise init with `sessionPath` defaulted so existing call
+    /// sites (which predate the field) keep compiling.
+    init(
+        source: String,
+        sessionId: String,
+        sessionPath: String? = nil,
+        event: WebhookEventType,
+        cwd: String,
+        timestamp: String?,
+        data: [String: Any]?
+    ) {
+        self.source = source
+        self.sessionId = sessionId
+        self.sessionPath = sessionPath
+        self.event = event
+        self.cwd = cwd
+        self.timestamp = timestamp
+        self.data = data
+    }
 
     /// Parse from JSON data. Supports generic protocol and native hook payloads.
     static func parse(from jsonData: Data) throws -> WebhookEvent {
@@ -97,6 +122,7 @@ struct WebhookEvent {
         return WebhookEvent(
             source: source,
             sessionId: sessionId,
+            sessionPath: json["session_path"] as? String,
             event: event,
             cwd: cwd,
             timestamp: json["timestamp"] as? String,
@@ -124,6 +150,8 @@ struct WebhookEvent {
         return WebhookEvent(
             source: source,
             sessionId: sessionId,
+            // Claude Code's `transcript_path` is the session's on-disk file.
+            sessionPath: json["transcript_path"] as? String ?? json["session_path"] as? String,
             event: event,
             cwd: cwd,
             timestamp: nil,

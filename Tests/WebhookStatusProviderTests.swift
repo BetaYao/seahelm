@@ -89,22 +89,34 @@ final class WebhookStatusProviderTests: XCTestCase {
         wait(for: [fired], timeout: 0.3)
     }
 
-    func testAgentSessionResolvedSkipsUnsupportedSource() {
-        let fired = expectation(description: "should not fire for codex in step 1")
-        fired.isInverted = true
-        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+    func testAgentSessionResolvedFiresForCodex() {
+        let fired = expectation(description: "agent session resolved for codex")
+        provider.onAgentSessionResolved = { _, ref in
+            XCTAssertEqual(ref.agent, "codex")
+            fired.fulfill()
+        }
         let codexEvent = WebhookEvent(source: "codex", sessionId: uuid, event: .sessionStart,
                                       cwd: "/projects/repo/main", timestamp: nil, data: nil)
         provider.handleEvent(codexEvent)
+        wait(for: [fired], timeout: 1.0)
+    }
+
+    func testAgentSessionResolvedSkipsUnsupportedSource() {
+        let fired = expectation(description: "should not fire for unsupported agent")
+        fired.isInverted = true
+        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        let event = WebhookEvent(source: "gemini", sessionId: uuid, event: .sessionStart,
+                                 cwd: "/projects/repo/main", timestamp: nil, data: nil)
+        provider.handleEvent(event)
         wait(for: [fired], timeout: 0.3)
     }
 
     func testAgentSessionResolvedSkipsInvalidSessionId() {
-        let fired = expectation(description: "should not fire for non-uuid id")
+        let fired = expectation(description: "should not fire for shell-unsafe id")
         fired.isInverted = true
         provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
-        // "s1" is not in the UUID alphabet → AgentSessionRef rejects it.
-        provider.handleEvent(makeEvent(sessionId: "s1", event: .sessionStart, cwd: "/projects/repo/main"))
+        // A space makes the id shell-unsafe → AgentSessionRef rejects it.
+        provider.handleEvent(makeEvent(sessionId: "bad id", event: .sessionStart, cwd: "/projects/repo/main"))
         wait(for: [fired], timeout: 0.3)
     }
 

@@ -241,9 +241,27 @@ class TabCoordinator {
     /// deleted worktree doesn't leave timestamps/layouts/session names behind
     /// forever. Runs once per loadWorkspaces.
     private func pruneStaleWorktreeConfigEntries() {
+        // Probe every candidate path up front, concurrently and with a timeout.
+        // A synchronous `fileExists` per path on the main thread would beachball
+        // the app when the paths live on a removable volume that was ejected and
+        // remounted (stale-mount `stat()` blocks forever). `missingPaths` only
+        // reports paths that *definitively* don't exist, so an unreachable drive
+        // never causes us to prune (and destroy) the user's saved workspaces.
+        var candidates = Set<String>()
+        candidates.formUnion(config.worktreeStartedAt.keys)
+        candidates.formUnion(config.worktreeLastActivityAt.keys)
+        candidates.formUnion(config.splitLayouts.keys)
+        candidates.formUnion(config.focusedPaneIds.keys)
+        candidates.formUnion(config.activeWorktreePaths.values)
+        if let selected = config.selectedWorktreePath { candidates.insert(selected) }
+        candidates.formUnion(config.cardOrder)
+
+        let missing = PathProbe.missingPaths(from: Array(candidates))
+        guard !missing.isEmpty else { return }
+
         var changed = false
         func prune<V>(_ map: inout [String: V]) {
-            for path in map.keys where !FileManager.default.fileExists(atPath: path) {
+            for path in map.keys where missing.contains(path) {
                 map.removeValue(forKey: path)
                 changed = true
             }
@@ -252,15 +270,15 @@ class TabCoordinator {
         prune(&config.worktreeLastActivityAt)
         prune(&config.splitLayouts)
         prune(&config.focusedPaneIds)
-        for (repo, worktree) in config.activeWorktreePaths where !FileManager.default.fileExists(atPath: worktree) {
+        for (repo, worktree) in config.activeWorktreePaths where missing.contains(worktree) {
             config.activeWorktreePaths.removeValue(forKey: repo)
             changed = true
         }
-        if let selected = config.selectedWorktreePath, !FileManager.default.fileExists(atPath: selected) {
+        if let selected = config.selectedWorktreePath, missing.contains(selected) {
             config.selectedWorktreePath = nil
             changed = true
         }
-        let prunedOrder = config.cardOrder.filter { FileManager.default.fileExists(atPath: $0) }
+        let prunedOrder = config.cardOrder.filter { !missing.contains($0) }
         if prunedOrder != config.cardOrder {
             config.cardOrder = prunedOrder
             changed = true
@@ -348,7 +366,11 @@ class TabCoordinator {
                 // Self-heal: a workspace path whose directory vanished (deleted
                 // worktree/repo) is dropped instead of resurrected as a phantom
                 // "main" tab on every launch.
-                guard FileManager.default.fileExists(atPath: repoPath) else {
+                // Bounded probe: a stale removable-mount `stat()` would otherwise
+                // block this background discovery forever, so the launch
+                // completion never fires and the app looks hung. `PathProbe`
+                // treats an unreachable path as present (kept), not pruned.
+                guard PathProbe.exists(repoPath) else {
                     NSLog("[TabCoordinator] Pruning nonexistent workspace path: \(repoPath)")
                     continue
                 }

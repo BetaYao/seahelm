@@ -131,7 +131,7 @@ class WebhookStatusProvider {
             // revivals. `worktreeCreate` already returned early above, so its
             // cross-worktree session id never reaches here.
             if event.data?["agent_id"] == nil,
-               let ref = AgentSessionRef(source: event.source, sessionId: event.sessionId) {
+               let ref = AgentSessionRef(source: event.source, sessionId: event.sessionId, sessionPath: event.sessionPath) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onAgentSessionResolved?(worktreePath, ref)
                 }

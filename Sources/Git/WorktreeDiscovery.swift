@@ -14,6 +14,39 @@ struct WorktreeInfo {
 enum WorktreeDiscovery {
     private static let backgroundQueue = DispatchQueue(label: "com.seahelm.git-discovery", qos: .userInitiated, attributes: .concurrent)
 
+    /// Upper bound on any single git invocation. A repo on a removable volume
+    /// that was ejected and remounted can leave git blocked in uninterruptible
+    /// kernel I/O; without a bound `waitUntilExit()` never returns and the whole
+    /// launch state-restore pipeline hangs behind it.
+    private static let gitTimeout: TimeInterval = 5
+
+    /// Runs `process` to completion, or terminates it after `timeout`. Returns
+    /// `true` only if the process exited on its own within the deadline. On
+    /// timeout the caller must NOT read the output pipe — the child may still be
+    /// stuck holding the write end, which would re-block the read.
+    private static func runWithTimeout(_ process: Process, timeout: TimeInterval) -> Bool {
+        let group = DispatchGroup()
+        group.enter()
+        process.terminationHandler = { _ in group.leave() }
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            return false
+        }
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            // Best-effort reap; a process wedged in kernel I/O won't die on
+            // SIGTERM, so give up after a beat and leak the worker rather than
+            // the caller.
+            _ = group.wait(timeout: .now() + 1)
+            process.terminationHandler = nil
+            return false
+        }
+        process.terminationHandler = nil
+        return true
+    }
+
     /// Cache for repo root lookups (path -> repo root)
     private static var repoRootCache: [String: String] = [:]
     private static let cacheLock = NSLock()
@@ -68,13 +101,7 @@ enum WorktreeDiscovery {
         process.standardOutput = pipe
         process.standardError = Pipe()
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-
+        guard runWithTimeout(process, timeout: gitTimeout) else { return nil }
         guard process.terminationStatus == 0 else { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)
@@ -125,11 +152,8 @@ enum WorktreeDiscovery {
         process.standardOutput = pipe
         process.standardError = Pipe()
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            NSLog("Failed to run git worktree list: \(error)")
+        guard runWithTimeout(process, timeout: gitTimeout) else {
+            NSLog("git worktree list timed out or failed at \(repoPath)")
             return []
         }
 
