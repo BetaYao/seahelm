@@ -187,20 +187,25 @@ class StatusPublisher {
             ).decode()
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
-            // Keep tracker in sync for roundDuration tracking
-            let textStatus: SailorStatus
-            if case .screenObserved(let s, _, _, _, _, _, _) = partialDecoded?.kind { textStatus = s } else { textStatus = .unknown }
+            // Rich detection gives us the visible_idle signal for debounce.
+            let detection = detector.detectDetailed(
+                processStatus: processStatus, shellInfo: nil, content: content,
+                manifest: manifest, lowercasedContent: lowerContent)
+            let textStatus = detection.state
 
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: textStatus)
+            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle)
+            // The debounced/committed status drives both pipelines, so a held
+            // running→idle flip does not leak into ShipLog either.
+            let committedStatus = tracker.currentStatus
             let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             lastMessages[terminalID] = lastMessage
             let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
             if statusChanged {
-                if textStatus == .running && oldStatus != .running {
+                if committedStatus == .running && oldStatus != .running {
                     runningStartTimes[terminalID] = Date()
-                } else if textStatus != .running && oldStatus == .running {
+                } else if committedStatus != .running && oldStatus == .running {
                     runningStartTimes[terminalID] = nil
                 }
             }
@@ -208,10 +213,10 @@ class StatusPublisher {
 
             // Rebuild with real roundDuration now that tracker has been updated
             if let partial = partialDecoded,
-               case .screenObserved(let s, let msg, let acts, let cl, let at, _, _) = partial.kind {
+               case .screenObserved(_, let msg, let acts, let cl, let at, _, _) = partial.kind {
                 let normalized = NormalizedEvent(
                     terminalID: terminalID, source: .scan,
-                    kind: .screenObserved(status: s, message: msg, activity: acts,
+                    kind: .screenObserved(status: committedStatus, message: msg, activity: acts,
                                           commandLine: cl, agentType: at,
                                           roundDuration: roundDur, tasks: webhookTasks))
                 ShipLog.shared.ingest(normalized)
@@ -220,7 +225,7 @@ class StatusPublisher {
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(
                     terminalID: terminalID,
-                    status: textStatus,
+                    status: committedStatus,
                     lastMessage: lastMessage,
                     lastUserPrompt: "",
                     agentType: agentType

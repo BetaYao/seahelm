@@ -271,6 +271,37 @@ final class DebouncedStatusTrackerTests: XCTestCase {
         tracker.reset()
         XCTAssertEqual(tracker.currentStatus, .unknown)
     }
+
+    func testPendingIdleHold_HeldUntilConfirmed() {
+        let tracker = DebouncedStatusTracker()
+        tracker.pendingIdleConfirmations = 2
+        tracker.update(status: .running)
+        // First plain idle (no visible signal) is held.
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: false))
+        XCTAssertEqual(tracker.currentStatus, .running)
+        // Second confirmation commits.
+        XCTAssertTrue(tracker.update(status: .idle, visibleIdle: false))
+        XCTAssertEqual(tracker.currentStatus, .idle)
+    }
+
+    func testVisibleIdleBypassesHold() {
+        let tracker = DebouncedStatusTracker()
+        tracker.pendingIdleConfirmations = 3
+        tracker.update(status: .running)
+        XCTAssertTrue(tracker.update(status: .idle, visibleIdle: true))
+        XCTAssertEqual(tracker.currentStatus, .idle)
+    }
+
+    func testPendingIdleResetByRunningReobservation() {
+        let tracker = DebouncedStatusTracker()
+        tracker.pendingIdleConfirmations = 2
+        tracker.update(status: .running)
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: false)) // held
+        XCTAssertFalse(tracker.update(status: .running, visibleIdle: false)) // back to running, no change
+        // Counter reset: next idle is held again, not committed.
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: false))
+        XCTAssertEqual(tracker.currentStatus, .running)
+    }
 }
 
 // MARK: - SailorStatus Priority Tests
