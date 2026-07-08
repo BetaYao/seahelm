@@ -154,7 +154,10 @@ enum SessionManager {
             // it spawns, e.g. seahelm-suggest) can reach the multiplexer socket
             // and knows it is running inside a seahelm pane.
             let socketPath = ControlSocketServer.defaultSocketPath()
+            // SEAHELM_PANE_ID is the stable session name so an agent can reference
+            // its own pane across app restarts (the control API resolves it).
             let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
+                + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
             let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
             return [[ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
         default:

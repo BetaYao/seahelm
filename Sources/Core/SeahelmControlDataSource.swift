@@ -31,13 +31,14 @@ final class SeahelmControlDataSource: ControlDataSource {
                 project: s.project,
                 agentType: s.agentType.rawValue,
                 status: s.status.rawValue,
-                lastMessage: s.lastMessage
+                lastMessage: s.lastMessage,
+                sessionName: StationRegistry.shared.station(forId: s.id)?.sessionName ?? ""
             )
         }
     }
 
     func readPane(paneId: String, source: String, lines: Int) -> String? {
-        guard let station = StationRegistry.shared.station(forId: paneId) else { return nil }
+        guard let station = station(for: paneId) else { return nil }
         // Ghostty reads must go through the surface; readViewportText already
         // takes the ghosttyLock internally.
         guard let text = station.readViewportText() else { return "" }
@@ -47,7 +48,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func sendText(paneId: String, text: String, enter: Bool) -> Bool {
-        guard let station = StationRegistry.shared.station(forId: paneId) else { return false }
+        guard let station = station(for: paneId) else { return false }
         runOnMain {
             if !text.isEmpty { station.sendText(text) }
             if enter { station.sendEnterKey() }
@@ -56,7 +57,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func sendKeys(paneId: String, keys: [String]) -> Bool {
-        guard let station = StationRegistry.shared.station(forId: paneId) else { return false }
+        guard let station = station(for: paneId) else { return false }
         runOnMain {
             for key in keys {
                 if ControlKeys.isEnter(key) {
@@ -70,16 +71,28 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func paneStatus(paneId: String) -> String? {
-        ShipLog.shared.sailor(for: paneId)?.status.rawValue
+        guard let sid = station(for: paneId)?.id else { return nil }
+        return ShipLog.shared.sailor(for: sid)?.status.rawValue
     }
 
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
         guard let splitHandler else { return nil }
         // right/left place panes side by side; down/up stack them.
         let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
+        // Resolve session-name references to the canonical station id the split
+        // machinery keys on; nil = split the focused pane.
+        let targetStationId = paneId.flatMap { station(for: $0)?.id }
+        if paneId != nil && targetStationId == nil { return nil }
         var newId: String?
-        runOnMain { newId = splitHandler(paneId, axis, focus) }
+        runOnMain { newId = splitHandler(targetStationId, axis, focus) }
         return newId
+    }
+
+    /// Resolve a pane reference that may be a per-instance station id OR the
+    /// stable zmx session name agents receive as SEAHELM_PANE_ID.
+    private func station(for paneId: String) -> Station? {
+        StationRegistry.shared.station(forId: paneId)
+            ?? StationRegistry.shared.station(forSessionName: paneId)
     }
 
     /// Ghostty input must run on the main thread; the control socket serves each

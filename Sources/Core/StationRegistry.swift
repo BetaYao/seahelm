@@ -23,6 +23,13 @@ class StationRegistry {
         stations.values.first { $0.surface == surface }
     }
 
+    /// Find a station by its persistent zmx session name. Unlike the per-instance
+    /// station id, the session name is stable across app restarts, so it is what
+    /// agents receive as SEAHELM_PANE_ID and use to reference their own pane.
+    func station(forSessionName name: String) -> Station? {
+        stations.values.first { $0.sessionName == name }
+    }
+
     func removeAll() {
         stations.removeAll()
     }

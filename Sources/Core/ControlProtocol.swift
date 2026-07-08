@@ -12,18 +12,19 @@ import Foundation
 
 /// A pane's identity + state for `session.snapshot` / `pane.list`.
 struct PaneSnapshot {
-    let paneId: String        // stable terminal ID (durable, unlike herdr's compact ids)
+    let paneId: String        // per-instance station ID
     let worktreePath: String
     let branch: String
     let project: String
     let agentType: String
     let status: String
     let lastMessage: String
+    var sessionName: String = ""  // stable id agents get as SEAHELM_PANE_ID
 
     var dict: [String: Any] {
-        ["pane_id": paneId, "worktree_path": worktreePath, "branch": branch,
-         "project": project, "agent_type": agentType, "status": status,
-         "last_message": lastMessage]
+        ["pane_id": paneId, "session_name": sessionName, "worktree_path": worktreePath,
+         "branch": branch, "project": project, "agent_type": agentType,
+         "status": status, "last_message": lastMessage]
     }
 }
 

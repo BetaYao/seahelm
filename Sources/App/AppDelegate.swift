@@ -34,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             CodexHooksSetup.ensureHooksConfigured()
             SeahelmSuggestInstaller.ensureInstalled()
             SeahelmCliInstaller.ensureInstalled()
+            SeahelmSkillInstaller.ensureInstalled()
         }
         NSAppearance.current = NSApp.effectiveAppearance
 
