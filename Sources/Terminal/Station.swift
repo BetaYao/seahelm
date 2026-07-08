@@ -17,6 +17,17 @@ class Station {
     private(set) var surface: ghostty_surface_t?
     private weak var containerView: NSView?
 
+    /// Latest OSC signals Ghostty surfaced for this pane, fed to the detection
+    /// engine's osc_title / osc_progress regions. Written from Ghostty's action
+    /// callback thread, read from the status-poll thread — guarded by oscLock.
+    private let oscLock = NSLock()
+    private var _oscTitle = ""
+    private var _oscProgress = ""
+    var oscTitle: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscTitle }
+    var oscProgress: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscProgress }
+    func setOscTitle(_ t: String) { oscLock.lock(); _oscTitle = t; oscLock.unlock() }
+    func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
+
     /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
     /// Persistence backend for the sessionName above.

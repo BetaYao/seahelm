@@ -188,9 +188,10 @@ class StatusPublisher {
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
             // Rich detection gives us the visible_idle signal for debounce.
+            let osc = (title: surface.oscTitle, progress: surface.oscProgress)
             let detection = detector.detectDetailed(
                 processStatus: processStatus, shellInfo: nil, content: content,
-                manifest: manifest, lowercasedContent: lowerContent)
+                manifest: manifest, osc: osc, lowercasedContent: lowerContent)
             let textStatus = detection.state
 
             lock.lock()

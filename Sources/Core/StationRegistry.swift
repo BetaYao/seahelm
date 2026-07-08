@@ -17,6 +17,12 @@ class StationRegistry {
         stations[id]
     }
 
+    /// Find the station owning a given Ghostty surface (for routing OSC / action
+    /// callbacks back to a pane). Linear scan — the station count is small.
+    func station(forSurface surface: ghostty_surface_t) -> Station? {
+        stations.values.first { $0.surface == surface }
+    }
+
     func removeAll() {
         stations.removeAll()
     }
