@@ -11,7 +11,7 @@ import Foundation
 /// On timeout we treat the path as **present**, never absent. Callers that prune
 /// config on absence must not destroy a user's saved workspaces just because the
 /// drive they live on is temporarily unreachable.
-enum PathProbe {
+enum FileSystemProbe {
     /// Bounded `fileExists`. Returns the real result if the `stat()` completes
     /// within `timeout`, otherwise `true` ("assume present").
     static func exists(_ path: String, timeout: TimeInterval = 2) -> Bool {

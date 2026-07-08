@@ -256,7 +256,7 @@ class TabCoordinator {
         if let selected = config.selectedWorktreePath { candidates.insert(selected) }
         candidates.formUnion(config.cardOrder)
 
-        let missing = PathProbe.missingPaths(from: Array(candidates))
+        let missing = FileSystemProbe.missingPaths(from: Array(candidates))
         guard !missing.isEmpty else { return }
 
         var changed = false
@@ -368,9 +368,9 @@ class TabCoordinator {
                 // "main" tab on every launch.
                 // Bounded probe: a stale removable-mount `stat()` would otherwise
                 // block this background discovery forever, so the launch
-                // completion never fires and the app looks hung. `PathProbe`
+                // completion never fires and the app looks hung. `FileSystemProbe`
                 // treats an unreachable path as present (kept), not pruned.
-                guard PathProbe.exists(repoPath) else {
+                guard FileSystemProbe.exists(repoPath) else {
                     NSLog("[TabCoordinator] Pruning nonexistent workspace path: \(repoPath)")
                     continue
                 }
