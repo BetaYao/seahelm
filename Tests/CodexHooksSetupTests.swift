@@ -35,7 +35,7 @@ final class CodexHooksSetupTests: XCTestCase {
         let dir = try makeTempDir()
         let url = dir.appendingPathComponent("hooks.json")
 
-        XCTAssertTrue(CodexHooksSetup.ensureHooksJSONForTests(at: url, port: 17070))
+        XCTAssertTrue(CodexHooksSetup.ensureHooksJSONForTests(at: url))
 
         let data = try Data(contentsOf: url)
         let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -56,7 +56,7 @@ final class CodexHooksSetupTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: existing, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: url)
 
-        XCTAssertTrue(CodexHooksSetup.ensureHooksJSONForTests(at: url, port: 17070))
+        XCTAssertTrue(CodexHooksSetup.ensureHooksJSONForTests(at: url))
 
         let updatedData = try Data(contentsOf: url)
         let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: updatedData) as? [String: Any])

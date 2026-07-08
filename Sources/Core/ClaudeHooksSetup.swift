@@ -7,7 +7,7 @@ enum ClaudeHooksSetup {
     /// Hook events seahelm requires. Now uses a `command` hook running the
     /// seahelm-hook bridge (socket-primary, HTTP fallback) instead of a direct
     /// `type:"http"` hook — moves reporting onto the fs-scoped control socket.
-    private static func requiredHooks(port: UInt16) -> [String: [[String: Any]]] {
+    private static func requiredHooks() -> [String: [[String: Any]]] {
         let hookEntry: [String: Any] = ["type": "command", "command": SeahelmHookInstaller.scriptPath()]
         let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]
         return [
@@ -47,7 +47,7 @@ enum ClaudeHooksSetup {
     /// Check and patch ~/.claude/settings.json on app launch.
     /// Returns true if the file was modified.
     @discardableResult
-    static func ensureHooksConfigured(port: UInt16 = 7070) -> Bool {
+    static func ensureHooksConfigured() -> Bool {
         let settingsPath = NSString("~/.claude/settings.json").expandingTildeInPath
         let settingsURL = URL(fileURLWithPath: settingsPath)
 
@@ -65,7 +65,7 @@ enum ClaudeHooksSetup {
         }
 
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
-        let required = requiredHooks(port: port)
+        let required = requiredHooks()
         var changed = false
 
         for (event, config) in required {

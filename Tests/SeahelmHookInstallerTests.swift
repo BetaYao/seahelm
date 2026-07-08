@@ -3,13 +3,14 @@ import XCTest
 
 final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
-        let s = SeahelmHookInstaller.scriptContents(port: 7070)
+        let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v1"))
-        XCTAssertTrue(s.contains("nc -U \"$sock\""))     // socket primary (Apple-nc compatible)
+        XCTAssertTrue(s.contains("seahelm-hook v2"))
+        XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
         XCTAssertTrue(s.contains("block_b64"))           // block extraction
         XCTAssertTrue(s.contains("base64 -d"))
-        XCTAssertTrue(s.contains("/webhook"))            // HTTP fallback retained
+        XCTAssertFalse(s.contains("/webhook"))           // HTTP fallback removed
+        XCTAssertFalse(s.contains("curl"))
         XCTAssertTrue(s.contains("\"method\":\"hook\""))
     }
 
@@ -17,11 +18,11 @@ final class SeahelmHookInstallerTests: XCTestCase {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("seahelm-hook-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
-        XCTAssertTrue(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp, port: 7070))
+        XCTAssertTrue(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp))
         let path = tmp.appendingPathComponent("seahelm-hook").path
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         XCTAssertEqual(((attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111, 0o111)
-        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp, port: 7070)) // idempotent
+        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp)) // idempotent
     }
 }
 

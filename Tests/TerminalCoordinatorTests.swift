@@ -47,6 +47,6 @@ final class TerminalCoordinatorTests: XCTestCase {
     func testCleanup() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.cleanup()
-        XCTAssertNil(coordinator.webhookServer)
+        XCTAssertNil(coordinator.controlSocketServer)
     }
 }

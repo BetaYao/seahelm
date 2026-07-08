@@ -9,7 +9,6 @@ class TerminalCoordinator {
     weak var delegate: TerminalCoordinatorDelegate?
     var config: Config
     let stationManager = StationManager()
-    var webhookServer: WebhookServer?
     var controlSocketServer: ControlSocketServer?
 
     /// Closure to access the active SplitContainerView for split pane operations.
@@ -257,8 +256,8 @@ class TerminalCoordinator {
     // MARK: - Cleanup
 
     func cleanup() {
-        webhookServer?.stop()
-        webhookServer = nil
+        controlSocketServer?.stop()
+        controlSocketServer = nil
         stationManager.removeAll()
     }
 }

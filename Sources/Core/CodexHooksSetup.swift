@@ -15,15 +15,15 @@ enum CodexHooksSetup {
         "Stop",
     ]
 
-    private static func hookCommand(port: UInt16) -> String {
+    private static func hookCommand() -> String {
         "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) >/dev/null 2>&1 || true'"
     }
 
-    private static func hookConfig(port: UInt16) -> [[String: Any]] {
+    private static func hookConfig() -> [[String: Any]] {
         [[
             "hooks": [[
                 "type": "command",
-                "command": hookCommand(port: port),
+                "command": hookCommand(),
             ]],
         ]]
     }
@@ -31,7 +31,7 @@ enum CodexHooksSetup {
     /// Check and patch ~/.codex/config.toml + ~/.codex/hooks.json on app launch.
     /// Returns true if either file was modified.
     @discardableResult
-    static func ensureHooksConfigured(port: UInt16 = 7070) -> Bool {
+    static func ensureHooksConfigured() -> Bool {
         let codexDir = URL(fileURLWithPath: NSString("~/.codex").expandingTildeInPath)
         do {
             try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
@@ -41,7 +41,7 @@ enum CodexHooksSetup {
         }
 
         let configChanged = ensureCodexHooksFeatureEnabled(at: codexDir.appendingPathComponent("config.toml"))
-        let hooksChanged = ensureHooksJSON(at: codexDir.appendingPathComponent("hooks.json"), port: port)
+        let hooksChanged = ensureHooksJSON(at: codexDir.appendingPathComponent("hooks.json"))
         return configChanged || hooksChanged
     }
 
@@ -111,7 +111,7 @@ enum CodexHooksSetup {
         }
     }
 
-    private static func ensureHooksJSON(at hooksURL: URL, port: UInt16) -> Bool {
+    private static func ensureHooksJSON(at hooksURL: URL) -> Bool {
         var root: [String: Any]
         if let data = try? Data(contentsOf: hooksURL),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -121,10 +121,10 @@ enum CodexHooksSetup {
         }
 
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        let config = hookConfig(port: port)
+        let config = hookConfig()
         var changed = false
 
-        let expectedCommand = hookCommand(port: port)
+        let expectedCommand = hookCommand()
         for event in requiredEvents {
             let current = hooks[event] as? [[String: Any]]
             let currentCommand = (current?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
@@ -159,8 +159,8 @@ extension CodexHooksSetup {
         ensureCodexHooksFeatureEnabled(at: configURL)
     }
 
-    static func ensureHooksJSONForTests(at hooksURL: URL, port: UInt16) -> Bool {
-        ensureHooksJSON(at: hooksURL, port: port)
+    static func ensureHooksJSONForTests(at hooksURL: URL) -> Bool {
+        ensureHooksJSON(at: hooksURL)
     }
 }
 #endif

@@ -1,17 +1,16 @@
 import Foundation
 
 enum SeahelmSuggestInstaller {
-    private static let versionMarker = "# seahelm-suggest v2"
+    private static let versionMarker = "# seahelm-suggest v3"
 
-    static func scriptContents(port: UInt16) -> String {
+    static func scriptContents() -> String {
         return """
         #!/bin/sh
         \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
         # Usage: seahelm-suggest "option one" "option two" ...
-        # Reports suggested next steps to seahelm; shows as one tool-call line, never raw XML.
-        # Prefers the Unix control socket (fs-scoped); falls back to the HTTP webhook.
+        # Reports suggested next steps to seahelm's control socket; shows as one
+        # tool-call line, never raw XML.
         set -u
-        port="${SEAHELM_WEBHOOK_PORT:-\(port)}"
         sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
         pane="${SEAHELM_PANE_ID:-}"
 
@@ -27,35 +26,25 @@ enum SeahelmSuggestInstaller {
         pane_field=""
         if [ -n "$pane" ]; then pane_field="\\"pane_id\\":\\"$(esc "$pane")\\","; fi
 
-        # 1) Unix control socket. Plain `nc -U` (macOS/Apple nc supports neither
-        #    -N nor -w): it closes its write half on stdin EOF, our server replies
-        #    and closes, nc exits.
-        if [ -S "$sock" ] && command -v nc >/dev/null 2>&1; then
-          req='{"id":"suggest","method":"suggest","params":{'"$pane_field"'"cwd":"'"$cwd"'","options":['"$opts"']}}'
-          if printf '%s\\n' "$req" | nc -U "$sock" >/dev/null 2>&1; then
-            exit 0
-          fi
-        fi
-
-        # 2) HTTP webhook fallback.
-        body='{"source":"seahelm-suggest","session_id":"cli","event":"suggest","cwd":"'"$cwd"'","data":{"options":['"$opts"']}}'
-        curl -s -m 2 -X POST "http://127.0.0.1:$port/webhook" \\
-          -H "Content-Type: application/json" \\
-          -d "$body" >/dev/null 2>&1 || true
+        # Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor -w):
+        # it closes its write half on stdin EOF, our server replies and closes.
+        [ -S "$sock" ] && command -v nc >/dev/null 2>&1 || exit 0
+        req='{"id":"suggest","method":"suggest","params":{'"$pane_field"'"cwd":"'"$cwd"'","options":['"$opts"']}}'
+        printf '%s\\n' "$req" | nc -U "$sock" >/dev/null 2>&1 || true
         exit 0
         """
     }
 
     @discardableResult
-    static func ensureInstalled(port: UInt16 = 7070) -> Bool {
+    static func ensureInstalled() -> Bool {
         let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
-        return ensureInstalled(binDirectory: bin, port: port)
+        return ensureInstalled(binDirectory: bin)
     }
 
     @discardableResult
-    static func ensureInstalled(binDirectory: URL, port: UInt16) -> Bool {
+    static func ensureInstalled(binDirectory: URL) -> Bool {
         let scriptURL = binDirectory.appendingPathComponent("seahelm-suggest")
-        let desired = scriptContents(port: port)
+        let desired = scriptContents()
 
         // Skip if an up-to-date copy already exists.
         if let existing = try? String(contentsOf: scriptURL, encoding: .utf8),

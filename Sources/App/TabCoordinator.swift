@@ -541,13 +541,10 @@ class TabCoordinator {
                         return nil
                       }
                     }
-                    let server = WebhookServer(port: self.config.webhook.port) { handleEvent($0) }
-                    server.start()
-                    self.terminalCoordinator.webhookServer = server
-
-                    // Local control socket: reads (snapshot/read) + the same shared
-                    // event sink as the webhook, so suggest/hook can arrive over the
-                    // socket too. seahelm-suggest prefers this socket over HTTP.
+                    // Local control socket is the sole inbound transport: reads
+                    // (snapshot/read) + the shared event sink for hook/suggest.
+                    // (The HTTP webhook was retired once the socket path was
+                    // verified end-to-end.)
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: SeahelmControlDataSource(hookSink: handleEvent)))
                     control.start()

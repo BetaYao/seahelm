@@ -5,9 +5,9 @@ import Foundation
 /// decision back to the agent via stdout. Prefers the Unix socket; falls back to
 /// the HTTP webhook so a socket hiccup never breaks the Stop-hook UX.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v1"
+    static let versionMarker = "# seahelm-hook v2"
 
-    static func scriptContents(port: UInt16) -> String {
+    static func scriptContents() -> String {
         return """
         #!/bin/sh
         \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
@@ -16,29 +16,18 @@ enum SeahelmHookInstaller {
         # to stdout so the agent continues and calls seahelm-suggest.
         set -u
         sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
-        port="${SEAHELM_WEBHOOK_PORT:-\(port)}"
 
         payload="$(cat)"
         [ -n "$payload" ] || exit 0
 
-        # 1) Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor
-        #    -w): it closes its write half on stdin EOF, the server replies with the
-        #    base64-encoded block body (block_b64) and closes, nc exits.
-        if [ -S "$sock" ] && command -v nc >/dev/null 2>&1; then
-          req='{"id":"h","method":"hook","params":'"$payload"'}'
-          resp="$(printf '%s\\n' "$req" | nc -U "$sock" 2>/dev/null)"
-          if [ -n "$resp" ]; then
-            b64="$(printf '%s' "$resp" | sed -n 's/.*"block_b64":"\\([A-Za-z0-9+/=]*\\)".*/\\1/p')"
-            [ -n "$b64" ] && printf '%s' "$b64" | base64 -d 2>/dev/null
-            exit 0
-          fi
-        fi
-
-        # 2) HTTP webhook fallback: the response body IS the block decision (or empty).
-        if command -v curl >/dev/null 2>&1; then
-          curl -s -m 5 -X POST "http://127.0.0.1:$port/webhook" \\
-            -H "Content-Type: application/json" -d "$payload"
-        fi
+        # Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor -w):
+        # it closes its write half on stdin EOF, the server replies with the
+        # base64-encoded block body (block_b64) and closes, nc exits.
+        [ -S "$sock" ] && command -v nc >/dev/null 2>&1 || exit 0
+        req='{"id":"h","method":"hook","params":'"$payload"'}'
+        resp="$(printf '%s\\n' "$req" | nc -U "$sock" 2>/dev/null)"
+        b64="$(printf '%s' "$resp" | sed -n 's/.*"block_b64":"\\([A-Za-z0-9+/=]*\\)".*/\\1/p')"
+        [ -n "$b64" ] && printf '%s' "$b64" | base64 -d 2>/dev/null
         exit 0
         """
     }
@@ -50,15 +39,15 @@ enum SeahelmHookInstaller {
     }
 
     @discardableResult
-    static func ensureInstalled(port: UInt16 = 7070) -> Bool {
+    static func ensureInstalled() -> Bool {
         let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
-        return ensureInstalled(binDirectory: bin, port: port)
+        return ensureInstalled(binDirectory: bin)
     }
 
     @discardableResult
-    static func ensureInstalled(binDirectory: URL, port: UInt16) -> Bool {
+    static func ensureInstalled(binDirectory: URL) -> Bool {
         let scriptURL = binDirectory.appendingPathComponent("seahelm-hook")
-        let desired = scriptContents(port: port)
+        let desired = scriptContents()
         if let existing = try? String(contentsOf: scriptURL, encoding: .utf8),
            existing.contains(versionMarker), existing == desired {
             return false

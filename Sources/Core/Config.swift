@@ -263,13 +263,15 @@ private extension Array where Element == String {
     }
 }
 
+/// Hook/event integration settings. (Formerly carried an HTTP `port`; the HTTP
+/// webhook was retired for the fs-scoped control socket, so only the behavioral
+/// flags remain. A legacy `port` key in old configs is ignored.)
 struct WebhookConfig: Codable {
     var enabled: Bool = true
-    var port: UInt16 = 7070
     var suggestOnStop: Bool = true
 
     enum CodingKeys: String, CodingKey {
-        case enabled, port
+        case enabled
         case suggestOnStop = "suggest_on_stop"
     }
 
@@ -278,7 +280,6 @@ struct WebhookConfig: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 7070
         suggestOnStop = try c.decodeIfPresent(Bool.self, forKey: .suggestOnStop) ?? true
     }
 }

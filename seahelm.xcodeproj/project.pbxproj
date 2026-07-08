@@ -234,7 +234,6 @@
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
 		CDE025440DDC3A5CFE827DB1 /* WeChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */; };
-		CDE67201708E45E4156CC96C /* WebhookServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6D86D3DC1888F917D9F3FD /* WebhookServerTests.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
 		D001B4255A3A312583AF966C /* SessionTitleLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */; };
 		D167E1E554F3BA094107F39D /* TabCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A4DC3FC06EC4D5EFE6BFA7F /* TabCoordinator.swift */; };
@@ -293,7 +292,6 @@
 		FC6620AFE070216CBEDBEB30 /* UsageSummaryFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22314B62F8F244CAE44DE94D /* UsageSummaryFormatterTests.swift */; };
 		FD31D39DD1C179392C0993F6 /* DiffSyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510FA8122ABEBFF0AAB1C539 /* DiffSyntaxHighlighter.swift */; };
 		FD97CEE3018382B7182D5EB7 /* DialogPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC6CD361867294E47A209E3 /* DialogPresenter.swift */; };
-		FDAC0DC6D33B777D58B5524F /* WebhookServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 341F000DDD743CB7E278357D /* WebhookServer.swift */; };
 		FE0A82E1F0D8DBE2D036CB71 /* AIPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */; };
 		FED31A3C39D21CA95E4FE06D /* FirstMate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF9EEEBC6FB86CD29B2B3D45 /* FirstMate.swift */; };
 /* End PBXBuildFile section */
@@ -369,7 +367,6 @@
 		3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CenterOverlayView.swift; sourceTree = "<group>"; };
 		33E9418C39C2F95AA6193F67 /* AppFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFont.swift; sourceTree = "<group>"; };
 		340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestOutcome.swift; sourceTree = "<group>"; };
-		341F000DDD743CB7E278357D /* WebhookServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServer.swift; sourceTree = "<group>"; };
 		358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatchTests.swift; sourceTree = "<group>"; };
 		35D82D53B83B8C48E71D9E57 /* TerminalCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinator.swift; sourceTree = "<group>"; };
 		367B1FA3E6F3BC5A0EB975D2 /* NotificationHistoryViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryViewController.swift; sourceTree = "<group>"; };
@@ -575,7 +572,6 @@
 		DCDDD8680C8FD209F2BB3CD1 /* SailorStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorStatus.swift; sourceTree = "<group>"; };
 		DCE458A11E72A34C3556092F /* TerminalCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinatorTests.swift; sourceTree = "<group>"; };
 		DE6B0C9F2013F74108B7422B /* BridgeCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommand.swift; sourceTree = "<group>"; };
-		DE6D86D3DC1888F917D9F3FD /* WebhookServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServerTests.swift; sourceTree = "<group>"; };
 		DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStoreTests.swift; sourceTree = "<group>"; };
 		E02B47C1F399F29F6BDC084B /* ghostty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ghostty.h; sourceTree = "<group>"; };
 		E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -829,7 +825,6 @@
 				57EF78A5043DF5162290DDE4 /* StatusPublisher.swift */,
 				84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */,
 				9F66DA28CC57BFA18891872D /* WebhookEvent.swift */,
-				341F000DDD743CB7E278357D /* WebhookServer.swift */,
 				CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */,
 				4775959C72857610AC1F12DC /* WorktreeStatusAggregator.swift */,
 			);
@@ -998,7 +993,6 @@
 				B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */,
 				5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */,
 				D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */,
-				DE6D86D3DC1888F917D9F3FD /* WebhookServerTests.swift */,
 				66D1A230FCEF8663316AD13F /* WebhookStatusProviderTests.swift */,
 				54322E1FB43B65F94D1AAC20 /* WebhookSuggestEventTests.swift */,
 				55B174E22642D5D980A37012 /* WebhookTaskParsingTests.swift */,
@@ -1390,7 +1384,6 @@
 				A5B666A67B06796F7E431A77 /* WatchFeedTests.swift in Sources */,
 				6B115DD3E985EBF9D42DF638 /* WeComFrameParserTests.swift in Sources */,
 				731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */,
-				CDE67201708E45E4156CC96C /* WebhookServerTests.swift in Sources */,
 				2C2802EE819E3CFE15765F18 /* WebhookStatusProviderTests.swift in Sources */,
 				5F16B6F4A4D85F5E6F515A4E /* WebhookSuggestEventTests.swift in Sources */,
 				5B7107654A31951EC6A5BE41 /* WebhookTaskParsingTests.swift in Sources */,
@@ -1572,7 +1565,6 @@
 				5B1493268A6DC0132D6193D0 /* WeComBotConfig.swift in Sources */,
 				865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */,
 				1E992A5758BD000FADE4E084 /* WebhookEvent.swift in Sources */,
-				FDAC0DC6D33B777D58B5524F /* WebhookServer.swift in Sources */,
 				43EF6A61FC26F6221292A0A3 /* WebhookStatusProvider.swift in Sources */,
 				4BBA37E55963FD4DBDC549E4 /* WorkspaceManager.swift in Sources */,
 				B0AF97B3F50FA1567DBD5CD9 /* WorktreeCreator.swift in Sources */,

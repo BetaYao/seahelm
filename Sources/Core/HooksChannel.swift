@@ -1,7 +1,7 @@
 import Foundation
 
 /// Communication channel for Claude Code via Hooks.
-/// Receives structured events through the existing WebhookServer,
+/// Receives structured events through the control socket,
 /// sends commands via backend channel (zmx by default).
 class HooksChannel: SailorChannel {
     let channelType: SailorChannelType = .hooks

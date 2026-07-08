@@ -28,11 +28,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure supported CLI hook integrations are configured
         if config.webhook.enabled {
             // Install the hook bridge before writing hook configs that reference it.
-            SeahelmHookInstaller.ensureInstalled(port: config.webhook.port)
-            ClaudeHooksSetup.ensureHooksConfigured(port: config.webhook.port)
+            SeahelmHookInstaller.ensureInstalled()
+            ClaudeHooksSetup.ensureHooksConfigured()
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
-            CodexHooksSetup.ensureHooksConfigured(port: config.webhook.port)
-            SeahelmSuggestInstaller.ensureInstalled(port: config.webhook.port)
+            CodexHooksSetup.ensureHooksConfigured()
+            SeahelmSuggestInstaller.ensureInstalled()
         }
         NSAppearance.current = NSApp.effectiveAppearance
 

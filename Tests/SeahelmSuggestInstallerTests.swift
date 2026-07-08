@@ -3,15 +3,14 @@ import XCTest
 
 final class SeahelmSuggestInstallerTests: XCTestCase {
     func testScriptContainsPortMarkerAndEndpoint() {
-        let script = SeahelmSuggestInstaller.scriptContents(port: 7070)
-        XCTAssertTrue(script.contains("seahelm-suggest v2"))          // version marker
-        XCTAssertTrue(script.contains("SEAHELM_WEBHOOK_PORT:-7070"))   // default port w/ override
-        XCTAssertTrue(script.contains("/webhook"))                     // HTTP fallback retained
-        XCTAssertTrue(script.contains("nc -U \"$sock\""))              // prefers the control socket (Apple-nc compatible)
+        let script = SeahelmSuggestInstaller.scriptContents()
+        XCTAssertTrue(script.contains("seahelm-suggest v3"))          // version marker
+        XCTAssertTrue(script.contains("nc -U \"$sock\""))            // control socket (Apple-nc compatible)
         XCTAssertTrue(script.contains("SEAHELM_SOCKET_PATH"))
-        XCTAssertTrue(script.contains("SEAHELM_PANE_ID"))              // pane targeting
+        XCTAssertTrue(script.contains("SEAHELM_PANE_ID"))            // pane targeting
         XCTAssertTrue(script.contains("\"method\":\"suggest\""))
-        XCTAssertTrue(script.contains("\"event\":\"suggest\""))
+        XCTAssertFalse(script.contains("/webhook"))                 // HTTP fallback removed
+        XCTAssertFalse(script.contains("curl"))
         XCTAssertTrue(script.hasPrefix("#!/bin/sh"))
     }
 
@@ -20,7 +19,7 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
             .appendingPathComponent("seahelm-suggest-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let wrote = SeahelmSuggestInstaller.ensureInstalled(binDirectory: tmp, port: 7070)
+        let wrote = SeahelmSuggestInstaller.ensureInstalled(binDirectory: tmp)
         XCTAssertTrue(wrote)
 
         let scriptPath = tmp.appendingPathComponent("seahelm-suggest").path
@@ -30,7 +29,7 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
         XCTAssertEqual(perms & 0o111, 0o111) // executable bits set
 
         // Idempotent: second run with same version does not rewrite.
-        let wroteAgain = SeahelmSuggestInstaller.ensureInstalled(binDirectory: tmp, port: 7070)
+        let wroteAgain = SeahelmSuggestInstaller.ensureInstalled(binDirectory: tmp)
         XCTAssertFalse(wroteAgain)
     }
 }
