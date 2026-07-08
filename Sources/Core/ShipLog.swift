@@ -164,6 +164,26 @@ class ShipLog {
     }
 
     /// THE single write entry. Faithfully record, then reduce to a station snapshot + outcome.
+    /// Combine the two status sources (screen scan vs agent hook) into one, using
+    /// the pane's manifest `authority` (herdr's single-authority-per-pane model):
+    ///   - full_lifecycle: hook is authoritative; screen only fills an unknown.
+    ///   - session_only (claude/codex): screen is authoritative (hooks miss
+    ///     permission/escape transitions); hook only fills an unknown.
+    ///   - screen_only / unknown: screen only.
+    /// An urgent state (waiting/error) from either source always surfaces — never
+    /// hide a blocked or errored agent behind an authority rule.
+    static func arbitrate(scan: SailorStatus, hook: SailorStatus, agentType: SailorType) -> SailorStatus {
+        let urgent = SailorStatus.highestPriority([scan, hook].filter { $0.isUrgent })
+        if urgent.isUrgent { return urgent }
+
+        let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        switch authority {
+        case "full_lifecycle": return hook != .unknown ? hook : scan
+        case "screen_only":    return scan
+        default:               return scan != .unknown ? scan : hook  // session_only
+        }
+    }
+
     func ingest(_ event: NormalizedEvent) {
         lock.lock()
         globalSeq &+= 1
@@ -218,7 +238,8 @@ class ShipLog {
 
         next.lastMessage = message
         let oldStatus = current.status
-        let newStatus = SailorStatus.highestPriority([next.scanStatus, next.hookStatus])
+        let newStatus = Self.arbitrate(scan: next.scanStatus, hook: next.hookStatus,
+                                       agentType: next.agentType)
         next.status = newStatus
         agents[event.terminalID] = next
 

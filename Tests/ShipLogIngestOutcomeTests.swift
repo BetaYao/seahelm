@@ -19,9 +19,10 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         super.tearDown()
     }
 
-    func testHookRunningThenScanIdleMergesToRunning() {
-        // hookStatus=running (higher priority than idle) must survive a later scan idle.
-        // Set onOutcome first; skip first event (sessionStarted), capture the second (screenObserved).
+    func testSessionOnlyScreenIdleOverridesStaleHookRunning() {
+        // claude is session_only → screen is authoritative. A (debounced) scan
+        // idle overrides a stale hook=running, instead of the old
+        // highestPriority merge that pinned it to running forever.
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
@@ -37,7 +38,27 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
         wait(for: [exp], timeout: 2)
-        XCTAssertEqual(captured?.newStatus, .running)  // highestPriority(scan=idle, hook=running)
+        XCTAssertEqual(captured?.newStatus, .idle)
+    }
+
+    func testUrgentHookSurfacesEvenWhenScreenAuthoritative() {
+        // A hook waiting/error must never be hidden by the authority rule.
+        var callCount = 0
+        var captured: IngestOutcome?
+        let exp = expectation(description: "outcome")
+        exp.assertForOverFulfill = false
+        ShipLog.shared.onOutcome = { o in
+            callCount += 1
+            if callCount == 2 { captured = o; exp.fulfill() }
+        }
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .idle, message: "", activity: [],
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 0, tasks: [])))
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .awaitingInput("approve?")))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured?.newStatus, .waiting)
     }
 
     func testScreenObservedCarriesRoundDurationAndTasks() {
