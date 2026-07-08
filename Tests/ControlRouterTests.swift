@@ -6,9 +6,22 @@ private final class FakeDataSource: ControlDataSource {
     var reads: [String: String] = [:]
     var ingested: [[String: Any]] = []
     var blockReturn: String?
+    var sentText: [(pane: String, text: String, enter: Bool)] = []
+    var sentKeys: [(pane: String, keys: [String])] = []
+    var statuses: [String: String] = [:]
+    var knownPanes: Set<String> = []
     func snapshotPanes() -> [PaneSnapshot] { panes }
     func readPane(paneId: String, source: String, lines: Int) -> String? { reads[paneId] }
     func ingestHook(json: [String: Any]) -> String? { ingested.append(json); return blockReturn }
+    func sendText(paneId: String, text: String, enter: Bool) -> Bool {
+        guard knownPanes.contains(paneId) else { return false }
+        sentText.append((paneId, text, enter)); return true
+    }
+    func sendKeys(paneId: String, keys: [String]) -> Bool {
+        guard knownPanes.contains(paneId) else { return false }
+        sentKeys.append((paneId, keys)); return true
+    }
+    func paneStatus(paneId: String) -> String? { statuses[paneId] }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -101,6 +114,114 @@ final class ControlRouterTests: XCTestCase {
         ds.blockReturn = nil
         guard case .ok(let d) = r.handle(method: "hook", params: ["event": "agent_stop"]) else { return XCTFail() }
         XCTAssertNil(d["block_b64"])
+    }
+
+    // MARK: - Write channel
+
+    func testSendTextTypesWithoutEnter() {
+        let (r, ds) = router()
+        ds.knownPanes = ["t1"]
+        guard case .ok(let d) = r.handle(method: "pane.send_text",
+                params: ["pane_id": "t1", "text": "hello"]) else { return XCTFail() }
+        XCTAssertEqual(d["sent"] as? Bool, true)
+        XCTAssertEqual(ds.sentText.count, 1)
+        XCTAssertEqual(ds.sentText[0].text, "hello")
+        XCTAssertFalse(ds.sentText[0].enter)
+    }
+
+    func testRunSubmitsWithEnter() {
+        let (r, ds) = router()
+        ds.knownPanes = ["t1"]
+        _ = r.handle(method: "pane.run", params: ["pane_id": "t1", "command": "npm test"])
+        XCTAssertEqual(ds.sentText[0].text, "npm test")
+        XCTAssertTrue(ds.sentText[0].enter)
+    }
+
+    func testSendTextUnknownPane() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.send_text",
+                params: ["pane_id": "nope", "text": "x"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testSendKeysArray() {
+        let (r, ds) = router()
+        ds.knownPanes = ["t1"]
+        _ = r.handle(method: "pane.send_keys", params: ["pane_id": "t1", "keys": ["escape", "ctrl+c"]])
+        XCTAssertEqual(ds.sentKeys[0].keys, ["escape", "ctrl+c"])
+    }
+
+    func testSendKeysStringCoerced() {
+        let (r, ds) = router()
+        ds.knownPanes = ["t1"]
+        _ = r.handle(method: "pane.send_keys", params: ["pane_id": "t1", "keys": "enter"])
+        XCTAssertEqual(ds.sentKeys[0].keys, ["enter"])
+    }
+
+    func testSendKeysRequiresKeys() {
+        let (r, ds) = router()
+        ds.knownPanes = ["t1"]
+        guard case .error(let code, _) = r.handle(method: "pane.send_keys",
+                params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Wait primitives
+
+    func testWaitForOutputImmediateMatch() {
+        let (r, ds) = router()
+        ds.reads["t1"] = "build ok\nServer ready on :3000"
+        guard case .ok(let d) = r.handle(method: "wait.output",
+                params: ["pane_id": "t1", "match": "ready", "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(d["matched"] as? Bool, true)
+    }
+
+    func testWaitForOutputTimeout() {
+        let (r, ds) = router()
+        ds.reads["t1"] = "nothing here"
+        guard case .ok(let d) = r.handle(method: "wait.output",
+                params: ["pane_id": "t1", "match": "ready", "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(d["matched"] as? Bool, false)
+        XCTAssertEqual(d["timed_out"] as? Bool, true)
+    }
+
+    func testWaitForOutputRegex() {
+        let (r, ds) = router()
+        ds.reads["t1"] = "listening on port 8080"
+        guard case .ok(let d) = r.handle(method: "wait.output",
+                params: ["pane_id": "t1", "match": "port [0-9]+", "regex": true, "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(d["matched"] as? Bool, true)
+    }
+
+    func testWaitForOutputUnknownPane() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "wait.output",
+                params: ["pane_id": "nope", "match": "x", "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testWaitAgentStatusMatch() {
+        let (r, ds) = router()
+        ds.statuses["t1"] = "Waiting"
+        guard case .ok(let d) = r.handle(method: "wait.agent_status",
+                params: ["pane_id": "t1", "status": "waiting", "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(d["matched"] as? Bool, true)
+    }
+
+    func testWaitAgentStatusDoneAliasesIdle() {
+        let (r, ds) = router()
+        ds.statuses["t1"] = "Idle"
+        guard case .ok(let d) = r.handle(method: "wait.agent_status",
+                params: ["pane_id": "t1", "status": "done", "timeout_ms": 0]) else { return XCTFail() }
+        XCTAssertEqual(d["matched"] as? Bool, true)
+    }
+
+    func testControlKeysMapping() {
+        XCTAssertEqual(ControlKeys.bytes(for: "esc"), "\u{1b}")
+        XCTAssertEqual(ControlKeys.bytes(for: "ctrl+c"), "\u{03}")
+        XCTAssertEqual(ControlKeys.bytes(for: "up"), "\u{1b}[A")
+        XCTAssertNil(ControlKeys.bytes(for: "enter"))
+        XCTAssertTrue(ControlKeys.isEnter("return"))
     }
 
     func testParseRequest() {

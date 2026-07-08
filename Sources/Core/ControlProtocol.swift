@@ -37,6 +37,63 @@ protocol ControlDataSource: AnyObject {
     /// into the shared event sink. Returns an optional block-body string (used by
     /// blocking Stop hooks); nil for fire-and-forget events like suggest.
     func ingestHook(json: [String: Any]) -> String?
+
+    // MARK: Phase 2 — write channel + wait (default no-ops so read-only
+    // conformers/fakes keep compiling).
+
+    /// Type `text` into a pane; append a real Return key when `enter`. Returns
+    /// false if the pane is unknown.
+    func sendText(paneId: String, text: String, enter: Bool) -> Bool
+    /// Deliver a sequence of named keys/combos (enter, esc, tab, arrows,
+    /// ctrl+<letter>, single chars) to a pane. False if the pane is unknown.
+    func sendKeys(paneId: String, keys: [String]) -> Bool
+    /// Current rolled-up status of a pane (SailorStatus raw value), or nil if unknown.
+    func paneStatus(paneId: String) -> String?
+}
+
+extension ControlDataSource {
+    func sendText(paneId: String, text: String, enter: Bool) -> Bool { false }
+    func sendKeys(paneId: String, keys: [String]) -> Bool { false }
+    func paneStatus(paneId: String) -> String? { nil }
+}
+
+/// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
+/// "enter"/"return" are excluded (callers send a real Return key event, which
+/// agent TUIs treat as submit rather than a literal newline).
+enum ControlKeys {
+    static func isEnter(_ name: String) -> Bool {
+        let k = name.lowercased(); return k == "enter" || k == "return"
+    }
+
+    static func bytes(for name: String) -> String? {
+        switch name.lowercased() {
+        case "enter", "return":   return nil
+        case "esc", "escape":     return "\u{1b}"
+        case "tab":               return "\t"
+        case "space":             return " "
+        case "backspace", "bs":   return "\u{7f}"
+        case "up":                return "\u{1b}[A"
+        case "down":              return "\u{1b}[B"
+        case "right":             return "\u{1b}[C"
+        case "left":              return "\u{1b}[D"
+        default:
+            let k = name.lowercased()
+            // ctrl+<letter> → the corresponding control byte (ctrl+c → 0x03).
+            if k.hasPrefix("ctrl+"), k.count == 6, let c = k.last,
+               let a = c.asciiValue, a >= 97, a <= 122 {
+                return String(UnicodeScalar(a - 96))
+            }
+            // A single literal character is sent verbatim.
+            return name.count == 1 ? name : nil
+        }
+    }
+
+    /// Normalize a `keys` param that may arrive as a string or an array.
+    static func parseKeys(_ raw: Any?) -> [String] {
+        if let arr = raw as? [String] { return arr }
+        if let s = raw as? String { return s.isEmpty ? [] : [s] }
+        return []
+    }
 }
 
 enum ControlResult {
@@ -92,6 +149,37 @@ final class ControlRouter {
             }
             return .ok([:])
 
+        case "pane.send_text", "pane.run":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            let text = (params["text"] as? String) ?? (params["command"] as? String) ?? ""
+            // pane.run always submits; pane.send_text submits only if asked.
+            let enter = method == "pane.run" ? true : (params["enter"] as? Bool ?? false)
+            guard dataSource?.sendText(paneId: paneId, text: text, enter: enter) == true else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(["sent": true])
+
+        case "pane.send_keys":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            let keys = ControlKeys.parseKeys(params["keys"])
+            guard !keys.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "keys required")
+            }
+            guard dataSource?.sendKeys(paneId: paneId, keys: keys) == true else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(["sent": true])
+
+        case "pane.wait_for_output", "wait.output":
+            return waitForOutput(params: params)
+
+        case "pane.wait_agent_status", "wait.agent_status":
+            return waitAgentStatus(params: params)
+
         case "suggest":
             guard let options = params["options"] as? [String], !options.isEmpty else {
                 return .error(code: ControlError.invalidParams, message: "options required")
@@ -110,6 +198,83 @@ final class ControlRouter {
         default:
             return .error(code: ControlError.methodNotFound, message: "unknown method: \(method)")
         }
+    }
+
+    // MARK: - Wait primitives
+    //
+    // These block the calling (per-connection) thread, polling the data source
+    // until the condition holds or the timeout elapses. Each socket connection
+    // runs on its own thread, so blocking one wait does not stall others.
+
+    private static let waitPollInterval: TimeInterval = 0.15
+    private static let defaultWaitTimeoutMs = 30_000
+    private static let maxWaitTimeoutMs = 600_000
+
+    private func timeout(from params: [String: Any]) -> TimeInterval {
+        let ms = min((params["timeout_ms"] as? Int) ?? Self.defaultWaitTimeoutMs, Self.maxWaitTimeoutMs)
+        return TimeInterval(max(0, ms)) / 1000
+    }
+
+    private func waitForOutput(params: [String: Any]) -> ControlResult {
+        guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+            return .error(code: ControlError.invalidParams, message: "pane_id required")
+        }
+        guard let match = params["match"] as? String, !match.isEmpty else {
+            return .error(code: ControlError.invalidParams, message: "match required")
+        }
+        let source = params["source"] as? String ?? "recent"
+        let useRegex = params["regex"] as? Bool ?? false
+        let re = useRegex ? try? NSRegularExpression(pattern: match) : nil
+        if useRegex && re == nil {
+            return .error(code: ControlError.invalidParams, message: "invalid regex: \(match)")
+        }
+        let deadline = Date().addingTimeInterval(timeout(from: params))
+        repeat {
+            guard let text = dataSource?.readPane(paneId: paneId, source: source, lines: 2000) else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            if Self.matches(text: text, match: match, regex: re) {
+                return .ok(["matched": true])
+            }
+            if Date() >= deadline { break }
+            Thread.sleep(forTimeInterval: Self.waitPollInterval)
+        } while Date() < deadline
+        return .ok(["matched": false, "timed_out": true])
+    }
+
+    private func waitAgentStatus(params: [String: Any]) -> ControlResult {
+        guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+            return .error(code: ControlError.invalidParams, message: "pane_id required")
+        }
+        guard let want = (params["status"] as? String)?.lowercased(), !want.isEmpty else {
+            return .error(code: ControlError.invalidParams, message: "status required")
+        }
+        let deadline = Date().addingTimeInterval(timeout(from: params))
+        repeat {
+            guard let status = dataSource?.paneStatus(paneId: paneId)?.lowercased() else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            if Self.statusMatches(status, want: want) {
+                return .ok(["matched": true, "status": status])
+            }
+            if Date() >= deadline { break }
+            Thread.sleep(forTimeInterval: Self.waitPollInterval)
+        } while Date() < deadline
+        return .ok(["matched": false, "timed_out": true])
+    }
+
+    static func matches(text: String, match: String, regex: NSRegularExpression?) -> Bool {
+        if let regex {
+            return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+        }
+        return text.contains(match)
+    }
+
+    /// `done` is an alias for a finished pane (idle or exited); otherwise compare
+    /// the SailorStatus raw value case-insensitively.
+    static func statusMatches(_ status: String, want: String) -> Bool {
+        if want == "done" { return status == "idle" || status == "exited" }
+        return status == want
     }
 
     // MARK: - Framing (pure, testable)

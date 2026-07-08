@@ -41,4 +41,37 @@ final class SeahelmControlDataSource: ControlDataSource {
         let all = text.components(separatedBy: "\n")
         return all.count <= lines ? text : all.suffix(lines).joined(separator: "\n")
     }
+
+    func sendText(paneId: String, text: String, enter: Bool) -> Bool {
+        guard let station = StationRegistry.shared.station(forId: paneId) else { return false }
+        runOnMain {
+            if !text.isEmpty { station.sendText(text) }
+            if enter { station.sendEnterKey() }
+        }
+        return true
+    }
+
+    func sendKeys(paneId: String, keys: [String]) -> Bool {
+        guard let station = StationRegistry.shared.station(forId: paneId) else { return false }
+        runOnMain {
+            for key in keys {
+                if ControlKeys.isEnter(key) {
+                    station.sendEnterKey()
+                } else if let bytes = ControlKeys.bytes(for: key) {
+                    station.sendText(bytes)
+                }
+            }
+        }
+        return true
+    }
+
+    func paneStatus(paneId: String) -> String? {
+        ShipLog.shared.sailor(for: paneId)?.status.rawValue
+    }
+
+    /// Ghostty input must run on the main thread; the control socket serves each
+    /// request on its own background thread.
+    private func runOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread { block() } else { DispatchQueue.main.sync(execute: block) }
+    }
 }
