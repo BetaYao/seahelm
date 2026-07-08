@@ -1,7 +1,10 @@
 import Foundation
 
-/// Ensures Codex CLI is configured to forward hook events into seahelm's webhook server.
-/// Codex hooks are command-based, so we install a command hook that POSTs stdin JSON to localhost.
+/// Ensures Codex CLI is configured to forward hook events into seahelm.
+/// Codex hooks are command-based; we install a command hook that pipes the
+/// stdin JSON to the seahelm-hook bridge (control socket, HTTP fallback). Its
+/// stdout is discarded so Codex keeps its current report-only behavior (no Stop
+/// blocking), matching the previous inline-curl hook.
 enum CodexHooksSetup {
 
     private static let requiredEvents = [
@@ -13,7 +16,7 @@ enum CodexHooksSetup {
     ]
 
     private static func hookCommand(port: UInt16) -> String {
-        "/bin/sh -lc '/usr/bin/curl -fsS -X POST http://localhost:\(port)/webhook -H \"Content-Type: application/json\" --data-binary @- 2>/dev/null || true'"
+        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) >/dev/null 2>&1 || true'"
     }
 
     private static func hookConfig(port: UInt16) -> [[String: Any]] {
@@ -125,7 +128,8 @@ enum CodexHooksSetup {
         for event in requiredEvents {
             let current = hooks[event] as? [[String: Any]]
             let currentCommand = (current?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
-            let isSeahelmOwned = currentCommand?.contains("/webhook") ?? false
+            let isSeahelmOwned = (currentCommand?.contains("/webhook") ?? false)
+                || (currentCommand?.contains("seahelm-hook") ?? false)
             if current == nil || (isSeahelmOwned && currentCommand != expectedCommand) {
                 hooks[event] = config
                 changed = true
