@@ -4,8 +4,10 @@ import XCTest
 private final class FakeDataSource: ControlDataSource {
     var panes: [PaneSnapshot] = []
     var reads: [String: String] = [:]
+    var ingested: [[String: Any]] = []
     func snapshotPanes() -> [PaneSnapshot] { panes }
     func readPane(paneId: String, source: String, lines: Int) -> String? { reads[paneId] }
+    func ingestHook(json: [String: Any]) -> String? { ingested.append(json); return nil }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -56,6 +58,32 @@ final class ControlRouterTests: XCTestCase {
         let (r, _) = router()
         guard case .error(let code, _) = r.handle(method: "pane.read", params: ["pane_id": "nope"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testSuggestBuildsPayload() {
+        let (r, ds) = router()
+        guard case .ok(let d) = r.handle(method: "suggest",
+                params: ["options": ["a", "b"], "cwd": "/wt", "pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(d["accepted"] as? Bool, true)
+        XCTAssertEqual(ds.ingested.count, 1)
+        let sent = ds.ingested[0]
+        XCTAssertEqual(sent["event"] as? String, "suggest")
+        XCTAssertEqual(sent["cwd"] as? String, "/wt")
+        XCTAssertEqual(sent["pane_id"] as? String, "t1")
+        XCTAssertEqual((sent["data"] as? [String: Any])?["options"] as? [String], ["a", "b"])
+    }
+
+    func testSuggestRequiresOptions() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "suggest", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testHookForwardsRaw() {
+        let (r, ds) = router()
+        _ = r.handle(method: "hook", params: ["event": "agent_stop", "session_id": "s1", "cwd": "/x"])
+        XCTAssertEqual(ds.ingested.count, 1)
+        XCTAssertEqual(ds.ingested[0]["event"] as? String, "agent_stop")
     }
 
     func testParseRequest() {

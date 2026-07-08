@@ -496,7 +496,12 @@ class TabCoordinator {
                     var sessionBlockedAt: [String: Date] = [:]
                     var sessionUserPromptedAt: [String: Date] = [:]
 
-                    let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
+                    // Shared inbound-event sink, serialized so the webhook and the
+                    // control socket can both feed it without racing the per-session
+                    // dictionaries below.
+                    let eventQueue = DispatchQueue(label: "seahelm.event-sink")
+                    let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
+                      eventQueue.sync {
                         guard let self else { return nil }
                         // Track when the user sent a message to this session.
                         if event.event == .userPrompt {
@@ -534,14 +539,17 @@ class TabCoordinator {
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // ShipLog.shared.updateTodoFromWebhook(event)
                         return nil
+                      }
                     }
+                    let server = WebhookServer(port: self.config.webhook.port) { handleEvent($0) }
                     server.start()
                     self.terminalCoordinator.webhookServer = server
 
-                    // Local control socket: lets agents/tooling drive the
-                    // multiplexer (read-only methods in this phase).
+                    // Local control socket: reads (snapshot/read) + the same shared
+                    // event sink as the webhook, so suggest/hook can arrive over the
+                    // socket too. seahelm-suggest prefers this socket over HTTP.
                     let control = ControlSocketServer(
-                        router: ControlRouter(dataSource: SeahelmControlDataSource()))
+                        router: ControlRouter(dataSource: SeahelmControlDataSource(hookSink: handleEvent)))
                     control.start()
                     self.terminalCoordinator.controlSocketServer = control
                 }

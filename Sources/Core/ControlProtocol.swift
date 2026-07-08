@@ -33,6 +33,10 @@ protocol ControlDataSource: AnyObject {
     func snapshotPanes() -> [PaneSnapshot]
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
+    /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
+    /// into the shared event sink. Returns an optional block-body string (used by
+    /// blocking Stop hooks); nil for fire-and-forget events like suggest.
+    func ingestHook(json: [String: Any]) -> String?
 }
 
 enum ControlResult {
@@ -76,6 +80,26 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
             }
             return .ok(["text": text])
+
+        case "hook":
+            // Raw webhook-shaped payload (parity with the HTTP webhook body).
+            let block = dataSource?.ingestHook(json: params)
+            return .ok(block.map { ["block": $0] } ?? [:])
+
+        case "suggest":
+            guard let options = params["options"] as? [String], !options.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "options required")
+            }
+            var payload: [String: Any] = [
+                "source": "seahelm-suggest",
+                "event": "suggest",
+                "cwd": params["cwd"] as? String ?? "",
+                "session_id": params["pane_id"] as? String ?? "cli",
+                "data": ["options": options],
+            ]
+            if let paneId = params["pane_id"] as? String { payload["pane_id"] = paneId }
+            _ = dataSource?.ingestHook(json: payload)
+            return .ok(["accepted": true])
 
         default:
             return .error(code: ControlError.methodNotFound, message: "unknown method: \(method)")

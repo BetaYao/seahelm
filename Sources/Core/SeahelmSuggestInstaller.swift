@@ -1,7 +1,7 @@
 import Foundation
 
 enum SeahelmSuggestInstaller {
-    private static let versionMarker = "# seahelm-suggest v1"
+    private static let versionMarker = "# seahelm-suggest v2"
 
     static func scriptContents(port: UInt16) -> String {
         return """
@@ -9,8 +9,11 @@ enum SeahelmSuggestInstaller {
         \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
         # Usage: seahelm-suggest "option one" "option two" ...
         # Reports suggested next steps to seahelm; shows as one tool-call line, never raw XML.
+        # Prefers the Unix control socket (fs-scoped); falls back to the HTTP webhook.
         set -u
         port="${SEAHELM_WEBHOOK_PORT:-\(port)}"
+        sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
+        pane="${SEAHELM_PANE_ID:-}"
 
         esc() { printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g'; }
 
@@ -21,8 +24,20 @@ enum SeahelmSuggestInstaller {
         done
 
         cwd="$(esc "$PWD")"
-        body='{"source":"seahelm-suggest","session_id":"cli","event":"suggest","cwd":"'"$cwd"'","data":{"options":['"$opts"']}}'
+        pane_field=""
+        if [ -n "$pane" ]; then pane_field="\\"pane_id\\":\\"$(esc "$pane")\\","; fi
 
+        # 1) Unix control socket via nc -U (-N: half-close after our EOF so the
+        #    server closes and nc exits promptly).
+        if [ -S "$sock" ] && command -v nc >/dev/null 2>&1; then
+          req='{"id":"suggest","method":"suggest","params":{'"$pane_field"'"cwd":"'"$cwd"'","options":['"$opts"']}}'
+          if printf '%s\\n' "$req" | nc -U -N -w 2 "$sock" >/dev/null 2>&1; then
+            exit 0
+          fi
+        fi
+
+        # 2) HTTP webhook fallback.
+        body='{"source":"seahelm-suggest","session_id":"cli","event":"suggest","cwd":"'"$cwd"'","data":{"options":['"$opts"']}}'
         curl -s -m 2 -X POST "http://127.0.0.1:$port/webhook" \\
           -H "Content-Type: application/json" \\
           -d "$body" >/dev/null 2>&1 || true
