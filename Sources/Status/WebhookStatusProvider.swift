@@ -12,6 +12,11 @@ class WebhookStatusProvider {
     /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
     var onNewWorktreeDetected: ((String) -> Void)?
 
+    /// Called (on main) when an agent hook event resolves a persistable resume
+    /// ref for a known worktree. The owner persists it and applies it to live
+    /// stations so the agent can be relaunched after a session is recreated.
+    var onAgentSessionResolved: ((_ worktreePath: String, _ ref: AgentSessionRef) -> Void)?
+
     /// Called when a WorktreeCreate event arrives, with source worktree path and worktree name.
     /// Fires before the new worktree is discoverable (the git operation may still be in progress).
     var onWorktreeCreateReceived: ((_ sourceWorktreePath: String, _ worktreeName: String, _ sessionId: String) -> Void)?
@@ -118,6 +123,18 @@ class WebhookStatusProvider {
                 )
                 Self.applyTaskEvent(event, to: &newSession)
                 sessions[event.sessionId] = newSession
+            }
+
+            // Persist a resume ref for recognized agents. Exclude subagent
+            // events — their `agent_id` marks a nested context, and (as herdr
+            // learned) letting them drive main-pane lifecycle causes false
+            // revivals. `worktreeCreate` already returned early above, so its
+            // cross-worktree session id never reaches here.
+            if event.data?["agent_id"] == nil,
+               let ref = AgentSessionRef(source: event.source, sessionId: event.sessionId) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onAgentSessionResolved?(worktreePath, ref)
+                }
             }
 
             DispatchQueue.main.async { [weak self] in

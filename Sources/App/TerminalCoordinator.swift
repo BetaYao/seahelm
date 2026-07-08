@@ -27,6 +27,13 @@ class TerminalCoordinator {
         if backend != "local",
            let savedLayout = config.splitLayouts[info.path],
            let restored = SplitTree.restore(from: savedLayout, worktreePath: info.path, backend: backend) {
+            // Backfill agent resume refs so a session recreated on attach (e.g.
+            // after reboot) relaunches the agent instead of a bare shell.
+            for leaf in restored.allLeaves {
+                if let ref = config.agentSessions[leaf.sessionName] {
+                    StationRegistry.shared.station(forId: leaf.stationId)?.agentSessionRef = ref
+                }
+            }
             stationManager.registerTree(restored, forPath: info.path)
             return restored
         }
@@ -85,6 +92,7 @@ class TerminalCoordinator {
 
         // Kill zmx session
         SessionManager.killSession(closed.sessionName, backend: config.backend)
+        config.agentSessions.removeValue(forKey: closed.sessionName)
 
         // Remove station
         if let station = StationRegistry.shared.station(forId: closed.stationId) {
@@ -216,6 +224,13 @@ class TerminalCoordinator {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
+        // Drop any persisted resume refs for this worktree's sessions before the
+        // tree (and its session names) are gone.
+        if let tree = stationManager.tree(forPath: info.path) {
+            for leaf in tree.allLeaves {
+                config.agentSessions.removeValue(forKey: leaf.sessionName)
+            }
+        }
         stationManager.removeTree(forPath: info.path)
 
         // Notify delegate immediately so the UI card disappears instantly

@@ -20,6 +20,11 @@ struct Config: Codable {
     var selectedWorktreePath: String?
     var activeWorktreePaths: [String: String]
     var focusedPaneIds: [String: String]
+    /// Per-session agent resume refs, keyed by backend session name. Populated
+    /// from agent hook events; used to relaunch the agent (e.g. `claude
+    /// --resume <id>`) when a backend session is recreated instead of falling
+    /// back to a plain shell.
+    var agentSessions: [String: AgentSessionRef]
     var wecomBot: WeComBotConfig?
     var wechat: WeChatConfig?
     var firstMate: FirstMateConfig
@@ -42,6 +47,7 @@ struct Config: Codable {
         case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
+        case agentSessions = "agent_sessions"
         case wecomBot = "wecom_bot"
         case wechat
         case firstMate
@@ -65,6 +71,7 @@ struct Config: Codable {
         selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
+        agentSessions = [:]
         wecomBot = nil
         wechat = nil
         firstMate = .default
@@ -94,6 +101,7 @@ struct Config: Codable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
+        agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
         wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
         wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default

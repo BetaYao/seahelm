@@ -8,10 +8,11 @@ final class BridgeCommandRouterTests: XCTestCase {
                     committed: @escaping (String) -> Void = { _ in },
                     returnWorktree: @escaping (String) -> Void = { _ in },
                     returnAll: @escaping () -> Void = {},
+                    addRepo: @escaping () -> Void = {},
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
                             commit: committed, returnWorktree: returnWorktree,
-                            returnAll: returnAll, activeSailorCount: agentCount,
+                            returnAll: returnAll, addRepo: addRepo, activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
     }
 

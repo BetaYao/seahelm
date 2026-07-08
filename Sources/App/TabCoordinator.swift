@@ -59,6 +59,10 @@ class TabCoordinator {
     private func saveConfig() {
         if let tc = terminalCoordinator {
             config.splitLayouts = tc.config.splitLayouts
+            // TerminalCoordinator is the authoritative holder of agentSessions
+            // (restore/close/delete all live there). Sync before saving so this
+            // coordinator's copy doesn't clobber it.
+            config.agentSessions = tc.config.agentSessions
         }
         config.save()
     }
@@ -452,6 +456,9 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
                         self?.handleNewWorktreeFromHook(worktreePath)
                     }
+                    self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, ref in
+                        self?.recordAgentSession(worktreePath: worktreePath, ref: ref)
+                    }
                     self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId in
                         guard let self else { return }
                         NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName)")
@@ -567,6 +574,19 @@ class TabCoordinator {
     }
 
     // MARK: - Worktree Auto-Discovery (via Agent Hooks)
+
+    /// Persist an agent resume ref (keyed by backend session name) and apply it
+    /// to the live station so a mid-session zmx recovery can relaunch the agent.
+    /// Called on the main thread.
+    private func recordAgentSession(worktreePath: String, ref: AgentSessionRef) {
+        let name = SessionManager.persistentSessionName(for: worktreePath)
+        // Apply to the live primary station (best-effort; drives mid-session recovery).
+        terminalCoordinator.stationManager.primaryStation(forPath: worktreePath)?.agentSessionRef = ref
+        // Write to the authoritative (TerminalCoordinator) copy, then persist.
+        guard terminalCoordinator.config.agentSessions[name] != ref else { return }
+        terminalCoordinator.config.agentSessions[name] = ref
+        saveConfig()
+    }
 
     private func handleNewWorktreeFromHook(_ worktreePath: String) {
         WorktreeDiscovery.findRepoRootAsync(from: worktreePath) { [weak self] repoRoot in

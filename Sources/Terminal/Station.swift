@@ -21,6 +21,12 @@ class Station {
     var sessionName: String?
     /// Persistence backend for the sessionName above.
     var backend: String = "zmx"
+    /// Agent resume ref, if this pane runs a recognized agent. When a *fresh*
+    /// backend session must be created (restore into a missing session, or zmx
+    /// recovery), the session is seeded with the agent's resume command instead
+    /// of a plain shell. Populated from Config on restore and from live hook
+    /// events mid-session.
+    var agentSessionRef: AgentSessionRef?
     /// Delegate notified when a stale session is recovered.
     weak var delegate: StationDelegate?
 
@@ -58,17 +64,53 @@ class Station {
             }
 
             if backend == "zmx" {
-                let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
-                _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
-                if surface != nil {
-                    scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+                // If this pane runs an agent and the backend session no longer
+                // exists (e.g. reboot lost the zmx daemon), seed a fresh session
+                // running the agent's resume command before attaching, instead
+                // of attaching into an empty shell. Seeding needs blocking
+                // process calls, so defer to a background thread and attach on
+                // main (mirrors the deferred tmux path).
+                if let resumeCmd = agentSessionRef?.resumeCommandLine(), let cwd = workingDirectory {
+                    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                        Station.seedZmxSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.attachZmx(app: app, container: container, workingDirectory: workingDirectory, sessionName: sessionName)
+                            completion?()
+                        }
+                    }
+                    return true  // Surface creation is deferred
                 }
+                attachZmx(app: app, container: container, workingDirectory: workingDirectory, sessionName: sessionName)
                 return surface != nil
             }
         }
 
         _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: nil)
         return surface != nil
+    }
+
+    /// Attach to a zmx session and schedule the post-attach health check.
+    private func attachZmx(app: ghostty_app_t, container: NSView, workingDirectory: String?, sessionName: String) {
+        let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
+        _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+        if surface != nil {
+            scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+        }
+    }
+
+    /// Seed a zmx session running `agentCommandLine` if one doesn't already
+    /// exist, blocking (briefly) until it comes up. Safe no-op when the session
+    /// is already alive. Call off the main thread.
+    static func seedZmxSessionIfMissing(name: String, cwd: String, agentCommandLine: String) {
+        guard !SessionManager.sessionExists(name: name, backend: "zmx") else { return }
+        // `zmx run` blocks for the agent's whole lifetime, so spawn it detached
+        // and wait only for the session to register.
+        Thread.detachNewThread {
+            SessionManager.createDetachedSession(
+                name: name, backend: "zmx", cwd: cwd, agentCommandLine: agentCommandLine)
+        }
+        _ = SessionManager.waitUntilSessionExists(name: name, backend: "zmx", timeoutSeconds: 5)
     }
 
     @discardableResult
@@ -417,9 +459,17 @@ class Station {
     }
 
     private func recoverZmxSession(sessionName: String, container: NSView, workingDirectory: String?) {
+        let resumeCmd = agentSessionRef?.resumeCommandLine()
         // 1. Kill the stale session in the background
         DispatchQueue.global(qos: .utility).async {
             Self.forceKillZmxSession(sessionName)
+
+            // 1b. If this pane runs an agent, seed a fresh session with the
+            // agent's resume command so recovery brings the agent back instead
+            // of a bare shell.
+            if let resumeCmd, let cwd = workingDirectory {
+                Station.seedZmxSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+            }
 
             // 2. Recreate on main thread
             DispatchQueue.main.async { [weak self] in

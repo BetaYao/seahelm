@@ -239,6 +239,7 @@
 		DA2A0458E60D38BD6F7C9649 /* PendingWorktreeTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC523F46E555168F903DA96E /* PendingWorktreeTransfer.swift */; };
 		DBC71AE11E16638FD7EE341D /* DashboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEC0119082025691BCED456 /* DashboardViewController.swift */; };
 		DD26E727E1605031773062C1 /* Region.swift in Sources */ = {isa = PBXBuildFile; fileRef = 777994FF5519110FAD559388 /* Region.swift */; };
+		DF435FEBFAFFAB058E34A71C /* AgentSessionRef.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */; };
 		DF8657B7BF0500DF52C1DFB4 /* ShipLogActivityEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89EF6FF04DDD099C95A100C3 /* ShipLogActivityEventTests.swift */; };
 		E014D0B236CDD89188F63E72 /* TmuxChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C533C111D282DEFF2B36E3 /* TmuxChannel.swift */; };
 		E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F647B139CCD0468E41CBBB6F /* BridgePanelViewController.swift */; };
@@ -263,6 +264,7 @@
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
 		F176CCFA365B9C079D3FE750 /* LeaderMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AF80AC91241DD0E34B964 /* LeaderMenuTests.swift */; };
+		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
 		F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */; };
 		F4980A324663FD9EF612E785 /* SailorChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A953BA5BA82E18C03F5294 /* SailorChannel.swift */; };
 		F684668DAD5AD32B13566824 /* SailorTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4307D4828267A1F187FE65E /* SailorTypeTests.swift */; };
@@ -414,6 +416,7 @@
 		69C2CDDE5B3E1CCC22C65419 /* ActivityFeedIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedIntegrationTests.swift; sourceTree = "<group>"; };
 		6A141F8A22DEE7A3DDC6768A /* WorktreeTitleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleCache.swift; sourceTree = "<group>"; };
 		6A912279D16E32ED9BADB27B /* UsageSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryStore.swift; sourceTree = "<group>"; };
+		6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRefTests.swift; sourceTree = "<group>"; };
 		6D98DA93A28B692784539710 /* seahelmTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seahelmTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolver.swift; sourceTree = "<group>"; };
 		72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstallerTests.swift; sourceTree = "<group>"; };
@@ -552,6 +555,7 @@
 		E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
 		E16FBC8322498A92AB007AAB /* ModalPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPage.swift; sourceTree = "<group>"; };
 		E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinator.swift; sourceTree = "<group>"; };
+		E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRef.swift; sourceTree = "<group>"; };
 		E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerLayoutTests.swift; sourceTree = "<group>"; };
 		E96EE302F1479073676DB584 /* FirstMateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateTests.swift; sourceTree = "<group>"; };
 		E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstaller.swift; sourceTree = "<group>"; };
@@ -613,6 +617,7 @@
 			children = (
 				47B0201979B7976AC0A77D56 /* ActivityEvent.swift */,
 				7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */,
+				E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */,
 				DE6B0C9F2013F74108B7422B /* BridgeCommand.swift */,
 				2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */,
 				2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */,
@@ -864,6 +869,7 @@
 				BD54528A1D3989383AC18319 /* ActivityEventTests.swift */,
 				69C2CDDE5B3E1CCC22C65419 /* ActivityFeedIntegrationTests.swift */,
 				7A43BFEA80D85BEB85CE0125 /* ActivityFeedRendererTests.swift */,
+				6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */,
 				1CA0B60DF8E61257A13B1271 /* BackendResolverTests.swift */,
 				32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */,
 				7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */,
@@ -1248,6 +1254,7 @@
 				92DFDABD2CD56B3AC0F6F5F3 /* ActivityEventTests.swift in Sources */,
 				59FC2AD92C805AA30D322B83 /* ActivityFeedIntegrationTests.swift in Sources */,
 				55837BD097FC8B76C4C8E3DB /* ActivityFeedRendererTests.swift in Sources */,
+				F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */,
 				E34E28AD7AD1028103E79E7B /* BackendResolverTests.swift in Sources */,
 				E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */,
 				EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */,
@@ -1388,6 +1395,7 @@
 				B017FBA8417E6C64C7A4804B /* ActivityEvent.swift in Sources */,
 				35B413CAB65CDFC7F5994E84 /* ActivityEventExtractor.swift in Sources */,
 				EBE5F0C17B4DDC6FBD06BB53 /* ActivityFeedRenderer.swift in Sources */,
+				DF435FEBFAFFAB058E34A71C /* AgentSessionRef.swift in Sources */,
 				33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */,
 				12702A1B7B7DD78FD49D65D5 /* AppFont.swift in Sources */,
 				16E24E68FDE6B856E82C30AF /* BackendResolver.swift in Sources */,

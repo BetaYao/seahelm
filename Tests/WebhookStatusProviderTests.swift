@@ -63,6 +63,59 @@ final class WebhookStatusProviderTests: XCTestCase {
         wait(for: [callback], timeout: 1.0)
     }
 
+    // MARK: - Agent session resolution (③)
+
+    private let uuid = "f637907b-a9b7-429a-941c-b407fe2487ee"
+
+    func testAgentSessionResolvedFiresForClaude() {
+        let fired = expectation(description: "agent session resolved")
+        provider.onAgentSessionResolved = { worktreePath, ref in
+            XCTAssertEqual(worktreePath, "/projects/repo/main")
+            XCTAssertEqual(ref.agent, "claude")
+            XCTAssertEqual(ref.sessionId, self.uuid)
+            fired.fulfill()
+        }
+        provider.handleEvent(makeEvent(sessionId: uuid, event: .sessionStart, cwd: "/projects/repo/main"))
+        wait(for: [fired], timeout: 1.0)
+    }
+
+    func testAgentSessionResolvedExcludesSubagent() {
+        let fired = expectation(description: "should not fire for subagent")
+        fired.isInverted = true
+        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        // Subagent events carry `agent_id`; they must not drive the main pane's ref.
+        provider.handleEvent(makeEvent(sessionId: uuid, event: .subagentStop,
+                                       cwd: "/projects/repo/main", data: ["agent_id": "sub-1"]))
+        wait(for: [fired], timeout: 0.3)
+    }
+
+    func testAgentSessionResolvedSkipsUnsupportedSource() {
+        let fired = expectation(description: "should not fire for codex in step 1")
+        fired.isInverted = true
+        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        let codexEvent = WebhookEvent(source: "codex", sessionId: uuid, event: .sessionStart,
+                                      cwd: "/projects/repo/main", timestamp: nil, data: nil)
+        provider.handleEvent(codexEvent)
+        wait(for: [fired], timeout: 0.3)
+    }
+
+    func testAgentSessionResolvedSkipsInvalidSessionId() {
+        let fired = expectation(description: "should not fire for non-uuid id")
+        fired.isInverted = true
+        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        // "s1" is not in the UUID alphabet → AgentSessionRef rejects it.
+        provider.handleEvent(makeEvent(sessionId: "s1", event: .sessionStart, cwd: "/projects/repo/main"))
+        wait(for: [fired], timeout: 0.3)
+    }
+
+    func testAgentSessionResolvedSkipsUnknownWorktree() {
+        let fired = expectation(description: "should not fire for unmatched cwd")
+        fired.isInverted = true
+        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        provider.handleEvent(makeEvent(sessionId: uuid, event: .sessionStart, cwd: "/somewhere/else"))
+        wait(for: [fired], timeout: 0.3)
+    }
+
     func testCodexUserPromptFallsBackToSessionLookup() {
         provider.codexPromptLookup = { sessionId in
             XCTAssertEqual(sessionId, "codex-session")
