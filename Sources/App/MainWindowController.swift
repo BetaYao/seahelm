@@ -110,6 +110,8 @@ class MainWindowController: NSWindowController {
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.aggregator = statusAggregator
+        NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
+        NotificationManager.shared.cooldown = config.notifications.cooldown
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
         statusAggregator.onActivity = { [weak self] path, date in
@@ -269,10 +271,12 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
 
-    /// Double-tap fn: show/hide the First Mate (Helm cockpit) panel.
+    /// Double-tap fn: toggle between the Dashboard overview (spread First Mate)
+    /// and the current worktree's working view.
     func toggleFirstMatePanel() {
         tabCoordinator.switchToTab(0)
-        dashboardVC?.helmCockpit.toggleCockpit()
+        guard let dashboard = dashboardVC else { return }
+        dashboard.setDisplayMode(dashboard.displayMode == .overview ? .worktree : .overview)
     }
 
     // MARK: - Ctrl double-tap detection
@@ -495,7 +499,33 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self?.helmMenuItems(trigger: trigger, query: query) ?? []
         }
 
-        dashboard.onEnterTerminal = { [weak self] in self?.keyboardMode.enterInsert() }
+        // Feed the full-width overview's ORDERS carousel + composer with the same
+        // queue and handlers the cockpit uses.
+        dashboard.configureOverview(
+            pendingOrders: tabCoordinator.pendingOrders,
+            onSubmitCommand: { [weak self] text in _ = self?.submitBridgeCommand(text) },
+            onOrderAction: { [weak self] order, optionText in
+                self?.handleSuggestionTapped(order: order, optionText: optionText)
+            },
+            commandMenuProvider: { [weak self] trigger, query in
+                self?.helmMenuItems(trigger: trigger, query: query) ?? []
+            }
+        )
+
+        dashboard.onEnterTerminal = { [weak self] in
+            // Drilling into a terminal = entering the worktree working view.
+            self?.dashboardVC?.setDisplayMode(.worktree)
+            self?.keyboardMode.enterInsert()
+        }
+        // Keep the title-bar left cluster in sync: only the theme toggle in the
+        // Dashboard overview; collapse + file/change once inside a worktree.
+        dashboard.onDisplayModeChanged = { [weak self] mode in
+            self?.titleBar.setChromeMode(overview: mode == .overview)
+        }
+        // Light exactly one toolbar icon for the active view; dim the rest.
+        dashboard.onActiveToolChanged = { [weak self] tool in
+            self?.titleBar.setActiveTool(tool)
+        }
         dashboard.onRequestNewWorktree = { [weak self] in
             // Opens the Helm cockpit with `/new ` prefilled (the inline creator and
             // its createForm keyboard substate were removed).
@@ -517,9 +547,18 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         embedViewController(dashboard)
         updateTitleBar()
+        // Launch in the overview: hide the worktree-only chrome up front so the
+        // collapse/file/change/back icons don't flash before the async activation.
+        titleBar.setChromeMode(overview: true)
 
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
+
+        // Land in the Dashboard overview (spread First Mate). Deferred so the
+        // window/first-responder are settled before the cockpit opens.
+        DispatchQueue.main.async { [weak self] in
+            self?.dashboardVC?.activateInitialOverview()
+        }
     }
 
     /// Creates a worktree off the main thread. `onComplete` fires on the main
@@ -909,16 +948,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
             return
         }
         let path = agent.worktreePath
-        // Prefer prompt/branch already on the display info; fall back to ShipLog.
         let info = ShipLog.shared.sailor(forWorktree: path)
-        let prompt = info?.lastUserPrompt ?? ""
         let branch = info?.branch ?? ""
-        capsuleToken += 1
-        let token = capsuleToken
-        WorktreeTitleCache.shared.title(worktreePath: path, lastUserPrompt: prompt, branch: branch) { [weak self] title in
-            guard let self, token == self.capsuleToken else { return }
-            self.titleBar.updateFocusedWorktree(title: title, path: path)
-        }
+        // Title leads with the repo name (emphasized), then the branch.
+        let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 } ?? (path as NSString).lastPathComponent
+        let title = branch.isEmpty ? repo : "\(repo) · \(branch)"
+        titleBar.updateFocusedWorktree(title: title, path: path)
     }
 
 
@@ -1160,7 +1195,18 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidSelectWorktree(_ path: String) {
+        // Picking a worktree from the popover drills into its working view.
         tabCoordinator.selectTab(forWorktree: path)
+        dashboardVC?.setDisplayMode(.worktree)
+    }
+
+    func titleBarDidRequestOverview() {
+        tabCoordinator.switchToTab(0)
+        dashboardVC?.enterOverview()
+    }
+
+    func titleBarDidToggleFirstMate() {
+        dashboardVC?.toggleFirstMateSide()
     }
 }
 

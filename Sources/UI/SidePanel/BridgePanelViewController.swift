@@ -449,7 +449,9 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
 
 // MARK: - Bare-TUI palette & helpers (prototype THEME.A)
 
-private enum Bare {
+/// First Mate "Bare-TUI" palette (prototype THEME.A). Internal so the Dashboard
+/// overview can reuse the exact same colours/cards 1:1.
+enum Bare {
     static let cardBg     = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
     static let panelAlt   = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
     static let line       = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
@@ -554,7 +556,9 @@ private final class OptionChipButton: NSView {
 
 // MARK: - OrderCardView
 
-private final class OrderCardView: NSTableCellView {
+/// First Mate order card. Internal so the Dashboard overview can lay the exact
+/// same card out horizontally in its ORDERS carousel.
+final class OrderCardView: NSTableCellView {
     private let accentBar = NSView()
     private let glyphLabel = NSTextField(labelWithString: "")
     private let agentLabel = NSTextField(labelWithString: "")

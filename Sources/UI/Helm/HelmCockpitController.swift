@@ -432,9 +432,19 @@ final class HelmCockpitController: NSViewController {
         menuSel = 0
     }
 
+    /// When false, scrim clicks and Esc do not close the cockpit — used by the
+    /// Dashboard overview, where the spread First Mate is the primary surface and
+    /// should stay put rather than being dismissed into an empty dashboard.
+    var allowsDismiss = true
+
     private func setupOrb(in root: NSView) {
         orb.onToggle = { [weak self] in self?.toggle() }
         root.addSubview(orb)
+        // The bottom-center radar orb entry was removed — the cockpit is now the
+        // spread First Mate that the Dashboard overview opens directly. The orb is
+        // kept in the hierarchy (hidden) only so the panel's `bottom == orb.top`
+        // constraint still resolves.
+        orb.isHidden = true
         NSLayoutConstraint.activate([
             orb.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             // root now extends to the window bottom (over the status bar); a small
@@ -461,6 +471,10 @@ final class HelmCockpitController: NSViewController {
     /// Open the center on the Watch tab (bound to `w`). For now just opens it.
     func openCockpit() { if !isOpen { toggle() } }
 
+    /// Close the cockpit if open (used when drilling into a worktree). Ignores the
+    /// `allowsDismiss` guard — this is a programmatic close, not a user dismissal.
+    func closeIfOpen() { if isOpen { toggle() } }
+
     /// Toggle the `?` keyboard help overlay.
     func toggleHelp() {
         if helpOverlay != nil { dismissHelp(); return }
@@ -486,7 +500,7 @@ final class HelmCockpitController: NSViewController {
     @discardableResult
     func closeTopmost() -> Bool {
         if helpOverlay != nil { dismissHelp(); return true }
-        if isOpen { toggle(); return true }
+        if isOpen && allowsDismiss { toggle(); return true }
         return false
     }
 
@@ -527,7 +541,7 @@ final class HelmCockpitController: NSViewController {
         (btn.cell as? NSButtonCell)?.imageScaling = .scaleNone
     }
 
-    @objc private func scrimClicked() { if isOpen { toggle() } }
+    @objc private func scrimClicked() { if isOpen && allowsDismiss { toggle() } }
 
     @objc private func toggle() {
         isOpen.toggle()
@@ -611,7 +625,9 @@ final class HelmCockpitController: NSViewController {
 }
 
 /// A single autocomplete row: `‹trigger› name … desc`, with hover highlight.
-private final class MenuRowButton: NSView {
+/// `/ @ #` autocomplete row. Internal so the Dashboard overview's composer can
+/// render the exact same menu as the cockpit.
+final class MenuRowButton: NSView {
     private static let ink      = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
     private static let inkFaint = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
     private static let hoverBg  = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 0.10)

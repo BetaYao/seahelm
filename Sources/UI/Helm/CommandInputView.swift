@@ -40,6 +40,12 @@ final class CommandInputView: NSView {
         set { field.stringValue = newValue }
     }
 
+    /// Corner radius of the input box. Defaults to 7 (Cockpit/THEME B). The
+    /// Dashboard overview (Bare TUI / THEME A) sets 0 for square corners.
+    var boxCornerRadius: CGFloat = 7 {
+        didSet { box.layer?.cornerRadius = boxCornerRadius }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
