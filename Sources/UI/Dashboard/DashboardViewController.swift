@@ -150,9 +150,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // Center overlay
     private var centerOverlay: CenterOverlayView?
 
-    // Helm cockpit (WP-2) — bottom-center radar orb + floating command center,
-    // layered on top of everything. Fed the live queue/feed by MainWindowController.
-    private(set) lazy var helmCockpit = HelmCockpitController()
+    // `?` keyboard cheat-sheet overlay (the floating First Mate cockpit was
+    // removed; the command composer lives in the overview now).
+    private var helpOverlay: KeyboardHelpOverlay?
 
     // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
     // open as a 392pt left side panel over the terminal in .worktree mode.
@@ -197,26 +197,37 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             self?.enterWorktree(byWorktreePath: path)
         }
         mountOverviewFull()
-
-        // The Helm cockpit is installed by MainWindowController into the window
-        // content view (so the orb can sit over the status bar), not here.
     }
 
-    /// Layer the Helm cockpit on top of `host`, spanning from `top` down to the
-    /// host bottom. MainWindowController passes the window content view + the
-    /// content-container top, so the cockpit covers the dashboard AND the status
-    /// bar — letting the radar orb bottom-align with the status bar.
-    /// Its passthrough container forwards clicks everywhere except the orb/panel.
-    func installCockpit(in host: NSView, top: NSLayoutYAxisAnchor) {
-        addChild(helmCockpit)
-        helmCockpit.view.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(helmCockpit.view)
+    // MARK: - `?` keyboard help overlay
+
+    /// Toggle the `?` keyboard cheat-sheet over the dashboard.
+    func toggleHelp() {
+        if helpOverlay != nil { dismissHelp(); return }
+        let overlay = KeyboardHelpOverlay()
+        overlay.onDismiss = { [weak self] in self?.dismissHelp() }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(overlay)
         NSLayoutConstraint.activate([
-            helmCockpit.view.topAnchor.constraint(equalTo: top),
-            helmCockpit.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            helmCockpit.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            helmCockpit.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        helpOverlay = overlay
+    }
+
+    private func dismissHelp() {
+        helpOverlay?.removeFromSuperview()
+        helpOverlay = nil
+    }
+
+    /// Close the topmost transient overlay (currently only the help sheet).
+    /// Returns true if it dismissed something so the caller stops propagating Esc.
+    @discardableResult
+    private func closeTopmostOverlay() -> Bool {
+        if helpOverlay != nil { dismissHelp(); return true }
+        return false
     }
 
     // MARK: - Public API
@@ -484,6 +495,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     /// Feed the overview's ORDERS carousel + command composer. Called by
     /// MainWindowController with the same queue/handlers the cockpit uses.
+    /// Return to the overview and start a `/new` command in its command input.
+    func startNewCommand(prefill: String = "/new ") {
+        setDisplayMode(.overview)
+        DispatchQueue.main.async { [weak self] in
+            self?.overviewView.focusCommand(prefill: prefill)
+        }
+    }
+
     func configureOverview(pendingOrders: PendingOrdersQueue?,
                            onSubmitCommand: @escaping (String) -> Void,
                            onOrderAction: @escaping (PendingOrder, String) -> Void,
@@ -576,9 +595,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     }
 
     func focusInlineCreate() {
-        // New-worktree creation moved to the Helm cockpit: open it with `/new `
-        // prefilled so the user types the task and submits.
-        helmCockpit.openWithCommand("/new ")
+        // New-worktree creation lives in the overview composer: switch to the
+        // overview and prefill `/new ` so the user types the task and submits.
+        startNewCommand()
     }
 
     /// Called when the inline create form ends (submit or cancel) so the owner
@@ -1107,18 +1126,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
         }
 
-        // Helm cockpit keys (NORMAL mode). space toggles the cockpit, ? the help
-        // overlay; Esc closes the topmost cockpit surface before falling back to
-        // the legacy "exit nav" behavior.
+        // NORMAL mode: ? toggles the keyboard help overlay; Esc closes it first
+        // before falling back to the legacy "exit nav" behavior.
         if event.keyCode == 53 {  // Esc
-            if helmCockpit.closeTopmost() { return }
+            if closeTopmostOverlay() { return }
         }
         if flags.isDisjoint(with: [.command, .control, .option]) {
-            if event.keyCode == 49 {  // space
-                helmCockpit.toggleCockpit(); return
-            }
             if event.characters == "?" {
-                helmCockpit.toggleHelp(); return
+                toggleHelp(); return
             }
         }
 
@@ -1702,7 +1717,7 @@ final class DashboardOverviewView: NSView {
         return bar
     }
 
-    // MARK: - `/ @ #` autocomplete (mirrors HelmCockpitController)
+    // MARK: - `/ @ #` autocomplete (overview composer)
 
     /// Trailing `/@#`-token of the input, if any.
     private func trailingToken(_ text: String) -> (trigger: Character, query: String, token: String)? {

@@ -250,19 +250,19 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
-        // Cmd+N now focuses the inline worktree creator in the sidebar instead of
-        // presenting the modal dialog. The modal builder (makeNewBranchDialog) and
-        // NewBranchDialog remain available but are no longer triggered here.
+        // Cmd+N returns to the Dashboard overview and starts a `/new` command in
+        // its command input.
         tabCoordinator.switchToTab(0)
-        dashboardVC?.focusInlineCreate()
+        dashboardVC?.startNewCommand()
     }
 
     // MARK: - First Mate command shortcuts
 
-    /// Open the Helm cockpit on the dashboard tab with a slash command prefilled.
+    /// Switch to the dashboard overview and prefill its composer with a slash
+    /// command (the floating cockpit was removed; the composer lives in overview).
     private func openHelmCockpit(prefill: String) {
         tabCoordinator.switchToTab(0)
-        dashboardVC?.helmCockpit.openWithCommand(prefill)
+        dashboardVC?.startNewCommand(prefill: prefill)
     }
 
     @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
@@ -473,34 +473,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self?.handleBridgeApprove(order)
         }
 
-        // Helm cockpit (WP-2) shares the same queue/feed/handlers as the sidebar.
-        dashboard.helmCockpit.pendingOrdersQueue = tabCoordinator.pendingOrders
-        dashboard.helmCockpit.watchFeed = tabCoordinator.watchFeed
-        dashboard.helmCockpit.onSuggestionTapped = { [weak self] order, optionText in
-            self?.handleSuggestionTapped(order: order, optionText: optionText)
-        }
-        dashboard.helmCockpit.onNavigate = { [weak self] path in
-            self?.tabCoordinator.selectTab(forWorktree: path)
-        }
-        dashboard.helmCockpit.onApprove = { [weak self] order in
-            self?.handleBridgeApprove(order)
-        }
-        // Install the cockpit into the window content view spanning the content
-        // container AND the status bar, so the radar orb bottom-aligns with the
-        // status bar. (force-load dashboard.view first so its child VC is ready.)
-        _ = dashboard.view
-        if let host = contentContainer.superview {
-            dashboard.installCockpit(in: host, top: contentContainer.topAnchor)
-        }
-        dashboard.helmCockpit.onSubmitCommand = { [weak self] text, onOutcome in
-            self?.submitBridgeCommand(text, onOutcome: onOutcome) ?? false
-        }
-        dashboard.helmCockpit.commandMenuProvider = { [weak self] trigger, query in
-            self?.helmMenuItems(trigger: trigger, query: query) ?? []
-        }
-
-        // Feed the full-width overview's ORDERS carousel + composer with the same
-        // queue and handlers the cockpit uses.
+        // Feed the full-width overview's ORDERS carousel + composer with the live
+        // queue and command handlers.
         dashboard.configureOverview(
             pendingOrders: tabCoordinator.pendingOrders,
             onSubmitCommand: { [weak self] text in _ = self?.submitBridgeCommand(text) },
@@ -734,6 +708,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
+    /// Outcome of an async Helm command, reported back so the caller can drop its
+    /// loading spinner and react.
+    enum HelmCommandOutcome {
+        case navigated   // moved to a new tab (e.g. /new)
+        case presented   // dropped an order card (e.g. /return)
+        case failed      // error
+    }
+
     /// Submit a Helm command. Returns `true` if it kicked off async work (so the
     /// caller shows a loading spinner); `onOutcome` then fires when the work
     /// completes — `.navigated` for a new tab, `.presented` for an order card,
@@ -927,12 +909,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
             return (path: path, title: title, agentGlyph: agentGlyph, agentColor: agentColor, statusColor: statusColor, paneCount: paneCount, isSelected: isSelected, collapsed: collapsed)
         }
         titleBar.setWorktreeTabs(tabs)
-
-        // Radar animates only while some agent is actively running or waiting.
-        let radarActive = ShipLog.shared.allSailors().contains {
-            $0.status == .running || $0.status == .waiting
-        }
-        dashboardVC?.helmCockpit.setRadarActive(radarActive)
 
         tabCoordinator.dashboardVC?.updateFleetSummary(
             repos: tabCoordinator.workspaceManager.tabs.count,
