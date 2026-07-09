@@ -5,6 +5,10 @@ struct PendingWorktreeTransfer {
     let sourceWorktreePath: String
     let worktreeName: String
     let sessionId: String
+    /// Stable pane id (zmx session name from SEAHELM_PANE_ID) of the pane that
+    /// created the worktree, when the hook forwarded it. Lets the transfer move
+    /// only that pane instead of the whole source tree. nil when unknown.
+    let paneId: String?
     let recordedAt: Date
 }
 
@@ -17,7 +21,7 @@ class PendingTransferTracker {
     private let ttl: TimeInterval = 30
 
     /// Record that a worktree creation is in progress.
-    func record(sourceWorktreePath: String, worktreeName: String, sessionId: String) {
+    func record(sourceWorktreePath: String, worktreeName: String, sessionId: String, paneId: String? = nil) {
         lock.lock()
         defer { lock.unlock() }
         pruneStale()
@@ -25,6 +29,7 @@ class PendingTransferTracker {
             sourceWorktreePath: sourceWorktreePath,
             worktreeName: worktreeName,
             sessionId: sessionId,
+            paneId: paneId,
             recordedAt: Date()
         ))
     }

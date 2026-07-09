@@ -19,7 +19,7 @@ class WebhookStatusProvider {
 
     /// Called when a WorktreeCreate event arrives, with source worktree path and worktree name.
     /// Fires before the new worktree is discoverable (the git operation may still be in progress).
-    var onWorktreeCreateReceived: ((_ sourceWorktreePath: String, _ worktreeName: String, _ sessionId: String) -> Void)?
+    var onWorktreeCreateReceived: ((_ sourceWorktreePath: String, _ worktreeName: String, _ sessionId: String, _ paneId: String?) -> Void)?
 
     struct SessionState {
         let sessionId: String
@@ -66,8 +66,9 @@ class WebhookStatusProvider {
                     let sourcePath = canonCwd
                     let worktreePath = event.data?["worktree_path"] as? String
                     NSLog("[WebhookStatusProvider] WorktreeCreate from \(sourcePath): \(worktreeName)")
+                    let paneId = event.paneId
                     DispatchQueue.main.async { [weak self] in
-                        self?.onWorktreeCreateReceived?(sourcePath, worktreeName, event.sessionId)
+                        self?.onWorktreeCreateReceived?(sourcePath, worktreeName, event.sessionId, paneId)
                     }
                     // Also trigger delayed discovery — CwdChanged may not fire
                     // if the agent stays in the original directory after creating the worktree

@@ -5,7 +5,7 @@ import Foundation
 /// decision back to the agent via stdout. Prefers the Unix socket; falls back to
 /// the HTTP webhook so a socket hiccup never breaks the Stop-hook UX.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v2"
+    static let versionMarker = "# seahelm-hook v3"
 
     static func scriptContents() -> String {
         return """
@@ -19,6 +19,14 @@ enum SeahelmHookInstaller {
 
         payload="$(cat)"
         [ -n "$payload" ] || exit 0
+
+        # Tag the event with our stable pane id so seahelm can attribute it to the
+        # exact pane (e.g. to transfer only that pane when it creates a worktree).
+        # Session names are [A-Za-z0-9_-], so no JSON escaping is needed.
+        pid="${SEAHELM_PANE_ID:-}"
+        case "$payload" in
+          '{'*) [ -n "$pid" ] && payload='{"seahelm_pane_id":"'"$pid"'",'"${payload#\\{}" ;;
+        esac
 
         # Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor -w):
         # it closes its write half on stdin EOF, the server replies with the

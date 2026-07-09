@@ -5,13 +5,29 @@ final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
         let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v2"))
+        XCTAssertTrue(s.contains("seahelm-hook v3"))
         XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
         XCTAssertTrue(s.contains("block_b64"))           // block extraction
         XCTAssertTrue(s.contains("base64 -d"))
         XCTAssertFalse(s.contains("/webhook"))           // HTTP fallback removed
         XCTAssertFalse(s.contains("curl"))
         XCTAssertTrue(s.contains("\"method\":\"hook\""))
+        XCTAssertTrue(s.contains("seahelm_pane_id"))     // pane id injected
+        XCTAssertTrue(s.contains("SEAHELM_PANE_ID"))
+    }
+
+    func testScriptIsValidSh() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("seahelm-hook-syn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try SeahelmHookInstaller.scriptContents().write(to: tmp, atomically: true, encoding: .utf8)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-n", tmp.path]   // syntax check only
+        let err = Pipe(); p.standardError = err
+        try p.run(); p.waitUntilExit()
+        let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(p.terminationStatus, 0, "sh syntax error:\n\(msg)")
     }
 
     func testInstallWritesExecutable() throws {

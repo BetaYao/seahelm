@@ -480,10 +480,10 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, ref: ref)
                     }
-                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId in
+                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId, paneId in
                         guard let self else { return }
-                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName)")
-                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId)
+                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName) (pane \(paneId ?? "?"))")
+                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId, paneId: paneId)
                     }
                     // Per-session timestamps: when we last blocked a session for suggestions,
                     // and when a user prompt last arrived for that session. If the user sent a
