@@ -82,6 +82,9 @@ class StationManager {
     @discardableResult
     func transferTree(fromPath: String, toPath: String) -> SplitTree? {
         guard let tree = trees.removeValue(forKey: fromPath) else { return nil }
+        // Re-home the tree so persistence (saveSplitLayout keys on worktreePath)
+        // and station.create's cwd point at the destination, not the old path.
+        tree.worktreePath = toPath
         trees[toPath] = tree
         return tree
     }

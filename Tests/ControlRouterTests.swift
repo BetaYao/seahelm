@@ -32,6 +32,23 @@ private final class FakeDataSource: ControlDataSource {
     var mutableOk = true
     func closePane(paneId: String) -> Bool { closed.append(paneId); return mutableOk }
     func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
+    var explains: [String: [String: Any]] = [:]
+    func explainPane(paneId: String) -> [String: Any]? { explains[paneId] }
+    var options: [String: [[String: Any]]] = [:]
+    var knownForOptions: Set<String> = []
+    func paneOptions(paneId: String) -> [[String: Any]]? {
+        knownForOptions.contains(paneId) ? (options[paneId] ?? []) : nil
+    }
+    var exportResult: [String: Any]?
+    var appliedRoots: [[String: Any]] = []
+    var applyOk = true
+    func exportLayout() -> [String: Any]? { exportResult }
+    func applyLayout(root: [String: Any]) -> Bool { appliedRoots.append(root); return applyOk }
+    var zoomCalls: [(pane: String?, mode: String)] = []
+    var zoomResult: [String: Any]? = ["zoomed": true]
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
+        zoomCalls.append((paneId, mode)); return zoomResult
+    }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -174,6 +191,108 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Options
+
+    func testPaneOptions() {
+        let (r, ds) = router()
+        ds.knownForOptions = ["t1"]
+        ds.options["t1"] = [["index": 1, "label": "Yes", "selected": true],
+                            ["index": 2, "label": "No", "selected": false]]
+        guard case .ok(let d) = r.handle(method: "pane.options", params: ["pane_id": "t1"]),
+              let opts = d["options"] as? [[String: Any]] else { return XCTFail() }
+        XCTAssertEqual(opts.count, 2)
+        XCTAssertEqual(opts[0]["label"] as? String, "Yes")
+    }
+
+    func testPaneOptionsUnknownPane() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.options", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    // MARK: - Zoom
+
+    func testZoomTogglesByDefault() {
+        let (r, ds) = router()
+        ds.zoomResult = ["zoomed": true]
+        guard case .ok(let d) = r.handle(method: "pane.zoom", params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(d["zoomed"] as? Bool, true)
+        XCTAssertEqual(ds.zoomCalls[0].mode, "toggle")
+        XCTAssertEqual(ds.zoomCalls[0].pane, "t1")
+    }
+
+    func testZoomModeOnAndInvalid() {
+        let (r, ds) = router()
+        _ = r.handle(method: "pane.zoom", params: ["mode": "on"])
+        XCTAssertEqual(ds.zoomCalls[0].mode, "on")
+        XCTAssertNil(ds.zoomCalls[0].pane)  // focused
+        guard case .error(let code, _) = r.handle(method: "pane.zoom", params: ["mode": "sideways"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testZoomNotFound() {
+        let (r, ds) = router()
+        ds.zoomResult = nil
+        guard case .error(let code, _) = r.handle(method: "pane.zoom", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    // MARK: - Layout
+
+    func testLayoutExport() {
+        let (r, ds) = router()
+        ds.exportResult = ["root": ["type": "pane"], "worktree_path": "/wt"]
+        guard case .ok(let d) = r.handle(method: "layout.export", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(d["worktree_path"] as? String, "/wt")
+    }
+
+    func testLayoutExportNoActive() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "layout.export", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testLayoutApply() {
+        let (r, ds) = router()
+        let root: [String: Any] = ["type": "pane", "command": "claude"]
+        guard case .ok(let d) = r.handle(method: "layout.apply", params: ["root": root]) else { return XCTFail() }
+        XCTAssertEqual(d["applied"] as? Bool, true)
+        XCTAssertEqual(ds.appliedRoots.count, 1)
+    }
+
+    func testLayoutApplyRequiresRoot() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "layout.apply", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testLayoutApplyRejectedByDataSource() {
+        let (r, ds) = router()
+        ds.applyOk = false
+        guard case .error = r.handle(method: "layout.apply", params: ["root": ["type": "pane"]]) else { return XCTFail() }
+    }
+
+    // MARK: - Explain
+
+    func testExplainReturnsDetail() {
+        let (r, ds) = router()
+        ds.explains["t1"] = ["status": "waiting", "decided_by": "screen",
+                             "matched_rule": ["id": "permission_prompt"]]
+        guard case .ok(let d) = r.handle(method: "pane.explain", params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(d["status"] as? String, "waiting")
+        XCTAssertEqual((d["matched_rule"] as? [String: Any])?["id"] as? String, "permission_prompt")
+    }
+
+    func testExplainAliasAndErrors() {
+        let (r, ds) = router()
+        ds.explains["t1"] = ["status": "idle"]
+        guard case .ok = r.handle(method: "agent.explain", params: ["pane_id": "t1"]) else { return XCTFail() }
+        guard case .error(let c1, _) = r.handle(method: "pane.explain", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(c1, ControlError.invalidParams)
+        guard case .error(let c2, _) = r.handle(method: "pane.explain", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(c2, ControlError.notFound)
     }
 
     // MARK: - Split

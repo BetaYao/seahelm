@@ -81,7 +81,7 @@ final class SplitTreeTests: XCTestCase {
 
     func testSplitFocusedLeaf() {
         let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", stationId: "s1", sessionName: "amux-repo-main")
-        let newLeafId = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: "amux-repo-main-1")
+        let newLeafId = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: "amux-repo-main-1").leafId
         XCTAssertEqual(newLeafId, "b")
         XCTAssertEqual(tree.focusedId, "b")
         XCTAssertEqual(tree.leafCount, 2)

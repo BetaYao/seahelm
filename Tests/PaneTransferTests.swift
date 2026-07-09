@@ -8,13 +8,21 @@ final class PaneTransferTests: XCTestCase {
 
     func testRecordAndMatch() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1")
+        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1",
+                       paneId: "amux-repo-main")
 
         let result = tracker.consume(newWorktreePath: "/repo/.worktrees/feature-x")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.sourceWorktreePath, "/repo")
         XCTAssertEqual(result?.worktreeName, "feature-x")
         XCTAssertEqual(result?.sessionId, "s1")
+        XCTAssertEqual(result?.paneId, "amux-repo-main")   // carried for precise transfer
+    }
+
+    func testPaneIdDefaultsNil() {
+        let tracker = PendingTransferTracker()
+        tracker.record(sourceWorktreePath: "/repo", worktreeName: "fx", sessionId: "s1")
+        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/fx")?.paneId)
     }
 
     func testConsumeRemovesEntry() {
@@ -66,6 +74,21 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertNil(manager.tree(forPath: "/repo"))
         XCTAssertNotNil(manager.tree(forPath: "/worktrees/feature-x"))
         XCTAssertTrue(transferred === tree)
+        // Re-homed: worktreePath must track the destination, or saveSplitLayout
+        // (which keys on worktreePath) persists under the old path and the
+        // transferred layout is lost on restart.
+        XCTAssertEqual(transferred?.worktreePath, "/worktrees/feature-x")
+    }
+
+    func testTransferredTreeKeepsRealSessionNames() {
+        // zmx can't rename: transferred leaves keep their original (source-derived)
+        // session names, so a restore attaches to the still-live session.
+        let manager = StationManager()
+        let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
+        let tree = manager.tree(for: info, backend: "zmx")
+        let originalNames = tree.allLeaves.map(\.sessionName)
+        let transferred = manager.transferTree(fromPath: "/repo", toPath: "/worktrees/feature-x")
+        XCTAssertEqual(transferred?.allLeaves.map(\.sessionName), originalNames)
     }
 
     func testTransferTreeReturnsNilForUnknownPath() {

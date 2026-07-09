@@ -4,26 +4,68 @@
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
-  "message_skip_patterns": ["tip", "shortcuts", "switch layout"],
+  "message_skip_patterns": [
+    "tip",
+    "shortcuts",
+    "switch layout"
+  ],
   "process": {
-    "exec_names": ["codex"],
-    "argv_contains": ["codex"],
-    "generic_runtimes": ["node", "bun", "deno"],
+    "exec_names": [
+      "codex"
+    ],
+    "argv_contains": [
+      "codex"
+    ],
+    "generic_runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ],
     "env_hint": "SEAHELM_AGENT"
   },
   "authority": "session_only",
   "rules": [
+    {
+      "id": "osc_title_working",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "regex": [
+        "^[\\x{2800}-\\x{28FF}] "
+      ],
+      "visible_working": true
+    },
     {
       "id": "permission_prompt",
       "state": "waiting",
       "priority": 850,
       "region": "bottom_lines:14",
       "any": [
-        { "contains": ["would you like to run the following command?"] },
-        { "contains": ["would you like to proceed?"] },
-        { "contains": ["yes, proceed"] },
-        { "contains": ["don't ask again"] },
-        { "contains": ["tell codex what to do differently"] }
+        {
+          "contains": [
+            "would you like to run the following command?"
+          ]
+        },
+        {
+          "contains": [
+            "would you like to proceed?"
+          ]
+        },
+        {
+          "contains": [
+            "yes, proceed"
+          ]
+        },
+        {
+          "contains": [
+            "don't ask again"
+          ]
+        },
+        {
+          "contains": [
+            "tell codex what to do differently"
+          ]
+        }
       ],
       "visible_blocker": true
     },
@@ -32,14 +74,32 @@
       "state": "error",
       "priority": 700,
       "region": "bottom_lines:10",
-      "contains": ["error:"]
+      "contains": [
+        "error:"
+      ]
     },
     {
       "id": "working_interrupt",
       "state": "running",
       "priority": 400,
       "region": "bottom_lines:10",
-      "any": [{ "contains": ["to interrupt"] }, { "contains": ["(thinking)"] }, { "contains": ["moving to task"] }],
+      "any": [
+        {
+          "contains": [
+            "to interrupt"
+          ]
+        },
+        {
+          "contains": [
+            "(thinking)"
+          ]
+        },
+        {
+          "contains": [
+            "moving to task"
+          ]
+        }
+      ],
       "visible_working": true
     }
   ]

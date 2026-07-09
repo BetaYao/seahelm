@@ -90,7 +90,7 @@ class TerminalCoordinator {
     /// pane keeps focus (the control API's `--no-focus`, for agents spawning a
     /// sibling without stealing their own cursor). Must be called on the main thread.
     @discardableResult
-    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool) -> String? {
+    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool, ratio: CGFloat? = nil) -> String? {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return nil }
 
@@ -114,7 +114,10 @@ class TerminalCoordinator {
         let leafId = UUID().uuidString
         // splitFocusedLeaf splits `focusedId`, so point it at the target first.
         tree.focusedId = targetLeafId
-        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        let split = tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        // Restore an exact divider ratio (e.g. from a layout template) instead of
+        // the 0.5 default. layoutTree below reads it.
+        if let ratio { tree.updateRatio(splitId: split.splitId, newRatio: ratio) }
 
         _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
         container.surfaceViews[station.id] = station.view
@@ -144,6 +147,74 @@ class TerminalCoordinator {
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
         return station.id
+    }
+
+    /// tmux-style zoom of a pane in the active container. `mode`: on|off|toggle.
+    /// Returns whether the container is zoomed afterward, or nil if the pane
+    /// isn't in the active container. Must be called on the main thread.
+    func zoomPane(targetStationId: String?, mode: String) -> Bool? {
+        guard let container = activeSplitContainer(), let tree = container.tree else { return nil }
+        let leafId: String
+        if let sid = targetStationId {
+            guard let leaf = tree.allLeaves.first(where: { $0.stationId == sid }) else { return nil }
+            leafId = leaf.id
+        } else {
+            leafId = tree.focusedId
+        }
+        let on: Bool? = mode == "on" ? true : (mode == "off" ? false : nil)
+        return container.setZoom(leafId: leafId, on: on)
+    }
+
+    // MARK: - Layout export / apply (declarative templates)
+
+    /// Serialize the active container's split tree as a portable LayoutNode.
+    /// Must be called on the main thread.
+    func exportLayout() -> [String: Any]? {
+        guard let container = activeSplitContainer(), let tree = container.tree else { return nil }
+        return ["root": Self.nodeToLayout(tree.root).dict, "worktree_path": tree.worktreePath]
+    }
+
+    private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
+        switch node {
+        case let .leaf(_, stationId, sessionName):
+            let agent = ShipLog.shared.sailor(for: stationId)?.agentType
+            let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
+            return .pane(label: sessionName, command: agent?.launchCommand, agent: named, cwd: nil)
+        case let .split(_, axis, ratio, first, second):
+            return .split(direction: axis == .vertical ? "down" : "right",
+                          ratio: Double(ratio),
+                          first: nodeToLayout(first), second: nodeToLayout(second))
+        }
+    }
+
+    /// Rebuild structure by splitting out from the focused pane per `root`, then
+    /// running each leaf's command. Ratios use the split default (exact ratios are
+    /// not restored). Bounded pane count. Must be called on the main thread.
+    @discardableResult
+    func applyLayout(_ root: LayoutNode) -> Bool {
+        guard root.paneCount <= 16 else { return false }
+        guard let container = activeSplitContainer(), let tree = container.tree,
+              let startStationId = tree.allLeaves.first(where: { $0.id == tree.focusedId })?.stationId
+        else { return false }
+        realize(root, intoStationId: startStationId)
+        return true
+    }
+
+    private func realize(_ node: LayoutNode, intoStationId sid: String) {
+        switch node {
+        case let .pane(_, command, _, _):
+            if let command, !command.isEmpty,
+               let station = StationRegistry.shared.station(forId: sid) {
+                station.sendText(command)
+                station.sendEnterKey()
+            }
+        case let .split(direction, ratio, first, second):
+            let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
+            guard let newId = splitPane(targetStationId: sid, axis: axis, focus: false,
+                                        ratio: CGFloat(ratio)) else { return }
+            realize(first, intoStationId: sid)
+            realize(second, intoStationId: newId)
+        }
     }
 
     func closeFocusedPane() {

@@ -8,6 +8,20 @@ final class ManifestEngineTests: XCTestCase {
         return CompiledManifest(try m.validated())
     }
 
+    /// Regression: every bundled agent manifest must detect a braille-spinner OSC
+    /// title as running. Previously only claude had this rule, so codex (and
+    /// others) showed idle while "thinking" (spinner in title, static viewport).
+    func testAllBundledManifestsDetectSpinnerTitle() {
+        let store = ManifestStore.shared
+        for id in ["claude", "codex", "opencode", "gemini", "cline", "goose",
+                   "amp", "aider", "cursor", "kiro", "agent"] {
+            guard let cm = store.manifest(for: id) else { XCTFail("missing \(id)"); continue }
+            let d = cm.evaluate(DetectionInput(screen: "", oscTitle: "\u{2810} 调查查询服务不稳定的问题"))
+            XCTAssertEqual(d.state, .running, "\(id) did not detect the spinner title as running")
+            XCTAssertTrue(d.visibleWorking, "\(id) spinner should be visible_working")
+        }
+    }
+
     func testHighestPriorityWins() throws {
         // Two rules match; the higher-priority (waiting) must win over running.
         let cm = try manifest("""

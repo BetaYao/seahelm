@@ -36,9 +36,12 @@ struct SailorDisplayInfo {
     let tasks: [TaskItem]              // webhook-tracked task items
     let activityEvents: [ActivityEvent]
 
-    /// Convenience: primary status string for display (first pane's status)
+    /// Rolled-up status for display/grouping: the highest-priority pane, so a
+    /// worktree whose first pane is idle but a later pane is running still reads
+    /// as running (waiting > error > exited > running > idle). Using `.first`
+    /// here made a multi-pane worktree show the first pane's state only.
     var status: String {
-        (paneStatuses.first ?? .unknown).rawValue.lowercased()
+        SailorStatus.highestPriority(paneStatuses).rawValue.lowercased()
     }
 
     /// Convenience: backward-compatible lastMessage
@@ -83,6 +86,18 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     weak var splitContainerDelegate: SplitContainerDelegate?
 
     var selectedSailorId: String = ""
+
+    /// The two top-level chrome states. `.overview` is the spread First Mate
+    /// (fleet + orders + composer) with no active worktree; `.worktree` is drilled
+    /// into one worktree's terminal + file/change side panel.
+    enum DisplayMode { case overview, worktree }
+    private(set) var displayMode: DisplayMode = .overview
+    /// Fired after a mode switch so MainWindowController can update the title-bar
+    /// chrome (collapse/file/change icons) accordingly.
+    var onDisplayModeChanged: ((DisplayMode) -> Void)?
+    /// Fires whenever the lit toolbar tool should change (mode or side switch).
+    var onActiveToolChanged: ((TitleBarView.ActiveTool) -> Void)?
+
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
 
@@ -135,9 +150,23 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // Center overlay
     private var centerOverlay: CenterOverlayView?
 
-    // Helm cockpit (WP-2) — bottom-center radar orb + floating command center,
-    // layered on top of everything. Fed the live queue/feed by MainWindowController.
-    private(set) lazy var helmCockpit = HelmCockpitController()
+    // `?` keyboard cheat-sheet overlay (the floating First Mate cockpit was
+    // removed; the command composer lives in the overview now).
+    private var helpOverlay: KeyboardHelpOverlay?
+
+    // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
+    // open as a 392pt left side panel over the terminal in .worktree mode.
+    private let overviewView = DashboardOverviewView()
+    private var firstMateSideOpen = false
+    /// Which content the left side column currently shows (.none = collapsed).
+    private enum SidePane { case none, firstMate, files, changes }
+    private var currentSide: SidePane = .none
+    /// The row the user has explicitly clicked in the overview. Empty until the
+    /// first click, so nothing is pre-selected (no stale default highlight).
+    private var overviewSelectedId: String = ""
+    private static let firstMateColumnWidth: CGFloat = 392
+    private static let overviewFullBg = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1)
+    private static let overviewSideBg = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
 
     // Empty state
     private let emptyStateView = NSView()
@@ -161,25 +190,44 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // Show the 3-column layout immediately; hide empty state
         leftRightContainer.isHidden = false
 
-        // The Helm cockpit is installed by MainWindowController into the window
-        // content view (so the orb can sit over the status bar), not here.
+        // Fleet overview (spread First Mate). Full-bleed in .overview mode; in a
+        // worktree it docks into the left column (same region as files/changes,
+        // pushing the terminal right — not a floating overlay).
+        overviewView.onSelectWorktree = { [weak self] path in
+            self?.enterWorktree(byWorktreePath: path)
+        }
+        mountOverviewFull()
     }
 
-    /// Layer the Helm cockpit on top of `host`, spanning from `top` down to the
-    /// host bottom. MainWindowController passes the window content view + the
-    /// content-container top, so the cockpit covers the dashboard AND the status
-    /// bar — letting the radar orb bottom-align with the status bar.
-    /// Its passthrough container forwards clicks everywhere except the orb/panel.
-    func installCockpit(in host: NSView, top: NSLayoutYAxisAnchor) {
-        addChild(helmCockpit)
-        helmCockpit.view.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(helmCockpit.view)
+    // MARK: - `?` keyboard help overlay
+
+    /// Toggle the `?` keyboard cheat-sheet over the dashboard.
+    func toggleHelp() {
+        if helpOverlay != nil { dismissHelp(); return }
+        let overlay = KeyboardHelpOverlay()
+        overlay.onDismiss = { [weak self] in self?.dismissHelp() }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(overlay)
         NSLayoutConstraint.activate([
-            helmCockpit.view.topAnchor.constraint(equalTo: top),
-            helmCockpit.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            helmCockpit.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            helmCockpit.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        helpOverlay = overlay
+    }
+
+    private func dismissHelp() {
+        helpOverlay?.removeFromSuperview()
+        helpOverlay = nil
+    }
+
+    /// Close the topmost transient overlay (currently only the help sheet).
+    /// Returns true if it dismissed something so the caller stops propagating Esc.
+    @discardableResult
+    private func closeTopmostOverlay() -> Bool {
+        if helpOverlay != nil { dismissHelp(); return true }
+        return false
     }
 
     // MARK: - Public API
@@ -200,6 +248,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         #endif
 
         agents = newSailors
+
+        if displayMode == .overview {
+            overviewView.selectedId = overviewSelectedId
+            overviewView.update(agents)
+        }
 
         if isInDState {
             focusController.refreshCards(agents.map { $0.id })
@@ -291,6 +344,189 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         syncSidePanelToSelection()
     }
 
+    // MARK: - Display mode (overview ⇄ worktree)
+
+    /// Switch top-level mode. Overview opens the spread First Mate cockpit (the
+    /// fleet/orders/composer) and pins it open; entering a worktree closes it so
+    /// the terminal + file/change side panel take over. No-op if unchanged.
+    func setDisplayMode(_ mode: DisplayMode) {
+        guard mode != displayMode else { return }
+        applyDisplayMode(mode)
+    }
+
+    private func applyDisplayMode(_ mode: DisplayMode) {
+        displayMode = mode
+        switch mode {
+        case .overview:
+            firstMateSideOpen = false
+            currentSide = .none
+            mountOverviewFull()
+            overviewView.selectedId = overviewSelectedId
+            overviewView.update(agents)
+            overviewView.isHidden = false
+        case .worktree:
+            // Start with the side column collapsed (terminal full); pane icons open it.
+            closeFirstMateSide()
+            currentSide = .none
+            overviewView.isHidden = true
+            if !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
+        }
+        onDisplayModeChanged?(mode)
+        notifyActiveTool()
+    }
+
+    /// Compute + publish the single lit toolbar tool from the current state.
+    private func notifyActiveTool() {
+        let tool: TitleBarView.ActiveTool
+        if displayMode == .overview {
+            tool = .dashboard
+        } else if isLeftColumnCollapsed {
+            tool = .none
+        } else {
+            switch currentSide {
+            case .firstMate: tool = .firstMate
+            case .files:     tool = .files
+            case .changes:   tool = .changes
+            case .none:      tool = .none
+            }
+        }
+        onActiveToolChanged?(tool)
+    }
+
+    /// Mount the overview full-bleed at the dashboard root (overview mode).
+    private func mountOverviewFull() {
+        let root = view
+        overviewView.removeFromSuperview()
+        overviewView.translatesAutoresizingMaskIntoConstraints = false
+        overviewView.layer?.backgroundColor = Self.overviewFullBg.cgColor
+        root.addSubview(overviewView)
+        NSLayoutConstraint.activate([
+            overviewView.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            overviewView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            overviewView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            overviewView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+    }
+
+    /// Dock the overview into the left column (worktree First Mate) so expanding
+    /// it pushes the terminal right — consistent with files/changes.
+    private func mountOverviewInColumn() {
+        overviewView.removeFromSuperview()
+        overviewView.translatesAutoresizingMaskIntoConstraints = false
+        overviewView.layer?.backgroundColor = Self.overviewSideBg.cgColor
+        leftColumnContainer.addSubview(overviewView)
+        NSLayoutConstraint.activate([
+            overviewView.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
+            overviewView.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
+            overviewView.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
+            overviewView.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
+        ])
+    }
+
+    /// First Mate icon: dock/undock the Dashboard as the left column (pushes the
+    /// terminal right, same as files/changes). No-op in the overview.
+    /// First Mate icon (title bar) → toggle the First Mate column.
+    func toggleFirstMateSide() { toggleSide(.firstMate) }
+
+    /// Each pane icon toggles its own panel: click when inactive → open that pane;
+    /// click when already the active pane → collapse the whole side column.
+    private func toggleSide(_ side: SidePane) {
+        guard displayMode == .worktree else { return }
+        if currentSide == side && !isLeftColumnCollapsed {
+            collapseCurrentSide()
+            return
+        }
+        switch side {
+        case .firstMate: openFirstMateColumn()
+        case .files:     openFilesColumn(.files)
+        case .changes:   openFilesColumn(.changes)
+        case .none:      collapseCurrentSide(); return
+        }
+        currentSide = side
+        notifyActiveTool()
+    }
+
+    private func openFirstMateColumn() {
+        firstMateSideOpen = true
+        sidePanelVC.view.isHidden = true          // First Mate replaces file/change content
+        mountOverviewInColumn()
+        overviewView.isHidden = false
+        overviewView.selectedId = overviewSelectedId
+        overviewView.update(agents)
+        leftColumnWidthExpanded?.constant = Self.firstMateColumnWidth
+        expandLeftColumnIfCollapsed()
+    }
+
+    private func openFilesColumn(_ tab: SidePanelTab) {
+        closeFirstMateSide()                      // undock First Mate if it was showing
+        leftColumnWidthExpanded?.constant = LayoutMetrics.leftColumnWidth
+        sidePanelVC.selectTab(tab)
+        expandLeftColumnIfCollapsed()
+    }
+
+    private func collapseCurrentSide() {
+        if firstMateSideOpen {
+            closeFirstMateSide(collapse: true)
+        } else if !isLeftColumnCollapsed {
+            _ = toggleLeftColumnCollapse()
+        }
+        currentSide = .none
+        notifyActiveTool()
+    }
+
+    /// Undock First Mate: restore the file/change side panel in the column.
+    /// `collapse` also collapses the column so the terminal reclaims the space.
+    private func closeFirstMateSide(collapse: Bool = false) {
+        guard firstMateSideOpen else { return }
+        firstMateSideOpen = false
+        overviewView.isHidden = true
+        overviewView.removeFromSuperview()
+        sidePanelVC.view.isHidden = false
+        leftColumnWidthExpanded?.constant = LayoutMetrics.leftColumnWidth
+        if collapse, !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
+    }
+
+    /// Return to the fleet overview (⌘E / Esc from a worktree).
+    func enterOverview() { setDisplayMode(.overview) }
+
+    /// Force the initial overview state at launch. `setDisplayMode` no-ops when the
+    /// mode is unchanged, so the very first activation needs an explicit apply.
+    func activateInitialOverview() { applyDisplayMode(.overview) }
+
+    /// Feed the overview's ORDERS carousel + command composer. Called by
+    /// MainWindowController with the same queue/handlers the cockpit uses.
+    /// Return to the overview and start a `/new` command in its command input.
+    func startNewCommand(prefill: String = "/new ") {
+        setDisplayMode(.overview)
+        DispatchQueue.main.async { [weak self] in
+            self?.overviewView.focusCommand(prefill: prefill)
+        }
+    }
+
+    func configureOverview(pendingOrders: PendingOrdersQueue?,
+                           onSubmitCommand: @escaping (String) -> Void,
+                           onOrderAction: @escaping (PendingOrder, String) -> Void,
+                           commandMenuProvider: @escaping (Character, String) -> [(name: String, desc: String)]) {
+        overviewView.pendingOrders = pendingOrders
+        overviewView.onSubmitCommand = onSubmitCommand
+        overviewView.onOrderAction = onOrderAction
+        overviewView.commandMenuProvider = commandMenuProvider
+    }
+
+    /// Drill into a specific worktree: select it, then flip to worktree mode.
+    /// Clicking a row is what sets the overview's selection highlight.
+    func enterWorktree(byWorktreePath path: String) {
+        selectSailor(byWorktreePath: path)
+        overviewSelectedId = selectedSailorId
+        // If the overview is on screen (fleet full-screen, or docked as the First
+        // Mate side panel), move its selection highlight to the clicked row.
+        if !overviewView.isHidden {
+            overviewView.selectedId = overviewSelectedId
+            overviewView.update(agents)
+        }
+        setDisplayMode(.worktree)
+    }
+
     var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
 
     @discardableResult
@@ -308,14 +544,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// icons. Expands the column first if it was collapsed.
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
-
-        switch pane {
-        case .bridge:   sidePanelVC.selectTab(.files)  // legacy enum value — bridge tab removed
-        case .file:     sidePanelVC.selectTab(.files)
-        case .change:   sidePanelVC.selectTab(.changes)
-        }
-
-        expandLeftColumnIfCollapsed()
+        toggleSide(pane == .change ? .changes : .files)
     }
 
     /// Expand the left column if it is currently collapsed (no-op otherwise).
@@ -366,9 +595,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     }
 
     func focusInlineCreate() {
-        // New-worktree creation moved to the Helm cockpit: open it with `/new `
-        // prefilled so the user types the task and submits.
-        helmCockpit.openWithCommand("/new ")
+        // New-worktree creation lives in the overview composer: switch to the
+        // overview and prefill `/new ` so the user types the task and submits.
+        startNewCommand()
     }
 
     /// Called when the inline create form ends (submit or cancel) so the owner
@@ -559,8 +788,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // --- Left column container: hosts worktree list + inline create + side panel ---
         leftColumnContainer.translatesAutoresizingMaskIntoConstraints = false
         leftColumnContainer.wantsLayer = true
-        leftColumnContainer.layer?.cornerRadius = LayoutMetrics.focusPanelCornerRadius
+        // Square (Bare-TUI) + First Mate card background, so First Mate and the
+        // Files/Changes pane share one consistent docked side-panel look.
+        leftColumnContainer.layer?.cornerRadius = 0
         leftColumnContainer.layer?.masksToBounds = true
+        leftColumnContainer.layer?.backgroundColor = Self.overviewSideBg.cgColor
         leftColumnContainer.setAccessibilityIdentifier("dashboard.leftColumn")
         leftRightContainer.addSubview(leftColumnContainer)
 
@@ -894,18 +1126,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
         }
 
-        // Helm cockpit keys (NORMAL mode). space toggles the cockpit, ? the help
-        // overlay; Esc closes the topmost cockpit surface before falling back to
-        // the legacy "exit nav" behavior.
+        // NORMAL mode: ? toggles the keyboard help overlay; Esc closes it first
+        // before falling back to the legacy "exit nav" behavior.
         if event.keyCode == 53 {  // Esc
-            if helmCockpit.closeTopmost() { return }
+            if closeTopmostOverlay() { return }
         }
         if flags.isDisjoint(with: [.command, .control, .option]) {
-            if event.keyCode == 49 {  // space
-                helmCockpit.toggleCockpit(); return
-            }
             if event.characters == "?" {
-                helmCockpit.toggleHelp(); return
+                toggleHelp(); return
             }
         }
 
@@ -1210,4 +1438,641 @@ private final class NonFirstResponderStackView: NSStackView {
 /// NSScrollView that never steals keyboard focus from the terminal.
 private final class NonFirstResponderScrollView: NSScrollView {
     override var acceptsFirstResponder: Bool { false }
+}
+
+// MARK: - Dashboard overview (spread First Mate fleet page)
+
+/// Full-width fleet overview: every worktree as a row grouped by status, a
+/// horizontal ORDERS carousel, and a command composer. This is the landing
+/// surface (the "spread First Mate"); clicking a row drills into that worktree.
+final class DashboardOverviewView: NSView {
+    var onSelectWorktree: ((String) -> Void)?
+    var onSubmitCommand: ((String) -> Void)?
+    /// A card's primary/secondary button was tapped. `optionText` is the chosen
+    /// option label (or "" for a plain approve).
+    var onOrderAction: ((PendingOrder, String) -> Void)?
+
+    var pendingOrders: PendingOrdersQueue? {
+        didSet {
+            oldValue?.removeObserver(ordersToken); ordersToken = nil
+            ordersToken = pendingOrders?.addObserver { [weak self] in
+                DispatchQueue.main.async { self?.refreshOrders() }
+            }
+            refreshOrders()
+        }
+    }
+    private var ordersToken: Int?
+
+    // Palette — SeaHelm.dc.html THEME A ("Bare TUI"), matched 1:1.
+    private static let bg         = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1) // --app-bg
+    private static let panelBg    = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045) // --panel-alt
+    private static let line       = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)  // --line
+    private static let lineStrong = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)  // --line-strong
+    private static let cardBg     = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)  // --card-bg
+    private static let cardBorder = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.12)  // --card-border
+    private static let sea        = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)  // --accent
+    private static let onSea      = NSColor(srgbRed: 0x06/255, green: 0x20/255, blue: 0x28/255, alpha: 1)
+    private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)  // --ink
+    private static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)  // --ink-dim
+    private static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)  // --ink-faint
+    private static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)  // --red
+    private static let orange     = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)  // --orange
+    private static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)  // --emerald
+    private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)  // --cornflower
+
+    /// Per-status group presentation (glyph, group colour, info-line colour, label).
+    private static func groupMeta(_ s: SailorStatus) -> (glyph: String, color: NSColor, info: NSColor, label: String) {
+        switch s {
+        case .waiting: return ("●", orange, orange, "等待你确认")
+        case .running: return ("◐", sea, inkDim, "运行中")
+        case .idle:    return ("○", emerald, inkDim, "空闲")
+        case .error:   return ("✕", red, red, "错误")
+        case .exited:  return ("◌", inkDim, inkFaint, "已休眠")
+        case .unknown: return ("◌", inkDim, inkFaint, "未知")
+        }
+    }
+
+    private let headerTitle = NSTextField(labelWithString: "Dashboard")
+    private let headerSub = NSTextField(labelWithString: "")
+    private let scroll = NonFirstResponderScrollView()
+    private let stack = FlippedStackView()
+
+    // ORDERS zone
+    private let ordersZone = NSView()
+    private let ordersCountLabel = NSTextField(labelWithString: "")
+    private let ordersCarousel = NSStackView()
+    private var ordersZoneHeight: NSLayoutConstraint?
+
+    // Composer — the real First Mate command input (identical styling), plus the
+    // same `/ @ #` autocomplete menu the cockpit uses.
+    let commandInput = CommandInputView()
+    var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
+    private let menuContainer = NSView()
+    private var menuRows: [MenuRowButton] = []
+    private var menuItems: [(name: String, desc: String)] = []
+    private var menuSel = 0
+    private var menuTrigger: Character = "/"
+    private var menuToken = ""
+    private var menuFullText = ""
+
+    // Group order: most actionable first.
+    private static let groupOrder: [SailorStatus] = [.waiting, .running, .idle, .error, .exited, .unknown]
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+    required init?(coder: NSCoder) { super.init(coder: coder); setup() }
+
+    deinit { pendingOrders?.removeObserver(ordersToken) }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = Self.bg.cgColor
+
+        // --- Header: ◍ Dashboard   N worktrees · M 在跑  (border-bottom) ---
+        let headerIcon = NSTextField(labelWithString: "◍")
+        headerIcon.font = AppFont.mono(size: 13)
+        headerIcon.textColor = Self.sea
+        headerTitle.stringValue = "Dashboard"
+        headerTitle.font = AppFont.mono(size: 12.5, weight: .bold)
+        headerTitle.textColor = Self.ink
+        headerSub.font = AppFont.mono(size: 11)
+        headerSub.textColor = Self.inkFaint
+        let headerRow = NSStackView(views: [headerIcon, headerTitle, headerSub])
+        headerRow.orientation = .horizontal
+        headerRow.spacing = 10
+        headerRow.alignment = .firstBaseline
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(headerRow)
+        let headerLine = NSView()
+        headerLine.wantsLayer = true
+        headerLine.layer?.backgroundColor = Self.line.cgColor
+        headerLine.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(headerLine)
+
+        // --- Fleet scroll ---
+        stack.orientation = .vertical
+        stack.spacing = 2
+        stack.alignment = .leading
+        stack.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 12, right: 0)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = stack
+        addSubview(scroll)
+
+        // --- ORDERS zone (hidden until there are orders) ---
+        setupOrdersZone()
+
+        // --- Composer ---
+        let composer = setupComposer()
+
+        NSLayoutConstraint.activate([
+            headerRow.topAnchor.constraint(equalTo: topAnchor, constant: 13),
+            headerRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
+            headerRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -15),
+
+            headerLine.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 11),
+            headerLine.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headerLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            headerLine.heightAnchor.constraint(equalToConstant: 1),
+
+            scroll.topAnchor.constraint(equalTo: headerLine.bottomAnchor, constant: 14),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: ordersZone.topAnchor),
+
+            ordersZone.leadingAnchor.constraint(equalTo: leadingAnchor),
+            ordersZone.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ordersZone.bottomAnchor.constraint(equalTo: composer.topAnchor),
+
+            composer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            composer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            composer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+        ordersZoneHeight = ordersZone.heightAnchor.constraint(equalToConstant: 0)
+        ordersZoneHeight?.isActive = true
+    }
+
+    private func setupOrdersZone() {
+        ordersZone.wantsLayer = true
+        ordersZone.layer?.backgroundColor = Self.panelBg.cgColor
+        ordersZone.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(ordersZone)
+
+        let topLine = NSView()
+        topLine.wantsLayer = true
+        topLine.layer?.backgroundColor = Self.line.cgColor
+        topLine.translatesAutoresizingMaskIntoConstraints = false
+
+        let lbl = NSTextField(labelWithString: "ORDERS")
+        lbl.font = AppFont.mono(size: 11, weight: .bold)
+        lbl.textColor = Self.sea
+        ordersCountLabel.font = AppFont.mono(size: 11)
+        ordersCountLabel.textColor = Self.inkFaint
+        let hint = NSTextField(labelWithString: "← 横向滑动 →")
+        hint.font = AppFont.mono(size: 10)
+        hint.textColor = Self.inkFaint
+
+        let head = NSStackView(views: [lbl, ordersCountLabel, NSView(), hint])
+        head.orientation = .horizontal
+        head.spacing = 9
+        head.alignment = .centerY
+        head.translatesAutoresizingMaskIntoConstraints = false
+
+        ordersCarousel.orientation = .horizontal
+        ordersCarousel.spacing = 12
+        ordersCarousel.alignment = .top
+        ordersCarousel.translatesAutoresizingMaskIntoConstraints = false
+        let cscroll = NonFirstResponderScrollView()
+        cscroll.hasHorizontalScroller = false
+        cscroll.drawsBackground = false
+        cscroll.borderType = .noBorder
+        cscroll.translatesAutoresizingMaskIntoConstraints = false
+        cscroll.documentView = ordersCarousel
+        ordersZone.addSubview(topLine)
+        ordersZone.addSubview(head)
+        ordersZone.addSubview(cscroll)
+
+        NSLayoutConstraint.activate([
+            topLine.topAnchor.constraint(equalTo: ordersZone.topAnchor),
+            topLine.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor),
+            topLine.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor),
+            topLine.heightAnchor.constraint(equalToConstant: 1),
+
+            head.topAnchor.constraint(equalTo: ordersZone.topAnchor, constant: 12),
+            head.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor, constant: 22),
+            head.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor, constant: -22),
+
+            cscroll.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 10),
+            cscroll.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor, constant: 22),
+            cscroll.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor, constant: -22),
+            cscroll.bottomAnchor.constraint(equalTo: ordersZone.bottomAnchor, constant: -14),
+            ordersCarousel.heightAnchor.constraint(equalTo: cscroll.contentView.heightAnchor),
+        ])
+    }
+
+    private func setupComposer() -> NSView {
+        let bar = NSView()
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = Self.bg.cgColor
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bar)
+
+        let topLine = NSView()
+        topLine.wantsLayer = true
+        topLine.layer?.backgroundColor = Self.line.cgColor
+        topLine.translatesAutoresizingMaskIntoConstraints = false
+
+        // Reuse the real First Mate command input verbatim, including its
+        // `/ @ #` autocomplete menu behaviour. Square corners for Bare-TUI (THEME A).
+        commandInput.boxCornerRadius = 0
+        commandInput.translatesAutoresizingMaskIntoConstraints = false
+        commandInput.onSubmit = { [weak self] text in
+            let t = text.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty else { return }
+            self?.onSubmitCommand?(t)
+            self?.commandInput.text = ""
+            self?.hideMenu()
+        }
+        commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
+        commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
+        commandInput.onCancel = { [weak self] in self?.hideMenu() }
+
+        // The autocomplete dropdown, opening upward above the input box (the
+        // composer sits at the window bottom). Added to `self` so it can overlay
+        // the fleet area above the composer.
+        menuContainer.wantsLayer = true
+        menuContainer.layer?.backgroundColor = Bare.cardBg.cgColor
+        menuContainer.layer?.borderWidth = 1
+        menuContainer.layer?.borderColor = Bare.line.cgColor
+        menuContainer.layer?.cornerRadius = 7
+        menuContainer.translatesAutoresizingMaskIntoConstraints = false
+        menuContainer.isHidden = true
+
+        bar.addSubview(topLine)
+        bar.addSubview(commandInput)
+        addSubview(menuContainer)
+        NSLayoutConstraint.activate([
+            topLine.topAnchor.constraint(equalTo: bar.topAnchor),
+            topLine.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            topLine.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            topLine.heightAnchor.constraint(equalToConstant: 1),
+
+            commandInput.topAnchor.constraint(equalTo: bar.topAnchor),
+            commandInput.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
+            commandInput.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            commandInput.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+
+            menuContainer.leadingAnchor.constraint(equalTo: commandInput.boxLeadingAnchor),
+            menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
+            menuContainer.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -6),
+        ])
+        return bar
+    }
+
+    // MARK: - `/ @ #` autocomplete (overview composer)
+
+    /// Trailing `/@#`-token of the input, if any.
+    private func trailingToken(_ text: String) -> (trigger: Character, query: String, token: String)? {
+        var token = ""
+        var idx = text.endIndex
+        while idx > text.startIndex {
+            let prev = text.index(before: idx)
+            let ch = text[prev]
+            if ch == " " { break }
+            token = String(ch) + token
+            idx = prev
+        }
+        guard let first = token.first, "/@#".contains(first) else { return nil }
+        return (first, String(token.dropFirst()).lowercased(), token)
+    }
+
+    private func refreshMenu(for text: String) {
+        guard let (trigger, query, token) = trailingToken(text),
+              let items = commandMenuProvider?(trigger, query), !items.isEmpty else {
+            hideMenu(); return
+        }
+        renderMenu(trigger: trigger, items: items, token: token, fullText: text)
+    }
+
+    private func renderMenu(trigger: Character, items: [(name: String, desc: String)],
+                            token: String, fullText: String) {
+        menuContainer.subviews.forEach { $0.removeFromSuperview() }
+        let triggerColor: NSColor
+        switch trigger {
+        case "@": triggerColor = Bare.cornflower
+        case "#": triggerColor = Bare.orange
+        default:  triggerColor = Bare.accent
+        }
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        menuContainer.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: menuContainer.topAnchor, constant: 4),
+            stack.leadingAnchor.constraint(equalTo: menuContainer.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: menuContainer.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: menuContainer.bottomAnchor, constant: -4),
+        ])
+
+        menuRows = []
+        menuItems = Array(items.prefix(6))
+        menuTrigger = trigger
+        menuToken = token
+        menuFullText = fullText
+        for item in menuItems {
+            let row = MenuRowButton(name: item.name, desc: item.desc,
+                                    triggerSymbol: String(trigger), triggerColor: triggerColor)
+            row.onPick = { [weak self] in
+                self?.applyCompletion(name: item.name, trigger: trigger, token: token, fullText: fullText)
+            }
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            menuRows.append(row)
+        }
+        menuContainer.isHidden = false
+        setMenuSelection(0)
+    }
+
+    private func setMenuSelection(_ i: Int) {
+        guard !menuRows.isEmpty else { return }
+        menuSel = max(0, min(menuRows.count - 1, i))
+        for (idx, row) in menuRows.enumerated() { row.setSelected(idx == menuSel) }
+    }
+
+    private func acceptMenuSelection() {
+        guard menuSel < menuItems.count else { return }
+        applyCompletion(name: menuItems[menuSel].name, trigger: menuTrigger,
+                        token: menuToken, fullText: menuFullText)
+    }
+
+    private func handleMenuKey(_ key: CommandInputView.MenuKey) -> Bool {
+        guard !menuContainer.isHidden, !menuRows.isEmpty else { return false }
+        switch key {
+        case .up:     setMenuSelection(menuSel - 1)
+        case .down:   setMenuSelection(menuSel + 1)
+        case .accept: acceptMenuSelection()
+        }
+        return true
+    }
+
+    private func applyCompletion(name: String, trigger: Character, token: String, fullText: String) {
+        let base = String(fullText.dropLast(token.count))
+        hideMenu()
+        commandInput.setTextAndFocusEnd(base + String(trigger) + name + " ")
+    }
+
+    private func hideMenu() {
+        menuContainer.isHidden = true
+        menuContainer.subviews.forEach { $0.removeFromSuperview() }
+        menuRows = []
+        menuItems = []
+        menuSel = 0
+    }
+
+    private static func primaryStatus(_ s: SailorDisplayInfo) -> SailorStatus {
+        let ps = s.paneStatuses
+        if ps.contains(.waiting) { return .waiting }
+        if ps.contains(.running) { return .running }
+        if ps.contains(.error) { return .error }
+        if ps.contains(.idle) { return .idle }
+        return ps.first ?? .unknown
+    }
+
+    func update(_ sailors: [SailorDisplayInfo]) {
+        let running = sailors.filter { Self.primaryStatus($0) == .running }.count
+        headerSub.stringValue = "\(sailors.count) worktrees · \(running) 在跑"
+
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let grouped = Dictionary(grouping: sailors, by: { Self.primaryStatus($0) })
+        for (gi, status) in Self.groupOrder.enumerated() {
+            guard let items = grouped[status], !items.isEmpty else { continue }
+            let meta = Self.groupMeta(status)
+            let header = makeGroupHeader(meta: meta, count: items.count, topGap: gi == 0 ? 0 : 13)
+            stack.addArrangedSubview(header)
+            pin(header)
+            let rowsBox = NSStackView()
+            rowsBox.orientation = .vertical
+            rowsBox.spacing = 4
+            rowsBox.alignment = .leading
+            rowsBox.translatesAutoresizingMaskIntoConstraints = false
+            for item in items {
+                let row = RowView(sailor: item, status: status, infoColor: meta.info,
+                                  selected: item.id == self.selectedId)
+                row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
+                rowsBox.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
+            }
+            stack.addArrangedSubview(rowsBox)
+            pin(rowsBox)
+        }
+    }
+
+    /// Selected worktree id, so the fleet can mark the current row (accent border).
+    var selectedId: String = ""
+
+    private func refreshOrders() {
+        let orders = pendingOrders?.all() ?? []
+        ordersCarousel.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        ordersCountLabel.stringValue = "\(orders.count)"
+        var maxCard: CGFloat = 0
+        for order in orders {
+            // The real First Mate order card, laid out horizontally.
+            let card = OrderCardView()
+            card.wantsLayer = true
+            card.configure(order: order) { [weak self] idx in
+                let opt = order.action.options?.indices.contains(idx) == true ? order.action.options![idx] : ""
+                self?.onOrderAction?(order, opt)
+            }
+            card.onNavigate = { [weak self] in self?.onSelectWorktree?(order.action.worktreePath) }
+            card.onDismiss = { [weak self] in self?.pendingOrders?.resolve(id: order.id) }
+            let h = BridgePanelViewController.cardHeight(for: order)
+            maxCard = max(maxCard, h)
+            ordersCarousel.addArrangedSubview(card)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            card.widthAnchor.constraint(equalToConstant: 340).isActive = true
+            card.heightAnchor.constraint(equalToConstant: h).isActive = true
+        }
+        // Collapse the whole zone when there's nothing pending; otherwise size it
+        // to the tallest card + the "ORDERS" header + padding.
+        let show = !orders.isEmpty
+        ordersZone.isHidden = !show
+        ordersZoneHeight?.constant = show ? (maxCard + 12 + 20 + 10 + 14) : 0
+    }
+
+    private func pin(_ v: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 15).isActive = true
+        v.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -15).isActive = true
+    }
+
+    private func makeGroupHeader(meta: (glyph: String, color: NSColor, info: NSColor, label: String),
+                                 count: Int, topGap: CGFloat) -> NSView {
+        // glyph(8px, group colour) · label(11px, group colour, +0.5 tracking) · count(11px, ink-faint)
+        let glyph = NSTextField(labelWithString: meta.glyph)
+        glyph.font = AppFont.mono(size: 8)
+        glyph.textColor = meta.color
+
+        let label = NSTextField(labelWithString: meta.label)
+        label.font = AppFont.mono(size: 11)
+        label.textColor = meta.color
+
+        let count = NSTextField(labelWithString: "\(count)")
+        count.font = AppFont.mono(size: 11)
+        count.textColor = Self.inkFaint
+
+        let row = NSStackView(views: [glyph, label, count])
+        row.orientation = .horizontal
+        row.spacing = 7
+        row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: topGap, left: 0, bottom: 7, right: 0)
+        return row
+    }
+
+    // MARK: - Fleet row
+
+    private final class RowView: NSView {
+        var onTap: ((String) -> Void)?
+        private let path: String
+        private let selected: Bool
+
+        private static func label(_ s: String, _ color: NSColor, _ size: CGFloat) -> NSTextField {
+            let l = NSTextField(labelWithString: s)
+            l.font = AppFont.mono(size: size)
+            l.textColor = color
+            l.lineBreakMode = .byTruncatingTail
+            return l
+        }
+        /// Time since a date as a compact largest-unit age: 8s / 5m / 8h / 3d.
+        /// Nil (no known activity) renders blank.
+        private static func compactAge(since date: Date?) -> String {
+            guard let date else { return "" }
+            let secs = Int(max(0, Date().timeIntervalSince(date)))
+            if secs < 60 { return "\(secs)s" }
+            let m = secs / 60
+            if m < 60 { return "\(m)m" }
+            let h = m / 60
+            if h < 24 { return "\(h)h" }
+            return "\(h / 24)d"
+        }
+        private static func spacer() -> NSView {
+            let v = NSView()
+            v.translatesAutoresizingMaskIntoConstraints = false
+            v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return v
+        }
+
+        init(sailor: SailorDisplayInfo, status: SailorStatus, infoColor: NSColor, selected: Bool) {
+            self.path = sailor.worktreePath
+            self.selected = selected
+            super.init(frame: .zero)
+            wantsLayer = true   // Bare-TUI: radius 0, no rounding
+            if selected { layer?.backgroundColor = DashboardOverviewView.panelBg.cgColor }
+
+            let waiting = (status == .waiting)
+
+            // Left border bar: awaiting=red, selected=accent, else transparent.
+            let bar = NSView()
+            bar.wantsLayer = true
+            bar.layer?.backgroundColor = (waiting ? DashboardOverviewView.red
+                : (selected ? DashboardOverviewView.sea : NSColor.clear)).cgColor
+            bar.translatesAutoresizingMaskIntoConstraints = false
+
+            // Line 1: repo / branch · subject   [tag]                     time
+            let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+            let subject = sailor.tasks.first?.subject ?? ""
+            // Emphasis swapped: repo is the emphasized (bright, larger) token,
+            // branch reads as the secondary (dim, smaller) one.
+            let repo = Self.label(sailor.project, DashboardOverviewView.ink, 12.5)
+            repo.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let slash = Self.label("/", DashboardOverviewView.inkFaint, 11)
+            let name = Self.label(branch, DashboardOverviewView.inkDim, 11)
+            let title = Self.label("· \(subject)", DashboardOverviewView.inkDim, 11.5)
+            title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let lastActive = sailor.activityEvents.map(\.timestamp).max()
+            let time = Self.label(Self.compactAge(since: lastActive), DashboardOverviewView.inkFaint, 10.5)
+            time.setContentHuggingPriority(.required, for: .horizontal)
+
+            let line1 = NSStackView()
+            line1.orientation = .horizontal
+            line1.alignment = .firstBaseline
+            line1.spacing = 7
+            line1.translatesAutoresizingMaskIntoConstraints = false
+            if !sailor.project.isEmpty { line1.addArrangedSubview(repo); line1.addArrangedSubview(slash) }
+            line1.addArrangedSubview(name)
+            if !subject.isEmpty { line1.addArrangedSubview(title) }
+            if waiting { line1.addArrangedSubview(Self.pill("需确认", color: DashboardOverviewView.red)) }
+            line1.addArrangedSubview(Self.spacer())
+            line1.addArrangedSubview(time)
+
+            // Line 2: info                                     [PR]  N panes
+            let info = Self.label(sailor.mostRecentMessage, infoColor, 11.5)
+            info.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) panes" : "—",
+                                   DashboardOverviewView.inkFaint, 10.5)
+            panes.setContentHuggingPriority(.required, for: .horizontal)
+
+            let line2 = NSStackView()
+            line2.orientation = .horizontal
+            line2.alignment = .centerY
+            line2.spacing = 9
+            line2.translatesAutoresizingMaskIntoConstraints = false
+            line2.addArrangedSubview(info)
+            line2.addArrangedSubview(Self.spacer())
+            line2.addArrangedSubview(panes)
+
+            let col = NSStackView(views: [line1, line2])
+            col.orientation = .vertical
+            col.spacing = 3
+            col.alignment = .leading
+            col.translatesAutoresizingMaskIntoConstraints = false
+
+            addSubview(bar); addSubview(col)
+            NSLayoutConstraint.activate([
+                bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+                bar.topAnchor.constraint(equalTo: topAnchor),
+                bar.bottomAnchor.constraint(equalTo: bottomAnchor),
+                bar.widthAnchor.constraint(equalToConstant: 2),
+
+                col.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+                col.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -13),
+                col.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                col.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+
+                line1.widthAnchor.constraint(equalTo: col.widthAnchor),
+                line2.widthAnchor.constraint(equalTo: col.widthAnchor),
+            ])
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        /// Bare-TUI pill: coloured text + 1px border, no fill, radius 0.
+        static func pill(_ text: String, color: NSColor) -> NSView {
+            let l = NSTextField(labelWithString: text)
+            l.font = AppFont.mono(size: 9.5)
+            l.textColor = color
+            l.translatesAutoresizingMaskIntoConstraints = false
+            let pad = NSView()
+            pad.wantsLayer = true
+            pad.layer?.borderWidth = 1
+            pad.layer?.borderColor = color.cgColor
+            pad.translatesAutoresizingMaskIntoConstraints = false
+            pad.addSubview(l)
+            NSLayoutConstraint.activate([
+                l.topAnchor.constraint(equalTo: pad.topAnchor, constant: 1),
+                l.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -1),
+                l.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 5),
+                l.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -5),
+            ])
+            return pad
+        }
+
+        override func mouseDown(with event: NSEvent) { onTap?(path) }
+
+        private var tracking: NSTrackingArea?
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+            addTrackingArea(t); tracking = t
+        }
+        override func mouseEntered(with event: NSEvent) {
+            layer?.backgroundColor = DashboardOverviewView.panelBg.cgColor
+        }
+        override func mouseExited(with event: NSEvent) {
+            layer?.backgroundColor = selected ? DashboardOverviewView.panelBg.cgColor : NSColor.clear.cgColor
+        }
+    }
+
 }

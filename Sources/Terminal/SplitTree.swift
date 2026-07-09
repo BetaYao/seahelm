@@ -5,7 +5,11 @@ import Foundation
 class SplitTree {
     private(set) var root: SplitNode
     var focusedId: String
-    let worktreePath: String
+    /// Owning worktree path. Mutable so a pane transfer (agent creates a new
+    /// worktree from its cwd) can re-home the tree; persistence keys on this, so
+    /// it must track the destination or the transferred layout saves under the
+    /// wrong path and is lost on restart.
+    var worktreePath: String
     private let baseSessionName: String
 
     var leafCount: Int { root.leafCount }
@@ -24,16 +28,19 @@ class SplitTree {
         return "\(baseSessionName)-\(index)"
     }
 
+    /// Split the focused leaf. Returns the new leaf id and the id of the split
+    /// node created above it (so callers can set its ratio via `updateRatio`).
     @discardableResult
-    func splitFocusedLeaf(axis: SplitAxis, newLeafId: String, newStationId: String, newSessionName: String) -> String {
+    func splitFocusedLeaf(axis: SplitAxis, newLeafId: String, newStationId: String, newSessionName: String)
+        -> (leafId: String, splitId: String) {
         let newLeaf = SplitNode.leaf(id: newLeafId, stationId: newStationId, sessionName: newSessionName)
         let splitId = UUID().uuidString
-        guard root.findLeaf(id: focusedId) != nil else { return newLeafId }
+        guard root.findLeaf(id: focusedId) != nil else { return (newLeafId, splitId) }
         let focusedNode = extractSubnode(id: focusedId)
         let replacement = SplitNode.split(id: splitId, axis: axis, ratio: 0.5, first: focusedNode, second: newLeaf)
         root = root.replacing(leafId: focusedId, with: replacement)
         focusedId = newLeafId
-        return newLeafId
+        return (newLeafId, splitId)
     }
 
     func closeFocusedLeaf() -> SplitNode.LeafInfo? {

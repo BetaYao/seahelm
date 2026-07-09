@@ -16,6 +16,22 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.cwd, "/tmp/project")
     }
 
+    func testParsesSeahelmPaneId() throws {
+        // Generic payload with the injected pane id.
+        let generic = """
+        {"seahelm_pane_id":"amux-repo-main","source":"claude-code","session_id":"s","event":"worktree_create","cwd":"/p","data":{}}
+        """.data(using: .utf8)!
+        XCTAssertEqual(try WebhookEvent.parse(from: generic).paneId, "amux-repo-main")
+
+        // Native Claude hook payload: pane id must be lifted out of `data`.
+        let native = """
+        {"seahelm_pane_id":"amux-repo-main","hook_event_name":"PreToolUse","session_id":"s","cwd":"/p"}
+        """.data(using: .utf8)!
+        let ev = try WebhookEvent.parse(from: native)
+        XCTAssertEqual(ev.paneId, "amux-repo-main")
+        XCTAssertNil(ev.data?["seahelm_pane_id"])   // not leaked into data
+    }
+
     func testParseGenericEventAllTypes() throws {
         let types: [(String, WebhookEventType)] = [
             ("session_start", .sessionStart),

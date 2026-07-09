@@ -14,6 +14,10 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidSelectLeftPane(_ pane: LeftPane)
     func titleBarDidToggleWorktreeList(from sourceView: NSView)
     func titleBarDidSelectWorktree(_ path: String)
+    /// Return to the Dashboard overview (spread First Mate) from a worktree.
+    func titleBarDidRequestOverview()
+    /// Toggle the First Mate side panel (the Dashboard opened as a left sidebar).
+    func titleBarDidToggleFirstMate()
 }
 
 final class TitleBarView: NSView {
@@ -44,12 +48,12 @@ final class TitleBarView: NSView {
     // Left control — collapse the worktrees sidebar. Aligned to the first
     // column's right edge when expanded; tucked next to the traffic lights when collapsed.
     private let collapseLeftButton = NSButton()
-    private var collapseLeftExpandedConstraint: NSLayoutConstraint?
-    private var collapseLeftCollapsedConstraint: NSLayoutConstraint?
 
-    // Left control cluster — theme toggle + the four pane switchers.
+    // Left control cluster — collapse · dashboard · theme · files · changes · First Mate.
     private let leftClusterStack = NSStackView()
+    private let dashboardButton = NSButton()
     private let themeButton = NSButton()
+    private let firstMateButton = NSButton()
     private var paneButtons: [LeftPane: NSButton] = [:]
     private var selectedLeftPane: LeftPane = .file
 
@@ -96,6 +100,33 @@ final class TitleBarView: NSView {
     func setSelectedLeftPane(_ pane: LeftPane) {
         selectedLeftPane = pane
         updatePaneHighlight()
+    }
+
+    /// Toggle the left-cluster chrome by display mode. In the Dashboard overview
+    /// there is no active worktree, so the collapse control and the file/change
+    /// pane switchers are hidden — only the theme toggle remains. Entering a
+    /// worktree reveals them so the file tree / changes are operable.
+    func setChromeMode(overview: Bool) {
+        // All icons stay VISIBLE in both modes. Worktree-context controls
+        // (files, changes, First Mate) are disabled — not hidden — in the
+        // Dashboard overview, where there is no active worktree.
+        func setWorktreeContext(_ b: NSButton) {
+            b.isEnabled = !overview
+            b.alphaValue = overview ? 0.3 : 1
+        }
+        setWorktreeContext(firstMateButton)
+        paneButtons.values.forEach(setWorktreeContext)
+    }
+
+    /// The single lit toolbar tool. Exactly one icon shows the accent tint; every
+    /// other reverts to the idle grey ("选中谁点亮谁,其他全灭").
+    enum ActiveTool { case dashboard, files, changes, firstMate, none }
+    func setActiveTool(_ tool: ActiveTool) {
+        let idle = NSColor(hex: 0x888888)
+        dashboardButton.contentTintColor = tool == .dashboard ? Theme.accent : idle
+        paneButtons[.file]?.contentTintColor = tool == .files ? Theme.accent : idle
+        paneButtons[.change]?.contentTintColor = tool == .changes ? Theme.accent : idle
+        firstMateButton.contentTintColor = tool == .firstMate ? Theme.accent : idle
     }
 
     func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true, canCleanWorktrees: Bool = false) {
@@ -150,13 +181,19 @@ final class TitleBarView: NSView {
         leftClusterStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leftClusterStack)
 
+        // Order: Dashboard · 主题 · 文件 · 改动 · First Mate.
+        // (The collapse icon was removed — each pane icon now toggles its own
+        // panel: click to open, click again to collapse.)
+        configureArcIconButton(dashboardButton, symbol: "square.grid.2x2",
+                               identifier: "titlebar.dashboard", label: "Dashboard",
+                               hoverTracking: false, action: #selector(dashboardClicked))
+        leftClusterStack.addArrangedSubview(dashboardButton)
+
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
                                identifier: "titlebar.themeToggle", label: "Toggle Theme",
                                action: #selector(themeClicked))
         leftClusterStack.addArrangedSubview(themeButton)
 
-        // Pane switchers. First Mate moved to the bottom-center Helm cockpit, so
-        // the sailboat tab is gone; Files + Changes remain.
         let panes: [(LeftPane, String, String)] = [
             (.file, "folder", "Files"),
             (.change, "plusminus", "Changes"),
@@ -171,17 +208,21 @@ final class TitleBarView: NSView {
             leftClusterStack.addArrangedSubview(btn)
         }
 
+        // First Mate — opens the Dashboard as a left side panel over the terminal.
+        configureArcIconButton(firstMateButton, symbol: "sailboat",
+                               identifier: "titlebar.firstMate", label: "First Mate",
+                               hoverTracking: false, action: #selector(firstMateClicked))
+        leftClusterStack.addArrangedSubview(firstMateButton)
+
         NSLayoutConstraint.activate([
-            leftClusterStack.leadingAnchor.constraint(equalTo: collapseLeftButton.trailingAnchor, constant: 8),
+            leftClusterStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             leftClusterStack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
         ])
         updatePaneHighlight()
     }
 
     private func updatePaneHighlight() {
-        for (pane, btn) in paneButtons {
-            btn.contentTintColor = pane == selectedLeftPane ? Theme.accent : NSColor(hex: 0x888888)
-        }
+        // Superseded by setActiveTool(), which owns the single-lit-icon state.
     }
 
     private func setupTabStrip() {
@@ -209,6 +250,8 @@ final class TitleBarView: NSView {
                                identifier: "titlebar.worktreeList", label: "Worktrees",
                                action: #selector(worktreeListClicked))
         addSubview(tabWorktreeButton)
+        // Removed: worktree switching now lives in the Dashboard fleet list.
+        tabWorktreeButton.isHidden = true
         // Tabs always tuck right after the left icon cluster — no middle gap.
         worktreeButtonExpandedLeading = tabWorktreeButton.leadingAnchor.constraint(
             equalTo: leftClusterStack.trailingAnchor, constant: 10)
@@ -256,6 +299,19 @@ final class TitleBarView: NSView {
     }
 
     func setWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool)]) {
+        // The horizontal worktree tab strip was removed — worktree switching now
+        // lives in the Dashboard overview's fleet list (the worktree-list popover
+        // button stays as a compact switcher). We still record the ordered paths
+        // and current selection so keyboard next/prev cycling keeps working, then
+        // bail before building any tab-strip UI.
+        worktreeTabPaths = tabs.map(\.path)
+        selectedTabPath = tabs.first(where: \.isSelected)?.path
+        tabStripScroll.isHidden = true
+        tabOverflowButton.isHidden = true
+        titleStack.isHidden = false
+    }
+
+    private func legacySetWorktreeTabs(_ tabs: [(path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool)]) {
         worktreeTabPaths = tabs.map(\.path)
         let previousSelectedPath = selectedTabPath
         selectedTabPath = tabs.first(where: \.isSelected)?.path
@@ -382,33 +438,16 @@ final class TitleBarView: NSView {
     }
 
     private func setupLeftButton() {
+        // The collapse-sidebar control is configured here but added to the ordered
+        // left cluster in setupLeftCluster().
         configureArcIconButton(collapseLeftButton, symbol: "sidebar.left",
                                identifier: "titlebar.collapseLeft", label: "Toggle Worktrees",
                                action: #selector(collapseLeftClicked))
-        addSubview(collapseLeftButton)
-        // Pinned to the far left so the pane-switch cluster reads as a single
-        // top-left group regardless of the worktree column's collapsed state.
-        collapseLeftExpandedConstraint = collapseLeftButton.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: 4)
-        collapseLeftCollapsedConstraint = collapseLeftButton.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: 4)
-        collapseLeftExpandedConstraint?.isActive = true
-        NSLayoutConstraint.activate([
-            collapseLeftButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
-        ])
     }
 
-    /// Reposition the collapse-left icon: tucked by the traffic lights when the
-    /// worktree column is collapsed, aligned to that column's right edge otherwise.
-    func setLeftColumnCollapsed(_ collapsed: Bool) {
-        collapseLeftExpandedConstraint?.isActive = !collapsed
-        collapseLeftCollapsedConstraint?.isActive = collapsed
-        // Re-align the worktree icon + tab strip: to the centre content's left
-        // edge when expanded, tucked after the icon cluster when collapsed.
-        worktreeButtonExpandedLeading?.isActive = !collapsed
-        worktreeButtonCollapsedLeading?.isActive = collapsed
-        layoutSubtreeIfNeeded()
-    }
+    /// No-op now that the collapse icon lives in the fixed left cluster (it no
+    /// longer repositions with the worktree column). Kept for call-site compat.
+    func setLeftColumnCollapsed(_ collapsed: Bool) {}
 
     private func setupTitleLabel() {
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -528,6 +567,10 @@ final class TitleBarView: NSView {
     }
 
     @objc private func collapseLeftClicked() { delegate?.titleBarDidRequestCollapseLeftColumn() }
+
+    @objc private func dashboardClicked() { delegate?.titleBarDidRequestOverview() }
+
+    @objc private func firstMateClicked() { delegate?.titleBarDidToggleFirstMate() }
 
     @objc private func paneButtonClicked(_ sender: NSButton) {
         guard let pane = LeftPane(rawValue: sender.tag) else { return }

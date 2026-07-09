@@ -323,6 +323,24 @@ class Station {
         return String(decoding: buf, as: UTF8.self)
     }
 
+    /// True when a live ghostty surface exists. Background dashboard cards that
+    /// were never opened have no surface, so `readViewportText()` returns nil and
+    /// status scanning must fall back to `readBackendText()`.
+    var hasLiveSurface: Bool { surface != nil }
+
+    /// Capture the current backend session frame for status scanning when there
+    /// is no live surface to read (e.g. an overview card never selected). zmx
+    /// `history` includes the live rendered frame — alt-screen TUIs like Claude
+    /// Code included — so the agent's status line ("esc to interrupt", prompts)
+    /// is present. Returns the last `lines` rows to approximate a viewport (keeps
+    /// bottom-anchored detection rules honest and bounds scrollback false matches).
+    /// Runs a subprocess — call off the main thread only. Returns nil when there
+    /// is a live surface (use `readViewportText()` instead) or no backend session.
+    func readBackendText(lines: Int = 60) -> String? {
+        guard surface == nil, backend == "zmx", let sessionName else { return nil }
+        return ZmxChannel(sessionName: sessionName).readOutput(lines: lines)
+    }
+
     /// Get the process status for status detection
     var processStatus: ProcessStatus {
         guard let surface else { return .unknown }

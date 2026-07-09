@@ -11,6 +11,11 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Set by the owner (TabCoordinator) to perform a split on the main thread.
     /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
     var splitHandler: ((String?, SplitAxis, Bool) -> String?)?
+    /// Owner-set layout export/apply, run on the main thread.
+    var exportLayoutHandler: (() -> [String: Any]?)?
+    var applyLayoutHandler: ((LayoutNode) -> Bool)?
+    /// (targetStationId, mode) → zoomed-after, or nil if the pane isn't found.
+    var zoomHandler: ((String?, String) -> Bool?)?
     /// Close a pane by station id (main thread). Returns whether it was closed.
     var closeHandler: ((String) -> Bool)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
@@ -79,6 +84,14 @@ final class SeahelmControlDataSource: ControlDataSource {
         return ShipLog.shared.sailor(for: sid)?.status.rawValue
     }
 
+    func paneOptions(paneId: String) -> [[String: Any]]? {
+        guard let station = station(for: paneId) else { return nil }
+        let text = station.readViewportText() ?? ""
+        return ChoiceOptionParser.parse(text).map {
+            ["index": $0.index, "label": $0.label, "selected": $0.selected]
+        }
+    }
+
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
         guard let splitHandler else { return nil }
         // right/left place panes side by side; down/up stack them.
@@ -103,6 +116,77 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard let sid = station(for: paneId)?.id, let focusHandler else { return false }
         var ok = false
         runOnMain { ok = focusHandler(sid) }
+        return ok
+    }
+
+    func explainPane(paneId: String) -> [String: Any]? {
+        guard let station = station(for: paneId) else { return nil }
+        let sailor = ShipLog.shared.sailor(for: station.id)
+        let agentType = sailor?.agentType ?? .unknown
+        let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
+
+        let content = station.readViewportText() ?? ""
+        let osc = (title: station.oscTitle, progress: station.oscProgress)
+        let input = DetectionInput(screen: content.lowercased(), oscTitle: osc.title, oscProgress: osc.progress)
+
+        // Live screen detection (what the scan layer sees right now).
+        let scan = StatusDetector().detectDetailed(
+            processStatus: station.processStatus, shellInfo: nil, content: content,
+            manifest: manifest, osc: osc)
+        let hookStatus = sailor?.hookStatus ?? .unknown
+        let decided = ShipLog.arbitrateDetailed(scan: scan.state, hook: hookStatus, agentType: agentType)
+
+        var result: [String: Any] = [
+            "pane_id": station.id,
+            "session_name": station.sessionName ?? "",
+            "agent": agentType.rawValue,
+            "manifest": manifest?.manifest.id ?? "",
+            "manifest_version": manifest?.manifest.version ?? "",
+            "authority": decided.authority,
+            "status": decided.status.rawValue,
+            "decided_by": decided.decidedBy,
+            "scan_status": scan.state.rawValue,
+            "hook_status": hookStatus.rawValue,
+            "process_status": "\(station.processStatus)",
+            "osc_title": osc.title,
+            "osc_progress": osc.progress,
+        ]
+        if let match = manifest?.matchDetail(input) {
+            result["matched_rule"] = [
+                "id": match.rule.id,
+                "state": match.rule.state,
+                "priority": match.rule.priority,
+                "region": match.rule.region,
+                "evidence": String(match.regionText.suffix(160)),
+            ]
+        } else {
+            result["matched_rule"] = NSNull()
+            result["default_status"] = manifest?.defaultStatus.rawValue ?? ""
+        }
+        return result
+    }
+
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
+        guard let h = zoomHandler else { return nil }
+        let sid = paneId.flatMap { station(for: $0)?.id }
+        if paneId != nil && sid == nil { return nil }  // named but not found
+        var zoomed: Bool?
+        runOnMain { zoomed = h(sid, mode) }
+        guard let z = zoomed else { return nil }
+        return ["zoomed": z]
+    }
+
+    func exportLayout() -> [String: Any]? {
+        guard let h = exportLayoutHandler else { return nil }
+        var r: [String: Any]?
+        runOnMain { r = h() }
+        return r
+    }
+
+    func applyLayout(root: [String: Any]) -> Bool {
+        guard let node = LayoutNode(dict: root), let h = applyLayoutHandler else { return false }
+        var ok = false
+        runOnMain { ok = h(node) }
         return ok
     }
 

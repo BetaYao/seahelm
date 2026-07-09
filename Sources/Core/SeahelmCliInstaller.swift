@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v3"
+    private static let versionMarker = "# seahelm-cli v7"
 
     static func scriptContents() -> String {
         return #"""
@@ -51,7 +51,7 @@ enum SeahelmCliInstaller {
         def main():
             argv = sys.argv[1:]
             if not argv:
-                die("usage: seahelm <ping|session|pane|wait|events> ...", 2)
+                die("usage: seahelm <ping|session|pane|wait|events|layout> ...", 2)
             g = argv[0]; a = argv[1:]
 
             if g == "ping":
@@ -81,6 +81,19 @@ enum SeahelmCliInstaller {
                     die("socket error: %s" % e)
                 return
 
+            if g == "layout":
+                if not a: die("usage: seahelm layout <export|apply [file|-]>")
+                if a[0] == "export":
+                    print(json.dumps(call("layout.export", {}), indent=2)); return
+                if a[0] == "apply":
+                    raw = sys.stdin.read() if len(a) < 2 or a[1] == "-" else open(a[1]).read()
+                    try:
+                        doc = json.loads(raw)
+                    except Exception:
+                        die("invalid layout JSON")
+                    call("layout.apply", {"root": doc.get("root", doc)}); return
+                die("unknown layout subcommand: %s" % a[0])
+
             if g == "wait":
                 if not a: die("usage: seahelm wait <output|agent-status> <pane> ...")
                 sub = a[0]; rest = a[1:]
@@ -103,7 +116,7 @@ enum SeahelmCliInstaller {
                 sys.exit(0 if r.get("matched") else 1)
 
             if g == "pane":
-                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus> ...")
+                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|explain|zoom|options> ...")
                 sub = a[0]; rest = a[1:]
                 if sub == "list":
                     print(json.dumps(call("pane.list", {}).get("panes", []), indent=2)); return
@@ -127,6 +140,18 @@ enum SeahelmCliInstaller {
                 if sub == "focus":
                     if not rest: die("usage: seahelm pane focus <pane>")
                     call("pane.focus", {"pane_id": rest[0]}); return
+                if sub == "explain":
+                    if not rest: die("usage: seahelm pane explain <pane>")
+                    print(json.dumps(call("pane.explain", {"pane_id": rest[0]}), indent=2)); return
+                if sub == "options":
+                    if not rest: die("usage: seahelm pane options <pane>")
+                    print(json.dumps(call("pane.options", {"pane_id": rest[0]}).get("options", []), indent=2)); return
+                if sub == "zoom":
+                    pane = rest[0] if rest and not rest[0].startswith("--") else None
+                    mode = "on" if has(rest, "--on") else ("off" if has(rest, "--off") else "toggle")
+                    p = {"mode": mode}
+                    if pane: p["pane_id"] = pane
+                    print(json.dumps(call("pane.zoom", p))); return
                 if sub == "split":
                     # optional positional pane id (a token not starting with --)
                     pane = rest[0] if rest and not rest[0].startswith("--") else None

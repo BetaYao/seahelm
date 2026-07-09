@@ -58,6 +58,20 @@ protocol ControlDataSource: AnyObject {
     func closePane(paneId: String) -> Bool
     /// Give keyboard focus to a pane. False if it isn't found in the active container.
     func focusPane(paneId: String) -> Bool
+    /// Explain how a pane's current status was decided (matched rule + evidence,
+    /// authority, scan vs hook), or nil if the pane is unknown.
+    func explainPane(paneId: String) -> [String: Any]?
+    /// Export the active container's split layout as a declarative template dict.
+    func exportLayout() -> [String: Any]?
+    /// Apply a declarative layout template (its `root` node dict) to the active
+    /// container. False if the template is invalid or can't be applied.
+    func applyLayout(root: [String: Any]) -> Bool
+    /// Toggle/set tmux-style zoom of a pane (nil = focused). `mode`: on|off|toggle.
+    /// Returns ["zoomed": Bool] or nil if the pane isn't found.
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]?
+    /// The on-screen numbered choices (permission prompt / AskUserQuestion) for a
+    /// pane, as [{index, label, selected}]. [] when none; nil if pane unknown.
+    func paneOptions(paneId: String) -> [[String: Any]]?
 }
 
 extension ControlDataSource {
@@ -67,6 +81,11 @@ extension ControlDataSource {
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? { nil }
     func closePane(paneId: String) -> Bool { false }
     func focusPane(paneId: String) -> Bool { false }
+    func explainPane(paneId: String) -> [String: Any]? { nil }
+    func exportLayout() -> [String: Any]? { nil }
+    func applyLayout(root: [String: Any]) -> Bool { false }
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? { nil }
+    func paneOptions(paneId: String) -> [[String: Any]]? { nil }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -198,6 +217,17 @@ final class ControlRouter {
             }
             return .ok(["pane_id": newId])
 
+        case "pane.zoom":
+            let paneId = (params["pane_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let mode = (params["mode"] as? String)?.lowercased() ?? "toggle"
+            guard ["on", "off", "toggle"].contains(mode) else {
+                return .error(code: ControlError.invalidParams, message: "mode must be on|off|toggle")
+            }
+            guard let result = dataSource?.zoomPane(paneId: paneId, mode: mode) else {
+                return .error(code: ControlError.notFound, message: "cannot zoom pane")
+            }
+            return .ok(result)
+
         case "pane.close", "pane.focus":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
                 return .error(code: ControlError.invalidParams, message: "pane_id required")
@@ -207,6 +237,39 @@ final class ControlRouter {
                 : (dataSource?.focusPane(paneId: paneId) ?? false)
             guard ok else { return .error(code: ControlError.notFound, message: "pane not found: \(paneId)") }
             return .ok([method == "pane.close" ? "closed" : "focused": true])
+
+        case "layout.export":
+            guard let layout = dataSource?.exportLayout() else {
+                return .error(code: ControlError.notFound, message: "no active layout")
+            }
+            return .ok(layout)
+
+        case "layout.apply":
+            guard let root = params["root"] as? [String: Any] else {
+                return .error(code: ControlError.invalidParams, message: "root required")
+            }
+            guard dataSource?.applyLayout(root: root) == true else {
+                return .error(code: ControlError.invalidParams, message: "invalid or unapplicable layout")
+            }
+            return .ok(["applied": true])
+
+        case "pane.options":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            guard let options = dataSource?.paneOptions(paneId: paneId) else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(["options": options])
+
+        case "pane.explain", "agent.explain":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            guard let detail = dataSource?.explainPane(paneId: paneId) else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(detail)
 
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)

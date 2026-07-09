@@ -66,7 +66,9 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     override func loadView() {
         let root = ThemedBackgroundView()
-        root.backgroundToken = Theme.background
+        // Match the First Mate side panel (Bare-TUI card background #0e2d37) so the
+        // Files/Changes pane and First Mate read as the same docked side panel.
+        root.backgroundToken = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
         root.setAccessibilityIdentifier("sidePanel.view")
 
         tabBar.orientation = .horizontal

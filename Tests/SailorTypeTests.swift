@@ -3,6 +3,27 @@ import XCTest
 
 final class SailorTypeTests: XCTestCase {
 
+    // MARK: - Launch command + suggest instruction injection
+
+    func testClaudeLaunchInjectsSuggestInstruction() {
+        let cmd = SailorType.claudeCode.launchCommand(withTask: "fix the bug")!
+        XCTAssertTrue(cmd.hasPrefix("claude --append-system-prompt "))
+        XCTAssertTrue(cmd.contains("seahelm-suggest"))
+        XCTAssertTrue(cmd.hasSuffix("'fix the bug'"))   // task stays the positional arg
+    }
+
+    func testNonClaudeAgentNoInjection() {
+        let cmd = SailorType.codex.launchCommand(withTask: "do x")!
+        XCTAssertFalse(cmd.contains("--append-system-prompt"))
+        XCTAssertEqual(cmd, "codex 'do x'")
+    }
+
+    func testEmptyTaskStillInjectsForClaude() {
+        let cmd = SailorType.claudeCode.launchCommand(withTask: "  ")!
+        XCTAssertTrue(cmd.contains("--append-system-prompt"))
+        XCTAssertFalse(cmd.hasSuffix("''"))   // no empty positional task
+    }
+
     // MARK: - Detection from terminal content
 
     func testDetectClaudeCode() {
@@ -144,11 +165,9 @@ final class SailorTypeTests: XCTestCase {
 
     // MARK: - launchCommand(withTask:)
 
+    // Use codex here: it gets no system-prompt injection, so the exact composed
+    // string is stable. Claude's injection is covered above.
     func testLaunchCommandWithTaskComposesPositionalPrompt() {
-        XCTAssertEqual(
-            SailorType.claudeCode.launchCommand(withTask: "fix the login bug"),
-            "claude 'fix the login bug'"
-        )
         XCTAssertEqual(
             SailorType.codex.launchCommand(withTask: "add tests"),
             "codex 'add tests'"
@@ -156,14 +175,14 @@ final class SailorTypeTests: XCTestCase {
     }
 
     func testLaunchCommandWithEmptyTaskReturnsBareCommand() {
-        XCTAssertEqual(SailorType.claudeCode.launchCommand(withTask: ""), "claude")
-        XCTAssertEqual(SailorType.claudeCode.launchCommand(withTask: "   "), "claude")
+        XCTAssertEqual(SailorType.codex.launchCommand(withTask: ""), "codex")
+        XCTAssertEqual(SailorType.codex.launchCommand(withTask: "   "), "codex")
     }
 
     func testLaunchCommandWithTaskEscapesQuotes() {
         XCTAssertEqual(
-            SailorType.claudeCode.launchCommand(withTask: "can't stop"),
-            "claude 'can'\\''t stop'"
+            SailorType.codex.launchCommand(withTask: "can't stop"),
+            "codex 'can'\\''t stop'"
         )
     }
 

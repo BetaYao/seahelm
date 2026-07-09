@@ -74,9 +74,13 @@ struct WebhookEvent {
     let cwd: String
     let timestamp: String?
     let data: [String: Any]?
+    /// Stable pane id (SEAHELM_PANE_ID) the hook ran under, injected by the
+    /// seahelm-hook bridge. Attributes the event to an exact pane. Nil when the
+    /// hook predates the injection or ran outside a seahelm pane.
+    let paneId: String?
 
-    /// Explicit memberwise init with `sessionPath` defaulted so existing call
-    /// sites (which predate the field) keep compiling.
+    /// Explicit memberwise init with `sessionPath`/`paneId` defaulted so existing
+    /// call sites (which predate the fields) keep compiling.
     init(
         source: String,
         sessionId: String,
@@ -84,7 +88,8 @@ struct WebhookEvent {
         event: WebhookEventType,
         cwd: String,
         timestamp: String?,
-        data: [String: Any]?
+        data: [String: Any]?,
+        paneId: String? = nil
     ) {
         self.source = source
         self.sessionId = sessionId
@@ -93,6 +98,7 @@ struct WebhookEvent {
         self.cwd = cwd
         self.timestamp = timestamp
         self.data = data
+        self.paneId = paneId
     }
 
     /// Parse from JSON data. Supports generic protocol and native hook payloads.
@@ -126,7 +132,8 @@ struct WebhookEvent {
             event: event,
             cwd: cwd,
             timestamp: json["timestamp"] as? String,
-            data: json["data"] as? [String: Any]
+            data: json["data"] as? [String: Any],
+            paneId: json["seahelm_pane_id"] as? String
         )
     }
 
@@ -142,7 +149,7 @@ struct WebhookEvent {
 
         // Collect remaining fields as data
         var data: [String: Any] = [:]
-        let reservedKeys: Set<String> = ["hook_event_name", "session_id", "cwd", "transcript_path", "permission_mode"]
+        let reservedKeys: Set<String> = ["hook_event_name", "session_id", "cwd", "transcript_path", "permission_mode", "seahelm_pane_id"]
         for (key, value) in json where !reservedKeys.contains(key) {
             data[key] = value
         }
@@ -155,7 +162,8 @@ struct WebhookEvent {
             event: event,
             cwd: cwd,
             timestamp: nil,
-            data: data.isEmpty ? nil : data
+            data: data.isEmpty ? nil : data,
+            paneId: json["seahelm_pane_id"] as? String
         )
     }
 

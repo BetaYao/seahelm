@@ -94,7 +94,18 @@ class TabCoordinator {
             }
         )
         ShipLog.shared.onOutcome = { [weak self] outcome in
-            self?.firstMate?.handle(outcome)
+            guard let self else { return }
+            self.firstMate?.handle(outcome)
+            // Feed the worktree aggregator from ShipLog's arbitrated status
+            // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
+            // "running" that the scan-only path misses when the viewport text is
+            // static (agent thinking; only the OSC-title spinner animates).
+            self.statusAggregator?.agentDidUpdate(
+                terminalID: outcome.info.id,
+                status: outcome.newStatus,
+                lastMessage: outcome.info.lastMessage,
+                lastUserPrompt: outcome.info.lastUserPrompt,
+                agentType: outcome.info.agentType)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
             guard let self,
@@ -304,7 +315,12 @@ class TabCoordinator {
             } ?? [station]
 
             let ws = statusAggregator.status(for: agent.worktreePath)
-            let paneStatuses = ws?.statuses ?? [agent.status]
+            // Roll up EVERY pane's ShipLog status for this worktree (authoritative,
+            // arbitrated). A multi-pane worktree must reflect its busiest pane, so
+            // don't collapse to the aggregator's list or a single sailor here.
+            let shipLogPaneStatuses = agents.filter { $0.worktreePath == agent.worktreePath }.map(\.status)
+            let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
+                : (ws?.statuses ?? [agent.status])
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
@@ -480,10 +496,10 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, ref: ref)
                     }
-                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId in
+                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId, paneId in
                         guard let self else { return }
-                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName)")
-                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId)
+                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName) (pane \(paneId ?? "?"))")
+                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId, paneId: paneId)
                     }
                     // Per-session timestamps: when we last blocked a session for suggestions,
                     // and when a user prompt last arrived for that session. If the user sent a
@@ -492,6 +508,11 @@ class TabCoordinator {
                     // without mixing suggestion overhead into the user-directed response.
                     var sessionBlockedAt: [String: Date] = [:]
                     var sessionUserPromptedAt: [String: Date] = [:]
+                    // When the agent voluntarily called seahelm-suggest this turn (it was
+                    // instructed to as its last action). If so, we needn't force a
+                    // suggestion via a blocking Stop — that saves the block→continue
+                    // round-trip. Reset each turn (on the next user prompt).
+                    var sessionSuggestedAt: [String: Date] = [:]
 
                     // Shared inbound-event sink, serialized so the webhook and the
                     // control socket can both feed it without racing the per-session
@@ -500,9 +521,11 @@ class TabCoordinator {
                     let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
                       eventQueue.sync {
                         guard let self else { return nil }
-                        // Track when the user sent a message to this session.
+                        // Track when the user sent a message to this session; a new
+                        // user prompt starts a fresh turn, so the agent must suggest again.
                         if event.event == .userPrompt {
                             sessionUserPromptedAt[event.sessionId] = Date()
+                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
                         }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         ShipLog.shared.updateBackgroundBusy(from: event)
@@ -511,10 +534,19 @@ class TabCoordinator {
                         if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
                             return nil
                         }
+                        // The agent gave its own suggestions this turn (per the injected
+                        // instruction) — record it so the Stop below won't force another.
+                        if event.event == .suggest {
+                            sessionSuggestedAt[event.sessionId] = Date()
+                        }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't
                         // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop,
+                        if event.event == .agentStop, sessionSuggestedAt[event.sessionId] != nil {
+                            // The agent already emitted buttons as its last action this
+                            // turn — no forced block needed (no extra round-trip).
+                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                        } else if event.event == .agentStop,
                            let blockedAt = sessionBlockedAt[event.sessionId],
                            let promptedAt = sessionUserPromptedAt[event.sessionId],
                            promptedAt > blockedAt {
@@ -551,6 +583,15 @@ class TabCoordinator {
                     }
                     controlDataSource.focusHandler = { [weak self] stationId in
                         self?.terminalCoordinator.focusPane(targetStationId: stationId) ?? false
+                    }
+                    controlDataSource.exportLayoutHandler = { [weak self] in
+                        self?.terminalCoordinator.exportLayout()
+                    }
+                    controlDataSource.applyLayoutHandler = { [weak self] node in
+                        self?.terminalCoordinator.applyLayout(node) ?? false
+                    }
+                    controlDataSource.zoomHandler = { [weak self] stationId, mode in
+                        self?.terminalCoordinator.zoomPane(targetStationId: stationId, mode: mode)
                     }
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: controlDataSource))
@@ -676,7 +717,11 @@ class TabCoordinator {
         }
         for leaf in transferredTree.allLeaves {
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
-                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
+                // zmx has no rename, so the session keeps its original (source-derived)
+                // name. Register with that real name — NOT persistentSessionName(for:
+                // newInfo.path), which would build a channel to a nonexistent session
+                // and let the orphan-reaper reap the live one.
+                let sessionName = runtimeBackend == "local" ? nil : leaf.sessionName
                 ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
             }
         }

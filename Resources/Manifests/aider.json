@@ -4,21 +4,59 @@
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
-  "message_skip_patterns": ["shift+tab", "accept edits", "to interrupt"],
+  "message_skip_patterns": [
+    "shift+tab",
+    "accept edits",
+    "to interrupt"
+  ],
   "process": {
-    "exec_names": ["aider"],
-    "argv_contains": ["aider"],
-    "generic_runtimes": ["python","python3","uv"],
+    "exec_names": [
+      "aider"
+    ],
+    "argv_contains": [
+      "aider"
+    ],
+    "generic_runtimes": [
+      "python",
+      "python3",
+      "uv"
+    ],
     "env_hint": "SEAHELM_AGENT"
   },
   "authority": "screen_only",
   "rules": [
     {
+      "id": "osc_title_working",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "regex": [
+        "^[\\x{2800}-\\x{28FF}] "
+      ],
+      "visible_working": true
+    },
+    {
       "id": "working_interrupt",
       "state": "running",
       "priority": 400,
       "region": "bottom_lines:10",
-      "any": [{ "contains": ["to interrupt"] }, { "contains": ["(thinking)"] }, { "contains": ["esc to interrupt"] }],
+      "any": [
+        {
+          "contains": [
+            "to interrupt"
+          ]
+        },
+        {
+          "contains": [
+            "(thinking)"
+          ]
+        },
+        {
+          "contains": [
+            "esc to interrupt"
+          ]
+        }
+      ],
       "visible_working": true
     },
     {
@@ -26,14 +64,46 @@
       "state": "error",
       "priority": 700,
       "region": "bottom_lines:10",
-      "any": [{ "contains": ["error:"] }, { "line_regex": ["(?i)^\\s*error\\b"] }]
+      "any": [
+        {
+          "contains": [
+            "error:"
+          ]
+        },
+        {
+          "line_regex": [
+            "(?i)^\\s*error\\b"
+          ]
+        }
+      ]
     },
     {
       "id": "waiting_prompt",
       "state": "waiting",
       "priority": 850,
       "region": "bottom_lines:8",
-      "any": [{ "contains": ["(y/n)"] }, { "contains": ["(yes/no)"] }, { "contains": ["do you want to proceed?"] }, { "contains": ["? "] }],
+      "any": [
+        {
+          "contains": [
+            "(y/n)"
+          ]
+        },
+        {
+          "contains": [
+            "(yes/no)"
+          ]
+        },
+        {
+          "contains": [
+            "do you want to proceed?"
+          ]
+        },
+        {
+          "contains": [
+            "? "
+          ]
+        }
+      ],
       "visible_blocker": true
     }
   ]

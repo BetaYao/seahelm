@@ -21,6 +21,11 @@ class StatusPublisher {
     private let pollInterval: TimeInterval = 2.0
     private let pollQueue = DispatchQueue(label: "com.seahelm.status-poll", qos: .utility)
     private let nonPreferredPollStride: Int = 3
+    /// Backend-capture (zmx history) cadence for surface-less panes, in poll
+    /// cycles. Each such capture forks a subprocess, so we sample every Nth cycle
+    /// (~6s at a 2s interval) rather than every cycle, and stagger panes by an
+    /// id-derived offset so they don't all fork on the same tick.
+    private let backendCaptureStride: Int = 3
     private var preferredPaths: Set<String> = []
     private var pollCycle: Int = 0
 
@@ -147,10 +152,31 @@ class StatusPublisher {
             }
             let processStatus = surface.processStatus
             // readViewportText() can be slow — do NOT hold the lock here
-            let content = surface.readViewportText() ?? ""
+            var content = surface.readViewportText() ?? ""
 
-            // Skip expensive text analysis if viewport hasn't changed
-            let contentHash = content.stableHash
+            // No live surface: this is a dashboard overview card that was never
+            // opened, so there is nothing to screen-scrape. Fall back to a
+            // throttled backend capture (zmx history) so its agent status still
+            // advances instead of freezing until a hook fires. The capture spawns
+            // a subprocess, so it runs on a stride (not every cycle) and is
+            // staggered per pane to avoid a subprocess burst on a single cycle.
+            if content.isEmpty && !surface.hasLiveSurface {
+                let offset = Int(truncatingIfNeeded: terminalID.stableHash)
+                guard Self.shouldBackendCapture(pollCycle: pollCycle, offset: offset,
+                                                stride: self.backendCaptureStride) else { continue }
+                content = surface.readBackendText() ?? ""
+                // Still nothing (no backend session): skip without poisoning the
+                // hash cache with an empty frame that would suppress future scans.
+                if content.isEmpty { continue }
+            }
+
+            // Skip expensive text analysis only when NOTHING observable changed.
+            // The OSC title/progress must be in the hash: an agent "thinking" keeps
+            // the viewport text static while animating a braille spinner in its
+            // title, and that spinner is the running signal (osc_title rule). The
+            // spinner changing between two 2s polls busts the hash and re-scans;
+            // when truly idle (static title) the hash is stable and we still skip.
+            let contentHash = (content + "\u{1}" + surface.oscTitle + "\u{1}" + surface.oscProgress).stableHash
 
             lock.lock()
             let lastHash = lastViewportHashes[terminalID]
@@ -232,17 +258,10 @@ class StatusPublisher {
                                           roundDuration: roundDur, tasks: webhookTasks))
                 ShipLog.shared.ingest(normalized)
             }
-
-            DispatchQueue.main.async { [weak self] in
-                self?.aggregator?.agentDidUpdate(
-                    terminalID: terminalID,
-                    status: committedStatus,
-                    lastMessage: lastMessage,
-                    lastUserPrompt: "",
-                    agentType: agentType
-                )
-            }
-
+            // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
+            // scan+hook+OSC) in TabCoordinator, not directly here — the scan path
+            // is viewport-hash-gated and would push a stale idle while an agent is
+            // thinking. Registration still happens via aggregator.registerTerminal.
         }
     }
 
@@ -327,6 +346,14 @@ class StatusPublisher {
         if preferredPaths.contains(path) { return true }
         let stride = max(1, nonPreferredStride)
         return pollCycle % stride == 0
+    }
+
+    /// Whether a surface-less pane should run a backend capture this cycle.
+    /// Sampled every `stride` cycles, staggered by a per-pane `offset` so captures
+    /// spread across cycles instead of bursting together.
+    static func shouldBackendCapture(pollCycle: Int, offset: Int, stride: Int) -> Bool {
+        let s = max(1, stride)
+        return ((pollCycle &+ offset) % s + s) % s == 0
     }
 
     deinit {
