@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v4"
+    private static let versionMarker = "# seahelm-cli v5"
 
     static func scriptContents() -> String {
         return #"""
@@ -51,7 +51,7 @@ enum SeahelmCliInstaller {
         def main():
             argv = sys.argv[1:]
             if not argv:
-                die("usage: seahelm <ping|session|pane|wait|events> ...", 2)
+                die("usage: seahelm <ping|session|pane|wait|events|layout> ...", 2)
             g = argv[0]; a = argv[1:]
 
             if g == "ping":
@@ -80,6 +80,19 @@ enum SeahelmCliInstaller {
                 except Exception as e:
                     die("socket error: %s" % e)
                 return
+
+            if g == "layout":
+                if not a: die("usage: seahelm layout <export|apply [file|-]>")
+                if a[0] == "export":
+                    print(json.dumps(call("layout.export", {}), indent=2)); return
+                if a[0] == "apply":
+                    raw = sys.stdin.read() if len(a) < 2 or a[1] == "-" else open(a[1]).read()
+                    try:
+                        doc = json.loads(raw)
+                    except Exception:
+                        die("invalid layout JSON")
+                    call("layout.apply", {"root": doc.get("root", doc)}); return
+                die("unknown layout subcommand: %s" % a[0])
 
             if g == "wait":
                 if not a: die("usage: seahelm wait <output|agent-status> <pane> ...")

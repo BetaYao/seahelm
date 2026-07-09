@@ -163,6 +163,7 @@
 		90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A7E8E322E5A353D4457DBC /* HooksChannel.swift */; };
 		91AD0153C909A0DF726EE6A1 /* ManifestEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304981CB302BEC6B00289258 /* ManifestEngineTests.swift */; };
 		91AE9A595CB36E54847C8274 /* GlobalKeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F339357674536CA6736266 /* GlobalKeymapTests.swift */; };
+		926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */; };
 		92B45E68D04E8B1213AE4E84 /* CommandInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F9D4F50D54CA7F4CE5D29E /* CommandInputView.swift */; };
 		92DFDABD2CD56B3AC0F6F5F3 /* ActivityEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD54528A1D3989383AC18319 /* ActivityEventTests.swift */; };
 		92E9F0AABB7C9DCD16D9445F /* SeahelmHookInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */; };
@@ -247,6 +248,7 @@
 		D47B59C29F15D7B8911BF0F1 /* ActivityEventPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 869B26072C7A6CF51E54A50A /* ActivityEventPipelineTests.swift */; };
 		D498FA22D507E98139DE451B /* SeahelmSkillInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA707703AD383C078C3DFC3 /* SeahelmSkillInstallerTests.swift */; };
 		D561B55100D9032AC7C173E5 /* FileContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCC4A1C262ABBDCDACB560CD /* FileContentView.swift */; };
+		D5E1195B106F29ACCB59D516 /* LayoutNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9854E3679A7AF9524F5077 /* LayoutNode.swift */; };
 		D63952B04D839AFBF04F5FC1 /* SeahelmCliInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */; };
 		D6494907C3E68AED14842187 /* DashboardViewControllerClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */; };
 		D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */; };
@@ -475,6 +477,7 @@
 		83A953BA5BA82E18C03F5294 /* SailorChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorChannel.swift; sourceTree = "<group>"; };
 		849C6707188E7E90997D691A /* SplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTree.swift; sourceTree = "<group>"; };
 		84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
+		85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNodeTests.swift; sourceTree = "<group>"; };
 		869B26072C7A6CF51E54A50A /* ActivityEventPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventPipelineTests.swift; sourceTree = "<group>"; };
 		86E5E4022C54782A3B4B4760 /* UpdateError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateError.swift; sourceTree = "<group>"; };
 		87CF73B862D4CB3AA19021D9 /* SuggestGuidanceWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestGuidanceWriterTests.swift; sourceTree = "<group>"; };
@@ -539,6 +542,7 @@
 		BA6D55A3BC776F3500FE595B /* SailorInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorInfo.swift; sourceTree = "<group>"; };
 		BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEvent.swift; sourceTree = "<group>"; };
 		BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstallerTests.swift; sourceTree = "<group>"; };
+		BB9854E3679A7AF9524F5077 /* LayoutNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNode.swift; sourceTree = "<group>"; };
 		BBA707703AD383C078C3DFC3 /* SeahelmSkillInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSkillInstallerTests.swift; sourceTree = "<group>"; };
 		BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHelpOverlay.swift; sourceTree = "<group>"; };
 		BCEC0119082025691BCED456 /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
@@ -949,6 +953,7 @@
 				9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */,
 				FC0B811C8897D41F6EA6B4FE /* KeyboardModeControllerTests.swift */,
 				D903DD2BD63A00A9BBE71CD3 /* KeymapTests.swift */,
+				85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */,
 				744AF80AC91241DD0E34B964 /* LeaderMenuTests.swift */,
 				304981CB302BEC6B00289258 /* ManifestEngineTests.swift */,
 				FFB2611416D80C0BE65750B1 /* MiniCardViewTests.swift */,
@@ -1064,6 +1069,7 @@
 			isa = PBXGroup;
 			children = (
 				5A12EC1A8AE8D2CC60BA5732 /* GhosttyBridge.swift */,
+				BB9854E3679A7AF9524F5077 /* LayoutNode.swift */,
 				5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */,
 				849C6707188E7E90997D691A /* SplitTree.swift */,
 				40CAD3E9929AC9E5E32EBA9F /* Station.swift */,
@@ -1343,6 +1349,7 @@
 				7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */,
 				BB434F7988252DD2F6976754 /* KeyboardModeControllerTests.swift in Sources */,
 				2342B54103FE7B8523E6F0FE /* KeymapTests.swift in Sources */,
+				926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */,
 				F176CCFA365B9C079D3FE750 /* LeaderMenuTests.swift in Sources */,
 				91AD0153C909A0DF726EE6A1 /* ManifestEngineTests.swift in Sources */,
 				5EB3B11CF948EA83F5F16A64 /* MiniCardViewTests.swift in Sources */,
@@ -1515,6 +1522,7 @@
 				4344E9AEB5D00D092883F299 /* KeyboardMode.swift in Sources */,
 				4308B5506F38615FF9EBED2A /* KeyboardModeController.swift in Sources */,
 				7A85312BE720DFFA0A03ADAB /* Keymap.swift in Sources */,
+				D5E1195B106F29ACCB59D516 /* LayoutNode.swift in Sources */,
 				15E29843E4033EE873B94313 /* LeaderMenu.swift in Sources */,
 				D41BF448B2DB04958D4C1B01 /* MainWindowController.swift in Sources */,
 				EE61D03E90AEC25A247BE3C9 /* ManifestEngine.swift in Sources */,

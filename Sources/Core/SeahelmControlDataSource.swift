@@ -11,6 +11,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Set by the owner (TabCoordinator) to perform a split on the main thread.
     /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
     var splitHandler: ((String?, SplitAxis, Bool) -> String?)?
+    /// Owner-set layout export/apply, run on the main thread.
+    var exportLayoutHandler: (() -> [String: Any]?)?
+    var applyLayoutHandler: ((LayoutNode) -> Bool)?
     /// Close a pane by station id (main thread). Returns whether it was closed.
     var closeHandler: ((String) -> Bool)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
@@ -151,6 +154,20 @@ final class SeahelmControlDataSource: ControlDataSource {
             result["default_status"] = manifest?.defaultStatus.rawValue ?? ""
         }
         return result
+    }
+
+    func exportLayout() -> [String: Any]? {
+        guard let h = exportLayoutHandler else { return nil }
+        var r: [String: Any]?
+        runOnMain { r = h() }
+        return r
+    }
+
+    func applyLayout(root: [String: Any]) -> Bool {
+        guard let node = LayoutNode(dict: root), let h = applyLayoutHandler else { return false }
+        var ok = false
+        runOnMain { ok = h(node) }
+        return ok
     }
 
     /// Resolve a pane reference that may be a per-instance station id OR the

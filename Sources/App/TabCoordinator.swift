@@ -552,6 +552,12 @@ class TabCoordinator {
                     controlDataSource.focusHandler = { [weak self] stationId in
                         self?.terminalCoordinator.focusPane(targetStationId: stationId) ?? false
                     }
+                    controlDataSource.exportLayoutHandler = { [weak self] in
+                        self?.terminalCoordinator.exportLayout()
+                    }
+                    controlDataSource.applyLayoutHandler = { [weak self] node in
+                        self?.terminalCoordinator.applyLayout(node) ?? false
+                    }
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: controlDataSource))
                     control.start()

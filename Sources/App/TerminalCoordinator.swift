@@ -146,6 +146,57 @@ class TerminalCoordinator {
         return station.id
     }
 
+    // MARK: - Layout export / apply (declarative templates)
+
+    /// Serialize the active container's split tree as a portable LayoutNode.
+    /// Must be called on the main thread.
+    func exportLayout() -> [String: Any]? {
+        guard let container = activeSplitContainer(), let tree = container.tree else { return nil }
+        return ["root": Self.nodeToLayout(tree.root).dict, "worktree_path": tree.worktreePath]
+    }
+
+    private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
+        switch node {
+        case let .leaf(_, stationId, sessionName):
+            let agent = ShipLog.shared.sailor(for: stationId)?.agentType
+            let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
+            return .pane(label: sessionName, command: agent?.launchCommand, agent: named, cwd: nil)
+        case let .split(_, axis, ratio, first, second):
+            return .split(direction: axis == .vertical ? "down" : "right",
+                          ratio: Double(ratio),
+                          first: nodeToLayout(first), second: nodeToLayout(second))
+        }
+    }
+
+    /// Rebuild structure by splitting out from the focused pane per `root`, then
+    /// running each leaf's command. Ratios use the split default (exact ratios are
+    /// not restored). Bounded pane count. Must be called on the main thread.
+    @discardableResult
+    func applyLayout(_ root: LayoutNode) -> Bool {
+        guard root.paneCount <= 16 else { return false }
+        guard let container = activeSplitContainer(), let tree = container.tree,
+              let startStationId = tree.allLeaves.first(where: { $0.id == tree.focusedId })?.stationId
+        else { return false }
+        realize(root, intoStationId: startStationId)
+        return true
+    }
+
+    private func realize(_ node: LayoutNode, intoStationId sid: String) {
+        switch node {
+        case let .pane(_, command, _, _):
+            if let command, !command.isEmpty,
+               let station = StationRegistry.shared.station(forId: sid) {
+                station.sendText(command)
+                station.sendEnterKey()
+            }
+        case let .split(direction, _, first, second):
+            let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
+            guard let newId = splitPane(targetStationId: sid, axis: axis, focus: false) else { return }
+            realize(first, intoStationId: sid)
+            realize(second, intoStationId: newId)
+        }
+    }
+
     func closeFocusedPane() {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }

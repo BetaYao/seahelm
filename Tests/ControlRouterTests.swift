@@ -34,6 +34,11 @@ private final class FakeDataSource: ControlDataSource {
     func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
     var explains: [String: [String: Any]] = [:]
     func explainPane(paneId: String) -> [String: Any]? { explains[paneId] }
+    var exportResult: [String: Any]?
+    var appliedRoots: [[String: Any]] = []
+    var applyOk = true
+    func exportLayout() -> [String: Any]? { exportResult }
+    func applyLayout(root: [String: Any]) -> Bool { appliedRoots.append(root); return applyOk }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -176,6 +181,41 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Layout
+
+    func testLayoutExport() {
+        let (r, ds) = router()
+        ds.exportResult = ["root": ["type": "pane"], "worktree_path": "/wt"]
+        guard case .ok(let d) = r.handle(method: "layout.export", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(d["worktree_path"] as? String, "/wt")
+    }
+
+    func testLayoutExportNoActive() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "layout.export", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testLayoutApply() {
+        let (r, ds) = router()
+        let root: [String: Any] = ["type": "pane", "command": "claude"]
+        guard case .ok(let d) = r.handle(method: "layout.apply", params: ["root": root]) else { return XCTFail() }
+        XCTAssertEqual(d["applied"] as? Bool, true)
+        XCTAssertEqual(ds.appliedRoots.count, 1)
+    }
+
+    func testLayoutApplyRequiresRoot() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "layout.apply", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testLayoutApplyRejectedByDataSource() {
+        let (r, ds) = router()
+        ds.applyOk = false
+        guard case .error = r.handle(method: "layout.apply", params: ["root": ["type": "pane"]]) else { return XCTFail() }
     }
 
     // MARK: - Explain
