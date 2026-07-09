@@ -54,6 +54,10 @@ protocol ControlDataSource: AnyObject {
     /// (right|left|down|up). Returns the new pane's id, or nil if the pane can't
     /// be split here. `focus` false = don't steal the caller's cursor.
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String?
+    /// Close a pane. False if it isn't found in the active container.
+    func closePane(paneId: String) -> Bool
+    /// Give keyboard focus to a pane. False if it isn't found in the active container.
+    func focusPane(paneId: String) -> Bool
 }
 
 extension ControlDataSource {
@@ -61,6 +65,8 @@ extension ControlDataSource {
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
     func paneStatus(paneId: String) -> String? { nil }
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? { nil }
+    func closePane(paneId: String) -> Bool { false }
+    func focusPane(paneId: String) -> Bool { false }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -191,6 +197,16 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "cannot split pane")
             }
             return .ok(["pane_id": newId])
+
+        case "pane.close", "pane.focus":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            let ok = method == "pane.close"
+                ? (dataSource?.closePane(paneId: paneId) ?? false)
+                : (dataSource?.focusPane(paneId: paneId) ?? false)
+            guard ok else { return .error(code: ControlError.notFound, message: "pane not found: \(paneId)") }
+            return .ok([method == "pane.close" ? "closed" : "focused": true])
 
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)

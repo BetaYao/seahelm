@@ -546,6 +546,12 @@ class TabCoordinator {
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
                         self?.terminalCoordinator.splitPane(targetStationId: targetStationId, axis: axis, focus: focus)
                     }
+                    controlDataSource.closeHandler = { [weak self] stationId in
+                        self?.terminalCoordinator.closePane(targetStationId: stationId) ?? false
+                    }
+                    controlDataSource.focusHandler = { [weak self] stationId in
+                        self?.terminalCoordinator.focusPane(targetStationId: stationId) ?? false
+                    }
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: controlDataSource))
                     control.start()

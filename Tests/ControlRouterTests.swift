@@ -27,6 +27,11 @@ private final class FakeDataSource: ControlDataSource {
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
         splitCalls.append((paneId, direction, focus)); return splitResult
     }
+    var closed: [String] = []
+    var focused: [String] = []
+    var mutableOk = true
+    func closePane(paneId: String) -> Bool { closed.append(paneId); return mutableOk }
+    func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -204,6 +209,29 @@ final class ControlRouterTests: XCTestCase {
         let (r, ds) = router()
         ds.splitResult = nil
         guard case .error(let code, _) = r.handle(method: "pane.split", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testCloseAndFocus() {
+        let (r, ds) = router()
+        guard case .ok(let c) = r.handle(method: "pane.close", params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(c["closed"] as? Bool, true)
+        XCTAssertEqual(ds.closed, ["t1"])
+        guard case .ok(let f) = r.handle(method: "pane.focus", params: ["pane_id": "t2"]) else { return XCTFail() }
+        XCTAssertEqual(f["focused"] as? Bool, true)
+        XCTAssertEqual(ds.focused, ["t2"])
+    }
+
+    func testCloseRequiresPaneId() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.close", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testCloseNotFound() {
+        let (r, ds) = router()
+        ds.mutableOk = false
+        guard case .error(let code, _) = r.handle(method: "pane.close", params: ["pane_id": "gone"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.notFound)
     }
 

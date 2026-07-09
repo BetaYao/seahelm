@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v2"
+    private static let versionMarker = "# seahelm-cli v3"
 
     static func scriptContents() -> String {
         return #"""
@@ -103,7 +103,7 @@ enum SeahelmCliInstaller {
                 sys.exit(0 if r.get("matched") else 1)
 
             if g == "pane":
-                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split> ...")
+                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus> ...")
                 sub = a[0]; rest = a[1:]
                 if sub == "list":
                     print(json.dumps(call("pane.list", {}).get("panes", []), indent=2)); return
@@ -121,6 +121,12 @@ enum SeahelmCliInstaller {
                 if sub == "send-keys":
                     if len(rest) < 2: die("usage: seahelm pane send-keys <pane> <key...>")
                     call("pane.send_keys", {"pane_id": rest[0], "keys": rest[1:]}); return
+                if sub == "close":
+                    if not rest: die("usage: seahelm pane close <pane>")
+                    call("pane.close", {"pane_id": rest[0]}); return
+                if sub == "focus":
+                    if not rest: die("usage: seahelm pane focus <pane>")
+                    call("pane.focus", {"pane_id": rest[0]}); return
                 if sub == "split":
                     # optional positional pane id (a token not starting with --)
                     pane = rest[0] if rest and not rest[0].startswith("--") else None

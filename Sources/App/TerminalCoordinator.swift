@@ -184,6 +184,31 @@ class TerminalCoordinator {
         saveSplitLayout(tree)
     }
 
+    /// Close a specific pane (by station id) in the active container. Returns
+    /// false if the pane isn't there. Reuses the focused-close teardown path
+    /// (kills the zmx session, destroys the station, re-lays out). Main thread.
+    @discardableResult
+    func closePane(targetStationId: String) -> Bool {
+        guard let container = activeSplitContainer(), let tree = container.tree,
+              let leaf = tree.allLeaves.first(where: { $0.stationId == targetStationId }) else { return false }
+        tree.focusedId = leaf.id
+        closeFocusedPane()
+        return true
+    }
+
+    /// Focus a specific pane (by station id) in the active container. Main thread.
+    @discardableResult
+    func focusPane(targetStationId: String) -> Bool {
+        guard let container = activeSplitContainer(), let tree = container.tree,
+              let leaf = tree.allLeaves.first(where: { $0.stationId == targetStationId }),
+              let station = StationRegistry.shared.station(forId: leaf.stationId),
+              let view = station.view else { return false }
+        tree.focusedId = leaf.id
+        container.window?.makeFirstResponder(view)
+        container.layoutTree()
+        return true
+    }
+
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
         guard let container = activeSplitContainer() else { return }
         if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {

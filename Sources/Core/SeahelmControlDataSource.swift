@@ -11,6 +11,10 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Set by the owner (TabCoordinator) to perform a split on the main thread.
     /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
     var splitHandler: ((String?, SplitAxis, Bool) -> String?)?
+    /// Close a pane by station id (main thread). Returns whether it was closed.
+    var closeHandler: ((String) -> Bool)?
+    /// Focus a pane by station id (main thread). Returns whether it was focused.
+    var focusHandler: ((String) -> Bool)?
 
     init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
         self.hookSink = hookSink
@@ -86,6 +90,20 @@ final class SeahelmControlDataSource: ControlDataSource {
         var newId: String?
         runOnMain { newId = splitHandler(targetStationId, axis, focus) }
         return newId
+    }
+
+    func closePane(paneId: String) -> Bool {
+        guard let sid = station(for: paneId)?.id, let closeHandler else { return false }
+        var ok = false
+        runOnMain { ok = closeHandler(sid) }
+        return ok
+    }
+
+    func focusPane(paneId: String) -> Bool {
+        guard let sid = station(for: paneId)?.id, let focusHandler else { return false }
+        var ok = false
+        runOnMain { ok = focusHandler(sid) }
+        return ok
     }
 
     /// Resolve a pane reference that may be a per-instance station id OR the
