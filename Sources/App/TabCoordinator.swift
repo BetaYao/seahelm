@@ -558,6 +558,9 @@ class TabCoordinator {
                     controlDataSource.applyLayoutHandler = { [weak self] node in
                         self?.terminalCoordinator.applyLayout(node) ?? false
                     }
+                    controlDataSource.zoomHandler = { [weak self] stationId, mode in
+                        self?.terminalCoordinator.zoomPane(targetStationId: stationId, mode: mode)
+                    }
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: controlDataSource))
                     control.start()

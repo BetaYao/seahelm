@@ -66,6 +66,9 @@ protocol ControlDataSource: AnyObject {
     /// Apply a declarative layout template (its `root` node dict) to the active
     /// container. False if the template is invalid or can't be applied.
     func applyLayout(root: [String: Any]) -> Bool
+    /// Toggle/set tmux-style zoom of a pane (nil = focused). `mode`: on|off|toggle.
+    /// Returns ["zoomed": Bool] or nil if the pane isn't found.
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]?
 }
 
 extension ControlDataSource {
@@ -78,6 +81,7 @@ extension ControlDataSource {
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
     func applyLayout(root: [String: Any]) -> Bool { false }
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? { nil }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -208,6 +212,17 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "cannot split pane")
             }
             return .ok(["pane_id": newId])
+
+        case "pane.zoom":
+            let paneId = (params["pane_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let mode = (params["mode"] as? String)?.lowercased() ?? "toggle"
+            guard ["on", "off", "toggle"].contains(mode) else {
+                return .error(code: ControlError.invalidParams, message: "mode must be on|off|toggle")
+            }
+            guard let result = dataSource?.zoomPane(paneId: paneId, mode: mode) else {
+                return .error(code: ControlError.notFound, message: "cannot zoom pane")
+            }
+            return .ok(result)
 
         case "pane.close", "pane.focus":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {

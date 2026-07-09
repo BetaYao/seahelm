@@ -14,6 +14,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Owner-set layout export/apply, run on the main thread.
     var exportLayoutHandler: (() -> [String: Any]?)?
     var applyLayoutHandler: ((LayoutNode) -> Bool)?
+    /// (targetStationId, mode) → zoomed-after, or nil if the pane isn't found.
+    var zoomHandler: ((String?, String) -> Bool?)?
     /// Close a pane by station id (main thread). Returns whether it was closed.
     var closeHandler: ((String) -> Bool)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
@@ -154,6 +156,16 @@ final class SeahelmControlDataSource: ControlDataSource {
             result["default_status"] = manifest?.defaultStatus.rawValue ?? ""
         }
         return result
+    }
+
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
+        guard let h = zoomHandler else { return nil }
+        let sid = paneId.flatMap { station(for: $0)?.id }
+        if paneId != nil && sid == nil { return nil }  // named but not found
+        var zoomed: Bool?
+        runOnMain { zoomed = h(sid, mode) }
+        guard let z = zoomed else { return nil }
+        return ["zoomed": z]
     }
 
     func exportLayout() -> [String: Any]? {

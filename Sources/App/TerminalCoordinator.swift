@@ -149,6 +149,22 @@ class TerminalCoordinator {
         return station.id
     }
 
+    /// tmux-style zoom of a pane in the active container. `mode`: on|off|toggle.
+    /// Returns whether the container is zoomed afterward, or nil if the pane
+    /// isn't in the active container. Must be called on the main thread.
+    func zoomPane(targetStationId: String?, mode: String) -> Bool? {
+        guard let container = activeSplitContainer(), let tree = container.tree else { return nil }
+        let leafId: String
+        if let sid = targetStationId {
+            guard let leaf = tree.allLeaves.first(where: { $0.stationId == sid }) else { return nil }
+            leafId = leaf.id
+        } else {
+            leafId = tree.focusedId
+        }
+        let on: Bool? = mode == "on" ? true : (mode == "off" ? false : nil)
+        return container.setZoom(leafId: leafId, on: on)
+    }
+
     // MARK: - Layout export / apply (declarative templates)
 
     /// Serialize the active container's split tree as a portable LayoutNode.

@@ -39,6 +39,11 @@ private final class FakeDataSource: ControlDataSource {
     var applyOk = true
     func exportLayout() -> [String: Any]? { exportResult }
     func applyLayout(root: [String: Any]) -> Bool { appliedRoots.append(root); return applyOk }
+    var zoomCalls: [(pane: String?, mode: String)] = []
+    var zoomResult: [String: Any]? = ["zoomed": true]
+    func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
+        zoomCalls.append((paneId, mode)); return zoomResult
+    }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -181,6 +186,33 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Zoom
+
+    func testZoomTogglesByDefault() {
+        let (r, ds) = router()
+        ds.zoomResult = ["zoomed": true]
+        guard case .ok(let d) = r.handle(method: "pane.zoom", params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(d["zoomed"] as? Bool, true)
+        XCTAssertEqual(ds.zoomCalls[0].mode, "toggle")
+        XCTAssertEqual(ds.zoomCalls[0].pane, "t1")
+    }
+
+    func testZoomModeOnAndInvalid() {
+        let (r, ds) = router()
+        _ = r.handle(method: "pane.zoom", params: ["mode": "on"])
+        XCTAssertEqual(ds.zoomCalls[0].mode, "on")
+        XCTAssertNil(ds.zoomCalls[0].pane)  // focused
+        guard case .error(let code, _) = r.handle(method: "pane.zoom", params: ["mode": "sideways"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    func testZoomNotFound() {
+        let (r, ds) = router()
+        ds.zoomResult = nil
+        guard case .error(let code, _) = r.handle(method: "pane.zoom", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
     }
 
     // MARK: - Layout

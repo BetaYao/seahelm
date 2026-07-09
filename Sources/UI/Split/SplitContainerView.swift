@@ -20,6 +20,9 @@ private class DimOverlayView: NSView {
 class SplitContainerView: NSView, DividerDelegate {
     var tree: SplitTree? { didSet { layoutTree() } }
     var surfaceViews: [String: NSView] = [:]
+    /// When set (and the leaf exists), only this leaf is shown, filling the
+    /// container — tmux-style zoom. Others are hidden; dividers/overlays cleared.
+    var zoomedLeafId: String?
     weak var delegate: SplitContainerDelegate?
 
     private var dividers: [String: DividerView] = [:]
@@ -43,7 +46,16 @@ class SplitContainerView: NSView, DividerDelegate {
 
     func layoutTree() {
         guard let tree = tree else { return }
-        leafFrames = Self.computeFrames(node: tree.root, in: bounds)
+        let zoomLeaf = zoomedLeafId.flatMap { z in tree.allLeaves.first { $0.id == z } }
+        if let zoomLeaf {
+            leafFrames = [zoomLeaf.id: bounds]
+        } else {
+            leafFrames = Self.computeFrames(node: tree.root, in: bounds)
+        }
+        // Hide zoomed-out leaves; only leaves with a computed frame are visible.
+        for leaf in tree.allLeaves {
+            surfaceViews[leaf.stationId]?.isHidden = (leafFrames[leaf.id] == nil)
+        }
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
                   let view = surfaceViews[leaf.stationId] else { continue }
@@ -92,13 +104,31 @@ class SplitContainerView: NSView, DividerDelegate {
                 station.syncSize()
             }
         }
-        layoutDividers(node: tree.root, in: bounds)
-        let activeSplitIds = collectSplitIds(tree.root)
-        for (id, divider) in dividers where !activeSplitIds.contains(id) {
-            divider.removeFromSuperview()
-            dividers.removeValue(forKey: id)
+        if zoomLeaf != nil {
+            // A single full-container pane has no dividers and nothing to dim.
+            dividers.values.forEach { $0.removeFromSuperview() }
+            dividers.removeAll()
+            dimOverlays.values.forEach { $0.removeFromSuperview() }
+            dimOverlays.removeAll()
+        } else {
+            layoutDividers(node: tree.root, in: bounds)
+            let activeSplitIds = collectSplitIds(tree.root)
+            for (id, divider) in dividers where !activeSplitIds.contains(id) {
+                divider.removeFromSuperview()
+                dividers.removeValue(forKey: id)
+            }
+            updateDimOverlays()
         }
-        updateDimOverlays()
+    }
+
+    /// Toggle/set tmux-style zoom for a leaf. `on == nil` toggles. Returns whether
+    /// the container is zoomed afterward.
+    @discardableResult
+    func setZoom(leafId: String, on: Bool?) -> Bool {
+        let shouldZoom = on ?? (zoomedLeafId != leafId)
+        zoomedLeafId = shouldZoom ? leafId : nil
+        layoutTree()
+        return zoomedLeafId != nil
     }
 
     /// Lightweight relayout for divider drags: recompute frames and move the
