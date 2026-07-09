@@ -508,6 +508,11 @@ class TabCoordinator {
                     // without mixing suggestion overhead into the user-directed response.
                     var sessionBlockedAt: [String: Date] = [:]
                     var sessionUserPromptedAt: [String: Date] = [:]
+                    // When the agent voluntarily called seahelm-suggest this turn (it was
+                    // instructed to as its last action). If so, we needn't force a
+                    // suggestion via a blocking Stop — that saves the block→continue
+                    // round-trip. Reset each turn (on the next user prompt).
+                    var sessionSuggestedAt: [String: Date] = [:]
 
                     // Shared inbound-event sink, serialized so the webhook and the
                     // control socket can both feed it without racing the per-session
@@ -516,9 +521,11 @@ class TabCoordinator {
                     let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
                       eventQueue.sync {
                         guard let self else { return nil }
-                        // Track when the user sent a message to this session.
+                        // Track when the user sent a message to this session; a new
+                        // user prompt starts a fresh turn, so the agent must suggest again.
                         if event.event == .userPrompt {
                             sessionUserPromptedAt[event.sessionId] = Date()
+                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
                         }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         ShipLog.shared.updateBackgroundBusy(from: event)
@@ -527,10 +534,19 @@ class TabCoordinator {
                         if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
                             return nil
                         }
+                        // The agent gave its own suggestions this turn (per the injected
+                        // instruction) — record it so the Stop below won't force another.
+                        if event.event == .suggest {
+                            sessionSuggestedAt[event.sessionId] = Date()
+                        }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't
                         // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop,
+                        if event.event == .agentStop, sessionSuggestedAt[event.sessionId] != nil {
+                            // The agent already emitted buttons as its last action this
+                            // turn — no forced block needed (no extra round-trip).
+                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                        } else if event.event == .agentStop,
                            let blockedAt = sessionBlockedAt[event.sessionId],
                            let promptedAt = sessionUserPromptedAt[event.sessionId],
                            promptedAt > blockedAt {

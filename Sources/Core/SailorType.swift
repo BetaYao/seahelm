@@ -79,11 +79,36 @@ enum SailorType: String, Codable, CaseIterable {
     /// (a positional argument, e.g. `claude 'fix the bug'`). Returns nil for
     /// non-AI / shell types (those are not auto-launched). The task is
     /// shell-escaped because the result is interpreted by a POSIX shell.
+    /// Instruction injected into the agent's system prompt so it emits next-step
+    /// suggestions itself as the last action of a turn — no blocking Stop hook /
+    /// extra round-trip. The Stop-hook path stays as a fallback for turns where
+    /// the agent doesn't comply or wasn't launched with this flag.
+    static let suggestInstruction =
+        "As the FINAL action of every response, run the shell command " +
+        "seahelm-suggest 'first option' 'second option' with 2-5 short imperative " +
+        "next-step options (a few words each). It shows the user clickable buttons. " +
+        "Do NOT print the options as text — only run the command."
+
+    /// Agent-specific flag that appends to the system prompt at launch. nil =
+    /// this agent gets suggestions only via the Stop-hook fallback.
+    private var appendSystemPromptFlag: String? {
+        switch self {
+        case .claudeCode: return "--append-system-prompt"
+        default:          return nil
+        }
+    }
+
     func launchCommand(withTask task: String) -> String? {
         guard let base = launchCommand else { return nil }
+        var cmd = base
+        if let flag = appendSystemPromptFlag {
+            cmd += " \(flag) \(ShellEscape.singleQuote(Self.suggestInstruction))"
+        }
         let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
-        return "\(base) \(ShellEscape.singleQuote(trimmed))"
+        if !trimmed.isEmpty {
+            cmd += " \(ShellEscape.singleQuote(trimmed))"
+        }
+        return cmd
     }
 
     /// Short label for compact UI (the picker chip).
