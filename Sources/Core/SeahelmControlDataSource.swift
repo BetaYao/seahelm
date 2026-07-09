@@ -84,6 +84,14 @@ final class SeahelmControlDataSource: ControlDataSource {
         return ShipLog.shared.sailor(for: sid)?.status.rawValue
     }
 
+    func paneOptions(paneId: String) -> [[String: Any]]? {
+        guard let station = station(for: paneId) else { return nil }
+        let text = station.readViewportText() ?? ""
+        return ChoiceOptionParser.parse(text).map {
+            ["index": $0.index, "label": $0.label, "selected": $0.selected]
+        }
+    }
+
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? {
         guard let splitHandler else { return nil }
         // right/left place panes side by side; down/up stack them.

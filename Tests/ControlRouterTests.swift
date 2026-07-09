@@ -34,6 +34,11 @@ private final class FakeDataSource: ControlDataSource {
     func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
     var explains: [String: [String: Any]] = [:]
     func explainPane(paneId: String) -> [String: Any]? { explains[paneId] }
+    var options: [String: [[String: Any]]] = [:]
+    var knownForOptions: Set<String> = []
+    func paneOptions(paneId: String) -> [[String: Any]]? {
+        knownForOptions.contains(paneId) ? (options[paneId] ?? []) : nil
+    }
     var exportResult: [String: Any]?
     var appliedRoots: [[String: Any]] = []
     var applyOk = true
@@ -186,6 +191,25 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Options
+
+    func testPaneOptions() {
+        let (r, ds) = router()
+        ds.knownForOptions = ["t1"]
+        ds.options["t1"] = [["index": 1, "label": "Yes", "selected": true],
+                            ["index": 2, "label": "No", "selected": false]]
+        guard case .ok(let d) = r.handle(method: "pane.options", params: ["pane_id": "t1"]),
+              let opts = d["options"] as? [[String: Any]] else { return XCTFail() }
+        XCTAssertEqual(opts.count, 2)
+        XCTAssertEqual(opts[0]["label"] as? String, "Yes")
+    }
+
+    func testPaneOptionsUnknownPane() {
+        let (r, _) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.options", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
     }
 
     // MARK: - Zoom

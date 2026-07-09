@@ -69,6 +69,9 @@ protocol ControlDataSource: AnyObject {
     /// Toggle/set tmux-style zoom of a pane (nil = focused). `mode`: on|off|toggle.
     /// Returns ["zoomed": Bool] or nil if the pane isn't found.
     func zoomPane(paneId: String?, mode: String) -> [String: Any]?
+    /// The on-screen numbered choices (permission prompt / AskUserQuestion) for a
+    /// pane, as [{index, label, selected}]. [] when none; nil if pane unknown.
+    func paneOptions(paneId: String) -> [[String: Any]]?
 }
 
 extension ControlDataSource {
@@ -82,6 +85,7 @@ extension ControlDataSource {
     func exportLayout() -> [String: Any]? { nil }
     func applyLayout(root: [String: Any]) -> Bool { false }
     func zoomPane(paneId: String?, mode: String) -> [String: Any]? { nil }
+    func paneOptions(paneId: String) -> [[String: Any]]? { nil }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -248,6 +252,15 @@ final class ControlRouter {
                 return .error(code: ControlError.invalidParams, message: "invalid or unapplicable layout")
             }
             return .ok(["applied": true])
+
+        case "pane.options":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            guard let options = dataSource?.paneOptions(paneId: paneId) else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
+            }
+            return .ok(["options": options])
 
         case "pane.explain", "agent.explain":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {

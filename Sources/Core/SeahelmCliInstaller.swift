@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v6"
+    private static let versionMarker = "# seahelm-cli v7"
 
     static func scriptContents() -> String {
         return #"""
@@ -116,7 +116,7 @@ enum SeahelmCliInstaller {
                 sys.exit(0 if r.get("matched") else 1)
 
             if g == "pane":
-                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|explain|zoom> ...")
+                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|explain|zoom|options> ...")
                 sub = a[0]; rest = a[1:]
                 if sub == "list":
                     print(json.dumps(call("pane.list", {}).get("panes", []), indent=2)); return
@@ -143,6 +143,9 @@ enum SeahelmCliInstaller {
                 if sub == "explain":
                     if not rest: die("usage: seahelm pane explain <pane>")
                     print(json.dumps(call("pane.explain", {"pane_id": rest[0]}), indent=2)); return
+                if sub == "options":
+                    if not rest: die("usage: seahelm pane options <pane>")
+                    print(json.dumps(call("pane.options", {"pane_id": rest[0]}).get("options", []), indent=2)); return
                 if sub == "zoom":
                     pane = rest[0] if rest and not rest[0].startswith("--") else None
                     mode = "on" if has(rest, "--on") else ("off" if has(rest, "--off") else "toggle")

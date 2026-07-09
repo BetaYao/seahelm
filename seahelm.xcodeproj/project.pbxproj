@@ -129,6 +129,7 @@
 		708FA82605788117E6142639 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */; };
 		718906FE9DB3F7AC492BA652 /* SailorReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */; };
 		7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */; };
+		72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */; };
 		731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */; };
 		7366EFB1C4C5E0E8A0B31FBA /* StopHookResponderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD4898C898C52B4C1DDEEC0 /* StopHookResponderTests.swift */; };
 		73B16CF9CCB46AADB3214B8F /* WorktreeSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2BF20167E8DC36DDF09077 /* WorktreeSidePanelViewController.swift */; };
@@ -185,6 +186,7 @@
 		9E6B89CACF0F49A0029E3BD1 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = B032E95F9035447EBF27883B /* GitDiff.swift */; };
 		9E70B1DBD63DBC4873DC38EB /* QuickSwitcherViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA513259B19E55E2FB46C9F /* QuickSwitcherViewController.swift */; };
 		9EEDB774BA368ABF037C6750 /* SemVerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64D9CDBF2943FC278A6A09D2 /* SemVerTests.swift */; };
+		9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */; };
 		9F9D60884BFD0AAA1A738DFA /* WorktreeTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */; };
 		9FA0C6130443BF763BA2BE24 /* StopHookResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
@@ -430,6 +432,7 @@
 		5CF8D45DC59BA85924DB8D9E /* PaneTransferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransferTests.swift; sourceTree = "<group>"; };
 		5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNode.swift; sourceTree = "<group>"; };
 		5E39B8D0CAEA529E6BA78F29 /* ShipLogIngestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogIngestTests.swift; sourceTree = "<group>"; };
+		5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceOptionParserTests.swift; sourceTree = "<group>"; };
 		60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStore.swift; sourceTree = "<group>"; };
 		6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryTests.swift; sourceTree = "<group>"; };
 		63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneStatusTests.swift; sourceTree = "<group>"; };
@@ -622,6 +625,7 @@
 		FC0D756956DEEA6BD91FB13B /* UpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
 		FDD687DFAD37A155D65D0541 /* MiniCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardView.swift; sourceTree = "<group>"; };
 		FFB2611416D80C0BE65750B1 /* MiniCardViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardViewTests.swift; sourceTree = "<group>"; };
+		FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceOptionParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -831,6 +835,7 @@
 			isa = PBXGroup;
 			children = (
 				AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */,
+				FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */,
 				8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */,
 				EBE28FEA6DE230823C9078B5 /* ManifestEngine.swift */,
 				424F903BA02536FB4F76731C /* ManifestStore.swift */,
@@ -927,6 +932,7 @@
 				32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */,
 				7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */,
 				446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */,
+				5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */,
 				72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */,
 				ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */,
 				20D815BD3789070197196037 /* CodexHooksSetupTests.swift */,
@@ -1323,6 +1329,7 @@
 				E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */,
 				EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */,
 				A90FADB8FDAA218DAEA7D694 /* BridgeCommandRouterTests.swift in Sources */,
+				9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */,
 				6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */,
 				6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */,
 				2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */,
@@ -1476,6 +1483,7 @@
 				4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */,
 				E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */,
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
+				72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */,
 				D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */,
 				0DA6D2D48F320DFB8671C67C /* ClaudeStatuslineBridgeInstaller.swift in Sources */,
 				10D70ABC6FF1371989A62258 /* ClaudeUsageSummaryProvider.swift in Sources */,
