@@ -685,7 +685,11 @@ class TabCoordinator {
         }
         for leaf in transferredTree.allLeaves {
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
-                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
+                // zmx has no rename, so the session keeps its original (source-derived)
+                // name. Register with that real name — NOT persistentSessionName(for:
+                // newInfo.path), which would build a channel to a nonexistent session
+                // and let the orphan-reaper reap the live one.
+                let sessionName = runtimeBackend == "local" ? nil : leaf.sessionName
                 ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
             }
         }

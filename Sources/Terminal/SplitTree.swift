@@ -5,7 +5,11 @@ import Foundation
 class SplitTree {
     private(set) var root: SplitNode
     var focusedId: String
-    let worktreePath: String
+    /// Owning worktree path. Mutable so a pane transfer (agent creates a new
+    /// worktree from its cwd) can re-home the tree; persistence keys on this, so
+    /// it must track the destination or the transferred layout saves under the
+    /// wrong path and is lost on restart.
+    var worktreePath: String
     private let baseSessionName: String
 
     var leafCount: Int { root.leafCount }

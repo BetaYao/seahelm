@@ -66,6 +66,21 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertNil(manager.tree(forPath: "/repo"))
         XCTAssertNotNil(manager.tree(forPath: "/worktrees/feature-x"))
         XCTAssertTrue(transferred === tree)
+        // Re-homed: worktreePath must track the destination, or saveSplitLayout
+        // (which keys on worktreePath) persists under the old path and the
+        // transferred layout is lost on restart.
+        XCTAssertEqual(transferred?.worktreePath, "/worktrees/feature-x")
+    }
+
+    func testTransferredTreeKeepsRealSessionNames() {
+        // zmx can't rename: transferred leaves keep their original (source-derived)
+        // session names, so a restore attaches to the still-live session.
+        let manager = StationManager()
+        let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
+        let tree = manager.tree(for: info, backend: "zmx")
+        let originalNames = tree.allLeaves.map(\.sessionName)
+        let transferred = manager.transferTree(fromPath: "/repo", toPath: "/worktrees/feature-x")
+        XCTAssertEqual(transferred?.allLeaves.map(\.sessionName), originalNames)
     }
 
     func testTransferTreeReturnsNilForUnknownPath() {
