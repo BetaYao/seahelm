@@ -106,6 +106,53 @@ final class SeahelmControlDataSource: ControlDataSource {
         return ok
     }
 
+    func explainPane(paneId: String) -> [String: Any]? {
+        guard let station = station(for: paneId) else { return nil }
+        let sailor = ShipLog.shared.sailor(for: station.id)
+        let agentType = sailor?.agentType ?? .unknown
+        let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
+
+        let content = station.readViewportText() ?? ""
+        let osc = (title: station.oscTitle, progress: station.oscProgress)
+        let input = DetectionInput(screen: content.lowercased(), oscTitle: osc.title, oscProgress: osc.progress)
+
+        // Live screen detection (what the scan layer sees right now).
+        let scan = StatusDetector().detectDetailed(
+            processStatus: station.processStatus, shellInfo: nil, content: content,
+            manifest: manifest, osc: osc)
+        let hookStatus = sailor?.hookStatus ?? .unknown
+        let decided = ShipLog.arbitrateDetailed(scan: scan.state, hook: hookStatus, agentType: agentType)
+
+        var result: [String: Any] = [
+            "pane_id": station.id,
+            "session_name": station.sessionName ?? "",
+            "agent": agentType.rawValue,
+            "manifest": manifest?.manifest.id ?? "",
+            "manifest_version": manifest?.manifest.version ?? "",
+            "authority": decided.authority,
+            "status": decided.status.rawValue,
+            "decided_by": decided.decidedBy,
+            "scan_status": scan.state.rawValue,
+            "hook_status": hookStatus.rawValue,
+            "process_status": "\(station.processStatus)",
+            "osc_title": osc.title,
+            "osc_progress": osc.progress,
+        ]
+        if let match = manifest?.matchDetail(input) {
+            result["matched_rule"] = [
+                "id": match.rule.id,
+                "state": match.rule.state,
+                "priority": match.rule.priority,
+                "region": match.rule.region,
+                "evidence": String(match.regionText.suffix(160)),
+            ]
+        } else {
+            result["matched_rule"] = NSNull()
+            result["default_status"] = manifest?.defaultStatus.rawValue ?? ""
+        }
+        return result
+    }
+
     /// Resolve a pane reference that may be a per-instance station id OR the
     /// stable zmx session name agents receive as SEAHELM_PANE_ID.
     private func station(for paneId: String) -> Station? {

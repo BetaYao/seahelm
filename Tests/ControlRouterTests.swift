@@ -32,6 +32,8 @@ private final class FakeDataSource: ControlDataSource {
     var mutableOk = true
     func closePane(paneId: String) -> Bool { closed.append(paneId); return mutableOk }
     func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
+    var explains: [String: [String: Any]] = [:]
+    func explainPane(paneId: String) -> [String: Any]? { explains[paneId] }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -174,6 +176,27 @@ final class ControlRouterTests: XCTestCase {
         guard case .error(let code, _) = r.handle(method: "pane.send_keys",
                 params: ["pane_id": "t1"]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.invalidParams)
+    }
+
+    // MARK: - Explain
+
+    func testExplainReturnsDetail() {
+        let (r, ds) = router()
+        ds.explains["t1"] = ["status": "waiting", "decided_by": "screen",
+                             "matched_rule": ["id": "permission_prompt"]]
+        guard case .ok(let d) = r.handle(method: "pane.explain", params: ["pane_id": "t1"]) else { return XCTFail() }
+        XCTAssertEqual(d["status"] as? String, "waiting")
+        XCTAssertEqual((d["matched_rule"] as? [String: Any])?["id"] as? String, "permission_prompt")
+    }
+
+    func testExplainAliasAndErrors() {
+        let (r, ds) = router()
+        ds.explains["t1"] = ["status": "idle"]
+        guard case .ok = r.handle(method: "agent.explain", params: ["pane_id": "t1"]) else { return XCTFail() }
+        guard case .error(let c1, _) = r.handle(method: "pane.explain", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(c1, ControlError.invalidParams)
+        guard case .error(let c2, _) = r.handle(method: "pane.explain", params: ["pane_id": "nope"]) else { return XCTFail() }
+        XCTAssertEqual(c2, ControlError.notFound)
     }
 
     // MARK: - Split

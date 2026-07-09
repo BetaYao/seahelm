@@ -65,6 +65,16 @@ final class CompiledManifest {
     /// Default fallback when no rule matched a known agent.
     var defaultStatus: SailorStatus { SailorStatus.fromManifest(manifest.defaultStatus) }
 
+    /// Explainability: the winning rule plus the region text it matched against
+    /// (evidence), or nil if no rule matched. Same evaluation order as `evaluate`.
+    func matchDetail(_ input: DetectionInput) -> (rule: ManifestRule, regionText: String)? {
+        for cr in compiledRules {
+            let text = Self.regionText(cr.region, input)
+            if cr.gate.matches(text) { return (cr.rule, text) }
+        }
+        return nil
+    }
+
     // MARK: Region extraction
 
     private static func regionText(_ region: ManifestRegion, _ input: DetectionInput) -> String {

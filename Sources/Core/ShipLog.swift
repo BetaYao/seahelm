@@ -173,14 +173,20 @@ class ShipLog {
     /// An urgent state (waiting/error) from either source always surfaces — never
     /// hide a blocked or errored agent behind an authority rule.
     static func arbitrate(scan: SailorStatus, hook: SailorStatus, agentType: SailorType) -> SailorStatus {
-        let urgent = SailorStatus.highestPriority([scan, hook].filter { $0.isUrgent })
-        if urgent.isUrgent { return urgent }
+        arbitrateDetailed(scan: scan, hook: hook, agentType: agentType).status
+    }
 
+    /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
+    /// `screen`) and the pane's authority — for `pane.explain`.
+    static func arbitrateDetailed(scan: SailorStatus, hook: SailorStatus, agentType: SailorType)
+        -> (status: SailorStatus, decidedBy: String, authority: String) {
         let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        let urgent = SailorStatus.highestPriority([scan, hook].filter { $0.isUrgent })
+        if urgent.isUrgent { return (urgent, "urgent", authority) }
         switch authority {
-        case "full_lifecycle": return hook != .unknown ? hook : scan
-        case "screen_only":    return scan
-        default:               return scan != .unknown ? scan : hook  // session_only
+        case "full_lifecycle": return hook != .unknown ? (hook, "hook", authority) : (scan, "screen", authority)
+        case "screen_only":    return (scan, "screen", authority)
+        default:               return scan != .unknown ? (scan, "screen", authority) : (hook, "hook", authority)
         }
     }
 
