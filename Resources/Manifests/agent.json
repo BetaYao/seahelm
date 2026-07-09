@@ -4,15 +4,31 @@
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
-  "message_skip_patterns": ["shift+tab", "accept edits", "to interrupt"],
+  "message_skip_patterns": [
+    "shift+tab",
+    "accept edits",
+    "to interrupt"
+  ],
   "authority": "screen_only",
   "rules": [
+    {
+      "id": "osc_title_working",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "regex": [
+        "^[\\x{2800}-\\x{28FF}] "
+      ],
+      "visible_working": true
+    },
     {
       "id": "working_interrupt",
       "state": "running",
       "priority": 400,
       "region": "bottom_lines:10",
-      "contains": ["to interrupt"],
+      "contains": [
+        "to interrupt"
+      ],
       "visible_working": true
     },
     {
@@ -20,14 +36,27 @@
       "state": "error",
       "priority": 700,
       "region": "bottom_lines:10",
-      "contains": ["error"]
+      "contains": [
+        "error"
+      ]
     },
     {
       "id": "waiting_prompt",
       "state": "waiting",
       "priority": 300,
       "region": "bottom_lines:6",
-      "any": [{ "contains": ["?"] }, { "line_regex": ["^\\s*>\\s"] }],
+      "any": [
+        {
+          "contains": [
+            "?"
+          ]
+        },
+        {
+          "line_regex": [
+            "^\\s*>\\s"
+          ]
+        }
+      ],
       "visible_blocker": true
     }
   ]

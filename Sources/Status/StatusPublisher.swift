@@ -149,8 +149,13 @@ class StatusPublisher {
             // readViewportText() can be slow — do NOT hold the lock here
             let content = surface.readViewportText() ?? ""
 
-            // Skip expensive text analysis if viewport hasn't changed
-            let contentHash = content.stableHash
+            // Skip expensive text analysis only when NOTHING observable changed.
+            // The OSC title/progress must be in the hash: an agent "thinking" keeps
+            // the viewport text static while animating a braille spinner in its
+            // title, and that spinner is the running signal (osc_title rule). The
+            // spinner changing between two 2s polls busts the hash and re-scans;
+            // when truly idle (static title) the hash is stable and we still skip.
+            let contentHash = (content + "\u{1}" + surface.oscTitle + "\u{1}" + surface.oscProgress).stableHash
 
             lock.lock()
             let lastHash = lastViewportHashes[terminalID]
