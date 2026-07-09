@@ -3,7 +3,6 @@ import Foundation
 struct Config: Codable {
     var workspacePaths: [String]
     var activeWorkspaceIndex: Int
-    var backend: String
     var terminalRowCacheSize: Int
     var agentDetect: SailorDetectConfig
     var webhook: WebhookConfig
@@ -28,11 +27,11 @@ struct Config: Codable {
     var wecomBot: WeComBotConfig?
     var wechat: WeChatConfig?
     var firstMate: FirstMateConfig
+    var notifications: NotificationConfig
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
         case activeWorkspaceIndex = "active_workspace_index"
-        case backend
         case terminalRowCacheSize = "terminal_row_cache_size"
         case agentDetect = "agent_detect"
         case webhook
@@ -51,12 +50,12 @@ struct Config: Codable {
         case wecomBot = "wecom_bot"
         case wechat
         case firstMate
+        case notifications
     }
 
     init() {
         workspacePaths = []
         activeWorkspaceIndex = 0
-        backend = "zmx"
         terminalRowCacheSize = 200
         agentDetect = SailorDetectConfig.default
         webhook = WebhookConfig()
@@ -75,17 +74,13 @@ struct Config: Codable {
         wecomBot = nil
         wechat = nil
         firstMate = .default
+        notifications = NotificationConfig()
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         workspacePaths = try container.decodeIfPresent([String].self, forKey: .workspacePaths) ?? []
         activeWorkspaceIndex = try container.decodeIfPresent(Int.self, forKey: .activeWorkspaceIndex) ?? 0
-        var rawBackend = try container.decodeIfPresent(String.self, forKey: .backend) ?? "zmx"
-        if rawBackend == "tmux" {
-            rawBackend = "zmx"
-        }
-        backend = rawBackend
         terminalRowCacheSize = try container.decodeIfPresent(Int.self, forKey: .terminalRowCacheSize) ?? 200
         agentDetect = (try container.decodeIfPresent(SailorDetectConfig.self, forKey: .agentDetect) ?? .default)
             .includingMissingDefaultSailors()
@@ -105,6 +100,7 @@ struct Config: Codable {
         wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
         wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
+        notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -281,6 +277,31 @@ struct WebhookConfig: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         suggestOnStop = try c.decodeIfPresent(Bool.self, forKey: .suggestOnStop) ?? true
+    }
+}
+
+struct NotificationConfig: Codable {
+    /// Stability gate: after an agent settles into a terminal state (idle /
+    /// waiting / error), wait this many seconds before actually delivering the
+    /// notification. If the status changes again within the window the pending
+    /// notification is dropped — this kills the "flash done" false alarms that
+    /// slip through when waiting/error/visible-idle commit immediately. This is
+    /// a state-stability gate, not a rate limit. 0 disables it (fire on edge).
+    var stabilityDelay: TimeInterval = 1.0
+    /// Minimum seconds between delivered notifications for the same pane/worktree.
+    var cooldown: TimeInterval = 30
+
+    enum CodingKeys: String, CodingKey {
+        case stabilityDelay = "stability_delay"
+        case cooldown
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        stabilityDelay = try c.decodeIfPresent(TimeInterval.self, forKey: .stabilityDelay) ?? 1.0
+        cooldown = try c.decodeIfPresent(TimeInterval.self, forKey: .cooldown) ?? 30
     }
 }
 
