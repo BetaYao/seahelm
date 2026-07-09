@@ -94,7 +94,18 @@ class TabCoordinator {
             }
         )
         ShipLog.shared.onOutcome = { [weak self] outcome in
-            self?.firstMate?.handle(outcome)
+            guard let self else { return }
+            self.firstMate?.handle(outcome)
+            // Feed the worktree aggregator from ShipLog's arbitrated status
+            // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
+            // "running" that the scan-only path misses when the viewport text is
+            // static (agent thinking; only the OSC-title spinner animates).
+            self.statusAggregator?.agentDidUpdate(
+                terminalID: outcome.info.id,
+                status: outcome.newStatus,
+                lastMessage: outcome.info.lastMessage,
+                lastUserPrompt: outcome.info.lastUserPrompt,
+                agentType: outcome.info.agentType)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
             guard let self,

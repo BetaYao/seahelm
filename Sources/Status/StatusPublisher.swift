@@ -232,17 +232,10 @@ class StatusPublisher {
                                           roundDuration: roundDur, tasks: webhookTasks))
                 ShipLog.shared.ingest(normalized)
             }
-
-            DispatchQueue.main.async { [weak self] in
-                self?.aggregator?.agentDidUpdate(
-                    terminalID: terminalID,
-                    status: committedStatus,
-                    lastMessage: lastMessage,
-                    lastUserPrompt: "",
-                    agentType: agentType
-                )
-            }
-
+            // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
+            // scan+hook+OSC) in TabCoordinator, not directly here — the scan path
+            // is viewport-hash-gated and would push a stale idle while an agent is
+            // thinking. Registration still happens via aggregator.registerTerminal.
         }
     }
 
