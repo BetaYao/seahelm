@@ -24,16 +24,19 @@ class SplitTree {
         return "\(baseSessionName)-\(index)"
     }
 
+    /// Split the focused leaf. Returns the new leaf id and the id of the split
+    /// node created above it (so callers can set its ratio via `updateRatio`).
     @discardableResult
-    func splitFocusedLeaf(axis: SplitAxis, newLeafId: String, newStationId: String, newSessionName: String) -> String {
+    func splitFocusedLeaf(axis: SplitAxis, newLeafId: String, newStationId: String, newSessionName: String)
+        -> (leafId: String, splitId: String) {
         let newLeaf = SplitNode.leaf(id: newLeafId, stationId: newStationId, sessionName: newSessionName)
         let splitId = UUID().uuidString
-        guard root.findLeaf(id: focusedId) != nil else { return newLeafId }
+        guard root.findLeaf(id: focusedId) != nil else { return (newLeafId, splitId) }
         let focusedNode = extractSubnode(id: focusedId)
         let replacement = SplitNode.split(id: splitId, axis: axis, ratio: 0.5, first: focusedNode, second: newLeaf)
         root = root.replacing(leafId: focusedId, with: replacement)
         focusedId = newLeafId
-        return newLeafId
+        return (newLeafId, splitId)
     }
 
     func closeFocusedLeaf() -> SplitNode.LeafInfo? {

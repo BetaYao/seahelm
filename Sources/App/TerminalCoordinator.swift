@@ -90,7 +90,7 @@ class TerminalCoordinator {
     /// pane keeps focus (the control API's `--no-focus`, for agents spawning a
     /// sibling without stealing their own cursor). Must be called on the main thread.
     @discardableResult
-    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool) -> String? {
+    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool, ratio: CGFloat? = nil) -> String? {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return nil }
 
@@ -114,7 +114,10 @@ class TerminalCoordinator {
         let leafId = UUID().uuidString
         // splitFocusedLeaf splits `focusedId`, so point it at the target first.
         tree.focusedId = targetLeafId
-        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        let split = tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        // Restore an exact divider ratio (e.g. from a layout template) instead of
+        // the 0.5 default. layoutTree below reads it.
+        if let ratio { tree.updateRatio(splitId: split.splitId, newRatio: ratio) }
 
         _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
         container.surfaceViews[station.id] = station.view
@@ -189,9 +192,10 @@ class TerminalCoordinator {
                 station.sendText(command)
                 station.sendEnterKey()
             }
-        case let .split(direction, _, first, second):
+        case let .split(direction, ratio, first, second):
             let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
-            guard let newId = splitPane(targetStationId: sid, axis: axis, focus: false) else { return }
+            guard let newId = splitPane(targetStationId: sid, axis: axis, focus: false,
+                                        ratio: CGFloat(ratio)) else { return }
             realize(first, intoStationId: sid)
             realize(second, intoStationId: newId)
         }
