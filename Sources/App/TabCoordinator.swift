@@ -521,11 +521,17 @@ class TabCoordinator {
                     let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
                       eventQueue.sync {
                         guard let self else { return nil }
+                        // Correlate the suggest→Stop suppression by pane, not session:
+                        // the agent-invoked `seahelm-suggest` carries only a pane id, while
+                        // the native Stop hook carries Claude's real session UUID. Keying off
+                        // sessionId made the two never match, so the block fired every turn.
+                        // paneId is stable across both; fall back to sessionId outside a pane.
+                        let turnKey = event.paneId ?? event.sessionId
                         // Track when the user sent a message to this session; a new
                         // user prompt starts a fresh turn, so the agent must suggest again.
                         if event.event == .userPrompt {
-                            sessionUserPromptedAt[event.sessionId] = Date()
-                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                            sessionUserPromptedAt[turnKey] = Date()
+                            sessionSuggestedAt.removeValue(forKey: turnKey)
                         }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         ShipLog.shared.updateBackgroundBusy(from: event)
@@ -537,27 +543,27 @@ class TabCoordinator {
                         // The agent gave its own suggestions this turn (per the injected
                         // instruction) — record it so the Stop below won't force another.
                         if event.event == .suggest {
-                            sessionSuggestedAt[event.sessionId] = Date()
+                            sessionSuggestedAt[turnKey] = Date()
                         }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't
                         // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop, sessionSuggestedAt[event.sessionId] != nil {
+                        if event.event == .agentStop, sessionSuggestedAt[turnKey] != nil {
                             // The agent already emitted buttons as its last action this
                             // turn — no forced block needed (no extra round-trip).
-                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                            sessionSuggestedAt.removeValue(forKey: turnKey)
                         } else if event.event == .agentStop,
-                           let blockedAt = sessionBlockedAt[event.sessionId],
-                           let promptedAt = sessionUserPromptedAt[event.sessionId],
+                           let blockedAt = sessionBlockedAt[turnKey],
+                           let promptedAt = sessionUserPromptedAt[turnKey],
                            promptedAt > blockedAt {
-                            sessionBlockedAt.removeValue(forKey: event.sessionId)
-                            sessionUserPromptedAt.removeValue(forKey: event.sessionId)
+                            sessionBlockedAt.removeValue(forKey: turnKey)
+                            sessionUserPromptedAt.removeValue(forKey: turnKey)
                         } else if let block = StopHookResponder.blockBody(
                             for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
                             // Blocking Stop: agent will continue and call seahelm-suggest.
                             // Do NOT ingest this stop as completion (avoid premature idle), but
                             // stash the agent's final message so the suggestion card can show it.
-                            sessionBlockedAt[event.sessionId] = Date()
+                            sessionBlockedAt[turnKey] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
                                 ShipLog.shared.noteAssistantMessage(cwd: event.cwd, message: msg)
                             }
