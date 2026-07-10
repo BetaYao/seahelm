@@ -11,8 +11,9 @@ enum Keymap {
             case "l": return .moveFocus(.right)
             case "i": return .enterTerminal
             case "d": return .deleteFocused
-            case "c": return .showChanges
-            case "f": return .browseFiles
+            case "c": return .toggleChanges
+            case "f": return .toggleFiles
+            case "m": return .toggleFirstMate
             case "n": return .newWorktree
             case "1"..."9":
                 if let n = Int(c) { return .jumpToCard(n - 1) }

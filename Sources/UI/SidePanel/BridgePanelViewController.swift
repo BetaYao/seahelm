@@ -591,15 +591,18 @@ final class OrderCardView: NSTableCellView {
         accentBar.layer?.backgroundColor = NSColor.clear.cgColor
         accentBar.translatesAutoresizingMaskIntoConstraints = false
 
+        // Header slots, left→right: repo (colored) · dot · session title.
         glyphLabel.font = AppFont.mono(size: 12, weight: .bold)
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
+        glyphLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        agentLabel.font = AppFont.mono(size: 12, weight: .medium)
-        agentLabel.textColor = Bare.ink
+        agentLabel.font = AppFont.mono(size: 9, weight: .bold)
+        agentLabel.textColor = Bare.inkFaint
         agentLabel.translatesAutoresizingMaskIntoConstraints = false
+        agentLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        taskLabel.font = AppFont.mono(size: 11, weight: .regular)
-        taskLabel.textColor = Bare.inkFaint
+        taskLabel.font = AppFont.mono(size: 11.5, weight: .regular)
+        taskLabel.textColor = Bare.ink
         taskLabel.lineBreakMode = .byTruncatingTail
         taskLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -673,11 +676,20 @@ final class OrderCardView: NSTableCellView {
         self.onOption = onOption
         self.armedDangerousIndex = nil
 
-        let meta = Bare.agent(worktreePath: order.action.worktreePath)
-        glyphLabel.stringValue = meta.glyph
-        glyphLabel.textColor = meta.color
-        agentLabel.stringValue = meta.name
-        taskLabel.stringValue = order.action.branch.isEmpty ? order.action.project : order.action.branch
+        // Header: repo (colored tag) · status dot · this pane's session title.
+        // No agent-type glyph/name — the repo + session title identify the order.
+        let sailor = ShipLog.shared.sailor(forWorktree: order.action.worktreePath)
+        glyphLabel.stringValue = order.action.project
+        glyphLabel.textColor = MiniCardView.repoColor(for: order.action.project)
+        glyphLabel.isHidden = order.action.project.isEmpty
+
+        agentLabel.stringValue = "\u{25CF}"
+        agentLabel.textColor = (sailor?.status ?? .unknown).color
+
+        let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: order.action.worktreePath)
+        let branch = order.action.branch.isEmpty ? order.action.project : order.action.branch
+        taskLabel.stringValue = [cachedTitle, sailor?.lastUserPrompt].compactMap { $0 }
+            .first(where: { !$0.isEmpty }) ?? branch
 
         let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)
         urgencyLabel.stringValue = dangerous ? "HIGH" : "NORMAL"

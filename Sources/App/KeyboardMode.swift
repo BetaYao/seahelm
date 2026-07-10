@@ -22,6 +22,9 @@ enum KeyboardAction: Equatable {
     case showChanges
     case browseFiles
     case newWorktree
+    case toggleFiles        // f: toggle Files side panel
+    case toggleChanges      // c: toggle Changes side panel
+    case toggleFirstMate    // m: toggle First Mate side panel
 }
 
 /// A normalized key identity. Either a printable char (no modifiers) or a raw keyCode.

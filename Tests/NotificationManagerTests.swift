@@ -145,4 +145,29 @@ final class NotificationManagerTests: XCTestCase {
         )
         XCTAssertEqual(body, "Agent hit a rate/usage limit")
     }
+
+    // MARK: - Stability gate
+
+    func testShouldNotifyOnlyFiresOnRunningToTerminalEdge() {
+        let m = NotificationManager.shared
+        // Qualifying edges.
+        XCTAssertTrue(m.shouldNotify(cooldownKey: "k1", oldStatus: .running, newStatus: .idle))
+        XCTAssertTrue(m.shouldNotify(cooldownKey: "k1", oldStatus: .running, newStatus: .waiting))
+        XCTAssertTrue(m.shouldNotify(cooldownKey: "k1", oldStatus: .running, newStatus: .error))
+        // Wrong origin.
+        XCTAssertFalse(m.shouldNotify(cooldownKey: "k1", oldStatus: .idle, newStatus: .waiting))
+        // Non-terminal destination.
+        XCTAssertFalse(m.shouldNotify(cooldownKey: "k1", oldStatus: .running, newStatus: .running))
+    }
+
+    func testShouldDeliverPendingHoldsOnlyWhenStatusUnchanged() {
+        // Status still at the target → deliver.
+        XCTAssertTrue(NotificationManager.shouldDeliverPending(targetStatus: .idle, latestStatus: .idle))
+        // Flicked back to running mid-turn → drop the flash.
+        XCTAssertFalse(NotificationManager.shouldDeliverPending(targetStatus: .idle, latestStatus: .running))
+        // Moved to a different terminal state → drop (a fresh edge scheduled its own).
+        XCTAssertFalse(NotificationManager.shouldDeliverPending(targetStatus: .idle, latestStatus: .waiting))
+        // No observation → drop.
+        XCTAssertFalse(NotificationManager.shouldDeliverPending(targetStatus: .idle, latestStatus: nil))
+    }
 }

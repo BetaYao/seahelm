@@ -519,10 +519,17 @@ class ShipLog {
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
         guard let tid = matchingTIDs?.first else {
+            let known = Array(worktreeIndex.keys)
             lock.unlock()
+            if event.event == .suggest {
+                NSLog("[suggest] DROP cwd-unresolved — cwd=\(event.cwd) knownWorktrees=\(known)")
+            }
             return
         }
         lock.unlock()
+        if event.event == .suggest {
+            NSLog("[suggest] pass gate2 (cwd→tid=\(tid)) — cwd=\(event.cwd)")
+        }
 
         switch event.source {
         case "claude-code":
