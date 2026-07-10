@@ -1594,6 +1594,13 @@ extension MainWindowController {
                 branch: order.action.branch,
                 deleteBranch: deleteBranch,
                 force: force)
+        } else if order.action.payload == "ask-user-question" {
+            // AskUserQuestion TUI selects by digit; typing the label text would
+            // land in the free-form field instead. Send the option's number —
+            // sendCommand follows with a Return that confirms the selection.
+            if let idx = order.action.options?.firstIndex(of: optionText) {
+                ShipLog.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
+            }
         } else {
             ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
         }

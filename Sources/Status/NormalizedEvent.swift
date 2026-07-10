@@ -19,6 +19,7 @@ enum NormalizedEventKind {
     case notification(level: String, text: String)  // notification / error(level:"error")
     case taskUpdate([TaskItem])               // future (MCP / derived)
     case suggest(options: [String])           // agent-authored candidate orders
+    case question(prompt: String, options: [String])  // AskUserQuestion tool — agent blocked on a choice
     case screenObserved(status: SailorStatus,
                         message: String,
                         activity: [ActivityEvent],

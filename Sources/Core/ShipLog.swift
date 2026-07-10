@@ -266,6 +266,11 @@ class ShipLog {
             next.hookStatus = .waiting
             hookRunningSince[event.terminalID] = nil
             message = text
+        case .question(let prompt, _):
+            // Agent is blocked on an AskUserQuestion choice — same as awaiting input.
+            next.hookStatus = .waiting
+            hookRunningSince[event.terminalID] = nil
+            message = prompt
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
             hookRunningSince[event.terminalID] = nil
@@ -458,12 +463,15 @@ class ShipLog {
 
     /// Record the agent's final prose (Stop hook `last_assistant_message`) for a worktree
     /// WITHOUT changing status — used to give suggestion cards a summary line. Resolves
-    /// cwd → terminal the same way `handleWebhookEvent` does.
-    func noteAssistantMessage(cwd: String, message: String) {
+    /// pane → terminal the same way `handleWebhookEvent` does: the exact pane wins,
+    /// cwd's first pane is the fallback.
+    func noteAssistantMessage(cwd: String, paneId: String? = nil, message: String) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let paneTid = paneId.flatMap { StationRegistry.shared.station(forSessionName: $0)?.id }
         lock.lock()
-        let tid = worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
+        let tid = (paneTid.flatMap { agents[$0] != nil ? $0 : nil })
+            ?? worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
         guard let tid, var info = agents[tid] else { lock.unlock(); return }
         info.lastMessage = trimmed
         info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
@@ -554,14 +562,23 @@ class ShipLog {
         return channels[terminalID]
     }
 
-    /// Route a webhook event to the appropriate HooksChannel based on cwd matching
+    /// Route a webhook event to the appropriate HooksChannel. The exact pane the
+    /// hook ran under (SEAHELM_PANE_ID → station session name) wins; cwd matching
+    /// is the fallback. Resolving by cwd alone always picked the worktree's FIRST
+    /// pane, so a suggestion raised in a split pane was attributed to — and its
+    /// picked option sent into — a sibling pane.
     func handleWebhookEvent(_ event: WebhookEvent) {
+        let paneTid = event.paneId.flatMap { StationRegistry.shared.station(forSessionName: $0)?.id }
         lock.lock()
         // Find the agent whose worktree path matches the event's cwd
         let matchingTIDs = worktreeIndex.first { (worktreePath, _) in
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
-        guard let tid = matchingTIDs?.first else {
+        let resolvedTid: String? = {
+            if let paneTid, agents[paneTid] != nil { return paneTid }
+            return matchingTIDs?.first
+        }()
+        guard let tid = resolvedTid else {
             let known = Array(worktreeIndex.keys)
             lock.unlock()
             if event.event == .suggest {
