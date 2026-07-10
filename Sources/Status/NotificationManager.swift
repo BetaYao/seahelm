@@ -3,7 +3,6 @@ import UserNotifications
 
 extension Notification.Name {
     static let navigateToWorktree = Notification.Name("seahelm.navigateToWorktree")
-    static let repoViewDidChangeWorktree = Notification.Name("seahelm.repoViewDidChangeWorktree")
     static let repoViewDidChangeFocusedPane = Notification.Name("seahelm.repoViewDidChangeFocusedPane")
 }
 
@@ -12,7 +11,21 @@ class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
     private var lastNotified: [String: Date] = [:]
-    private let cooldown: TimeInterval = 30  // Don't spam same worktree within 30s
+
+    /// Minimum seconds between delivered notifications for the same key. Injected
+    /// from `Config.notifications` at startup.
+    var cooldown: TimeInterval = 30
+
+    /// Stability gate: after a qualifying edge, hold the notification this long
+    /// and only deliver if the status is still the same when the timer fires.
+    /// 0 disables the gate (deliver on the edge). Injected from config.
+    var stabilityDelay: TimeInterval = 1.0
+
+    /// Latest observed status per key, updated on *every* edge (not just
+    /// qualifying ones) so a pending fire can tell the agent moved on.
+    private var latestStatus: [String: SailorStatus] = [:]
+    /// In-flight stability timers, keyed by cooldownKey.
+    private var pendingFires: [String: Timer] = [:]
 
     private override init() {
         super.init()
@@ -45,19 +58,31 @@ class NotificationManager: NSObject {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
-    /// Single gate for all notifications: only fire on a `running → (waiting |
-    /// error | idle)` edge, and not more than once per `cooldown` per key.
-    /// `cooldownKey` is a namespaced pane- or worktree-level identity (see
+    /// Eligibility gate: only fire on a `running → (waiting | error | idle)` edge,
+    /// and not more than once per `cooldown` per key. `cooldownKey` is a
+    /// namespaced pane- or worktree-level identity (see
     /// `cooldownKey(terminalID:worktreePath:)`), so the pane and worktree call
     /// paths can never collide in `lastNotified`.
-    func shouldNotify(cooldownKey: String, oldStatus: SailorStatus, newStatus: SailorStatus) -> Bool {
+    ///
+    /// Pure predicate — it does NOT consume the cooldown. Cooldown is recorded
+    /// only when a notification is actually *delivered* (`recordDelivery`), so a
+    /// notification held by the stability gate and then dropped does not burn the
+    /// cooldown window.
+    func shouldNotify(cooldownKey: String, oldStatus: SailorStatus, newStatus: SailorStatus,
+                      now: Date = Date()) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
-        if let last = lastNotified[cooldownKey], Date().timeIntervalSince(last) < cooldown {
+        if let last = lastNotified[cooldownKey], now.timeIntervalSince(last) < cooldown {
             return false
         }
-        lastNotified[cooldownKey] = Date()
         return true
+    }
+
+    /// Whether a pending (delayed) notification for `targetStatus` should still
+    /// fire, given the latest observed status for its key. Pure — extracted so the
+    /// stability-gate decision is unit-testable without a live Timer.
+    static func shouldDeliverPending(targetStatus: SailorStatus, latestStatus: SailorStatus?) -> Bool {
+        latestStatus == targetStatus
     }
 
     /// Prefer a stable per-pane key (terminalID) when we have one, otherwise fall
@@ -322,8 +347,67 @@ class NotificationManager: NSObject {
         isTargetVisible: Bool = false
     ) {
         let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
+
+        // Track the latest observed status for this key on *every* edge so a
+        // pending stability timer can detect the agent moved on (e.g. an idle
+        // flicker that flips back to running mid-turn).
+        latestStatus[key] = newStatus
+
         guard shouldNotify(cooldownKey: key, oldStatus: oldStatus, newStatus: newStatus) else { return }
 
+        // The delivery closure captures the fully-formed payload. Invoked either
+        // immediately or when the stability timer fires and the status still holds.
+        let deliver = { [weak self] in
+            guard let self else { return }
+            self.lastNotified[key] = Date()
+            self.deliver(
+                worktreePath: worktreePath,
+                workspaceName: workspaceName,
+                branch: branch,
+                paneIndex: paneIndex,
+                paneCount: paneCount,
+                newStatus: newStatus,
+                lastMessage: lastMessage,
+                lastUserPrompt: lastUserPrompt,
+                isTargetVisible: isTargetVisible
+            )
+        }
+
+        // The stability gate only applies to the pane path, which has a live
+        // status stream to cancel against. First Mate / inspection callers pass
+        // terminalID == "" and never update `latestStatus`, so a timer there would
+        // just add latency and always fire — deliver those immediately.
+        guard stabilityDelay > 0, !terminalID.isEmpty else {
+            deliver()
+            return
+        }
+
+        pendingFires[key]?.invalidate()
+        let targetStatus = newStatus
+        let timer = Timer.scheduledTimer(withTimeInterval: stabilityDelay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.pendingFires[key] = nil
+            guard Self.shouldDeliverPending(targetStatus: targetStatus, latestStatus: self.latestStatus[key]) else {
+                return
+            }
+            deliver()
+        }
+        pendingFires[key] = timer
+    }
+
+    /// Builds and posts the notification (in-app history + optional system
+    /// banner). Assumes eligibility was already decided by `notify`.
+    private func deliver(
+        worktreePath: String,
+        workspaceName: String,
+        branch: String,
+        paneIndex: Int,
+        paneCount: Int,
+        newStatus: SailorStatus,
+        lastMessage: String,
+        lastUserPrompt: String,
+        isTargetVisible: Bool
+    ) {
         let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
         let content = UNMutableNotificationContent()
         content.title = Self.formatSystemTitle(status: newStatus)

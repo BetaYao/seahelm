@@ -50,6 +50,7 @@ final class FirstMateCoordinator {
                 switch action.kind {
                 case .suggestNextOrder:
                     // Agent-supplied suggestion: replace any prior one for this worktree.
+                    NSLog("[suggest] pass gate3 → queue.upsert — worktree=\(action.worktreePath) options=\(action.options?.count ?? 0)")
                     queue.upsert(action)
                 default:
                     queue.enqueue(action)

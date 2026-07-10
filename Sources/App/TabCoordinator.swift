@@ -107,13 +107,6 @@ class TabCoordinator {
                 lastUserPrompt: outcome.info.lastUserPrompt,
                 agentType: outcome.info.agentType)
         }
-        NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
-            guard let self,
-                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
-                  let repoPath = self.worktreeRepoCache[worktreePath] else { return }
-            self.config.activeWorktreePaths[repoPath] = worktreePath
-            self.saveConfig()
-        }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
@@ -327,13 +320,35 @@ class TabCoordinator {
 
             let matchedWorktree = allWorktrees.first(where: { $0.info.path == agent.worktreePath })
             let isMain = matchedWorktree?.info.isMainWorktree ?? false
-            let freshBranch = matchedWorktree?.info.branch ?? agent.branch
+            // Card label is the worktree's own name — its directory's last path
+            // component — not the branch (the branch is visible inside the
+            // terminal). The main worktree always reads as "main".
+            let worktreeName = isMain
+                ? "main"
+                : URL(fileURLWithPath: agent.worktreePath).lastPathComponent
+
+            // "Last activity" age: seconds since the aggregator last saw a real
+            // status/message change for this worktree (persisted across launches),
+            // falling back to the sailor's start time.
+            let lastActivity = statusAggregator.lastActivity(for: agent.worktreePath) ?? agent.startedAt
+            let lastActivityAge = SailorDisplayHelpers.relativeAge(since: lastActivity)
+
+            // Git summary (diff size + ahead/behind). Served from an 8s cache;
+            // kick an off-main refresh so the next build has fresh numbers.
+            WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            let gitStats = WorktreeGitStatsCache.shared.cachedStats(worktreePath: agent.worktreePath)
+
+            // Warm the shared title cache (session summary → task → prompt) so
+            // both the cards and the overview rows can read cachedTitle synchronously.
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath,
+                                            lastUserPrompt: mostRecentUserPrompt,
+                                            branch: worktreeName) { _ in }
 
             result.append(SailorDisplayInfo(
                 id: agent.id,
-                name: freshBranch,
+                name: worktreeName,
                 project: agent.project,
-                thread: freshBranch,
+                thread: worktreeName,
                 paneStatuses: paneStatuses,
                 mostRecentMessage: mostRecentMessage,
                 lastUserPrompt: mostRecentUserPrompt,
@@ -346,7 +361,9 @@ class TabCoordinator {
                 paneStations: paneStations,
                 isMainWorktree: isMain,
                 tasks: agent.tasks,
-                activityEvents: agent.activityEvents
+                activityEvents: agent.activityEvents,
+                lastActivityAge: lastActivityAge,
+                gitStats: gitStats
             ))
         }
 
@@ -521,43 +538,53 @@ class TabCoordinator {
                     let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
                       eventQueue.sync {
                         guard let self else { return nil }
+                        // Correlate the suggest→Stop suppression by pane, not session:
+                        // the agent-invoked `seahelm-suggest` carries only a pane id, while
+                        // the native Stop hook carries Claude's real session UUID. Keying off
+                        // sessionId made the two never match, so the block fired every turn.
+                        // paneId is stable across both; fall back to sessionId outside a pane.
+                        let turnKey = event.paneId ?? event.sessionId
                         // Track when the user sent a message to this session; a new
                         // user prompt starts a fresh turn, so the agent must suggest again.
                         if event.event == .userPrompt {
-                            sessionUserPromptedAt[event.sessionId] = Date()
-                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                            sessionUserPromptedAt[turnKey] = Date()
+                            sessionSuggestedAt.removeValue(forKey: turnKey)
                         }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         ShipLog.shared.updateBackgroundBusy(from: event)
                         // Drop a (voluntary) suggestion while background work is still running —
                         // the agent will auto-resume, so it isn't a real end-of-turn yet.
                         if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
+                            NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
                             return nil
+                        }
+                        if event.event == .suggest {
+                            NSLog("[suggest] pass gate1 (not background-busy) — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
                         }
                         // The agent gave its own suggestions this turn (per the injected
                         // instruction) — record it so the Stop below won't force another.
                         if event.event == .suggest {
-                            sessionSuggestedAt[event.sessionId] = Date()
+                            sessionSuggestedAt[turnKey] = Date()
                         }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't
                         // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop, sessionSuggestedAt[event.sessionId] != nil {
+                        if event.event == .agentStop, sessionSuggestedAt[turnKey] != nil {
                             // The agent already emitted buttons as its last action this
                             // turn — no forced block needed (no extra round-trip).
-                            sessionSuggestedAt.removeValue(forKey: event.sessionId)
+                            sessionSuggestedAt.removeValue(forKey: turnKey)
                         } else if event.event == .agentStop,
-                           let blockedAt = sessionBlockedAt[event.sessionId],
-                           let promptedAt = sessionUserPromptedAt[event.sessionId],
+                           let blockedAt = sessionBlockedAt[turnKey],
+                           let promptedAt = sessionUserPromptedAt[turnKey],
                            promptedAt > blockedAt {
-                            sessionBlockedAt.removeValue(forKey: event.sessionId)
-                            sessionUserPromptedAt.removeValue(forKey: event.sessionId)
+                            sessionBlockedAt.removeValue(forKey: turnKey)
+                            sessionUserPromptedAt.removeValue(forKey: turnKey)
                         } else if let block = StopHookResponder.blockBody(
                             for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
                             // Blocking Stop: agent will continue and call seahelm-suggest.
                             // Do NOT ingest this stop as completion (avoid premature idle), but
                             // stash the agent's final message so the suggestion card can show it.
-                            sessionBlockedAt[event.sessionId] = Date()
+                            sessionBlockedAt[turnKey] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
                                 ShipLog.shared.noteAssistantMessage(cwd: event.cwd, message: msg)
                             }
@@ -838,10 +865,13 @@ class TabCoordinator {
 
     // MARK: - Branch Refresh
 
+    private var branchRefreshTick = 0
+
     func startBranchRefreshTimer() {
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self else { return }
+            self.branchRefreshTick += 1
             self.refreshBranches()
             // Re-evaluate worktree-tab idle collapse even when nothing changed.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -850,7 +880,12 @@ class TabCoordinator {
 
     private func refreshBranches() {
         let tabs = workspaceManager.tabs
+        // The active tab refreshes every tick (5s); background tabs only every
+        // 6th tick (30s) — each refresh forks a `git worktree list` subprocess
+        // per repo, so polling every open repo at 5s is wasteful.
+        let refreshAll = branchRefreshTick % 6 == 0
         for (tabIndex, tab) in tabs.enumerated() {
+            guard refreshAll || tabIndex == activeTabIndex else { continue }
             WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
                 guard let self else { return }
                 _ = self.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: tab.worktrees, freshWorktrees: freshWorktrees)

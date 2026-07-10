@@ -35,6 +35,8 @@ struct SailorDisplayInfo {
     let isMainWorktree: Bool    // true = base repo, false = git worktree
     let tasks: [TaskItem]              // webhook-tracked task items
     let activityEvents: [ActivityEvent]
+    let lastActivityAge: String        // "3m"/"2h" since last real activity ("" if unknown)
+    let gitStats: WorktreeGitStats?    // diff size + ahead/behind (nil until first resolve)
 
     /// Rolled-up status for display/grouping: the highest-priority pane, so a
     /// worktree whose first pane is idle but a later pane is running still reads
@@ -173,7 +175,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     // MARK: - First responder
 
-    override var acceptsFirstResponder: Bool { isInDState }
+    override var acceptsFirstResponder: Bool { isInDState || displayMode == .overview }
 
     // MARK: - View lifecycle
 
@@ -249,7 +251,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         agents = newSailors
 
-        if displayMode == .overview {
+        // Refresh the overview whenever it is on screen — that's overview mode OR
+        // the First Mate side column (which mounts the same overviewView in
+        // .worktree mode). Without the firstMateSideOpen check, an open First Mate
+        // sidebar showed the fleet frozen at the state it had when opened.
+        if displayMode == .overview || firstMateSideOpen {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
         }
@@ -319,6 +325,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
+                lastActivityAge: agent.lastActivityAge,
+                gitStats: agent.gitStats,
                 paneStatuses: agent.paneStatuses,
                 isMainWorktree: agent.isMainWorktree,
                 tasks: agent.tasks,
@@ -364,6 +372,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
             overviewView.isHidden = false
+            // Take first responder so fleet keyboard nav (j/k/⏎/1–9) works.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.displayMode == .overview else { return }
+                self.view.window?.makeFirstResponder(self)
+            }
         case .worktree:
             // Start with the side column collapsed (terminal full); pane icons open it.
             closeFirstMateSide()
@@ -427,6 +440,21 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// terminal right, same as files/changes). No-op in the overview.
     /// First Mate icon (title bar) → toggle the First Mate column.
     func toggleFirstMateSide() { toggleSide(.firstMate) }
+
+    /// Cmd+B: toggle the left side column. Opening from a collapsed state defaults
+    /// to the dashboard (First Mate overview) pane instead of whatever content was
+    /// left mounted; when a pane is showing, Cmd+B collapses the column.
+    func toggleSidebarDefaultDashboard() {
+        guard displayMode == .worktree else {
+            toggleLeftColumnCollapse()
+            return
+        }
+        if isLeftColumnCollapsed {
+            toggleSide(.firstMate)
+        } else {
+            collapseCurrentSide()
+        }
+    }
 
     /// Each pane icon toggles its own panel: click when inactive → open that pane;
     /// click when already the active pane → collapse the whole side column.
@@ -688,6 +716,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             status: agent.status, lastMessage: agent.lastMessage,
             lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
             totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
+            lastActivityAge: agent.lastActivityAge, gitStats: agent.gitStats,
             paneStatuses: agent.paneStatuses,
             isMainWorktree: agent.isMainWorktree,
             tasks: agent.tasks,
@@ -1112,6 +1141,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // MARK: - D-state key handling
 
     override func keyDown(with event: NSEvent) {
+        if displayMode == .overview, !isInDState {
+            handleOverviewKey(event); return
+        }
         guard isInDState else { super.keyDown(with: event); return }
         let mode = windowKeyboardMode
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -1168,6 +1200,53 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         return agents.first(where: { $0.id == agentId })
     }
 
+    // MARK: - Overview (fleet) keyboard navigation
+
+    /// Keyboard handling while the Dashboard overview is the active surface.
+    /// j/k (↑/↓) move the fleet selection, ⏎ / 1–9 enter a worktree, / @ # focus
+    /// the command input, n starts /new, ? shows help.
+    private func handleOverviewKey(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isDisjoint(with: [.command, .control, .option]) else { super.keyDown(with: event); return }
+        let ch = event.charactersIgnoringModifiers
+        switch event.keyCode {
+        case 126: moveOverviewSelection(-1); return   // ↑
+        case 125: moveOverviewSelection(1);  return   // ↓
+        case 36:  enterOverviewSelection();  return   // ⏎
+        default: break
+        }
+        switch ch {
+        case "k": moveOverviewSelection(-1)
+        case "j": moveOverviewSelection(1)
+        case "?": toggleHelp()
+        case "n": startNewCommand()
+        case "/", "@", "#": overviewView.focusCommand(prefill: ch ?? "")
+        case let d? where ("1"..."9").contains(d):
+            if let n = Int(d), n - 1 < overviewView.orderedRows.count {
+                enterWorktree(byWorktreePath: overviewView.orderedRows[n - 1].path)
+            }
+        default: super.keyDown(with: event)
+        }
+    }
+
+    private func moveOverviewSelection(_ delta: Int) {
+        let rows = overviewView.orderedRows
+        guard !rows.isEmpty else { return }
+        let cur = rows.firstIndex(where: { $0.id == overviewSelectedId })
+        let next: Int
+        if let cur { next = max(0, min(rows.count - 1, cur + delta)) }
+        else { next = delta > 0 ? 0 : rows.count - 1 }
+        overviewSelectedId = rows[next].id
+        overviewView.selectedId = overviewSelectedId
+        overviewView.update(agents)
+    }
+
+    private func enterOverviewSelection() {
+        let rows = overviewView.orderedRows
+        let path = rows.first(where: { $0.id == overviewSelectedId })?.path ?? rows.first?.path
+        if let path { enterWorktree(byWorktreePath: path) }
+    }
+
     private func dispatch(_ action: KeyboardAction) {
         switch action {
         case .moveFocus(let dir):
@@ -1200,6 +1279,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             // keyboardMode stays .normal + .createForm (set by beginCreateForm()).
             exitNavForCreateForm()
             onRequestNewWorktree?()
+        case .toggleFiles:      selectLeftPane(.file)
+        case .toggleChanges:    selectLeftPane(.change)
+        case .toggleFirstMate:  toggleFirstMateSide()
         }
     }
 
@@ -1428,10 +1510,6 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
 
 private final class FlippedStackView: NSStackView {
     override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { false }
-}
-
-private final class NonFirstResponderStackView: NSStackView {
     override var acceptsFirstResponder: Bool { false }
 }
 
@@ -1829,11 +1907,20 @@ final class DashboardOverviewView: NSView {
         return ps.first ?? .unknown
     }
 
+    /// Focus the command input with a prefilled command (e.g. "/new ").
+    func focusCommand(prefill: String) {
+        commandInput.setTextAndFocusEnd(prefill)
+    }
+
+    /// Worktrees in display (grouped) order — the sequence keyboard nav walks.
+    private(set) var orderedRows: [(id: String, path: String)] = []
+
     func update(_ sailors: [SailorDisplayInfo]) {
         let running = sailors.filter { Self.primaryStatus($0) == .running }.count
         headerSub.stringValue = "\(sailors.count) worktrees · \(running) 在跑"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        orderedRows = []
 
         let grouped = Dictionary(grouping: sailors, by: { Self.primaryStatus($0) })
         for (gi, status) in Self.groupOrder.enumerated() {
@@ -1853,6 +1940,7 @@ final class DashboardOverviewView: NSView {
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
+                orderedRows.append((item.id, item.worktreePath))
             }
             stack.addArrangedSubview(rowsBox)
             pin(rowsBox)
@@ -1970,46 +2058,57 @@ final class DashboardOverviewView: NSView {
                 : (selected ? DashboardOverviewView.sea : NSColor.clear)).cgColor
             bar.translatesAutoresizingMaskIntoConstraints = false
 
-            // Line 1: repo / branch · subject   [tag]                     time
+            // Line 1: [repo tag]  ● title                              time
+            // The title is the worktree's session summary (shared resolver, same
+            // source as the cards), falling back to task subject / latest message.
             let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
-            let subject = sailor.tasks.first?.subject ?? ""
-            // Emphasis swapped: repo is the emphasized (bright, larger) token,
-            // branch reads as the secondary (dim, smaller) one.
-            let repo = Self.label(sailor.project, DashboardOverviewView.ink, 12.5)
-            repo.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let slash = Self.label("/", DashboardOverviewView.inkFaint, 11)
-            let name = Self.label(branch, DashboardOverviewView.inkDim, 11)
-            let title = Self.label("· \(subject)", DashboardOverviewView.inkDim, 11.5)
+            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
+            let subject = sailor.tasks.first?.subject
+            let msg = sailor.mostRecentMessage == "No active task." ? nil : sailor.mostRecentMessage
+            let titleText = [cachedTitle, subject, msg].compactMap { $0 }
+                .first(where: { !$0.isEmpty }) ?? branch
+
+            // Per-repo colored tag; the same project always gets the same color.
+            let repoTag = Self.repoTag(sailor.project)
+            // Status dot colored by the row's arbitrated status.
+            let dot = Self.label("\u{25CF}", status.color, 8)
+            dot.setContentHuggingPriority(.required, for: .horizontal)
+            let title = Self.label(titleText, DashboardOverviewView.ink, 12)
             title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let lastActive = sailor.activityEvents.map(\.timestamp).max()
-            let time = Self.label(Self.compactAge(since: lastActive), DashboardOverviewView.inkFaint, 10.5)
+            let time = Self.label(Self.compactAge(since: lastActive), DashboardOverviewView.inkFaint, 10)
             time.setContentHuggingPriority(.required, for: .horizontal)
 
             let line1 = NSStackView()
             line1.orientation = .horizontal
-            line1.alignment = .firstBaseline
+            line1.alignment = .centerY
             line1.spacing = 7
             line1.translatesAutoresizingMaskIntoConstraints = false
-            if !sailor.project.isEmpty { line1.addArrangedSubview(repo); line1.addArrangedSubview(slash) }
-            line1.addArrangedSubview(name)
-            if !subject.isEmpty { line1.addArrangedSubview(title) }
+            if !sailor.project.isEmpty { line1.addArrangedSubview(repoTag) }
+            line1.addArrangedSubview(dot)
+            line1.addArrangedSubview(title)
             if waiting { line1.addArrangedSubview(Self.pill("需确认", color: DashboardOverviewView.red)) }
             line1.addArrangedSubview(Self.spacer())
             line1.addArrangedSubview(time)
 
-            // Line 2: info                                     [PR]  N panes
-            let info = Self.label(sailor.mostRecentMessage, infoColor, 11.5)
-            info.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // Line 2: worktree name   git info                       N panes
+            let name = Self.label(branch, DashboardOverviewView.inkDim, 10.5)
+            name.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let git = NSTextField(labelWithString: "")
+            git.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
+            git.translatesAutoresizingMaskIntoConstraints = false
+            git.setContentHuggingPriority(.required, for: .horizontal)
             let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) panes" : "—",
-                                   DashboardOverviewView.inkFaint, 10.5)
+                                   DashboardOverviewView.inkFaint, 10)
             panes.setContentHuggingPriority(.required, for: .horizontal)
 
             let line2 = NSStackView()
             line2.orientation = .horizontal
-            line2.alignment = .centerY
+            line2.alignment = .firstBaseline
             line2.spacing = 9
             line2.translatesAutoresizingMaskIntoConstraints = false
-            line2.addArrangedSubview(info)
+            line2.addArrangedSubview(name)
+            line2.addArrangedSubview(git)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(panes)
 
@@ -2036,6 +2135,57 @@ final class DashboardOverviewView: NSView {
             ])
         }
         required init?(coder: NSCoder) { fatalError() }
+
+        /// Per-repo colored tag: a stable brand color (shared with the cards) as a
+        /// subtle fill + border + colored text. Radius 0 to match the bare-TUI look.
+        static func repoTag(_ project: String) -> NSView {
+            let color = MiniCardView.repoColor(for: project)
+            let l = NSTextField(labelWithString: project)
+            l.font = AppFont.mono(size: 10)
+            l.textColor = color
+            l.lineBreakMode = .byTruncatingTail
+            l.translatesAutoresizingMaskIntoConstraints = false
+            let pad = NSView()
+            pad.wantsLayer = true
+            pad.layer?.borderWidth = 1
+            pad.layer?.borderColor = color.withAlphaComponent(0.55).cgColor
+            pad.layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
+            pad.translatesAutoresizingMaskIntoConstraints = false
+            pad.setContentHuggingPriority(.required, for: .horizontal)
+            pad.setContentCompressionResistancePriority(.required, for: .horizontal)
+            pad.addSubview(l)
+            NSLayoutConstraint.activate([
+                l.topAnchor.constraint(equalTo: pad.topAnchor, constant: 1),
+                l.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -1),
+                l.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 5),
+                l.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -5),
+            ])
+            return pad
+        }
+
+        /// Compact git summary "+adds −dels  ↑ahead↓behind", colored. Empty when
+        /// there are no changes and no divergence (or stats not yet resolved).
+        static func gitInfoAttributed(_ stats: WorktreeGitStats?) -> NSAttributedString {
+            guard let stats, !stats.isEmpty else { return NSAttributedString() }
+            let font = AppFont.mono(size: 10)
+            let result = NSMutableAttributedString()
+            func append(_ s: String, _ color: NSColor) {
+                result.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color]))
+            }
+            if stats.added > 0 { append("+\(stats.added)", DashboardOverviewView.emerald) }
+            if stats.removed > 0 {
+                if result.length > 0 { append(" ", DashboardOverviewView.inkFaint) }
+                append("\u{2212}\(stats.removed)", DashboardOverviewView.red)
+            }
+            if stats.hasAheadBehind {
+                if result.length > 0 { append("  ", DashboardOverviewView.inkFaint) }
+                var ab = ""
+                if let ahead = stats.ahead, ahead > 0 { ab += "\u{2191}\(ahead)" }
+                if let behind = stats.behind, behind > 0 { ab += "\u{2193}\(behind)" }
+                append(ab, DashboardOverviewView.inkFaint)
+            }
+            return result
+        }
 
         /// Bare-TUI pill: coloured text + 1px border, no fill, radius 0.
         static func pill(_ text: String, color: NSColor) -> NSView {

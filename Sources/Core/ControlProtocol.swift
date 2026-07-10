@@ -288,7 +288,12 @@ final class ControlRouter {
                 "session_id": params["pane_id"] as? String ?? "cli",
                 "data": ["options": options],
             ]
-            if let paneId = params["pane_id"] as? String { payload["pane_id"] = paneId }
+            if let paneId = params["pane_id"] as? String {
+                payload["pane_id"] = paneId
+                // Also expose under the bridge's canonical key so WebhookEvent.paneId
+                // is populated — the Stop→suggest turn correlation keys off paneId.
+                payload["seahelm_pane_id"] = paneId
+            }
             _ = dataSource?.ingestHook(json: payload)
             return .ok(["accepted": true])
 

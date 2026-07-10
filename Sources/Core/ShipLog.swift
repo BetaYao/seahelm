@@ -19,6 +19,17 @@ class ShipLog {
     /// Tracks when each terminal entered its current status (for holdSeconds calculation).
     private var statusEnteredAt: [String: Date] = [:]
 
+    /// When each terminal's hook last asserted `.running` (a UserPrompt / PreToolUse
+    /// leading edge). For session_only agents this lets a hook run promote over a
+    /// stale scan `.idle` immediately, while a later scan `.idle` observed *after*
+    /// the grace window reclaims it — so an Esc/interrupt that fires no Stop hook
+    /// still self-heals instead of sticking on "running".
+    private var hookRunningSince: [String: Date] = [:]
+    /// Grace before a scan `.idle` is allowed to clear a hook-asserted `.running`.
+    /// Long enough for the agent to start rendering its spinner after a prompt.
+    /// `var` so tests can drive the trailing-edge reclaim deterministically.
+    static var hookRunningGrace: TimeInterval = 3.0
+
     private var agents: [String: SailorInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
     private var orderedIDs: [String] = []
@@ -176,6 +187,13 @@ class ShipLog {
         arbitrateDetailed(scan: scan, hook: hook, agentType: agentType).status
     }
 
+    /// Whether the agent's manifest makes the screen authoritative (hooks only fill
+    /// gaps). Defaults to true when no manifest is registered.
+    static func isSessionOnly(_ agentType: SailorType) -> Bool {
+        let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        return authority == "session_only"
+    }
+
     /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
     /// `screen`) and the pane's authority — for `pane.explain`.
     static func arbitrateDetailed(scan: SailorStatus, hook: SailorStatus, agentType: SailorType)
@@ -186,7 +204,14 @@ class ShipLog {
         switch authority {
         case "full_lifecycle": return hook != .unknown ? (hook, "hook", authority) : (scan, "screen", authority)
         case "screen_only":    return (scan, "screen", authority)
-        default:               return scan != .unknown ? (scan, "screen", authority) : (hook, "hook", authority)
+        default:
+            // session_only: screen is authoritative EXCEPT a hook `.running` edge
+            // promotes over a scan `.idle`, so the leading edge (prompt submitted,
+            // spinner not yet on screen) surfaces immediately instead of waiting for
+            // the next slow scan. `ingest` clears a stale hook `.running` once scan
+            // sees a sustained idle, so the trailing edge stays screen-authoritative.
+            if scan == .idle && hook == .running { return (hook, "hook", authority) }
+            return scan != .unknown ? (scan, "screen", authority) : (hook, "hook", authority)
         }
     }
 
@@ -200,6 +225,7 @@ class ShipLog {
         var next = current
         var isCompletion = false
         var message = current.lastMessage
+        let now = Date()
 
         switch event.kind {
         case .screenObserved(let status, let msg, let activity, let commandLine, let agentType, let roundDuration, let tasks):
@@ -210,21 +236,36 @@ class ShipLog {
             if let cl = commandLine { next.commandLine = cl }
             if agentType != .unknown { next.agentType = agentType }
             if !activity.isEmpty { next.activityEvents = activity }
+            // Trailing-edge reclaim: once scan sees a sustained idle (past the grace
+            // window since the hook's running edge), drop a stale hook `.running` so
+            // an Esc/interrupt that fires no Stop hook doesn't stick on "running".
+            if status == .idle, next.hookStatus == .running,
+               let since = hookRunningSince[event.terminalID],
+               now.timeIntervalSince(since) >= Self.hookRunningGrace,
+               Self.isSessionOnly(next.agentType) {
+                next.hookStatus = .unknown
+                hookRunningSince[event.terminalID] = nil
+            }
         case .sessionStarted(let label):
             next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
             message = label
         case .userPrompt(let text):
             next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
             next.lastUserPrompt = text
         case .toolUse(let ev):
             next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
             Self.upsertLatest(&next.activityEvents, event: ev, maxSize: 20)
             message = ev.detail.isEmpty ? message : ev.detail
         case .awaitingInput(let text):
             next.hookStatus = .waiting
+            hookRunningSince[event.terminalID] = nil
             message = text
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
+            hookRunningSince[event.terminalID] = nil
             next.activityEvents.removeAll()
             isCompletion = true
         case .notification(let level, let text):
@@ -249,7 +290,6 @@ class ShipLog {
         next.status = newStatus
         agents[event.terminalID] = next
 
-        let now = Date()
         let statusChanged = oldStatus != newStatus
         var hold: Double = 0
         if statusChanged {
@@ -519,10 +559,17 @@ class ShipLog {
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
         guard let tid = matchingTIDs?.first else {
+            let known = Array(worktreeIndex.keys)
             lock.unlock()
+            if event.event == .suggest {
+                NSLog("[suggest] DROP cwd-unresolved — cwd=\(event.cwd) knownWorktrees=\(known)")
+            }
             return
         }
         lock.unlock()
+        if event.event == .suggest {
+            NSLog("[suggest] pass gate2 (cwd→tid=\(tid)) — cwd=\(event.cwd)")
+        }
 
         switch event.source {
         case "claude-code":

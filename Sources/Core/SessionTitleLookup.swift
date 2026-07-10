@@ -51,18 +51,33 @@ enum SessionTitleLookup {
 
     private static func lastSummary(in fileURL: URL) -> String? {
         guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
-        var last: String?
+        // Newer Claude Code writes `ai-title` records (and `custom-title` when the
+        // user renames a session in the resume picker); older versions wrote
+        // `summary`. Track the last of each and prefer the user's own rename.
+        var lastCustom: String?
+        var lastAI: String?
+        var lastLegacy: String?
         contents.enumerateLines { line, _ in
+            // Cheap pre-filter: title records are rare, full JSON parse per line is not.
+            guard line.contains("\"type\":\"summary\"")
+                || line.contains("\"type\":\"ai-title\"")
+                || line.contains("\"type\":\"custom-title\"") else { return }
             guard
                 let data = line.data(using: .utf8),
                 let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                object["type"] as? String == "summary",
-                let summary = object["summary"] as? String,
-                !summary.isEmpty
+                let type = object["type"] as? String
             else { return }
-            last = summary
+            switch type {
+            case "custom-title":
+                if let t = object["customTitle"] as? String, !t.isEmpty { lastCustom = t }
+            case "ai-title":
+                if let t = object["aiTitle"] as? String, !t.isEmpty { lastAI = t }
+            case "summary":
+                if let t = object["summary"] as? String, !t.isEmpty { lastLegacy = t }
+            default: break
+            }
         }
-        return last
+        return lastCustom ?? lastAI ?? lastLegacy
     }
 
     private static func defaultProjectsRoot() -> URL {

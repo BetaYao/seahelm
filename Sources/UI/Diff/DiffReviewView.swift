@@ -65,11 +65,6 @@ final class DiffReviewView: NSView {
         }
     }
 
-    func loadDiffForTesting() {
-        hasLoaded = true
-        applySnapshot(loadSnapshot())
-    }
-
     private func setup() {
         wantsLayer = true
         layer?.backgroundColor = Theme.background.cgColor

@@ -18,9 +18,10 @@ final class MiniCardView: NSView {
     private let statusTextLabel = NSTextField(labelWithString: "")
     private var statusDots: [NSView] = []
     private var durationLeadingConstraint: NSLayoutConstraint?
-    // Line 4: repo badge + worktree branch
+    // Line 4: repo badge + worktree name (left), git summary (right)
     private let agentBadge = SailorBadgeView()
     private let repoWorktreeLabel = NSTextField(labelWithString: "")
+    private let gitStatsLabel = NSTextField(labelWithString: "")
     private var repoLeadingDefault: NSLayoutConstraint!
     private var repoLeadingAfterBadge: NSLayoutConstraint!
 
@@ -38,7 +39,7 @@ final class MiniCardView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [SailorStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = [], agentType: SailorType = .unknown) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, lastActivityAge: String = "", gitStats: WorktreeGitStats? = nil, paneStatuses: [SailorStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = [], agentType: SailorType = .unknown) {
         agentId = id
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
 
@@ -88,9 +89,11 @@ final class MiniCardView: NSView {
             durationLeadingConstraint?.isActive = true
         }
 
-        let compactTotal = SailorDisplayHelpers.compactDuration(totalDuration)
-        let compactRound = SailorDisplayHelpers.compactDuration(roundDuration)
-        durationLabel.stringValue = "\u{23F1} \(compactTotal) \u{00B7} \(compactRound)"
+        // Line 3 left: time since last activity (not run duration).
+        durationLabel.stringValue = lastActivityAge.isEmpty ? "" : "\u{23F1} \(lastActivityAge)"
+
+        // Line 4 right: git summary — "+adds −dels  ↑ahead↓behind".
+        gitStatsLabel.attributedStringValue = Self.gitStatsAttributed(gitStats)
 
         statusTextLabel.stringValue = status.capitalized
         statusTextLabel.textColor = SailorDisplayHelpers.statusColor(status)
@@ -137,6 +140,15 @@ final class MiniCardView: NSView {
         repoWorktreeLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(repoWorktreeLabel)
 
+        gitStatsLabel.font = NSFont.monospacedDigitSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        gitStatsLabel.lineBreakMode = .byClipping
+        gitStatsLabel.maximumNumberOfLines = 1
+        gitStatsLabel.alignment = .right
+        gitStatsLabel.translatesAutoresizingMaskIntoConstraints = false
+        gitStatsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        gitStatsLabel.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(gitStatsLabel)
+
         agentBadge.translatesAutoresizingMaskIntoConstraints = false
         agentBadge.isHidden = true
         agentBadge.setContentHuggingPriority(.required, for: .horizontal)
@@ -176,8 +188,11 @@ final class MiniCardView: NSView {
 
             repoWorktreeLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
             repoLeadingDefault,
-            repoWorktreeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            repoWorktreeLabel.trailingAnchor.constraint(lessThanOrEqualTo: gitStatsLabel.leadingAnchor, constant: -6),
             repoWorktreeLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -padding),
+
+            gitStatsLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            gitStatsLabel.centerYAnchor.constraint(equalTo: repoWorktreeLabel.centerYAnchor),
         ])
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
@@ -257,6 +272,30 @@ final class MiniCardView: NSView {
         var hash: UInt64 = 5381
         for byte in project.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
         return NSColor(hex: palette[Int(hash % UInt64(palette.count))])
+    }
+
+    /// Colored git summary: green "+adds", red "−dels", then dim "↑ahead↓behind".
+    /// Empty when there are no changes and no divergence (or stats not yet loaded).
+    static func gitStatsAttributed(_ stats: WorktreeGitStats?) -> NSAttributedString {
+        guard let stats, !stats.isEmpty else { return NSAttributedString() }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        let result = NSMutableAttributedString()
+        func append(_ s: String, _ color: NSColor) {
+            result.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color]))
+        }
+        if stats.added > 0 { append("+\(stats.added)", SemanticColors.running) }
+        if stats.removed > 0 {
+            if result.length > 0 { append(" ", SemanticColors.muted) }
+            append("\u{2212}\(stats.removed)", SemanticColors.danger)
+        }
+        if stats.hasAheadBehind {
+            if result.length > 0 { append("  ", SemanticColors.muted) }
+            var ab = ""
+            if let ahead = stats.ahead, ahead > 0 { ab += "\u{2191}\(ahead)" }
+            if let behind = stats.behind, behind > 0 { ab += "\u{2193}\(behind)" }
+            append(ab, SemanticColors.muted)
+        }
+        return result
     }
 
     // Test hook

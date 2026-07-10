@@ -109,7 +109,7 @@ enum SessionManager {
         let output = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
         let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
         for sessionName in orphaned {
-            Station.forceKillZmxSession(sessionName)
+            ZmxSessionRecovery.forceKillSession(sessionName)
         }
         return orphaned
     }
@@ -117,7 +117,7 @@ enum SessionManager {
     /// Kill a persistent zmx session.
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {
-            Station.forceKillZmxSession(name)
+            ZmxSessionRecovery.forceKillSession(name)
         }
     }
 

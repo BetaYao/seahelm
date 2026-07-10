@@ -73,6 +73,7 @@ class MainWindowController: NSWindowController {
             self?.tabCoordinator.dashboardVC?.activeSplitContainer
         })
         tc.delegate = self
+        tc.runtimeBackend = runtimeBackend
         return tc
     }()
 
@@ -222,16 +223,28 @@ class MainWindowController: NSWindowController {
         NSApp.mainMenu = MenuBuilder.buildMainMenu(target: self)
     }
 
+    /// Resolve the runtime backend (zmx, else local fallback) off the main thread
+    /// — the version probe spawns a process — then push it to the coordinators.
+    /// `runtimeBackend` starts optimistically at "zmx" so any restore that races
+    /// this resolution attaches persistent sessions; the async pass only ever
+    /// downgrades to "local" when zmx is genuinely unavailable/unsupported.
     private func normalizeBackendAvailabilityIfNeeded() {
-        BackendResolver.resolveAsync(preferred: config.backend) { [weak self] resolution in
-            guard let self else { return }
-            self.runtimeBackend = resolution.backend
-            self.tabCoordinator.runtimeBackend = resolution.backend
-            if resolution.warningMessage == nil, resolution.backend != self.config.backend {
-                self.config.backend = resolution.backend
-                self.saveConfig()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let resolution = ZmxLocator.resolveBackend()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.runtimeBackend = resolution.backend
+                self.tabCoordinator.runtimeBackend = resolution.backend
+                self.terminalCoordinator.runtimeBackend = resolution.backend
+                if let warning = resolution.warning {
+                    let alert = NSAlert()
+                    alert.messageText = "Backend Fallback Activated"
+                    alert.informativeText = "\(warning)\nCurrent backend: \(resolution.backend)."
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
             }
-            BackendResolver.showWarningIfNeeded(resolution, configBackend: self.config.backend)
         }
     }
 
@@ -936,11 +949,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     // MARK: - Forwarding to TabCoordinator
 
-    @discardableResult
-    func integrateDiscoveredRepoForTesting(repoPath: String, worktrees: [WorktreeInfo], activateTab: Bool = true) -> Int {
-        tabCoordinator.integrateDiscoveredRepo(repoPath: repoPath, worktrees: worktrees, activateTab: activateTab)
-    }
-
     private func switchToTab(_ index: Int) {
         tabCoordinator.switchToTab(index)
     }
@@ -1031,13 +1039,21 @@ class SeahelmWindow: NSWindow {
         case .prevWorktree:
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
-            mwc.tabCoordinator.dashboardVC?.toggleLeftColumnCollapse(); return true
+            mwc.tabCoordinator.dashboardVC?.toggleSidebarDefaultDashboard(); return true
         case .exitInsert:
             if mwc.keyboardMode.handleEsc(hasCommand: true, now: ProcessInfo.processInfo.systemUptime) {
                 mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
                 return true
             }
             return super.performKeyEquivalent(with: event)
+        case .toggleOverview:
+            mwc.toggleFirstMatePanel(); return true   // overview ⇄ worktree
+        case .firstMatePane:
+            mwc.tabCoordinator.dashboardVC?.toggleFirstMateSide(); return true
+        case .filesPane:
+            mwc.tabCoordinator.dashboardVC?.selectLeftPane(.file); return true
+        case .changesPane:
+            mwc.tabCoordinator.dashboardVC?.selectLeftPane(.change); return true
         }
     }
 

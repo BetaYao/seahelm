@@ -15,23 +15,25 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
+        ("⌘E", "总览 ⇄ worktree"),
         ("h j k l", "移动焦点"),
-        ("⏎", "进入终端"),
-        ("space", "打开 / 关闭 大副 Helm"),
-        ("1 – 9", "跳到第 N 个卡片"),
+        ("1 – 9", "跳到 / 进入第 N 个 worktree"),
+        ("⏎ / i", "进入终端"),
+        ("f / c / m", "文件 / 改动 / First Mate 侧栏"),
+        ("⌘1 / ⌘2 / ⌘3", "First Mate / 文件 / 改动"),
+        ("⌃⇥ / ⌃⇧⇥", "下 / 上一个 worktree"),
         ("d", "删除聚焦 worktree"),
-        ("c", "查看 changes"),
-        ("f", "浏览 files"),
         ("n", "新建 worktree"),
+        ("⌘esc", "INSERT → NORMAL"),
         ("?", "快捷键说明"),
-        ("⌘esc", "INSERT ↔ NORMAL"),
     ]
     private static let helmKeys: [(String, String)] = [
-        ("点击雷达球", "开 / 合 指挥中心"),
-        ("点击 / ⏎", "聚焦命令输入框"),
+        ("⌘D / ⌘⇧D", "水平 / 垂直分屏"),
+        ("⌘⌥ ← → ↑ ↓", "移动分屏焦点"),
+        ("⌘⌃ ← → ↑ ↓", "调整分屏比例"),
         ("/ @ #", "命令 / 仓库 / agent 补全"),
-        ("点击选项", "对卡片下达决策"),
-        ("✕ / esc", "关闭指挥中心"),
+        ("↑ ↓ / ⏎", "补全菜单选择 / 确认"),
+        ("esc", "命令框失焦 / 关闭"),
     ]
 
     var onDismiss: (() -> Void)?
@@ -73,7 +75,7 @@ final class KeyboardHelpOverlay: NSView {
         card.addSubview(glyph); card.addSubview(title); card.addSubview(hint)
 
         let left = column(header: "NORMAL", rows: Self.normalKeys)
-        let right = column(header: "HELM 打开时", rows: Self.helmKeys)
+        let right = column(header: "分屏 / 命令", rows: Self.helmKeys)
         card.addSubview(left); card.addSubview(right)
 
         NSLayoutConstraint.activate([

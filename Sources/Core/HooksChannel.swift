@@ -57,20 +57,6 @@ class HooksChannel: SailorChannel {
         return events.last
     }
 
-    /// Get events since a given date
-    func eventsSince(_ date: Date) -> [HookEvent] {
-        lock.lock()
-        defer { lock.unlock() }
-        return events.filter { $0.timestamp >= date }
-    }
-
-    /// Clear event history
-    func clearEvents() {
-        lock.lock()
-        events.removeAll()
-        lock.unlock()
-    }
-
     // MARK: - Private
 
     private func extractMessage(from event: WebhookEvent) -> String? {

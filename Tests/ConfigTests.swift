@@ -9,7 +9,6 @@ final class ConfigTests: XCTestCase {
         let config = Config()
         XCTAssertTrue(config.workspacePaths.isEmpty)
         XCTAssertEqual(config.activeWorkspaceIndex, 0)
-        XCTAssertEqual(config.backend, "zmx")
         XCTAssertEqual(config.terminalRowCacheSize, 200)
         XCTAssertFalse(config.agentDetect.agents.isEmpty)
     }
@@ -21,7 +20,6 @@ final class ConfigTests: XCTestCase {
         {
             "workspace_paths": ["/path/a", "/path/b"],
             "active_workspace_index": 1,
-            "backend": "local",
             "terminal_row_cache_size": 500
         }
         """.data(using: .utf8)!
@@ -29,7 +27,6 @@ final class ConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.workspacePaths, ["/path/a", "/path/b"])
         XCTAssertEqual(config.activeWorkspaceIndex, 1)
-        XCTAssertEqual(config.backend, "local")
         XCTAssertEqual(config.terminalRowCacheSize, 500)
     }
 
@@ -42,7 +39,6 @@ final class ConfigTests: XCTestCase {
 
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.workspacePaths, ["/path/a"])
-        XCTAssertEqual(config.backend, "zmx")  // default
         XCTAssertEqual(config.terminalRowCacheSize, 200)  // default
     }
 
@@ -50,7 +46,6 @@ final class ConfigTests: XCTestCase {
         let json = "{}".data(using: .utf8)!
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertTrue(config.workspacePaths.isEmpty)
-        XCTAssertEqual(config.backend, "zmx")
     }
 
     // MARK: - JSON Roundtrip
@@ -58,14 +53,12 @@ final class ConfigTests: XCTestCase {
     func testEncodeDecodeRoundtrip() throws {
         var original = Config()
         original.workspacePaths = ["/a", "/b"]
-        original.backend = "local"
 
         let encoder = JSONEncoder()
         let data = try encoder.encode(original)
         let decoded = try JSONDecoder().decode(Config.self, from: data)
 
         XCTAssertEqual(decoded.workspacePaths, original.workspacePaths)
-        XCTAssertEqual(decoded.backend, original.backend)
         XCTAssertEqual(decoded.terminalRowCacheSize, original.terminalRowCacheSize)
     }
 
@@ -178,7 +171,6 @@ final class ConfigTests: XCTestCase {
         // Create and save config
         var config = Config()
         config.workspacePaths = ["/Users/dev/project-a", "/Users/dev/project-b"]
-        config.backend = "local"
         config.terminalRowCacheSize = 500
 
         let encoder = JSONEncoder()
@@ -191,7 +183,6 @@ final class ConfigTests: XCTestCase {
         let loaded = try JSONDecoder().decode(Config.self, from: loadedData)
 
         XCTAssertEqual(loaded.workspacePaths, ["/Users/dev/project-a", "/Users/dev/project-b"])
-        XCTAssertEqual(loaded.backend, "local")
         XCTAssertEqual(loaded.terminalRowCacheSize, 500)
     }
 
@@ -207,14 +198,6 @@ final class ConfigTests: XCTestCase {
 
         config.workspacePaths.remove(at: 0)
         XCTAssertEqual(config.workspacePaths, ["/another/path"])
-    }
-
-    func testConfigModification_Backend() {
-        var config = Config()
-        XCTAssertEqual(config.backend, "zmx")
-
-        config.backend = "local"
-        XCTAssertEqual(config.backend, "local")
     }
 
     func testAgentDetectConfig_EncodeDecodeRoundtrip() throws {
@@ -284,26 +267,12 @@ final class ConfigTests: XCTestCase {
     func testDecodeMissingNewFields() throws {
         let json = """
         {
-            "workspace_paths": ["/path/a"],
-            "backend": "tmux"
+            "workspace_paths": ["/path/a"]
         }
         """.data(using: .utf8)!
 
         let config = try JSONDecoder().decode(Config.self, from: json)
-        XCTAssertEqual(config.backend, "zmx")
         XCTAssertEqual(config.themeMode, "system")
-    }
-
-    func testConfigMigration_TmuxToZmx() throws {
-        let json = """
-        {
-            "workspace_paths": ["/path/a"],
-            "backend": "tmux"
-        }
-        """.data(using: .utf8)!
-
-        let config = try JSONDecoder().decode(Config.self, from: json)
-        XCTAssertEqual(config.backend, "zmx")
     }
 
     // MARK: - Config Dir Migration

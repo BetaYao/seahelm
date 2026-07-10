@@ -35,12 +35,6 @@ final class DialogPresenter {
         return settingsVC
     }
 
-    func makeNewBranchDialog(repoPaths: [String], dialogDelegate: NewBranchDialogDelegate) -> NewBranchDialog {
-        let dialog = NewBranchDialog(repoPaths: repoPaths)
-        dialog.dialogDelegate = dialogDelegate
-        return dialog
-    }
-
     static func showKeyboardShortcuts() {
         let alert = NSAlert()
         alert.messageText = "Keyboard Shortcuts"

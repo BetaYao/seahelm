@@ -17,7 +17,6 @@ class SettingsViewController: NSViewController {
     private var workspacePaths: [String] = []
     private let addButton = NSButton()
     private let removeButton = NSButton()
-    private let backendPopup = NSPopUpButton()
     private let cacheSizeField = NSTextField()
 
     // Agent Detection tab controls
@@ -153,22 +152,6 @@ class SettingsViewController: NSViewController {
         removeButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(removeButton)
 
-        // Backend
-        let backendLabel = NSTextField(labelWithString: "Backend:")
-        backendLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        backendLabel.textColor = Theme.textSecondary
-        backendLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(backendLabel)
-
-        backendPopup.removeAllItems()
-        backendPopup.addItems(withTitles: ["zmx"])
-        backendPopup.selectItem(withTitle: config.backend)
-        if backendPopup.indexOfSelectedItem < 0 {
-            backendPopup.selectItem(withTitle: "zmx")
-        }
-        backendPopup.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(backendPopup)
-
         // Cache size
         let cacheLabel = NSTextField(labelWithString: "Terminal cache rows:")
         cacheLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -198,15 +181,7 @@ class SettingsViewController: NSViewController {
             removeButton.leadingAnchor.constraint(equalTo: addButton.trailingAnchor, constant: 4),
             removeButton.widthAnchor.constraint(equalToConstant: 32),
 
-            backendLabel.topAnchor.constraint(equalTo: addButton.bottomAnchor, constant: 16),
-            backendLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            backendLabel.widthAnchor.constraint(equalToConstant: 140),
-
-            backendPopup.centerYAnchor.constraint(equalTo: backendLabel.centerYAnchor),
-            backendPopup.leadingAnchor.constraint(equalTo: backendLabel.trailingAnchor, constant: 8),
-            backendPopup.widthAnchor.constraint(equalToConstant: 120),
-
-            cacheLabel.topAnchor.constraint(equalTo: backendLabel.bottomAnchor, constant: 12),
+            cacheLabel.topAnchor.constraint(equalTo: addButton.bottomAnchor, constant: 16),
             cacheLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             cacheLabel.widthAnchor.constraint(equalToConstant: 140),
 
@@ -443,7 +418,6 @@ class SettingsViewController: NSViewController {
     @objc private func saveClicked() {
         // Update config from UI
         config.workspacePaths = workspacePaths
-        config.backend = backendPopup.titleOfSelectedItem ?? "zmx"
         config.terminalRowCacheSize = Int(cacheSizeField.stringValue) ?? 200
 
         // Parse agent detection JSON

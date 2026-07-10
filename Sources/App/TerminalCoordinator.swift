@@ -8,6 +8,10 @@ protocol TerminalCoordinatorDelegate: AnyObject {
 class TerminalCoordinator {
     weak var delegate: TerminalCoordinatorDelegate?
     var config: Config
+    /// Resolved runtime backend ("zmx" or "local"). Set by MainWindowController
+    /// after zmx availability is checked; starts at "zmx" so early tree restore
+    /// attaches persistent sessions before the async resolution lands.
+    var runtimeBackend: String = "zmx"
     let stationManager = StationManager()
     var controlSocketServer: ControlSocketServer?
 
@@ -23,7 +27,7 @@ class TerminalCoordinator {
     // MARK: - Tree Resolution
 
     func resolveTree(for info: WorktreeInfo) -> SplitTree {
-        let backend = config.backend
+        let backend = runtimeBackend
         if backend != "local",
            let savedLayout = config.splitLayouts[info.path],
            let restored = SplitTree.restore(from: savedLayout, worktreePath: info.path, backend: backend) {
@@ -54,7 +58,7 @@ class TerminalCoordinator {
         let sessionName = tree.nextSessionName()
         let station = Station()
         station.sessionName = sessionName
-        station.backend = config.backend
+        station.backend = runtimeBackend
         StationRegistry.shared.register(station)
 
         let leafId = UUID().uuidString
@@ -108,7 +112,7 @@ class TerminalCoordinator {
         let sessionName = tree.nextSessionName()
         let station = Station()
         station.sessionName = sessionName
-        station.backend = config.backend
+        station.backend = runtimeBackend
         StationRegistry.shared.register(station)
 
         let leafId = UUID().uuidString
@@ -224,7 +228,7 @@ class TerminalCoordinator {
         guard let closed = tree.closeFocusedLeaf() else { return }
 
         // Kill zmx session
-        SessionManager.killSession(closed.sessionName, backend: config.backend)
+        SessionManager.killSession(closed.sessionName, backend: runtimeBackend)
         config.agentSessions.removeValue(forKey: closed.sessionName)
 
         // Remove station

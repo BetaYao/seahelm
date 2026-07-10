@@ -1,6 +1,6 @@
 {
   "id": "claude",
-  "version": "2026.07.08.1",
+  "version": "2026.07.10.2",
   "min_engine_version": 1,
   "aliases": ["claude-code"],
   "default_status": "idle",
@@ -39,6 +39,17 @@
       "priority": 700,
       "region": "bottom_lines:10",
       "any": [{ "contains": ["error:"] }, { "line_regex": ["(?i)^\\s*error\\b"] }]
+    },
+    {
+      "id": "background_tasks",
+      "state": "running",
+      "priority": 380,
+      "region": "bottom_lines:4",
+      "any": [
+        { "line_regex": ["\\d+ shells? still running"] },
+        { "line_regex": ["\\d+ shells?\\s*(·|$)"] }
+      ],
+      "visible_working": true
     },
     {
       "id": "working_interrupt",

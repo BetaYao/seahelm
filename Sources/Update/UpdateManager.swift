@@ -68,12 +68,6 @@ class UpdateManager: NSObject {
         task.resume()
     }
 
-    func cancelDownload() {
-        downloadTask?.cancel()
-        downloadTask = nil
-        state = .idle
-    }
-
     func installAndRestart() {
         guard case .readyToInstall(let newAppPath) = state else { return }
 
