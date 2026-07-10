@@ -68,6 +68,24 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID"
 
+      - name: Resolve Ghostty commit
+        id: ghostty
+        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache GhosttyKit.xcframework
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/seahelm/ghosttykit
+          key: ghosttykit-${{ steps.ghostty.outputs.sha }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build GhosttyKit.xcframework
+        run: ./scripts/setup.sh
+
       - name: Build release artifact
         env:
           ARCH: ${{ matrix.arch }}
