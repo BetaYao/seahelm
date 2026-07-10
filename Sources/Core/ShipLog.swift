@@ -120,6 +120,9 @@ class ShipLog {
         agents.removeValue(forKey: terminalID)
         channels.removeValue(forKey: terminalID)
         orderedIDs.removeAll { $0 == terminalID }
+        statusEnteredAt.removeValue(forKey: terminalID)
+        hookRunningSince.removeValue(forKey: terminalID)
+        eventLog.removeValue(forKey: terminalID)
     }
 
     // MARK: - Worktree Index (1:N)

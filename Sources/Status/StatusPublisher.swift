@@ -94,9 +94,21 @@ class StatusPublisher {
         timer = nil
     }
 
+    /// Drop all per-terminal state for a dead pane. Caller must hold `lock`.
+    private func removeTerminalStateLocked(_ terminalID: String) {
+        trackers.removeValue(forKey: terminalID)
+        lastMessages.removeValue(forKey: terminalID)
+        runningStartTimes.removeValue(forKey: terminalID)
+        lastViewportHashes.removeValue(forKey: terminalID)
+        probedTypes.removeValue(forKey: terminalID)
+        probedAtCycle.removeValue(forKey: terminalID)
+    }
+
     func updateSurfaces(_ trees: [String: SplitTree]) {
         let inputWorktreePaths = Array(trees.keys)
         lock.lock()
+        let oldSurfaceIDs = Set(self.surfaces.keys)
+        let oldPaths = self.worktreePaths
         self.surfaces = [:]
         self.worktreePaths = [:]
         for (worktreePath, tree) in trees {
@@ -113,7 +125,19 @@ class StatusPublisher {
                 trackers[terminalID] = DebouncedStatusTracker()
             }
         }
+        // Self-healing: drop per-terminal state for panes that disappeared
+        // (pane closed, worktree deleted). Without this, trackers/hashes/probe
+        // caches grow for the app's lifetime.
+        let goneIDs = oldSurfaceIDs.subtracting(self.surfaces.keys)
+        for id in goneIDs { removeTerminalStateLocked(id) }
         lock.unlock()
+
+        // Aggregator is main-queue only; updateSurfaces is called from main.
+        for id in goneIDs {
+            if let path = oldPaths[id] {
+                aggregator?.unregisterTerminal(id, worktreePath: path)
+            }
+        }
 
         for (worktreePath, tree) in trees {
             let leaves = tree.allLeaves

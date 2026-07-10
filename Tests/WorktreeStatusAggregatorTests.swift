@@ -50,8 +50,10 @@ final class WorktreeStatusAggregatorTests: XCTestCase {
         let ws = mockDelegate.lastUpdatedStatus!
         XCTAssertEqual(ws.panes.count, 2)
         XCTAssertEqual(ws.statuses, [.running, .idle])
-        XCTAssertEqual(ws.mostRecentMessage, "done")
-        XCTAssertEqual(ws.mostRecentPaneIndex, 2)
+        // Representative pane = highest rollup rank (running t1 beats idle t2),
+        // so status/message/index all describe that pane.
+        XCTAssertEqual(ws.mostRecentMessage, "building")
+        XCTAssertEqual(ws.mostRecentPaneIndex, 1)
     }
 
     func testStatusChangeFiresPaneCallback() {

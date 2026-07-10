@@ -17,6 +17,12 @@ final class WorktreeTitleCache {
         return entries[worktreePath]?.title
     }
 
+    /// Drop the entry for a deleted worktree so churn doesn't grow the cache unbounded.
+    func evict(worktreePath: String) {
+        lock.lock(); defer { lock.unlock() }
+        entries.removeValue(forKey: worktreePath)
+    }
+
     /// Resolves the title, serving a fresh cache entry without disk access or
     /// resolving off the main thread on a miss/stale. `completion` runs on main.
     func title(worktreePath: String, lastUserPrompt: String, branch: String,

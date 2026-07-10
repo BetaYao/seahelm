@@ -208,9 +208,11 @@ class Station {
 
     /// Check if the process has exited
     var processExited: Bool {
-        guard let surface else { return true }
+        // Read `surface` inside the lock: destroy() frees it under the same
+        // lock, so a pointer captured before locking could dangle.
         ghosttyLock.lock()
         defer { ghosttyLock.unlock() }
+        guard let surface else { return true }
         return ghostty_surface_process_exited(surface)
     }
 
@@ -247,14 +249,17 @@ class Station {
     }
 
     func readViewportText() -> String? {
-        guard let surface else { return nil }
-
         // Hold ghosttyLock only for the C calls plus a raw byte copy. Building
         // the String (UTF-8 validation + allocation over a full viewport) used
         // to happen inside the lock, stalling main-thread input that contends
-        // for it during every background status poll.
+        // for it during every background status poll. `surface` must be read
+        // inside the lock — destroy() frees it under the same lock.
         var bytes: [UInt8]?
         ghosttyLock.lock()
+        guard let surface else {
+            ghosttyLock.unlock()
+            return nil
+        }
         let size = ghostty_surface_size(surface)
         if size.rows > 0, size.columns > 0 {
             var selection = ghostty_selection_s()
@@ -312,9 +317,9 @@ class Station {
 
     /// Get the process status for status detection
     var processStatus: ProcessStatus {
-        guard let surface else { return .unknown }
         ghosttyLock.lock()
         defer { ghosttyLock.unlock() }
+        guard let surface else { return .unknown }
         if ghostty_surface_process_exited(surface) {
             // We don't have the exit code from ghostty, so assume exited
             return .exited
@@ -377,11 +382,17 @@ class Station {
     func destroy() {
         recoveryTimer?.cancel()
         recoveryTimer = nil
-        if let surface {
-            ghostty_surface_request_close(surface)
-        }
+        view?.surface = nil
         view?.removeFromSuperview()
+        // Free under ghosttyLock so the background status poll can't be mid-read
+        // on this surface. Freeing (not just request_close) is what tears down
+        // the PTY and renderer — request_close only fires the host callback.
+        ghosttyLock.lock()
+        if let surface {
+            ghostty_surface_free(surface)
+        }
         surface = nil
+        ghosttyLock.unlock()
         view = nil
         containerView = nil
     }
