@@ -134,7 +134,7 @@ enum UsageSummaryFormatter {
             kind: .usage,
             iconName: snapshot.provider == .claude ? "sparkles" : "terminal",
             leadingText: snapshot.provider.displayName,
-            bodyText: "剩余 \(remaining)",
+            bodyText: "\(remaining) left",
             trailingText: "Today \(today)",
             usageProgress: snapshot.rateLimit?.progress,
             resetText: resetText

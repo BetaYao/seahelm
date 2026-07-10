@@ -90,7 +90,7 @@ final class CompiledManifest {
             return afterLastHorizontalRule(input.screen)
         // The prompt-box / prompt-marker regions need shell/OSC133 marker context
         // we don't yet thread through here; fall back to whole_recent until the
-        // OSC/prompt tracker lands (阶段 A5).
+        // OSC/prompt tracker lands (phase A5).
         case .promptBoxBody, .afterLastPromptMarker, .beforeCurrentPromptMarker:
             return input.screen
         }

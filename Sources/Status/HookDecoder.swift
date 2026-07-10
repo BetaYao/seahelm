@@ -1,7 +1,7 @@
 import Foundation
 
-/// 被动通道的信号员:webhook 事件 → NormalizedEvent。
-/// 映射表见 spec「14 种 webhook 事件 → Kind 对齐表」。
+/// Signalman for the passive channel: webhook events → NormalizedEvent.
+/// See the spec's "14 webhook events → Kind mapping table".
 struct HookDecoder: SignalDecoder {
     let terminalID: String
     let event: WebhookEvent

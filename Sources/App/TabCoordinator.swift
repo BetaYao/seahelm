@@ -1153,10 +1153,10 @@ extension TabCoordinator {
                     watchMsg = cr
                 } else if passed {
                     watchMsg = self.config.firstMate.autoReview
-                        ? "验船通过 · review 就绪(手动拉起)"
-                        : "验船通过"
+                        ? "Inspection passed · review ready (launch manually)"
+                        : "Inspection passed"
                 } else {
-                    watchMsg = "验船失败: \(firstFailedCmd!)"
+                    watchMsg = "Inspection failed: \(firstFailedCmd!)"
                 }
                 let watchAction = FirstMateAction(
                     kind: isAutoCommit ? .autoCommit : .inspect,

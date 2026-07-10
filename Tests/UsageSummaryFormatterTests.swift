@@ -18,7 +18,7 @@ final class UsageSummaryFormatterTests: XCTestCase {
 
         XCTAssertEqual(frame.kind, .usage)
         XCTAssertEqual(frame.leadingText, "Codex")
-        XCTAssertEqual(frame.bodyText, "剩余 72%")
+        XCTAssertEqual(frame.bodyText, "72% left")
         XCTAssertEqual(frame.trailingText, "Today 5.7M")
         XCTAssertEqual(frame.usageProgress ?? -1, 0.28, accuracy: 0.001)
         XCTAssertEqual(frame.resetText, "2h 19m")
@@ -114,7 +114,7 @@ final class UsageSummaryFormatterTests: XCTestCase {
         XCTAssertEqual(frames[claudeIdx].secondaryTrailingText, "14%, Resets 5d 14h 59m")
         XCTAssertEqual(frames[codexIdx].kind, .usage)
         XCTAssertEqual(frames[codexIdx].leadingText, "Codex")
-        XCTAssertEqual(frames[codexIdx].bodyText, "剩余 72%")
+        XCTAssertEqual(frames[codexIdx].bodyText, "72% left")
         XCTAssertEqual(frames[codexIdx].trailingText, "Today 5.7M")
         XCTAssertEqual(frames[codexIdx].secondaryText, "")
         XCTAssertNil(frames[codexIdx].secondaryUsageProgress)

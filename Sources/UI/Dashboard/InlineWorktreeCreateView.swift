@@ -284,11 +284,11 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 
     private static let commandCompletions: [CommandItem] = [
-        CommandItem(name: "new",       args: "<task>",            desc: "新建 worktree 并派活"),
-        CommandItem(name: "order",     args: "<branch> <task>",   desc: "给现有 worktree 派活"),
-        CommandItem(name: "commit",    args: "<branch>",          desc: "提交改动"),
-        CommandItem(name: "return",    args: "<branch>",          desc: "返港 · 删除 worktree"),
-        CommandItem(name: "broadcast", args: "<task>",            desc: "广播给全部 agent"),
+        CommandItem(name: "new",       args: "<task>",            desc: "Create a worktree and assign a task"),
+        CommandItem(name: "order",     args: "<branch> <task>",   desc: "Assign a task to an existing worktree"),
+        CommandItem(name: "commit",    args: "<branch>",          desc: "Commit changes"),
+        CommandItem(name: "return",    args: "<branch>",          desc: "Return to port · delete worktree"),
+        CommandItem(name: "broadcast", args: "<task>",            desc: "Broadcast to all agents"),
     ]
 
     func textDidChange(_ notification: Notification) {

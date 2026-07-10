@@ -13,7 +13,7 @@ protocol NewBranchDialogDelegate: AnyObject {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String)
 }
 
-/// Zoom 风格的新分支弹窗
+/// Zoom-style new branch dialog
 class NewBranchDialog: NSViewController {
     enum Layout {
         static let actionButtonsFillEqually = true
@@ -42,14 +42,14 @@ class NewBranchDialog: NSViewController {
     }
     
     override func loadView() {
-        // 创建圆角卡片容器
+        // Rounded card container
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 280))
         container.wantsLayer = true
         container.layer?.backgroundColor = SemanticColors.panel.cgColor
         container.layer?.cornerRadius = 12
         container.layer?.masksToBounds = false
         
-        // 添加阴影
+        // Shadow
         container.layer?.shadowColor = NSColor.black.withAlphaComponent(0.4).cgColor
         container.layer?.shadowOpacity = 0.5
         container.layer?.shadowRadius = 20
@@ -60,34 +60,34 @@ class NewBranchDialog: NSViewController {
         container.setAccessibilityRole(.group)
         self.view = container
         
-        // 标题
+        // Title
         let titleLabel = NSTextField(labelWithString: "New Thread")
         titleLabel.font = ZoomTypography.title
         titleLabel.textColor = SemanticColors.text
         titleLabel.alignment = .center
         
-        // Repository 选择
+        // Repository picker
         let repoLabel = createLabel("Repository")
         setupRepoPopup()
         
-        // Branch name 输入
+        // Branch name input
         let branchLabel = createLabel("Thread name")
         setupBranchField()
         
-        // Base branch 选择
+        // Base branch picker
         let baseLabel = createLabel("Based on")
         setupBaseBranchPopup()
         
-        // 错误提示
+        // Error message
         errorLabel.textColor = SemanticColors.danger
         errorLabel.font = ZoomTypography.caption
         errorLabel.isHidden = true
         errorLabel.maximumNumberOfLines = 2
         
-        // 按钮
+        // Buttons
         setupButtons()
         
-        // 布局
+        // Layout
         let formStack = NSStackView(views: [
             createFormRow(repoLabel, repoPopup),
             createFormRow(branchLabel, branchField),
@@ -135,7 +135,7 @@ class NewBranchDialog: NSViewController {
             cancelButton.heightAnchor.constraint(equalToConstant: Layout.actionButtonHeight),
         ])
         
-        // 加载第一个 repo 的分支
+        // Load branches of the first repo
         if !repoPaths.isEmpty {
             loadBranches(for: repoPaths[0])
         }
@@ -200,10 +200,10 @@ class NewBranchDialog: NSViewController {
             ]
         )
         
-        // 添加内边距
+        // Add padding
         textField.cell?.focusRingType = .none
         
-        // 监听聚焦状态改变边框颜色
+        // Update border color on focus change
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(textFieldDidBeginEditing),
@@ -225,7 +225,7 @@ class NewBranchDialog: NSViewController {
         popup.layer?.borderWidth = 1
         popup.layer?.borderColor = SemanticColors.line.cgColor
         
-        // 设置文字颜色通过 attributedTitle
+        // Set text color via attributedTitle
         for item in popup.itemArray {
             let attributedTitle = NSAttributedString(
                 string: item.title,
@@ -354,7 +354,7 @@ class NewBranchDialog: NSViewController {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
         
-        // 震动动画
+        // Shake animation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.1
             self.view.animator().layer?.transform = CATransform3DMakeTranslation(-5, 0, 0)

@@ -755,7 +755,7 @@ class ShipLog {
         if let cmd = CommandParser.parse(message) {
             executeCommand(cmd)
         } else {
-            reply(to: message, content: "请使用 /help 查看支持的命令")
+            reply(to: message, content: "Use /help to see supported commands")
         }
     }
 
@@ -763,18 +763,18 @@ class ShipLog {
         switch cmd.command {
         case "help":
             let help = """
-            **Seahelm 命令列表**
-            `/idea <描述>` — 新增一个 idea
-            `/status` — 查看所有 agent 状态
-            `/list` — 列出所有 agent
-            `/send <project> <command>` — 给指定 agent 下指令
-            `/help` — 显示帮助
+            **Seahelm Commands**
+            `/idea <description>` — Add a new idea
+            `/status` — Show status of all agents
+            `/list` — List all agents
+            `/send <project> <command>` — Send a command to an agent
+            `/help` — Show this help
             """
             reply(to: cmd.rawMessage, content: help)
 
         case "idea":
             guard !cmd.args.isEmpty else {
-                reply(to: cmd.rawMessage, content: "用法: `/idea <描述>`")
+                reply(to: cmd.rawMessage, content: "Usage: `/idea <description>`")
                 return
             }
             let item = IdeaStore.shared.add(
@@ -812,21 +812,21 @@ class ShipLog {
         case "send":
             let parts = cmd.args.split(separator: " ", maxSplits: 1)
             guard parts.count == 2 else {
-                reply(to: cmd.rawMessage, content: "用法: `/send <project> <command>`")
+                reply(to: cmd.rawMessage, content: "Usage: `/send <project> <command>`")
                 return
             }
             let project = String(parts[0])
             let command = String(parts[1])
             let matched = sailorsForProject(project)
             guard let target = matched.first else {
-                reply(to: cmd.rawMessage, content: "未找到 project: \(project)")
+                reply(to: cmd.rawMessage, content: "Project not found: \(project)")
                 return
             }
             sendCommand(to: target.id, command: command)
             reply(to: cmd.rawMessage, content: "Command sent to \(target.project): \(command)")
 
         default:
-            reply(to: cmd.rawMessage, content: "未知命令: /\(cmd.command)\n请使用 /help 查看支持的命令")
+            reply(to: cmd.rawMessage, content: "Unknown command: /\(cmd.command)\nUse /help to see supported commands")
         }
     }
 

@@ -53,7 +53,7 @@ class UpdateBanner: NSView {
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(progressBar)
 
-        // Action button (更新 / 立即重启 / 重试)
+        // Action button (Update / Restart Now / Retry)
         actionButton.bezelStyle = .rounded
         actionButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         actionButton.target = self
@@ -63,7 +63,7 @@ class UpdateBanner: NSView {
         addSubview(actionButton)
 
         // Skip button
-        skipButton.title = "跳过"
+        skipButton.title = "Skip"
         skipButton.bezelStyle = .recessed
         skipButton.isBordered = false
         skipButton.font = NSFont.systemFont(ofSize: 11)
@@ -97,8 +97,8 @@ class UpdateBanner: NSView {
 
     func showNewVersion(_ ver: String) {
         version = ver
-        statusLabel.stringValue = "新版本 v\(ver) 可用"
-        actionButton.title = "更新"
+        statusLabel.stringValue = "New version v\(ver) available"
+        actionButton.title = "Update"
         actionButton.setAccessibilityIdentifier("update.installButton")
         actionButton.isHidden = false
         skipButton.isHidden = false
@@ -121,7 +121,7 @@ class UpdateBanner: NSView {
             setBannerVisible(false)
 
         case .downloading(let progress):
-            statusLabel.stringValue = "下载中... \(Int(progress * 100))%"
+            statusLabel.stringValue = "Downloading... \(Int(progress * 100))%"
             progressBar.doubleValue = progress
             progressBar.isHidden = false
             actionButton.isHidden = true
@@ -129,28 +129,28 @@ class UpdateBanner: NSView {
             setBannerVisible(true)
 
         case .extracting:
-            statusLabel.stringValue = "正在解压..."
+            statusLabel.stringValue = "Extracting..."
             progressBar.isHidden = true
             actionButton.isHidden = true
             skipButton.isHidden = true
 
         case .verifying:
-            statusLabel.stringValue = "正在验证签名..."
+            statusLabel.stringValue = "Verifying signature..."
             progressBar.isHidden = true
             actionButton.isHidden = true
             skipButton.isHidden = true
 
         case .readyToInstall:
-            statusLabel.stringValue = "准备就绪"
-            actionButton.title = "立即重启"
+            statusLabel.stringValue = "Ready"
+            actionButton.title = "Restart Now"
             actionButton.setAccessibilityIdentifier("update.restartButton")
             actionButton.isHidden = false
             skipButton.isHidden = true
             progressBar.isHidden = true
 
         case .failed(let error):
-            statusLabel.stringValue = "更新失败: \(error.localizedDescription)"
-            actionButton.title = "重试"
+            statusLabel.stringValue = "Update failed: \(error.localizedDescription)"
+            actionButton.title = "Retry"
             actionButton.setAccessibilityIdentifier("update.installButton")
             actionButton.isHidden = false
             skipButton.isHidden = false
@@ -161,9 +161,9 @@ class UpdateBanner: NSView {
     // MARK: - Actions
 
     @objc private func actionClicked() {
-        if actionButton.title == "立即重启" {
+        if actionButton.title == "Restart Now" {
             delegate?.updateBannerDidClickRestart(self)
-        } else if actionButton.title == "重试" {
+        } else if actionButton.title == "Retry" {
             delegate?.updateBannerDidClickRetry(self)
         } else {
             delegate?.updateBannerDidClickInstall(self)

@@ -333,7 +333,7 @@ private struct GetUpdatesResult {
                             // Check for ref_msg (quoted reply)
                             if let refMsg = item["ref_msg"] as? [String: Any],
                                let title = refMsg["title"] as? String {
-                                text = "[引用: \(title)]\n\(t.trimmingCharacters(in: .whitespaces))"
+                                text = "[Quote: \(title)]\n\(t.trimmingCharacters(in: .whitespaces))"
                             } else {
                                 text = t.trimmingCharacters(in: .whitespaces)
                             }
