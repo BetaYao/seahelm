@@ -35,6 +35,37 @@ final class SessionTitleLookupTests: XCTestCase {
         XCTAssertEqual(title, "Refactor the parser")
     }
 
+    func testReturnsAITitleFromModernSessionFormat() throws {
+        // Newer Claude Code stopped writing `summary` records; the session title
+        // lives in `ai-title` records instead (regression: cards fell back to the
+        // last prompt because only `summary` was parsed).
+        let wt = "/Users/me/repo-worktrees/feature-ai"
+        let dir = projectDir(for: wt)
+        let lines = [
+            #"{"type":"mode","mode":"normal","sessionId":"abc"}"#,
+            #"{"type":"ai-title","aiTitle":"测试 all-in-one 本地部署","sessionId":"abc"}"#,
+            #"{"type":"user","message":{"role":"user","content":"hi"}}"#,
+        ].joined(separator: "\n")
+        try lines.write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
+
+        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root)
+        XCTAssertEqual(title, "测试 all-in-one 本地部署")
+    }
+
+    func testCustomTitleWinsOverAITitle() throws {
+        // A user rename (custom-title) beats the AI-generated title.
+        let wt = "/Users/me/repo-worktrees/feature-custom"
+        let dir = projectDir(for: wt)
+        let lines = [
+            #"{"type":"ai-title","aiTitle":"AI title"}"#,
+            #"{"type":"custom-title","customTitle":"My name"}"#,
+        ].joined(separator: "\n")
+        try lines.write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
+
+        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root)
+        XCTAssertEqual(title, "My name")
+    }
+
     func testReturnsNilWhenNoSummary() throws {
         let wt = "/Users/me/repo-worktrees/feature-y"
         let dir = projectDir(for: wt)

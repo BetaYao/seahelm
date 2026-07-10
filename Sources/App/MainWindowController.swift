@@ -1039,7 +1039,7 @@ class SeahelmWindow: NSWindow {
         case .prevWorktree:
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
-            mwc.tabCoordinator.dashboardVC?.toggleLeftColumnCollapse(); return true
+            mwc.tabCoordinator.dashboardVC?.toggleSidebarDefaultDashboard(); return true
         case .exitInsert:
             if mwc.keyboardMode.handleEsc(hasCommand: true, now: ProcessInfo.processInfo.systemUptime) {
                 mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()

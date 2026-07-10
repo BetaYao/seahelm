@@ -441,6 +441,21 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// First Mate icon (title bar) → toggle the First Mate column.
     func toggleFirstMateSide() { toggleSide(.firstMate) }
 
+    /// Cmd+B: toggle the left side column. Opening from a collapsed state defaults
+    /// to the dashboard (First Mate overview) pane instead of whatever content was
+    /// left mounted; when a pane is showing, Cmd+B collapses the column.
+    func toggleSidebarDefaultDashboard() {
+        guard displayMode == .worktree else {
+            toggleLeftColumnCollapse()
+            return
+        }
+        if isLeftColumnCollapsed {
+            toggleSide(.firstMate)
+        } else {
+            collapseCurrentSide()
+        }
+    }
+
     /// Each pane icon toggles its own panel: click when inactive → open that pane;
     /// click when already the active pane → collapse the whole side column.
     private func toggleSide(_ side: SidePane) {

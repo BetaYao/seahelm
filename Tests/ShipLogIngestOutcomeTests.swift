@@ -19,10 +19,12 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         super.tearDown()
     }
 
-    func testSessionOnlyScreenIdleOverridesStaleHookRunning() {
-        // claude is session_only → screen is authoritative. A (debounced) scan
-        // idle overrides a stale hook=running, instead of the old
-        // highestPriority merge that pinned it to running forever.
+    func testSessionOnlyHookRunningPromotesOverStaleScanIdle() {
+        // Leading edge: a hook running edge (prompt submitted) must surface
+        // immediately even while the scan still shows the pre-prompt idle prompt —
+        // the spinner isn't on screen yet. Within the grace window scan idle does
+        // NOT reclaim, so the card flips to running without waiting for the slow scan.
+        ShipLog.hookRunningGrace = 3.0
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
@@ -32,7 +34,32 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
             if callCount == 2 { captured = o; exp.fulfill() }
         }
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
-                                              kind: .sessionStarted(label: "Session started")))
+                                              kind: .userPrompt("do the thing")))
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .idle, message: "", activity: [],
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 0, tasks: [])))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured?.newStatus, .running)
+    }
+
+    func testStaleHookRunningReclaimedByScanIdleAfterGrace() {
+        // Trailing edge safety: once the grace window has passed (agent genuinely
+        // stopped, or Esc/interrupt fired no Stop hook), a scan idle reclaims the
+        // status so it does not stick on "running" forever. Grace=0 exercises this
+        // deterministically without a wall-clock wait.
+        ShipLog.hookRunningGrace = 0
+        defer { ShipLog.hookRunningGrace = 3.0 }
+        var callCount = 0
+        var captured: IngestOutcome?
+        let exp = expectation(description: "outcome")
+        exp.assertForOverFulfill = false
+        ShipLog.shared.onOutcome = { o in
+            callCount += 1
+            if callCount == 2 { captured = o; exp.fulfill() }
+        }
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .userPrompt("do the thing")))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,

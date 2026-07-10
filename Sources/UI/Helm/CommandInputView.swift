@@ -1,6 +1,6 @@
 import AppKit
 
-/// Helm command line: `› ____  / 命令 · @ 仓库 · # agent`.
+/// Helm command line: a bordered input box (`/ 命令 · @ 仓库 · # agent` placeholder).
 /// Pure input surface — it emits text changes and submit; the cockpit owns the
 /// autocomplete dropdown (so it can float over the Orders/Watch list unclipped).
 /// Keyboard navigation of the menu is deferred to WP-6; completion is mouse-driven.
@@ -8,10 +8,7 @@ final class CommandInputView: NSView {
 
     // Bare-TUI palette (prototype THEME.A)
     private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
-    private static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
     private static let accent     = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
-    private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
-    private static let orange     = NSColor(srgbRed: 0xff/255, green: 0x8a/255, blue: 0x3d/255, alpha: 1)
 
     enum MenuKey { case up, down, accept }
 
@@ -24,13 +21,12 @@ final class CommandInputView: NSView {
     var onMenuKey: ((MenuKey) -> Bool)?
 
     private let field = FocusReportingTextField()
-    private var hintRow: NSView?
     private let box = NSView()
     private let spinner = NSProgressIndicator()
     private var savedPlaceholder: String?
 
     /// Anchors of the bordered input box, so the host can align the autocomplete
-    /// dropdown to the box's bottom edge (not below the hint row).
+    /// dropdown to the box's bottom edge.
     var boxBottomAnchor: NSLayoutYAxisAnchor { box.bottomAnchor }
     var boxLeadingAnchor: NSLayoutXAxisAnchor { box.leadingAnchor }
     var boxTrailingAnchor: NSLayoutXAxisAnchor { box.trailingAnchor }
@@ -58,12 +54,7 @@ final class CommandInputView: NSView {
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        let prompt = NSTextField(labelWithString: "›")
-        prompt.font = AppFont.mono(size: 14, weight: .bold)
-        prompt.textColor = Self.accent
-        prompt.translatesAutoresizingMaskIntoConstraints = false
-
-        // Bordered rounded input box (prototype). The `›` prompt sits outside it.
+        // Bordered rounded input box (prototype).
         box.wantsLayer = true
         box.layer?.cornerRadius = 7
         box.layer?.borderWidth = 1
@@ -82,10 +73,6 @@ final class CommandInputView: NSView {
         field.action = #selector(submit)
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityIdentifier("helm.commandInput")
-        field.onFocusChange = { [weak self] focused in
-            // Hint shows whenever the field is focused (not tied to the menu).
-            if focused { self?.hintRow?.isHidden = false }
-        }
         box.addSubview(field)
 
         spinner.style = .spinning
@@ -94,22 +81,13 @@ final class CommandInputView: NSView {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(spinner)
 
-        let hint = makeHintRow()
-        hint.isHidden = true  // only shown while the field is focused
-        hintRow = hint
-
-        addSubview(prompt)
         addSubview(box)
-        addSubview(hint)
 
         NSLayoutConstraint.activate([
             box.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            box.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 30),
+            box.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             box.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             box.heightAnchor.constraint(equalToConstant: 40),
-
-            prompt.trailingAnchor.constraint(equalTo: box.leadingAnchor, constant: -9),
-            prompt.centerYAnchor.constraint(equalTo: box.centerYAnchor),
 
             field.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
             field.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
@@ -118,37 +96,8 @@ final class CommandInputView: NSView {
             spinner.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
             spinner.centerYAnchor.constraint(equalTo: box.centerYAnchor),
 
-            hint.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 2),
-            hint.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor),
-            hint.topAnchor.constraint(equalTo: box.bottomAnchor, constant: 8),
-            hint.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
-    }
-
-    private func makeHintRow() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 16
-        row.translatesAutoresizingMaskIntoConstraints = false
-        let specs: [(String, NSColor, String)] = [
-            ("/", Self.accent, "命令"),
-            ("@", Self.cornflower, "仓库 / worktree"),
-            ("#", Self.orange, "agent"),
-        ]
-        for (sym, color, label) in specs {
-            let s = NSTextField(labelWithString: "")
-            let attr = NSMutableAttributedString(
-                string: sym,
-                attributes: [.foregroundColor: color,
-                             .font: AppFont.mono(size: 10.5, weight: .bold)])
-            attr.append(NSAttributedString(
-                string: " \(label)",
-                attributes: [.foregroundColor: Self.inkFaint,
-                             .font: AppFont.mono(size: 10.5, weight: .regular)]))
-            s.attributedStringValue = attr
-            row.addArrangedSubview(s)
-        }
-        return row
     }
 
     func focusInput() { window?.makeFirstResponder(field) }
@@ -196,8 +145,6 @@ extension CommandInputView: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         onTextChanged?(field.stringValue)
     }
-
-    func controlTextDidEndEditing(_ obj: Notification) { hintRow?.isHidden = true }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
