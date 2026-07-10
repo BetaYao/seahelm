@@ -119,7 +119,7 @@ final class TitleBarView: NSView {
     }
 
     /// The single lit toolbar tool. Exactly one icon shows the accent tint; every
-    /// other reverts to the idle grey ("选中谁点亮谁,其他全灭").
+    /// other reverts to the idle grey (only the selected one lights up).
     enum ActiveTool { case dashboard, files, changes, firstMate, none }
     func setActiveTool(_ tool: ActiveTool) {
         let idle = NSColor(hex: 0x888888)
@@ -181,18 +181,14 @@ final class TitleBarView: NSView {
         leftClusterStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leftClusterStack)
 
-        // Order: Dashboard · 主题 · 文件 · 改动 · First Mate.
+        // Order: Dashboard · Files · Changes · First Mate. The theme toggle
+        // lives at the far right of the title bar (see the tab-strip section).
         // (The collapse icon was removed — each pane icon now toggles its own
         // panel: click to open, click again to collapse.)
         configureArcIconButton(dashboardButton, symbol: "square.grid.2x2",
                                identifier: "titlebar.dashboard", label: "Dashboard",
                                hoverTracking: false, action: #selector(dashboardClicked))
         leftClusterStack.addArrangedSubview(dashboardButton)
-
-        configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
-                               identifier: "titlebar.themeToggle", label: "Toggle Theme",
-                               action: #selector(themeClicked))
-        leftClusterStack.addArrangedSubview(themeButton)
 
         let panes: [(LeftPane, String, String)] = [
             (.file, "folder", "Files"),
@@ -278,8 +274,14 @@ final class TitleBarView: NSView {
         tabOverflowButton.setAccessibilityIdentifier("titlebar.tabOverflow")
         addSubview(tabOverflowButton)
 
+        // Theme toggle — anchored at the far right of the title bar.
+        configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
+                               identifier: "titlebar.themeToggle", label: "Toggle Theme",
+                               action: #selector(themeClicked))
+        addSubview(themeButton)
+
         scrollTrailingToOverflow = tabStripScroll.trailingAnchor.constraint(equalTo: tabOverflowButton.leadingAnchor, constant: -6)
-        scrollTrailingToEdge = tabStripScroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12)
+        scrollTrailingToEdge = tabStripScroll.trailingAnchor.constraint(equalTo: themeButton.leadingAnchor, constant: -6)
         scrollTrailingToEdge?.isActive = true
 
         NSLayoutConstraint.activate([
@@ -287,7 +289,10 @@ final class TitleBarView: NSView {
             tabStripScroll.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             tabStripScroll.heightAnchor.constraint(equalToConstant: 22),
 
-            tabOverflowButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            themeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            themeButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+
+            tabOverflowButton.trailingAnchor.constraint(equalTo: themeButton.leadingAnchor, constant: -6),
             tabOverflowButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             tabOverflowButton.heightAnchor.constraint(equalToConstant: 22),
 

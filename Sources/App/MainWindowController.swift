@@ -607,12 +607,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
         switch trigger {
         case "/":
             pool = [
-                ("new", "开启一个新任务会话"),
-                ("order", "向 agent 下达指令"),
-                ("commit", "提交并推送当前改动"),
-                ("return", "召回 agent · 结束会话"),
-                ("broadcast", "向全员广播通知"),
-                ("add", "添加一个 repo 到工作区"),
+                ("new", "Start a new task session"),
+                ("order", "Give an order to the agent"),
+                ("commit", "Commit and push current changes"),
+                ("return", "Recall agent · end session"),
+                ("broadcast", "Broadcast to everyone"),
+                ("add", "Add a repo to the workspace"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {

@@ -1,7 +1,7 @@
 import Foundation
 
-/// 主动通道的信号员:扫屏文本 + 进程状态 → NormalizedEvent(.screenObserved)。
-/// 取数(瞭望员)发生在 StatusPublisher;本类型只负责解码。
+/// Signalman for the active channel: screen-scan text + process state → NormalizedEvent (.screenObserved).
+/// Data capture (the lookout) happens in StatusPublisher; this type only decodes.
 struct ScanDecoder: SignalDecoder {
     let terminalID: String
     let detector: StatusDetector

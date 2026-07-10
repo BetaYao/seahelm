@@ -5,8 +5,8 @@ struct PendingOrder: Equatable, Identifiable {
     let action: FirstMateAction
 }
 
-/// 红区待批航令队列。同一 (worktreePath, kind) 至多一条(幂等)。
-/// 必须在主线程使用。
+/// Red-zone pending-orders queue. At most one entry per (worktreePath, kind) — idempotent.
+/// Must be used on the main thread.
 final class PendingOrdersQueue {
     private(set) var orders: [PendingOrder] = []
 

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Helm command line: a bordered input box (`/ 命令 · @ 仓库 · # agent` placeholder).
+/// Helm command line: a bordered input box (`/ command · @ repo · # agent` placeholder).
 /// Pure input surface — it emits text changes and submit; the cockpit owns the
 /// autocomplete dropdown (so it can float over the Orders/Watch list unclipped).
 /// Keyboard navigation of the menu is deferred to WP-6; completion is mouse-driven.
@@ -67,7 +67,7 @@ final class CommandInputView: NSView {
         field.focusRingType = .none
         field.font = AppFont.mono(size: 12.5, weight: .regular)
         field.textColor = Self.ink
-        field.placeholderString = "下达指令 — / 命令 · @ 仓库 · # agent"
+        field.placeholderString = "Give an order — / command · @ repo · # agent"
         field.delegate = self
         field.target = self
         field.action = #selector(submit)
@@ -104,7 +104,7 @@ final class CommandInputView: NSView {
 
     /// Show a busy state while an async command runs: disable editing, swap the
     /// placeholder to `message`, and spin.
-    func setLoading(_ loading: Bool, message: String = "处理中…") {
+    func setLoading(_ loading: Bool, message: String = "Working…") {
         if loading {
             savedPlaceholder = field.placeholderString
             field.stringValue = ""

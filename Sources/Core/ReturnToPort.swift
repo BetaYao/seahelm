@@ -9,11 +9,11 @@ struct PortPrecheck: Equatable {
 
 enum ReturnToPort {
     static func warningSummary(_ p: PortPrecheck) -> String {
-        guard p.hasWarnings else { return "无风险,可安全入坞" }
+        guard p.hasWarnings else { return "No risk, safe to dock" }
         var parts: [String] = []
-        if p.hasUnmergedCommits { parts.append("有未 merge 的提交") }
-        if p.hasUnpushedCommits { parts.append("有未 push 的提交") }
-        if p.hasUncommittedChanges { parts.append("有未提交的改动") }
+        if p.hasUnmergedCommits { parts.append("unmerged commits") }
+        if p.hasUnpushedCommits { parts.append("unpushed commits") }
+        if p.hasUncommittedChanges { parts.append("uncommitted changes") }
         return "⚠ " + parts.joined(separator: ";")
     }
 }

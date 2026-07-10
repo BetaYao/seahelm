@@ -617,7 +617,7 @@ final class OrderCardView: NSTableCellView {
         dismissButton.setButtonType(.momentaryChange)
         dismissButton.target = self
         dismissButton.action = #selector(tappedDismiss)
-        dismissButton.toolTip = "忽略此 suggestion"
+        dismissButton.toolTip = "Dismiss this suggestion"
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
         messageLabel.font = AppFont.mono(size: 12.5, weight: .regular)

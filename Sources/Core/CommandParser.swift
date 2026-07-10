@@ -8,7 +8,7 @@ struct ParsedCommand {
 
 enum CommandParser {
     /// Parse a slash command from an inbound message.
-    /// "/idea 做一个登录页" → ParsedCommand(command: "idea", args: "做一个登录页")
+    /// "/idea build a login page" → ParsedCommand(command: "idea", args: "build a login page")
     /// "hello" → nil (not a command)
     static func parse(_ message: InboundMessage) -> ParsedCommand? {
         let trimmed = message.content.trimmingCharacters(in: .whitespaces)

@@ -244,7 +244,7 @@ class SettingsViewController: NSViewController {
     private func buildWeComTab() -> NSView {
         let view = NSView()
 
-        let infoLabel = NSTextField(labelWithString: "企业微信智能机器人长连接配置。需要在企业微信后台创建智能机器人获取 Bot ID 和 Secret。")
+        let infoLabel = NSTextField(labelWithString: "WeCom smart bot persistent connection settings. Create a smart bot in the WeCom admin console to get a Bot ID and Secret.")
         infoLabel.font = NSFont.systemFont(ofSize: 11)
         infoLabel.textColor = Theme.textSecondary
         infoLabel.lineBreakMode = .byWordWrapping
@@ -270,13 +270,13 @@ class SettingsViewController: NSViewController {
         secretLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(secretLabel)
 
-        wecomSecretField.placeholderString = "认证密钥"
+        wecomSecretField.placeholderString = "Auth secret"
         wecomSecretField.font = AppFont.mono(size: 12, weight: .regular)
         wecomSecretField.stringValue = config.wecomBot?.secret ?? ""
         wecomSecretField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wecomSecretField)
 
-        let nameLabel = NSTextField(labelWithString: "显示名称:")
+        let nameLabel = NSTextField(labelWithString: "Display name:")
         nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         nameLabel.textColor = Theme.textSecondary
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -289,7 +289,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(wecomNameField)
 
         wecomAutoConnectCheckbox.setButtonType(.switch)
-        wecomAutoConnectCheckbox.title = "启动时自动连接"
+        wecomAutoConnectCheckbox.title = "Connect automatically at launch"
         wecomAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
         wecomAutoConnectCheckbox.state = (config.wecomBot?.resolvedAutoConnect ?? true) ? .on : .off
         wecomAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false
@@ -338,7 +338,7 @@ class SettingsViewController: NSViewController {
     private func buildWeChatTab() -> NSView {
         let view = NSView()
 
-        let infoLabel = NSTextField(labelWithString: "微信个人号 iLink 长轮询连接。需通过 QR 码扫码获取 Bot Token。")
+        let infoLabel = NSTextField(labelWithString: "Personal WeChat iLink long-polling connection. Scan a QR code to get a Bot Token.")
         infoLabel.font = NSFont.systemFont(ofSize: 11)
         infoLabel.textColor = Theme.textSecondary
         infoLabel.lineBreakMode = .byWordWrapping
@@ -352,14 +352,14 @@ class SettingsViewController: NSViewController {
         tokenLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tokenLabel)
 
-        wechatTokenField.placeholderString = "QR 扫码获取的 bot_token"
+        wechatTokenField.placeholderString = "bot_token from QR scan"
         wechatTokenField.font = AppFont.mono(size: 12, weight: .regular)
         wechatTokenField.stringValue = config.wechat?.botToken ?? ""
         wechatTokenField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wechatTokenField)
 
         wechatAutoConnectCheckbox.setButtonType(.switch)
-        wechatAutoConnectCheckbox.title = "启动时自动连接"
+        wechatAutoConnectCheckbox.title = "Connect automatically at launch"
         wechatAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
         wechatAutoConnectCheckbox.state = (config.wechat?.resolvedAutoConnect ?? true) ? .on : .off
         wechatAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false

@@ -11,13 +11,13 @@ enum UpdateError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .networkError(let e): return "网络错误: \(e.localizedDescription)"
-        case .extractionFailed: return "解压失败"
-        case .signatureInvalid: return "签名验证失败"
-        case .noMatchingAsset: return "未找到匹配的安装包"
-        case .invalidAppPath: return "应用路径无效"
-        case .versionParseError(let v): return "版本号解析失败: \(v)"
-        case .rateLimited: return "请求过于频繁，稍后再试"
+        case .networkError(let e): return "Network error: \(e.localizedDescription)"
+        case .extractionFailed: return "Extraction failed"
+        case .signatureInvalid: return "Signature verification failed"
+        case .noMatchingAsset: return "No matching installer found"
+        case .invalidAppPath: return "Invalid app path"
+        case .versionParseError(let v): return "Failed to parse version: \(v)"
+        case .rateLimited: return "Too many requests, try again later"
         }
     }
 }

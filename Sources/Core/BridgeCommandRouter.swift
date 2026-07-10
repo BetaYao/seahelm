@@ -32,7 +32,7 @@ struct BridgeCommandRouter {
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",
-                                          message: "广播给 \(activeSailorCount()) 个 agent", payload: task))
+                                          message: "Broadcast to \(activeSailorCount()) agents", payload: task))
         }
     }
 }

@@ -15,25 +15,25 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("⌘E", "总览 ⇄ worktree"),
-        ("h j k l", "移动焦点"),
-        ("1 – 9", "跳到 / 进入第 N 个 worktree"),
-        ("⏎ / i", "进入终端"),
-        ("f / c / m", "文件 / 改动 / First Mate 侧栏"),
-        ("⌘1 / ⌘2 / ⌘3", "First Mate / 文件 / 改动"),
-        ("⌃⇥ / ⌃⇧⇥", "下 / 上一个 worktree"),
-        ("d", "删除聚焦 worktree"),
-        ("n", "新建 worktree"),
+        ("⌘E", "Overview ⇄ worktree"),
+        ("h j k l", "Move focus"),
+        ("1 – 9", "Jump to / enter Nth worktree"),
+        ("⏎ / i", "Enter terminal"),
+        ("f / c / m", "Files / Changes / First Mate sidebar"),
+        ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
+        ("⌃⇥ / ⌃⇧⇥", "Next / previous worktree"),
+        ("d", "Delete focused worktree"),
+        ("n", "New worktree"),
         ("⌘esc", "INSERT → NORMAL"),
-        ("?", "快捷键说明"),
+        ("?", "Keyboard shortcuts"),
     ]
     private static let helmKeys: [(String, String)] = [
-        ("⌘D / ⌘⇧D", "水平 / 垂直分屏"),
-        ("⌘⌥ ← → ↑ ↓", "移动分屏焦点"),
-        ("⌘⌃ ← → ↑ ↓", "调整分屏比例"),
-        ("/ @ #", "命令 / 仓库 / agent 补全"),
-        ("↑ ↓ / ⏎", "补全菜单选择 / 确认"),
-        ("esc", "命令框失焦 / 关闭"),
+        ("⌘D / ⌘⇧D", "Horizontal / vertical split"),
+        ("⌘⌥ ← → ↑ ↓", "Move split focus"),
+        ("⌘⌃ ← → ↑ ↓", "Resize split"),
+        ("/ @ #", "Command / repo / agent completion"),
+        ("↑ ↓ / ⏎", "Select / confirm completion"),
+        ("esc", "Unfocus command box / close"),
     ]
 
     var onDismiss: (() -> Void)?
@@ -68,14 +68,14 @@ final class KeyboardHelpOverlay: NSView {
         title.font = AppFont.mono(size: 12, weight: .bold)
         title.textColor = Self.ink
         title.translatesAutoresizingMaskIntoConstraints = false
-        let hint = NSTextField(labelWithString: "? 或 Esc 关闭")
+        let hint = NSTextField(labelWithString: "? or Esc to close")
         hint.font = AppFont.mono(size: 11, weight: .regular)
         hint.textColor = Self.inkFaint
         hint.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(glyph); card.addSubview(title); card.addSubview(hint)
 
         let left = column(header: "NORMAL", rows: Self.normalKeys)
-        let right = column(header: "分屏 / 命令", rows: Self.helmKeys)
+        let right = column(header: "Splits / Commands", rows: Self.helmKeys)
         card.addSubview(left); card.addSubview(right)
 
         NSLayoutConstraint.activate([

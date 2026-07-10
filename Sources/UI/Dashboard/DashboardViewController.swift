@@ -1263,7 +1263,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         case .deleteFocused:
             guard let agent = focusedSailor else { return }
             guard !agent.isMainWorktree else {
-                windowKeyboardMode?.flashHint("main worktree 不可删除")
+                windowKeyboardMode?.flashHint("The main worktree cannot be deleted")
                 return
             }
             windowKeyboardMode?.beginDelete(agentId: agent.id)
@@ -1561,12 +1561,12 @@ final class DashboardOverviewView: NSView {
     /// Per-status group presentation (glyph, group colour, info-line colour, label).
     private static func groupMeta(_ s: SailorStatus) -> (glyph: String, color: NSColor, info: NSColor, label: String) {
         switch s {
-        case .waiting: return ("●", orange, orange, "等待你确认")
-        case .running: return ("◐", sea, inkDim, "运行中")
-        case .idle:    return ("○", emerald, inkDim, "空闲")
-        case .error:   return ("✕", red, red, "错误")
-        case .exited:  return ("◌", inkDim, inkFaint, "已休眠")
-        case .unknown: return ("◌", inkDim, inkFaint, "未知")
+        case .waiting: return ("●", orange, orange, "Needs input")
+        case .running: return ("◐", sea, inkDim, "Running")
+        case .idle:    return ("○", emerald, inkDim, "Idle")
+        case .error:   return ("✕", red, red, "Error")
+        case .exited:  return ("◌", inkDim, inkFaint, "Dormant")
+        case .unknown: return ("◌", inkDim, inkFaint, "Unknown")
         }
     }
 
@@ -1608,7 +1608,7 @@ final class DashboardOverviewView: NSView {
         wantsLayer = true
         layer?.backgroundColor = Self.bg.cgColor
 
-        // --- Header: ◍ Dashboard   N worktrees · M 在跑  (border-bottom) ---
+        // --- Header: ◍ Dashboard   N worktrees · M running  (border-bottom) ---
         let headerIcon = NSTextField(labelWithString: "◍")
         headerIcon.font = AppFont.mono(size: 13)
         headerIcon.textColor = Self.sea
@@ -1694,7 +1694,7 @@ final class DashboardOverviewView: NSView {
         lbl.textColor = Self.sea
         ordersCountLabel.font = AppFont.mono(size: 11)
         ordersCountLabel.textColor = Self.inkFaint
-        let hint = NSTextField(labelWithString: "← 横向滑动 →")
+        let hint = NSTextField(labelWithString: "← scroll →")
         hint.font = AppFont.mono(size: 10)
         hint.textColor = Self.inkFaint
 
@@ -1917,7 +1917,7 @@ final class DashboardOverviewView: NSView {
 
     func update(_ sailors: [SailorDisplayInfo]) {
         let running = sailors.filter { Self.primaryStatus($0) == .running }.count
-        headerSub.stringValue = "\(sailors.count) worktrees · \(running) 在跑"
+        headerSub.stringValue = "\(sailors.count) worktrees · \(running) running"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
@@ -2087,7 +2087,7 @@ final class DashboardOverviewView: NSView {
             if !sailor.project.isEmpty { line1.addArrangedSubview(repoTag) }
             line1.addArrangedSubview(dot)
             line1.addArrangedSubview(title)
-            if waiting { line1.addArrangedSubview(Self.pill("需确认", color: DashboardOverviewView.red)) }
+            if waiting { line1.addArrangedSubview(Self.pill("NEEDS INPUT", color: DashboardOverviewView.red)) }
             line1.addArrangedSubview(Self.spacer())
             line1.addArrangedSubview(time)
 
