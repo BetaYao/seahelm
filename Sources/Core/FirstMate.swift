@@ -57,6 +57,19 @@ enum FirstMate {
     static func evaluate(_ outcome: IngestOutcome, config: FirstMateConfig) -> [FirstMateAction] {
         guard config.enabled else { return [] }
 
+        if case .question(let prompt, let options) = outcome.event.kind {
+            guard !options.isEmpty else { return [] }
+            let i = outcome.info
+            // AskUserQuestion card: the question itself is the summary, and the
+            // payload marks the tap handler to answer by option NUMBER (the TUI
+            // selects by digit), not by typing the label text.
+            return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
+                                    worktreePath: i.worktreePath, branch: i.branch,
+                                    project: i.project, terminalID: i.id,
+                                    message: String(prompt.prefix(200)),
+                                    payload: "ask-user-question", options: options)]
+        }
+
         if case .suggest(let options) = outcome.event.kind {
             guard !options.isEmpty else { return [] }
             let i = outcome.info

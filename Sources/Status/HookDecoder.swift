@@ -69,6 +69,13 @@ struct HookDecoder: SignalDecoder {
         case .userPrompt:
             return .userPrompt(event.data?["message"] as? String ?? "Processing prompt")
         case .toolUseStart, .toolUseEnd, .toolUseFailed:
+            // AskUserQuestion blocks the agent on a choice — surface it as a
+            // First Mate question card instead of a generic tool-use activity.
+            if event.event == .toolUseStart,
+               event.data?["tool_name"] as? String == "AskUserQuestion",
+               let q = firstQuestion(from: event) {
+                return .question(prompt: q.prompt, options: q.options)
+            }
             return .toolUse(ActivityEventExtractor.extract(from: event))
         case .prompt:
             return .awaitingInput(event.data?["message"] as? String ?? "Waiting for input")
@@ -89,5 +96,22 @@ struct HookDecoder: SignalDecoder {
             // A subagent finishing must not drive the main station's status.
             return nil
         }
+    }
+
+    /// Extract the first question (text + option labels) from an AskUserQuestion
+    /// tool_input payload. Returns nil when the payload doesn't parse — the event
+    /// then degrades to a normal tool-use activity.
+    static func firstQuestion(from event: WebhookEvent) -> (prompt: String, options: [String])? {
+        guard let input = event.data?["tool_input"] as? [String: Any],
+              let questions = input["questions"] as? [[String: Any]],
+              let first = questions.first,
+              let prompt = first["question"] as? String, !prompt.isEmpty,
+              let rawOptions = first["options"] as? [[String: Any]] else { return nil }
+        let labels = rawOptions.compactMap { $0["label"] as? String }.filter { !$0.isEmpty }
+        guard !labels.isEmpty else { return nil }
+        // Multi-question flows answer one question at a time in the TUI; the card
+        // shows the first, tagged with the total so the user knows more follow.
+        let tagged = questions.count > 1 ? "\(prompt) (1/\(questions.count))" : prompt
+        return (tagged, labels)
     }
 }

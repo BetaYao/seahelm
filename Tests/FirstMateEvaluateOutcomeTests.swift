@@ -29,6 +29,22 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
         XCTAssertTrue(acts.isEmpty)
     }
 
+    func testQuestionEventEmitsCardWithPromptAndPayloadMarker() {
+        let acts = FirstMate.evaluate(
+            outcome(kind: .question(prompt: "Pick one?", options: ["A", "B"])), config: .default)
+        XCTAssertEqual(acts.map(\.kind), [.suggestNextOrder])
+        XCTAssertEqual(acts.first?.zone, .red)
+        XCTAssertEqual(acts.first?.message, "Pick one?")
+        XCTAssertEqual(acts.first?.options, ["A", "B"])
+        XCTAssertEqual(acts.first?.payload, "ask-user-question")
+    }
+
+    func testEmptyQuestionOptionsEmitsNothing() {
+        let acts = FirstMate.evaluate(
+            outcome(kind: .question(prompt: "Pick?", options: [])), config: .default)
+        XCTAssertTrue(acts.isEmpty)
+    }
+
     func testStatusTransitionRoutedThroughOutcomeEntry() {
         let acts = FirstMate.evaluate(outcome(kind: .agentStopped(success: false),
                                               changed: true, newStatus: .error), config: .default)

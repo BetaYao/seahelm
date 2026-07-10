@@ -39,6 +39,43 @@ final class HookDecoderTests: XCTestCase {
         XCTAssertEqual(ae.tool, "Bash")
     }
 
+    func testAskUserQuestionMapsToQuestion() {
+        let event = makeEvent(type: .toolUseStart, data: [
+            "tool_name": "AskUserQuestion",
+            "tool_input": [
+                "questions": [[
+                    "question": "Where should daily check-in happen?",
+                    "options": [["label": "Gate face scan"], ["label": "Front desk kiosk"]],
+                ]],
+            ],
+        ])
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .question(let prompt, let options)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(prompt, "Where should daily check-in happen?")
+        XCTAssertEqual(options, ["Gate face scan", "Front desk kiosk"])
+    }
+
+    func testAskUserQuestionMultiQuestionTagsCount() {
+        let event = makeEvent(type: .toolUseStart, data: [
+            "tool_name": "AskUserQuestion",
+            "tool_input": [
+                "questions": [
+                    ["question": "Q1?", "options": [["label": "A"], ["label": "B"]]],
+                    ["question": "Q2?", "options": [["label": "C"]]],
+                ],
+            ],
+        ])
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .question(let prompt, _)? = normalized?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(prompt, "Q1? (1/2)")
+    }
+
+    func testAskUserQuestionWithBadPayloadDegradesToToolUse() {
+        let event = makeEvent(type: .toolUseStart, data: ["tool_name": "AskUserQuestion"])
+        let normalized = HookDecoder(terminalID: "t1", event: event).decode()
+        guard case .toolUse? = normalized?.kind else { return XCTFail("wrong kind") }
+    }
+
     func testPromptMapsToAwaitingInput() {
         let event = makeEvent(type: .prompt, data: ["message": "Continue?"])
         let normalized = HookDecoder(terminalID: "t1", event: event).decode()

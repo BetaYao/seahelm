@@ -586,7 +586,7 @@ class TabCoordinator {
                             // stash the agent's final message so the suggestion card can show it.
                             sessionBlockedAt[turnKey] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
-                                ShipLog.shared.noteAssistantMessage(cwd: event.cwd, message: msg)
+                                ShipLog.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
                             }
                             return block
                         }
