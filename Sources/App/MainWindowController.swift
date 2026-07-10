@@ -284,12 +284,17 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
 
-    /// Double-tap fn: toggle between the Dashboard overview (spread First Mate)
-    /// and the current worktree's working view.
-    func toggleFirstMatePanel() {
+    /// Unified back key (double-Ctrl and Cmd+Esc): terminal (mode 3) → split
+    /// (mode 2) → dashboard (mode 1), and dashboard ⇄ split toggle at the top —
+    /// pressing back in mode 1 re-enters mode 2 on the last worktree.
+    func navigateBack() {
         tabCoordinator.switchToTab(0)
         guard let dashboard = dashboardVC else { return }
-        dashboard.setDisplayMode(dashboard.displayMode == .overview ? .worktree : .overview)
+        switch dashboard.viewMode {
+        case .terminal:  dashboard.setViewMode(.split)
+        case .split:     dashboard.setViewMode(.dashboard)
+        case .dashboard: dashboard.enterLastWorktreeSplit()
+        }
     }
 
     // MARK: - Ctrl double-tap detection
@@ -320,8 +325,8 @@ class MainWindowController: NSWindowController {
             let now = ProcessInfo.processInfo.systemUptime
             if now - self.lastFnPressAt < Self.ctrlDoubleTapWindow {
                 self.lastFnPressAt = 0
-                self.fnTapLog("double-tap → toggleFirstMatePanel")
-                self.toggleFirstMatePanel()
+                self.fnTapLog("double-tap → navigateBack")
+                self.navigateBack()
             } else {
                 self.lastFnPressAt = now
             }
@@ -508,6 +513,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
         // Dashboard overview; collapse + file/change once inside a worktree.
         dashboard.onDisplayModeChanged = { [weak self] mode in
             self?.titleBar.setChromeMode(overview: mode == .overview)
+        }
+        // Keyboard NORMAL/INSERT is now derived from the view mode: only the
+        // full-terminal mode hands the keyboard to the terminal.
+        dashboard.onViewModeChanged = { [weak self] mode in
+            guard let self else { return }
+            if mode == .terminal {
+                self.keyboardMode.enterInsert()
+            } else {
+                self.keyboardMode.enterNormal()
+            }
         }
         // Light exactly one toolbar icon for the active view; dim the rest.
         dashboard.onActiveToolChanged = { [weak self] tool in
@@ -1041,13 +1056,9 @@ class SeahelmWindow: NSWindow {
         case .toggleSidebar:
             mwc.tabCoordinator.dashboardVC?.toggleSidebarDefaultDashboard(); return true
         case .exitInsert:
-            if mwc.keyboardMode.handleEsc(hasCommand: true, now: ProcessInfo.processInfo.systemUptime) {
-                mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
-                return true
-            }
-            return super.performKeyEquivalent(with: event)
+            mwc.navigateBack(); return true
         case .toggleOverview:
-            mwc.toggleFirstMatePanel(); return true   // overview ⇄ worktree
+            mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
         case .firstMatePane:
             mwc.tabCoordinator.dashboardVC?.toggleFirstMateSide(); return true
         case .filesPane:
@@ -1083,26 +1094,16 @@ class SeahelmWindow: NSWindow {
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
                 return
             }
-            // Cmd+Esc in insert mode → normal.
+            // Cmd+Esc = unified back key (mode 3 → 2 → 1, and 1 ⇄ 2 toggle).
             // macOS does not route Cmd+Esc through performKeyEquivalent the way it
-            // does Cmd+<letter>, so it lands here. Read the real Command flag instead
-            // of assuming a plain Esc — otherwise Cmd+Esc gets mis-handled as a single
-            // Esc and passes through to the terminal (interrupting the agent).
+            // does Cmd+<letter>, so it lands here. Read the real Command flag —
+            // a plain Esc must keep passing through to the terminal (interrupting
+            // the agent otherwise).
             if event.keyCode == 53,
-               let mwc = windowController as? MainWindowController,
-               mwc.keyboardMode.mode == .insert {
-                let hasCommand = event.modifierFlags
-                    .intersection(.deviceIndependentFlagsMask)
-                    .contains(.command)
-                let consumed = mwc.keyboardMode.handleEsc(
-                    hasCommand: hasCommand,
-                    now: ProcessInfo.processInfo.systemUptime
-                )
-                if consumed {
-                    mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
-                    return
-                }
-                // first plain Esc: fall through to terminal
+               event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+               let mwc = windowController as? MainWindowController {
+                mwc.navigateBack()
+                return
             }
         }
         super.sendEvent(event)

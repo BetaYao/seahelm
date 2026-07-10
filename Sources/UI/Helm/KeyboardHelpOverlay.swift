@@ -15,16 +15,15 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("⌘E", "Overview ⇄ worktree"),
-        ("h j k l", "Move focus"),
-        ("1 – 9", "Jump to / enter Nth worktree"),
-        ("⏎ / i", "Enter terminal"),
-        ("f / c / m", "Files / Changes / First Mate sidebar"),
-        ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
-        ("⌃⇥ / ⌃⇧⇥", "Next / previous worktree"),
-        ("d", "Delete focused worktree"),
+        ("↑ ↓ / k j", "Move: worktrees → cards → command"),
+        ("⏎ / →", "Forward: dashboard → split → terminal"),
+        ("← ", "Card row: previous card · split: back"),
+        ("⌘esc / ⌃⌃", "Back: terminal → split → dashboard"),
+        ("⇥", "Cycle options on selected card"),
+        ("1 – 9", "Enter Nth worktree"),
         ("n", "New worktree"),
-        ("⌘esc", "INSERT → NORMAL"),
+        ("⌃⇥ / ⌃⇧⇥", "Next / previous worktree"),
+        ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
         ("?", "Keyboard shortcuts"),
     ]
     private static let helmKeys: [(String, String)] = [
@@ -33,7 +32,7 @@ final class KeyboardHelpOverlay: NSView {
         ("⌘⌃ ← → ↑ ↓", "Resize split"),
         ("/ @ #", "Command / repo / agent completion"),
         ("↑ ↓ / ⏎", "Select / confirm completion"),
-        ("esc", "Unfocus command box / close"),
+        ("esc", "Close menu → clear → leave command box"),
     ]
 
     var onDismiss: (() -> Void)?

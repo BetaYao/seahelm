@@ -133,9 +133,9 @@ final class KeyboardModeController {
         case .none:
             switch mode {
             case .insert:
-                return "INSERT  ·  \u{2318}esc \u{2192} normal"
+                return "TERMINAL  ·  \u{2318}esc / \u{2303}\u{2303} back"
             case .normal:
-                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter term  ·  space Helm  ·  d del  ·  c diff  ·  f files  ·  n new  ·  ? keys"
+                return "NAV  ·  \u{2191}\u{2193} move  ·  \u{23CE}/\u{2192} enter  ·  \u{2318}esc / \u{2303}\u{2303} back  ·  n new  ·  ? keys"
             }
         }
     }

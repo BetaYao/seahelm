@@ -534,7 +534,18 @@ private final class OptionChipButton: NSView {
 
     func setTitle(_ t: String) { labelField.stringValue = t }
 
+    /// Keyboard focus ring for Tab-cycling through a card's options.
+    func setKeyboardFocused(_ focused: Bool) {
+        if focused {
+            layer?.borderWidth = 2
+            layer?.borderColor = Bare.ink.cgColor
+        } else {
+            applyStyle()
+        }
+    }
+
     private func applyStyle() {
+        layer?.borderColor = nil
         if primary {
             layer?.backgroundColor = Bare.accent.cgColor
             layer?.borderWidth = 0
@@ -670,6 +681,25 @@ final class OrderCardView: NSTableCellView {
     func setSelected(_ selected: Bool) {
         accentBar.layer?.backgroundColor = (selected ? Bare.accent : NSColor.clear).cgColor
         layer?.backgroundColor = (selected ? Bare.cardBg : Bare.panelAlt).cgColor
+        if !selected { clearChipFocus() }
+    }
+
+    /// Index of the option chip highlighted by keyboard Tab-cycling, if any.
+    private(set) var focusedChipIndex: Int?
+
+    /// Tab on a keyboard-selected card: cycle the highlight through its chips.
+    func cycleFocusedChip() {
+        let chips = chipRow.arrangedSubviews.compactMap { $0 as? OptionChipButton }
+        guard !chips.isEmpty else { return }
+        let next = ((focusedChipIndex ?? -1) + 1) % chips.count
+        focusedChipIndex = next
+        for (i, chip) in chips.enumerated() { chip.setKeyboardFocused(i == next) }
+    }
+
+    func clearChipFocus() {
+        focusedChipIndex = nil
+        chipRow.arrangedSubviews.compactMap { $0 as? OptionChipButton }
+            .forEach { $0.setKeyboardFocused(false) }
     }
 
     func configure(order: PendingOrder, onOption: @escaping (Int) -> Void) {

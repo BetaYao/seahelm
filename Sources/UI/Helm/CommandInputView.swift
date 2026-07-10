@@ -19,6 +19,12 @@ final class CommandInputView: NSView {
     /// Arrow/Enter while the autocomplete menu is open. Return true if the host
     /// consumed it (menu visible) so the keystroke doesn't also edit/submit.
     var onMenuKey: ((MenuKey) -> Bool)?
+    /// ↑ pressed while the field is focused, the menu is closed, and the text is
+    /// empty — the nav ring reclaims focus. Return true when consumed.
+    var onArrowUpAtEmpty: (() -> Bool)?
+    /// The field became first responder (keyboard OR mouse click) — lets the
+    /// host's focus model track that the command row is active.
+    var onFocused: (() -> Void)?
 
     private let field = FocusReportingTextField()
     private let box = NSView()
@@ -73,6 +79,9 @@ final class CommandInputView: NSView {
         field.action = #selector(submit)
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityIdentifier("helm.commandInput")
+        field.onFocusChange = { [weak self] focused in
+            if focused { self?.onFocused?() }
+        }
         box.addSubview(field)
 
         spinner.style = .spinning
@@ -152,7 +161,9 @@ extension CommandInputView: NSTextFieldDelegate {
             onCancel?()
             return true
         case #selector(NSResponder.moveUp(_:)):
-            return onMenuKey?(.up) ?? false
+            if onMenuKey?(.up) == true { return true }
+            if field.stringValue.isEmpty { return onArrowUpAtEmpty?() ?? false }
+            return false
         case #selector(NSResponder.moveDown(_:)):
             return onMenuKey?(.down) ?? false
         case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)):

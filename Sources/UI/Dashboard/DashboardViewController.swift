@@ -89,11 +89,25 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     var selectedSailorId: String = ""
 
-    /// The two top-level chrome states. `.overview` is the spread First Mate
-    /// (fleet + orders + composer) with no active worktree; `.worktree` is drilled
-    /// into one worktree's terminal + file/change side panel.
+    /// The two top-level chrome states, now derived from `viewMode`. `.overview`
+    /// is the spread First Mate (fleet + orders + composer) with no active
+    /// worktree; `.worktree` is drilled into one worktree's terminal.
     enum DisplayMode { case overview, worktree }
-    private(set) var displayMode: DisplayMode = .overview
+    var displayMode: DisplayMode { viewMode == .dashboard ? .overview : .worktree }
+
+    /// The three keyboard-navigation view modes:
+    /// - `.dashboard` (mode 1): full-bleed fleet overview
+    /// - `.split` (mode 2): overview docked as the left column + terminal right,
+    ///   keyboard focus stays on the overview ring (terminal live-previews)
+    /// - `.terminal` (mode 3): left column collapsed, terminal owns the keyboard
+    enum ViewMode: Equatable { case dashboard, split, terminal }
+    private(set) var viewMode: ViewMode = .dashboard
+    /// Fired after every view-mode switch (MainWindowController syncs the
+    /// keyboard NORMAL/INSERT mode and status-bar hints off this).
+    var onViewModeChanged: ((ViewMode) -> Void)?
+    /// Last worktree the user actually committed into (split/terminal). Backs the
+    /// mode-1 ⇄ mode-2 back-key toggle.
+    private(set) var lastCommittedWorktreePath: String?
     /// Fired after a mode switch so MainWindowController can update the title-bar
     /// chrome (collapse/file/change icons) accordingly.
     var onDisplayModeChanged: ((DisplayMode) -> Void)?
@@ -166,6 +180,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// The row the user has explicitly clicked in the overview. Empty until the
     /// first click, so nothing is pre-selected (no stale default highlight).
     private var overviewSelectedId: String = ""
+    /// Vertical nav ring over the overview (worktree rows → orders row → command
+    /// input). Lives here (not in the view) because visuals need `agents`.
+    private var overviewFocus = OverviewFocusModel(worktreeCount: 0, orderCount: 0)
     private static let firstMateColumnWidth: CGFloat = 392
     private static let overviewFullBg = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1)
     private static let overviewSideBg = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
@@ -175,7 +192,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     // MARK: - First responder
 
-    override var acceptsFirstResponder: Bool { isInDState || displayMode == .overview }
+    override var acceptsFirstResponder: Bool { isInDState || viewMode != .terminal }
 
     // MARK: - View lifecycle
 
@@ -197,6 +214,25 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // pushing the terminal right — not a floating overlay).
         overviewView.onSelectWorktree = { [weak self] path in
             self?.enterWorktree(byWorktreePath: path)
+        }
+        // Nav-ring ↔ command-field hand-off (see OverviewFocusModel).
+        overviewView.onCommandArrowUpAtEmpty = { [weak self] in
+            guard let self else { return false }
+            let effect = self.overviewFocus.moveUp(commandIsEmpty: true)
+            guard case .blurCommandThenLand = effect else { return false }
+            self.applyOverviewEffect(effect)
+            return true
+        }
+        overviewView.onCommandEscapeAtEmpty = { [weak self] in
+            guard let self else { return }
+            self.view.window?.makeFirstResponder(self)
+            self.applyOverviewEffect(self.overviewFocus.escapeFromCommand())
+        }
+        overviewView.onCommandFocused = { [weak self] in
+            self?.overviewFocus.noteCommandFocused()
+        }
+        overviewView.onOrdersChanged = { [weak self] in
+            self?.syncOverviewFocusCounts()
         }
         mountOverviewFull()
     }
@@ -258,6 +294,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if displayMode == .overview || firstMateSideOpen {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
+            syncOverviewFocusCounts()
         }
 
         if isInDState {
@@ -343,29 +380,33 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         activeSplitWorktreePath = nil
     }
 
-    func selectSailor(byWorktreePath path: String) {
+    func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
         selectedSailorId = agent.id
         detachTerminals()
-        embedSplitContainerForSelectedSailor()
+        embedSplitContainerForSelectedSailor(focusTerminal: focusTerminal)
         updateMiniCardSelection()
         syncSidePanelToSelection()
     }
 
     // MARK: - Display mode (overview ⇄ worktree)
 
-    /// Switch top-level mode. Overview opens the spread First Mate cockpit (the
-    /// fleet/orders/composer) and pins it open; entering a worktree closes it so
-    /// the terminal + file/change side panel take over. No-op if unchanged.
+    /// Legacy two-state entry point. `.overview` maps to mode 1; `.worktree`
+    /// drills all the way into the terminal (mode 3).
     func setDisplayMode(_ mode: DisplayMode) {
-        guard mode != displayMode else { return }
-        applyDisplayMode(mode)
+        setViewMode(mode == .overview ? .dashboard : .terminal)
     }
 
-    private func applyDisplayMode(_ mode: DisplayMode) {
-        displayMode = mode
+    /// Switch between the three keyboard view modes. No-op if unchanged.
+    func setViewMode(_ mode: ViewMode) {
+        guard mode != viewMode else { return }
+        applyViewMode(mode)
+    }
+
+    private func applyViewMode(_ mode: ViewMode) {
+        viewMode = mode
         switch mode {
-        case .overview:
+        case .dashboard:
             firstMateSideOpen = false
             currentSide = .none
             mountOverviewFull()
@@ -374,18 +415,55 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             overviewView.isHidden = false
             // Take first responder so fleet keyboard nav (j/k/⏎/1–9) works.
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.displayMode == .overview else { return }
+                guard let self, self.viewMode == .dashboard else { return }
                 self.view.window?.makeFirstResponder(self)
             }
-        case .worktree:
-            // Start with the side column collapsed (terminal full); pane icons open it.
+        case .split:
+            // Overview docks as the left column; the terminal live-previews on the
+            // right but keyboard focus stays on the overview ring.
+            openFirstMateColumn()
+            currentSide = .firstMate
+            if activeSplitContainer == nil {
+                embedSplitContainerForSelectedSailor(focusTerminal: false)
+            }
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+                ?? lastCommittedWorktreePath
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.viewMode == .split else { return }
+                self.view.window?.makeFirstResponder(self)
+            }
+        case .terminal:
             closeFirstMateSide()
             currentSide = .none
             overviewView.isHidden = true
             if !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+                ?? lastCommittedWorktreePath
+            // Hand the keyboard to the terminal after Ghostty's own deferred focus
+            // handling (existing convention).
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.viewMode == .terminal else { return }
+                self.embedSplitContainerForSelectedSailor(focusTerminal: true)
+            }
         }
-        onDisplayModeChanged?(mode)
+        onDisplayModeChanged?(displayMode)
         notifyActiveTool()
+        onViewModeChanged?(mode)
+    }
+
+    /// Back-key toggle from mode 1: re-enter mode 2 on the last committed
+    /// worktree (falling back to the overview selection, then the first agent).
+    func enterLastWorktreeSplit() {
+        let candidates = [
+            lastCommittedWorktreePath,
+            agents.first(where: { $0.id == overviewSelectedId })?.worktreePath,
+            agents.first?.worktreePath,
+        ]
+        guard let path = candidates.compactMap({ $0 })
+            .first(where: { p in agents.contains { $0.worktreePath == p } }) else { return }
+        selectSailor(byWorktreePath: path, focusTerminal: false)
+        overviewSelectedId = selectedSailorId
+        setViewMode(.split)
     }
 
     /// Compute + publish the single lit toolbar tool from the current state.
@@ -465,7 +543,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             return
         }
         switch side {
-        case .firstMate: openFirstMateColumn()
+        case .firstMate:
+            // Opening the First Mate column IS mode 2 — route through the mode
+            // machine so keyboard focus and hints follow.
+            setViewMode(.split)
+            return
         case .files:     openFilesColumn(.files)
         case .changes:   openFilesColumn(.changes)
         case .none:      collapseCurrentSide(); return
@@ -487,6 +569,12 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     private func openFilesColumn(_ tab: SidePanelTab) {
         closeFirstMateSide()                      // undock First Mate if it was showing
+        // Files/changes replace the First Mate column: keyboard-wise that's the
+        // terminal mode (the ring lives on the overview only).
+        if viewMode == .split {
+            viewMode = .terminal
+            onViewModeChanged?(.terminal)
+        }
         leftColumnWidthExpanded?.constant = LayoutMetrics.leftColumnWidth
         sidePanelVC.selectTab(tab)
         expandLeftColumnIfCollapsed()
@@ -494,7 +582,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     private func collapseCurrentSide() {
         if firstMateSideOpen {
-            closeFirstMateSide(collapse: true)
+            // Closing the First Mate column leaves mode 2 → full terminal.
+            setViewMode(.terminal)
+            return
         } else if !isLeftColumnCollapsed {
             _ = toggleLeftColumnCollapse()
         }
@@ -519,7 +609,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     /// Force the initial overview state at launch. `setDisplayMode` no-ops when the
     /// mode is unchanged, so the very first activation needs an explicit apply.
-    func activateInitialOverview() { applyDisplayMode(.overview) }
+    func activateInitialOverview() { applyViewMode(.dashboard) }
 
     /// Feed the overview's ORDERS carousel + command composer. Called by
     /// MainWindowController with the same queue/handlers the cockpit uses.
@@ -936,10 +1026,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         guard let agent = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
 
-        // Skip re-embed if the same split container is already active for this worktree
+        // Skip re-embed if the same split container is already active for this
+        // worktree — but still hand it the keyboard when asked (e.g. committing
+        // into mode 3 after a split-mode live preview already embedded it).
         if let active = activeSplitContainer,
            active.superview === container,
            activeSplitWorktreePath == worktreePath {
+            if focusTerminal { focusActiveTerminalLeaf() }
             return
         }
 
@@ -1003,6 +1096,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             windowKeyboardMode?.enterInsert()
         }
 
+        focusActiveTerminalLeaf(tree: tree)
+    }
+
+    /// Make the active split leaf's Ghostty view first responder (immediate +
+    /// deferred attempt, in case the hierarchy hasn't settled yet).
+    private func focusActiveTerminalLeaf(tree: SplitTree? = nil) {
+        guard let tree = tree ?? activeSplitContainer?.tree else { return }
         let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
         if let leaf = leafToFocus,
            let station = StationRegistry.shared.station(forId: leaf.stationId),
@@ -1141,8 +1241,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // MARK: - D-state key handling
 
     override func keyDown(with event: NSEvent) {
-        if displayMode == .overview, !isInDState {
-            handleOverviewKey(event); return
+        if viewMode != .terminal, !isInDState {
+            handleNavKey(event); return
         }
         guard isInDState else { super.keyDown(with: event); return }
         let mode = windowKeyboardMode
@@ -1200,51 +1300,157 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         return agents.first(where: { $0.id == agentId })
     }
 
-    // MARK: - Overview (fleet) keyboard navigation
+    // MARK: - Overview (fleet) keyboard navigation — the vertical nav ring
 
-    /// Keyboard handling while the Dashboard overview is the active surface.
-    /// j/k (↑/↓) move the fleet selection, ⏎ / 1–9 enter a worktree, / @ # focus
-    /// the command input, n starts /new, ? shows help.
-    private func handleOverviewKey(_ event: NSEvent) {
+    /// Keyboard handling while the overview drives the keyboard (modes 1 & 2).
+    /// ↑↓ (j/k) walk worktree rows → orders card row → command input; on the
+    /// orders row ←→ pick a card and Tab cycles its options; ⏎/→ commit forward
+    /// (mode 1 → 2 → 3); ← in mode 2 goes back to mode 1.
+    private func handleNavKey(_ event: NSEvent) {
+        if event.keyCode == 53 {  // Esc closes overlays (help, …)
+            if closeTopmostOverlay() { return }
+            return
+        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.isDisjoint(with: [.command, .control, .option]) else { super.keyDown(with: event); return }
         let ch = event.charactersIgnoringModifiers
         switch event.keyCode {
-        case 126: moveOverviewSelection(-1); return   // ↑
-        case 125: moveOverviewSelection(1);  return   // ↓
-        case 36:  enterOverviewSelection();  return   // ⏎
+        case 126: applyOverviewEffect(overviewFocus.moveUp());   return  // ↑
+        case 125: applyOverviewEffect(overviewFocus.moveDown()); return  // ↓
+        case 123: handleNavLeft();  return                               // ←
+        case 124: handleNavRight(); return                               // →
+        case 48:  handleNavTab();   return                               // Tab
+        case 36:  handleNavReturn(); return                              // ⏎
         default: break
         }
         switch ch {
-        case "k": moveOverviewSelection(-1)
-        case "j": moveOverviewSelection(1)
+        case "k": applyOverviewEffect(overviewFocus.moveUp())
+        case "j": applyOverviewEffect(overviewFocus.moveDown())
+        case "h": handleNavLeft()
+        case "l": handleNavRight()
         case "?": toggleHelp()
         case "n": startNewCommand()
         case "/", "@", "#": overviewView.focusCommand(prefill: ch ?? "")
         case let d? where ("1"..."9").contains(d):
-            if let n = Int(d), n - 1 < overviewView.orderedRows.count {
-                enterWorktree(byWorktreePath: overviewView.orderedRows[n - 1].path)
+            if let n = Int(d), case .previewWorktree = overviewFocus.jumpToWorktree(n - 1) {
+                applyOverviewEffect(.previewWorktree(n - 1))
+                commitFocusedWorktreeForward()
             }
         default: super.keyDown(with: event)
         }
     }
 
-    private func moveOverviewSelection(_ delta: Int) {
-        let rows = overviewView.orderedRows
-        guard !rows.isEmpty else { return }
-        let cur = rows.firstIndex(where: { $0.id == overviewSelectedId })
-        let next: Int
-        if let cur { next = max(0, min(rows.count - 1, cur + delta)) }
-        else { next = delta > 0 ? 0 : rows.count - 1 }
-        overviewSelectedId = rows[next].id
-        overviewView.selectedId = overviewSelectedId
-        overviewView.update(agents)
+    /// Execute a focus-ring effect: highlight rows/cards, live-preview the
+    /// terminal in mode 2, and hand focus to/from the command field.
+    private func applyOverviewEffect(_ effect: OverviewFocusModel.Effect) {
+        switch effect {
+        case .none:
+            break
+        case .previewWorktree(let i):
+            overviewView.setKeyboardCardSelected(nil)
+            guard let row = overviewView.orderedRows[safeIndex: i] else { break }
+            overviewSelectedId = row.id
+            overviewView.selectedId = row.id
+            overviewView.update(agents)
+            if viewMode == .split { previewWorktree(path: row.path) }
+        case .selectCard(let i):
+            overviewView.setKeyboardCardSelected(i)
+        case .focusCommand:
+            overviewView.setKeyboardCardSelected(nil)
+            overviewView.commandInput.focusInput()
+        case .blurCommandThenLand(let row):
+            view.window?.makeFirstResponder(self)
+            switch row {
+            case .worktree(let i): applyOverviewEffect(.previewWorktree(i))
+            case .orders(let i):   applyOverviewEffect(.selectCard(i))
+            case .command:         break
+            }
+        }
     }
 
-    private func enterOverviewSelection() {
-        let rows = overviewView.orderedRows
-        let path = rows.first(where: { $0.id == overviewSelectedId })?.path ?? rows.first?.path
-        if let path { enterWorktree(byWorktreePath: path) }
+    private func handleNavLeft() {
+        if overviewFocus.selectedCardIndex != nil {
+            applyOverviewEffect(overviewFocus.moveLeftInOrders())
+        } else if overviewFocus.selectedWorktreeIndex != nil, viewMode == .split {
+            setViewMode(.dashboard)   // ← on a worktree row in mode 2 = back to mode 1
+        }
+    }
+
+    private func handleNavRight() {
+        if overviewFocus.selectedCardIndex != nil {
+            applyOverviewEffect(overviewFocus.moveRightInOrders())
+        } else if overviewFocus.selectedWorktreeIndex != nil {
+            commitFocusedWorktreeForward()
+        }
+    }
+
+    private func handleNavTab() {
+        guard let card = overviewFocus.selectedCardIndex else { return }
+        overviewView.cycleChipOnCard(at: card)
+    }
+
+    private func handleNavReturn() {
+        if let card = overviewFocus.selectedCardIndex {
+            // ⏎ on a card: jump straight into that card's terminal (mode 3).
+            if let path = overviewView.orderCardPaths[safeIndex: card] {
+                enterWorktree(byWorktreePath: path)
+            }
+            return
+        }
+        if overviewFocus.selectedWorktreeIndex != nil {
+            commitFocusedWorktreeForward()
+        }
+    }
+
+    /// ⏎/→ on a worktree row: mode 1 → mode 2 (selected worktree), mode 2 → mode 3.
+    private func commitFocusedWorktreeForward() {
+        guard let i = overviewFocus.selectedWorktreeIndex,
+              let row = overviewView.orderedRows[safeIndex: i] else { return }
+        switch viewMode {
+        case .dashboard:
+            selectSailor(byWorktreePath: row.path, focusTerminal: false)
+            overviewSelectedId = selectedSailorId
+            overviewView.selectedId = overviewSelectedId
+            setViewMode(.split)
+        case .split:
+            // Selection already previewed live; just hand over the keyboard.
+            setViewMode(.terminal)
+        case .terminal:
+            break
+        }
+    }
+
+    /// Live-follow in mode 2: swap the right-hand terminal to `path` without
+    /// stealing keyboard focus from the nav ring.
+    private func previewWorktree(path: String) {
+        guard let agent = agents.first(where: { $0.worktreePath == path }),
+              agent.id != selectedSailorId else { return }
+        selectedSailorId = agent.id
+        detachTerminals()
+        embedSplitContainerForSelectedSailor(focusTerminal: false)
+        updateMiniCardSelection()
+        syncSidePanelToSelection()
+    }
+
+    /// Re-clamp the focus ring after the fleet list or orders queue rebuilt.
+    private func syncOverviewFocusCounts() {
+        let effect = overviewFocus.rowsDidChange(
+            worktreeCount: overviewView.orderedRows.count,
+            orderCount: overviewView.orderCards.count
+        )
+        // Refresh highlights only — a data refresh must not re-trigger terminal
+        // embeds or focus moves.
+        switch effect {
+        case .selectCard(let i):
+            overviewView.setKeyboardCardSelected(i)
+        case .previewWorktree(let i):
+            if let row = overviewView.orderedRows[safeIndex: i], row.id != overviewSelectedId {
+                overviewSelectedId = row.id
+                overviewView.selectedId = row.id
+            }
+        default:
+            break
+        }
     }
 
     private func dispatch(_ action: KeyboardAction) {
@@ -1523,12 +1729,28 @@ private final class NonFirstResponderScrollView: NSScrollView {
 /// Full-width fleet overview: every worktree as a row grouped by status, a
 /// horizontal ORDERS carousel, and a command composer. This is the landing
 /// surface (the "spread First Mate"); clicking a row drills into that worktree.
+extension Array {
+    subscript(safeIndex index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
 final class DashboardOverviewView: NSView {
     var onSelectWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
     /// A card's primary/secondary button was tapped. `optionText` is the chosen
     /// option label (or "" for a plain approve).
     var onOrderAction: ((PendingOrder, String) -> Void)?
+
+    // Nav-ring hooks (owned by DashboardViewController, which holds the
+    // OverviewFocusModel — the same ring drives both the full-bleed overview and
+    // the docked left column since this is one reparented instance).
+    /// Orders queue rebuilt its cards — counts may have changed.
+    var onOrdersChanged: (() -> Void)?
+    /// ↑ in an EMPTY, menu-closed command field: ring reclaims focus upward.
+    var onCommandArrowUpAtEmpty: (() -> Bool)?
+    /// Esc in an EMPTY, menu-closed command field: ring reclaims focus (first row).
+    var onCommandEscapeAtEmpty: (() -> Void)?
+    /// The command field became first responder (incl. mouse click).
+    var onCommandFocused: (() -> Void)?
 
     var pendingOrders: PendingOrdersQueue? {
         didSet {
@@ -1761,7 +1983,22 @@ final class DashboardOverviewView: NSView {
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
-        commandInput.onCancel = { [weak self] in self?.hideMenu() }
+        // Esc escalation: close the menu → clear the text → release focus to the ring.
+        commandInput.onCancel = { [weak self] in
+            guard let self else { return }
+            if !self.menuContainer.isHidden { self.hideMenu(); return }
+            if !self.commandInput.text.isEmpty {
+                self.commandInput.text = ""
+                self.hideMenu()
+                return
+            }
+            self.onCommandEscapeAtEmpty?()
+        }
+        commandInput.onArrowUpAtEmpty = { [weak self] in
+            guard let self, self.menuContainer.isHidden else { return false }
+            return self.onCommandArrowUpAtEmpty?() ?? false
+        }
+        commandInput.onFocused = { [weak self] in self?.onCommandFocused?() }
 
         // The autocomplete dropdown, opening upward above the input box (the
         // composer sits at the window bottom). Added to `self` so it can overlay
@@ -1950,10 +2187,31 @@ final class DashboardOverviewView: NSView {
     /// Selected worktree id, so the fleet can mark the current row (accent border).
     var selectedId: String = ""
 
+    /// Cards in carousel order + each card's worktree path, for keyboard nav.
+    private(set) var orderCards: [OrderCardView] = []
+    private(set) var orderCardPaths: [String] = []
+
+    /// Highlight card `index` as the keyboard selection (nil clears all).
+    func setKeyboardCardSelected(_ index: Int?) {
+        for (i, card) in orderCards.enumerated() {
+            card.setSelected(i == index)
+        }
+        if let index, let card = orderCards[safeIndex: index] {
+            card.scrollToVisible(card.bounds)
+        }
+    }
+
+    /// Tab on the orders row: cycle option-chip focus on the selected card.
+    func cycleChipOnCard(at index: Int) {
+        orderCards[safeIndex: index]?.cycleFocusedChip()
+    }
+
     private func refreshOrders() {
         let orders = pendingOrders?.all() ?? []
         ordersCarousel.arrangedSubviews.forEach { $0.removeFromSuperview() }
         ordersCountLabel.stringValue = "\(orders.count)"
+        orderCards = []
+        orderCardPaths = []
         var maxCard: CGFloat = 0
         for order in orders {
             // The real First Mate order card, laid out horizontally.
@@ -1971,12 +2229,15 @@ final class DashboardOverviewView: NSView {
             card.translatesAutoresizingMaskIntoConstraints = false
             card.widthAnchor.constraint(equalToConstant: 340).isActive = true
             card.heightAnchor.constraint(equalToConstant: h).isActive = true
+            orderCards.append(card)
+            orderCardPaths.append(order.action.worktreePath)
         }
         // Collapse the whole zone when there's nothing pending; otherwise size it
         // to the tallest card + the "ORDERS" header + padding.
         let show = !orders.isEmpty
         ordersZone.isHidden = !show
         ordersZoneHeight?.constant = show ? (maxCard + 12 + 20 + 10 + 14) : 0
+        onOrdersChanged?()
     }
 
     private func pin(_ v: NSView) {

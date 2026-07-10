@@ -90,7 +90,7 @@ extension KeyboardModeControllerTests {
 extension KeyboardModeControllerTests {
     func testHintNormal() {
         let c = KeyboardModeController()
-        XCTAssertTrue(c.hintText.contains("hjkl"))
+        XCTAssertTrue(c.hintText.contains("↑↓"))
         XCTAssertTrue(c.hintText.contains("⏎"))
     }
 
