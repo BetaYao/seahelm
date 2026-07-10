@@ -92,6 +92,8 @@ xcodebuild \
   -configuration "$CONFIGURATION" \
   -derivedDataPath "$ARCHIVE_ROOT" \
   -destination "generic/platform=macOS" \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   ARCHS="$ARCH" \
   ONLY_ACTIVE_ARCH=YES \
   CODE_SIGNING_ALLOWED=NO \
