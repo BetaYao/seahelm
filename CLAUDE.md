@@ -54,23 +54,23 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
 
 3. **Core Services** (`Sources/Core/`, `Sources/Status/`)
-   - `AgentHead` — Single source of truth for all agent state; delegates notify UI of changes
+   - `ShipLog` — Single source of truth for all agent state; delegates notify UI of changes
    - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
    - `StatusDetector` — Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
    - `Config` — JSON config at `~/.config/seahelm/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
-   - `SurfaceRegistry` — Global registry mapping surface IDs to `TerminalSurface` instances
+   - `StationRegistry` — Global registry mapping surface IDs to `Station` instances
    - `ExternalChannel` — Protocol for WeChat/WeCom bot integrations
 
 4. **Terminal & System** (`Sources/Terminal/`, `Sources/Git/`)
    - `GhosttyBridge` — Singleton wrapping the Ghostty C API (`ghostty.h` via bridging header)
-   - `TerminalSurface` — Wraps `GhosttyNSView` (NSView + Metal renderer + PTY); manages surface lifecycle, reparenting, and backend session attachment
+   - `Station` — Wraps `GhosttyNSView` (NSView + Metal renderer + PTY); manages surface lifecycle, reparenting, and backend session attachment
    - `SplitTree` / `SplitNode` — Tree data structure for split pane layout; serializable for persistence in config
    - `WorktreeDiscovery` — Runs `git worktree list --porcelain` to discover worktrees
 
 ## Key Patterns
 
-**Surface lifecycle:** TerminalSurface instances are long-lived — created once per split leaf, reparented between views (dashboard focus panel, repo tab split containers). `reparent(to:)` uses `CATransaction` to suppress animations, then defers size sync and focus restoration via two `DispatchQueue.main.async` passes. Surfaces are destroyed only on explicit deletion or app quit.
+**Surface lifecycle:** Station instances are long-lived — created once per split leaf, reparented between views (dashboard focus panel, repo tab split containers). `reparent(to:)` uses `CATransaction` to suppress animations, then defers size sync and focus restoration via two `DispatchQueue.main.async` passes. Surfaces are destroyed only on explicit deletion or app quit.
 
 **Tab switching:** `detachActiveTerminal()` removes the active `SplitContainerView` from its superview before embedding the new tab's content. This prevents Z-order conflicts when surfaces are shared across views.
 
@@ -78,7 +78,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 **Terminal persistence:** Backend sessions (tmux or zmx) named `amux-<parent>-<name>` are created per split leaf. For zmx, a health check runs 3s after creation; stale sessions trigger `recoverZmxSession` (destroy + recreate). Split layouts are serialized to config for restore on relaunch.
 
-**Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `AgentHead` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
+**Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `ShipLog` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
 
 **Focus management:** `GhosttyNSView` overrides `becomeFirstResponder`/`resignFirstResponder` to call `ghostty_surface_set_focus()` and apply visual shadow state. `mouseDown` calls `makeFirstResponder(self)`. Split pane operations defer `makeFirstResponder` via `DispatchQueue.main.async` to run after Ghostty's own deferred focus handling.
 
@@ -94,8 +94,8 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 - SPM dependencies: `CodeEditSourceEditor` (+ `CodeEditLanguages`) for the embedded code editor; otherwise system frameworks + Ghostty
 - Delegate pattern used throughout (not Combine/async-await for UI updates)
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
-- `SurfaceRegistry.shared` is the global surface lookup table (surface ID → TerminalSurface)
-- `AgentHead.shared` is the single source of truth for agent state (status, messages, activity events)
+- `StationRegistry.shared` is the global surface lookup table (surface ID → Station)
+- `ShipLog.shared` is the single source of truth for agent state (status, messages, activity events)
 - Tests use XCTest with `@testable import seahelm`; test files in `Tests/` directory; no external test dependencies
 - Config uses `decodeIfPresent()` throughout for backward compatibility with older config files
 - `ghostty/` directory contains the vendored Ghostty source (read-only reference, not built from here)

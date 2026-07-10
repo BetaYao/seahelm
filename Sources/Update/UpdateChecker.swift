@@ -47,11 +47,6 @@ class UpdateChecker {
         }
     }
 
-    func stopPolling() {
-        timer?.invalidate()
-        timer = nil
-    }
-
     /// Manual check (e.g. from menu item). Returns nil if already up to date.
     func checkNow() async throws -> ReleaseInfo? {
         // Respect rate limit

@@ -107,13 +107,6 @@ class TabCoordinator {
                 lastUserPrompt: outcome.info.lastUserPrompt,
                 agentType: outcome.info.agentType)
         }
-        NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
-            guard let self,
-                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
-                  let repoPath = self.worktreeRepoCache[worktreePath] else { return }
-            self.config.activeWorktreePaths[repoPath] = worktreePath
-            self.saveConfig()
-        }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
@@ -327,13 +320,35 @@ class TabCoordinator {
 
             let matchedWorktree = allWorktrees.first(where: { $0.info.path == agent.worktreePath })
             let isMain = matchedWorktree?.info.isMainWorktree ?? false
-            let freshBranch = matchedWorktree?.info.branch ?? agent.branch
+            // Card label is the worktree's own name — its directory's last path
+            // component — not the branch (the branch is visible inside the
+            // terminal). The main worktree always reads as "main".
+            let worktreeName = isMain
+                ? "main"
+                : URL(fileURLWithPath: agent.worktreePath).lastPathComponent
+
+            // "Last activity" age: seconds since the aggregator last saw a real
+            // status/message change for this worktree (persisted across launches),
+            // falling back to the sailor's start time.
+            let lastActivity = statusAggregator.lastActivity(for: agent.worktreePath) ?? agent.startedAt
+            let lastActivityAge = SailorDisplayHelpers.relativeAge(since: lastActivity)
+
+            // Git summary (diff size + ahead/behind). Served from an 8s cache;
+            // kick an off-main refresh so the next build has fresh numbers.
+            WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            let gitStats = WorktreeGitStatsCache.shared.cachedStats(worktreePath: agent.worktreePath)
+
+            // Warm the shared title cache (session summary → task → prompt) so
+            // both the cards and the overview rows can read cachedTitle synchronously.
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath,
+                                            lastUserPrompt: mostRecentUserPrompt,
+                                            branch: worktreeName) { _ in }
 
             result.append(SailorDisplayInfo(
                 id: agent.id,
-                name: freshBranch,
+                name: worktreeName,
                 project: agent.project,
-                thread: freshBranch,
+                thread: worktreeName,
                 paneStatuses: paneStatuses,
                 mostRecentMessage: mostRecentMessage,
                 lastUserPrompt: mostRecentUserPrompt,
@@ -346,7 +361,9 @@ class TabCoordinator {
                 paneStations: paneStations,
                 isMainWorktree: isMain,
                 tasks: agent.tasks,
-                activityEvents: agent.activityEvents
+                activityEvents: agent.activityEvents,
+                lastActivityAge: lastActivityAge,
+                gitStats: gitStats
             ))
         }
 
@@ -538,7 +555,11 @@ class TabCoordinator {
                         // Drop a (voluntary) suggestion while background work is still running —
                         // the agent will auto-resume, so it isn't a real end-of-turn yet.
                         if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
+                            NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
                             return nil
+                        }
+                        if event.event == .suggest {
+                            NSLog("[suggest] pass gate1 (not background-busy) — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
                         }
                         // The agent gave its own suggestions this turn (per the injected
                         // instruction) — record it so the Stop below won't force another.
@@ -844,10 +865,13 @@ class TabCoordinator {
 
     // MARK: - Branch Refresh
 
+    private var branchRefreshTick = 0
+
     func startBranchRefreshTimer() {
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self else { return }
+            self.branchRefreshTick += 1
             self.refreshBranches()
             // Re-evaluate worktree-tab idle collapse even when nothing changed.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -856,7 +880,12 @@ class TabCoordinator {
 
     private func refreshBranches() {
         let tabs = workspaceManager.tabs
+        // The active tab refreshes every tick (5s); background tabs only every
+        // 6th tick (30s) — each refresh forks a `git worktree list` subprocess
+        // per repo, so polling every open repo at 5s is wasteful.
+        let refreshAll = branchRefreshTick % 6 == 0
         for (tabIndex, tab) in tabs.enumerated() {
+            guard refreshAll || tabIndex == activeTabIndex else { continue }
             WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
                 guard let self else { return }
                 _ = self.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: tab.worktrees, freshWorktrees: freshWorktrees)

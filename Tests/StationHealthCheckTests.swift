@@ -7,12 +7,12 @@ final class StationHealthCheckTests: XCTestCase {
     /// the viewport read empty, leaving plain-terminal panes dead (no input, must
     /// Cmd+W). A live attach process must NOT be recovered.
     func testLiveShellWithBlankViewportIsNotRecovered() {
-        XCTAssertFalse(Station.shouldRecoverZmxSession(processExited: false))
+        XCTAssertFalse(ZmxSessionRecovery.shouldRecover(processExited: false))
     }
 
     /// When `zmx attach` has actually exited, the session is gone and the pane is
     /// genuinely dead — recovery is warranted.
     func testExitedAttachIsRecovered() {
-        XCTAssertTrue(Station.shouldRecoverZmxSession(processExited: true))
+        XCTAssertTrue(ZmxSessionRecovery.shouldRecover(processExited: true))
     }
 }

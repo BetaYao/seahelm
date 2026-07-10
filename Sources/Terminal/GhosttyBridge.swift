@@ -145,28 +145,9 @@ class GhosttyBridge {
              GHOSTTY_ACTION_CLOSE_TAB,
              GHOSTTY_ACTION_CLOSE_WINDOW:
             return true
-        case GHOSTTY_ACTION_START_SEARCH:
-            // Ghostty requests search UI — we handle this ourselves
-            return true
-        case GHOSTTY_ACTION_SEARCH_TOTAL:
-            let total = action.action.search_total.total
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .ghosttySearchTotal,
-                    object: nil,
-                    userInfo: ["total": Int(total)]
-                )
-            }
-            return true
-        case GHOSTTY_ACTION_SEARCH_SELECTED:
-            let selected = action.action.search_selected.selected
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .ghosttySearchSelected,
-                    object: nil,
-                    userInfo: ["selected": Int(selected)]
-                )
-            }
+        case GHOSTTY_ACTION_START_SEARCH,
+             GHOSTTY_ACTION_SEARCH_TOTAL,
+             GHOSTTY_ACTION_SEARCH_SELECTED:
             return true
         default:
             return false
@@ -204,6 +185,4 @@ class GhosttyBridge {
 
 extension Notification.Name {
     static let ghosttySurfaceCloseRequested = Notification.Name("ghosttySurfaceCloseRequested")
-    static let ghosttySearchTotal = Notification.Name("ghosttySearchTotal")
-    static let ghosttySearchSelected = Notification.Name("ghosttySearchSelected")
 }

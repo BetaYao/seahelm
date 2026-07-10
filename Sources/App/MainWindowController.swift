@@ -949,11 +949,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     // MARK: - Forwarding to TabCoordinator
 
-    @discardableResult
-    func integrateDiscoveredRepoForTesting(repoPath: String, worktrees: [WorktreeInfo], activateTab: Bool = true) -> Int {
-        tabCoordinator.integrateDiscoveredRepo(repoPath: repoPath, worktrees: worktrees, activateTab: activateTab)
-    }
-
     private func switchToTab(_ index: Int) {
         tabCoordinator.switchToTab(index)
     }

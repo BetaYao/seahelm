@@ -18,6 +18,25 @@ enum DiffSyntaxHighlighter {
         case function
     }
 
+    // Compiled once — building NSRegularExpression per call is expensive and
+    // this runs on the main thread while rendering diffs.
+    private static let stringRegex = try! NSRegularExpression(
+        pattern: #""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"#)
+    private static let numberRegex = try! NSRegularExpression(
+        pattern: #"(?<![\w.])(?:0x[0-9A-Fa-f]+|\d+(?:\.\d+)?)(?![\w.])"#)
+    private static let typeRegex = try! NSRegularExpression(
+        pattern: #"\b[A-Z][A-Za-z0-9_]*\b"#)
+    private static let functionRegex = try! NSRegularExpression(
+        pattern: #"\b[A-Za-z_$][A-Za-z0-9_$]*(?=\s*\()"#)
+    private static var keywordRegexCache: [Language: NSRegularExpression] = [:]
+
+    private static func keywordRegex(for language: Language) -> NSRegularExpression {
+        if let cached = keywordRegexCache[language] { return cached }
+        let regex = try! NSRegularExpression(pattern: keywordPattern(for: language))
+        keywordRegexCache[language] = regex
+        return regex
+    }
+
     static func attributedString(
         for code: String,
         filePath: String,
@@ -36,11 +55,7 @@ enum DiffSyntaxHighlighter {
         let fullRange = NSRange(location: 0, length: (code as NSString).length)
         var protectedRanges: [NSRange] = []
 
-        let stringRanges = ranges(
-            matching: #""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"#,
-            in: code,
-            range: fullRange
-        )
+        let stringRanges = ranges(matching: stringRegex, in: code, range: fullRange)
         apply(.string, to: stringRanges, in: attributed, baseColor: baseColor)
         protectedRanges.append(contentsOf: stringRanges)
 
@@ -50,7 +65,7 @@ enum DiffSyntaxHighlighter {
 
         var occupiedRanges = protectedRanges
         let keywordRanges = ranges(
-            matching: keywordPattern(for: language),
+            matching: keywordRegex(for: language),
             in: code,
             range: fullRange,
             excluding: occupiedRanges
@@ -59,7 +74,7 @@ enum DiffSyntaxHighlighter {
         occupiedRanges.append(contentsOf: keywordRanges)
 
         let numberRanges = ranges(
-            matching: #"(?<![\w.])(?:0x[0-9A-Fa-f]+|\d+(?:\.\d+)?)(?![\w.])"#,
+            matching: numberRegex,
             in: code,
             range: fullRange,
             excluding: occupiedRanges
@@ -68,7 +83,7 @@ enum DiffSyntaxHighlighter {
         occupiedRanges.append(contentsOf: numberRanges)
 
         let typeRanges = ranges(
-            matching: #"\b[A-Z][A-Za-z0-9_]*\b"#,
+            matching: typeRegex,
             in: code,
             range: fullRange,
             excluding: occupiedRanges
@@ -77,7 +92,7 @@ enum DiffSyntaxHighlighter {
         occupiedRanges.append(contentsOf: typeRanges)
 
         let functionRanges = ranges(
-            matching: #"\b[A-Za-z_$][A-Za-z0-9_$]*(?=\s*\()"#,
+            matching: functionRegex,
             in: code,
             range: fullRange,
             excluding: occupiedRanges
@@ -184,21 +199,39 @@ enum DiffSyntaxHighlighter {
     }
 
     private static func ranges(
-        matching pattern: String,
+        matching regex: NSRegularExpression,
         in code: String,
         range: NSRange,
         excluding excludedRanges: [NSRange] = []
     ) -> [NSRange] {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return []
-        }
+        let matches = regex.matches(in: code, range: range).map(\.range)
+        guard !excludedRanges.isEmpty else { return matches }
 
-        return regex
-            .matches(in: code, range: range)
-            .map(\.range)
-            .filter { matchedRange in
-                !excludedRanges.contains(where: { rangesIntersect($0, matchedRange) })
+        // Binary-search sorted exclusions instead of scanning all of them per
+        // match — the naive filter is O(matches × exclusions).
+        let sorted = excludedRanges.sorted { $0.location < $1.location }
+        return matches.filter { !intersectsAny(sorted, $0) }
+    }
+
+    /// Whether `range` intersects any range in `sorted` (sorted by location).
+    private static func intersectsAny(_ sorted: [NSRange], _ range: NSRange) -> Bool {
+        // Find the first exclusion ending after range starts, then check overlap
+        // from there until exclusions start past range's end.
+        var lo = 0, hi = sorted.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if sorted[mid].location + sorted[mid].length <= range.location {
+                lo = mid + 1
+            } else {
+                hi = mid
             }
+        }
+        var i = lo
+        while i < sorted.count, sorted[i].location < range.location + range.length {
+            if rangesIntersect(sorted[i], range) { return true }
+            i += 1
+        }
+        return false
     }
 
     private static func apply(

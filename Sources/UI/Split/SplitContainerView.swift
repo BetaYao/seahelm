@@ -41,7 +41,25 @@ class SplitContainerView: NSView, DividerDelegate {
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        layoutTree()
+        // Live-resize fires this continuously; the full layoutTree (constraint
+        // teardown, re-embedding, delegate rewiring, forced size sync) is only
+        // needed on structural changes. If every visible leaf is already embedded
+        // here, just move frames.
+        if allVisibleLeavesEmbedded {
+            applyFramesOnly()
+        } else {
+            layoutTree()
+        }
+    }
+
+    private var allVisibleLeavesEmbedded: Bool {
+        guard let tree = tree else { return false }
+        let leaves = zoomedLeafId.flatMap { z in tree.allLeaves.first { $0.id == z } }.map { [$0] }
+            ?? tree.allLeaves
+        return !leaves.isEmpty && leaves.allSatisfy { leaf in
+            guard let view = surfaceViews[leaf.stationId] else { return false }
+            return view.superview == self && view.translatesAutoresizingMaskIntoConstraints
+        }
     }
 
     func layoutTree() {
@@ -137,7 +155,11 @@ class SplitContainerView: NSView, DividerDelegate {
     /// GhosttyNSView.setFrameSize already syncs the surface size with a debounce.
     private func applyFramesOnly() {
         guard let tree = tree else { return }
-        leafFrames = Self.computeFrames(node: tree.root, in: bounds)
+        if let zoomLeaf = zoomedLeafId.flatMap({ z in tree.allLeaves.first { $0.id == z } }) {
+            leafFrames = [zoomLeaf.id: bounds]
+        } else {
+            leafFrames = Self.computeFrames(node: tree.root, in: bounds)
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for leaf in tree.allLeaves {
@@ -146,7 +168,9 @@ class SplitContainerView: NSView, DividerDelegate {
                   view.superview == self else { continue }
             view.frame = frame
         }
-        layoutDividers(node: tree.root, in: bounds)
+        if zoomedLeafId == nil {
+            layoutDividers(node: tree.root, in: bounds)
+        }
         for (id, overlay) in dimOverlays {
             if let frame = leafFrames[id] { overlay.frame = frame }
         }
