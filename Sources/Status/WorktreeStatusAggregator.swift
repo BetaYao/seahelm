@@ -55,6 +55,7 @@ class WorktreeStatusAggregator {
         if worktreeTerminals[worktreePath]?.isEmpty == true {
             worktreeTerminals.removeValue(forKey: worktreePath)
             worktreeStatuses.removeValue(forKey: worktreePath)
+            lastActivityAt.removeValue(forKey: worktreePath)
         }
     }
 

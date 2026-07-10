@@ -237,6 +237,7 @@ class TerminalCoordinator {
             station.destroy()
         }
         StationRegistry.shared.unregister(closed.stationId)
+        ShipLog.shared.unregister(terminalID: closed.stationId)
         container.surfaceViews.removeValue(forKey: closed.stationId)
         container.layoutTree()
 

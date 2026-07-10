@@ -87,8 +87,12 @@ struct CodexAppServerRateLimitClient {
                 #"{"method":"initialized"}"#,
                 #"{"id":2,"method":"account/rateLimits/read"}"#
             ].joined(separator: "\n") + "\n"
-            stdin.fileHandleForWriting.write(Data(input.utf8))
-            stdin.fileHandleForWriting.closeFile()
+            // write(contentsOf:) throws a Swift error on EPIPE; the legacy
+            // write(_:) raises an ObjC NSFileHandleOperationException that no
+            // Swift catch can intercept — it crashed the app when the codex
+            // process exited before reading stdin.
+            try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8))
+            try stdin.fileHandleForWriting.close()
 
             guard waitUntilExit(process, timeout: timeout) else {
                 terminate(process)

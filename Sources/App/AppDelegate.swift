@@ -8,7 +8,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// How often to clean up orphan zmx sessions (5 minutes).
     private let orphanCleanupInterval: TimeInterval = 300
 
+    /// True when the process is hosting XCTest. The unit tests exercise types
+    /// directly and never need the real app (window, Ghostty, git discovery,
+    /// hook installers). Skipping bootstrap keeps them hermetic and prevents the
+    /// test runner from hanging when git on an external volume stalls at launch.
+    static var isRunningUnitTests: Bool {
+        NSClassFromString("XCTestCase") != nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !Self.isRunningUnitTests else { return }
         // Register bundled JetBrains Mono before any view builds its fonts.
         AppFont.registerBundledFonts()
 

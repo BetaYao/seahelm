@@ -98,6 +98,12 @@ final class WorktreeGitStatsCache {
         return entries[worktreePath]?.stats
     }
 
+    /// Drop the entry for a deleted worktree so churn doesn't grow the cache unbounded.
+    func evict(worktreePath: String) {
+        lock.lock(); defer { lock.unlock() }
+        entries.removeValue(forKey: worktreePath)
+    }
+
     /// Serves a fresh cache entry without disk access, or resolves off-main on a
     /// miss/stale. `completion` runs on main with the resolved stats.
     func refresh(worktreePath: String, completion: @escaping (WorktreeGitStats) -> Void = { _ in }) {

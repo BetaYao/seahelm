@@ -780,6 +780,10 @@ class TabCoordinator {
     // MARK: - Worktree Lifecycle
 
     func worktreeDidDelete(_ info: WorktreeInfo) {
+        // Idempotent surface teardown: every current caller already removed the
+        // tree, but destroying here too means a future call path can't leak the
+        // worktree's stations (removeTree on a missing path is a no-op).
+        _ = terminalCoordinator.stationManager.removeTree(forPath: info.path)
         let repoPath = worktreeRepoCache[info.path]
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
@@ -788,9 +792,13 @@ class TabCoordinator {
             let remaining = workspaceManager.tabs[tabIndex].worktrees.filter { $0.path != info.path }
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
         }
-        if let agent = ShipLog.shared.sailor(forWorktree: info.path) {
-            ShipLog.shared.unregister(terminalID: agent.id)
+        // Unregister EVERY pane of the worktree (split worktrees have N agents;
+        // taking just the first leaked the rest for the app's lifetime).
+        for terminalID in ShipLog.shared.terminalIDs(forWorktree: info.path) {
+            ShipLog.shared.unregister(terminalID: terminalID)
         }
+        WorktreeTitleCache.shared.evict(worktreePath: info.path)
+        WorktreeGitStatsCache.shared.evict(worktreePath: info.path)
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updateSailors(buildSailorDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
@@ -809,11 +817,15 @@ class TabCoordinator {
             let primaryStation = terminalCoordinator.stationManager.primaryStation(forPath: worktree.path)
             terminalCoordinator.stationManager.removeTree(forPath: worktree.path)
 
-            if let agent = ShipLog.shared.sailor(forWorktree: worktree.path) {
-                ShipLog.shared.unregister(terminalID: agent.id)
-            } else if let primaryStation {
+            // Unregister EVERY pane of the worktree, not just the first sailor.
+            let ids = ShipLog.shared.terminalIDs(forWorktree: worktree.path)
+            if ids.isEmpty, let primaryStation {
                 ShipLog.shared.unregister(terminalID: primaryStation.id)
+            } else {
+                for id in ids { ShipLog.shared.unregister(terminalID: id) }
             }
+            WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
+            WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)
             if runtimeBackend != "local" {
                 let sessionName = SessionManager.persistentSessionName(for: worktree.path)
                 SessionManager.killSession(sessionName, backend: runtimeBackend)
