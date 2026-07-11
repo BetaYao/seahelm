@@ -26,7 +26,9 @@ if [ -d "$CACHED_XCFRAMEWORK" ]; then
 else
     echo "==> Building GhosttyKit.xcframework (this may take a few minutes)..."
     cd "$GHOSTTY_DIR"
-    zig build -Demit-xcframework=true -Dxcframework-target=universal -Doptimize=ReleaseFast
+    # -Demit-macos-app=false: emit-macos-app defaults to emit-xcframework, and we
+    # only need the xcframework — building the full Ghostty.app fails on CI's Xcode.
+    zig build -Demit-xcframework=true -Demit-macos-app=false -Dxcframework-target=universal -Doptimize=ReleaseFast
 
     # Cache the build
     mkdir -p "$CACHE_DIR/$GHOSTTY_SHA"
