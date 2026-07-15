@@ -41,6 +41,9 @@ class NotificationManager: NSObject {
             if let error {
                 NSLog("Notification permission error: \(error)")
             }
+            if !granted {
+                NSLog("Notification permission NOT granted — system banners will be dropped (System Settings → Notifications → seahelm)")
+            }
         }
         UNUserNotificationCenter.current().delegate = self
 
@@ -453,12 +456,11 @@ class NotificationManager: NSObject {
         content.userInfo = userInfo
         content.categoryIdentifier = Self.categoryIdentifier
 
-        // Stable identifier (String hashValue is randomized per process, so it
-        // can't reliably replace a prior notification across launches). The path
-        // + pane is stable and collision-free.
-        let identifier = paneCount > 1
-            ? "seahelm-\(worktreePath)-\(paneIndex)"
-            : "seahelm-\(worktreePath)"
+        // Unique per delivery. Reusing an identifier makes macOS update the
+        // already-delivered notification in place — it re-alerts nothing and the
+        // user never sees a banner for the second and later events on a worktree.
+        // Grouping in Notification Center is `threadIdentifier`'s job, not this.
+        let identifier = "seahelm-\(UUID().uuidString)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { NSLog("Failed to send notification: \(error)") }
