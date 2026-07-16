@@ -221,7 +221,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // worktree it docks into the left column (same region as files/changes,
         // pushing the terminal right — not a floating overlay).
         overviewView.onSelectWorktree = { [weak self] path in
-            self?.enterWorktree(byWorktreePath: path)
+            self?.handleWorktreeRowClick(path: path)
         }
         // Nav-ring ↔ command-field hand-off (see OverviewFocusModel).
         overviewView.onCommandArrowUpAtEmpty = { [weak self] in
@@ -1413,6 +1413,39 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
         if overviewFocus.selectedWorktreeIndex != nil {
             commitFocusedWorktreeForward()
+        }
+    }
+
+    /// Click on a fleet row. Clicking steps the same ladder as ⏎/→, so the mouse
+    /// and the nav ring never disagree about which mode a row lands you in:
+    /// - mode 1 (dashboard): commit the clicked worktree → mode 2 (split)
+    /// - mode 2, clicking the *selected* row: → mode 3 (terminal), sidebar hidden
+    /// - mode 2, clicking a *different* row: stay in mode 2 and just switch
+    ///   worktrees — identical to walking there with ↑/↓.
+    private func handleWorktreeRowClick(path: String) {
+        guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
+            // Not a fleet row (orders card path, stale list) — drill in as before.
+            enterWorktree(byWorktreePath: path)
+            return
+        }
+        let row = overviewView.orderedRows[i]
+        // Land the ring on the clicked row so a following ↑/↓ continues from here
+        // rather than from wherever the keyboard was last.
+        _ = overviewFocus.jumpToWorktree(i)
+
+        switch viewMode {
+        case .dashboard:
+            commitFocusedWorktreeForward()
+        case .split:
+            if row.id == overviewSelectedId {
+                commitFocusedWorktreeForward()
+            } else {
+                applyOverviewEffect(.previewWorktree(i))
+            }
+        case .terminal:
+            // Overview is hidden here, but a docked side panel can still surface
+            // rows — keep the direct drill-in.
+            enterWorktree(byWorktreePath: path)
         }
     }
 
