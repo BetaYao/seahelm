@@ -127,7 +127,15 @@ struct OverviewFocusModel: Equatable {
 
     /// Clamp the focus after the fleet list or orders queue rebuilds. Returns the
     /// effect to re-apply the (possibly moved) highlight.
-    mutating func rowsDidChange(worktreeCount: Int, orderCount: Int) -> Effect {
+    ///
+    /// `worktreeAnchor` is where the row the host still considers selected now
+    /// lives. The fleet list is re-sorted by status, so a row index is NOT a
+    /// stable identity across rebuilds: a single status flip elsewhere reshuffles
+    /// the list and the old index silently lands on a different worktree. Pass the
+    /// anchor to follow the selection by identity; nil keeps the plain clamp (the
+    /// selected row is gone, or the host tracks no identity).
+    mutating func rowsDidChange(worktreeCount: Int, orderCount: Int,
+                                worktreeAnchor: Int? = nil) -> Effect {
         self.worktreeCount = max(0, worktreeCount)
         self.orderCount = max(0, orderCount)
         lastCardIndex = clampedCardIndex(lastCardIndex)
@@ -138,7 +146,8 @@ struct OverviewFocusModel: Equatable {
                 row = .worktree(index: 0)
                 return .none
             }
-            return land(.worktree(index: min(i, self.worktreeCount - 1)))
+            let target = worktreeAnchor ?? i
+            return land(.worktree(index: min(max(0, target), self.worktreeCount - 1)))
         case .orders(let i):
             if self.orderCount == 0 { return land(lastWorktreeRowOrSelf()) }
             return land(.orders(cardIndex: min(i, self.orderCount - 1)))

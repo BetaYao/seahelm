@@ -13,12 +13,17 @@ enum BridgeCommand: Equatable {
     case returnAll
     case broadcast(task: String)
     case addRepo
+    /// Stop tracking a repo: kills its sessions, leaves every worktree on disk.
+    case removeRepo(repoPath: String)
+    /// Delete one linked worktree (never the main one — that is `removeRepo`).
+    case removeWorktree(worktreePath: String)
 }
 
 enum BridgeCommandError: Error, Equatable {
     case emptyTask
     case unknownCommand(String)
     case unknownBranch(String)
+    case unknownTarget(String)
     case missingArgument(String)
 }
 
@@ -35,6 +40,33 @@ enum BridgeCommandParser {
         }
         let rest = tokens.dropFirst().joined(separator: " ")
         return (matched, rest.isEmpty ? text : rest)
+    }
+
+    /// Resolve what `/remove @x` targets. The `@` list mixes both kinds of name,
+    /// and the kind decides the verb:
+    ///
+    ///   - a **repo** name (its directory name) → drop the whole repo, keeping
+    ///     every worktree on disk. This is how you "remove main": a repo's main
+    ///     worktree cannot be deleted (git and `confirmAndDeleteWorktree` both
+    ///     refuse), so naming the repo is the only sensible reading.
+    ///   - a **branch** name of a linked worktree → delete that worktree.
+    ///
+    /// Repos win a name collision: dropping a repo leaves the worktree on disk,
+    /// so guessing it is the recoverable mistake.
+    static func resolveRemoveTarget(_ rest: String, worktrees: [WorktreeRef],
+                                    repoPaths: [String]) -> Result<BridgeCommand, BridgeCommandError> {
+        let first = rest.split(separator: " ", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        let name = first.hasPrefix("@") ? String(first.dropFirst()) : first
+        guard !name.isEmpty else { return .failure(.missingArgument("remove")) }
+        if let path = repoPaths.first(where: {
+            URL(fileURLWithPath: $0).lastPathComponent.lowercased() == name.lowercased()
+        }) {
+            return .success(.removeRepo(repoPath: path))
+        }
+        if let wt = worktrees.first(where: { $0.branch.lowercased() == name.lowercased() }) {
+            return .success(.removeWorktree(worktreePath: wt.path))
+        }
+        return .failure(.unknownTarget(name))
     }
 
     static func parse(_ text: String, worktrees: [WorktreeRef],
@@ -77,6 +109,8 @@ enum BridgeCommandParser {
             return rest.isEmpty ? .failure(.emptyTask) : .success(.broadcast(task: rest))
         case "add":
             return .success(.addRepo)
+        case "remove":
+            return Self.resolveRemoveTarget(rest, worktrees: worktrees, repoPaths: repoPaths)
         default:
             return .failure(.unknownCommand(verb))
         }

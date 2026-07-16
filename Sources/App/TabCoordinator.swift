@@ -31,7 +31,7 @@ class TabCoordinator {
     var statusPublisher: StatusPublisher!
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
-    private let pendingTransfers = PendingTransferTracker()
+    let pendingTransfers = PendingTransferTracker()
 
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
@@ -713,6 +713,10 @@ class TabCoordinator {
                     let newWorktrees = worktrees.filter { !knownPaths.contains($0.path) }
                     self.integrateNewWorktrees(repoRoot: repoRoot, allDiscovered: worktrees, newWorktrees: newWorktrees)
                 }
+            } else if Self.isEphemeralRepoPath(repoRoot) {
+                // An agent that clones into $TMPDIR to build and cd's there would
+                // otherwise join that clone to the workspace permanently.
+                NSLog("[TabCoordinator] Ignoring ephemeral repo from hook: \(repoRoot)")
             } else {
                 NSLog("[TabCoordinator] Auto-adding new repo via hook: \(repoRoot)")
                 self.addRepo(at: repoRoot)
@@ -720,8 +724,36 @@ class TabCoordinator {
         }
     }
 
+    /// Directories the OS hands out for throwaway work. Auto-add is driven by an
+    /// agent's cwd, so a repo cloned into one is disposable by construction — and
+    /// `workspacePaths` is never pruned, so adding it strands a card that outlives
+    /// the directory itself (discovery then synthesizes a fake main worktree for it).
+    /// Only the hook-driven path consults this; an explicit Add Repo is the user's call.
+    static func isEphemeralRepoPath(_ path: String) -> Bool {
+        let canon = WorktreeDiscovery.canonicalPath(path)
+        var roots = ["/tmp", "/var/folders", "/var/tmp"]
+            .map { WorktreeDiscovery.canonicalPath($0) }
+        roots.append(WorktreeDiscovery.canonicalPath(NSTemporaryDirectory()))
+        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            roots.append(WorktreeDiscovery.canonicalPath(caches.path))
+        }
+        return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
+    }
+
     private func performPaneTransfer(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
         let sourcePath = transfer.sourceWorktreePath
+        // Capture the source's own info before step 2 drops it. Step 6 restores the
+        // source from `allDiscoveredWorktrees`, but that list only covers `repoRoot`
+        // — the *new* worktree's repo. Transfers are matched by worktree name alone
+        // (a worktree may be created at any sibling path), so a name collision can
+        // pair this new worktree with a source in a *different* repo, and then the
+        // lookup finds nothing and the source is destroyed with no way back until
+        // relaunch. Falling back to the captured info keeps that unrecoverable.
+        let sourceEntryInfo = allWorktrees.first(where: { $0.info.path == sourcePath })?.info
+        // The source keeps its OWN repo/project — `repoRoot` and `project` describe
+        // the new worktree, which is only the same repo when no cross-repo name
+        // collision routed us here.
+        let sourceRepo = worktreeRepoCache[sourcePath] ?? repoRoot
 
         // 1. Transfer the SplitTree from source → new worktree path
         guard let transferredTree = terminalCoordinator.stationManager.transferTree(fromPath: sourcePath, toPath: newInfo.path) else {
@@ -761,17 +793,25 @@ class TabCoordinator {
         dashboardVC?.invalidateSplitContainer(forPath: sourcePath)
 
         // 6. Create a fresh tree for the source worktree (e.g., main)
-        if let sourceInfo = allDiscoveredWorktrees.first(where: { $0.path == transfer.sourceWorktreePath }) {
+        let rediscoveredSource = allDiscoveredWorktrees.first(where: {
+            WorktreeDiscovery.canonicalPath($0.path) == WorktreeDiscovery.canonicalPath(sourcePath)
+        })
+        if rediscoveredSource == nil, sourceEntryInfo != nil {
+            NSLog("[TabCoordinator] Transfer source \(sourcePath) absent from \(repoRoot) discovery — restoring from its tracked info")
+        }
+        if let sourceInfo = rediscoveredSource ?? sourceEntryInfo {
             let freshTree = terminalCoordinator.stationManager.tree(for: sourceInfo, backend: runtimeBackend)
             if let idx = allWorktrees.firstIndex(where: { $0.info.path == sourceInfo.path }) {
                 allWorktrees[idx] = (info: sourceInfo, tree: freshTree)
             } else {
                 allWorktrees.append((info: sourceInfo, tree: freshTree))
             }
-            worktreeRepoCache[sourceInfo.path] = repoRoot
+            worktreeRepoCache[sourceInfo.path] = sourceRepo
+            let sourceProject = workspaceManager.tabs.first(where: { $0.repoPath == sourceRepo })?.displayName
+                ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
             if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
-                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }
@@ -913,8 +953,24 @@ class TabCoordinator {
         // Compare by canonical path: discovery emits symlink-resolved paths that
         // may differ as strings from how a worktree path was originally stored.
         let knownPaths = Set(allWorktrees.map { WorktreeDiscovery.canonicalPath($0.info.path) })
-        let freshPaths = Set(freshWorktrees.map(\.path))
-        let deletedWorktrees = oldWorktrees.filter { !freshPaths.contains($0.path) }
+        let freshPaths = Set(freshWorktrees.map { WorktreeDiscovery.canonicalPath($0.path) })
+        let absent = oldWorktrees.filter { !freshPaths.contains(WorktreeDiscovery.canonicalPath($0.path)) }
+
+        // Absent from `git worktree list` is not proof of deletion — a partial or
+        // degraded listing (repo mid-write, a hiccup on a removable volume) drops
+        // live entries. Deleting on that evidence destroys the worktree's stations
+        // and its dashboard card until relaunch. Only act when the directory is
+        // *definitively* gone; `missingPaths` never reports an unreachable path.
+        let deletedWorktrees: [WorktreeInfo]
+        if absent.isEmpty {
+            deletedWorktrees = []
+        } else {
+            let missing = FileSystemProbe.missingPaths(from: absent.map(\.path))
+            deletedWorktrees = absent.filter { missing.contains($0.path) }
+            for kept in absent where !missing.contains(kept.path) {
+                NSLog("[TabCoordinator] \(kept.path) missing from git worktree list but still on disk — keeping")
+            }
+        }
 
         var changed = false
         if !deletedWorktrees.isEmpty {
@@ -1040,7 +1096,7 @@ class TabCoordinator {
             newStatus: newStatus,
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
-            isTargetVisible: isWorktreeVisible(worktreePath)
+            isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID)
         )
     }
 
@@ -1049,6 +1105,20 @@ class TabCoordinator {
     /// to decide whether a system banner would be redundant.
     private func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
+    }
+
+    /// Pane-level visibility: a banner is redundant only when THIS pane is the
+    /// focused pane of the on-screen worktree. Any other pane — including a
+    /// sibling split of the same worktree — still notifies, so an agent
+    /// finishing in a pane you're not looking at never goes silent.
+    private func isPaneFocused(worktreePath: String, terminalID: String) -> Bool {
+        guard let tree = dashboardVC?.activeSplitContainer?.tree,
+              tree.worktreePath == worktreePath else { return false }
+        // No pane identity (shouldn't happen on the pane path) — fall back to
+        // worktree-level visibility.
+        guard !terminalID.isEmpty else { return true }
+        guard let focused = tree.allLeaves.first(where: { $0.id == tree.focusedId }) else { return false }
+        return focused.stationId == terminalID
     }
 
     // MARK: - Tab Selection

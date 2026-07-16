@@ -5,7 +5,7 @@ import Foundation
 /// decision back to the agent via stdout. Prefers the Unix socket; falls back to
 /// the HTTP webhook so a socket hiccup never breaks the Stop-hook UX.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v3"
+    static let versionMarker = "# seahelm-hook v4"
 
     static func scriptContents() -> String {
         return """
@@ -23,7 +23,11 @@ enum SeahelmHookInstaller {
         # Tag the event with our stable pane id so seahelm can attribute it to the
         # exact pane (e.g. to transfer only that pane when it creates a worktree).
         # Session names are [A-Za-z0-9_-], so no JSON escaping is needed.
-        pid="${SEAHELM_PANE_ID:-}"
+        # ZMX_SESSION holds the same value SessionManager exports as SEAHELM_PANE_ID,
+        # and panes predating that export still have it — keep this fallback
+        # identical to seahelm-suggest's, or the two sides key the turn differently
+        # and every Stop blocks for a suggestion that already arrived.
+        pid="${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
         case "$payload" in
           '{'*) [ -n "$pid" ] && payload='{"seahelm_pane_id":"'"$pid"'",'"${payload#\\{}" ;;
         esac

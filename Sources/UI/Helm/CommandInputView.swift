@@ -8,6 +8,7 @@ final class CommandInputView: NSView {
 
     // Bare-TUI palette (prototype THEME.A)
     private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
+    private static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)
     private static let accent     = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
 
     enum MenuKey { case up, down, accept }
@@ -30,6 +31,19 @@ final class CommandInputView: NSView {
     private let box = NSView()
     private let spinner = NSProgressIndicator()
     private var savedPlaceholder: String?
+    private var placeholder: String = "" {
+        // The Bare-TUI surface is a fixed dark navy, so the placeholder can't use
+        // the system default (secondaryLabelColor goes near-black under .aqua).
+        didSet {
+            field.placeholderAttributedString = NSAttributedString(
+                string: placeholder,
+                attributes: [
+                    .foregroundColor: Self.inkDim,
+                    .font: field.font ?? AppFont.mono(size: 12.5, weight: .regular),
+                ]
+            )
+        }
+    }
 
     /// Anchors of the bordered input box, so the host can align the autocomplete
     /// dropdown to the box's bottom edge.
@@ -73,7 +87,7 @@ final class CommandInputView: NSView {
         field.focusRingType = .none
         field.font = AppFont.mono(size: 12.5, weight: .regular)
         field.textColor = Self.ink
-        field.placeholderString = "Give an order — / command · @ repo · # agent"
+        placeholder = "Give an order — / command · @ repo · # agent"
         field.delegate = self
         field.target = self
         field.action = #selector(submit)
@@ -115,14 +129,14 @@ final class CommandInputView: NSView {
     /// placeholder to `message`, and spin.
     func setLoading(_ loading: Bool, message: String = "Working…") {
         if loading {
-            savedPlaceholder = field.placeholderString
+            savedPlaceholder = placeholder
             field.stringValue = ""
-            field.placeholderString = message
+            placeholder = message
             field.isEditable = false
             field.isSelectable = false
             spinner.startAnimation(nil)
         } else {
-            field.placeholderString = savedPlaceholder ?? field.placeholderString
+            placeholder = savedPlaceholder ?? placeholder
             field.isEditable = true
             field.isSelectable = true
             spinner.stopAnimation(nil)

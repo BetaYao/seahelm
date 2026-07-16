@@ -128,6 +128,48 @@ final class OverviewFocusModelTests: XCTestCase {
         XCTAssertEqual(m.row, .command)
     }
 
+    // MARK: - rowsDidChange follows identity across a re-sort
+
+    /// The fleet list re-sorts by status, so the selected row moves. Without an
+    /// anchor the index clamp keeps the old slot — which now holds a *different*
+    /// worktree — and the highlight silently drifts off the user's selection.
+    func testRowsDidChangeFollowsAnchorWhenListReorders() {
+        var m = OverviewFocusModel(worktreeCount: 4, orderCount: 0)
+        _ = m.jumpToWorktree(1)
+        // Same count, but the selected row is now at index 3 after the re-sort.
+        XCTAssertEqual(
+            m.rowsDidChange(worktreeCount: 4, orderCount: 0, worktreeAnchor: 3),
+            .previewWorktree(3))
+        XCTAssertEqual(m.row, .worktree(index: 3))
+    }
+
+    func testRowsDidChangeWithoutAnchorStillClamps() {
+        var m = OverviewFocusModel(worktreeCount: 5, orderCount: 0)
+        _ = m.jumpToWorktree(4)
+        // Anchor nil = selected row is gone; fall back to the plain clamp.
+        XCTAssertEqual(
+            m.rowsDidChange(worktreeCount: 2, orderCount: 0, worktreeAnchor: nil),
+            .previewWorktree(1))
+    }
+
+    func testRowsDidChangeClampsOutOfRangeAnchor() {
+        var m = OverviewFocusModel(worktreeCount: 5, orderCount: 0)
+        _ = m.jumpToWorktree(4)
+        XCTAssertEqual(
+            m.rowsDidChange(worktreeCount: 3, orderCount: 0, worktreeAnchor: 9),
+            .previewWorktree(2))
+    }
+
+    /// An anchor must not drag focus off the orders row or the command input.
+    func testRowsDidChangeAnchorIgnoredOffWorktreeRows() {
+        var m = OverviewFocusModel(worktreeCount: 2, orderCount: 2)
+        _ = m.moveDown(); _ = m.moveDown()  // orders row
+        XCTAssertEqual(
+            m.rowsDidChange(worktreeCount: 2, orderCount: 2, worktreeAnchor: 1),
+            .selectCard(0))
+        XCTAssertEqual(m.row, .orders(cardIndex: 0))
+    }
+
     func testJumpToWorktreeBounds() {
         var m = OverviewFocusModel(worktreeCount: 2, orderCount: 0)
         XCTAssertEqual(m.jumpToWorktree(5), .none)
