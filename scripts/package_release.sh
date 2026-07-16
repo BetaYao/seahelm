@@ -95,7 +95,7 @@ xcodebuild \
   -skipPackagePluginValidation \
   -skipMacroValidation \
   ARCHS="$ARCH" \
-  ONLY_ACTIVE_ARCH=YES \
+  ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
@@ -103,6 +103,15 @@ xcodebuild \
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Built app not found at $APP_PATH" >&2
+  exit 1
+fi
+
+# The x86_64 slice is cross-compiled on Apple Silicon, where a stray
+# ONLY_ACTIVE_ARCH=YES would silently yield an arm64 binary in a zip labelled
+# x86_64. Fail loudly instead of shipping the wrong architecture.
+echo "==> Verifying $APP_NAME.app is $ARCH"
+if ! lipo -archs "$APP_PATH/Contents/MacOS/$APP_NAME" | tr ' ' '\n' | grep -qx "$ARCH"; then
+  echo "Built binary is $(lipo -archs "$APP_PATH/Contents/MacOS/$APP_NAME"), expected $ARCH" >&2
   exit 1
 fi
 

@@ -13,6 +13,7 @@ jobs:
   build:
     name: Build ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     env:
       HAS_CERTIFICATE_SECRETS: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_DEVELOPER_IDENTITY != '' }}
       HAS_NOTARY_SECRETS: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
@@ -22,8 +23,11 @@ jobs:
         include:
           - arch: arm64
             runner: macos-14
+          # macos-13 was the last Intel runner and was retired in Dec 2025, so the
+          # x86_64 slice is cross-compiled on Apple Silicon. GhosttyKit's macOS
+          # slice is universal (macos-arm64_x86_64), so it links either way.
           - arch: x86_64
-            runner: macos-13
+            runner: macos-14
 
     steps:
       - name: Checkout
@@ -98,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
-          path: dist/amux-macos-${{ matrix.arch }}.zip
+          path: dist/seahelm-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   publish:
@@ -118,15 +122,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/amux-macos-arm64.zip
-            dist/amux-macos-x86_64.zip
+            dist/seahelm-macos-arm64.zip
+            dist/seahelm-macos-x86_64.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             ## Downloads
 
-            - `amux-macos-arm64.zip`: Apple Silicon
-            - `amux-macos-x86_64.zip`: Intel
+            - `seahelm-macos-arm64.zip`: Apple Silicon
+            - `seahelm-macos-x86_64.zip`: Intel
 
             Artifacts are notarized when the required Apple signing secrets are configured in this repository.
