@@ -381,20 +381,6 @@ class TerminalCoordinator {
         }
     }
 
-    /// `/remove @branch` — delete a linked worktree with no confirmation sheet:
-    /// typing the command is the confirmation.
-    ///
-    /// Deliberately NOT forced, unlike `deleteWorktreeForReturnToPort`. That path
-    /// force-removes because its caller already approved discarding the work; here
-    /// nobody has, so git is left to refuse a dirty tree and `performDeleteWorktree`
-    /// surfaces its reason. Skipping the sheet must not silently skip the sheet's
-    /// "uncommitted changes will be lost" warning.
-    func deleteWorktreeFromCommand(_ info: WorktreeInfo) {
-        guard !info.isMainWorktree else { return }  // main worktree → /remove @repo
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
-        performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: false)
-    }
-
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
         // Tear the sessions down BEFORE the tree (and its session names) are gone —
         // afterwards there is nothing left to name them by.

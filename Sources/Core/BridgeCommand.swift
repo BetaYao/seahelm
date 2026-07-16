@@ -9,8 +9,8 @@ enum BridgeCommand: Equatable {
     case newWorktree(task: String, repoHint: String? = nil)
     case orderExisting(worktreePath: String, task: String)
     case commit(worktreePath: String)
-    case returnToPort(worktreePath: String)
-    case returnAll
+    /// Scan every non-main worktree and clean up whatever is done.
+    case removeAll
     case broadcast(task: String)
     case addRepo
     /// Stop tracking a repo: kills its sessions, leaves every worktree on disk.
@@ -45,6 +45,7 @@ enum BridgeCommandParser {
     /// Resolve what `/remove @x` targets. The `@` list mixes both kinds of name,
     /// and the kind decides the verb:
     ///
+    ///   - **no name at all** → sweep every non-main worktree.
     ///   - a **repo** name (its directory name) → drop the whole repo, keeping
     ///     every worktree on disk. This is how you "remove main": a repo's main
     ///     worktree cannot be deleted (git and `confirmAndDeleteWorktree` both
@@ -57,7 +58,7 @@ enum BridgeCommandParser {
                                     repoPaths: [String]) -> Result<BridgeCommand, BridgeCommandError> {
         let first = rest.split(separator: " ", omittingEmptySubsequences: true).first.map(String.init) ?? ""
         let name = first.hasPrefix("@") ? String(first.dropFirst()) : first
-        guard !name.isEmpty else { return .failure(.missingArgument("remove")) }
+        guard !name.isEmpty else { return .success(.removeAll) }
         if let path = repoPaths.first(where: {
             URL(fileURLWithPath: $0).lastPathComponent.lowercased() == name.lowercased()
         }) {
@@ -102,9 +103,6 @@ enum BridgeCommandParser {
             }
         case "commit":
             return resolveBranch("commit").map { .commit(worktreePath: $0.path) }
-        case "return":
-            if rest.isEmpty { return .success(.returnAll) }
-            return resolveBranch("return").map { .returnToPort(worktreePath: $0.path) }
         case "broadcast":
             return rest.isEmpty ? .failure(.emptyTask) : .success(.broadcast(task: rest))
         case "add":

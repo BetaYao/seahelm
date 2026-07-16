@@ -58,13 +58,9 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(BridgeCommandParser.parse("/order feat-x", worktrees: wts), .failure(.emptyTask))
     }
 
-    func testReturnResolvesBranch() {
+    func testReturnIsGone() {
         XCTAssertEqual(BridgeCommandParser.parse("/return fix-y", worktrees: wts),
-                       .success(.returnToPort(worktreePath: "/repo/fix-y")))
-    }
-
-    func testReturnNoArgIsReturnAll() {
-        XCTAssertEqual(BridgeCommandParser.parse("/return", worktrees: wts), .success(.returnAll))
+                       .failure(.unknownCommand("return")))
     }
 
     func testCommitResolvesBranch() {
@@ -123,9 +119,10 @@ final class BridgeCommandParserTests: XCTestCase {
                        .failure(.unknownTarget("nope")))
     }
 
-    func testRemoveWithoutArgumentFails() {
+    /// A bare /remove is the sweep that /return used to be.
+    func testRemoveWithoutArgumentSweepsAll() {
         XCTAssertEqual(BridgeCommandParser.parse("/remove", worktrees: wts, repoPaths: repos),
-                       .failure(.missingArgument("remove")))
+                       .success(.removeAll))
     }
 
     /// A repo name that resolves must name a real tab: the parser matches on the

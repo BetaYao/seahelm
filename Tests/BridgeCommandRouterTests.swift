@@ -6,15 +6,14 @@ final class BridgeCommandRouterTests: XCTestCase {
                     created: @escaping (String, String?) -> Void = { _, _ in },
                     ordered: @escaping (String, String) -> Void = { _, _ in },
                     committed: @escaping (String) -> Void = { _ in },
-                    returnWorktree: @escaping (String) -> Void = { _ in },
-                    returnAll: @escaping () -> Void = {},
+                    removeAll: @escaping () -> Void = {},
                     addRepo: @escaping () -> Void = {},
                     removeRepo: @escaping (String) -> Void = { _ in },
                     removeWorktree: @escaping (String) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
-                            commit: committed, returnWorktree: returnWorktree,
-                            returnAll: returnAll, addRepo: addRepo, removeRepo: removeRepo,
+                            commit: committed,
+                            removeAll: removeAll, addRepo: addRepo, removeRepo: removeRepo,
                             removeWorktree: removeWorktree,
                             activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
@@ -77,18 +76,10 @@ final class BridgeCommandRouterTests: XCTestCase {
         XCTAssertTrue(q.all().isEmpty)
     }
 
-    func testReturnToPortCallsReturnWorktreeClosure() {
-        let q = PendingOrdersQueue()
-        var got: String?
-        makeRouter(queue: q, returnWorktree: { got = $0 }).route(.returnToPort(worktreePath: "/p"))
-        XCTAssertEqual(got, "/p")
-        XCTAssertTrue(q.all().isEmpty)
-    }
-
-    func testReturnAllCallsReturnAllClosure() {
+    func testRemoveAllCallsRemoveAllClosure() {
         let q = PendingOrdersQueue()
         var called = false
-        makeRouter(queue: q, returnAll: { called = true }).route(.returnAll)
+        makeRouter(queue: q, removeAll: { called = true }).route(.removeAll)
         XCTAssertTrue(called)
         XCTAssertTrue(q.all().isEmpty)
     }

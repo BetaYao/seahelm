@@ -278,7 +278,7 @@ class MainWindowController: NSWindowController {
         dashboardVC?.startNewCommand(prefill: prefill)
     }
 
-    @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
+    @objc func helmRemoveCommand() { openHelmCockpit(prefill: "/remove ") }
     @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
     @objc func helmCommitCommand() { openHelmCockpit(prefill: "/commit ") }
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
@@ -625,11 +625,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 ("new", "Start a new task session"),
                 ("order", "Give an order to the agent"),
                 ("commit", "Commit and push current changes"),
-                ("return", "Recall agent · end session"),
                 ("broadcast", "Broadcast to everyone"),
                 ("add", "Add a repo to the workspace"),
-                // Both kinds of `@` name are valid — the kind picks the verb.
-                ("remove", "@worktree deletes it · @repo drops the repo"),
+                // Both kinds of `@` name are valid — the kind picks the verb,
+                // and no name at all sweeps every worktree.
+                ("remove", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -667,10 +667,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
                 ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
             },
-            returnWorktree: { [weak self] path in
-                self?.enqueueReturnCard(forPath: path)
-            },
-            returnAll: { [weak self] in
+            removeAll: { [weak self] in
                 guard let self else { return }
                 let worktrees = self.tabCoordinator.allWorktrees
                     .map(\.info)
@@ -695,7 +692,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 guard let self,
                       let item = self.tabCoordinator.allWorktrees.first(where: { $0.info.path == path })
                 else { return }
-                self.terminalCoordinator.deleteWorktreeFromCommand(item.info)
+                // Same confirm sheet as the sidebar's Delete: typing a branch name is
+                // easy to get wrong, and the work in that tree is unrecoverable.
+                self.terminalCoordinator.confirmAndDeleteWorktree(item.info, window: self.window)
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
@@ -705,7 +704,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Run a merge check for `path` on a background thread and enqueue a
     /// return-to-port card with appropriate options once the check completes.
-    /// Resolve a `/return` for one worktree. If it is clean AND fully merged,
+    /// Resolve a `/remove` sweep for one worktree. If it is clean AND fully merged,
     /// remove it immediately (no confirmation). Otherwise enqueue a red
     /// "Force remove" card requiring explicit confirmation. `onDone` fires on the
     /// main thread once resolved (deleted or carded).
@@ -715,7 +714,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let coordinator = terminalCoordinator
         let sailor = ShipLog.shared.sailor(forWorktree: path)
 
-        // A worktree with a live agent must never be reaped by /return: neither
+        // A worktree with a live agent must never be reaped by /remove: neither
         // deleted outright nor carded for "Force remove". Leave it untouched.
         if sailor?.status == .running {
             onDone?()
@@ -757,7 +756,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// loading spinner and react.
     enum HelmCommandOutcome {
         case navigated   // moved to a new tab (e.g. /new)
-        case presented   // dropped an order card (e.g. /return)
+        case presented   // dropped an order card (e.g. /remove)
         case failed      // error
     }
 
@@ -779,11 +778,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 }
                 return true
 
-            case .returnToPort(let path):
-                enqueueReturnCard(forPath: path) { onOutcome?(.presented) }
-                return true
-
-            case .returnAll:
+            case .removeAll:
                 let worktrees = tabCoordinator.allWorktrees.map(\.info).filter { !$0.isMainWorktree }
                 guard !worktrees.isEmpty else { NSSound.beep(); return false }
                 let group = DispatchGroup()

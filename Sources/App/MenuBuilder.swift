@@ -43,7 +43,7 @@ enum MenuBuilder {
         let firstMateMenuItem = NSMenuItem()
         let firstMateMenu = NSMenu(title: "First Mate")
         let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
-            ("Return to Port (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
+            ("Remove (/remove)", #selector(MainWindowController.helmRemoveCommand), "r", .command),
             ("Order Worktree (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
             ("Commit Worktree (/commit)", #selector(MainWindowController.helmCommitCommand), "c", [.command, .shift]),
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
