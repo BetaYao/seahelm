@@ -13,6 +13,10 @@ enum FirstMateActionKind: Equatable {
 }
 
 struct FirstMateAction: Equatable {
+    /// Payload marking an AskUserQuestion card (answered by option NUMBER in the
+    /// TUI). Such cards auto-resolve once the agent moves on (tool use / stop).
+    static let askUserQuestionPayload = "ask-user-question"
+
     let kind: FirstMateActionKind
     let zone: FirstMateZone
     let worktreePath: String
@@ -67,7 +71,7 @@ enum FirstMate {
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
                                     message: String(prompt.prefix(200)),
-                                    payload: "ask-user-question", options: options)]
+                                    payload: FirstMateAction.askUserQuestionPayload, options: options)]
         }
 
         if case .suggest(let options) = outcome.event.kind {

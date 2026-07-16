@@ -62,6 +62,18 @@ final class PendingOrdersQueue {
         if orders.count != before { notify() }
     }
 
+    /// Remove any pending AskUserQuestion card for the given worktree path — the
+    /// agent moved past the question (it was answered in the TUI), so the card
+    /// is stale.
+    func resolveQuestion(worktreePath: String) {
+        let before = orders.count
+        orders.removeAll {
+            $0.action.payload == FirstMateAction.askUserQuestionPayload
+                && $0.action.worktreePath == worktreePath
+        }
+        if orders.count != before { notify() }
+    }
+
     /// Remove any pending suggest order for the given worktree path.
     func resolveSuggest(worktreePath: String) {
         let before = orders.count

@@ -30,6 +30,17 @@ class ShipLog {
     /// `var` so tests can drive the trailing-edge reclaim deterministically.
     static var hookRunningGrace: TimeInterval = 3.0
 
+    /// When each terminal's hook last asserted `.waiting` (an AskUserQuestion /
+    /// awaiting-input edge). `.waiting` is urgent, so it outranks *any* scan —
+    /// without a reclaim, a single lost clearing hook pins the card on "Needs
+    /// input" forever while the screen plainly shows the agent working again.
+    private var hookWaitingSince: [String: Date] = [:]
+    /// Grace before a scan `.running` is allowed to clear a hook-asserted
+    /// `.waiting`. Long enough that the question prompt has replaced the spinner
+    /// on screen, so the pre-question scan can't reclaim its own stale frame.
+    /// `var` so tests can drive the reclaim deterministically.
+    static var hookWaitingGrace: TimeInterval = 3.0
+
     private var agents: [String: SailorInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
     private var orderedIDs: [String] = []
@@ -122,6 +133,7 @@ class ShipLog {
         orderedIDs.removeAll { $0 == terminalID }
         statusEnteredAt.removeValue(forKey: terminalID)
         hookRunningSince.removeValue(forKey: terminalID)
+        hookWaitingSince.removeValue(forKey: terminalID)
         eventLog.removeValue(forKey: terminalID)
     }
 
@@ -249,38 +261,58 @@ class ShipLog {
                 next.hookStatus = .unknown
                 hookRunningSince[event.terminalID] = nil
             }
+            // Same reclaim for a stale hook `.waiting`: the question has been
+            // answered and the agent is visibly working again. Only a hook could
+            // otherwise clear `.waiting` (it is urgent, so it outranks the scan),
+            // which strands the card on "Needs input" whenever a clearing hook is
+            // never delivered.
+            if status == .running, next.hookStatus == .waiting,
+               let since = hookWaitingSince[event.terminalID],
+               now.timeIntervalSince(since) >= Self.hookWaitingGrace,
+               Self.isSessionOnly(next.agentType) {
+                next.hookStatus = .unknown
+                hookWaitingSince[event.terminalID] = nil
+            }
         case .sessionStarted(let label):
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
             message = label
         case .userPrompt(let text):
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
             next.lastUserPrompt = text
         case .toolUse(let ev):
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
             Self.upsertLatest(&next.activityEvents, event: ev, maxSize: 20)
             message = ev.detail.isEmpty ? message : ev.detail
         case .awaitingInput(let text):
             next.hookStatus = .waiting
             hookRunningSince[event.terminalID] = nil
+            if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             message = text
         case .question(let prompt, _):
             // Agent is blocked on an AskUserQuestion choice — same as awaiting input.
             next.hookStatus = .waiting
             hookRunningSince[event.terminalID] = nil
+            if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             message = prompt
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
             hookRunningSince[event.terminalID] = nil
+            hookWaitingSince[event.terminalID] = nil
             next.activityEvents.removeAll()
             isCompletion = true
         case .notification(let level, let text):
             // Intentionally preserves prior hookStatus for neutral notifications (old code returned .unknown, losing context).
             switch level {
             case "error": next.hookStatus = .error
-            case "warning": next.hookStatus = .waiting
+            case "warning":
+                next.hookStatus = .waiting
+                if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             default: break
             }
             if !text.isEmpty { message = text }
@@ -578,15 +610,27 @@ class ShipLog {
             if let paneTid, agents[paneTid] != nil { return paneTid }
             return matchingTIDs?.first
         }()
+        // The pane id was supposed to identify the exact pane but didn't resolve, so
+        // this event is about to be attributed to the worktree's *first* pane. When
+        // that misroutes a turn's clearing hook, the question's own pane keeps its
+        // `.waiting` and the card sticks on "Needs input" — so make the fallback
+        // visible instead of silently guessing.
+        let fellBackFromPaneId = event.paneId != nil && resolvedTid != paneTid
         guard let tid = resolvedTid else {
             let known = Array(worktreeIndex.keys)
             lock.unlock()
+            if fellBackFromPaneId {
+                NSLog("[hook] pane-unresolved and cwd-unresolved — event=\(event.event) paneId=\(event.paneId ?? "nil") cwd=\(event.cwd)")
+            }
             if event.event == .suggest {
                 NSLog("[suggest] DROP cwd-unresolved — cwd=\(event.cwd) knownWorktrees=\(known)")
             }
             return
         }
         lock.unlock()
+        if fellBackFromPaneId {
+            NSLog("[hook] pane-unresolved, attributing to first pane of worktree — event=\(event.event) paneId=\(event.paneId ?? "nil") fallbackTid=\(tid) cwd=\(event.cwd)")
+        }
         if event.event == .suggest {
             NSLog("[suggest] pass gate2 (cwd→tid=\(tid)) — cwd=\(event.cwd)")
         }

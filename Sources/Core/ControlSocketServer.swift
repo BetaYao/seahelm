@@ -13,6 +13,9 @@ final class ControlSocketServer {
     private let path: String
     private var listenFD: Int32 = -1
     private var running = false
+    /// (dev, ino) of the socket file we bound, so `stop()` can tell our own
+    /// socket from one a newer instance rebound at the same path.
+    private var boundIdentity: (dev: dev_t, ino: ino_t)?
     private let acceptQueue = DispatchQueue(label: "seahelm.control-socket.accept")
 
     static func defaultSocketPath() -> String {
@@ -53,6 +56,8 @@ final class ControlSocketServer {
             NSLog("[ControlSocket] bind() failed: \(errno)"); close(fd); return
         }
         chmod(path, 0o600)
+        var st = stat()
+        boundIdentity = (stat(path, &st) == 0) ? (st.st_dev, st.st_ino) : nil
         guard listen(fd, 8) == 0 else {
             NSLog("[ControlSocket] listen() failed: \(errno)"); close(fd); return
         }
@@ -66,7 +71,18 @@ final class ControlSocketServer {
     func stop() {
         running = false
         if listenFD >= 0 { close(listenFD); listenFD = -1 }
-        unlink(path)
+        // Only remove the socket file if it is still the one we bound. A newer
+        // instance's start() unlinks this path and rebinds its own socket; a
+        // blind unlink here would delete *its* live socket, leaving it bound to
+        // an fd that no client can reach (hooks then fail their `[ -S ]` guard
+        // and silently drop every event).
+        if let mine = boundIdentity {
+            var st = stat()
+            if stat(path, &st) == 0, st.st_dev == mine.dev, st.st_ino == mine.ino {
+                unlink(path)
+            }
+        }
+        boundIdentity = nil
     }
 
     private func acceptLoop() {

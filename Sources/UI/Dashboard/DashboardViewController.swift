@@ -183,6 +183,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// Vertical nav ring over the overview (worktree rows → orders row → command
     /// input). Lives here (not in the view) because visuals need `agents`.
     private var overviewFocus = OverviewFocusModel(worktreeCount: 0, orderCount: 0)
+    /// Worktree awaiting a debounced terminal preview, and its timer. Walking the
+    /// list must not re-parent Metal surfaces on every keystroke — see
+    /// `schedulePreview(path:)`.
+    private var pendingPreviewPath: String?
+    private var previewDebounceWork: DispatchWorkItem?
+    /// How long ↑↓ must settle before the terminal actually swaps. Long enough to
+    /// coalesce a fast key-repeat burst, short enough to feel live.
+    private static let previewDebounce: TimeInterval = 0.12
     private static let firstMateColumnWidth: CGFloat = 392
     private static let overviewFullBg = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1)
     private static let overviewSideBg = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
@@ -407,6 +415,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         viewMode = mode
         switch mode {
         case .dashboard:
+            // A live-follow preview only means something in mode 2; drop any that
+            // is still queued so it cannot fire after we have left.
+            cancelPendingPreview()
             firstMateSideOpen = false
             currentSide = .none
             mountOverviewFull()
@@ -582,7 +593,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     private func collapseCurrentSide() {
         if firstMateSideOpen {
-            // Closing the First Mate column leaves mode 2 → full terminal.
+            // Closing the First Mate column leaves mode 2 → full terminal. Cash in
+            // a queued preview first, so the terminal we expand is the selected
+            // worktree's rather than the one it happened to be showing.
+            flushPendingPreview()
             setViewMode(.terminal)
             return
         } else if !isLeftColumnCollapsed {
@@ -1352,7 +1366,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             overviewSelectedId = row.id
             overviewView.selectedId = row.id
             overviewView.update(agents)
-            if viewMode == .split { previewWorktree(path: row.path) }
+            if viewMode == .split { schedulePreview(path: row.path) }
         case .selectCard(let i):
             overviewView.setKeyboardCardSelected(i)
         case .focusCommand:
@@ -1408,16 +1422,61 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
               let row = overviewView.orderedRows[safeIndex: i] else { return }
         switch viewMode {
         case .dashboard:
+            cancelPendingPreview()  // selectSailor supersedes any queued preview
             selectSailor(byWorktreePath: row.path, focusTerminal: false)
             overviewSelectedId = selectedSailorId
             overviewView.selectedId = overviewSelectedId
             setViewMode(.split)
         case .split:
-            // Selection already previewed live; just hand over the keyboard.
+            // The live preview is debounced, so it may still be queued when the
+            // user commits straight after an arrow key. Cash it in before handing
+            // over the keyboard, or they land in the previous worktree's terminal.
+            flushPendingPreview()
             setViewMode(.terminal)
         case .terminal:
             break
         }
+    }
+
+    /// Coalesce live-follow previews while the user walks the fleet list.
+    ///
+    /// `previewWorktree` detaches and re-parents Metal-backed terminal surfaces —
+    /// far too heavy to run on every arrow key. Doing it synchronously per
+    /// keystroke stalled the main thread and made fast ↑↓ navigation drop keys
+    /// ("press it several times before it moves"). The highlight still updates
+    /// synchronously; only the terminal swap waits for the user to settle.
+    private func schedulePreview(path: String) {
+        pendingPreviewPath = path
+        previewDebounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let p = self.pendingPreviewPath else { return }
+            self.pendingPreviewPath = nil
+            self.previewDebounceWork = nil
+            self.previewWorktree(path: p)
+        }
+        previewDebounceWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.previewDebounce, execute: work)
+    }
+
+    /// Apply a pending debounced preview now. Any path that hands the keyboard to
+    /// the terminal must call this first — it assumes the embed already happened,
+    /// so a still-queued preview would leave the user in the *previous*
+    /// worktree's terminal.
+    private func flushPendingPreview() {
+        previewDebounceWork?.cancel()
+        previewDebounceWork = nil
+        guard let path = pendingPreviewPath else { return }
+        pendingPreviewPath = nil
+        previewWorktree(path: path)
+    }
+
+    /// Drop a queued preview that is about to be made irrelevant (mode change,
+    /// explicit selection) so it cannot fire afterwards and swap the terminal out
+    /// from under the new selection.
+    private func cancelPendingPreview() {
+        previewDebounceWork?.cancel()
+        previewDebounceWork = nil
+        pendingPreviewPath = nil
     }
 
     /// Live-follow in mode 2: swap the right-hand terminal to `path` without
@@ -1434,9 +1493,18 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     /// Re-clamp the focus ring after the fleet list or orders queue rebuilt.
     private func syncOverviewFocusCounts() {
+        // Follow the selection by identity, not by position. The fleet list is
+        // re-sorted by status, so one status flip anywhere reshuffles it and a
+        // plain index clamp would drift the highlight onto whichever worktree now
+        // sits in that slot — while the embedded terminal stays on the old one.
+        // A nil anchor (selected row gone) falls back to the clamp.
+        let anchor = overviewSelectedId.isEmpty
+            ? nil
+            : overviewView.orderedRows.firstIndex(where: { $0.id == overviewSelectedId })
         let effect = overviewFocus.rowsDidChange(
             worktreeCount: overviewView.orderedRows.count,
-            orderCount: overviewView.orderCards.count
+            orderCount: overviewView.orderCards.count,
+            worktreeAnchor: anchor
         )
         // Refresh highlights only — a data refresh must not re-trigger terminal
         // embeds or focus moves.

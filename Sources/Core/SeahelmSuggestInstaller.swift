@@ -1,7 +1,7 @@
 import Foundation
 
 enum SeahelmSuggestInstaller {
-    private static let versionMarker = "# seahelm-suggest v3"
+    private static let versionMarker = "# seahelm-suggest v4"
 
     static func scriptContents() -> String {
         return """
@@ -12,7 +12,13 @@ enum SeahelmSuggestInstaller {
         # tool-call line, never raw XML.
         set -u
         sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
-        pane="${SEAHELM_PANE_ID:-}"
+        # ZMX_SESSION is the same value SessionManager exports as SEAHELM_PANE_ID
+        # (the backend session name). Panes created before that export exists still
+        # carry it, so it rescues them: without a pane id this reports under the
+        # literal "cli" while the Stop hook reports under Claude's session UUID, the
+        # turn correlation never matches, and every Stop is blocked for a suggestion
+        # that already happened.
+        pane="${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
 
         esc() { printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g'; }
 

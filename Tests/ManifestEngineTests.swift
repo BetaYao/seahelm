@@ -34,6 +34,12 @@ final class ManifestEngineTests: XCTestCase {
             "some transcript text\n\n❯ \n▸▸ bypass permissions on · 1 shell · ← 2 agents",
             "some transcript text\n\n❯ \n▸▸ bypass permissions on · 2 shells",
             "* sautéed for 2m 10s · 1 shell still running\n\n❯ \ncontext 6%",
+            // Several kinds of background task are comma-separated, so the count is
+            // no longer followed by "·" or end-of-line — the footer that made a
+            // watching-CI pane report Idle on the dashboard.
+            "some text\n\n❯ \n▸▸ bypass permissions on · pr #4902 · 1 shell, 1 monitor · ← 3 agents",
+            // A monitor with no shell: "shell" never appears at all.
+            "some text\n\n❯ \n▸▸ bypass permissions on · 1 monitor · ← 3 agents",
         ]
         for screen in footers {
             let d = cm.evaluate(DetectionInput(screen: screen.lowercased()))
@@ -50,6 +56,51 @@ final class ManifestEngineTests: XCTestCase {
         for screen in idles {
             XCTAssertEqual(cm.evaluate(DetectionInput(screen: screen)).state, .unknown,
                            "expected no match for: \(screen)")
+        }
+    }
+
+    /// Regression: Claude Code no longer prints "esc to interrupt" in its spinner
+    /// line, so `working_interrupt` stopped matching and every working pane fell
+    /// through to the idle default. The spinner shape ("Verb… (3m 55s · ↓ 11.1k
+    /// tokens)") must detect as running; the completion marker Claude replaces it
+    /// with ("✻ Sautéed for 6m 25s" — no ellipsis, no parenthesised duration)
+    /// must not.
+    func testClaudeSpinnerWithoutInterruptHintDetectsAsRunning() {
+        guard let cm = ManifestStore.shared.manifest(for: "claude") else {
+            return XCTFail("missing claude manifest")
+        }
+        let footer = """
+
+            ───────────────────────────────
+            ❯
+            ───────────────────────────────
+              [opus 4.8 (1m context)] │ seahelm git:(fix/notification-unique-identifier*)
+              context ██░░░░ 38% │ usage █░░░░░ 11% (resets in 3h 51m)
+              ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 3 agents
+            """
+        // Captured verbatim from live panes (zmx history), lowercased as the
+        // publisher does before evaluating.
+        let working = [
+            "· sprouting… (3m 55s · ↓ 11.1k tokens)",
+            "✻ sprouting… (26s · ↓ 762 tokens)",
+            "✳ cogitating... (1h 2m · ↑ 3 tokens)",
+        ]
+        for spinner in working {
+            let d = cm.evaluate(DetectionInput(screen: (spinner + footer).lowercased()))
+            XCTAssertEqual(d.state, .running, "expected running for: \(spinner)")
+            XCTAssertTrue(d.visibleWorking)
+        }
+        // Completion markers and prose must not match.
+        let done = [
+            "✻ sautéed for 6m 25s",
+            "✻ worked for 37s",
+            "✻ brewed for 1m 3s",
+            "* crunched for 2m 30s",
+            "reading 1 file, running 1 shell command…",
+        ]
+        for marker in done {
+            XCTAssertEqual(cm.evaluate(DetectionInput(screen: (marker + footer).lowercased())).state,
+                           .unknown, "expected no match for: \(marker)")
         }
     }
 

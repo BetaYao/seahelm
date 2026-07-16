@@ -381,14 +381,41 @@ class TerminalCoordinator {
         }
     }
 
+    /// `/remove @branch` — delete a linked worktree with no confirmation sheet:
+    /// typing the command is the confirmation.
+    ///
+    /// Deliberately NOT forced, unlike `deleteWorktreeForReturnToPort`. That path
+    /// force-removes because its caller already approved discarding the work; here
+    /// nobody has, so git is left to refuse a dirty tree and `performDeleteWorktree`
+    /// surfaces its reason. Skipping the sheet must not silently skip the sheet's
+    /// "uncommitted changes will be lost" warning.
+    func deleteWorktreeFromCommand(_ info: WorktreeInfo) {
+        guard !info.isMainWorktree else { return }  // main worktree → /remove @repo
+        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+        performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: false)
+    }
+
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        // Drop any persisted resume refs for this worktree's sessions before the
-        // tree (and its session names) are gone.
+        // Tear the sessions down BEFORE the tree (and its session names) are gone —
+        // afterwards there is nothing left to name them by.
+        //
+        // Killing them is not optional. `SessionManager.expectedSessionNames` counts
+        // every session named in `config.splitLayouts` as live, so a layout left
+        // behind here makes the orphan reaper skip these sessions forever, and
+        // `resolveTree` can restore that same layout and resurrect the deleted
+        // worktree's card. Deleting the directory is not enough; the worktree's
+        // state has to go with it. (`performCloseRepo` already does this.)
         if let tree = stationManager.tree(forPath: info.path) {
             for leaf in tree.allLeaves {
                 config.agentSessions.removeValue(forKey: leaf.sessionName)
+                if runtimeBackend != "local" {
+                    SessionManager.killSession(leaf.sessionName, backend: runtimeBackend)
+                }
             }
         }
+        config.splitLayouts.removeValue(forKey: info.path)
+        config.focusedPaneIds.removeValue(forKey: info.path)
+        config.save()
         stationManager.removeTree(forPath: info.path)
 
         // Notify delegate immediately so the UI card disappears instantly

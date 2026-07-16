@@ -628,6 +628,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 ("return", "Recall agent · end session"),
                 ("broadcast", "Broadcast to everyone"),
                 ("add", "Add a repo to the workspace"),
+                // Both kinds of `@` name are valid — the kind picks the verb.
+                ("remove", "@worktree deletes it · @repo drops the repo"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -679,6 +681,21 @@ dashboard.stationManager = terminalCoordinator.stationManager
             },
             addRepo: { [weak self] in
                 self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window)
+            },
+            removeRepo: { [weak self] path in
+                guard let self else { return }
+                // Reuse the same confirmation the "Close Repo" context menu shows —
+                // this kills the repo's persisted sessions, so it must not be a
+                // silent one-liner. displayName is the repo's directory name, which
+                // is exactly what the parser matched to resolve `path`.
+                self.tabCoordinator.showCloseProjectModal(
+                    URL(fileURLWithPath: path).lastPathComponent, window: self.window)
+            },
+            removeWorktree: { [weak self] path in
+                guard let self,
+                      let item = self.tabCoordinator.allWorktrees.first(where: { $0.info.path == path })
+                else { return }
+                self.terminalCoordinator.deleteWorktreeFromCommand(item.info)
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },

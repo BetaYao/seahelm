@@ -22,6 +22,43 @@ final class FirstMateCoordinatorOutcomeTests: XCTestCase {
         XCTAssertFalse(evaluated, "tool_use without status change must not reach FirstMate")
     }
 
+    private func questionAction(worktree: String = "/wt") -> FirstMateAction {
+        FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: worktree,
+                        branch: "b", project: "p", terminalID: "t1",
+                        message: "Pick one", payload: FirstMateAction.askUserQuestionPayload,
+                        options: ["A", "B"])
+    }
+
+    func testToolUseResolvesStaleQuestionCard() {
+        let q = PendingOrdersQueue()
+        q.upsert(questionAction())
+        let coord = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        let act = ActivityEvent(tool: "Bash", detail: "ls", isError: false, timestamp: Date())
+        coord.handle(outcome(kind: .toolUse(act), changed: false, completion: false, newStatus: .running))
+        XCTAssertTrue(q.all().isEmpty, "answered AskUserQuestion card must clear on next tool use")
+    }
+
+    func testAgentStoppedResolvesStaleQuestionCard() {
+        let q = PendingOrdersQueue()
+        q.upsert(questionAction())
+        let coord = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        coord.handle(outcome(kind: .agentStopped(success: true), changed: true,
+                             completion: false, newStatus: .idle))
+        XCTAssertTrue(q.all().isEmpty, "answered AskUserQuestion card must clear on agent stop")
+    }
+
+    func testToolUseKeepsQuestionCardOfOtherWorktree() {
+        let q = PendingOrdersQueue()
+        q.upsert(questionAction(worktree: "/other"))
+        let coord = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        let act = ActivityEvent(tool: "Bash", detail: "ls", isError: false, timestamp: Date())
+        coord.handle(outcome(kind: .toolUse(act), changed: false, completion: false, newStatus: .running))
+        XCTAssertEqual(q.all().count, 1, "cards of other worktrees must survive")
+    }
+
     func testCompletionSignalIsEvaluated() {
         var inspected = false
         let coord = FirstMateCoordinator(config: .default, queue: PendingOrdersQueue(),

@@ -37,12 +37,13 @@ final class ControlSocketServerTests: XCTestCase {
 
     // MARK: - socket client helper
 
-    private func connect() -> Int32 {
+    private func connect(_ socketPath: String? = nil) -> Int32 {
+        let target = socketPath ?? path!
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { dst in
-            path.withCString { strcpy(dst, $0) }
+            target.withCString { strcpy(dst, $0) }
         }
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)
         let ok = withUnsafePointer(to: &addr) {
@@ -104,6 +105,36 @@ final class ControlSocketServerTests: XCTestCase {
         let ev = (json(readLine(fd))?["event"] as? [String: Any])
         XCTAssertEqual(ev?["type"] as? String, "pane.status_changed")
         XCTAssertEqual(ev?["seq"] as? Int, 42)
+    }
+
+    /// Regression: when a second instance rebinds the same path, the first
+    /// instance's stop() must not unlink it. It used to, which left the live
+    /// server bound to an fd with no path on disk — `lsof` showed the socket,
+    /// `ls` did not, and every hook silently no-op'd on its `[ -S ]` guard.
+    func testStopLeavesSocketRebornUnderNewerInstance() {
+        let shared = "/tmp/sh-\(UUID().uuidString.prefix(8)).sock"
+        let first = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
+        first.start()
+        Thread.sleep(forTimeInterval: 0.1)
+
+        // Second instance takes the path over: unlinks the first socket, binds its own.
+        let second = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
+        second.start()
+        Thread.sleep(forTimeInterval: 0.1)
+
+        first.stop()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: shared),
+                      "stop() deleted the newer instance's socket file")
+
+        // The survivor must still be reachable by a fresh client.
+        let fd = connect(shared); defer { close(fd) }
+        send(fd, #"{"id":"9","method":"ping"}"#)
+        XCTAssertEqual((json(readLine(fd))?["result"] as? [String: Any])?["pong"] as? Bool, true)
+
+        // And the owner still cleans up after itself.
+        second.stop()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shared),
+                       "stop() left a stale socket behind")
     }
 
     func testEventsSubscribeReplaysAfterSeq() {

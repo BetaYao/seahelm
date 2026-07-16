@@ -11,6 +11,11 @@ struct BridgeCommandRouter {
     let returnAll: () -> Void
     /// Prompt (open panel) to add a repo to the workspace.
     let addRepo: () -> Void
+    /// Confirm, then stop tracking the repo at this path (kills its sessions).
+    let removeRepo: (String) -> Void
+    /// Delete the linked worktree at this path. No confirmation — typing the
+    /// command is the confirmation; git refuses if the tree is dirty.
+    let removeWorktree: (String) -> Void
     let activeSailorCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
@@ -29,6 +34,10 @@ struct BridgeCommandRouter {
             returnAll()
         case .addRepo:
             addRepo()
+        case .removeRepo(let path):
+            removeRepo(path)
+        case .removeWorktree(let path):
+            removeWorktree(path)
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",

@@ -81,4 +81,58 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(BridgeCommandParser.parse("/frobnicate x", worktrees: wts),
                        .failure(.unknownCommand("frobnicate")))
     }
+
+    // MARK: - /remove: repo name drops the repo, branch name deletes the worktree
+
+    func testRemoveRepoNameDropsRepo() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @beta", worktrees: wts, repoPaths: repos),
+                       .success(.removeRepo(repoPath: "/workspaces/beta")))
+    }
+
+    func testRemoveBranchNameDeletesWorktree() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @feat-x", worktrees: wts, repoPaths: repos),
+                       .success(.removeWorktree(worktreePath: "/repo/feat-x")))
+    }
+
+    /// `@` is how /new spells a repo, but a bare name is the obvious thing to type.
+    func testRemoveAcceptsBareName() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove alpha", worktrees: wts, repoPaths: repos),
+                       .success(.removeRepo(repoPath: "/workspaces/alpha")))
+        XCTAssertEqual(BridgeCommandParser.parse("/remove fix-y", worktrees: wts, repoPaths: repos),
+                       .success(.removeWorktree(worktreePath: "/repo/fix-y")))
+    }
+
+    func testRemoveIsCaseInsensitive() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @BETA", worktrees: wts, repoPaths: repos),
+                       .success(.removeRepo(repoPath: "/workspaces/beta")))
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @FEAT-X", worktrees: wts, repoPaths: repos),
+                       .success(.removeWorktree(worktreePath: "/repo/feat-x")))
+    }
+
+    /// A repo name wins a collision: dropping a repo leaves worktrees on disk,
+    /// so it is the recoverable branch of the two.
+    func testRemovePrefersRepoOnNameCollision() {
+        let clash = [WorktreeRef(branch: "alpha", path: "/repo/alpha")]
+        XCTAssertEqual(BridgeCommandParser.parse("/remove alpha", worktrees: clash, repoPaths: repos),
+                       .success(.removeRepo(repoPath: "/workspaces/alpha")))
+    }
+
+    /// Must not fall through to some other target — either verb is destructive.
+    func testRemoveUnknownTargetFails() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @nope", worktrees: wts, repoPaths: repos),
+                       .failure(.unknownTarget("nope")))
+    }
+
+    func testRemoveWithoutArgumentFails() {
+        XCTAssertEqual(BridgeCommandParser.parse("/remove", worktrees: wts, repoPaths: repos),
+                       .failure(.missingArgument("remove")))
+    }
+
+    /// A repo name that resolves must name a real tab: the parser matches on the
+    /// directory name, which is what WorkspaceTab.displayName derives from.
+    func testRemoveMatchesOnDirectoryName() {
+        let nested = ["/a/b/c/myrepo"]
+        XCTAssertEqual(BridgeCommandParser.parse("/remove @myrepo", worktrees: wts, repoPaths: nested),
+                       .success(.removeRepo(repoPath: "/a/b/c/myrepo")))
+    }
 }

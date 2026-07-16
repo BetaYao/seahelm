@@ -9,11 +9,38 @@ final class BridgeCommandRouterTests: XCTestCase {
                     returnWorktree: @escaping (String) -> Void = { _ in },
                     returnAll: @escaping () -> Void = {},
                     addRepo: @escaping () -> Void = {},
+                    removeRepo: @escaping (String) -> Void = { _ in },
+                    removeWorktree: @escaping (String) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
                             commit: committed, returnWorktree: returnWorktree,
-                            returnAll: returnAll, addRepo: addRepo, activeSailorCount: agentCount,
+                            returnAll: returnAll, addRepo: addRepo, removeRepo: removeRepo,
+                            removeWorktree: removeWorktree,
+                            activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
+    }
+
+    func testRemoveRepoCallsClosureNotQueue() {
+        let q = PendingOrdersQueue()
+        var removed: String?
+        makeRouter(queue: q, removeRepo: { removed = $0 })
+            .route(.removeRepo(repoPath: "/workspaces/alpha"))
+        XCTAssertEqual(removed, "/workspaces/alpha")
+        // Closing a repo is a confirm-then-act flow owned by the host, not a card.
+        XCTAssertTrue(q.all().isEmpty)
+    }
+
+    /// The two verbs must not cross-fire: one drops a repo (worktrees survive),
+    /// the other deletes a worktree from disk.
+    func testRemoveWorktreeRoutesToItsOwnClosure() {
+        let q = PendingOrdersQueue()
+        var deleted: String?
+        var droppedRepo: String?
+        makeRouter(queue: q, removeRepo: { droppedRepo = $0 }, removeWorktree: { deleted = $0 })
+            .route(.removeWorktree(worktreePath: "/repo/feat-x"))
+        XCTAssertEqual(deleted, "/repo/feat-x")
+        XCTAssertNil(droppedRepo)
+        XCTAssertTrue(q.all().isEmpty)
     }
 
     func testNewWorktreeCallsClosureNotQueue() {

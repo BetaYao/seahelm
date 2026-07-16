@@ -42,12 +42,16 @@ final class BridgePanelViewController: NSViewController {
         order.action.options ?? ["Approve"]
     }
 
-    /// Bare-TUI card: top(11) + title row(18) + message(measured) + chip row(30) + bottom(11).
+    /// Bare-TUI card: top(11) + title row(18) + message(measured) + chip stack + bottom(11).
     /// The question is measured at a deliberately-narrow width so the predicted height is
     /// never short of what the real (wider) layout needs — avoids bottom clipping.
     static func cardHeight(for order: PendingOrder) -> CGFloat {
         let titleRow: CGFloat = 18
-        let chipRow: CGFloat = 30  // buttonTitles always yields ≥1 chip
+        // Options stack vertically, one chip (28) per row with 7 between, so the
+        // card grows with the option count. Side-by-side chips shared one row's
+        // width and truncated every label down to its bare number badge.
+        let count = max(1, buttonTitles(for: order).count)
+        let chipRow = CGFloat(count) * 28 + CGFloat(count - 1) * 7 + 2  // 30 for a lone chip, as before
         let msg = order.action.message
         var messageBlock: CGFloat = 0
         if !msg.isEmpty {
@@ -637,8 +641,11 @@ final class OrderCardView: NSTableCellView {
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        chipRow.orientation = .horizontal
-        chipRow.alignment = .centerY
+        // Vertical: an option label is a sentence, and side by side they each got a
+        // fraction of the card's width and truncated away to nothing. One per row
+        // gives every label the full width to read at.
+        chipRow.orientation = .vertical
+        chipRow.alignment = .leading
         chipRow.spacing = 7
         chipRow.translatesAutoresizingMaskIntoConstraints = false
 
@@ -671,7 +678,9 @@ final class OrderCardView: NSTableCellView {
 
             chipRow.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 11),
             chipRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            chipRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
+            // Pin (not hug) the trailing edge: the stack must span the card so each
+            // chip gets the full width to lay its label out in.
+            chipRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             chipRow.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -11),
         ])
         taskLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -700,6 +709,11 @@ final class OrderCardView: NSTableCellView {
         focusedChipIndex = nil
         chipRow.arrangedSubviews.compactMap { $0 as? OptionChipButton }
             .forEach { $0.setKeyboardFocused(false) }
+    }
+
+    /// Laid-out option chip frames, in order. For tests asserting on the chip layout.
+    var optionChipFrames: [CGRect] {
+        chipRow.arrangedSubviews.compactMap { $0 as? OptionChipButton }.map(\.frame)
     }
 
     func configure(order: PendingOrder, onOption: @escaping (Int) -> Void) {
@@ -737,6 +751,9 @@ final class OrderCardView: NSTableCellView {
                 self?.selectOption(i, dangerous: self?.dangerousIndexes.contains(i) ?? false)
             }
             chipRow.addArrangedSubview(chip)
+            // Stack alignment alone leaves each chip at its intrinsic width, which
+            // is what truncated the labels. Pin every chip to the row's full width.
+            chip.widthAnchor.constraint(equalTo: chipRow.widthAnchor).isActive = true
         }
     }
 

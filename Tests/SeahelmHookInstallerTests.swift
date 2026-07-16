@@ -5,7 +5,7 @@ final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
         let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v3"))
+        XCTAssertTrue(s.contains("seahelm-hook v4"))
         XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
         XCTAssertTrue(s.contains("block_b64"))           // block extraction
         XCTAssertTrue(s.contains("base64 -d"))

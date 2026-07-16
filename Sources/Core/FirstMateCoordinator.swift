@@ -21,8 +21,16 @@ final class FirstMateCoordinator {
 
     func handle(_ outcome: IngestOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
-        if case .userPrompt = outcome.event.kind {
+        switch outcome.event.kind {
+        case .userPrompt:
             queue.resolveSuggest(worktreePath: outcome.info.worktreePath)
+        case .toolUse, .agentStopped:
+            // The agent moved past its AskUserQuestion (answered in the TUI):
+            // the question card is stale, clear it. (AskUserQuestion's own
+            // tool_use_start is decoded as .question, so it can't self-clear.)
+            queue.resolveQuestion(worktreePath: outcome.info.worktreePath)
+        default:
+            break
         }
         route(FirstMate.evaluate(outcome, config: config))
     }
