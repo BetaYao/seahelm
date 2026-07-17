@@ -34,10 +34,10 @@ struct OpenedSurfaceView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
         .background(
             NotchShape(topRadius: 10, bottomRadius: 22)
-                .fill(Color.black)
+                .fill(IslandStyle.background)
                 .overlay(
                     NotchShape(topRadius: 10, bottomRadius: 22)
-                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                        .stroke(IslandStyle.accent.opacity(0.16), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
         )
@@ -73,7 +73,7 @@ struct OpenedSurfaceView: View {
                     }
 
                     if !model.recentNotifications.isEmpty {
-                        Divider().overlay(Color.white.opacity(0.08))
+                        Divider().overlay(IslandStyle.accent.opacity(0.14))
                         VStack(spacing: 2) {
                             ForEach(model.recentNotifications) { entry in
                                 notificationRow(entry)
@@ -133,7 +133,7 @@ struct OpenedSurfaceView: View {
                     .fill(Color.white.opacity(0.06))
                     .overlay(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .stroke(Color.white.opacity(commandFocused ? 0.25 : 0.1), lineWidth: 1)
+                            .stroke(commandFocused ? IslandStyle.accent.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
                     )
             )
             .contentShape(Rectangle())
@@ -262,7 +262,7 @@ struct OpenedSurfaceView: View {
                     .contentTransition(.numericText(value: Double(model.unreadCount)))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.white.opacity(0.14)))
+                    .background(Capsule().fill(IslandStyle.accent.opacity(0.22)))
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
             Spacer()
@@ -421,7 +421,7 @@ private struct SuggestionCard: View {
                 .fill(Color.white.opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.yellow.opacity(0.25), lineWidth: 1)
+                        .stroke(IslandStyle.accent.opacity(0.3), lineWidth: 1)
                 )
         )
     }

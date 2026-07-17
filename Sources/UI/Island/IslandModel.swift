@@ -1,5 +1,14 @@
 import AppKit
 import Observation
+import SwiftUI
+
+/// Island palette — keyed to the product's cyan accent (#1FC8DA) so the
+/// floating panel reads as part of the app, not a generic black overlay.
+enum IslandStyle {
+    static let accent = Color(red: 0x1f / 255, green: 0xc8 / 255, blue: 0xda / 255)
+    /// Near-black with a cyan cast for the pill/panel surface.
+    static let background = Color(red: 0.016, green: 0.055, blue: 0.066)
+}
 
 /// One row in the island — a worktree's aggregated agent state.
 struct IslandAgentRow: Identifiable, Equatable {

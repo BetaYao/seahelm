@@ -24,7 +24,7 @@ struct ClosedPillView: View {
         }
         .padding(.horizontal, 10)
         .frame(width: model.closedWidth, height: model.notchHeight)
-        .background(ClosedPillShape(bottomRadius: 14).fill(Color.black))
+        .background(ClosedPillShape(bottomRadius: 14).fill(IslandStyle.background))
         .contentShape(Rectangle())
         // Material-style curve so wing content (badge/tiles) slides in and
         // out smoothly as counts change while closed.
@@ -74,7 +74,7 @@ struct ClosedPillView: View {
                 .contentTransition(.numericText(value: Double(model.unreadCount)))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Capsule().fill(Color.white.opacity(0.18)))
+                .background(Capsule().fill(IslandStyle.accent.opacity(0.25)))
                 .transition(.opacity.combined(with: .move(edge: .leading)))
         }
     }
