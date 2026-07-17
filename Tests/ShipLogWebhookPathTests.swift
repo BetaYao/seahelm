@@ -117,9 +117,15 @@ final class ShipLogWebhookPathTests: XCTestCase {
             "webhook toolUseStart must not trigger an external broadcast")
     }
 
-    func testPromptEventBroadcastsWhenStatusChangesToWaiting() {
-        // Before: running. prompt → awaitingInput → hookStatus=.waiting → status becomes .waiting
-        // notifyObservers broadcasts for .waiting when statusChanged=true.
+    /// ShipLog used to fan out to chat itself on `statusChanged && (waiting || error)`.
+    /// That was a second, cruder notification path: no running→X edge check, no
+    /// cooldown, no stability delay — so it re-sent on every flicker — and it never
+    /// fired on completion, the one thing you want to hear from your phone.
+    ///
+    /// The fan-out now hangs off NotificationManager's delivery, mirroring the
+    /// desktop banner and inheriting its gating. ShipLog must stay out of it: two
+    /// paths meant two sets of rules.
+    func testStatusChangeDoesNotFanOutToChatFromShipLog() {
         ShipLog.shared.updateStatus(
             terminalID: tid,
             status: .running,
@@ -128,7 +134,7 @@ final class ShipLogWebhookPathTests: XCTestCase {
         )
         mockChannel.sentMessages.removeAll()
 
-        let exp = expectation(description: "broadcast on waiting")
+        let exp = expectation(description: "status reaches waiting")
         ShipLog.shared.onOutcome = { o in
             if o.newStatus == .waiting { exp.fulfill() }
         }
@@ -136,9 +142,8 @@ final class ShipLogWebhookPathTests: XCTestCase {
         ShipLog.shared.handleWebhookEvent(makeEvent(.prompt))
 
         wait(for: [exp], timeout: 2)
-        // prompt → .waiting transition triggers broadcast (by design, notifyObservers fires for .waiting)
-        XCTAssertEqual(mockChannel.sentMessages.count, 1,
-            "webhook prompt that changes status to .waiting must trigger a broadcast")
+        XCTAssertTrue(mockChannel.sentMessages.isEmpty,
+            "ShipLog must not broadcast; the phone mirrors the desktop banner via NotificationManager.onDeliverExternal")
     }
 
     // MARK: - agentStop: completion transition fires
