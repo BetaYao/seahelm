@@ -3,8 +3,14 @@ import Foundation
 struct BridgeCommandRouter {
     let queue: PendingOrdersQueue
     let createWorktree: (String, String?) -> Void
-    let orderExisting: (String, String) -> Void
-    let commit: (String) -> Void
+    /// Make an existing worktree current.
+    let selectWorktree: (String) -> Void
+    /// Make one of the current worktree's agents current.
+    let selectAgent: (String) -> Void
+    /// Show the fleet. The desktop's listing is the dashboard, so this is a
+    /// navigation, not text.
+    let showOverview: () -> Void
+    let orderAgent: (String, String) -> Void
     /// Scan all non-main worktrees and enqueue return-to-port cards for each.
     let removeAll: () -> Void
     /// Prompt (open panel) to add a repo to the workspace.
@@ -21,10 +27,14 @@ struct BridgeCommandRouter {
         switch command {
         case .newWorktree(let task, let repoHint):
             createWorktree(task, repoHint)
-        case .orderExisting(let path, let task):
-            orderExisting(path, task)
-        case .commit(let path):
-            commit(path)
+        case .listWorktrees, .listAgents, .listRepos:
+            showOverview()
+        case .selectWorktree(let path):
+            selectWorktree(path)
+        case .selectAgent(let id):
+            selectAgent(id)
+        case .orderAgent(let id, let task):
+            orderAgent(id, task)
         case .removeAll:
             removeAll()
         case .addRepo:

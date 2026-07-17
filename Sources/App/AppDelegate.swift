@@ -42,6 +42,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
             CodexHooksSetup.ensureHooksConfigured()
             SeahelmSuggestInstaller.ensureInstalled()
+            // After SeahelmSuggestInstaller: the plugin shells out to the script
+            // it writes.
+            OpenCodePluginInstaller.ensureInstalled()
             SeahelmCliInstaller.ensureInstalled()
             SeahelmSkillInstaller.ensureInstalled()
         }

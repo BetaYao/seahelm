@@ -7,6 +7,16 @@ final class BridgeCommandParserTests: XCTestCase {
         WorktreeRef(branch: "fix-y", path: "/repo/fix-y"),
     ]
     let repos = ["/workspaces/alpha", "/workspaces/beta"]
+    let agents = [
+        AgentRef(id: "t1", project: "alpha", branch: "feat-x", status: "Running"),
+        AgentRef(id: "t2", project: "alpha", branch: "fix-y", status: "Idle"),
+    ]
+
+    private func parse(_ text: String) -> Result<BridgeCommand, BridgeCommandError> {
+        BridgeCommandParser.parse(text, worktrees: wts, agents: agents, repoPaths: repos)
+    }
+
+    // MARK: - Bare prose
 
     func testNoPrefixIsNewWorktree() {
         XCTAssertEqual(BridgeCommandParser.parse("add dark mode", worktrees: wts),
@@ -17,119 +27,232 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(BridgeCommandParser.parse("   ", worktrees: wts), .failure(.emptyTask))
     }
 
-    func testNewExplicit() {
-        XCTAssertEqual(BridgeCommandParser.parse("/new build login", worktrees: wts),
-                       .success(.newWorktree(task: "build login")))
+    // MARK: - /task
+
+    func testBareTaskLists() {
+        XCTAssertEqual(parse("/task"), .success(.listWorktrees))
     }
 
-    func testNewWithAtRepoExtractsHint() {
-        XCTAssertEqual(BridgeCommandParser.parse("/new @alpha build login", worktrees: wts, repoPaths: repos),
+    func testTaskWithDescriptionCreates() {
+        XCTAssertEqual(parse("/task build login"), .success(.newWorktree(task: "build login")))
+    }
+
+    func testTaskWithAtRepoExtractsHint() {
+        XCTAssertEqual(parse("/task @alpha build login"),
                        .success(.newWorktree(task: "build login", repoHint: "/workspaces/alpha")))
     }
 
-    func testNewAtRepoAtEnd() {
-        // @repo can also appear as the first token of free text
-        XCTAssertEqual(BridgeCommandParser.parse("@beta fix auth", worktrees: wts, repoPaths: repos),
-                       .success(.newWorktree(task: "fix auth", repoHint: "/workspaces/beta")))
+    func testTaskAtRepoUnknownIgnored() {
+        XCTAssertEqual(parse("/task @nope build login"),
+                       .success(.newWorktree(task: "build login", repoHint: nil)))
     }
 
-    func testNewAtRepoUnknownIgnored() {
-        // Unknown @name → no hint, @name stays in task text (treat as plain text)
-        let result = BridgeCommandParser.parse("/new @unknown task", worktrees: wts, repoPaths: repos)
-        XCTAssertEqual(result, .success(.newWorktree(task: "task", repoHint: nil)))
+    func testTaskAtRepoCaseInsensitive() {
+        XCTAssertEqual(parse("/task @ALPHA x"),
+                       .success(.newWorktree(task: "x", repoHint: "/workspaces/alpha")))
     }
 
-    func testNewAtRepoCaseInsensitive() {
-        XCTAssertEqual(BridgeCommandParser.parse("/new @ALPHA do work", worktrees: wts, repoPaths: repos),
-                       .success(.newWorktree(task: "do work", repoHint: "/workspaces/alpha")))
+    func testTaskHashSelectsByCode() {
+        XCTAssertEqual(parse("/task #2"), .success(.selectWorktree(path: "/repo/fix-y")))
     }
 
-    func testOrderResolvesBranch() {
-        XCTAssertEqual(BridgeCommandParser.parse("/order feat-x keep going", worktrees: wts),
-                       .success(.orderExisting(worktreePath: "/repo/feat-x", task: "keep going")))
+    func testTaskHashSelectsByBranch() {
+        XCTAssertEqual(parse("/task #feat-x"), .success(.selectWorktree(path: "/repo/feat-x")))
     }
 
-    func testOrderUnknownBranch() {
-        XCTAssertEqual(BridgeCommandParser.parse("/order nope do it", worktrees: wts),
-                       .failure(.unknownBranch("nope")))
+    func testTaskHashIsCaseInsensitive() {
+        XCTAssertEqual(parse("/task #FEAT-X"), .success(.selectWorktree(path: "/repo/feat-x")))
+    }
+
+    func testTaskHashOutOfRangeFails() {
+        XCTAssertEqual(parse("/task #9"), .failure(.unknownTarget("9")))
+        XCTAssertEqual(parse("/task #0"), .failure(.unknownTarget("0")))
+    }
+
+    func testTaskHashUnknownNameFails() {
+        XCTAssertEqual(parse("/task #nope"), .failure(.unknownTarget("nope")))
+    }
+
+    /// The `#` is what separates selecting from creating — without it a
+    /// description that happens to be a digit must still start work.
+    func testTaskWithoutHashIsAlwaysCreate() {
+        XCTAssertEqual(parse("/task 2"), .success(.newWorktree(task: "2")))
+        XCTAssertEqual(parse("/task feat-x"), .success(.newWorktree(task: "feat-x")))
+    }
+
+    func testTaskEmptyDescriptionAfterRepoFails() {
+        XCTAssertEqual(BridgeCommandParser.parse("/task @alpha", worktrees: wts, repoPaths: repos),
+                       .success(.newWorktree(task: "@alpha", repoHint: "/workspaces/alpha")))
+    }
+
+    // MARK: - /agents
+
+    func testBareAgentsLists() {
+        XCTAssertEqual(parse("/agents"), .success(.listAgents))
+        XCTAssertEqual(parse("/agent"), .success(.listAgents))
+    }
+
+    func testAgentsSelectsByCode() {
+        XCTAssertEqual(parse("/agents 2"), .success(.selectAgent(id: "t2")))
+    }
+
+    /// The `#` is optional here: `/agents` has no create form to disambiguate from.
+    func testAgentsAcceptsHashPrefix() {
+        XCTAssertEqual(parse("/agents #2"), .success(.selectAgent(id: "t2")))
+    }
+
+    func testAgentsSelectsByBranch() {
+        XCTAssertEqual(parse("/agents feat-x"), .success(.selectAgent(id: "t1")))
+    }
+
+    func testAgentsSelectsByProjectSlashBranch() {
+        XCTAssertEqual(parse("/agents alpha/fix-y"), .success(.selectAgent(id: "t2")))
+    }
+
+    func testAgentsUnknownFails() {
+        XCTAssertEqual(parse("/agents nope"), .failure(.unknownTarget("nope")))
+        XCTAssertEqual(parse("/agents 9"), .failure(.unknownTarget("9")))
+    }
+
+    // MARK: - /repo
+
+    func testRepoLists() {
+        XCTAssertEqual(parse("/repo"), .success(.listRepos))
+        XCTAssertEqual(parse("/repos"), .success(.listRepos))
+    }
+
+    // MARK: - /order
+
+    func testOrderResolvesAgentByCode() {
+        XCTAssertEqual(parse("/order #1 run tests"),
+                       .success(.orderAgent(agentId: "t1", task: "run tests")))
+    }
+
+    func testOrderResolvesAgentByName() {
+        XCTAssertEqual(parse("/order fix-y run tests"),
+                       .success(.orderAgent(agentId: "t2", task: "run tests")))
+    }
+
+    func testOrderUnknownAgent() {
+        XCTAssertEqual(parse("/order #9 do it"), .failure(.unknownTarget("9")))
     }
 
     func testOrderMissingTask() {
-        XCTAssertEqual(BridgeCommandParser.parse("/order feat-x", worktrees: wts), .failure(.emptyTask))
+        XCTAssertEqual(parse("/order #1"), .failure(.emptyTask))
     }
 
-    func testReturnIsGone() {
-        XCTAssertEqual(BridgeCommandParser.parse("/return fix-y", worktrees: wts),
-                       .failure(.unknownCommand("return")))
+    func testOrderMissingEverything() {
+        XCTAssertEqual(parse("/order"), .failure(.missingArgument("order")))
     }
 
-    func testCommitResolvesBranch() {
-        XCTAssertEqual(BridgeCommandParser.parse("/commit feat-x", worktrees: wts),
-                       .success(.commit(worktreePath: "/repo/feat-x")))
+    // MARK: - Retired verbs
+
+    func testRetiredVerbsAreUnknown() {
+        XCTAssertEqual(parse("/new build login"), .failure(.unknownCommand("new")))
+        XCTAssertEqual(parse("/remove @feat-x"), .failure(.unknownCommand("remove")))
+        XCTAssertEqual(parse("/commit @feat-x"), .failure(.unknownCommand("commit")))
+        XCTAssertEqual(parse("/send alpha do it"), .failure(.unknownCommand("send")))
+        XCTAssertEqual(parse("/list"), .failure(.unknownCommand("list")))
+        XCTAssertEqual(parse("/worktrees"), .failure(.unknownCommand("worktrees")))
     }
+
+    // MARK: - /broadcast, /add
 
     func testBroadcast() {
-        XCTAssertEqual(BridgeCommandParser.parse("/broadcast run tests", worktrees: wts),
-                       .success(.broadcast(task: "run tests")))
+        XCTAssertEqual(parse("/broadcast ship it"), .success(.broadcast(task: "ship it")))
+    }
+
+    func testBroadcastEmpty() {
+        XCTAssertEqual(parse("/broadcast"), .failure(.emptyTask))
+    }
+
+    func testAdd() {
+        XCTAssertEqual(parse("/add"), .success(.addRepo))
     }
 
     func testUnknownCommand() {
-        XCTAssertEqual(BridgeCommandParser.parse("/frobnicate x", worktrees: wts),
-                       .failure(.unknownCommand("frobnicate")))
+        XCTAssertEqual(parse("/frobnicate"), .failure(.unknownCommand("frobnicate")))
     }
 
-    // MARK: - /remove: repo name drops the repo, branch name deletes the worktree
+    // MARK: - /return (was /remove)
 
-    func testRemoveRepoNameDropsRepo() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @beta", worktrees: wts, repoPaths: repos),
-                       .success(.removeRepo(repoPath: "/workspaces/beta")))
+    func testBareReturnSweeps() {
+        XCTAssertEqual(parse("/return"), .success(.removeAll))
     }
 
-    func testRemoveBranchNameDeletesWorktree() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @feat-x", worktrees: wts, repoPaths: repos),
-                       .success(.removeWorktree(worktreePath: "/repo/feat-x")))
+    func testReturnRepoNameDropsRepo() {
+        XCTAssertEqual(parse("/return @alpha"), .success(.removeRepo(repoPath: "/workspaces/alpha")))
     }
 
-    /// `@` is how /new spells a repo, but a bare name is the obvious thing to type.
-    func testRemoveAcceptsBareName() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove alpha", worktrees: wts, repoPaths: repos),
-                       .success(.removeRepo(repoPath: "/workspaces/alpha")))
-        XCTAssertEqual(BridgeCommandParser.parse("/remove fix-y", worktrees: wts, repoPaths: repos),
-                       .success(.removeWorktree(worktreePath: "/repo/fix-y")))
+    func testReturnBranchNameDeletesWorktree() {
+        XCTAssertEqual(parse("/return @feat-x"), .success(.removeWorktree(worktreePath: "/repo/feat-x")))
     }
 
-    func testRemoveIsCaseInsensitive() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @BETA", worktrees: wts, repoPaths: repos),
-                       .success(.removeRepo(repoPath: "/workspaces/beta")))
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @FEAT-X", worktrees: wts, repoPaths: repos),
-                       .success(.removeWorktree(worktreePath: "/repo/feat-x")))
+    func testReturnAcceptsBareName() {
+        XCTAssertEqual(parse("/return feat-x"), .success(.removeWorktree(worktreePath: "/repo/feat-x")))
     }
 
-    /// A repo name wins a collision: dropping a repo leaves worktrees on disk,
-    /// so it is the recoverable branch of the two.
-    func testRemovePrefersRepoOnNameCollision() {
-        let clash = [WorktreeRef(branch: "alpha", path: "/repo/alpha")]
-        XCTAssertEqual(BridgeCommandParser.parse("/remove alpha", worktrees: clash, repoPaths: repos),
-                       .success(.removeRepo(repoPath: "/workspaces/alpha")))
+    func testReturnIsCaseInsensitive() {
+        XCTAssertEqual(parse("/return @FEAT-X"), .success(.removeWorktree(worktreePath: "/repo/feat-x")))
+        XCTAssertEqual(parse("/return @Alpha"), .success(.removeRepo(repoPath: "/workspaces/alpha")))
     }
 
-    /// Must not fall through to some other target — either verb is destructive.
-    func testRemoveUnknownTargetFails() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @nope", worktrees: wts, repoPaths: repos),
-                       .failure(.unknownTarget("nope")))
+    /// Dropping a repo leaves the worktree on disk, so it is the recoverable guess.
+    func testReturnPrefersRepoOnNameCollision() {
+        let collidingWts = [WorktreeRef(branch: "alpha", path: "/repo/alpha")]
+        XCTAssertEqual(
+            BridgeCommandParser.parse("/return @alpha", worktrees: collidingWts, repoPaths: repos),
+            .success(.removeRepo(repoPath: "/workspaces/alpha")))
     }
 
-    /// A bare /remove is the sweep that /return used to be.
-    func testRemoveWithoutArgumentSweepsAll() {
-        XCTAssertEqual(BridgeCommandParser.parse("/remove", worktrees: wts, repoPaths: repos),
-                       .success(.removeAll))
+    func testReturnUnknownTargetFails() {
+        XCTAssertEqual(parse("/return @nope"), .failure(.unknownTarget("nope")))
     }
 
-    /// A repo name that resolves must name a real tab: the parser matches on the
-    /// directory name, which is what WorkspaceTab.displayName derives from.
-    func testRemoveMatchesOnDirectoryName() {
-        let nested = ["/a/b/c/myrepo"]
-        XCTAssertEqual(BridgeCommandParser.parse("/remove @myrepo", worktrees: wts, repoPaths: nested),
-                       .success(.removeRepo(repoPath: "/a/b/c/myrepo")))
+    // MARK: - Verb casing
+
+    func testVerbIsCaseInsensitive() {
+        XCTAssertEqual(parse("/TASK"), .success(.listWorktrees))
+        XCTAssertEqual(parse("/Return"), .success(.removeAll))
+    }
+
+    // MARK: - Formatter ↔ parser agreement
+
+    /// The codes a listing prints must be the codes the parser accepts back.
+    func testListedCodesRoundTrip() {
+        let taskList = BridgeCommandFormatter.worktreeList(wts, currentPath: nil)
+        for (index, wt) in wts.enumerated() {
+            XCTAssertTrue(taskList.contains("\(index + 1). \(wt.branch)"))
+            XCTAssertEqual(parse("/task #\(index + 1)"), .success(.selectWorktree(path: wt.path)))
+        }
+
+        let agentList = BridgeCommandFormatter.agentList(agents, currentId: nil)
+        for (index, agent) in agents.enumerated() {
+            XCTAssertTrue(agentList.contains("\(index + 1). \(agent.project) / \(agent.branch)"))
+            XCTAssertEqual(parse("/agents \(index + 1)"), .success(.selectAgent(id: agent.id)))
+        }
+    }
+
+    func testFormatterMarksCurrent() {
+        XCTAssertTrue(BridgeCommandFormatter.worktreeList(wts, currentPath: "/repo/fix-y")
+            .contains("2. fix-y  ← current"))
+        XCTAssertTrue(BridgeCommandFormatter.agentList(agents, currentId: "t1")
+            .contains("1. alpha / feat-x — Running  ← current"))
+    }
+
+    func testFormatterEmptyStates() {
+        XCTAssertEqual(BridgeCommandFormatter.repoList([]),
+                       "No repos configured. Use `/add` on the desktop.")
+        XCTAssertEqual(BridgeCommandFormatter.agentList([], currentId: nil), "No agents in this task.")
+        XCTAssertTrue(BridgeCommandFormatter.worktreeList([], currentPath: nil).contains("No tasks"))
+    }
+
+    func testRepoListIsNumbered() {
+        XCTAssertEqual(BridgeCommandFormatter.repoList(repos), """
+        **Repos**
+
+        1. alpha
+        2. beta
+        """)
     }
 }

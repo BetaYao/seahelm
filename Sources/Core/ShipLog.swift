@@ -339,11 +339,35 @@ class ShipLog {
         }
         lock.unlock()
 
+        // Screen scans re-fire every poll while an agent is active (the OSC
+        // spinner busts the viewport hash), so a scan that changed nothing the
+        // UI shows would still force a main-queue hop + full delegate fan-out
+        // every 2s per pane. Drop those. Hook/lifecycle events are edges and
+        // always pass through.
+        if case .screenObserved = event.kind,
+           !statusChanged, Self.displayedStateUnchanged(current, next) {
+            return
+        }
+
         let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
                                     oldStatus: oldStatus, newStatus: newStatus,
                                     holdSeconds: hold, isCompletionSignal: isCompletion,
                                     event: event, seq: seq)
         notifyObservers(outcome)
+    }
+
+    /// Whether two snapshots agree on every field an observer can render.
+    private static func displayedStateUnchanged(_ a: SailorInfo, _ b: SailorInfo) -> Bool {
+        a.status == b.status
+            && a.lastMessage == b.lastMessage
+            && a.lastUserPrompt == b.lastUserPrompt
+            && a.commandLine == b.commandLine
+            && a.roundDuration == b.roundDuration
+            && a.agentType == b.agentType
+            && a.scanStatus == b.scanStatus
+            && a.hookStatus == b.hookStatus
+            && a.tasks == b.tasks
+            && a.activityEvents == b.activityEvents
     }
 
     /// Shape an ingest outcome into a control-API event dict for EventHub.
@@ -575,7 +599,11 @@ class ShipLog {
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
-        channel?.sendCommand(command)
+        // Channel sends spawn a subprocess (zmx/tmux) and wait for it — callers
+        // are mostly main-thread interaction sites, so keep it off-thread.
+        DispatchQueue.global(qos: .userInitiated).async {
+            channel?.sendCommand(command)
+        }
     }
 
     /// Read recent output from a specific agent
@@ -752,6 +780,15 @@ class ShipLog {
         return agents[tid]
     }
 
+    /// Every agent in a worktree, in registration order. A worktree holds one
+    /// agent per split pane, which is what `/agents` lists.
+    func sailors(forWorktree worktreePath: String) -> [SailorInfo] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return (worktreeIndex[worktreePath] ?? []).compactMap { agents[$0] }
+    }
+
     func sailorsForProject(_ project: String) -> [SailorInfo] {
         lock.lock()
         defer { lock.unlock() }
@@ -873,18 +910,19 @@ class ShipLog {
             **Seahelm Commands**
 
             _Same as the desktop cockpit:_
-            `<anything>` — Steer the current agent (`/agents` to change it)
-            `/new <task>` — Start a worktree and staff it
-            `/order @branch <task>` — Send a task to that worktree's agent
-            `/commit @branch` — Commit that worktree
+            `<anything>` — Steer the current agent
+            `/task` — List tasks (worktrees), numbered
+            `/task [@repo] <description>` — Start a task and switch to it
+            `/task #<code|name>` — Switch to that task
+            `/agents` — List this task's agents, numbered
+            `/agents #<code|name>` — Steer that agent
+            `/repo` — List repos
+            `/order #<code|name> <task>` — Send to one agent without switching
             `/broadcast <task>` — Send a task to every agent
-            `/remove [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
+            `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
             `/add` — Desktop only (needs a file picker)
 
             _Chat only:_
-            `/repo` — List repos
-            `/worktrees [code|name]` — List worktrees, or steer one
-            `/agents [code|name]` — List agents, or steer one
             `/status` — Status of all agents
             `/idea <description>` — Capture an idea
             `/help` — This help
@@ -915,22 +953,6 @@ class ShipLog {
                 lines.append("\(a.status.icon) **\(a.project)** [\(a.branch)] — \(a.status.rawValue): \(a.lastMessage)")
             }
             reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
-
-        case "send":
-            let parts = cmd.args.split(separator: " ", maxSplits: 1)
-            guard parts.count == 2 else {
-                reply(to: cmd.rawMessage, content: "Usage: `/send <project> <command>`")
-                return
-            }
-            let project = String(parts[0])
-            let command = String(parts[1])
-            let matched = sailorsForProject(project)
-            guard let target = matched.first else {
-                reply(to: cmd.rawMessage, content: "Project not found: \(project)")
-                return
-            }
-            sendCommand(to: target.id, command: command)
-            reply(to: cmd.rawMessage, content: "Command sent to \(target.project): \(command)")
 
         default:
             reply(to: cmd.rawMessage, content: "Unknown command: /\(cmd.command)\nUse /help to see supported commands")

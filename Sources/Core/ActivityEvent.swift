@@ -1,6 +1,6 @@
 import Foundation
 
-struct ActivityEvent {
+struct ActivityEvent: Equatable {
     let tool: String
     let detail: String
     let isError: Bool

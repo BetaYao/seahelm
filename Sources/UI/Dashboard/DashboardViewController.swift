@@ -2011,6 +2011,10 @@ final class DashboardOverviewView: NSView {
     // same `/ @ #` autocomplete menu the cockpit uses.
     let commandInput = CommandInputView()
     var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
+    /// The composer moved to the island; the bar stays hidden except while a
+    /// prefilled command flow (Cmd+N `/new `) needs a visible input.
+    private var composerBar: NSView?
+    private var composerCollapsed: NSLayoutConstraint?
     private let menuContainer = NSView()
     private var menuRows: [MenuRowButton] = []
     private var menuItems: [(name: String, desc: String)] = []
@@ -2184,6 +2188,7 @@ final class DashboardOverviewView: NSView {
             self?.onSubmitCommand?(t)
             self?.commandInput.text = ""
             self?.hideMenu()
+            self?.setComposerVisible(false)
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
@@ -2196,6 +2201,7 @@ final class DashboardOverviewView: NSView {
                 self.hideMenu()
                 return
             }
+            self.setComposerVisible(false)
             self.onCommandEscapeAtEmpty?()
         }
         commandInput.onArrowUpAtEmpty = { [weak self] in
@@ -2233,7 +2239,19 @@ final class DashboardOverviewView: NSView {
             menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
             menuContainer.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -6),
         ])
+        composerBar = bar
+        let collapsed = bar.heightAnchor.constraint(equalToConstant: 0)
+        composerCollapsed = collapsed
+        setComposerVisible(false)
         return bar
+    }
+
+    /// Show/hide the bottom composer. Hidden by default — day-to-day commands
+    /// live in the island; only prefilled flows (`/new `) surface it here.
+    func setComposerVisible(_ visible: Bool) {
+        composerBar?.isHidden = !visible
+        composerCollapsed?.isActive = !visible
+        if !visible { hideMenu() }
     }
 
     // MARK: - `/ @ #` autocomplete (overview composer)
@@ -2350,6 +2368,7 @@ final class DashboardOverviewView: NSView {
 
     /// Focus the command input with a prefilled command (e.g. "/new ").
     func focusCommand(prefill: String) {
+        setComposerVisible(true)
         commandInput.setTextAndFocusEnd(prefill)
     }
 

@@ -51,6 +51,25 @@ class TerminalCoordinator {
 
     // MARK: - Split Pane Operations
 
+    /// Enrol a freshly split pane in ShipLog. StationRegistry alone is not enough:
+    /// `ShipLog.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
+    /// and then requires that station to be a known agent, so a pane missing here
+    /// silently falls back to the worktree's *first* pane — every hook, and every
+    /// suggestion chip tapped for this pane, lands in a sibling.
+    /// Branch/project come from a sibling in the same worktree, which shares both.
+    private func registerSplitStation(_ station: Station, worktreePath: String, sessionName: String) {
+        let sibling = ShipLog.shared.sailor(forWorktree: worktreePath)
+        ShipLog.shared.register(
+            station: station,
+            worktreePath: worktreePath,
+            branch: sibling?.branch ?? "",
+            project: sibling?.project ?? URL(fileURLWithPath: worktreePath).lastPathComponent,
+            startedAt: Date(),
+            sessionName: runtimeBackend == "local" ? nil : sessionName,
+            backend: runtimeBackend
+        )
+    }
+
     func splitFocusedPane(axis: SplitAxis) {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
@@ -60,6 +79,8 @@ class TerminalCoordinator {
         station.sessionName = sessionName
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
+
+        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
 
         let leafId = UUID().uuidString
         tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
@@ -114,6 +135,7 @@ class TerminalCoordinator {
         station.sessionName = sessionName
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
+        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
 
         let leafId = UUID().uuidString
         // splitFocusedLeaf splits `focusedId`, so point it at the target first.
@@ -331,10 +353,22 @@ class TerminalCoordinator {
 
     func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
         guard !info.isMainWorktree else { return }
+        guard let window else { return }
 
-        let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+        // Both are synchronous git subprocesses (up to a 5s timeout on a wedged
+        // repo) — run them off the main thread, then present the alert.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
+            let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+            DispatchQueue.main.async {
+                self?.presentDeleteConfirmation(info, window: window,
+                                                hasChanges: hasChanges, repoPath: repoPath)
+            }
+        }
+    }
 
+    private func presentDeleteConfirmation(_ info: WorktreeInfo, window: NSWindow,
+                                           hasChanges: Bool, repoPath: String) {
         let alert = NSAlert()
         alert.alertStyle = hasChanges ? .critical : .warning
         alert.messageText = "Delete worktree \"\(info.branch)\"?"
@@ -350,7 +384,6 @@ class TerminalCoordinator {
         alert.buttons[0].hasDestructiveAction = true
         alert.buttons[1].hasDestructiveAction = true
 
-        guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             switch response {

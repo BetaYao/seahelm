@@ -28,6 +28,8 @@ struct Config: Codable {
     var wechat: WeChatConfig?
     var firstMate: FirstMateConfig
     var notifications: NotificationConfig
+    /// Vibe-island style notch overlay showing notifications + suggestions.
+    var islandEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -51,6 +53,7 @@ struct Config: Codable {
         case wechat
         case firstMate
         case notifications
+        case islandEnabled = "island_enabled"
     }
 
     init() {
@@ -75,6 +78,7 @@ struct Config: Codable {
         wechat = nil
         firstMate = .default
         notifications = NotificationConfig()
+        islandEnabled = true
     }
 
     init(from decoder: Decoder) throws {
@@ -101,6 +105,7 @@ struct Config: Codable {
         wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
+        islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser

@@ -67,6 +67,12 @@ class MainWindowController: NSWindowController {
     private var capsuleToken = 0
     private lazy var usageSummaryStore = UsageSummaryStore()
 
+    // Vibe-island notch overlay
+    private let islandController = IslandPanelController()
+    private var islandRefreshTimer: Timer?
+    private var islandKnownOrderIDs: Set<String> = []
+    private var islandKnownUnread = 0
+
     // Terminal management
     private lazy var terminalCoordinator: TerminalCoordinator = {
         let tc = TerminalCoordinator(config: config, activeSplitContainer: { [weak self] in
@@ -199,6 +205,7 @@ class MainWindowController: NSWindowController {
             name: .notificationHistoryDidChange, object: nil
         )
         handleNotificationHistoryDidChange(nil)
+        setupIsland()
         usageSummaryStore.onUpdate = { [weak self] frames in
             let usageText = frames
                 .filter { $0.kind == .usage }
@@ -290,10 +297,14 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
-        // Cmd+N returns to the Dashboard overview and starts a `/new` command in
-        // its command input.
-        tabCoordinator.switchToTab(0)
-        dashboardVC?.startNewCommand()
+        // Cmd+N opens the island with `/new ` prefilled in its command field.
+        // Fall back to the overview composer when the island is disabled.
+        if config.islandEnabled {
+            islandController.openCommandBar(prefill: "/new ")
+        } else {
+            tabCoordinator.switchToTab(0)
+            dashboardVC?.startNewCommand()
+        }
     }
 
     // MARK: - First Mate command shortcuts
@@ -641,25 +652,30 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
+    /// What `/task` lists and `/task #x` / `/return @branch` resolve against —
+    /// every worktree, not just the staffed ones, so an idle tree is still
+    /// reachable and still sweepable. Both surfaces read this, which is what
+    /// keeps their numbering identical.
     private func currentWorktreeRefs() -> [WorktreeRef] {
-        ShipLog.shared.allSailors().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
+        tabCoordinator.allWorktrees.map { WorktreeRef(branch: $0.info.branch, path: $0.info.path) }
     }
 
     /// Autocomplete data for the Helm command line.
-    /// `/` commands · `@` worktrees/branches · `#` agent types.
+    /// `/` commands · `@` repos/branches · `#` task and agent codes.
     private func helmMenuItems(trigger: Character, query: String) -> [(name: String, desc: String)] {
         let pool: [(name: String, desc: String)]
         switch trigger {
         case "/":
             pool = [
-                ("new", "Start a new task session"),
-                ("order", "Give an order to the agent"),
-                ("commit", "Commit and push current changes"),
+                ("task", "bare lists tasks · <description> starts one · #code switches"),
+                ("agents", "bare lists this task's agents · #code steers one"),
+                ("repo", "List repos"),
+                ("order", "#code <task> — send to one agent without switching"),
                 ("broadcast", "Broadcast to everyone"),
                 ("add", "Add a repo to the workspace"),
                 // Both kinds of `@` name are valid — the kind picks the verb,
                 // and no name at all sweeps every worktree.
-                ("remove", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
+                ("return", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -668,11 +684,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let worktrees = ShipLog.shared.allSailors().map { ($0.branch, "worktree · \($0.project)") }
             pool = repos + worktrees
         case "#":
-            pool = [
-                ("claude", "Claude Code"),
-                ("codex", "codex-cli"),
-                ("opencode", "opencode"),
-            ]
+            // The codes `/task #x` and `/agents #x` take, in the order the
+            // listings print them, so the menu and the reply always agree.
+            let tasks = currentWorktreeRefs().enumerated().map { index, wt in
+                ("\(index + 1)", "task · \(wt.branch)")
+            }
+            let agents = currentWorktreeAgentRefs().enumerated().map { index, agent in
+                (agent.branch, "agent \(index + 1) · \(agent.project)")
+            }
+            pool = tasks + agents
         default:
             pool = []
         }
@@ -703,8 +723,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 return true
             }
 
-            if self.routeChatSelection(text, reply: reply) { return true }
-
             // `force` suffix is chat-only: on the desktop the sheet asks instead.
             var body = text
             var force = false
@@ -713,13 +731,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 force = true
             }
 
-            let worktrees = self.tabCoordinator.allWorktrees.map {
-                WorktreeRef(branch: $0.info.branch, path: $0.info.path)
-            }
-            switch BridgeCommandParser.parse(body, worktrees: worktrees,
+            switch BridgeCommandParser.parse(body, worktrees: self.currentWorktreeRefs(),
+                                             agents: self.currentWorktreeAgentRefs(),
                                              repoPaths: self.tabCoordinator.config.workspacePaths) {
             case .failure(.unknownCommand):
-                return false   // not ours — let /status, /list, /idea try
+                return false   // not ours — let /status, /idea, /help try
             case .failure(let err):
                 reply(Self.describeChatError(err))
                 return true
@@ -730,54 +746,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// Handle `/repo`, `/worktrees`, `/agents`. Returns false for other verbs.
-    private func routeChatSelection(_ text: String, reply: @escaping (String) -> Void) -> Bool {
-        let worktrees = tabCoordinator.allWorktrees.map {
-            WorktreeRef(branch: $0.info.branch, path: $0.info.path)
-        }
-        let sailors = ShipLog.shared.allSailors()
-        let agents = sailors.map {
+    /// The agents `/agents` and `/order #x` select from: the current worktree's
+    /// panes. Empty when nothing is current.
+    private func currentWorktreeAgentRefs() -> [AgentRef] {
+        guard let path = dashboardVC?.lastCommittedWorktreePath else { return [] }
+        return ShipLog.shared.sailors(forWorktree: path).map {
             AgentRef(id: $0.id, project: $0.project, branch: $0.branch, status: $0.status.rawValue)
         }
-
-        guard let result = ChatSelectionParser.parse(text, worktrees: worktrees, agents: agents) else {
-            return false
-        }
-
-        let currentPath = dashboardVC?.lastCommittedWorktreePath
-        let currentAgentId = currentPath.flatMap { ShipLog.shared.sailor(forWorktree: $0)?.id }
-
-        switch result {
-        case .failure(let err):
-            reply(Self.describeChatError(err))
-
-        case .success(.listRepos):
-            reply(ChatSelectionFormatter.repoList(tabCoordinator.config.workspacePaths))
-
-        case .success(.listWorktrees):
-            reply(ChatSelectionFormatter.worktreeList(worktrees, currentPath: currentPath))
-
-        case .success(.listAgents):
-            reply(ChatSelectionFormatter.agentList(agents, currentId: currentAgentId))
-
-        case .success(.selectWorktree(let path)):
-            dashboardVC?.commitWorktreeSelection(path: path)
-            let branch = worktrees.first { $0.path == path }?.branch ?? path
-            if let sailor = ShipLog.shared.sailor(forWorktree: path) {
-                reply("Now steering **\(sailor.project)** [\(branch)]")
-            } else {
-                reply("Switched to [\(branch)] — no agent there yet. `/new <task>` to staff it.")
-            }
-
-        case .success(.selectAgent(let id)):
-            guard let sailor = sailors.first(where: { $0.id == id }) else {
-                reply("That agent is gone. `/agents` to see what's left.")
-                return true
-            }
-            dashboardVC?.commitWorktreeSelection(path: sailor.worktreePath)
-            reply("Now steering **\(sailor.project)** [\(sailor.branch)]")
-        }
-        return true
     }
 
     private static func describeChatError(_ err: BridgeCommandError) -> String {
@@ -795,18 +770,53 @@ dashboard.stationManager = terminalCoordinator.stationManager
         case .newWorktree(let task, let repoHint):
             let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
             guard !repoPath.isEmpty else { reply("No repo configured."); return }
-            performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
+            // Starting a task is also moving to it — the phone has no dashboard to
+            // click, so a create that left `current` behind would strand the reply.
+            performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
+                                  reuseEnv: false) { [weak self] path in
+                guard let path else { return }
+                self?.dashboardVC?.commitWorktreeSelection(path: path)
+            }
             reply("Starting **\(URL(fileURLWithPath: repoPath).lastPathComponent)** — \(task)")
 
-        case .orderExisting(let path, let task):
-            guard let s = ShipLog.shared.sailor(forWorktree: path) else { reply("No agent there."); return }
+        case .listWorktrees:
+            reply(BridgeCommandFormatter.worktreeList(
+                currentWorktreeRefs(), currentPath: dashboardVC?.lastCommittedWorktreePath))
+
+        case .selectWorktree(let path):
+            dashboardVC?.commitWorktreeSelection(path: path)
+            let branch = currentWorktreeRefs().first { $0.path == path }?.branch ?? path
+            if let s = ShipLog.shared.sailor(forWorktree: path) {
+                reply("Now on **\(s.project)** [\(branch)]")
+            } else {
+                reply("Now on [\(branch)] — no agent there yet. `/task <description>` to start one.")
+            }
+
+        case .listAgents:
+            guard dashboardVC?.lastCommittedWorktreePath != nil else {
+                reply("No current task. `/task` to pick one.")
+                return
+            }
+            reply(BridgeCommandFormatter.agentList(
+                currentWorktreeAgentRefs(),
+                currentId: dashboardVC?.lastCommittedWorktreePath
+                    .flatMap { ShipLog.shared.sailor(forWorktree: $0)?.id }))
+
+        case .selectAgent(let id):
+            guard let s = ShipLog.shared.sailor(for: id) else {
+                reply("That agent is gone. `/agents` to see what's left.")
+                return
+            }
+            dashboardVC?.commitWorktreeSelection(path: s.worktreePath)
+            reply("Now steering **\(s.project)** [\(s.branch)]")
+
+        case .listRepos:
+            reply(BridgeCommandFormatter.repoList(tabCoordinator.config.workspacePaths))
+
+        case .orderAgent(let id, let task):
+            guard let s = ShipLog.shared.sailor(for: id) else { reply("No such agent."); return }
             ShipLog.shared.sendCommand(to: s.id, command: task)
             reply("→ **\(s.project)** [\(s.branch)]")
-
-        case .commit(let path):
-            guard let s = ShipLog.shared.sailor(forWorktree: path) else { reply("No agent there."); return }
-            ShipLog.shared.sendCommand(to: s.id, command: "git add -A && git commit -m 'wip'")
-            reply("Committing **\(s.project)** [\(s.branch)]")
 
         case .broadcast(let task):
             let all = ShipLog.shared.allSailors()
@@ -841,12 +851,19 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
             // The desktop's sheet exists to stop uncommitted work being lost, not
             // as ceremony. Chat keeps that guard and moves it into the reply.
-            if !force, WorktreeDeleter.hasUncommittedChanges(worktreePath: path) {
-                reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
-                return
+            // The dirty check is a synchronous git subprocess — run it off-thread.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let dirty = !force && WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if dirty {
+                        reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
+                        return
+                    }
+                    self.terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
+                    reply("Deleted **\(branch)**.")
+                }
             }
-            terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
-            reply("Deleted **\(branch)**.")
         }
     }
 
@@ -859,13 +876,19 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 let repoPath = repoHint ?? paths.first ?? ""
                 self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
             },
-            orderExisting: { path, task in
-                guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
-                ShipLog.shared.sendCommand(to: tid, command: task)
+            selectWorktree: { [weak self] path in
+                self?.dashboardVC?.commitWorktreeSelection(path: path)
             },
-            commit: { path in
-                guard let tid = ShipLog.shared.sailor(forWorktree: path)?.id else { return }
-                ShipLog.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
+            selectAgent: { [weak self] id in
+                guard let path = ShipLog.shared.sailor(for: id)?.worktreePath else { return }
+                self?.dashboardVC?.commitWorktreeSelection(path: path)
+            },
+            showOverview: { [weak self] in
+                // The dashboard IS the listing; the chat reply is its text stand-in.
+                self?.tabCoordinator.switchToTab(0)
+            },
+            orderAgent: { id, task in
+                ShipLog.shared.sendCommand(to: id, command: task)
             },
             removeAll: { [weak self] in
                 guard let self else { return }
@@ -967,13 +990,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
     @discardableResult
     func submitBridgeCommand(_ text: String, onOutcome: ((HelmCommandOutcome) -> Void)? = nil) -> Bool {
         switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs(),
+                                         agents: currentWorktreeAgentRefs(),
                                          repoPaths: tabCoordinator.config.workspacePaths) {
         case .success(let command):
             switch command {
             case .newWorktree(let task, let repoHint):
                 let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
                 performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
-                                      reuseEnv: false) { path in
+                                      reuseEnv: false) { [weak self] path in
+                    if let path { self?.dashboardVC?.commitWorktreeSelection(path: path) }
                     onOutcome?(path != nil ? .navigated : .failed)
                 }
                 return true
@@ -1577,6 +1602,141 @@ extension MainWindowController: WorktreeStatusDelegate {
     }
 }
 
+// MARK: - Island Overlay
+
+extension MainWindowController {
+    private func setupIsland() {
+        guard config.islandEnabled else { return }
+        // Live test hosts must not float an overlay over the desktop.
+        guard NSClassFromString("XCTestCase") == nil else { return }
+
+        let model = islandController.model
+        model.onNavigate = { [weak self] worktreePath, paneIndex in
+            self?.tabCoordinator.handleNavigateToWorktree(worktreePath: worktreePath, paneIndex: paneIndex)
+            self?.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        model.onOptionTapped = { [weak self] order, optionText in
+            self?.handleSuggestionTapped(order: order, optionText: optionText)
+        }
+        model.onDismissOrder = { [weak self] order in
+            self?.tabCoordinator.pendingOrders.resolve(id: order.id)
+        }
+        model.onMarkAllRead = {
+            NotificationHistory.shared.markAllRead()
+        }
+        model.onSubmitCommand = { [weak self] text in
+            _ = self?.submitBridgeCommand(text)
+        }
+        model.commandMenuProvider = { [weak self] trigger, query in
+            self?.helmMenuItems(trigger: trigger, query: query) ?? []
+        }
+        islandController.install()
+
+        tabCoordinator.pendingOrders.addObserver { [weak self] in
+            self?.refreshIsland()
+        }
+        // Push-driven: worktree status changes arrive via
+        // tabCoordinatorRequestUpdateTitleBar, notification changes via the
+        // history's NotificationCenter post. The timer is only a slow fallback
+        // for async stragglers (e.g. title resolution finishing later).
+        NotificationCenter.default.addObserver(forName: .notificationHistoryDidChange,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.refreshIsland()
+        }
+        islandRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.refreshIsland()
+        }
+        refreshIsland()
+    }
+
+    fileprivate func refreshIsland() {
+        guard config.islandEnabled else { return }
+        let model = islandController.model
+
+        // Aggregate per-worktree: the highest-urgency pane wins the row.
+        var byWorktree: [String: IslandAgentRow] = [:]
+        for sailor in ShipLog.shared.allSailors() {
+            let row = IslandAgentRow(
+                id: sailor.worktreePath,
+                project: sailor.project,
+                branch: sailor.branch,
+                status: sailor.status,
+                message: sailor.lastAssistantMessage.isEmpty ? sailor.lastMessage : sailor.lastAssistantMessage,
+                // Same resolver as the dashboard cards; empty branch fallback —
+                // the island row already renders the branch separately.
+                title: WorktreeTitleResolver.resolve(
+                    worktreePath: sailor.worktreePath,
+                    lastUserPrompt: sailor.lastUserPrompt,
+                    branch: ""
+                )
+            )
+            if let existing = byWorktree[sailor.worktreePath] {
+                if Self.notificationPriorityScoreForIsland(row.status) > Self.notificationPriorityScoreForIsland(existing.status) {
+                    byWorktree[sailor.worktreePath] = row
+                }
+            } else {
+                byWorktree[sailor.worktreePath] = row
+            }
+        }
+        // Branch alone ties for every "main" worktree, and dictionary order plus
+        // Swift's unstable sort made those rows shuffle on each refresh. Break
+        // ties deterministically: project, then path (unique).
+        let rows = byWorktree.values.sorted {
+            ($0.branch, $0.project, $0.id) < ($1.branch, $1.project, $1.id)
+        }
+        if model.rows != rows { model.rows = rows }
+
+        // Equality-gate every assignment: this runs on a 2s timer, and an
+        // ungated @Observable set re-evaluates the SwiftUI island every tick
+        // even when nothing changed.
+        let primary = primaryCapsuleNotification
+        if model.primaryEntry != primary { model.primaryEntry = primary }
+        let unread = NotificationHistory.shared.unreadCount
+        if model.unreadCount != unread { model.unreadCount = unread }
+        let recent = Array(
+            NotificationHistory.shared.entries
+                .filter { !$0.isRead }
+                .prefix(IslandModel.maxRecentNotifications)
+        )
+        if model.recentNotifications != recent { model.recentNotifications = recent }
+
+        let orders = tabCoordinator.pendingOrders.all()
+            .filter { $0.action.kind == .suggestNextOrder }
+        if model.orders != orders { model.orders = orders }
+
+        // Pop the pill when something new needs attention while closed.
+        let orderIDs = Set(orders.map(\.id))
+        let hasNewOrder = !orderIDs.subtracting(islandKnownOrderIDs).isEmpty
+        let hasNewUnread = model.unreadCount > islandKnownUnread
+        islandKnownOrderIDs = orderIDs
+        islandKnownUnread = model.unreadCount
+        if hasNewOrder && !model.isOpened {
+            // A suggestion is actionable — expand so the card is visible
+            // without hovering. Plain notifications just pop the pill.
+            islandController.openForEvent()
+        } else if hasNewUnread && !model.isOpened {
+            if let entry = primaryCapsuleNotification ?? NotificationHistory.shared.entries.first {
+                let name = entry.workspaceName.isEmpty ? entry.branch : entry.workspaceName
+                model.flashTransient("\(name) · \(entry.message)")
+            } else {
+                model.pop()
+            }
+        }
+        islandController.updateVisibility()
+    }
+
+    private static func notificationPriorityScoreForIsland(_ status: SailorStatus) -> Int {
+        switch status {
+        case .error, .exited: return 4
+        case .waiting: return 3
+        case .running: return 2
+        case .idle: return 1
+        case .unknown: return 0
+        }
+    }
+}
+
 // MARK: - Notification Navigation
 
 extension MainWindowController {
@@ -1588,6 +1748,7 @@ extension MainWindowController {
 
     @objc private func handleNotificationHistoryDidChange(_ notification: Notification?) {
         updatePrimaryCapsuleNotification()
+        refreshIsland()
     }
 
     private func updatePrimaryCapsuleNotification() {
@@ -1755,6 +1916,9 @@ extension MainWindowController: TabCoordinatorDelegate {
     }
     func tabCoordinatorRequestUpdateTitleBar(_ coordinator: TabCoordinator) {
         updateTitleBar()
+        // Fires on every worktree status change — the island's push channel
+        // for agent rows (replaces the old 2s full-rebuild poll).
+        refreshIsland()
     }
     func tabCoordinatorRequestShowNewBranchDialog(_ coordinator: TabCoordinator) {
         showNewBranchDialog()
@@ -1826,9 +1990,15 @@ extension MainWindowController {
     func handleBridgeApprove(_ order: PendingOrder) {
         switch order.action.kind {
         case .suggestNextOrder:
+            // Send to the pane that raised the suggestion. Re-resolving the
+            // worktree here would pick its *first* pane, so a suggestion from a
+            // split pane got answered in a sibling.
             let worktreePath = order.action.worktreePath
-            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath),
-                  let terminalID = ShipLog.shared.sailor(forWorktree: worktreePath)?.id else { return }
+            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
+            let terminalID = order.action.terminalID.isEmpty
+                ? ShipLog.shared.sailor(forWorktree: worktreePath)?.id
+                : order.action.terminalID
+            guard let terminalID else { return }
             ShipLog.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             // Never reap a worktree whose agent is now running.

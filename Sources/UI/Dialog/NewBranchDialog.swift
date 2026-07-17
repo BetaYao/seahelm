@@ -285,15 +285,28 @@ class NewBranchDialog: NSViewController {
         loadBranches(for: repoPaths[index])
     }
     
+    private var branchLoadGeneration = 0
+
     private func loadBranches(for repoPath: String) {
-        let branches = WorktreeCreator.listBranches(repoPath: repoPath)
+        // `git branch -a` is a synchronous subprocess — keep it off the main
+        // thread so switching the repo popup never stalls the dialog. The
+        // generation guard drops stale results from rapid popup changes.
+        branchLoadGeneration += 1
+        let generation = branchLoadGeneration
         baseBranchPopup.removeAllItems()
-        baseBranchPopup.addItems(withTitles: branches)
-        // Select "main" if available
-        if let mainIndex = branches.firstIndex(of: "main") {
-            baseBranchPopup.selectItem(at: mainIndex)
-        } else if let masterIndex = branches.firstIndex(of: "master") {
-            baseBranchPopup.selectItem(at: masterIndex)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let branches = WorktreeCreator.listBranches(repoPath: repoPath)
+            DispatchQueue.main.async {
+                guard let self, self.branchLoadGeneration == generation else { return }
+                self.baseBranchPopup.removeAllItems()
+                self.baseBranchPopup.addItems(withTitles: branches)
+                // Select "main" if available
+                if let mainIndex = branches.firstIndex(of: "main") {
+                    self.baseBranchPopup.selectItem(at: mainIndex)
+                } else if let masterIndex = branches.firstIndex(of: "master") {
+                    self.baseBranchPopup.selectItem(at: masterIndex)
+                }
+            }
         }
     }
     

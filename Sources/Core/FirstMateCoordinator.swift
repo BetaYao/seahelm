@@ -23,12 +23,12 @@ final class FirstMateCoordinator {
         dispatchPrecondition(condition: .onQueue(.main))
         switch outcome.event.kind {
         case .userPrompt:
-            queue.resolveSuggest(worktreePath: outcome.info.worktreePath)
+            queue.resolveSuggest(terminalID: outcome.info.id)
         case .toolUse, .agentStopped:
             // The agent moved past its AskUserQuestion (answered in the TUI):
             // the question card is stale, clear it. (AskUserQuestion's own
             // tool_use_start is decoded as .question, so it can't self-clear.)
-            queue.resolveQuestion(worktreePath: outcome.info.worktreePath)
+            queue.resolveQuestion(terminalID: outcome.info.id)
         default:
             break
         }
@@ -57,7 +57,7 @@ final class FirstMateCoordinator {
             case .red:
                 switch action.kind {
                 case .suggestNextOrder:
-                    // Agent-supplied suggestion: replace any prior one for this worktree.
+                    // Agent-supplied suggestion: replace any prior one from this pane.
                     NSLog("[suggest] pass gate3 → queue.upsert — worktree=\(action.worktreePath) options=\(action.options?.count ?? 0)")
                     queue.upsert(action)
                 default:

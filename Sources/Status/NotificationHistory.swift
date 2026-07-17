@@ -1,6 +1,6 @@
 import Foundation
 
-struct NotificationEntry: Identifiable, Codable {
+struct NotificationEntry: Identifiable, Codable, Equatable {
     let id: UUID
     let timestamp: Date
     let workspaceName: String

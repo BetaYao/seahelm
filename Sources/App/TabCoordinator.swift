@@ -216,10 +216,7 @@ class TabCoordinator {
             let proj = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
                 ?? URL(fileURLWithPath: repoPath).lastPathComponent
             let started = config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
-            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-            if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: runtimeBackend)
-            }
+            registerPanes(of: info, project: proj, startedAt: started)
         }
 
         // Record startedAt for newly discovered worktrees
@@ -291,8 +288,17 @@ class TabCoordinator {
 
     // MARK: - Build Agent Display Infos
 
-    func buildSailorDisplayInfos() -> [SailorDisplayInfo] {
+    /// - Parameter changedWorktreePath: when set (single-worktree status change),
+    ///   only that worktree kicks an async git-stats refresh; every card still
+    ///   reads its cached stats. A full rebuild (nil) refreshes all.
+    func buildSailorDisplayInfos(changedWorktreePath: String? = nil) -> [SailorDisplayInfo] {
         let agents = ShipLog.shared.allSailors()
+        // Index once — the per-agent loop below used to re-filter the full agent
+        // list and re-scan allWorktrees for every worktree (O(N²) per rebuild,
+        // and this rebuilds on every single-worktree status change).
+        let agentsByWorktree = Dictionary(grouping: agents, by: \.worktreePath)
+        let worktreeInfoByPath = Dictionary(allWorktrees.map { ($0.info.path, $0.info) },
+                                            uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var result: [SailorDisplayInfo] = []
 
@@ -311,15 +317,14 @@ class TabCoordinator {
             // Roll up EVERY pane's ShipLog status for this worktree (authoritative,
             // arbitrated). A multi-pane worktree must reflect its busiest pane, so
             // don't collapse to the aggregator's list or a single sailor here.
-            let shipLogPaneStatuses = agents.filter { $0.worktreePath == agent.worktreePath }.map(\.status)
+            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
 
-            let matchedWorktree = allWorktrees.first(where: { $0.info.path == agent.worktreePath })
-            let isMain = matchedWorktree?.info.isMainWorktree ?? false
+            let isMain = worktreeInfoByPath[agent.worktreePath]?.isMainWorktree ?? false
             // Card label is the worktree's own name — its directory's last path
             // component — not the branch (the branch is visible inside the
             // terminal). The main worktree always reads as "main".
@@ -335,7 +340,9 @@ class TabCoordinator {
 
             // Git summary (diff size + ahead/behind). Served from an 8s cache;
             // kick an off-main refresh so the next build has fresh numbers.
-            WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            if changedWorktreePath == nil || changedWorktreePath == agent.worktreePath {
+                WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            }
             let gitStats = WorktreeGitStatsCache.shared.cachedStats(worktreePath: agent.worktreePath)
 
             // Warm the shared title cache (session summary → task → prompt) so
@@ -479,10 +486,7 @@ class TabCoordinator {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
-                    let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                    if let surface = self.terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                        ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: self.runtimeBackend)
-                    }
+                    self.registerPanes(of: info, project: proj, startedAt: started)
                 }
                 if !cardOrder.isEmpty {
                     ShipLog.shared.reorder(paths: cardOrder)
@@ -665,10 +669,7 @@ class TabCoordinator {
                 allWorktrees.append((info: info, tree: tree))
                 worktreeRepoCache[info.path] = repoRoot
 
-                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                    ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
-                }
+                registerPanes(of: info, project: proj, startedAt: Date())
             }
         }
 
@@ -1074,13 +1075,35 @@ class TabCoordinator {
     // MARK: - Status Update Forwarding
 
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updateSailors(buildSailorDisplayInfos(), changedWorktreePath: status.worktreePath)
+        dashboardVC?.updateSailors(buildSailorDisplayInfos(changedWorktreePath: status.worktreePath),
+                                   changedWorktreePath: status.worktreePath)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
     func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
+        // Cache miss means a synchronous `git rev-parse` (up to 5s on a wedged
+        // repo) — resolve off-thread, then deliver the notification on main.
+        guard let repoPath = worktreeRepoCache[worktreePath] else {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let resolved = WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.worktreeRepoCache[worktreePath] = resolved
+                    self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                                 oldStatus: oldStatus, newStatus: newStatus,
+                                                 lastMessage: lastMessage, repoPath: resolved)
+                }
+            }
+            return
+        }
+        deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                oldStatus: oldStatus, newStatus: newStatus,
+                                lastMessage: lastMessage, repoPath: repoPath)
+    }
+
+    private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus,
+                                         newStatus: SailorStatus, lastMessage: String, repoPath: String) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-        let repoPath = worktreeRepoCache[worktreePath] ?? WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
         let worktreeStatus = statusAggregator.status(for: worktreePath)
@@ -1088,6 +1111,10 @@ class TabCoordinator {
         let paneStatus = worktreeStatus?.panes.first(where: { $0.paneIndex == paneIndex })
         let terminalID = paneStatus?.terminalID ?? ""
         let lastUserPrompt = paneStatus?.lastUserPrompt ?? ""
+        // The agent's final prose (Stop hook) — the most informative body line;
+        // without it completed panes surface placeholder labels like
+        // "Processing prompt".
+        let lastAssistantMessage = ShipLog.shared.sailor(for: terminalID)?.lastAssistantMessage ?? ""
 
         NotificationManager.shared.notify(
             worktreePath: worktreePath,
@@ -1100,6 +1127,7 @@ class TabCoordinator {
             newStatus: newStatus,
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
+            lastAssistantMessage: lastAssistantMessage,
             isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID)
         )
     }
@@ -1109,6 +1137,26 @@ class TabCoordinator {
     /// to decide whether a system banner would be redundant.
     private func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
+    }
+
+    /// Register every pane of a worktree's tree with ShipLog — not just the first.
+    /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID
+    /// (`ShipLog.handleWebhookEvent` only accepts a station that is a known agent),
+    /// so its events — and any suggestion chip tapped for it — silently fall back
+    /// to the worktree's FIRST pane. Restored splits are the common case: every
+    /// pane comes back through here on launch, not through the split path.
+    /// Each leaf registers under its own `sessionName`, which is exactly what that
+    /// pane exports as SEAHELM_PANE_ID.
+    private func registerPanes(of info: WorktreeInfo, project: String, startedAt: Date?) {
+        guard let tree = terminalCoordinator.stationManager.tree(forPath: info.path) else { return }
+        for leaf in tree.allLeaves {
+            guard let station = StationRegistry.shared.station(forId: leaf.stationId) else { continue }
+            ShipLog.shared.register(
+                station: station, worktreePath: info.path, branch: info.branch,
+                project: project, startedAt: startedAt,
+                sessionName: runtimeBackend == "local" ? nil : leaf.sessionName,
+                backend: runtimeBackend)
+        }
     }
 
     /// Pane-level visibility: a banner is redundant only when THIS pane is the
@@ -1147,7 +1195,9 @@ class TabCoordinator {
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
             dashboardVC?.updateSailors(buildSailorDisplayInfos())
-            dashboardVC?.selectSailor(byWorktreePath: worktreePath)
+            // enterWorktree (not selectSailor): it also moves the overview
+            // list's selection highlight to the target row.
+            dashboardVC?.enterWorktree(byWorktreePath: worktreePath)
             saveSelectedWorktree()
             delegate?.tabCoordinatorRequestUpdateTitleBar(self)
             return
@@ -1167,7 +1217,7 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
                 self.openRepoTab(repoPath: repoPath) { [weak self] in
-                    self?.dashboardVC?.selectSailor(byWorktreePath: worktreePath)
+                    self?.dashboardVC?.enterWorktree(byWorktreePath: worktreePath)
                     self?.saveSelectedWorktree()
                     if let self {
                         self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
