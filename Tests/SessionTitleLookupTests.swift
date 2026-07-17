@@ -35,6 +35,35 @@ final class SessionTitleLookupTests: XCTestCase {
         XCTAssertEqual(title, "Refactor the parser")
     }
 
+    /// The whole point of the by-id lookup: two agents in one worktree write two
+    /// transcripts side by side, and the worktree-keyed lookup would hand both of
+    /// them whichever was touched last.
+    func testTitleBySessionIdPicksThatSessionNotTheNewestOne() throws {
+        let wt = "/Users/me/repo-worktrees/two-agents"
+        let dir = projectDir(for: wt)
+        try #"{"type":"ai-title","aiTitle":"Older agent"}"#
+            .write(to: dir.appendingPathComponent("older.jsonl"), atomically: true, encoding: .utf8)
+        try #"{"type":"ai-title","aiTitle":"Newer agent"}"#
+            .write(to: dir.appendingPathComponent("newer.jsonl"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "older", projectsRoot: root),
+            "Older agent")
+        XCTAssertEqual(
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "newer", projectsRoot: root),
+            "Newer agent")
+    }
+
+    func testTitleBySessionIdMissesGracefully() throws {
+        let wt = "/Users/me/repo-worktrees/none"
+        _ = projectDir(for: wt)
+        // No transcript: agents that keep no session file under ~/.claude land here.
+        XCTAssertNil(SessionTitleLookup.title(worktreePath: wt, sessionId: "ghost", projectsRoot: root))
+        // The id arrives from a webhook payload, so it must not walk out of the dir.
+        XCTAssertNil(SessionTitleLookup.title(
+            worktreePath: wt, sessionId: "../../escape", projectsRoot: root))
+    }
+
     func testReturnsAITitleFromModernSessionFormat() throws {
         // Newer Claude Code stopped writing `summary` records; the session title
         // lives in `ai-title` records instead (regression: cards fell back to the

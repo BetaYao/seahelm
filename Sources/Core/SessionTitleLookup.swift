@@ -40,6 +40,31 @@ enum SessionTitleLookup {
         return nil
     }
 
+    /// Title for one named session, rather than for whatever ran in the worktree
+    /// last. Two agents sharing a worktree write two transcripts into the same
+    /// directory, so `title(worktreePath:)` hands them both the same words —
+    /// which is no use when the point of the listing is telling them apart.
+    ///
+    /// Returns nil when the transcript has no title record yet, and for agents
+    /// that don't keep transcripts here at all (only Claude writes under
+    /// ~/.claude/projects) — callers need a fallback either way.
+    static func title(
+        worktreePath: String,
+        sessionId: String,
+        fileManager: FileManager = .default,
+        projectsRoot: URL = defaultProjectsRoot()
+    ) -> String? {
+        guard !worktreePath.isEmpty, !sessionId.isEmpty else { return nil }
+        // The id is a transcript stem, but it reaches us from a webhook payload:
+        // keep a crafted one from walking out of the projects directory.
+        guard !sessionId.contains("/"), !sessionId.hasPrefix(".") else { return nil }
+        let url = projectsRoot
+            .appendingPathComponent(encodedProjectComponent(worktreePath: worktreePath), isDirectory: true)
+            .appendingPathComponent("\(sessionId).jsonl")
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return lastSummary(in: url)
+    }
+
     /// Encodes an absolute path the way Claude Code names its project directories.
     static func encodedProjectComponent(worktreePath: String) -> String {
         var result = ""

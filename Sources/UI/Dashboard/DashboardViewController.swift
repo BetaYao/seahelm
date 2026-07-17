@@ -89,28 +89,19 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     var selectedSailorId: String = ""
 
-    /// The two top-level chrome states, now derived from `viewMode`. `.overview`
-    /// is the spread First Mate (fleet + orders + composer) with no active
-    /// worktree; `.worktree` is drilled into one worktree's terminal.
-    enum DisplayMode { case overview, worktree }
-    var displayMode: DisplayMode { viewMode == .dashboard ? .overview : .worktree }
-
-    /// The three keyboard-navigation view modes:
-    /// - `.dashboard` (mode 1): full-bleed fleet overview
+    /// The two keyboard-navigation view modes (the full-bleed overview mode was
+    /// removed — the fleet overview only exists docked as the left column now):
     /// - `.split` (mode 2): overview docked as the left column + terminal right,
     ///   keyboard focus stays on the overview ring (terminal live-previews)
     /// - `.terminal` (mode 3): left column collapsed, terminal owns the keyboard
-    enum ViewMode: Equatable { case dashboard, split, terminal }
-    private(set) var viewMode: ViewMode = .dashboard
+    enum ViewMode: Equatable { case split, terminal }
+    private(set) var viewMode: ViewMode = .split
     /// Fired after every view-mode switch (MainWindowController syncs the
     /// keyboard NORMAL/INSERT mode and status-bar hints off this).
     var onViewModeChanged: ((ViewMode) -> Void)?
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
-    /// Fired after a mode switch so MainWindowController can update the title-bar
-    /// chrome (collapse/file/change icons) accordingly.
-    var onDisplayModeChanged: ((DisplayMode) -> Void)?
     /// Fires whenever the lit toolbar tool should change (mode or side switch).
     var onActiveToolChanged: ((TitleBarView.ActiveTool) -> Void)?
 
@@ -192,7 +183,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// coalesce a fast key-repeat burst, short enough to feel live.
     private static let previewDebounce: TimeInterval = 0.12
     private static let firstMateColumnWidth: CGFloat = 392
-    private static let overviewFullBg = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1)
     private static let overviewSideBg = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
 
     // Empty state
@@ -250,7 +240,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         overviewView.onOrdersChanged = { [weak self] in
             self?.syncOverviewFocusCounts()
         }
-        mountOverviewFull()
     }
 
     // MARK: - `?` keyboard help overlay
@@ -303,11 +292,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         agents = newSailors
 
-        // Refresh the overview whenever it is on screen — that's overview mode OR
-        // the First Mate side column (which mounts the same overviewView in
-        // .worktree mode). Without the firstMateSideOpen check, an open First Mate
-        // sidebar showed the fleet frozen at the state it had when opened.
-        if displayMode == .overview || firstMateSideOpen {
+        // Refresh the overview whenever the First Mate side column is on screen.
+        // Without this check, an open First Mate sidebar showed the fleet frozen
+        // at the state it had when opened.
+        if firstMateSideOpen {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
             syncOverviewFocusCounts()
@@ -419,15 +407,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         syncSidePanelToSelection()
     }
 
-    // MARK: - Display mode (overview ⇄ worktree)
+    // MARK: - View mode (split ⇄ terminal)
 
-    /// Legacy two-state entry point. `.overview` maps to mode 1; `.worktree`
-    /// drills all the way into the terminal (mode 3).
-    func setDisplayMode(_ mode: DisplayMode) {
-        setViewMode(mode == .overview ? .dashboard : .terminal)
-    }
-
-    /// Switch between the three keyboard view modes. No-op if unchanged.
+    /// Switch between the two keyboard view modes. No-op if unchanged.
     func setViewMode(_ mode: ViewMode) {
         guard mode != viewMode else { return }
         applyViewMode(mode)
@@ -436,21 +418,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private func applyViewMode(_ mode: ViewMode) {
         viewMode = mode
         switch mode {
-        case .dashboard:
-            // A live-follow preview only means something in mode 2; drop any that
-            // is still queued so it cannot fire after we have left.
-            cancelPendingPreview()
-            firstMateSideOpen = false
-            currentSide = .none
-            mountOverviewFull()
-            overviewView.selectedId = overviewSelectedId
-            overviewView.update(agents)
-            overviewView.isHidden = false
-            // Take first responder so fleet keyboard nav (j/k/⏎/1–9) works.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.viewMode == .dashboard else { return }
-                self.view.window?.makeFirstResponder(self)
-            }
         case .split:
             // Overview docks as the left column; the terminal live-previews on the
             // right but keyboard focus stays on the overview ring.
@@ -479,32 +446,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 self.embedSplitContainerForSelectedSailor(focusTerminal: true)
             }
         }
-        onDisplayModeChanged?(displayMode)
         notifyActiveTool()
         onViewModeChanged?(mode)
-    }
-
-    /// Back-key toggle from mode 1: re-enter mode 2 on the last committed
-    /// worktree (falling back to the overview selection, then the first agent).
-    func enterLastWorktreeSplit() {
-        let candidates = [
-            lastCommittedWorktreePath,
-            agents.first(where: { $0.id == overviewSelectedId })?.worktreePath,
-            agents.first?.worktreePath,
-        ]
-        guard let path = candidates.compactMap({ $0 })
-            .first(where: { p in agents.contains { $0.worktreePath == p } }) else { return }
-        selectSailor(byWorktreePath: path, focusTerminal: false)
-        overviewSelectedId = selectedSailorId
-        setViewMode(.split)
     }
 
     /// Compute + publish the single lit toolbar tool from the current state.
     private func notifyActiveTool() {
         let tool: TitleBarView.ActiveTool
-        if displayMode == .overview {
-            tool = .dashboard
-        } else if isLeftColumnCollapsed {
+        if isLeftColumnCollapsed {
             tool = .none
         } else {
             switch currentSide {
@@ -515,21 +464,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             }
         }
         onActiveToolChanged?(tool)
-    }
-
-    /// Mount the overview full-bleed at the dashboard root (overview mode).
-    private func mountOverviewFull() {
-        let root = view
-        overviewView.removeFromSuperview()
-        overviewView.translatesAutoresizingMaskIntoConstraints = false
-        overviewView.layer?.backgroundColor = Self.overviewFullBg.cgColor
-        root.addSubview(overviewView)
-        NSLayoutConstraint.activate([
-            overviewView.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            overviewView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            overviewView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            overviewView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
     }
 
     /// Dock the overview into the left column (worktree First Mate) so expanding
@@ -556,10 +490,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// to the dashboard (First Mate overview) pane instead of whatever content was
     /// left mounted; when a pane is showing, Cmd+B collapses the column.
     func toggleSidebarDefaultDashboard() {
-        guard displayMode == .worktree else {
-            toggleLeftColumnCollapse()
-            return
-        }
         if isLeftColumnCollapsed {
             toggleSide(.firstMate)
         } else {
@@ -570,7 +500,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// Each pane icon toggles its own panel: click when inactive → open that pane;
     /// click when already the active pane → collapse the whole side column.
     private func toggleSide(_ side: SidePane) {
-        guard displayMode == .worktree else { return }
         if currentSide == side && !isLeftColumnCollapsed {
             collapseCurrentSide()
             return
@@ -640,18 +569,16 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if collapse, !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
     }
 
-    /// Return to the fleet overview (⌘E / Esc from a worktree).
-    func enterOverview() { setDisplayMode(.overview) }
+    /// Open the fleet overview as the left column (⌘E / title-bar dashboard icon).
+    func enterOverview() { setViewMode(.split) }
 
-    /// Force the initial overview state at launch. `setDisplayMode` no-ops when the
-    /// mode is unchanged, so the very first activation needs an explicit apply.
-    func activateInitialOverview() { applyViewMode(.dashboard) }
+    /// Force the initial state at launch. `setViewMode` no-ops when the mode is
+    /// unchanged, so the very first activation needs an explicit apply.
+    func activateInitialSplit() { applyViewMode(.split) }
 
-    /// Feed the overview's ORDERS carousel + command composer. Called by
-    /// MainWindowController with the same queue/handlers the cockpit uses.
-    /// Return to the overview and start a `/new` command in its command input.
+    /// Open the First Mate column and start a command in its composer.
     func startNewCommand(prefill: String = "/new ") {
-        setDisplayMode(.overview)
+        setViewMode(.split)
         DispatchQueue.main.async { [weak self] in
             self?.overviewView.focusCommand(prefill: prefill)
         }
@@ -678,7 +605,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
         }
-        setDisplayMode(.worktree)
+        setViewMode(.terminal)
     }
 
     var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
@@ -1488,8 +1415,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private func handleNavLeft() {
         if overviewFocus.selectedCardIndex != nil {
             applyOverviewEffect(overviewFocus.moveLeftInOrders())
-        } else if overviewFocus.selectedWorktreeIndex != nil, viewMode == .split {
-            setViewMode(.dashboard)   // ← on a worktree row in mode 2 = back to mode 1
         }
     }
 
@@ -1537,8 +1462,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         _ = overviewFocus.jumpToWorktree(i)
 
         switch viewMode {
-        case .dashboard:
-            commitFocusedWorktreeForward()
         case .split:
             if row.id == overviewSelectedId {
                 commitFocusedWorktreeForward()
@@ -1557,12 +1480,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         guard let i = overviewFocus.selectedWorktreeIndex,
               let row = overviewView.orderedRows[safeIndex: i] else { return }
         switch viewMode {
-        case .dashboard:
-            cancelPendingPreview()  // selectSailor supersedes any queued preview
-            selectSailor(byWorktreePath: row.path, focusTerminal: false)
-            overviewSelectedId = selectedSailorId
-            overviewView.selectedId = overviewSelectedId
-            setViewMode(.split)
         case .split:
             // The live preview is debounced, so it may still be queued when the
             // user commits straight after an arrow key. Cash it in before handing
@@ -2011,10 +1928,6 @@ final class DashboardOverviewView: NSView {
     // same `/ @ #` autocomplete menu the cockpit uses.
     let commandInput = CommandInputView()
     var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
-    /// The composer moved to the island; the bar stays hidden except while a
-    /// prefilled command flow (Cmd+N `/new `) needs a visible input.
-    private var composerBar: NSView?
-    private var composerCollapsed: NSLayoutConstraint?
     private let menuContainer = NSView()
     private var menuRows: [MenuRowButton] = []
     private var menuItems: [(name: String, desc: String)] = []
@@ -2188,7 +2101,6 @@ final class DashboardOverviewView: NSView {
             self?.onSubmitCommand?(t)
             self?.commandInput.text = ""
             self?.hideMenu()
-            self?.setComposerVisible(false)
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
         commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
@@ -2201,7 +2113,6 @@ final class DashboardOverviewView: NSView {
                 self.hideMenu()
                 return
             }
-            self.setComposerVisible(false)
             self.onCommandEscapeAtEmpty?()
         }
         commandInput.onArrowUpAtEmpty = { [weak self] in
@@ -2239,19 +2150,7 @@ final class DashboardOverviewView: NSView {
             menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
             menuContainer.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -6),
         ])
-        composerBar = bar
-        let collapsed = bar.heightAnchor.constraint(equalToConstant: 0)
-        composerCollapsed = collapsed
-        setComposerVisible(false)
         return bar
-    }
-
-    /// Show/hide the bottom composer. Hidden by default — day-to-day commands
-    /// live in the island; only prefilled flows (`/new `) surface it here.
-    func setComposerVisible(_ visible: Bool) {
-        composerBar?.isHidden = !visible
-        composerCollapsed?.isActive = !visible
-        if !visible { hideMenu() }
     }
 
     // MARK: - `/ @ #` autocomplete (overview composer)
@@ -2368,7 +2267,6 @@ final class DashboardOverviewView: NSView {
 
     /// Focus the command input with a prefilled command (e.g. "/new ").
     func focusCommand(prefill: String) {
-        setComposerVisible(true)
         commandInput.setTextAndFocusEnd(prefill)
     }
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Seahelm (sea + helm; AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses tmux for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
+Seahelm (sea + helm; AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses zmx for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
 
 ## Build Commands
 
@@ -76,7 +76,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 **Split pane system:** `SplitTree` is a binary tree of `SplitNode` (leaf or split with axis + ratio). `SplitContainerView.layoutTree()` computes frame-based positions for each leaf, places `GhosttyNSView` instances, adds `DividerView` drag handles, and updates dim overlays. Focus is tracked via `tree.focusedId`; `GhosttyNSView.onFocusAcquired` callback keeps the tree in sync when user clicks a pane.
 
-**Terminal persistence:** Backend sessions (tmux or zmx) named `amux-<parent>-<name>` are created per split leaf. For zmx, a health check runs 3s after creation; stale sessions trigger `recoverZmxSession` (destroy + recreate). Split layouts are serialized to config for restore on relaunch.
+**Terminal persistence:** `runtimeBackend` is `"zmx"` (default) or `"local"` — there is no user-facing backend choice and no tmux backend. `MainWindowController` starts optimistically at `"zmx"` so early tree restore attaches persistent sessions before the async availability check lands, then falls back to `"local"` if zmx is missing. `local` panes are plain processes with no persistence (`SessionManager` guards `backend == "zmx"`). zmx sessions are named `amux-<parent>-<name>` (`.` and `:` replaced with `_`, truncated past `maxSessionNameLength`) and created per split leaf; a health check runs 3s after creation (`Station.recoveryDelay`) and stale sessions trigger `recoverZmxSession` (destroy + recreate). Split layouts are serialized to config for restore on relaunch.
 
 **Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `ShipLog` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
 

@@ -3,13 +3,17 @@ import XCTest
 
 final class BridgeCommandParserTests: XCTestCase {
     let wts = [
-        WorktreeRef(branch: "feat-x", path: "/repo/feat-x"),
-        WorktreeRef(branch: "fix-y", path: "/repo/fix-y"),
+        WorktreeRef(repo: "alpha", branch: "feat-x", path: "/repo/feat-x"),
+        WorktreeRef(repo: "beta", branch: "fix-y", path: "/repo/fix-y"),
     ]
     let repos = ["/workspaces/alpha", "/workspaces/beta"]
     let agents = [
-        AgentRef(id: "t1", project: "alpha", branch: "feat-x", status: "Running"),
-        AgentRef(id: "t2", project: "alpha", branch: "fix-y", status: "Idle"),
+        // One listing is one worktree's agents, so they share a repo and branch —
+        // that is why those head the reply and only the titles vary per row.
+        AgentRef(id: "t1", project: "alpha", branch: "feat-x",
+                 type: "Claude", title: "Wire up the parser"),
+        AgentRef(id: "t2", project: "alpha", branch: "feat-x",
+                 type: "Codex", title: "Chase the flaky test"),
     ]
 
     private func parse(_ text: String) -> Result<BridgeCommand, BridgeCommandError> {
@@ -106,7 +110,7 @@ final class BridgeCommandParserTests: XCTestCase {
     }
 
     func testAgentsSelectsByProjectSlashBranch() {
-        XCTAssertEqual(parse("/agents alpha/fix-y"), .success(.selectAgent(id: "t2")))
+        XCTAssertEqual(parse("/agents alpha/feat-x"), .success(.selectAgent(id: "t1")))
     }
 
     func testAgentsUnknownFails() {
@@ -199,7 +203,7 @@ final class BridgeCommandParserTests: XCTestCase {
 
     /// Dropping a repo leaves the worktree on disk, so it is the recoverable guess.
     func testReturnPrefersRepoOnNameCollision() {
-        let collidingWts = [WorktreeRef(branch: "alpha", path: "/repo/alpha")]
+        let collidingWts = [WorktreeRef(repo: "alpha", branch: "alpha", path: "/repo/alpha")]
         XCTAssertEqual(
             BridgeCommandParser.parse("/return @alpha", worktrees: collidingWts, repoPaths: repos),
             .success(.removeRepo(repoPath: "/workspaces/alpha")))
@@ -222,22 +226,30 @@ final class BridgeCommandParserTests: XCTestCase {
     func testListedCodesRoundTrip() {
         let taskList = BridgeCommandFormatter.worktreeList(wts, currentPath: nil)
         for (index, wt) in wts.enumerated() {
-            XCTAssertTrue(taskList.contains("\(index + 1). \(wt.branch)"))
+            XCTAssertTrue(taskList.contains("\(index + 1). \(wt.repo) / \(wt.branch)"))
             XCTAssertEqual(parse("/task #\(index + 1)"), .success(.selectWorktree(path: wt.path)))
         }
 
         let agentList = BridgeCommandFormatter.agentList(agents, currentId: nil)
         for (index, agent) in agents.enumerated() {
-            XCTAssertTrue(agentList.contains("\(index + 1). \(agent.project) / \(agent.branch)"))
+            XCTAssertTrue(agentList.contains("\(index + 1). \(agent.type) — \(agent.title)"))
             XCTAssertEqual(parse("/agents \(index + 1)"), .success(.selectAgent(id: agent.id)))
         }
     }
 
     func testFormatterMarksCurrent() {
         XCTAssertTrue(BridgeCommandFormatter.worktreeList(wts, currentPath: "/repo/fix-y")
-            .contains("2. fix-y  ← current"))
+            .contains("2. beta / fix-y  ← current"))
         XCTAssertTrue(BridgeCommandFormatter.agentList(agents, currentId: "t1")
-            .contains("1. alpha / feat-x — Running  ← current"))
+            .contains("1. Claude — Wire up the parser  ← current"))
+    }
+
+    /// Repo and branch head the reply instead of repeating on every row, since a
+    /// listing only ever covers one worktree's agents.
+    func testAgentListHeadsWithRepoAndBranch() {
+        let list = BridgeCommandFormatter.agentList(agents, currentId: nil)
+        XCTAssertTrue(list.contains("**Agents** - alpha - feat-x"), list)
+        XCTAssertFalse(list.contains("1. alpha / feat-x"), "repo/branch should not repeat per row: \(list)")
     }
 
     func testFormatterEmptyStates() {

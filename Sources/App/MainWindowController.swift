@@ -322,16 +322,14 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
 
-    /// Unified back key (double-Ctrl and Cmd+Esc): terminal (mode 3) → split
-    /// (mode 2) → dashboard (mode 1), and dashboard ⇄ split toggle at the top —
-    /// pressing back in mode 1 re-enters mode 2 on the last worktree.
+    /// Unified back key (double-Ctrl and Cmd+Esc): toggle between the full
+    /// terminal (mode 3) and the First Mate split (mode 2).
     func navigateBack() {
         tabCoordinator.switchToTab(0)
         guard let dashboard = dashboardVC else { return }
         switch dashboard.viewMode {
         case .terminal:  dashboard.setViewMode(.split)
-        case .split:     dashboard.setViewMode(.dashboard)
-        case .dashboard: dashboard.enterLastWorktreeSplit()
+        case .split:     dashboard.setViewMode(.terminal)
         }
     }
 
@@ -547,13 +545,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         dashboard.onEnterTerminal = { [weak self] in
             // Drilling into a terminal = entering the worktree working view.
-            self?.dashboardVC?.setDisplayMode(.worktree)
+            self?.dashboardVC?.setViewMode(.terminal)
             self?.keyboardMode.enterInsert()
-        }
-        // Keep the title-bar left cluster in sync: only the theme toggle in the
-        // Dashboard overview; collapse + file/change once inside a worktree.
-        dashboard.onDisplayModeChanged = { [weak self] mode in
-            self?.titleBar.setChromeMode(overview: mode == .overview)
         }
         // Keyboard NORMAL/INSERT is now derived from the view mode: only the
         // full-terminal mode hands the keyboard to the terminal.
@@ -590,17 +583,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         embedViewController(dashboard)
         updateTitleBar()
-        // Launch in the overview: hide the worktree-only chrome up front so the
-        // collapse/file/change/back icons don't flash before the async activation.
-        titleBar.setChromeMode(overview: true)
+        titleBar.setChromeMode(overview: false)
 
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
 
-        // Land in the Dashboard overview (spread First Mate). Deferred so the
-        // window/first-responder are settled before the cockpit opens.
+        // Land in the First Mate split view. Deferred so the window/first-
+        // responder are settled before the cockpit opens.
         DispatchQueue.main.async { [weak self] in
-            self?.dashboardVC?.activateInitialOverview()
+            self?.dashboardVC?.activateInitialSplit()
         }
     }
 
@@ -657,7 +648,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// reachable and still sweepable. Both surfaces read this, which is what
     /// keeps their numbering identical.
     private func currentWorktreeRefs() -> [WorktreeRef] {
-        tabCoordinator.allWorktrees.map { WorktreeRef(branch: $0.info.branch, path: $0.info.path) }
+        tabCoordinator.allWorktrees.map {
+            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+                        branch: $0.info.branch,
+                        path: $0.info.path)
+        }
     }
 
     /// Autocomplete data for the Helm command line.
@@ -687,7 +682,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             // The codes `/task #x` and `/agents #x` take, in the order the
             // listings print them, so the menu and the reply always agree.
             let tasks = currentWorktreeRefs().enumerated().map { index, wt in
-                ("\(index + 1)", "task · \(wt.branch)")
+                ("\(index + 1)", "task · \(wt.repo) / \(wt.branch)")
             }
             let agents = currentWorktreeAgentRefs().enumerated().map { index, agent in
                 (agent.branch, "agent \(index + 1) · \(agent.project)")
@@ -751,8 +746,32 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func currentWorktreeAgentRefs() -> [AgentRef] {
         guard let path = dashboardVC?.lastCommittedWorktreePath else { return [] }
         return ShipLog.shared.sailors(forWorktree: path).map {
-            AgentRef(id: $0.id, project: $0.project, branch: $0.branch, status: $0.status.rawValue)
+            AgentRef(id: $0.id,
+                     project: $0.project,
+                     branch: $0.branch,
+                     type: $0.agentType.displayName,
+                     title: Self.agentTitle(for: $0))
         }
+    }
+
+    /// Title for one agent, keyed by that pane's own session.
+    ///
+    /// Deliberately not `WorktreeTitleResolver`: its session lookup is keyed by
+    /// worktree, which is right for the capsule and the mini cards (one title per
+    /// tree) and wrong here (every agent in the tree would read the same). The
+    /// fallbacks below mirror it, minus that first step — an agent whose session
+    /// has no title yet, or that keeps no transcript under ~/.claude, still needs
+    /// words on its row.
+    private static func agentTitle(for sailor: SailorInfo) -> String {
+        if let ref = sailor.station?.agentSessionRef, ref.kind == .id,
+           let title = SessionTitleLookup.title(worktreePath: sailor.worktreePath, sessionId: ref.sessionId)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return title
+        }
+        let prompt = sailor.lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty { return prompt }
+        return sailor.branch
     }
 
     private static func describeChatError(_ err: BridgeCommandError) -> String {
@@ -1435,7 +1454,7 @@ extension MainWindowController: TitleBarDelegate {
     func titleBarDidSelectWorktree(_ path: String) {
         // Picking a worktree from the popover drills into its working view.
         tabCoordinator.selectTab(forWorktree: path)
-        dashboardVC?.setDisplayMode(.worktree)
+        dashboardVC?.setViewMode(.terminal)
     }
 
     func titleBarDidRequestOverview() {

@@ -1,6 +1,10 @@
 import Foundation
 
 struct WorktreeRef: Equatable {
+    /// Repo display name. A branch alone is ambiguous once the workspace holds
+    /// more than one repo — several can carry the same branch name, and the
+    /// chat listing is the one surface with no tab bar to disambiguate it.
+    let repo: String
     let branch: String
     let path: String
 }
@@ -8,9 +12,16 @@ struct WorktreeRef: Equatable {
 /// An agent as the command language sees it — one split pane running one agent.
 struct AgentRef: Equatable {
     let id: String
+    /// Repo and branch are the same for every agent in one listing — it lists a
+    /// single worktree's agents — so they head the reply rather than repeat on
+    /// every row.
     let project: String
     let branch: String
-    let status: String
+    /// Agent kind, e.g. "Claude".
+    let type: String
+    /// This agent's own session title. Distinct per agent, unlike the
+    /// worktree-keyed title the dashboard shows.
+    let title: String
 }
 
 /// The command language, spoken identically by the desktop Helm line and the
@@ -204,17 +215,21 @@ enum BridgeCommandFormatter {
     static func worktreeList(_ worktrees: [WorktreeRef], currentPath: String?) -> String {
         guard !worktrees.isEmpty else { return "No tasks. `/task <description>` to start one." }
         let lines = worktrees.enumerated().map { index, wt in
-            "\(index + 1). \(wt.branch)\(wt.path == currentPath ? "  ← current" : "")"
+            "\(index + 1). \(wt.repo) / \(wt.branch)\(wt.path == currentPath ? "  ← current" : "")"
         }
         return (["**Tasks**", ""] + lines + ["", "`/task #<code|name>` to switch."]).joined(separator: "\n")
     }
 
     static func agentList(_ agents: [AgentRef], currentId: String?) -> String {
-        guard !agents.isEmpty else { return "No agents in this task." }
+        // The header reads off the first row rather than taking its own repo and
+        // branch parameters, so it cannot disagree with the rows beneath it.
+        guard let first = agents.first else { return "No agents in this task." }
         let lines = agents.enumerated().map { index, agent in
-            "\(index + 1). \(agent.project) / \(agent.branch) — \(agent.status)"
+            "\(index + 1). \(agent.type) — \(agent.title)"
                 + (agent.id == currentId ? "  ← current" : "")
         }
-        return (["**Agents**", ""] + lines + ["", "`/agents #<code>` to switch."]).joined(separator: "\n")
+        return (["**Agents** - \(first.project) - \(first.branch)", ""]
+                + lines
+                + ["", "`/agents #<code>` to switch."]).joined(separator: "\n")
     }
 }
