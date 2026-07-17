@@ -1070,8 +1070,29 @@ class TabCoordinator {
     }
 
     func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
+        // Cache miss means a synchronous `git rev-parse` (up to 5s on a wedged
+        // repo) — resolve off-thread, then deliver the notification on main.
+        guard let repoPath = worktreeRepoCache[worktreePath] else {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let resolved = WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.worktreeRepoCache[worktreePath] = resolved
+                    self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                                 oldStatus: oldStatus, newStatus: newStatus,
+                                                 lastMessage: lastMessage, repoPath: resolved)
+                }
+            }
+            return
+        }
+        deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                oldStatus: oldStatus, newStatus: newStatus,
+                                lastMessage: lastMessage, repoPath: repoPath)
+    }
+
+    private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus,
+                                         newStatus: SailorStatus, lastMessage: String, repoPath: String) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-        let repoPath = worktreeRepoCache[worktreePath] ?? WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
         let worktreeStatus = statusAggregator.status(for: worktreePath)

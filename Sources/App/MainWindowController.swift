@@ -851,12 +851,19 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
             // The desktop's sheet exists to stop uncommitted work being lost, not
             // as ceremony. Chat keeps that guard and moves it into the reply.
-            if !force, WorktreeDeleter.hasUncommittedChanges(worktreePath: path) {
-                reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
-                return
+            // The dirty check is a synchronous git subprocess — run it off-thread.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let dirty = !force && WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if dirty {
+                        reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
+                        return
+                    }
+                    self.terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
+                    reply("Deleted **\(branch)**.")
+                }
             }
-            terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
-            reply("Deleted **\(branch)**.")
         }
     }
 
@@ -1666,8 +1673,19 @@ extension MainWindowController {
         let rows = byWorktree.values.sorted { $0.branch < $1.branch }
         if model.rows != rows { model.rows = rows }
 
-        model.primaryEntry = primaryCapsuleNotification
-        model.unreadCount = NotificationHistory.shared.unreadCount
+        // Equality-gate every assignment: this runs on a 2s timer, and an
+        // ungated @Observable set re-evaluates the SwiftUI island every tick
+        // even when nothing changed.
+        let primary = primaryCapsuleNotification
+        if model.primaryEntry != primary { model.primaryEntry = primary }
+        let unread = NotificationHistory.shared.unreadCount
+        if model.unreadCount != unread { model.unreadCount = unread }
+        let recent = Array(
+            NotificationHistory.shared.entries
+                .filter { !$0.isRead }
+                .prefix(IslandModel.maxRecentNotifications)
+        )
+        if model.recentNotifications != recent { model.recentNotifications = recent }
 
         let orders = tabCoordinator.pendingOrders.all()
             .filter { $0.action.kind == .suggestNextOrder }

@@ -353,10 +353,22 @@ class TerminalCoordinator {
 
     func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
         guard !info.isMainWorktree else { return }
+        guard let window else { return }
 
-        let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+        // Both are synchronous git subprocesses (up to a 5s timeout on a wedged
+        // repo) — run them off the main thread, then present the alert.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
+            let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+            DispatchQueue.main.async {
+                self?.presentDeleteConfirmation(info, window: window,
+                                                hasChanges: hasChanges, repoPath: repoPath)
+            }
+        }
+    }
 
+    private func presentDeleteConfirmation(_ info: WorktreeInfo, window: NSWindow,
+                                           hasChanges: Bool, repoPath: String) {
         let alert = NSAlert()
         alert.alertStyle = hasChanges ? .critical : .warning
         alert.messageText = "Delete worktree \"\(info.branch)\"?"
@@ -372,7 +384,6 @@ class TerminalCoordinator {
         alert.buttons[0].hasDestructiveAction = true
         alert.buttons[1].hasDestructiveAction = true
 
-        guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             switch response {

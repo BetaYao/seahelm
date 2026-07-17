@@ -575,7 +575,11 @@ class ShipLog {
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
-        channel?.sendCommand(command)
+        // Channel sends spawn a subprocess (zmx/tmux) and wait for it — callers
+        // are mostly main-thread interaction sites, so keep it off-thread.
+        DispatchQueue.global(qos: .userInitiated).async {
+            channel?.sendCommand(command)
+        }
     }
 
     /// Read recent output from a specific agent

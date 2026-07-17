@@ -12,8 +12,6 @@ struct OpenedSurfaceView: View {
     @State private var menuTrigger: Character = "/"
     @State private var menuToken = ""
 
-    private static let maxNotifications = 5
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Spacer band matching the physical notch so content starts
@@ -72,10 +70,10 @@ struct OpenedSurfaceView: View {
                         }
                     }
 
-                    if !recentNotifications.isEmpty {
+                    if !model.recentNotifications.isEmpty {
                         Divider().overlay(Color.white.opacity(0.08))
                         VStack(spacing: 2) {
-                            ForEach(recentNotifications) { entry in
+                            ForEach(model.recentNotifications) { entry in
                                 notificationRow(entry)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
@@ -248,14 +246,6 @@ struct OpenedSurfaceView: View {
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
             value = max(value, nextValue())
         }
-    }
-
-    private var recentNotifications: [NotificationEntry] {
-        Array(
-            NotificationHistory.shared.entries
-                .filter { !$0.isRead }
-                .prefix(Self.maxNotifications)
-        )
     }
 
     private var header: some View {

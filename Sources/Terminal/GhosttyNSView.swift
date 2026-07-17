@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 // MARK: - GhosttyNSView
 
@@ -47,6 +48,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        // Shadow is computed from an explicit path so Core Animation never has to
+        // derive it from the live Metal contents (which forces offscreen passes).
+        layer?.shadowPath = CGPath(rect: bounds, transform: nil)
         syncSurfaceSize()
     }
 
@@ -64,10 +68,36 @@ class GhosttyNSView: NSView, NSTextInputClient {
         syncSurfaceSize()
     }
 
+    private var lastSurfaceSyncTime: CFTimeInterval = 0
+    private var surfaceSyncScheduled = false
+    /// Divider drags and animated layouts call setFrameSize once per mouse/frame
+    /// event; resizing the Ghostty grid at that rate is the dominant drag cost.
+    /// Coalesce to ~30Hz — the deferred pass re-reads bounds, so the final size
+    /// always lands.
+    private static let surfaceSyncMinInterval: CFTimeInterval = 1.0 / 30.0
+
     func syncSurfaceSize() {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         guard size != lastSyncedSize else { return }
+
+        let now = CACurrentMediaTime()
+        let elapsed = now - lastSurfaceSyncTime
+        // First sync after a reset/reparent (lastSyncedSize == .zero) must land
+        // immediately — only continuous resize streams get coalesced.
+        if lastSyncedSize != .zero, elapsed < Self.surfaceSyncMinInterval {
+            if !surfaceSyncScheduled {
+                surfaceSyncScheduled = true
+                let delay = Self.surfaceSyncMinInterval - elapsed
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self else { return }
+                    self.surfaceSyncScheduled = false
+                    self.syncSurfaceSize()
+                }
+            }
+            return
+        }
+        lastSurfaceSyncTime = now
         lastSyncedSize = size
 
         guard let surface else { return }
@@ -108,6 +138,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     private func applyFocusVisualState(_ focused: Bool) {
         guard let layer else { return }
         layer.masksToBounds = false
+        layer.shadowPath = CGPath(rect: bounds, transform: nil)
         layer.shadowOffset = .zero
         layer.shadowRadius = 5
         layer.shadowColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor

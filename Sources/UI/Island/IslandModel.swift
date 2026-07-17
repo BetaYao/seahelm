@@ -37,6 +37,11 @@ final class IslandModel {
     var primaryEntry: NotificationEntry?
     var unreadCount: Int = 0
     var orders: [PendingOrder] = []
+    /// Snapshot of the newest unread notifications, refreshed by
+    /// MainWindowController.refreshIsland. Stored (not computed in the view)
+    /// so opening the island doesn't re-filter the full history per body eval.
+    var recentNotifications: [NotificationEntry] = []
+    static let maxRecentNotifications = 5
 
     /// Screen geometry, set by the panel controller.
     var notchWidth: CGFloat = 190

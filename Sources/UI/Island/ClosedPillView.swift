@@ -6,6 +6,9 @@ import SwiftUI
 /// behind the physical notch on MacBooks.
 struct ClosedPillView: View {
     let model: IslandModel
+    /// One shared pulse phase for every waiting tile — a single repeatForever
+    /// animation instead of one per tile.
+    @State private var pulsing = false
 
     private var pulseTiles: Bool {
         model.tileRows.contains { $0.status == .waiting }
@@ -29,6 +32,18 @@ struct ClosedPillView: View {
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.orders.isEmpty)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.rows)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: model.transientText)
+        .onAppear { updatePulse() }
+        .onChange(of: pulseTiles) { updatePulse() }
+    }
+
+    private func updatePulse() {
+        if pulseTiles {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                pulsing = true
+            }
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) { pulsing = false }
+        }
     }
 
     private var wingWidth: CGFloat { (model.closedWidth - model.notchWidth) / 2 - 10 }
@@ -69,7 +84,7 @@ struct ClosedPillView: View {
         if !model.tileRows.isEmpty {
             HStack(spacing: 3) {
                 ForEach(model.tileRows.prefix(6)) { row in
-                    StatusTile(status: row.status)
+                    StatusTile(status: row.status, pulsing: pulsing)
                 }
                 if model.tileRows.count > 6 {
                     Text("+\(model.tileRows.count - 6)")
@@ -82,18 +97,17 @@ struct ClosedPillView: View {
     }
 }
 
-/// 8×8pt rounded tile colored by agent status; waiting pulses.
+/// 8×8pt rounded tile colored by agent status; waiting pulses (phase shared
+/// across tiles, driven by ClosedPillView).
 private struct StatusTile: View {
     let status: SailorStatus
-    @State private var pulsing = false
+    let pulsing: Bool
 
     var body: some View {
         RoundedRectangle(cornerRadius: 2.5, style: .continuous)
             .fill(Color(nsColor: status.color))
             .frame(width: 8, height: 8)
             .opacity(opacityValue)
-            .onAppear { startPulseIfNeeded() }
-            .onChange(of: status) { startPulseIfNeeded() }
     }
 
     private var opacityValue: Double {
@@ -101,16 +115,6 @@ private struct StatusTile: View {
         case .waiting: return pulsing ? 1.0 : 0.35
         case .idle, .exited: return 0.35
         default: return 1.0
-        }
-    }
-
-    private func startPulseIfNeeded() {
-        if status == .waiting {
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                pulsing = true
-            }
-        } else {
-            withAnimation(.easeInOut(duration: 0.2)) { pulsing = false }
         }
     }
 }
