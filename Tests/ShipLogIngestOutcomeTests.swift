@@ -106,7 +106,7 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
             if callCount == 2 { captured = o; exp.fulfill() }
         }
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
-                                              kind: .question(prompt: "which repo?", options: ["a", "b"])))
+                                              kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
@@ -130,7 +130,7 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
             if callCount == 2 { captured = o; exp.fulfill() }
         }
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
-                                              kind: .question(prompt: "which repo?", options: ["a", "b"])))
+                                              kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
@@ -157,7 +157,7 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
-                                              kind: .question(prompt: "which repo?", options: ["a", "b"])))
+                                              kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
         ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .toolUse(ActivityEvent(tool: "Bash", detail: "grep",
                                                                            isError: false, timestamp: Date()))))

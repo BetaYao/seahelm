@@ -10,6 +10,12 @@ enum EventSource {
 
 /// The single input language. Event-native cases (hook/mcp/shell) carry no status —
 /// reduce derives hookStatus. Screen-native (.screenObserved) carries the observed scan status.
+/// One AskUserQuestion question: its prompt plus the option labels.
+struct QuestionSpec: Equatable {
+    let prompt: String
+    let options: [String]
+}
+
 enum NormalizedEventKind {
     case sessionStarted(label: String)        // session_start / worktree_create / subagent_start
     case userPrompt(String)                   // user_prompt — user submitted
@@ -19,7 +25,10 @@ enum NormalizedEventKind {
     case notification(level: String, text: String)  // notification / error(level:"error")
     case taskUpdate([TaskItem])               // future (MCP / derived)
     case suggest(options: [String])           // agent-authored candidate orders
-    case question(prompt: String, options: [String])  // AskUserQuestion tool — agent blocked on a choice
+    // AskUserQuestion tool — agent blocked on a choice. A multi-question call
+    // carries the remaining questions in `followups` (prompts pre-tagged "(i/N)")
+    // so the card can advance as each one is answered.
+    case question(prompt: String, options: [String], followups: [QuestionSpec])
     case screenObserved(status: SailorStatus,
                         message: String,
                         activity: [ActivityEvent],

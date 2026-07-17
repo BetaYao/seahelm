@@ -294,7 +294,7 @@ class ShipLog {
             hookRunningSince[event.terminalID] = nil
             if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             message = text
-        case .question(let prompt, _):
+        case .question(let prompt, _, _):
             // Agent is blocked on an AskUserQuestion choice — same as awaiting input.
             next.hookStatus = .waiting
             hookRunningSince[event.terminalID] = nil

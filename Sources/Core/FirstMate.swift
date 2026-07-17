@@ -26,10 +26,14 @@ struct FirstMateAction: Equatable {
     let message: String
     let payload: String?
     let options: [String]?
+    /// Remaining AskUserQuestion questions after this card's — answering the
+    /// card advances to the next instead of dropping the flow.
+    let followups: [QuestionSpec]?
 
     init(kind: FirstMateActionKind, zone: FirstMateZone, worktreePath: String,
          branch: String, project: String, terminalID: String, message: String,
-         payload: String? = nil, options: [String]? = nil) {
+         payload: String? = nil, options: [String]? = nil,
+         followups: [QuestionSpec]? = nil) {
         self.kind = kind
         self.zone = zone
         self.worktreePath = worktreePath
@@ -39,6 +43,7 @@ struct FirstMateAction: Equatable {
         self.message = message
         self.payload = payload
         self.options = options
+        self.followups = followups
     }
 }
 
@@ -61,7 +66,7 @@ enum FirstMate {
     static func evaluate(_ outcome: IngestOutcome, config: FirstMateConfig) -> [FirstMateAction] {
         guard config.enabled else { return [] }
 
-        if case .question(let prompt, let options) = outcome.event.kind {
+        if case .question(let prompt, let options, let followups) = outcome.event.kind {
             guard !options.isEmpty else { return [] }
             let i = outcome.info
             // AskUserQuestion card: the question itself is the summary, and the
@@ -71,7 +76,8 @@ enum FirstMate {
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
                                     message: String(prompt.prefix(200)),
-                                    payload: FirstMateAction.askUserQuestionPayload, options: options)]
+                                    payload: FirstMateAction.askUserQuestionPayload, options: options,
+                                    followups: followups.isEmpty ? nil : followups)]
         }
 
         if case .suggest(let options) = outcome.event.kind {

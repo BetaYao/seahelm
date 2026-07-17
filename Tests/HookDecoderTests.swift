@@ -50,7 +50,7 @@ final class HookDecoderTests: XCTestCase {
             ],
         ])
         let normalized = HookDecoder(terminalID: "t1", event: event).decode()
-        guard case .question(let prompt, let options)? = normalized?.kind else { return XCTFail("wrong kind") }
+        guard case .question(let prompt, let options, _)? = normalized?.kind else { return XCTFail("wrong kind") }
         XCTAssertEqual(prompt, "Where should daily check-in happen?")
         XCTAssertEqual(options, ["Gate face scan", "Front desk kiosk"])
     }
@@ -66,7 +66,7 @@ final class HookDecoderTests: XCTestCase {
             ],
         ])
         let normalized = HookDecoder(terminalID: "t1", event: event).decode()
-        guard case .question(let prompt, _)? = normalized?.kind else { return XCTFail("wrong kind") }
+        guard case .question(let prompt, _, _)? = normalized?.kind else { return XCTFail("wrong kind") }
         XCTAssertEqual(prompt, "Q1? (1/2)")
     }
 

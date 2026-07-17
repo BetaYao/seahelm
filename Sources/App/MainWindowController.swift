@@ -1981,6 +1981,18 @@ extension MainWindowController {
             if let idx = order.action.options?.firstIndex(of: optionText) {
                 ShipLog.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
             }
+            // Multi-question call: the TUI advances to the next question, so the
+            // card follows instead of vanishing with N-1 questions unanswered.
+            if let next = order.action.followups?.first {
+                let a = order.action
+                tabCoordinator.pendingOrders.resolve(id: order.id)
+                tabCoordinator.pendingOrders.enqueue(FirstMateAction(
+                    kind: a.kind, zone: a.zone, worktreePath: a.worktreePath,
+                    branch: a.branch, project: a.project, terminalID: a.terminalID,
+                    message: next.prompt, payload: a.payload, options: next.options,
+                    followups: (a.followups?.count ?? 0) > 1 ? Array(a.followups!.dropFirst()) : nil))
+                return
+            }
         } else {
             ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
         }

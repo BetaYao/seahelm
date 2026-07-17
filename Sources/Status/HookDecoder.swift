@@ -73,8 +73,9 @@ struct HookDecoder: SignalDecoder {
             // First Mate question card instead of a generic tool-use activity.
             if event.event == .toolUseStart,
                event.data?["tool_name"] as? String == "AskUserQuestion",
-               let q = firstQuestion(from: event) {
-                return .question(prompt: q.prompt, options: q.options)
+               let qs = questions(from: event), let first = qs.first {
+                return .question(prompt: first.prompt, options: first.options,
+                                 followups: Array(qs.dropFirst()))
             }
             return .toolUse(ActivityEventExtractor.extract(from: event))
         case .prompt:
@@ -98,20 +99,25 @@ struct HookDecoder: SignalDecoder {
         }
     }
 
-    /// Extract the first question (text + option labels) from an AskUserQuestion
-    /// tool_input payload. Returns nil when the payload doesn't parse — the event
-    /// then degrades to a normal tool-use activity.
-    static func firstQuestion(from event: WebhookEvent) -> (prompt: String, options: [String])? {
+    /// Extract every question (text + option labels) from an AskUserQuestion
+    /// tool_input payload. Returns nil when nothing parses — the event then
+    /// degrades to a normal tool-use activity. The TUI answers one question at a
+    /// time, so multi-question prompts are tagged "(i/N)" and the card advances
+    /// through them as each is answered.
+    static func questions(from event: WebhookEvent) -> [QuestionSpec]? {
         guard let input = event.data?["tool_input"] as? [String: Any],
-              let questions = input["questions"] as? [[String: Any]],
-              let first = questions.first,
-              let prompt = first["question"] as? String, !prompt.isEmpty,
-              let rawOptions = first["options"] as? [[String: Any]] else { return nil }
-        let labels = rawOptions.compactMap { $0["label"] as? String }.filter { !$0.isEmpty }
-        guard !labels.isEmpty else { return nil }
-        // Multi-question flows answer one question at a time in the TUI; the card
-        // shows the first, tagged with the total so the user knows more follow.
-        let tagged = questions.count > 1 ? "\(prompt) (1/\(questions.count))" : prompt
-        return (tagged, labels)
+              let raw = input["questions"] as? [[String: Any]] else { return nil }
+        let parsed: [QuestionSpec] = raw.compactMap { q in
+            guard let prompt = q["question"] as? String, !prompt.isEmpty,
+                  let rawOptions = q["options"] as? [[String: Any]] else { return nil }
+            let labels = rawOptions.compactMap { $0["label"] as? String }.filter { !$0.isEmpty }
+            guard !labels.isEmpty else { return nil }
+            return QuestionSpec(prompt: prompt, options: labels)
+        }
+        guard !parsed.isEmpty else { return nil }
+        guard parsed.count > 1 else { return parsed }
+        return parsed.enumerated().map { index, q in
+            QuestionSpec(prompt: "\(q.prompt) (\(index + 1)/\(parsed.count))", options: q.options)
+        }
     }
 }
