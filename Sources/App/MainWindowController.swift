@@ -1679,7 +1679,11 @@ extension MainWindowController {
         let hasNewUnread = model.unreadCount > islandKnownUnread
         islandKnownOrderIDs = orderIDs
         islandKnownUnread = model.unreadCount
-        if (hasNewOrder || hasNewUnread) && !model.isOpened {
+        if hasNewOrder && !model.isOpened {
+            // A suggestion is actionable — expand so the card is visible
+            // without hovering. Plain notifications just pop the pill.
+            islandController.openForEvent()
+        } else if hasNewUnread && !model.isOpened {
             model.pop()
         }
         islandController.updateVisibility()

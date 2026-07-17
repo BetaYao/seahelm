@@ -261,6 +261,38 @@ struct OpenedSurfaceView: View {
     }
 
     private func agentRow(_ row: IslandAgentRow) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            agentRowHeader(row)
+            if !row.message.isEmpty {
+                Text(row.message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 15) // align under the text, past the dot
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(hoveredRowID == row.id ? 0.09 : 0))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.onNavigate?(row.id, nil)
+            model.close()
+        }
+        .onHover { inside in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                hoveredRowID = inside ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
+            }
+        }
+    }
+
+    private func agentRowHeader(_ row: IslandAgentRow) -> some View {
         HStack(spacing: 8) {
                 Circle()
                     .fill(Color(nsColor: row.status.color))
@@ -285,22 +317,6 @@ struct OpenedSurfaceView: View {
                 Text(row.status.rawValue)
                     .font(.system(size: 9.5, weight: .bold))
                     .foregroundStyle(Color(nsColor: row.status.color).opacity(0.9))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(hoveredRowID == row.id ? 0.09 : 0))
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                model.onNavigate?(row.id, nil)
-                model.close()
-            }
-            .onHover { inside in
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    hoveredRowID = inside ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
-                }
             }
     }
 

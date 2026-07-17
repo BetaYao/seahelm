@@ -15,6 +15,11 @@ final class IslandPanelController {
     private var panel: IslandPanel?
     private var eventMonitors = IslandEventMonitors()
     private var hoverTimer: DispatchWorkItem?
+    private var eventAutoCloseTimer: DispatchWorkItem?
+    /// Pointer has entered the surface since an event-open — once engaged,
+    /// leaving the surface collapses it again.
+    private var eventOpenEngaged = false
+    private static let eventAutoCloseDelay: TimeInterval = 10
 
     func install() {
         guard panel == nil else { return }
@@ -42,6 +47,11 @@ final class IslandPanelController {
         let hosting = IslandHostingView(rootView: IslandRootView(model: model))
         hosting.controller = self
         panel.contentView = hosting
+        panel.onEscape = { [weak self] in
+            guard let self, self.model.isOpened else { return false }
+            self.model.close()
+            return true
+        }
 
         self.panel = panel
         panel.orderFrontRegardless()
@@ -80,8 +90,32 @@ final class IslandPanelController {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
         model.pendingCommandPrefill = prefill
+        model.open(reason: .click)
+        panel.makeKey()
+    }
+
+    /// Auto-expand for an arriving suggestion so the card is visible without
+    /// hovering. Collapses again after a timeout if the pointer never comes,
+    /// or as soon as it leaves after having engaged.
+    func openForEvent() {
+        guard let panel, !model.isOpened else { return }
+        if !panel.isVisible { updateVisibility() }
+        guard panel.isVisible else { return }
+        eventOpenEngaged = false
         model.open(reason: .event)
         panel.makeKey()
+        scheduleEventAutoClose()
+    }
+
+    private func scheduleEventAutoClose() {
+        eventAutoCloseTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.model.isOpened, self.model.openReason == .event,
+                  !self.eventOpenEngaged else { return }
+            self.model.close()
+        }
+        eventAutoCloseTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.eventAutoCloseDelay, execute: work)
     }
 
     /// Hide the island while the target screen is in a fullscreen space —
@@ -220,6 +254,18 @@ final class IslandPanelController {
             hoverTimer?.cancel()
             hoverTimer = nil
         }
+
+        // Event-opened surface: engage on enter, collapse on leave.
+        if model.isOpened, model.openReason == .event,
+           let rect = visibleContentRect() {
+            let inside = rect.insetBy(dx: -12, dy: -12).contains(location)
+            if inside {
+                eventOpenEngaged = true
+                eventAutoCloseTimer?.cancel()
+            } else if eventOpenEngaged {
+                model.close()
+            }
+        }
     }
 
     private func handleMouseDown(_ location: NSPoint) {
@@ -279,8 +325,19 @@ final class IslandPanelController {
 // MARK: - IslandPanel
 
 private final class IslandPanel: NSPanel {
+    var onEscape: (() -> Bool)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        if onEscape?() != true { super.cancelOperation(sender) }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, onEscape?() == true { return }
+        super.keyDown(with: event)
+    }
 }
 
 // MARK: - IslandHostingView
