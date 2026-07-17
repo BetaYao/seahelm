@@ -1619,6 +1619,9 @@ extension MainWindowController {
         model.onOptionTapped = { [weak self] order, optionText in
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
+        model.onDismissOrder = { [weak self] order in
+            self?.tabCoordinator.pendingOrders.resolve(id: order.id)
+        }
         model.onMarkAllRead = {
             NotificationHistory.shared.markAllRead()
         }

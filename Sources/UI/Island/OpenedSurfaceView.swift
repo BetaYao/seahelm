@@ -55,9 +55,11 @@ struct OpenedSurfaceView: View {
                     // A pending suggestion takes over the island — worktree
                     // rows and notifications stay hidden until it resolves.
                     ForEach(model.orders) { order in
-                        SuggestionCard(order: order) { optionText in
-                            model.onOptionTapped?(order, optionText)
-                        }
+                        SuggestionCard(order: order,
+                                       onOption: { optionText in
+                                           model.onOptionTapped?(order, optionText)
+                                       },
+                                       onDismiss: { model.onDismissOrder?(order) })
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 } else {
@@ -374,6 +376,7 @@ struct OpenedSurfaceView: View {
 private struct SuggestionCard: View {
     let order: PendingOrder
     let onOption: (String) -> Void
+    let onDismiss: () -> Void
 
     private var isQuestion: Bool {
         order.action.payload == FirstMateAction.askUserQuestionPayload
@@ -394,6 +397,14 @@ private struct SuggestionCard: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
                 Spacer()
+                // onTapGesture, not Button: SwiftUI Buttons in a non-activating
+                // panel swallow the click for key acquisition.
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onDismiss() }
             }
             if !order.action.message.isEmpty {
                 Text(order.action.message)
