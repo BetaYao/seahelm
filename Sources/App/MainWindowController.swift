@@ -1676,7 +1676,12 @@ extension MainWindowController {
                 byWorktree[sailor.worktreePath] = row
             }
         }
-        let rows = byWorktree.values.sorted { $0.branch < $1.branch }
+        // Branch alone ties for every "main" worktree, and dictionary order plus
+        // Swift's unstable sort made those rows shuffle on each refresh. Break
+        // ties deterministically: project, then path (unique).
+        let rows = byWorktree.values.sorted {
+            ($0.branch, $0.project, $0.id) < ($1.branch, $1.project, $1.id)
+        }
         if model.rows != rows { model.rows = rows }
 
         // Equality-gate every assignment: this runs on a 2s timer, and an
