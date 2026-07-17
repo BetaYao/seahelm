@@ -339,11 +339,35 @@ class ShipLog {
         }
         lock.unlock()
 
+        // Screen scans re-fire every poll while an agent is active (the OSC
+        // spinner busts the viewport hash), so a scan that changed nothing the
+        // UI shows would still force a main-queue hop + full delegate fan-out
+        // every 2s per pane. Drop those. Hook/lifecycle events are edges and
+        // always pass through.
+        if case .screenObserved = event.kind,
+           !statusChanged, Self.displayedStateUnchanged(current, next) {
+            return
+        }
+
         let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
                                     oldStatus: oldStatus, newStatus: newStatus,
                                     holdSeconds: hold, isCompletionSignal: isCompletion,
                                     event: event, seq: seq)
         notifyObservers(outcome)
+    }
+
+    /// Whether two snapshots agree on every field an observer can render.
+    private static func displayedStateUnchanged(_ a: SailorInfo, _ b: SailorInfo) -> Bool {
+        a.status == b.status
+            && a.lastMessage == b.lastMessage
+            && a.lastUserPrompt == b.lastUserPrompt
+            && a.commandLine == b.commandLine
+            && a.roundDuration == b.roundDuration
+            && a.agentType == b.agentType
+            && a.scanStatus == b.scanStatus
+            && a.hookStatus == b.hookStatus
+            && a.tasks == b.tasks
+            && a.activityEvents == b.activityEvents
     }
 
     /// Shape an ingest outcome into a control-API event dict for EventHub.

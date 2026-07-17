@@ -288,8 +288,17 @@ class TabCoordinator {
 
     // MARK: - Build Agent Display Infos
 
-    func buildSailorDisplayInfos() -> [SailorDisplayInfo] {
+    /// - Parameter changedWorktreePath: when set (single-worktree status change),
+    ///   only that worktree kicks an async git-stats refresh; every card still
+    ///   reads its cached stats. A full rebuild (nil) refreshes all.
+    func buildSailorDisplayInfos(changedWorktreePath: String? = nil) -> [SailorDisplayInfo] {
         let agents = ShipLog.shared.allSailors()
+        // Index once — the per-agent loop below used to re-filter the full agent
+        // list and re-scan allWorktrees for every worktree (O(N²) per rebuild,
+        // and this rebuilds on every single-worktree status change).
+        let agentsByWorktree = Dictionary(grouping: agents, by: \.worktreePath)
+        let worktreeInfoByPath = Dictionary(allWorktrees.map { ($0.info.path, $0.info) },
+                                            uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var result: [SailorDisplayInfo] = []
 
@@ -308,15 +317,14 @@ class TabCoordinator {
             // Roll up EVERY pane's ShipLog status for this worktree (authoritative,
             // arbitrated). A multi-pane worktree must reflect its busiest pane, so
             // don't collapse to the aggregator's list or a single sailor here.
-            let shipLogPaneStatuses = agents.filter { $0.worktreePath == agent.worktreePath }.map(\.status)
+            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
 
-            let matchedWorktree = allWorktrees.first(where: { $0.info.path == agent.worktreePath })
-            let isMain = matchedWorktree?.info.isMainWorktree ?? false
+            let isMain = worktreeInfoByPath[agent.worktreePath]?.isMainWorktree ?? false
             // Card label is the worktree's own name — its directory's last path
             // component — not the branch (the branch is visible inside the
             // terminal). The main worktree always reads as "main".
@@ -332,7 +340,9 @@ class TabCoordinator {
 
             // Git summary (diff size + ahead/behind). Served from an 8s cache;
             // kick an off-main refresh so the next build has fresh numbers.
-            WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            if changedWorktreePath == nil || changedWorktreePath == agent.worktreePath {
+                WorktreeGitStatsCache.shared.refresh(worktreePath: agent.worktreePath)
+            }
             let gitStats = WorktreeGitStatsCache.shared.cachedStats(worktreePath: agent.worktreePath)
 
             // Warm the shared title cache (session summary → task → prompt) so
@@ -1065,7 +1075,8 @@ class TabCoordinator {
     // MARK: - Status Update Forwarding
 
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updateSailors(buildSailorDisplayInfos(), changedWorktreePath: status.worktreePath)
+        dashboardVC?.updateSailors(buildSailorDisplayInfos(changedWorktreePath: status.worktreePath),
+                                   changedWorktreePath: status.worktreePath)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 

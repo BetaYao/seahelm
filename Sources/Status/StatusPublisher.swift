@@ -231,20 +231,12 @@ class StatusPublisher {
             let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
 
-            // Detect status first (without roundDuration); tracker update gives us roundDur below
-            let partialDecoded = ScanDecoder(
-                terminalID: terminalID,
-                detector: detector,
-                processStatus: processStatus,
-                shellInfo: nil,
-                content: content,
-                agentDef: agentDef,
-                manifest: manifest,
-                commandLine: nil,
-                agentType: agentType,
-                roundDuration: 0,
-                tasks: webhookTasks
-            ).decode()
+            // The ingested event's status is the debounced committedStatus from
+            // detectDetailed below — a ScanDecoder.decode() here would run the
+            // whole manifest engine (plus another full-screen lowercase) just to
+            // produce a status that gets discarded. Only its activity extraction
+            // is actually consumed, so run just that.
+            let activityEvents = detector.extractActivityEvents(from: content)
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
             // Rich detection gives us the visible_idle signal for debounce.
@@ -272,16 +264,12 @@ class StatusPublisher {
             }
             lock.unlock()
 
-            // Rebuild with real roundDuration now that tracker has been updated
-            if let partial = partialDecoded,
-               case .screenObserved(_, let msg, let acts, let cl, let at, _, _) = partial.kind {
-                let normalized = NormalizedEvent(
-                    terminalID: terminalID, source: .scan,
-                    kind: .screenObserved(status: committedStatus, message: msg, activity: acts,
-                                          commandLine: cl, agentType: at,
-                                          roundDuration: roundDur, tasks: webhookTasks))
-                ShipLog.shared.ingest(normalized)
-            }
+            let normalized = NormalizedEvent(
+                terminalID: terminalID, source: .scan,
+                kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
+                                      commandLine: nil, agentType: agentType,
+                                      roundDuration: roundDur, tasks: webhookTasks))
+            ShipLog.shared.ingest(normalized)
             // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
             // scan+hook+OSC) in TabCoordinator, not directly here — the scan path
             // is viewport-hash-gated and would push a stale idle while an agent is

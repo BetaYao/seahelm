@@ -56,7 +56,7 @@ enum TaskItemStatus: String {
     case completed
 }
 
-struct TaskItem {
+struct TaskItem: Equatable {
     let id: String
     var subject: String
     var status: TaskItemStatus

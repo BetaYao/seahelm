@@ -1633,9 +1633,15 @@ extension MainWindowController {
         tabCoordinator.pendingOrders.addObserver { [weak self] in
             self?.refreshIsland()
         }
-        // Agent rows have no push channel here — poll a cheap main-thread
-        // snapshot in step with the status pipeline's own cadence.
-        islandRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Push-driven: worktree status changes arrive via
+        // tabCoordinatorRequestUpdateTitleBar, notification changes via the
+        // history's NotificationCenter post. The timer is only a slow fallback
+        // for async stragglers (e.g. title resolution finishing later).
+        NotificationCenter.default.addObserver(forName: .notificationHistoryDidChange,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.refreshIsland()
+        }
+        islandRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.refreshIsland()
         }
         refreshIsland()
@@ -1902,6 +1908,9 @@ extension MainWindowController: TabCoordinatorDelegate {
     }
     func tabCoordinatorRequestUpdateTitleBar(_ coordinator: TabCoordinator) {
         updateTitleBar()
+        // Fires on every worktree status change — the island's push channel
+        // for agent rows (replaces the old 2s full-rebuild poll).
+        refreshIsland()
     }
     func tabCoordinatorRequestShowNewBranchDialog(_ coordinator: TabCoordinator) {
         showNewBranchDialog()
