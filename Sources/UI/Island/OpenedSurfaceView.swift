@@ -22,7 +22,37 @@ struct OpenedSurfaceView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 header
+                middleSection
+                commandBar
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+        }
+        .frame(width: model.openedWidth)
+        // Content churn while open (rows/orders/notifications changing)
+        // animates instead of hard-swapping.
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
+        .background(
+            NotchShape(topRadius: 10, bottomRadius: 22)
+                .fill(Color.black)
+                .overlay(
+                    NotchShape(topRadius: 10, bottomRadius: 22)
+                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
+        )
+    }
 
+    /// Auto-height list area: renders at natural height, and past the cap it
+    /// becomes an internal scroll instead of overflowing the panel.
+    private static let maxListHeight: CGFloat = 380
+    @State private var listHeight: CGFloat = 0
+
+    private var middleSection: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 10) {
                 if !model.orders.isEmpty {
                     // A pending suggestion takes over the island — worktree
                     // rows and notifications stay hidden until it resolves.
@@ -52,26 +82,15 @@ struct OpenedSurfaceView: View {
                         }
                     }
                 }
-                commandBar
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: ListHeightKey.self, value: geo.size.height)
+                }
+            )
         }
-        .frame(width: model.openedWidth)
-        // Content churn while open (rows/orders/notifications changing)
-        // animates instead of hard-swapping.
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
-        .background(
-            NotchShape(topRadius: 10, bottomRadius: 22)
-                .fill(Color.black)
-                .overlay(
-                    NotchShape(topRadius: 10, bottomRadius: 22)
-                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
-        )
+        .frame(height: min(max(listHeight, 1), Self.maxListHeight))
+        .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
     }
 
     private var commandBar: some View {
@@ -222,6 +241,13 @@ struct OpenedSurfaceView: View {
         menuItems = []
         menuSel = 0
         return .handled
+    }
+
+    private struct ListHeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
     }
 
     private var recentNotifications: [NotificationEntry] {

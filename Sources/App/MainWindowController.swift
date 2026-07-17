@@ -1684,7 +1684,12 @@ extension MainWindowController {
             // without hovering. Plain notifications just pop the pill.
             islandController.openForEvent()
         } else if hasNewUnread && !model.isOpened {
-            model.pop()
+            if let entry = primaryCapsuleNotification ?? NotificationHistory.shared.entries.first {
+                let name = entry.workspaceName.isEmpty ? entry.branch : entry.workspaceName
+                model.flashTransient("\(name) · \(entry.message)")
+            } else {
+                model.pop()
+            }
         }
         islandController.updateVisibility()
     }

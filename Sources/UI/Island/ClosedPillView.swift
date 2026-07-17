@@ -28,13 +28,26 @@ struct ClosedPillView: View {
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.unreadCount)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.orders.isEmpty)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.rows)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: model.transientText)
     }
 
     private var wingWidth: CGFloat { (model.closedWidth - model.notchWidth) / 2 - 10 }
 
     @ViewBuilder
     private var leftWing: some View {
-        if !model.orders.isEmpty {
+        if let transient = model.transientText {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color(nsColor: SailorStatus.waiting.color))
+                    .frame(width: 6, height: 6)
+                Text(transient)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .transition(.opacity.combined(with: .move(edge: .leading)))
+        } else if !model.orders.isEmpty {
             Image(systemName: "questionmark.bubble.fill")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.yellow)

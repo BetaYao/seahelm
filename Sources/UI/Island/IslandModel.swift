@@ -59,7 +59,12 @@ final class IslandModel {
     /// this text, focuses it, then clears the flag.
     var pendingCommandPrefill: String?
 
+    /// Transient one-line text shown in the closed pill's left wing when a
+    /// notification arrives (cleared automatically).
+    var transientText: String?
+
     private var popRevertWork: DispatchWorkItem?
+    private var transientClearWork: DispatchWorkItem?
 
     var isOpened: Bool { state == .opened }
 
@@ -90,15 +95,31 @@ final class IslandModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.popDuration, execute: work)
     }
 
+    /// Show `text` in the pill for a few seconds alongside a pop.
+    func flashTransient(_ text: String) {
+        transientText = text
+        transientClearWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.transientText = nil
+        }
+        transientClearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+        pop()
+    }
+
     /// Width of the closed pill. On a notched display it is locked to the
     /// physical notch plus symmetric wings so it merges with the hardware
     /// notch; on external displays it is a fixed simulated-notch width.
+    /// A transient label widens both wings symmetrically so the notch stays
+    /// centered on the screen.
     var closedWidth: CGFloat {
         let popBonus: CGFloat = state == .popping ? 18 : 0
+        let transientBonus: CGFloat = transientText != nil ? 260 : 0
         if isNotchedDisplay {
-            return notchWidth + 88 + popBonus
+            return notchWidth + 88 + popBonus + transientBonus
         }
-        return min(360, notchWidth + 170) + popBonus
+        return min(360, notchWidth + 170) + popBonus + transientBonus
     }
 
     /// Sessions needing attention first, then the rest — pill tile order.
