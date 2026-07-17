@@ -5,6 +5,12 @@ import SwiftUI
 struct OpenedSurfaceView: View {
     let model: IslandModel
     @State private var hoveredRowID: String?
+    @State private var commandText = ""
+    @FocusState private var commandFocused: Bool
+    @State private var menuItems: [(name: String, desc: String)] = []
+    @State private var menuSel = 0
+    @State private var menuTrigger: Character = "/"
+    @State private var menuToken = ""
 
     private static let maxNotifications = 5
 
@@ -46,6 +52,7 @@ struct OpenedSurfaceView: View {
                         }
                     }
                 }
+                commandBar
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 14)
@@ -65,6 +72,156 @@ struct OpenedSurfaceView: View {
                 )
                 .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
         )
+    }
+
+    private var commandBar: some View {
+        VStack(spacing: 6) {
+            if !menuItems.isEmpty {
+                menuList
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                TextField("Give an order — / command · @ repo · #", text: $commandText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .focused($commandFocused)
+                    .onChange(of: commandText) { refreshMenu(for: commandText) }
+                    .onKeyPress(.upArrow) { moveMenuSelection(-1) }
+                    .onKeyPress(.downArrow) { moveMenuSelection(1) }
+                    .onKeyPress(.tab) { acceptMenuSelection() }
+                    .onKeyPress(.escape) {
+                        guard !menuItems.isEmpty else { return .ignored }
+                        withAnimation(.easeInOut(duration: 0.15)) { menuItems = [] }
+                        return .handled
+                    }
+                    .onSubmit {
+                        // Menu open: Enter completes the token instead of submitting.
+                        if acceptMenuSelection() == .handled { return }
+                        let t = commandText.trimmingCharacters(in: .whitespaces)
+                        guard !t.isEmpty else { return }
+                        model.onSubmitCommand?(t)
+                        commandText = ""
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.white.opacity(commandFocused ? 0.25 : 0.1), lineWidth: 1)
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { commandFocused = true }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: menuItems.map(\.name))
+        .onAppear { consumePrefill() }
+        .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
+    }
+
+    private func consumePrefill() {
+        guard let prefill = model.pendingCommandPrefill else { return }
+        commandText = prefill
+        model.pendingCommandPrefill = nil
+        // Focus after the field is mounted and the panel is key.
+        DispatchQueue.main.async { commandFocused = true }
+    }
+
+    private var menuList: some View {
+        VStack(spacing: 1) {
+            ForEach(Array(menuItems.enumerated()), id: \.offset) { index, item in
+                HStack(spacing: 8) {
+                    Text(String(menuTrigger))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.yellow.opacity(0.9))
+                    Text(item.name)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text(item.desc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(index == menuSel ? 0.14 : 0))
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    menuSel = index
+                    _ = acceptMenuSelection()
+                }
+                .onHover { inside in
+                    if inside { menuSel = index }
+                }
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - `/ @ #` autocomplete (mirrors the cockpit composer's semantics)
+
+    /// Trailing `/@#`-token of the input, if any.
+    private func trailingToken(_ text: String) -> (trigger: Character, query: String, token: String)? {
+        var token = ""
+        var idx = text.endIndex
+        while idx > text.startIndex {
+            let prev = text.index(before: idx)
+            let ch = text[prev]
+            if ch == " " { break }
+            token = String(ch) + token
+            idx = prev
+        }
+        guard let first = token.first, "/@#".contains(first) else { return nil }
+        return (first, String(token.dropFirst()).lowercased(), token)
+    }
+
+    private func refreshMenu(for text: String) {
+        guard let (trigger, query, token) = trailingToken(text),
+              let items = model.commandMenuProvider?(trigger, query),
+              !items.isEmpty else {
+            menuItems = []
+            menuSel = 0
+            return
+        }
+        menuTrigger = trigger
+        menuToken = token
+        menuItems = Array(items.prefix(6))
+        menuSel = min(menuSel, menuItems.count - 1)
+    }
+
+    private func moveMenuSelection(_ delta: Int) -> KeyPress.Result {
+        guard !menuItems.isEmpty else { return .ignored }
+        menuSel = max(0, min(menuItems.count - 1, menuSel + delta))
+        return .handled
+    }
+
+    @discardableResult
+    private func acceptMenuSelection() -> KeyPress.Result {
+        guard menuItems.indices.contains(menuSel),
+              let (trigger, _, token) = trailingToken(commandText) else { return .ignored }
+        let name = menuItems[menuSel].name
+        commandText = String(commandText.dropLast(token.count)) + String(trigger) + name + " "
+        menuItems = []
+        menuSel = 0
+        return .handled
     }
 
     private var recentNotifications: [NotificationEntry] {

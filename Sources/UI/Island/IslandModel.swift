@@ -51,6 +51,13 @@ final class IslandModel {
     var onNavigate: ((_ worktreePath: String, _ paneIndex: Int?) -> Void)?
     var onOptionTapped: ((_ order: PendingOrder, _ optionText: String) -> Void)?
     var onMarkAllRead: (() -> Void)?
+    /// Bridge command submit (same handler as the First Mate composer).
+    var onSubmitCommand: ((String) -> Void)?
+    /// `/ @ #` autocomplete source — same provider as the cockpit composer.
+    var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
+    /// One-shot: when set, the opened surface prefills the command field with
+    /// this text, focuses it, then clears the flag.
+    var pendingCommandPrefill: String?
 
     private var popRevertWork: DispatchWorkItem?
 

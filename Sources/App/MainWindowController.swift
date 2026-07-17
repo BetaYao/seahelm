@@ -297,10 +297,14 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
-        // Cmd+N returns to the Dashboard overview and starts a `/new` command in
-        // its command input.
-        tabCoordinator.switchToTab(0)
-        dashboardVC?.startNewCommand()
+        // Cmd+N opens the island with `/new ` prefilled in its command field.
+        // Fall back to the overview composer when the island is disabled.
+        if config.islandEnabled {
+            islandController.openCommandBar(prefill: "/new ")
+        } else {
+            tabCoordinator.switchToTab(0)
+            dashboardVC?.startNewCommand()
+        }
     }
 
     // MARK: - First Mate command shortcuts
@@ -1610,6 +1614,12 @@ extension MainWindowController {
         }
         model.onMarkAllRead = {
             NotificationHistory.shared.markAllRead()
+        }
+        model.onSubmitCommand = { [weak self] text in
+            _ = self?.submitBridgeCommand(text)
+        }
+        model.commandMenuProvider = { [weak self] trigger, query in
+            self?.helmMenuItems(trigger: trigger, query: query) ?? []
         }
         islandController.install()
 

@@ -75,6 +75,15 @@ final class IslandPanelController {
         updateVisibility()
     }
 
+    /// Open the island with the command field focused (Cmd+N entry point).
+    func openCommandBar(prefill: String) {
+        guard let panel else { return }
+        if !panel.isVisible { panel.orderFrontRegardless() }
+        model.pendingCommandPrefill = prefill
+        model.open(reason: .event)
+        panel.makeKey()
+    }
+
     /// Hide the island while the target screen is in a fullscreen space —
     /// the pill's wings (and the whole simulated notch on external displays)
     /// would otherwise sit on top of the fullscreen app. A pending
