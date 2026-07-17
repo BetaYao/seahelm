@@ -8,6 +8,8 @@ struct IslandAgentRow: Identifiable, Equatable {
     let branch: String
     let status: SailorStatus
     let message: String
+    /// Task description entered at worktree-creation time.
+    let title: String
 }
 
 enum IslandState: Equatable {

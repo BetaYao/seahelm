@@ -28,6 +28,7 @@ final class IslandPanelController {
             defer: false
         )
         panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.level = .statusBar
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -55,6 +56,11 @@ final class IslandPanelController {
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(activeSpaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
+        )
+        updateVisibility()
     }
 
     func uninstall() {
@@ -62,6 +68,63 @@ final class IslandPanelController {
         panel?.orderOut(nil)
         panel = nil
         NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    @objc private func activeSpaceChanged() {
+        updateVisibility()
+    }
+
+    /// Hide the island while the target screen is in a fullscreen space —
+    /// the pill's wings (and the whole simulated notch on external displays)
+    /// would otherwise sit on top of the fullscreen app. A pending
+    /// suggestion overrides the hide: it is actionable and time-sensitive.
+    func updateVisibility() {
+        guard let panel, let screen = targetScreen() else { return }
+        let fullscreen = Self.hasFullscreenWindow(on: screen)
+        let shouldShow = !fullscreen || !model.orders.isEmpty
+        if shouldShow {
+            if !panel.isVisible { panel.orderFrontRegardless() }
+        } else if panel.isVisible {
+            model.close()
+            panel.orderOut(nil)
+        }
+    }
+
+    /// True when another app's normal-layer window fully covers the screen
+    /// in the current space. Fullscreen windows cover the whole frame
+    /// including the menu-bar band; ordinary maximized windows don't, so
+    /// they never match. (`visibleFrame` is not reliable here — AppKit often
+    /// doesn't refresh it for fullscreen spaces.)
+    private static func hasFullscreenWindow(on screen: NSScreen) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+
+        // CG coordinates: top-left origin of the primary display.
+        let primaryHeight = NSScreen.screens.first.map { $0.frame.maxY } ?? 0
+        let target = CGRect(
+            x: screen.frame.minX,
+            y: primaryHeight - screen.frame.maxY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        for info in windows {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let pid = info[kCGWindowOwnerPID as String] as? Int32, pid != ownPID,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat]
+            else { continue }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0
+            )
+            if bounds.insetBy(dx: -2, dy: -2).contains(target) {
+                return true
+            }
+        }
+        return false
     }
 
     @objc private func screensChanged() {
@@ -152,8 +215,16 @@ final class IslandPanelController {
 
     private func handleMouseDown(_ location: NSPoint) {
         guard let rect = visibleContentRect() else { return }
+        islandDebugLog("monitor mouseDown loc=\(location) rect=\(rect) opened=\(model.isOpened) panelFrame=\(panel?.frame ?? .zero)")
         if model.isOpened {
-            if !rect.contains(location) {
+            if rect.contains(location) {
+                // Monitors run before normal dispatch — make the panel key
+                // now so the SwiftUI Button fires instead of consuming the
+                // click for key acquisition. (hitTest may route mouseDown to
+                // an internal SwiftUI subview, bypassing the hosting view's
+                // own makeKey fallback.)
+                panel?.makeKey()
+            } else {
                 model.close()
                 repostMouseDown(at: location)
             }
@@ -161,6 +232,7 @@ final class IslandPanelController {
             hoverTimer?.cancel()
             hoverTimer = nil
             model.open(reason: .click)
+            panel?.makeKey()
         }
     }
 
@@ -170,6 +242,7 @@ final class IslandPanelController {
             guard let self, !self.model.isOpened else { return }
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             self.model.open(reason: .hover)
+            self.panel?.makeKey()
             self.hoverTimer = nil
         }
         hoverTimer = work
@@ -195,6 +268,22 @@ final class IslandPanelController {
     }
 }
 
+// MARK: - Debug log
+
+/// Temporary diagnostics for the click-routing bug — appends to
+/// ~/.config/seahelm/island-debug.log.
+func islandDebugLog(_ message: String) {
+    let url = Config.configDir.appendingPathComponent("island-debug.log")
+    let line = "\(Date()) \(message)\n"
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(line.data(using: .utf8)!)
+        try? handle.close()
+    } else {
+        try? line.data(using: .utf8)!.write(to: url)
+    }
+}
+
 // MARK: - IslandPanel
 
 private final class IslandPanel: NSPanel {
@@ -211,14 +300,6 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func mouseDown(with event: NSEvent) {
-        // With .nonactivatingPanel a hover-opened panel isn't key, so a
-        // SwiftUI Button would consume the first click acquiring key status
-        // instead of firing. Make key before SwiftUI sees the click.
-        window?.makeKey()
-        super.mouseDown(with: event)
-    }
-
     required init(rootView: Content) {
         super.init(rootView: rootView)
         wantsLayer = true
@@ -234,10 +315,31 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
         guard let controller,
               let window,
               let contentRect = controller.visibleContentRect() else { return nil }
-        let windowPoint = convert(point, to: nil)
+        // `point` is in the superview's coordinate system — and the window
+        // frame view is flipped, so convert properly instead of treating it
+        // as local coordinates (that mirrored y and killed clicks near the
+        // top of the surface).
+        let local = superview.map { convert(point, from: $0) } ?? point
+        let windowPoint = convert(local, to: nil)
         let screenPoint = window.convertPoint(toScreen: windowPoint)
-        guard contentRect.contains(screenPoint) else { return nil }
-        return super.hitTest(point) ?? self
+        guard contentRect.contains(screenPoint) else {
+            islandDebugLog("hitTest MISS point=\(point) local=\(local) screen=\(screenPoint) rect=\(contentRect) flippedSuper=\(superview?.isFlipped ?? false)")
+            return nil
+        }
+        let hit = super.hitTest(point)
+        islandDebugLog("hitTest HIT screen=\(screenPoint) rect=\(contentRect) superHit=\(hit.map { String(describing: type(of: $0)) } ?? "nil")")
+        return hit ?? self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        islandDebugLog("hosting mouseDown loc=\(event.locationInWindow) keyWindow=\(window?.isKeyWindow ?? false)")
+        window?.makeKey()
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        islandDebugLog("hosting mouseUp loc=\(event.locationInWindow)")
+        super.mouseUp(with: event)
     }
 }
 

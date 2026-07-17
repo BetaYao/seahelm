@@ -1606,6 +1606,7 @@ extension MainWindowController {
             NSApp.activate(ignoringOtherApps: true)
         }
         model.onOptionTapped = { [weak self] order, optionText in
+            NSLog("[island] option tapped: \(optionText) (order \(order.id))")
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
         model.onMarkAllRead = {
@@ -1636,7 +1637,14 @@ extension MainWindowController {
                 project: sailor.project,
                 branch: sailor.branch,
                 status: sailor.status,
-                message: sailor.lastAssistantMessage.isEmpty ? sailor.lastMessage : sailor.lastAssistantMessage
+                message: sailor.lastAssistantMessage.isEmpty ? sailor.lastMessage : sailor.lastAssistantMessage,
+                // Same resolver as the dashboard cards; empty branch fallback —
+                // the island row already renders the branch separately.
+                title: WorktreeTitleResolver.resolve(
+                    worktreePath: sailor.worktreePath,
+                    lastUserPrompt: sailor.lastUserPrompt,
+                    branch: ""
+                )
             )
             if let existing = byWorktree[sailor.worktreePath] {
                 if Self.notificationPriorityScoreForIsland(row.status) > Self.notificationPriorityScoreForIsland(existing.status) {
@@ -1665,6 +1673,7 @@ extension MainWindowController {
         if (hasNewOrder || hasNewUnread) && !model.isOpened {
             model.pop()
         }
+        islandController.updateVisibility()
     }
 
     private static func notificationPriorityScoreForIsland(_ status: SailorStatus) -> Int {

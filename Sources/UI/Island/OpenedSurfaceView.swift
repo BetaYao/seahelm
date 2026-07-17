@@ -83,24 +83,19 @@ struct OpenedSurfaceView: View {
             }
             Spacer()
             if model.unreadCount > 0 {
-                Button {
-                    model.onMarkAllRead?()
-                } label: {
-                    Text("Read all")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-                .buttonStyle(.plain)
+                // onTapGesture, not Button: SwiftUI Buttons in a
+                // non-activating panel swallow the click for key acquisition.
+                Text("Read all")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.onMarkAllRead?() }
             }
         }
     }
 
     private func agentRow(_ row: IslandAgentRow) -> some View {
-        Button {
-            model.onNavigate?(row.id, nil)
-            model.close()
-        } label: {
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
                 Circle()
                     .fill(Color(nsColor: row.status.color))
                     .frame(width: 7, height: 7)
@@ -112,6 +107,12 @@ struct OpenedSurfaceView: View {
                     Text(row.branch)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                if !row.title.isEmpty {
+                    Text(row.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.4))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -126,27 +127,31 @@ struct OpenedSurfaceView: View {
                     .fill(Color.white.opacity(hoveredRowID == row.id ? 0.09 : 0))
             )
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { inside in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                hoveredRowID = inside ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
+            .onTapGesture {
+                model.onNavigate?(row.id, nil)
+                model.close()
             }
-        }
+            .onHover { inside in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    hoveredRowID = inside ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
+                }
+            }
     }
 
     private func notificationRow(_ entry: NotificationEntry) -> some View {
-        Button {
-            model.onNavigate?(entry.worktreePath, entry.paneIndex)
-            model.close()
-        } label: {
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
                 Text(entry.status.icon)
                     .font(.system(size: 10))
                     .foregroundStyle(Color(nsColor: entry.status.color))
+                if !entry.workspaceName.isEmpty {
+                    Text(entry.workspaceName)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
                 Text(entry.branch)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)
                 Text(entry.message)
                     .font(.system(size: 11))
@@ -160,8 +165,10 @@ struct OpenedSurfaceView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+            .onTapGesture {
+                model.onNavigate?(entry.worktreePath, entry.paneIndex)
+                model.close()
+            }
     }
 }
 
@@ -180,9 +187,14 @@ private struct SuggestionCard: View {
                 Image(systemName: isQuestion ? "questionmark.circle.fill" : "lightbulb.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.yellow)
-                Text(order.action.branch.isEmpty ? order.action.project : order.action.branch)
+                Text(order.action.project)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.85))
+                if !order.action.branch.isEmpty {
+                    Text(order.action.branch)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
                 Spacer()
             }
             if !order.action.message.isEmpty {
@@ -215,10 +227,7 @@ private struct OptionList: View {
     var body: some View {
         VStack(spacing: 6) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
-                Button {
-                    onTap(option)
-                } label: {
-                    HStack(spacing: 10) {
+                HStack(spacing: 10) {
                         Text("\(index + 1)")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.7))
@@ -234,16 +243,15 @@ private struct OptionList: View {
                             .multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Color.white.opacity(hoveredIndex == index ? 0.18 : 0.08))
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(hoveredIndex == index ? 0.18 : 0.08))
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { onTap(option) }
                 .onHover { inside in
                     withAnimation(.easeInOut(duration: 0.12)) {
                         hoveredIndex = inside ? index : (hoveredIndex == index ? nil : hoveredIndex)
