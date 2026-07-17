@@ -18,11 +18,18 @@ final class FileContentView: NSView {
 
     init(path: String) {
         super.init(frame: .zero)
-        let content = FileContentView.readContent(at: path)
-        if let text = content {
-            setupTextView(text: text)
-        } else {
-            setupPlaceholder()
+        // Shown from a user click — read off-main so a slow/networked volume
+        // can't stall the UI, then build whichever subtree applies.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let content = FileContentView.readContent(at: path)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let text = content {
+                    self.setupTextView(text: text)
+                } else {
+                    self.setupPlaceholder()
+                }
+            }
         }
     }
 

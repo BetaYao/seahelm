@@ -238,7 +238,7 @@ struct SailorDef: Codable {
     }
 }
 
-struct SailorRule: Codable {
+struct SailorRule: Codable, Equatable {
     var status: String
     var patterns: [String]
 }

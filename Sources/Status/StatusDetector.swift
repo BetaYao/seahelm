@@ -156,17 +156,39 @@ class StatusDetector {
 
 
 extension SailorDef {
-    /// Get pre-lowercased rules (computed inline for efficiency)
-    private var lowercasedRules: [(status: String, patterns: [String])] {
-        rules.map { rule in
-            (status: rule.status, patterns: rule.patterns.map { $0.lowercased() })
+    /// Lowercased rules/skip-patterns, cached per def name. detectStatus and
+    /// extractLastMessage run on every poll of a legacy (manifest-less) pane, so
+    /// re-lowercasing the whole rule set each call adds up. The cache validates
+    /// against the source rules, so a config reload with edited rules recomputes.
+    private struct LoweredCache {
+        let sourceRules: [SailorRule]
+        let sourceSkip: [String]
+        let rules: [(status: String, patterns: [String])]
+        let skip: [String]
+    }
+    private static var loweredCache: [String: LoweredCache] = [:]
+    private static let loweredCacheLock = NSLock()
+
+    private var lowered: LoweredCache {
+        Self.loweredCacheLock.lock()
+        defer { Self.loweredCacheLock.unlock() }
+        if let cached = Self.loweredCache[name],
+           cached.sourceRules == rules, cached.sourceSkip == messageSkipPatterns {
+            return cached
         }
+        let fresh = LoweredCache(
+            sourceRules: rules,
+            sourceSkip: messageSkipPatterns,
+            rules: rules.map { (status: $0.status, patterns: $0.patterns.map { $0.lowercased() }) },
+            skip: messageSkipPatterns.map { $0.lowercased() }
+        )
+        Self.loweredCache[name] = fresh
+        return fresh
     }
 
-    /// Get pre-lowercased messageSkipPatterns (computed inline for efficiency)
-    private var lowercasedSkipPatterns: [String] {
-        messageSkipPatterns.map { $0.lowercased() }
-    }
+    private var lowercasedRules: [(status: String, patterns: [String])] { lowered.rules }
+
+    private var lowercasedSkipPatterns: [String] { lowered.skip }
 
     /// Apply rules in order; first match wins
     func detectStatus(from content: String) -> SailorStatus {

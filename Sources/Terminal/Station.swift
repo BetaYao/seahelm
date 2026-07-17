@@ -173,9 +173,8 @@ class Station {
 
         self.containerView = container
 
-        // Force size sync after constraints resolve — need TWO deferred
-        // passes because the first run loop resolves constraints (setting frame)
-        // and the second one is needed for Ghostty to recalculate the grid
+        // Force size sync after the run loop has resolved constraints (set the
+        // frame) so Ghostty recalculates its grid from the final geometry.
         DispatchQueue.main.async { [weak self] in
             guard let self, let view = self.view, let surface = self.surface else { return }
             self.syncContentScale()
