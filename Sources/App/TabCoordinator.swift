@@ -1111,6 +1111,10 @@ class TabCoordinator {
         let paneStatus = worktreeStatus?.panes.first(where: { $0.paneIndex == paneIndex })
         let terminalID = paneStatus?.terminalID ?? ""
         let lastUserPrompt = paneStatus?.lastUserPrompt ?? ""
+        // The agent's final prose (Stop hook) — the most informative body line;
+        // without it completed panes surface placeholder labels like
+        // "Processing prompt".
+        let lastAssistantMessage = ShipLog.shared.sailor(for: terminalID)?.lastAssistantMessage ?? ""
 
         NotificationManager.shared.notify(
             worktreePath: worktreePath,
@@ -1123,6 +1127,7 @@ class TabCoordinator {
             newStatus: newStatus,
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
+            lastAssistantMessage: lastAssistantMessage,
             isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID)
         )
     }

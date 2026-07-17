@@ -325,7 +325,13 @@ class NotificationManager: NSObject {
         return target
     }
 
-    static func formatSystemBody(status: SailorStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "") -> String {
+    static func formatSystemBody(status: SailorStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "", lastAssistantMessage: String = "") -> String {
+        // The agent's own final prose is the most informative line — placeholder
+        // hook labels ("Processing prompt") in lastMessage carry nothing.
+        let trimmedAssistant = lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedAssistant.isEmpty {
+            return truncateBody(sanitizeMessage(trimmedAssistant))
+        }
         let trimmedPrompt = lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedPrompt.isEmpty {
             return truncateBody(sanitizeMessage(trimmedPrompt))
@@ -361,6 +367,7 @@ class NotificationManager: NSObject {
         newStatus: SailorStatus,
         lastMessage: String,
         lastUserPrompt: String = "",
+        lastAssistantMessage: String = "",
         isTargetVisible: Bool = false
     ) {
         let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
@@ -386,6 +393,7 @@ class NotificationManager: NSObject {
                 newStatus: newStatus,
                 lastMessage: lastMessage,
                 lastUserPrompt: lastUserPrompt,
+                lastAssistantMessage: lastAssistantMessage,
                 isTargetVisible: isTargetVisible
             )
         }
@@ -423,6 +431,7 @@ class NotificationManager: NSObject {
         newStatus: SailorStatus,
         lastMessage: String,
         lastUserPrompt: String,
+        lastAssistantMessage: String,
         isTargetVisible: Bool
     ) {
         let sessionTitle = SessionTitleLookup.title(worktreePath: worktreePath)
@@ -440,7 +449,8 @@ class NotificationManager: NSObject {
             workspaceName: workspaceName,
             branch: branch,
             lastMessage: lastMessage,
-            lastUserPrompt: lastUserPrompt
+            lastUserPrompt: lastUserPrompt,
+            lastAssistantMessage: lastAssistantMessage
         )
         content.sound = newStatus == .error ? .defaultCritical : .default
         // Group all notifications for a worktree together in Notification Center.
