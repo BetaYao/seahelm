@@ -107,13 +107,15 @@ final class ShipLogExternalTests: XCTestCase {
         XCTAssertTrue(ch.sentMessages[0].content.contains("做一个暗色模式"))
     }
 
-    func testNonCommandShowsHelp() {
+    /// Bare prose steers the current agent. With no route injected there is
+    /// nothing to steer, so it points at `/new` rather than dumping help.
+    func testNonCommandWithNoAgentPointsAtNew() {
         let ch = MockExternalChannel()
         ShipLog.shared.registerChannel(ch)
         ShipLog.shared.handleInbound(makeMessage(content: "hello"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("/help"))
+        XCTAssertTrue(ch.sentMessages[0].content.contains("/new"))
     }
 
     func testUnknownCommandShowsHelp() {
