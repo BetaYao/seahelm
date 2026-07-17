@@ -51,6 +51,25 @@ class TerminalCoordinator {
 
     // MARK: - Split Pane Operations
 
+    /// Enrol a freshly split pane in ShipLog. StationRegistry alone is not enough:
+    /// `ShipLog.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
+    /// and then requires that station to be a known agent, so a pane missing here
+    /// silently falls back to the worktree's *first* pane — every hook, and every
+    /// suggestion chip tapped for this pane, lands in a sibling.
+    /// Branch/project come from a sibling in the same worktree, which shares both.
+    private func registerSplitStation(_ station: Station, worktreePath: String, sessionName: String) {
+        let sibling = ShipLog.shared.sailor(forWorktree: worktreePath)
+        ShipLog.shared.register(
+            station: station,
+            worktreePath: worktreePath,
+            branch: sibling?.branch ?? "",
+            project: sibling?.project ?? URL(fileURLWithPath: worktreePath).lastPathComponent,
+            startedAt: Date(),
+            sessionName: runtimeBackend == "local" ? nil : sessionName,
+            backend: runtimeBackend
+        )
+    }
+
     func splitFocusedPane(axis: SplitAxis) {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
@@ -60,6 +79,8 @@ class TerminalCoordinator {
         station.sessionName = sessionName
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
+
+        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
 
         let leafId = UUID().uuidString
         tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
@@ -114,6 +135,7 @@ class TerminalCoordinator {
         station.sessionName = sessionName
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
+        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
 
         let leafId = UUID().uuidString
         // splitFocusedLeaf splits `focusedId`, so point it at the target first.

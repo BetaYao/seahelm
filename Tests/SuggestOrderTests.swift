@@ -2,14 +2,16 @@ import XCTest
 @testable import seahelm
 
 final class SuggestOrderTests: XCTestCase {
-    private func suggestOutcome(options: [String]) -> IngestOutcome {
-        let info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
+    /// `terminalID` defaults to "t1"; pass a second one to model a split pane —
+    /// two panes of the same worktree share `worktreePath` but never a terminal.
+    private func suggestOutcome(options: [String], terminalID: String = "t1") -> IngestOutcome {
+        let info = SailorInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
                               project: "p", branch: "b", status: .idle, lastMessage: "",
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())
         return IngestOutcome(info: info, statusChanged: false, oldStatus: .idle, newStatus: .idle,
                              holdSeconds: 0, isCompletionSignal: false,
-                             event: NormalizedEvent(terminalID: "t1", source: .hook("seahelm-suggest"),
+                             event: NormalizedEvent(terminalID: terminalID, source: .hook("seahelm-suggest"),
                                                     kind: .suggest(options: options)))
     }
 
@@ -24,7 +26,7 @@ final class SuggestOrderTests: XCTestCase {
         XCTAssertEqual(queue.all().first?.action.options, ["run tests", "open PR"])
     }
 
-    func testNewSuggestReplacesOldForSameWorktree() {
+    func testNewSuggestReplacesOldForSamePane() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
             notify: { _ in }, runInspection: { _ in })
@@ -32,6 +34,17 @@ final class SuggestOrderTests: XCTestCase {
         coord.handle(suggestOutcome(options: ["new1", "new2"]))
         XCTAssertEqual(queue.all().count, 1)
         XCTAssertEqual(queue.all().first?.action.options, ["new1", "new2"])
+    }
+
+    /// Two panes of one worktree each get a card; neither displaces the other.
+    func testSuggestFromSiblingPaneDoesNotReplaceTheFirst() {
+        let queue = PendingOrdersQueue()
+        let coord = FirstMateCoordinator(config: .default, queue: queue,
+            notify: { _ in }, runInspection: { _ in })
+        coord.handle(suggestOutcome(options: ["from t1"], terminalID: "t1"))
+        coord.handle(suggestOutcome(options: ["from t2"], terminalID: "t2"))
+        XCTAssertEqual(queue.all().count, 2, "each pane should hold its own suggestion card")
+        XCTAssertEqual(queue.all().map(\.action.terminalID), ["t1", "t2"])
     }
 
     func testEmptyOptionsEnqueuesNothing() {
@@ -42,24 +55,36 @@ final class SuggestOrderTests: XCTestCase {
         XCTAssertTrue(queue.all().isEmpty)
     }
 
+    private func userPromptOutcome(terminalID: String) -> IngestOutcome {
+        let info = SailorInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
+                              project: "p", branch: "b", status: .idle, lastMessage: "",
+                              commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
+                              channel: nil, taskProgress: TaskProgress())
+        return IngestOutcome(info: info, statusChanged: false, oldStatus: .idle,
+                             newStatus: .idle, holdSeconds: 0, isCompletionSignal: false,
+                             event: NormalizedEvent(terminalID: terminalID, source: .hook("claude-code"),
+                                                    kind: .userPrompt("hi")))
+    }
+
     func testUserPromptClearsExistingSuggestOrder() {
         let queue = PendingOrdersQueue()
         let coord = FirstMateCoordinator(config: .default, queue: queue,
             notify: { _ in }, runInspection: { _ in })
-        // Enqueue a suggest order for /wt
         coord.handle(suggestOutcome(options: ["run tests"]))
         XCTAssertEqual(queue.all().count, 1, "suggest order should be enqueued")
-        // Now send a userPrompt for the same worktree
-        let info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
-                              project: "p", branch: "b", status: .idle, lastMessage: "",
-                              commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
-                              channel: nil, taskProgress: TaskProgress())
-        let promptOutcome = IngestOutcome(info: info, statusChanged: false, oldStatus: .idle,
-                                         newStatus: .idle, holdSeconds: 0, isCompletionSignal: false,
-                                         event: NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
-                                                                kind: .userPrompt("hi")))
-        coord.handle(promptOutcome)
+        coord.handle(userPromptOutcome(terminalID: "t1"))
         XCTAssertTrue(queue.all().isEmpty, "suggest order should be cleared on userPrompt")
+    }
+
+    /// Typing in one pane must not clear a sibling pane's suggestions.
+    func testUserPromptDoesNotClearSiblingPanesSuggestOrder() {
+        let queue = PendingOrdersQueue()
+        let coord = FirstMateCoordinator(config: .default, queue: queue,
+            notify: { _ in }, runInspection: { _ in })
+        coord.handle(suggestOutcome(options: ["run tests"], terminalID: "t2"))
+        coord.handle(userPromptOutcome(terminalID: "t1"))
+        XCTAssertEqual(queue.all().count, 1, "t2's card should survive a prompt typed in t1")
+        XCTAssertEqual(queue.all().first?.action.terminalID, "t2")
     }
 
     func testResolveSuggestDirectly() {
@@ -69,7 +94,7 @@ final class SuggestOrderTests: XCTestCase {
                                      message: "suggestions", options: ["a"])
         queue.upsert(action)
         XCTAssertEqual(queue.all().count, 1)
-        queue.resolveSuggest(worktreePath: "/wt")
+        queue.resolveSuggest(terminalID: "t")
         XCTAssertTrue(queue.all().isEmpty)
     }
 }

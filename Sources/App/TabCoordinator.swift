@@ -216,10 +216,7 @@ class TabCoordinator {
             let proj = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
                 ?? URL(fileURLWithPath: repoPath).lastPathComponent
             let started = config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
-            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-            if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: runtimeBackend)
-            }
+            registerPanes(of: info, project: proj, startedAt: started)
         }
 
         // Record startedAt for newly discovered worktrees
@@ -479,10 +476,7 @@ class TabCoordinator {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { Self.iso8601.date(from: $0) }
-                    let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                    if let surface = self.terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                        ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, sessionName: sessionName, backend: self.runtimeBackend)
-                    }
+                    self.registerPanes(of: info, project: proj, startedAt: started)
                 }
                 if !cardOrder.isEmpty {
                     ShipLog.shared.reorder(paths: cardOrder)
@@ -665,10 +659,7 @@ class TabCoordinator {
                 allWorktrees.append((info: info, tree: tree))
                 worktreeRepoCache[info.path] = repoRoot
 
-                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                if let surface = terminalCoordinator.stationManager.primaryStation(forPath: info.path) {
-                    ShipLog.shared.register(station: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
-                }
+                registerPanes(of: info, project: proj, startedAt: Date())
             }
         }
 
@@ -1109,6 +1100,26 @@ class TabCoordinator {
     /// to decide whether a system banner would be redundant.
     private func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
+    }
+
+    /// Register every pane of a worktree's tree with ShipLog — not just the first.
+    /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID
+    /// (`ShipLog.handleWebhookEvent` only accepts a station that is a known agent),
+    /// so its events — and any suggestion chip tapped for it — silently fall back
+    /// to the worktree's FIRST pane. Restored splits are the common case: every
+    /// pane comes back through here on launch, not through the split path.
+    /// Each leaf registers under its own `sessionName`, which is exactly what that
+    /// pane exports as SEAHELM_PANE_ID.
+    private func registerPanes(of info: WorktreeInfo, project: String, startedAt: Date?) {
+        guard let tree = terminalCoordinator.stationManager.tree(forPath: info.path) else { return }
+        for leaf in tree.allLeaves {
+            guard let station = StationRegistry.shared.station(forId: leaf.stationId) else { continue }
+            ShipLog.shared.register(
+                station: station, worktreePath: info.path, branch: info.branch,
+                project: project, startedAt: startedAt,
+                sessionName: runtimeBackend == "local" ? nil : leaf.sessionName,
+                backend: runtimeBackend)
+        }
     }
 
     /// Pane-level visibility: a banner is redundant only when THIS pane is the

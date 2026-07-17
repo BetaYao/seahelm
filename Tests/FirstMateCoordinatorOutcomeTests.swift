@@ -22,9 +22,11 @@ final class FirstMateCoordinatorOutcomeTests: XCTestCase {
         XCTAssertFalse(evaluated, "tool_use without status change must not reach FirstMate")
     }
 
-    private func questionAction(worktree: String = "/wt") -> FirstMateAction {
+    /// A terminal belongs to exactly one worktree, so a fixture naming another
+    /// worktree must name that worktree's own terminal too.
+    private func questionAction(worktree: String = "/wt", terminalID: String = "t1") -> FirstMateAction {
         FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: worktree,
-                        branch: "b", project: "p", terminalID: "t1",
+                        branch: "b", project: "p", terminalID: terminalID,
                         message: "Pick one", payload: FirstMateAction.askUserQuestionPayload,
                         options: ["A", "B"])
     }
@@ -51,12 +53,23 @@ final class FirstMateCoordinatorOutcomeTests: XCTestCase {
 
     func testToolUseKeepsQuestionCardOfOtherWorktree() {
         let q = PendingOrdersQueue()
-        q.upsert(questionAction(worktree: "/other"))
+        q.upsert(questionAction(worktree: "/other", terminalID: "t2"))
         let coord = FirstMateCoordinator(config: .default, queue: q,
             notify: { _ in }, runInspection: { _ in })
         let act = ActivityEvent(tool: "Bash", detail: "ls", isError: false, timestamp: Date())
         coord.handle(outcome(kind: .toolUse(act), changed: false, completion: false, newStatus: .running))
         XCTAssertEqual(q.all().count, 1, "cards of other worktrees must survive")
+    }
+
+    /// A split pane's tool use must not clear the sibling pane's unanswered question.
+    func testToolUseKeepsQuestionCardOfSiblingPaneInSameWorktree() {
+        let q = PendingOrdersQueue()
+        q.upsert(questionAction(worktree: "/wt", terminalID: "t2"))
+        let coord = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        let act = ActivityEvent(tool: "Bash", detail: "ls", isError: false, timestamp: Date())
+        coord.handle(outcome(kind: .toolUse(act), changed: false, completion: false, newStatus: .running))
+        XCTAssertEqual(q.all().count, 1, "t2's question must survive t1's tool use")
     }
 
     func testCompletionSignalIsEvaluated() {

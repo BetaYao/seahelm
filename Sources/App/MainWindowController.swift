@@ -1928,9 +1928,15 @@ extension MainWindowController {
     func handleBridgeApprove(_ order: PendingOrder) {
         switch order.action.kind {
         case .suggestNextOrder:
+            // Send to the pane that raised the suggestion. Re-resolving the
+            // worktree here would pick its *first* pane, so a suggestion from a
+            // split pane got answered in a sibling.
             let worktreePath = order.action.worktreePath
-            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath),
-                  let terminalID = ShipLog.shared.sailor(forWorktree: worktreePath)?.id else { return }
+            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
+            let terminalID = order.action.terminalID.isEmpty
+                ? ShipLog.shared.sailor(forWorktree: worktreePath)?.id
+                : order.action.terminalID
+            guard let terminalID else { return }
             ShipLog.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             // Never reap a worktree whose agent is now running.

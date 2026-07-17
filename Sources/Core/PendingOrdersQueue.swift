@@ -29,8 +29,13 @@ final class PendingOrdersQueue {
 
     private func notify() { observers.values.forEach { $0() } }
 
+    /// Pane-scoped for actions that name a terminal (suggestions and questions come
+    /// from one specific pane, and two panes of a worktree must be able to hold a
+    /// card each). Worktree- and app-scoped actions (returnToPort, broadcastOrder)
+    /// carry no terminalID and keep their worktree-wide key.
     static func key(_ a: FirstMateAction) -> String {
-        let base = "\(a.worktreePath)#\(a.kind)"
+        var base = "\(a.worktreePath)#\(a.kind)"
+        if !a.terminalID.isEmpty { base += "#\(a.terminalID)" }
         return a.payload.map { "\(base)#\($0)" } ?? base
     }
 
@@ -62,22 +67,23 @@ final class PendingOrdersQueue {
         if orders.count != before { notify() }
     }
 
-    /// Remove any pending AskUserQuestion card for the given worktree path — the
-    /// agent moved past the question (it was answered in the TUI), so the card
-    /// is stale.
-    func resolveQuestion(worktreePath: String) {
+    /// Remove the pending AskUserQuestion card for the given pane — its agent moved
+    /// past the question (it was answered in the TUI), so the card is stale.
+    /// Pane-scoped: a sibling pane's unanswered question must survive.
+    func resolveQuestion(terminalID: String) {
         let before = orders.count
         orders.removeAll {
             $0.action.payload == FirstMateAction.askUserQuestionPayload
-                && $0.action.worktreePath == worktreePath
+                && $0.action.terminalID == terminalID
         }
         if orders.count != before { notify() }
     }
 
-    /// Remove any pending suggest order for the given worktree path.
-    func resolveSuggest(worktreePath: String) {
+    /// Remove the pending suggest order for the given pane. Pane-scoped: typing in
+    /// one pane must not clear a sibling pane's suggestions.
+    func resolveSuggest(terminalID: String) {
         let before = orders.count
-        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.worktreePath == worktreePath }
+        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
         if orders.count != before { notify() }
     }
 }
