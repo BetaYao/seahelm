@@ -140,7 +140,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // Data
     private(set) var agents: [SailorDisplayInfo] = []
 
-    private let layoutTopInset: CGFloat = 8
+    private let layoutTopInset: CGFloat = 2
 
     // Left-Right layout
     private let leftRightContainer = NSView()

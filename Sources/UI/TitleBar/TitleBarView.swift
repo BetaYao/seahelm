@@ -22,7 +22,7 @@ protocol TitleBarDelegate: AnyObject {
 
 final class TitleBarView: NSView {
     enum Layout {
-        static let barHeight: CGFloat = 32
+        static let barHeight: CGFloat = 30
         static let capsuleHeight: CGFloat = 24
         static let arcVerticalOffset: CGFloat = 1
         /// Right edge of the dashboard's first (worktree) column — keeps the
