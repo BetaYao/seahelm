@@ -23,6 +23,11 @@ struct ClosedPillView: View {
         .frame(width: model.closedWidth, height: model.notchHeight)
         .background(ClosedPillShape(bottomRadius: 14).fill(Color.black))
         .contentShape(Rectangle())
+        // Material-style curve so wing content (badge/tiles) slides in and
+        // out smoothly as counts change while closed.
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.unreadCount)
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.orders.isEmpty)
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.rows)
     }
 
     private var wingWidth: CGFloat { (model.closedWidth - model.notchWidth) / 2 - 10 }
@@ -38,6 +43,7 @@ struct ClosedPillView: View {
             Text("\(model.unreadCount)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
+                .contentTransition(.numericText(value: Double(model.unreadCount)))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.white.opacity(0.18)))

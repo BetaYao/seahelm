@@ -31,6 +31,7 @@ struct OpenedSurfaceView: View {
                         VStack(spacing: 2) {
                             ForEach(model.rows) { row in
                                 agentRow(row)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
                     }
@@ -40,6 +41,7 @@ struct OpenedSurfaceView: View {
                         VStack(spacing: 2) {
                             ForEach(recentNotifications) { entry in
                                 notificationRow(entry)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
                     }
@@ -49,6 +51,11 @@ struct OpenedSurfaceView: View {
             .padding(.bottom, 14)
         }
         .frame(width: model.openedWidth)
+        // Content churn while open (rows/orders/notifications changing)
+        // animates instead of hard-swapping.
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
         .background(
             NotchShape(topRadius: 10, bottomRadius: 22)
                 .fill(Color.black)
@@ -77,9 +84,11 @@ struct OpenedSurfaceView: View {
                 Text("\(model.unreadCount) unread")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
+                    .contentTransition(.numericText(value: Double(model.unreadCount)))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.white.opacity(0.14)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
             Spacer()
             if model.unreadCount > 0 {

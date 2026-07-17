@@ -16,9 +16,12 @@ struct IslandRootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            // The pill "grows into" the surface: it scales up and fades as
+            // the surface expands, instead of a flat cross-fade in place.
             ClosedPillView(model: model)
-                .scaleEffect(pillScale, anchor: .top)
+                .scaleEffect(model.isOpened ? 1.35 : pillScale, anchor: .top)
                 .opacity(model.isOpened ? 0 : 1)
+                .blur(radius: model.isOpened ? 6 : 0)
                 .onHover { inside in
                     withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                         hoveringPill = inside
@@ -36,7 +39,9 @@ struct IslandRootView: View {
                         }
                     )
                     .opacity(model.isOpened ? 1 : 0)
-                    .scaleEffect(model.isOpened ? 1 : 0.86, anchor: .top)
+                    // Emerge from the notch: slight upward offset + scale so
+                    // the surface reads as unfolding out of the pill.
+                    .scaleEffect(x: model.isOpened ? 1 : 0.62, y: model.isOpened ? 1 : 0.3, anchor: .top)
                     .allowsHitTesting(model.isOpened)
             }
         }

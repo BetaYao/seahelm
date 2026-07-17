@@ -1158,7 +1158,9 @@ class TabCoordinator {
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
             dashboardVC?.updateSailors(buildSailorDisplayInfos())
-            dashboardVC?.selectSailor(byWorktreePath: worktreePath)
+            // enterWorktree (not selectSailor): it also moves the overview
+            // list's selection highlight to the target row.
+            dashboardVC?.enterWorktree(byWorktreePath: worktreePath)
             saveSelectedWorktree()
             delegate?.tabCoordinatorRequestUpdateTitleBar(self)
             return
@@ -1178,7 +1180,7 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
                 self.openRepoTab(repoPath: repoPath) { [weak self] in
-                    self?.dashboardVC?.selectSailor(byWorktreePath: worktreePath)
+                    self?.dashboardVC?.enterWorktree(byWorktreePath: worktreePath)
                     self?.saveSelectedWorktree()
                     if let self {
                         self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
