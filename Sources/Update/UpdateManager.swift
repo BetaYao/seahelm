@@ -1,11 +1,17 @@
 import AppKit
 
 protocol UpdateManagerDelegate: AnyObject {
-    func updateManager(_ manager: UpdateManager, didChangeState state: UpdateManager.State)
+    func updateManager(_ manager: UpdateManaging, didChangeState state: UpdateManager.State)
+}
+
+protocol UpdateManaging: AnyObject {
+    var delegate: UpdateManagerDelegate? { get set }
+    func download(release: ReleaseInfo)
+    func installAndRestart()
 }
 
 /// Downloads, verifies, and installs updates.
-class UpdateManager: NSObject {
+class UpdateManager: NSObject, UpdateManaging {
     enum State {
         case idle
         case downloading(progress: Double)

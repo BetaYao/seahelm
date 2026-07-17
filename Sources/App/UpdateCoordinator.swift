@@ -8,13 +8,20 @@ class UpdateCoordinator {
     weak var delegate: UpdateCoordinatorDelegate?
     var config: Config
 
-    let updateChecker = UpdateChecker()
-    let updateManager = UpdateManager()
+    let updateChecker: UpdateChecker
+    let updateManager: UpdateManaging
     let banner = UpdateBanner()
     var pendingRelease: ReleaseInfo?
+    private var downloadingVersion: String?
 
-    init(config: Config) {
+    init(
+        config: Config,
+        updateChecker: UpdateChecker = UpdateChecker(),
+        updateManager: UpdateManaging = UpdateManager()
+    ) {
         self.config = config
+        self.updateChecker = updateChecker
+        self.updateManager = updateManager
     }
 
     func setup(config: Config) {
@@ -30,14 +37,15 @@ class UpdateCoordinator {
         Task {
             do {
                 if let release = try await updateChecker.checkNow() {
-                    pendingRelease = release
-                    banner.showNewVersion(release.version)
+                    await MainActor.run { self.beginUpdateFlow(release: release) }
                 } else {
-                    let alert = NSAlert()
-                    alert.messageText = "Already up to date"
-                    alert.informativeText = "Current version v\(updateChecker.currentVersion) is the latest."
-                    alert.alertStyle = .informational
-                    alert.runModal()
+                    await MainActor.run {
+                        let alert = NSAlert()
+                        alert.messageText = "Already up to date"
+                        alert.informativeText = "Current version v\(updateChecker.currentVersion) is the latest."
+                        alert.alertStyle = .informational
+                        alert.runModal()
+                    }
                 }
             } catch {
                 NSLog("Update check failed: \(error)")
@@ -51,6 +59,18 @@ class UpdateCoordinator {
         updateChecker.skippedVersion = version
         banner.dismiss()
         pendingRelease = nil
+        if downloadingVersion == version {
+            downloadingVersion = nil
+        }
+    }
+
+    private func beginUpdateFlow(release: ReleaseInfo) {
+        pendingRelease = release
+        banner.showNewVersion(release.version)
+
+        guard downloadingVersion != release.version else { return }
+        downloadingVersion = release.version
+        updateManager.download(release: release)
     }
 }
 
@@ -58,15 +78,20 @@ class UpdateCoordinator {
 
 extension UpdateCoordinator: UpdateCheckerDelegate {
     func updateChecker(_ checker: UpdateChecker, didFindRelease release: ReleaseInfo) {
-        pendingRelease = release
-        banner.showNewVersion(release.version)
+        beginUpdateFlow(release: release)
     }
 }
 
 // MARK: - UpdateManagerDelegate
 
 extension UpdateCoordinator: UpdateManagerDelegate {
-    func updateManager(_ manager: UpdateManager, didChangeState state: UpdateManager.State) {
+    func updateManager(_ manager: UpdateManaging, didChangeState state: UpdateManager.State) {
+        switch state {
+        case .idle, .readyToInstall, .failed:
+            downloadingVersion = nil
+        case .downloading, .extracting, .verifying:
+            break
+        }
         banner.update(state: state)
     }
 }
