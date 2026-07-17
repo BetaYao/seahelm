@@ -26,6 +26,9 @@ class WeChatChannel: ExternalChannel {
     private static let retryDelaySec: TimeInterval = 2
 
     var onStateChange: ((GatewayState) -> Void)?
+    /// Fired on the main queue when the bot token is no longer accepted. The
+    /// poll loop has stopped by then — only a fresh QR bind can revive it.
+    var onAuthExpired: (() -> Void)?
 
     init(config: WeChatConfig, channelId: String? = nil) {
         self.config = config
@@ -117,8 +120,11 @@ class WeChatChannel: ExternalChannel {
                 NSLog("[WeChat] API error: \(apiError)")
 
                 if response.isAuthError {
-                    updateState(.error("Token expired. Please re-authenticate."))
+                    updateState(.error("WeChat sign-in expired. Scan the QR code again in Settings."))
                     isPolling = false
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onAuthExpired?()
+                    }
                     return
                 }
 

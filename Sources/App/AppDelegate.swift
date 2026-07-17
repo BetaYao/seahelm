@@ -64,6 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Auto-connect WeChat if configured
         if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
             let channel = WeChatChannel(config: wechatConfig)
+            channel.onAuthExpired = { [weak self] in
+                self?.mainWindowController?.promptWeChatReauth()
+            }
             ShipLog.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] WeChat auto-connecting")

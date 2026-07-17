@@ -272,6 +272,23 @@ class MainWindowController: NSWindowController {
         dialogPresenter.presentSheetOnActiveVC(settingsVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
+    /// The WeChat bot token stopped being accepted. Point the user at the QR
+    /// flow rather than leaving the channel silently dead.
+    func promptWeChatReauth() {
+        guard let window else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "WeChat sign-in expired"
+        alert.informativeText = "Seahelm has stopped receiving WeChat messages. Scan the QR code again to reconnect."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.showSettings()
+        }
+    }
+
     @objc func showNewBranchDialog() {
         // Cmd+N returns to the Dashboard overview and starts a `/new` command in
         // its command input.
@@ -1639,6 +1656,9 @@ extension MainWindowController: SettingsDelegate {
 
             if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
                 let channel = WeChatChannel(config: wechatConfig)
+                channel.onAuthExpired = { [weak self] in
+                    self?.promptWeChatReauth()
+                }
                 ShipLog.shared.registerChannel(channel)
                 channel.connect()
                 NSLog("[Settings] WeChat reconnecting")

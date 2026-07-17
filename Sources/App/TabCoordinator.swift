@@ -622,8 +622,12 @@ class TabCoordinator {
                     }
                     let control = ControlSocketServer(
                         router: ControlRouter(dataSource: controlDataSource))
-                    control.start()
-                    self.terminalCoordinator.controlSocketServer = control
+                    // start() unlinks the socket path before binding, so starting
+                    // here would steal the live app's socket out from under it.
+                    if !DebugFlags.forceEmptyState {
+                        control.start()
+                        self.terminalCoordinator.controlSocketServer = control
+                    }
                 }
             }
         }

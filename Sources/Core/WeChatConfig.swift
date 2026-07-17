@@ -1,7 +1,7 @@
 import Foundation
 
 struct WeChatConfig: Codable, Equatable {
-    let botToken: String
+    var botToken: String
     var accountId: String?
     var baseUrl: String?
     var autoConnect: Bool?

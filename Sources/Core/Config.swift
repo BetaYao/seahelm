@@ -153,6 +153,10 @@ struct Config: Codable {
     private static var pendingSaveWorkItem: DispatchWorkItem?
 
     func save() {
+        // A forced-empty-state instance shares the real config path with the
+        // live app; saving would persist its pretend-empty view over the real one.
+        guard !DebugFlags.forceEmptyState else { return }
+
         // Debounced async save: coalesces rapid saves into a single write
         Config.pendingSaveWorkItem?.cancel()
         let configCopy = self
