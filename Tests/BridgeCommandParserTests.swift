@@ -132,9 +132,11 @@ final class BridgeCommandParserTests: XCTestCase {
                        .success(.orderAgent(agentId: "t1", task: "run tests")))
     }
 
+    /// Agents in one listing share a branch, so a name match resolves to the
+    /// first — codes (`#2`) are the selector that distinguishes siblings.
     func testOrderResolvesAgentByName() {
-        XCTAssertEqual(parse("/order fix-y run tests"),
-                       .success(.orderAgent(agentId: "t2", task: "run tests")))
+        XCTAssertEqual(parse("/order feat-x run tests"),
+                       .success(.orderAgent(agentId: "t1", task: "run tests")))
     }
 
     func testOrderUnknownAgent() {
