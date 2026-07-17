@@ -17,17 +17,20 @@ import Foundation
 /// and owns the pane-id fallback and JSON escaping. A second copy here would be
 /// a second thing to keep in sync.
 enum OpenCodePluginInstaller {
-    private static let versionMarker = "// seahelm-suggest-plugin v1"
+    // Ownership marker (no version): the overwrite guard checks `contains`, so a
+    // versioned marker would make every older install look foreign and freeze it.
+    private static let versionMarker = "// seahelm-suggest-plugin"
 
     /// Note `plugins/`, plural. opencode's own docs say `plugin/`, but the
     /// loader reads `plugins/` — a file in the singular directory is silently
     /// ignored, with no error to notice.
     static func pluginContents() -> String {
         return """
-        \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
+        \(versionMarker) v2 — managed by seahelm. Do not edit; it is overwritten on launch.
         //
         // Registers a `seahelm_suggest` tool that reports next-step options to
-        // seahelm's control socket, where they render as clickable buttons.
+        // seahelm's control socket, where they render as clickable buttons, and
+        // mirrors opencode's native `question` tool into a seahelm question card.
         //
         // The @opencode-ai/plugin import needs no setup: opencode writes its own
         // ~/.config/opencode/package.json pinning the package to its version and
@@ -36,9 +39,52 @@ enum OpenCodePluginInstaller {
         import { tool } from "@opencode-ai/plugin"
 
         const SCRIPT = `${process.env.HOME}/.local/bin/seahelm-suggest`
+        const SOCK = process.env.SEAHELM_SOCKET_PATH ?? `${process.env.HOME}/.config/seahelm/seahelm.sock`
+        // Same fallback chain as the suggest script: panes created before
+        // SEAHELM_PANE_ID was exported still carry ZMX_SESSION.
+        const PANE = process.env.SEAHELM_PANE_ID ?? process.env.ZMX_SESSION ?? ""
 
-        export const SeahelmSuggest = async ({ $ }) => {
+        export const SeahelmSuggest = async ({ $, directory }) => {
+          // Send a webhook-shaped payload over the control socket's `hook` method.
+          // Mimics Claude's event shape so the existing HookDecoder path applies.
+          const send = async (event, data) => {
+            if (!PANE) return
+            const req = JSON.stringify({
+              id: "opencode-question",
+              method: "hook",
+              params: {
+                source: "opencode",
+                event,
+                session_id: PANE,
+                seahelm_pane_id: PANE,
+                cwd: directory ?? "",
+                data,
+              },
+            })
+            await $`printf '%s\\n' ${req} | nc -U ${SOCK}`.quiet().nothrow()
+          }
+
           return {
+            // opencode's native question tool blocks the agent on a choice, like
+            // Claude's AskUserQuestion. Forward it as that event so seahelm shows
+            // the same tappable card. Multi-select questions are skipped entirely:
+            // a card tap sends one Down×n+Enter, which would only toggle an option,
+            // and forwarding a subset would desync followup indices from the TUI.
+            "tool.execute.before": async (input, output) => {
+              if (input.tool !== "question") return
+              const questions = output.args?.questions ?? []
+              if (questions.length === 0 || questions.some((q) => q.multiple)) return
+              await send("tool_use_start", {
+                tool_name: "AskUserQuestion",
+                tool_input: { questions },
+              })
+            },
+            // The dialog is gone once the tool returns (answered in the TUI or via
+            // a card tap) — a tool_use_end lets seahelm clear a stale card.
+            "tool.execute.after": async (input) => {
+              if (input.tool !== "question") return
+              await send("tool_use_end", { tool_name: "AskUserQuestion" })
+            },
             tool: {
               seahelm_suggest: tool({
                 description:

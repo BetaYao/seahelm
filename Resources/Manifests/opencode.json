@@ -1,6 +1,6 @@
 {
   "id": "opencode",
-  "version": "2026.07.08.1",
+  "version": "2026.07.17.1",
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
@@ -54,6 +54,11 @@
         {
           "contains": [
             "esc to interrupt"
+          ]
+        },
+        {
+          "contains": [
+            "esc interrupt"
           ]
         }
       ],

@@ -606,6 +606,21 @@ class ShipLog {
         }
     }
 
+    /// Answer an on-screen choice dialog by arrow keys: Down × index, then Return.
+    /// For agent TUIs without digit shortcuts (opencode's question tool) — their
+    /// selection starts at index 0 when the dialog opens, so the offset is absolute
+    /// as long as the user hasn't moved it.
+    func answerChoiceByArrows(to terminalID: String, index: Int) {
+        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
+        DispatchQueue.main.async {
+            for _ in 0..<max(0, index) { station.sendText("\u{1b}[B") }
+            // Same beat as sendCommand: let the TUI ingest the arrows first.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                station.sendEnterKey()
+            }
+        }
+    }
+
     /// Read recent output from a specific agent
     func readOutput(from terminalID: String, lines: Int = 50) -> String? {
         lock.lock()

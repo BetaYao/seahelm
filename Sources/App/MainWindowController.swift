@@ -1986,8 +1986,14 @@ extension MainWindowController {
             // AskUserQuestion TUI selects by digit; typing the label text would
             // land in the free-form field instead. Send the option's number —
             // sendCommand follows with a Return that confirms the selection.
+            // opencode's question TUI has no digit shortcuts (a digit would land
+            // in the custom-answer field), so drive it with arrow keys instead.
             if let idx = order.action.options?.firstIndex(of: optionText) {
-                ShipLog.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
+                if ShipLog.shared.sailor(for: order.action.terminalID)?.agentType == .openCode {
+                    ShipLog.shared.answerChoiceByArrows(to: order.action.terminalID, index: idx)
+                } else {
+                    ShipLog.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
+                }
             }
             // Multi-question call: the TUI advances to the next question, so the
             // card follows instead of vanishing with N-1 questions unanswered.

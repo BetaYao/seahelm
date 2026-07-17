@@ -68,4 +68,17 @@ final class OpenCodePluginInstallerTests: XCTestCase {
         XCTAssertTrue(js.contains("${SCRIPT} ${options}"))
         XCTAssertFalse(js.contains("u0024"))
     }
+
+    /// The plugin mirrors opencode's native `question` tool into seahelm's
+    /// AskUserQuestion card path, and clears the card when the tool returns.
+    func testPluginForwardsQuestionToolCalls() {
+        let js = OpenCodePluginInstaller.pluginContents()
+        XCTAssertTrue(js.contains("\"tool.execute.before\""))
+        XCTAssertTrue(js.contains("\"tool.execute.after\""))
+        XCTAssertTrue(js.contains("AskUserQuestion"))
+        XCTAssertTrue(js.contains("tool_use_end"))
+        // Multi-select questions can't be answered by a single card tap — the
+        // whole call must be skipped, not a filtered subset forwarded.
+        XCTAssertTrue(js.contains("q.multiple"))
+    }
 }
