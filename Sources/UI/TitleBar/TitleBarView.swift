@@ -22,7 +22,7 @@ protocol TitleBarDelegate: AnyObject {
 
 final class TitleBarView: NSView {
     enum Layout {
-        static let barHeight: CGFloat = 38
+        static let barHeight: CGFloat = 32
         static let capsuleHeight: CGFloat = 24
         static let arcVerticalOffset: CGFloat = 1
         /// Right edge of the dashboard's first (worktree) column — keeps the
@@ -148,14 +148,34 @@ final class TitleBarView: NSView {
         return collapsed.prefix(limit).trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 
+    private var focusedTitle = ""
+    private var focusedPath = ""
+
     func updateFocusedWorktree(title: String, path: String = "", tokenText: String = "\u{2014}") {
-        titleLabel.stringValue = Self.clampTitle(title)
-        titleLabel.toolTip = title
-        // Abbreviate the home directory so the second line stays readable.
-        let display = path.isEmpty ? "" : (path as NSString).abbreviatingWithTildeInPath
-        pathLabel.stringValue = display
-        pathLabel.toolTip = path
-        pathLabel.isHidden = display.isEmpty
+        focusedTitle = Self.clampTitle(title)
+        focusedPath = path
+        recomposeFocusedTitle()
+        titleLabel.toolTip = path.isEmpty ? title : "\(title) — \(path)"
+        // Single-line layout: the path rides at the end of the title line.
+        pathLabel.isHidden = true
+    }
+
+    /// One line: "repo · branch · title" emphasized, then the path muted.
+    /// Rebuilt (not just recolored) on theme change because the colors live in
+    /// the attributed string.
+    private func recomposeFocusedTitle() {
+        let composed = NSMutableAttributedString(
+            string: focusedTitle,
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                         .foregroundColor: SemanticColors.text])
+        if !focusedPath.isEmpty {
+            let display = (focusedPath as NSString).abbreviatingWithTildeInPath
+            composed.append(NSAttributedString(
+                string: "  ·  \(display)",
+                attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .regular),
+                             .foregroundColor: SemanticColors.muted]))
+        }
+        titleLabel.attributedStringValue = composed
     }
 
     // MARK: - Setup
@@ -599,6 +619,7 @@ final class TitleBarView: NSView {
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         titleLabel.textColor = SemanticColors.text
         pathLabel.textColor = SemanticColors.muted
+        recomposeFocusedTitle()
         NSAppearance.current = saved
     }
 

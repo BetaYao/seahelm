@@ -1191,9 +1191,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let path = agent.worktreePath
         let info = ShipLog.shared.sailor(forWorktree: path)
         let branch = info?.branch ?? ""
-        // Title leads with the repo name (emphasized), then the branch.
+        // One line: repo · branch · worktree title, with the path appended
+        // (muted) by the title bar itself.
         let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 } ?? (path as NSString).lastPathComponent
-        let title = branch.isEmpty ? repo : "\(repo) · \(branch)"
+        let worktreeTitle = WorktreeTitleResolver.resolve(
+            worktreePath: path,
+            lastUserPrompt: info?.lastUserPrompt ?? "",
+            branch: ""
+        )
+        let title = [repo, branch, worktreeTitle]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
         titleBar.updateFocusedWorktree(title: title, path: path)
     }
 
