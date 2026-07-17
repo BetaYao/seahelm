@@ -138,53 +138,71 @@ extension NotificationHistoryViewController: NSTableViewDataSource {
 
 extension NotificationHistoryViewController: NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let entry = entries[row]
+        let identifier = NSUserInterfaceItemIdentifier("NotificationCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? NotificationCellView
+            ?? {
+                let view = NotificationCellView()
+                view.identifier = identifier
+                return view
+            }()
+        cell.configure(with: entries[row])
+        return cell
+    }
+}
 
-        let cell = NSView()
-        cell.wantsLayer = true
+// MARK: - NotificationCellView
 
-        // Status dot (colored by agent status)
-        let dot = NSView(frame: NSRect(x: 12, y: 20, width: 10, height: 10))
+/// One notification row. Subviews are built once and reconfigured on reuse —
+/// scrolling must not reallocate the cell tree (or a DateFormatter) per row.
+private final class NotificationCellView: NSView {
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private let dot = NSView(frame: NSRect(x: 12, y: 20, width: 10, height: 10))
+    private let timeLabel = NSTextField(labelWithString: "")
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let messageLabel = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 5
-        dot.layer?.backgroundColor = entry.status.color.cgColor
-        cell.addSubview(dot)
+        addSubview(dot)
 
-        // Read indicator
-        if !entry.isRead {
-            dot.layer?.borderWidth = 2
-            dot.layer?.borderColor = Theme.accent.cgColor
-        }
-
-        // Time
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:mm"
-        let timeStr = timeFormatter.string(from: entry.timestamp)
-
-        let timeLabel = NSTextField(labelWithString: timeStr)
         timeLabel.font = AppFont.mono(size: 10, weight: .regular)
         timeLabel.textColor = Theme.textSecondary
         timeLabel.frame = NSRect(x: 30, y: 30, width: 40, height: 14)
-        cell.addSubview(timeLabel)
+        addSubview(timeLabel)
 
-        // Branch + status
-        let target = entry.workspaceName.isEmpty ? entry.branch : "\(entry.workspaceName) / \(entry.branch)"
-        let statusText = "\(target)  \(entry.status.rawValue)"
-        let branchLabel = NSTextField(labelWithString: statusText)
         branchLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         branchLabel.textColor = Theme.textPrimary
         branchLabel.frame = NSRect(x: 76, y: 28, width: 380, height: 18)
         branchLabel.lineBreakMode = .byTruncatingTail
-        cell.addSubview(branchLabel)
+        addSubview(branchLabel)
 
-        // Message
-        let messageLabel = NSTextField(labelWithString: entry.message)
         messageLabel.font = NSFont.systemFont(ofSize: 11)
         messageLabel.textColor = Theme.textSecondary
         messageLabel.frame = NSRect(x: 76, y: 8, width: 380, height: 16)
         messageLabel.lineBreakMode = .byTruncatingTail
-        cell.addSubview(messageLabel)
+        addSubview(messageLabel)
+    }
 
-        return cell
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(with entry: NotificationEntry) {
+        dot.layer?.backgroundColor = entry.status.color.cgColor
+        dot.layer?.borderWidth = entry.isRead ? 0 : 2
+        dot.layer?.borderColor = entry.isRead ? nil : Theme.accent.cgColor
+
+        timeLabel.stringValue = Self.timeFormatter.string(from: entry.timestamp)
+
+        let target = entry.workspaceName.isEmpty ? entry.branch : "\(entry.workspaceName) / \(entry.branch)"
+        branchLabel.stringValue = "\(target)  \(entry.status.rawValue)"
+        messageLabel.stringValue = entry.message
     }
 }
