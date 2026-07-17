@@ -1606,7 +1606,6 @@ extension MainWindowController {
             NSApp.activate(ignoringOtherApps: true)
         }
         model.onOptionTapped = { [weak self] order, optionText in
-            NSLog("[island] option tapped: \(optionText) (order \(order.id))")
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
         model.onMarkAllRead = {

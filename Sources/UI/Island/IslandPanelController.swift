@@ -215,7 +215,6 @@ final class IslandPanelController {
 
     private func handleMouseDown(_ location: NSPoint) {
         guard let rect = visibleContentRect() else { return }
-        islandDebugLog("monitor mouseDown loc=\(location) rect=\(rect) opened=\(model.isOpened) panelFrame=\(panel?.frame ?? .zero)")
         if model.isOpened {
             if rect.contains(location) {
                 // Monitors run before normal dispatch — make the panel key
@@ -268,22 +267,6 @@ final class IslandPanelController {
     }
 }
 
-// MARK: - Debug log
-
-/// Temporary diagnostics for the click-routing bug — appends to
-/// ~/.config/seahelm/island-debug.log.
-func islandDebugLog(_ message: String) {
-    let url = Config.configDir.appendingPathComponent("island-debug.log")
-    let line = "\(Date()) \(message)\n"
-    if let handle = try? FileHandle(forWritingTo: url) {
-        handle.seekToEndOfFile()
-        handle.write(line.data(using: .utf8)!)
-        try? handle.close()
-    } else {
-        try? line.data(using: .utf8)!.write(to: url)
-    }
-}
-
 // MARK: - IslandPanel
 
 private final class IslandPanel: NSPanel {
@@ -322,24 +305,15 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
         let local = superview.map { convert(point, from: $0) } ?? point
         let windowPoint = convert(local, to: nil)
         let screenPoint = window.convertPoint(toScreen: windowPoint)
-        guard contentRect.contains(screenPoint) else {
-            islandDebugLog("hitTest MISS point=\(point) local=\(local) screen=\(screenPoint) rect=\(contentRect) flippedSuper=\(superview?.isFlipped ?? false)")
-            return nil
-        }
-        let hit = super.hitTest(point)
-        islandDebugLog("hitTest HIT screen=\(screenPoint) rect=\(contentRect) superHit=\(hit.map { String(describing: type(of: $0)) } ?? "nil")")
-        return hit ?? self
+        guard contentRect.contains(screenPoint) else { return nil }
+        return super.hitTest(point) ?? self
     }
 
     override func mouseDown(with event: NSEvent) {
-        islandDebugLog("hosting mouseDown loc=\(event.locationInWindow) keyWindow=\(window?.isKeyWindow ?? false)")
+        // Non-activating panels aren't key when hover-opened; make key
+        // before SwiftUI sees the click so gestures fire on the first tap.
         window?.makeKey()
         super.mouseDown(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        islandDebugLog("hosting mouseUp loc=\(event.locationInWindow)")
-        super.mouseUp(with: event)
     }
 }
 
