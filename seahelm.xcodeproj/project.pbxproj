@@ -199,6 +199,7 @@
 		9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */; };
 		9F9D60884BFD0AAA1A738DFA /* WorktreeTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */; };
 		9FA0C6130443BF763BA2BE24 /* StopHookResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */; };
+		A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
 		A3C6B5F047EBF420EA393C13 /* TodoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */; };
 		A56AD79B6223CC0089D6B6F6 /* SeahelmUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */; };
@@ -249,6 +250,7 @@
 		C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */; };
 		C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */; };
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
+		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
 		CDE025440DDC3A5CFE827DB1 /* WeChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
@@ -367,6 +369,7 @@
 		20D815BD3789070197196037 /* CodexHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetupTests.swift; sourceTree = "<group>"; };
 		20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmUITestCase.swift; sourceTree = "<group>"; };
 		20E7934A548F91E1E9FB161C /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
+		2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePluginInstallerTests.swift; sourceTree = "<group>"; };
 		22314B62F8F244CAE44DE94D /* UsageSummaryFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryFormatterTests.swift; sourceTree = "<group>"; };
 		2269C1AD32C500F6012CFA2E /* ShipLogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogTests.swift; sourceTree = "<group>"; };
 		22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopHookResponder.swift; sourceTree = "<group>"; };
@@ -615,6 +618,7 @@
 		DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStoreTests.swift; sourceTree = "<group>"; };
 		E02B47C1F399F29F6BDC084B /* ghostty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ghostty.h; sourceTree = "<group>"; };
 		E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
+		E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePluginInstaller.swift; sourceTree = "<group>"; };
 		E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
 		E16FBC8322498A92AB007AAB /* ModalPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPage.swift; sourceTree = "<group>"; };
 		E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinator.swift; sourceTree = "<group>"; };
@@ -708,6 +712,7 @@
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */,
+				E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */,
 				CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */,
 				DC523F46E555168F903DA96E /* PendingWorktreeTransfer.swift */,
 				EF3E143D632D86B7DBBC840E /* PersistedStringMap.swift */,
@@ -1003,6 +1008,7 @@
 				ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */,
 				6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */,
 				C4D0B8A444B60E3445EC7977 /* NotificationManagerTests.swift */,
+				2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */,
 				826B5E1EB796AA82415B329F /* OSC133ParserTests.swift */,
 				376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
@@ -1404,6 +1410,7 @@
 				00F46EEC83808A01C3104099 /* NotificationHistoryTests.swift in Sources */,
 				13005279CEAF281DCBE08040 /* NotificationManagerTests.swift in Sources */,
 				A9484F5D905FF14F920838C0 /* OSC133ParserTests.swift in Sources */,
+				C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */,
 				E7AB85089D6CD9A1AF14B3CF /* OverviewFocusModelTests.swift in Sources */,
 				371A789DDD991B083F733DB8 /* PaneStatusTests.swift in Sources */,
 				B192412250A276B2421D9AEB /* PaneTransferTests.swift in Sources */,
@@ -1591,6 +1598,7 @@
 				D892E79198E0768A6A8959EF /* NotificationHistoryViewController.swift in Sources */,
 				8579DC09CEA0D01A125D5273 /* NotificationManager.swift in Sources */,
 				A607EAC1ECC21293284C5CD4 /* OSC133Parser.swift in Sources */,
+				A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */,
 				132C344775FE1F50E1CD4C2B /* OpenedSurfaceView.swift in Sources */,
 				36A3C27B63B14CBA52BC3A4D /* OverviewFocusModel.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,
