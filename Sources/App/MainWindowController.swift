@@ -113,6 +113,16 @@ class MainWindowController: NSWindowController {
         pub.aggregator = statusAggregator
         NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
         NotificationManager.shared.cooldown = config.notifications.cooldown
+        // Every desktop banner also goes to whatever chat channels are registered,
+        // so a phone hears "agent finished" without seahelm owning a transport or
+        // push certificate. No-op until a channel is registered.
+        NotificationManager.shared.onDeliverExternal = { status, title, subtitle, body in
+            ShipLog.shared.broadcast(
+                "\(status.icon) **\(title)**\n\(subtitle)\n\n\(body)",
+                format: .markdown
+            )
+        }
+        ShipLog.shared.chatCommandRoute = makeChatCommandRoute()
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
         statusAggregator.onActivity = { [weak self] path, date in
@@ -474,6 +484,9 @@ class MainWindowController: NSWindowController {
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
+        dashboard.hasWorkspaces = { [weak self] in
+            !(self?.tabCoordinator.config.workspacePaths.isEmpty ?? true)
+        }
 dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
@@ -648,6 +661,124 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         guard !query.isEmpty else { return pool }
         return pool.filter { $0.name.lowercased().contains(query) }
+    }
+
+    /// Routes a chat message through the cockpit's own verbs, so the phone and the
+    /// desktop share one command language.
+    ///
+    /// Deliberately not the cockpit's `BridgeCommandRouter` wiring: those handlers
+    /// open file panels and raise confirmation sheets. A phone can neither see nor
+    /// answer a sheet, so routing chat through them would park a dialog on the
+    /// desktop and read as a hang. These execute and report back in the reply.
+    ///
+    /// Returns false for verbs it doesn't own, so ShipLog's chat-only ones still run.
+    private func makeChatCommandRoute() -> (String, @escaping (String) -> Void) -> Bool {
+        { [weak self] text, reply in
+            guard let self else { return false }
+
+            // Bare prose steers the worktree you last worked in. NOT the cockpit's
+            // meaning (create a worktree and staff it) — see ShipLog.handleInbound.
+            guard text.hasPrefix("/") else {
+                guard let path = self.dashboardVC?.lastCommittedWorktreePath,
+                      let sailor = ShipLog.shared.sailor(forWorktree: path) else { return false }
+                ShipLog.shared.sendCommand(to: sailor.id, command: text)
+                reply("→ **\(sailor.project)** [\(sailor.branch)]")
+                return true
+            }
+
+            // `force` suffix is chat-only: on the desktop the sheet asks instead.
+            var body = text
+            var force = false
+            if body.hasSuffix(" force") {
+                body = String(body.dropLast(" force".count))
+                force = true
+            }
+
+            let worktrees = self.tabCoordinator.allWorktrees.map {
+                WorktreeRef(branch: $0.info.branch, path: $0.info.path)
+            }
+            switch BridgeCommandParser.parse(body, worktrees: worktrees,
+                                             repoPaths: self.tabCoordinator.config.workspacePaths) {
+            case .failure(.unknownCommand):
+                return false   // not ours — let /status, /list, /idea try
+            case .failure(let err):
+                reply(Self.describeChatError(err))
+                return true
+            case .success(let cmd):
+                self.routeChatCommand(cmd, force: force, reply: reply)
+                return true
+            }
+        }
+    }
+
+    private static func describeChatError(_ err: BridgeCommandError) -> String {
+        switch err {
+        case .emptyTask:              return "Nothing to do — add a task."
+        case .unknownCommand(let c):  return "Unknown command: `\(c)`"
+        case .unknownBranch(let b):   return "No worktree on branch `\(b)`"
+        case .unknownTarget(let t):   return "No worktree or repo named `\(t)`"
+        case .missingArgument(let a): return "`\(a)` needs an argument."
+        }
+    }
+
+    private func routeChatCommand(_ cmd: BridgeCommand, force: Bool, reply: @escaping (String) -> Void) {
+        switch cmd {
+        case .newWorktree(let task, let repoHint):
+            let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
+            guard !repoPath.isEmpty else { reply("No repo configured."); return }
+            performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
+            reply("Starting **\(URL(fileURLWithPath: repoPath).lastPathComponent)** — \(task)")
+
+        case .orderExisting(let path, let task):
+            guard let s = ShipLog.shared.sailor(forWorktree: path) else { reply("No agent there."); return }
+            ShipLog.shared.sendCommand(to: s.id, command: task)
+            reply("→ **\(s.project)** [\(s.branch)]")
+
+        case .commit(let path):
+            guard let s = ShipLog.shared.sailor(forWorktree: path) else { reply("No agent there."); return }
+            ShipLog.shared.sendCommand(to: s.id, command: "git add -A && git commit -m 'wip'")
+            reply("Committing **\(s.project)** [\(s.branch)]")
+
+        case .broadcast(let task):
+            let all = ShipLog.shared.allSailors()
+            guard !all.isEmpty else { reply("No agents running."); return }
+            for s in all { ShipLog.shared.sendCommand(to: s.id, command: task) }
+            reply("Sent to \(all.count) agent\(all.count == 1 ? "" : "s").")
+
+        case .addRepo:
+            reply("`/add` is desktop only — it needs a file picker.")
+
+        case .removeAll:
+            // Cards, exactly as on the desktop. A blind sweep is the one place
+            // direct execution could delete several worktrees from one stray line.
+            let targets = tabCoordinator.allWorktrees.map(\.info).filter { !$0.isMainWorktree }
+            for info in targets { enqueueReturnCard(forPath: info.path) }
+            reply("Reviewing \(targets.count) worktree\(targets.count == 1 ? "" : "s") — approve on the desktop.")
+
+        case .removeRepo(let path):
+            // lastPathComponent is what the parser matched to resolve `path`, so it
+            // is also the tab's displayName. Executed rather than confirmed: this
+            // only kills sessions and leaves every worktree on disk, so nothing
+            // unrecoverable rides on it.
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            tabCoordinator.performCloseRepo(projectName: name)
+            reply("Dropped **\(name)**. Its worktrees are still on disk.")
+
+        case .removeWorktree(let path):
+            let branch = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info.branch ?? ""
+            if ShipLog.shared.sailor(forWorktree: path)?.status == .running {
+                reply("**\(branch)** has an agent running — leaving it alone.")
+                return
+            }
+            // The desktop's sheet exists to stop uncommitted work being lost, not
+            // as ceremony. Chat keeps that guard and moves it into the reply.
+            if !force, WorktreeDeleter.hasUncommittedChanges(worktreePath: path) {
+                reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
+                return
+            }
+            terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
+            reply("Deleted **\(branch)**.")
+        }
     }
 
     private func makeBridgeRouter() -> BridgeCommandRouter {

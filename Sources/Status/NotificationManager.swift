@@ -286,6 +286,20 @@ class NotificationManager: NSObject {
         return String(body.prefix(maxBodyLength - 3)) + "..."
     }
 
+    /// Mirrors a delivered banner out to the registered chat channels (WeCom /
+    /// WeChat), so a phone learns an agent finished without seahelm having to own
+    /// a transport, a relay, or push certificates — the IM app already has all
+    /// three.
+    ///
+    /// Hung off `deliver` rather than off ShipLog's ingest so the chat message
+    /// inherits this type's gating: the running → done edge, the per-key
+    /// cooldown, and the stability delay that swallows an idle flicker mid-turn.
+    /// The ShipLog broadcast this replaced had none of those, and never fired on
+    /// completion at all.
+    ///
+    /// Set by MainWindowController; nil in tests and headless runs.
+    var onDeliverExternal: ((_ status: SailorStatus, _ title: String, _ subtitle: String, _ body: String) -> Void)?
+
     static func formatSystemTitle(status: SailorStatus) -> String {
         switch status {
         case .idle:
@@ -450,6 +464,12 @@ class NotificationManager: NSObject {
         // Suppress the system banner only when the user can already see this
         // target (frontmost AND the worktree is on screen).
         if isTargetVisible && NSApp.isActive { return }
+
+        // Mirror the banner, not the history entry: this fires on exactly the
+        // edges that earn a banner, and is skipped by the return above when the
+        // user is already looking at the pane — a phone ping for something on
+        // screen in front of them is noise.
+        onDeliverExternal?(newStatus, content.title, content.subtitle, content.body)
 
         var userInfo: [String: Any] = ["worktreePath": worktreePath]
         if let historyPaneIndex { userInfo["paneIndex"] = historyPaneIndex }

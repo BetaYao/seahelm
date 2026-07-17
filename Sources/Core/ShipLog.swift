@@ -337,14 +337,13 @@ class ShipLog {
             hold = now.timeIntervalSince(entered)
             statusEnteredAt[event.terminalID] = now
         }
-        let hasExternalChannels = !externalChannels.isEmpty
         lock.unlock()
 
         let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
                                     oldStatus: oldStatus, newStatus: newStatus,
                                     holdSeconds: hold, isCompletionSignal: isCompletion,
                                     event: event, seq: seq)
-        notifyObservers(outcome, hasExternalChannels: hasExternalChannels)
+        notifyObservers(outcome)
     }
 
     /// Shape an ingest outcome into a control-API event dict for EventHub.
@@ -363,18 +362,19 @@ class ShipLog {
     }
 
     /// All observer delivery hops to main for ordering. Subscribers never run on the scan queue.
-    private func notifyObservers(_ outcome: IngestOutcome, hasExternalChannels: Bool) {
+    ///
+    /// Chat-channel fan-out deliberately does NOT happen here. It used to, gated
+    /// on `statusChanged && (waiting || error)` — which never fired on completion
+    /// (the thing you most want to hear about from your phone) and had none of
+    /// NotificationManager's edge/cooldown/stability gating, so it re-sent on
+    /// every flicker. It now hangs off that type's delivery instead, which makes
+    /// the phone a mirror of the desktop banner. See `onDeliverExternal`.
+    private func notifyObservers(_ outcome: IngestOutcome) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.delegate?.agentDidUpdate(outcome.info)
             self.onOutcome?(outcome)
             EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
-            if hasExternalChannels && outcome.statusChanged
-                && (outcome.newStatus == .waiting || outcome.newStatus == .error) {
-                let i = outcome.info
-                self.broadcast("[\(i.project)] \(outcome.newStatus.icon) \(outcome.newStatus.rawValue): \(i.lastMessage)",
-                               format: .markdown)
-            }
         }
     }
 
@@ -812,7 +812,43 @@ class ShipLog {
     /// Process an inbound message from an external channel.
     /// Phase 1: slash command routing.
     /// Phase 2 (future): LLM intent understanding.
+    /// Routes chat text through the cockpit's own command language, so a phone
+    /// and the desktop speak the same verbs instead of the two divergent sets
+    /// that used to exist (`/send` here vs `/order` there, and so on).
+    ///
+    /// Injected by MainWindowController because routing needs the worktree list
+    /// and the repo paths, which live up there — ShipLog stays free of UI. Returns
+    /// false for a verb it doesn't own, leaving the chat-only verbs below (`/status`,
+    /// `/list`, `/idea`) to handle it: those have no cockpit equivalent because on
+    /// the desktop you just look at the dashboard.
+    ///
+    /// Nil in tests and headless runs, where only the chat-only verbs answer.
+    var chatCommandRoute: ((_ text: String, _ reply: @escaping (String) -> Void) -> Bool)?
+
     func handleInbound(_ message: InboundMessage) {
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        // Bare prose steers the worktree you last worked in — the phone equivalent
+        // of typing into its pane. It deliberately does NOT mean what it means in
+        // the desktop cockpit (create a worktree and staff it): a stray line in a
+        // group chat must not spawn worktrees.
+        if !text.hasPrefix("/") {
+            let handled = chatCommandRoute?(text) { [weak self] r in
+                self?.reply(to: message, content: r, format: .markdown)
+            } ?? false
+            if !handled {
+                reply(to: message, content: "No agent to steer. Use `/new <task>` to start one.")
+            }
+            return
+        }
+
+        if chatCommandRoute?(text, { [weak self] r in
+            self?.reply(to: message, content: r, format: .markdown)
+        }) == true {
+            return
+        }
+
         if let cmd = CommandParser.parse(message) {
             executeCommand(cmd)
         } else {
@@ -823,15 +859,27 @@ class ShipLog {
     private func executeCommand(_ cmd: ParsedCommand) {
         switch cmd.command {
         case "help":
+            // The cockpit verbs come first because they are the shared language;
+            // the rest are chat-only (the desktop reads them off the dashboard).
             let help = """
             **Seahelm Commands**
-            `/idea <description>` — Add a new idea
-            `/status` — Show status of all agents
+
+            _Same as the desktop cockpit:_
+            `<anything>` — Steer the worktree you last worked in
+            `/new <task>` — Start a worktree and staff it
+            `/order @branch <task>` — Send a task to that worktree's agent
+            `/commit @branch` — Commit that worktree
+            `/broadcast <task>` — Send a task to every agent
+            `/remove [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
+            `/add` — Desktop only (needs a file picker)
+
+            _Chat only:_
+            `/status` — Status of all agents
             `/list` — List all agents
-            `/send <project> <command>` — Send a command to an agent
-            `/help` — Show this help
+            `/idea <description>` — Capture an idea
+            `/help` — This help
             """
-            reply(to: cmd.rawMessage, content: help)
+            reply(to: cmd.rawMessage, content: help, format: .markdown)
 
         case "idea":
             guard !cmd.args.isEmpty else {
