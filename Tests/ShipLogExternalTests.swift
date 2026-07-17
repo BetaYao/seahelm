@@ -86,13 +86,16 @@ final class ShipLogExternalTests: XCTestCase {
         XCTAssertTrue(ch.sentMessages[0].content.contains("No agent"))
     }
 
-    func testListCommandNoSailors() {
+    /// `/list` became `/agents`, which `chatCommandRoute` owns because it marks
+    /// and moves the current selection. With no route injected (as here and in
+    /// any headless run), both verbs fall through to the unknown-command reply.
+    func testListVerbIsGone() {
         let ch = MockExternalChannel()
         ShipLog.shared.registerChannel(ch)
         ShipLog.shared.handleInbound(makeMessage(content: "/list"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("No agent"))
+        XCTAssertTrue(ch.sentMessages[0].content.contains("Unknown command"))
     }
 
     func testIdeaCommand() {

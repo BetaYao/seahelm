@@ -703,6 +703,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 return true
             }
 
+            if self.routeChatSelection(text, reply: reply) { return true }
+
             // `force` suffix is chat-only: on the desktop the sheet asks instead.
             var body = text
             var force = false
@@ -726,6 +728,56 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 return true
             }
         }
+    }
+
+    /// Handle `/repo`, `/worktrees`, `/agents`. Returns false for other verbs.
+    private func routeChatSelection(_ text: String, reply: @escaping (String) -> Void) -> Bool {
+        let worktrees = tabCoordinator.allWorktrees.map {
+            WorktreeRef(branch: $0.info.branch, path: $0.info.path)
+        }
+        let sailors = ShipLog.shared.allSailors()
+        let agents = sailors.map {
+            AgentRef(id: $0.id, project: $0.project, branch: $0.branch, status: $0.status.rawValue)
+        }
+
+        guard let result = ChatSelectionParser.parse(text, worktrees: worktrees, agents: agents) else {
+            return false
+        }
+
+        let currentPath = dashboardVC?.lastCommittedWorktreePath
+        let currentAgentId = currentPath.flatMap { ShipLog.shared.sailor(forWorktree: $0)?.id }
+
+        switch result {
+        case .failure(let err):
+            reply(Self.describeChatError(err))
+
+        case .success(.listRepos):
+            reply(ChatSelectionFormatter.repoList(tabCoordinator.config.workspacePaths))
+
+        case .success(.listWorktrees):
+            reply(ChatSelectionFormatter.worktreeList(worktrees, currentPath: currentPath))
+
+        case .success(.listAgents):
+            reply(ChatSelectionFormatter.agentList(agents, currentId: currentAgentId))
+
+        case .success(.selectWorktree(let path)):
+            dashboardVC?.commitWorktreeSelection(path: path)
+            let branch = worktrees.first { $0.path == path }?.branch ?? path
+            if let sailor = ShipLog.shared.sailor(forWorktree: path) {
+                reply("Now steering **\(sailor.project)** [\(branch)]")
+            } else {
+                reply("Switched to [\(branch)] — no agent there yet. `/new <task>` to staff it.")
+            }
+
+        case .success(.selectAgent(let id)):
+            guard let sailor = sailors.first(where: { $0.id == id }) else {
+                reply("That agent is gone. `/agents` to see what's left.")
+                return true
+            }
+            dashboardVC?.commitWorktreeSelection(path: sailor.worktreePath)
+            reply("Now steering **\(sailor.project)** [\(sailor.branch)]")
+        }
+        return true
     }
 
     private static func describeChatError(_ err: BridgeCommandError) -> String {

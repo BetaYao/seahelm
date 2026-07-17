@@ -397,6 +397,19 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         activeSplitWorktreePath = nil
     }
 
+    /// Point "current" at `path` from outside the UI — a chat command doing what
+    /// committing a selection on the desktop does, so both sides agree on which
+    /// worktree bare prose steers.
+    ///
+    /// The worktree need not be staffed: the cursor still moves, and the caller
+    /// tells the user there is no agent to talk to yet.
+    func commitWorktreeSelection(path: String) {
+        lastCommittedWorktreePath = path
+        guard agents.contains(where: { $0.worktreePath == path }) else { return }
+        selectSailor(byWorktreePath: path, focusTerminal: false)
+        overviewSelectedId = selectedSailorId
+    }
+
     func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
         selectedSailorId = agent.id

@@ -2,9 +2,9 @@ import Foundation
 
 /// Ensures Codex CLI is configured to forward hook events into seahelm.
 /// Codex hooks are command-based; we install a command hook that pipes the
-/// stdin JSON to the seahelm-hook bridge (control socket, HTTP fallback). Its
-/// stdout is discarded so Codex keeps its current report-only behavior (no Stop
-/// blocking), matching the previous inline-curl hook.
+/// stdin JSON to the seahelm-hook bridge, and lets the bridge's stdout back
+/// through so a Stop-hook block decision reaches Codex — the same reverse
+/// trigger that drives suggestions under Claude.
 enum CodexHooksSetup {
 
     private static let requiredEvents = [
@@ -15,8 +15,19 @@ enum CodexHooksSetup {
         "Stop",
     ]
 
+    /// `2>/dev/null`, not `>/dev/null 2>&1`.
+    ///
+    /// Codex's hook wire is field-for-field Claude's: `stop.command.input` carries
+    /// `hook_event_name: "Stop"`, `stop_hook_active` and `last_assistant_message`,
+    /// and `stop.command.output` accepts `{"decision":"block","reason":…}` —
+    /// codex-cli's own schema annotates `reason` with "Claude requires `reason`
+    /// when `decision` is `block`". So the bridge already emits a valid Codex
+    /// response; suggestions never fired only because this wrapper threw it away.
+    ///
+    /// stderr stays discarded, and separately: merging it into stdout (`2>&1`)
+    /// would splice diagnostics into the JSON Codex parses.
     private static func hookCommand() -> String {
-        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) >/dev/null 2>&1 || true'"
+        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) 2>/dev/null || true'"
     }
 
     private static func hookConfig() -> [[String: Any]] {

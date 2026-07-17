@@ -819,13 +819,21 @@ class ShipLog {
     /// Injected by MainWindowController because routing needs the worktree list
     /// and the repo paths, which live up there — ShipLog stays free of UI. Returns
     /// false for a verb it doesn't own, leaving the chat-only verbs below (`/status`,
-    /// `/list`, `/idea`) to handle it: those have no cockpit equivalent because on
-    /// the desktop you just look at the dashboard.
+    /// `/idea`) to handle it: those have no cockpit equivalent because on the
+    /// desktop you just look at the dashboard.
     ///
     /// Nil in tests and headless runs, where only the chat-only verbs answer.
     var chatCommandRoute: ((_ text: String, _ reply: @escaping (String) -> Void) -> Bool)?
 
     func handleInbound(_ message: InboundMessage) {
+        // Channels deliver from their own poll threads, and `chatCommandRoute`
+        // reads the dashboard's selection and moves it. Hop to main before any
+        // of that touches AppKit.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.handleInbound(message) }
+            return
+        }
+
         let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -865,7 +873,7 @@ class ShipLog {
             **Seahelm Commands**
 
             _Same as the desktop cockpit:_
-            `<anything>` — Steer the worktree you last worked in
+            `<anything>` — Steer the current agent (`/agents` to change it)
             `/new <task>` — Start a worktree and staff it
             `/order @branch <task>` — Send a task to that worktree's agent
             `/commit @branch` — Commit that worktree
@@ -874,8 +882,10 @@ class ShipLog {
             `/add` — Desktop only (needs a file picker)
 
             _Chat only:_
+            `/repo` — List repos
+            `/worktrees [code|name]` — List worktrees, or steer one
+            `/agents [code|name]` — List agents, or steer one
             `/status` — Status of all agents
-            `/list` — List all agents
             `/idea <description>` — Capture an idea
             `/help` — This help
             """
@@ -903,18 +913,6 @@ class ShipLog {
             var lines = ["**Agent Status**", ""]
             for a in agents {
                 lines.append("\(a.status.icon) **\(a.project)** [\(a.branch)] — \(a.status.rawValue): \(a.lastMessage)")
-            }
-            reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
-
-        case "list":
-            let agents = allSailors()
-            if agents.isEmpty {
-                reply(to: cmd.rawMessage, content: "No agents registered.")
-                return
-            }
-            var lines = ["**Agents**", ""]
-            for a in agents {
-                lines.append("- \(a.project) / \(a.branch) — \(a.status.rawValue)")
             }
             reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
 

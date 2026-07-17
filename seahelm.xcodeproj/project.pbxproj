@@ -236,10 +236,12 @@
 		BCEFB12FC9264290C08C5D51 /* ShellEscapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36FC6278CE9A15F68E6FAE89 /* ShellEscapeTests.swift */; };
 		BE5BDE49F57C10D9024D8379 /* SplitNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B64B6D9AE47DFBCFCF626885 /* SplitNodeTests.swift */; };
 		C0F42D1E677166C1F4CE3642 /* ShipLogIngestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E39B8D0CAEA529E6BA78F29 /* ShipLogIngestTests.swift */; };
+		C1EC56E616C472022CE0D918 /* ChatSelectionCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF3FB7A99491BDC5D52207BB /* ChatSelectionCommand.swift */; };
 		C309311CA5316E705F68CA77 /* ReturnToPortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B4CB5436AAB9C042D5AF800 /* ReturnToPortTests.swift */; };
 		C3E90FF67663F4290485E940 /* FileSystemProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6E8352A4B0C1AE47D7B49A /* FileSystemProbe.swift */; };
 		C444DD64D874C76934185DD6 /* WorktreeStatusAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 517E6B353B84EA6AE224E0C1 /* WorktreeStatusAggregatorTests.swift */; };
 		C44DA54E0C66DC612DB80D80 /* StatusBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79FF4E0C39BAB48A48179246 /* StatusBarPage.swift */; };
+		C59AE72B247A0D00E5AF2C6A /* ChatSelectionCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9608230E6FC410BD356F9B2C /* ChatSelectionCommandTests.swift */; };
 		C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */; };
 		C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */; };
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
@@ -505,6 +507,7 @@
 		91B01EC1A480FF0E73B1EDC9 /* WeChatSessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatSessionStoreTests.swift; sourceTree = "<group>"; };
 		9254F14A8829CCB39D04E456 /* LeaderMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderMenu.swift; sourceTree = "<group>"; };
 		95C6B4297D134649B185BC65 /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
+		9608230E6FC410BD356F9B2C /* ChatSelectionCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSelectionCommandTests.swift; sourceTree = "<group>"; };
 		968213FDE4B08CF2A98DB961 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		977EBF9499499F3C4E6C2891 /* ShipLogWebhookPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogWebhookPathTests.swift; sourceTree = "<group>"; };
 		97A7E8E322E5A353D4457DBC /* HooksChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HooksChannel.swift; sourceTree = "<group>"; };
@@ -602,6 +605,7 @@
 		DCE458A11E72A34C3556092F /* TerminalCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinatorTests.swift; sourceTree = "<group>"; };
 		DE6B0C9F2013F74108B7422B /* BridgeCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommand.swift; sourceTree = "<group>"; };
 		DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStoreTests.swift; sourceTree = "<group>"; };
+		DF3FB7A99491BDC5D52207BB /* ChatSelectionCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSelectionCommand.swift; sourceTree = "<group>"; };
 		E02B47C1F399F29F6BDC084B /* ghostty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ghostty.h; sourceTree = "<group>"; };
 		E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
 		E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
@@ -676,6 +680,7 @@
 				E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */,
 				DE6B0C9F2013F74108B7422B /* BridgeCommand.swift */,
 				2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */,
+				DF3FB7A99491BDC5D52207BB /* ChatSelectionCommand.swift */,
 				2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */,
 				26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */,
 				A51B009382FE3586E735355D /* CodexHooksSetup.swift */,
@@ -944,6 +949,7 @@
 				32ED7C4B1150BC7F4AA25A2D /* BridgeCardModelTests.swift */,
 				7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */,
 				446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */,
+				9608230E6FC410BD356F9B2C /* ChatSelectionCommandTests.swift */,
 				5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */,
 				72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */,
 				ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */,
@@ -1343,6 +1349,7 @@
 				E3EA4BC258F52D65EFBCC1DE /* BridgeCardModelTests.swift in Sources */,
 				EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */,
 				A90FADB8FDAA218DAEA7D694 /* BridgeCommandRouterTests.swift in Sources */,
+				C59AE72B247A0D00E5AF2C6A /* ChatSelectionCommandTests.swift in Sources */,
 				9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */,
 				6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */,
 				6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */,
@@ -1499,6 +1506,7 @@
 				4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */,
 				E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */,
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
+				C1EC56E616C472022CE0D918 /* ChatSelectionCommand.swift in Sources */,
 				72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */,
 				D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */,
 				0DA6D2D48F320DFB8671C67C /* ClaudeStatuslineBridgeInstaller.swift in Sources */,
@@ -1698,6 +1706,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.app;
+				PRODUCT_MODULE_NAME = seahelm;
 				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
@@ -1718,7 +1727,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/seahelm.app/Contents/MacOS/seahelm";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Seahelm.app/Contents/MacOS/Seahelm";
 			};
 			name = Release;
 		};
@@ -1752,7 +1761,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/seahelm.app/Contents/MacOS/seahelm";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Seahelm.app/Contents/MacOS/Seahelm";
 			};
 			name = Debug;
 		};
@@ -1928,6 +1937,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.app;
+				PRODUCT_MODULE_NAME = seahelm;
 				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
