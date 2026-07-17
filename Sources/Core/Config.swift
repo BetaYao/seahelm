@@ -127,6 +127,10 @@ struct Config: Codable {
     }
 
     static func load() -> Config {
+        // Pretend a fresh install: no repos to restore means no stations, and so
+        // no `zmx attach` into sessions the live app is already driving.
+        if DebugFlags.forceEmptyState { return Config() }
+
         migrateLegacyConfigDirIfNeeded()
         // Support UI test config override via launch argument
         if let idx = CommandLine.arguments.firstIndex(of: "-UITestConfig"),

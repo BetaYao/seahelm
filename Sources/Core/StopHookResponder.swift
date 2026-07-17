@@ -2,11 +2,27 @@ import Foundation
 
 /// Pure decision for the Stop hook reverse-trigger.
 /// Returns a JSON body to force the agent to emit suggestions, or nil to let it stop.
-/// The block reason tells the agent to call the existing `seahelm-suggest` shell tool.
+/// The block reason tells the agent to run the installed `seahelm-suggest` script.
 enum StopHookResponder {
-    static let reason = "Before ending this turn, call `seahelm-suggest 'option one' 'option two'` "
-        + "with 2-5 short imperative next-step options for the user. "
-        + "Do NOT print them as text — the user sees them as clickable buttons."
+    /// Names the script by absolute path, and says "run … via Bash".
+    ///
+    /// Both halves were bugs on a fresh install. The bare name only resolved on
+    /// machines whose shell profile had added `~/.local/bin` — the installers put
+    /// the CLIs there, but nothing puts it on PATH, so every agent on a clean
+    /// machine was told to call a command it could not find. The hook itself never
+    /// had this problem because it is registered by absolute path
+    /// (`ClaudeHooksSetup`, `CodexHooksSetup`); only the instruction it hands the
+    /// agent was left to guess.
+    ///
+    /// "call `x`" also reads to an agent as the name of a *tool*: they search their
+    /// toolset, find nothing, and report the tool missing rather than reaching for
+    /// a shell. Naming Bash outright removes the ambiguity.
+    static var reason: String {
+        "Before ending this turn, run `\(SeahelmSuggestInstaller.scriptPath()) 'option one' 'option two'` "
+            + "via Bash, with 2-5 short imperative next-step options for the user. "
+            + "It is a shell script, not a tool. "
+            + "Do NOT print them as text — the user sees them as clickable buttons."
+    }
 
     static func blockBody(for event: WebhookEvent, suggestOnStop: Bool) -> String? {
         guard suggestOnStop else { return nil }

@@ -41,8 +41,6 @@ class SettingsViewController: NSViewController {
     private let wechatAutoConnectCheckbox = NSButton()
 
     /// Edited copy of the WeChat binding; committed to `config` on save.
-    /// Carries `syncBuf`/`contextTokens` through so saving does not drop the
-    /// long-poll cursor or the context tokens replies depend on.
     private var wechatDraft: WeChatConfig?
     private var wechatLoginService: WeChatLoginService?
 
@@ -485,6 +483,11 @@ class SettingsViewController: NSViewController {
     }
 
     @objc private func wechatUnbindClicked() {
+        // Drop the resume state too — leaving it behind would hand a stale cursor
+        // to whoever binds this account next.
+        if let accountId = wechatDraft?.accountId {
+            WeChatSessionStore.clear(accountId: accountId)
+        }
         wechatDraft = nil
         refreshWeChatBindingUI()
     }
@@ -519,8 +522,8 @@ class SettingsViewController: NSViewController {
 
         case .succeeded(let result):
             wechatLoginService = nil
-            // A fresh binding: the old cursor and context tokens belong to the
-            // previous account, so start clean rather than carrying them over.
+            // Resume state is keyed by account in WeChatSessionStore, so rebinding
+            // the same account keeps its cursor and a new one starts clean.
             wechatDraft = WeChatConfig(
                 botToken: result.botToken,
                 accountId: result.accountId,
@@ -640,8 +643,7 @@ class SettingsViewController: NSViewController {
             config.wecomBot = nil
         }
 
-        // WeChat config — mutate the draft in place so the long-poll cursor and
-        // cached context tokens survive a save.
+        // WeChat config
         if var wechat = wechatDraft, !wechat.botToken.isEmpty {
             wechat.autoConnect = wechatAutoConnectCheckbox.state == .on
             config.wechat = wechat

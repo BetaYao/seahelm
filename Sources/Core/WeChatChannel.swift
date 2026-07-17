@@ -30,11 +30,17 @@ class WeChatChannel: ExternalChannel {
     /// poll loop has stopped by then — only a fresh QR bind can revive it.
     var onAuthExpired: (() -> Void)?
 
+    /// Key for the persisted long-poll state.
+    private let stateAccountId: String
+
     init(config: WeChatConfig, channelId: String? = nil) {
         self.config = config
+        self.stateAccountId = config.accountId ?? "default"
         self.channelId = channelId ?? "wechat-\(config.accountId ?? "default")"
-        self.syncBuf = config.syncBuf ?? ""
-        self.contextTokens = config.contextTokens ?? [:]
+
+        let state = WeChatSessionStore.load(accountId: stateAccountId)
+        self.syncBuf = state.syncBuf
+        self.contextTokens = state.contextTokens
 
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = Self.longPollTimeoutSec + 5
@@ -140,8 +146,9 @@ class WeChatChannel: ExternalChannel {
 
             consecutiveFailures = 0
 
-            if let buf = response.getUpdatesBuf {
+            if let buf = response.getUpdatesBuf, buf != syncBuf {
                 syncBuf = buf
+                persistSessionState()
             }
 
             for msg in response.userMessages {
@@ -243,8 +250,10 @@ class WeChatChannel: ExternalChannel {
         // Cache context token
         if let ct = msg.contextToken, !ct.isEmpty {
             lock.lock()
+            let changed = contextTokens[msg.senderId] != ct
             contextTokens[msg.senderId] = ct
             lock.unlock()
+            if changed { persistSessionState() }
         }
 
         let inbound = InboundMessage(
@@ -272,6 +281,14 @@ class WeChatChannel: ExternalChannel {
         if !config.botToken.isEmpty {
             request.setValue("Bearer \(config.botToken)", forHTTPHeaderField: "Authorization")
         }
+    }
+
+    /// Snapshot the resume state to disk. Writes are debounced by the store.
+    private func persistSessionState() {
+        lock.lock()
+        let state = WeChatSessionState(syncBuf: syncBuf, contextTokens: contextTokens)
+        lock.unlock()
+        WeChatSessionStore.save(state, accountId: stateAccountId)
     }
 
     private func randomWeChatUin() -> String {

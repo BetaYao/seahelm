@@ -61,7 +61,11 @@ targets:
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.app
-        PRODUCT_NAME: seahelm
+        # Drives the bundle name, the executable, and CFBundleName — i.e. what the
+        # menu bar, About box and Finder all call the app. The target/scheme stay
+        # lowercase so seahelm.xcodeproj and every documented build command keep
+        # working; only the product users see is capitalised.
+        PRODUCT_NAME: Seahelm
         INFOPLIST_FILE: ""
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -44,8 +44,11 @@ if [[ -n "$RELEASE_VERSION" ]]; then
   VERSION_ARGS+=("MARKETING_VERSION=$MARKETING_VERSION")
 fi
 
-APP_NAME="seahelm"
-ARTIFACT_NAME="${APP_NAME}-macos-${ARCH}.zip"
+# The bundle is capitalised (PRODUCT_NAME) because it is what users read; the
+# release assets stay lowercase so existing download URLs and the workflow's
+# hardcoded dist/ paths keep resolving. Two names, deliberately.
+APP_NAME="Seahelm"
+ARTIFACT_NAME="seahelm-macos-${ARCH}.zip"
 ARCHIVE_ROOT="$BUILD_DIR/$ARCH"
 PRODUCTS_DIR="$ARCHIVE_ROOT/Build/Products/$CONFIGURATION"
 APP_PATH="$PRODUCTS_DIR/$APP_NAME.app"

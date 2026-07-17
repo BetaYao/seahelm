@@ -16,6 +16,25 @@ final class StopHookResponderTests: XCTestCase {
         XCTAssertTrue(body!.contains("seahelm-suggest"))
     }
 
+    /// Regression: the reason named `seahelm-suggest` bare. The installers write the
+    /// CLIs to ~/.local/bin but nothing puts that on PATH — not seahelm (panes get
+    /// SEAHELM_ENV/SEAHELM_SOCKET_PATH and nothing more), not macOS by default — so
+    /// on a clean install every agent was told to run a command it could not find.
+    /// It only ever worked on machines whose shell profile had added the directory.
+    func testBlockBodyNamesTheScriptByAbsolutePath() {
+        let path = SeahelmSuggestInstaller.scriptPath()
+        XCTAssertTrue(path.hasPrefix("/"), "installer path must be absolute: \(path)")
+
+        let body = StopHookResponder.blockBody(for: stop(active: false), suggestOnStop: true)
+        XCTAssertNotNil(body)
+        XCTAssertTrue(body!.contains(path),
+                      "block reason must carry the absolute script path, not a bare name: \(body!)")
+        // A bare invocation must not survive: `run \`seahelm-suggest '...'\`` is
+        // exactly what a shell can't resolve without PATH.
+        XCTAssertFalse(body!.contains("`seahelm-suggest "),
+                       "block reason still invokes the bare name: \(body!)")
+    }
+
     func testSecondStopDoesNotBlock() {
         XCTAssertNil(StopHookResponder.blockBody(for: stop(active: true), suggestOnStop: true))
     }

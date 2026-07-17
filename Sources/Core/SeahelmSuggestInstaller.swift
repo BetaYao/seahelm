@@ -42,6 +42,19 @@ enum SeahelmSuggestInstaller {
     }
 
     @discardableResult
+    /// Absolute path to the installed script.
+    ///
+    /// Callers must use this rather than the bare name: nothing guarantees
+    /// `~/.local/bin` is on PATH. seahelm gives panes only `SEAHELM_ENV` and
+    /// `SEAHELM_SOCKET_PATH`, and macOS does not put `~/.local/bin` on PATH by
+    /// default — so a bare `seahelm-suggest` resolves only on machines whose shell
+    /// profile happens to add it. `SeahelmHookInstaller.scriptPath()` exists for
+    /// the same reason.
+    static func scriptPath() -> String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/seahelm-suggest").path
+    }
+
     static func ensureInstalled() -> Bool {
         let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
         return ensureInstalled(binDirectory: bin)

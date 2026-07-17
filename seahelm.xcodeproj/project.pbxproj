@@ -187,6 +187,7 @@
 		9BC46FE4C86C7A21C60F8F65 /* SailorReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */; };
 		9C55DE7AD6C3DCE23F18B842 /* PendingOrdersQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */; };
 		9D4C05D0F41DC020F00986BA /* SailorDisplayHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */; };
+		9D63E84CE52C4927520DCCA6 /* WeChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42953163764E0711B1DF5A1D /* WeChatSessionStore.swift */; };
 		9E6B89CACF0F49A0029E3BD1 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = B032E95F9035447EBF27883B /* GitDiff.swift */; };
 		9E70B1DBD63DBC4873DC38EB /* QuickSwitcherViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA513259B19E55E2FB46C9F /* QuickSwitcherViewController.swift */; };
 		9EEDB774BA368ABF037C6750 /* SemVerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64D9CDBF2943FC278A6A09D2 /* SemVerTests.swift */; };
@@ -260,6 +261,7 @@
 		D892E79198E0768A6A8959EF /* NotificationHistoryViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367B1FA3E6F3BC5A0EB975D2 /* NotificationHistoryViewController.swift */; };
 		D8EE8497A1122A2C4ED21DF7 /* SidebarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB04ED00519D831122EF9B8A /* SidebarPage.swift */; };
 		D9E27613FC5F0C4932A8237F /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F0C5FB141D86ECC0B6D8E66 /* Config.swift */; };
+		DA26B379785FF4116F980920 /* WeChatSessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B01EC1A480FF0E73B1EDC9 /* WeChatSessionStoreTests.swift */; };
 		DA2A0458E60D38BD6F7C9649 /* PendingWorktreeTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC523F46E555168F903DA96E /* PendingWorktreeTransfer.swift */; };
 		DB33750974F8A06871E64915 /* SeahelmCliInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C18BB4B4618D2F5F48B499 /* SeahelmCliInstaller.swift */; };
 		DBC71AE11E16638FD7EE341D /* DashboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEC0119082025691BCED456 /* DashboardViewController.swift */; };
@@ -400,6 +402,7 @@
 		40CAD3E9929AC9E5E32EBA9F /* Station.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Station.swift; sourceTree = "<group>"; };
 		4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteRegressionTests.swift; sourceTree = "<group>"; };
 		424F903BA02536FB4F76731C /* ManifestStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestStore.swift; sourceTree = "<group>"; };
+		42953163764E0711B1DF5A1D /* WeChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatSessionStore.swift; sourceTree = "<group>"; };
 		42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlProtocol.swift; sourceTree = "<group>"; };
 		42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewControllerClickTests.swift; sourceTree = "<group>"; };
 		42F821C1D0FA64C98C0E1E1B /* StatusBarModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarModeTests.swift; sourceTree = "<group>"; };
@@ -499,6 +502,7 @@
 		9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPort.swift; sourceTree = "<group>"; };
 		911314F4B91E512511E3FC21 /* EventHubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventHubTests.swift; sourceTree = "<group>"; };
+		91B01EC1A480FF0E73B1EDC9 /* WeChatSessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatSessionStoreTests.swift; sourceTree = "<group>"; };
 		9254F14A8829CCB39D04E456 /* LeaderMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderMenu.swift; sourceTree = "<group>"; };
 		95C6B4297D134649B185BC65 /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
 		968213FDE4B08CF2A98DB961 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
@@ -719,6 +723,7 @@
 				A49DE692E146DF04DADA3B50 /* WeChatChannel.swift */,
 				A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */,
 				17489E23F295D1C7195B3E66 /* WeChatLoginService.swift */,
+				42953163764E0711B1DF5A1D /* WeChatSessionStore.swift */,
 				D94D0809EF8A568E5C3A80A5 /* WeComBotChannel.swift */,
 				F14E210737A9C8647601B46F /* WeComBotConfig.swift */,
 				401A403F90AAF10933AC1869 /* WeComFrameParser.swift */,
@@ -1037,6 +1042,7 @@
 				66D1A230FCEF8663316AD13F /* WebhookStatusProviderTests.swift */,
 				54322E1FB43B65F94D1AAC20 /* WebhookSuggestEventTests.swift */,
 				55B174E22642D5D980A37012 /* WebhookTaskParsingTests.swift */,
+				91B01EC1A480FF0E73B1EDC9 /* WeChatSessionStoreTests.swift */,
 				9DE6E5E60B65B88BB4328F40 /* WeComFrameParserTests.swift */,
 				28A21327F80611EDF5E558A2 /* WorkspaceManagerTests.swift */,
 				C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */,
@@ -1431,6 +1437,7 @@
 				FC6620AFE070216CBEDBEB30 /* UsageSummaryFormatterTests.swift in Sources */,
 				489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */,
 				A5B666A67B06796F7E431A77 /* WatchFeedTests.swift in Sources */,
+				DA26B379785FF4116F980920 /* WeChatSessionStoreTests.swift in Sources */,
 				6B115DD3E985EBF9D42DF638 /* WeComFrameParserTests.swift in Sources */,
 				731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */,
 				2C2802EE819E3CFE15765F18 /* WebhookStatusProviderTests.swift in Sources */,
@@ -1615,6 +1622,7 @@
 				B9872FE3B3521117DCE17ADC /* WeChatChannel.swift in Sources */,
 				CDE025440DDC3A5CFE827DB1 /* WeChatConfig.swift in Sources */,
 				900325D5B8A82441646FAE6C /* WeChatLoginService.swift in Sources */,
+				9D63E84CE52C4927520DCCA6 /* WeChatSessionStore.swift in Sources */,
 				B2E723320C2AAA22C82B98B4 /* WeComBotChannel.swift in Sources */,
 				5B1493268A6DC0132D6193D0 /* WeComBotConfig.swift in Sources */,
 				865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */,
@@ -1690,7 +1698,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.app;
-				PRODUCT_NAME = seahelm;
+				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
 				SWIFT_VERSION = 5.10;
@@ -1920,7 +1928,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.seahelm.app;
-				PRODUCT_NAME = seahelm;
+				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
 				SWIFT_VERSION = 5.10;
