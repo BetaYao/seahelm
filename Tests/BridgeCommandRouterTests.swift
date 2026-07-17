@@ -4,15 +4,18 @@ import XCTest
 final class BridgeCommandRouterTests: XCTestCase {
     func makeRouter(queue: PendingOrdersQueue,
                     created: @escaping (String, String?) -> Void = { _, _ in },
+                    selectWorktree: @escaping (String) -> Void = { _ in },
+                    selectAgent: @escaping (String) -> Void = { _ in },
+                    showOverview: @escaping () -> Void = {},
                     ordered: @escaping (String, String) -> Void = { _, _ in },
-                    committed: @escaping (String) -> Void = { _ in },
                     removeAll: @escaping () -> Void = {},
                     addRepo: @escaping () -> Void = {},
                     removeRepo: @escaping (String) -> Void = { _ in },
                     removeWorktree: @escaping (String) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
-        BridgeCommandRouter(queue: queue, createWorktree: created, orderExisting: ordered,
-                            commit: committed,
+        BridgeCommandRouter(queue: queue, createWorktree: created,
+                            selectWorktree: selectWorktree, selectAgent: selectAgent,
+                            showOverview: showOverview, orderAgent: ordered,
                             removeAll: removeAll, addRepo: addRepo, removeRepo: removeRepo,
                             removeWorktree: removeWorktree,
                             activeSailorCount: agentCount,
@@ -59,20 +62,40 @@ final class BridgeCommandRouterTests: XCTestCase {
         XCTAssertEqual(got?.1, "/repos/alpha")
     }
 
-    func testOrderCallsClosure() {
+    func testOrderCallsClosureWithAgentId() {
         let q = PendingOrdersQueue()
         var got: (String, String)?
-        makeRouter(queue: q, ordered: { got = ($0, $1) }).route(.orderExisting(worktreePath: "/p", task: "go"))
-        XCTAssertEqual(got?.0, "/p")
+        makeRouter(queue: q, ordered: { got = ($0, $1) }).route(.orderAgent(agentId: "t1", task: "go"))
+        XCTAssertEqual(got?.0, "t1")
         XCTAssertEqual(got?.1, "go")
         XCTAssertTrue(q.all().isEmpty)
     }
 
-    func testCommitCallsClosureNotQueue() {
+    func testSelectWorktreeCallsItsOwnClosure() {
         let q = PendingOrdersQueue()
-        var got: String?
-        makeRouter(queue: q, committed: { got = $0 }).route(.commit(worktreePath: "/repo"))
-        XCTAssertEqual(got, "/repo")
+        var selected: String?
+        var agentSelected: String?
+        makeRouter(queue: q, selectWorktree: { selected = $0 }, selectAgent: { agentSelected = $0 })
+            .route(.selectWorktree(path: "/repo/feat-x"))
+        XCTAssertEqual(selected, "/repo/feat-x")
+        XCTAssertNil(agentSelected)
+    }
+
+    func testSelectAgentCallsItsOwnClosure() {
+        let q = PendingOrdersQueue()
+        var selected: String?
+        makeRouter(queue: q, selectAgent: { selected = $0 }).route(.selectAgent(id: "t2"))
+        XCTAssertEqual(selected, "t2")
+    }
+
+    /// The desktop's listing is the dashboard, so every list verb navigates there.
+    func testListVerbsShowOverview() {
+        let q = PendingOrdersQueue()
+        for command in [BridgeCommand.listWorktrees, .listAgents, .listRepos] {
+            var shown = false
+            makeRouter(queue: q, showOverview: { shown = true }).route(command)
+            XCTAssertTrue(shown, "\(command) should show the overview")
+        }
         XCTAssertTrue(q.all().isEmpty)
     }
 
