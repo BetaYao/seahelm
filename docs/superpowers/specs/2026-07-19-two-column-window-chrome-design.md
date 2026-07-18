@@ -23,7 +23,7 @@ Traffic lights and tool icons must live in column headers, not in a spanning bar
 - Draggable divider; persist sidebar width.
 - Collapse sidebar with **⌘B** (not a separate layout “view mode”).
 - Sidebar uses **macOS 26 Liquid Glass / vibrancy** (frosted translucent material).
-- Worktree list **grouped by repo**, with a fixed three-line item anatomy.
+- Worktree list **grouped by repo**: group header + two-line items (anatomy below).
 
 ## Non-goals
 
@@ -38,7 +38,7 @@ Traffic lights and tool icons must live in column headers, not in a spanning bar
 | Topic | Decision |
 |-------|----------|
 | Worktree tabs in title bar | **Remove** — sidebar list is the only switcher |
-| Header icons | Keep **Theme / First Mate / Files / Changes** |
+| Header icons | Keep **Theme / First Mate / Files / Changes**; icons still **switch sidebar content** (worktree navigator is the default pane) |
 | Sidebar collapse | **⌘B** (+ matching menu/button); not `ViewMode` as layout mode |
 | Terminal top chrome | **Yes** — `Repo · pane title` |
 | Collapsed traffic lights | Move into **terminal header** left |
@@ -93,7 +93,12 @@ When sidebar collapsed (⌘B):
 Same row, ~36–40pt tall, aligned with TerminalHeader:
 
 - **Left:** system traffic lights (repositioned `standardWindowButton`s — no fake buttons).
-- **Right:** Theme · First Mate · Files · Changes (migrated from `TitleBarView`; mutual exclusive active tint; overview/no-worktree disables Files/Changes/First Mate at 0.3 alpha as today).
+- **Right:** Theme · First Mate · Files · Changes (migrated from `TitleBarView`; mutual exclusive active tint among First Mate / Files / Changes; Theme is independent).
+- **Icon → sidebar content (unchanged product behavior):** these icons still **swap what the left column shows**. The glass sidebar is a slot:
+  - **Default / worktrees navigator:** repo-grouped worktree list (this spec’s §6).
+  - **First Mate / Files / Changes:** existing `WorktreeSidePanelViewController` (or equivalent) content for that pane, same as today’s `LeftPane` switching.
+  - ⌘B collapses the **whole** left column regardless of which pane is active; it does not change the selected pane.
+- When no worktree is selected, Files / Changes / First Mate stay visible but disabled at 0.3 alpha (today’s overview behavior).
 - Optional **sidebar.left** icon as mouse affordance for ⌘B (recommended).
 
 ### 3. TerminalHeader
@@ -131,13 +136,13 @@ Icons remain available; title sits after icons; expand control mirrors ⌘B.
 
 ### 6. Worktree list (grouped)
 
-Replace the current overview row presentation for the navigator with a **repo-grouped** list inside the glass sidebar.
+Replace the current overview row presentation for the **default navigator pane** with a **repo-grouped** list inside the glass sidebar.
 
 **Section label:** e.g. `WORKTREES` (exact copy flexible).
 
-**Group header:** repo name (`SailorDisplayInfo.project` / repo display name).
+**Group header (not part of the item card):** repo name (`SailorDisplayInfo.project` / repo display name). Multiple worktrees under the same repo share one header.
 
-**Item (per worktree), three lines under the group:**
+**Item (per worktree) — exactly two content rows:**
 
 ```
 ●  current pane title                         time
@@ -150,10 +155,10 @@ Replace the current overview row presentation for the navigator with a **repo-gr
 - **Git diff:** `+adds −dels` / `↑ahead↓behind` when present; muted “clean” or empty when none.
 - **N panes:** leaf count.
 - **Selected:** rounded rect highlight (Cursor-like), not a left accent bar requirement.
-- Keep bottom **composer** in the sidebar content unless a follow-up explicitly removes it.
+- Keep bottom **composer** in the navigator pane unless a follow-up explicitly removes it.
 - Tap selects worktree / focuses terminal as today.
-
-Orders carousel behavior can remain below the list if it already lives in the overview; out of scope to redesign ORDERS in this spec.
+- **Grouping change:** list is ordered/grouped by **repo**, not by agent status. Preserve idle-worktree collapse/expander behavior if it still applies (idle items may sit in an expandable “Idle” section within or after groups — plan must not silently drop it; default = preserve).
+- Orders carousel may remain below the list; out of scope to redesign ORDERS.
 
 ### 7. Migration map
 
@@ -180,7 +185,16 @@ Orders carousel behavior can remain below the list if it already lives in the ov
 
 - Exact `NSVisualEffectView` / Liquid Glass API choice for the deployment target — decide in the plan against `MACOSX_DEPLOYMENT_TARGET`.
 - Whether `TitleBarView.swift` is deleted vs reduced to a deprecated shim — prefer delete once call sites move.
-- Region-focus keyboard (`titlebar` region) should retarget to sidebar header / terminal header regions in a follow-up or the same plan’s keyboard task.
+- **Keyboard `titlebar` region:** in scope for this plan’s wiring — retarget to sidebar header (icons) / terminal header so region focus does not point at a removed accessory. Deep shortcut redesign is out of scope.
+
+## Interaction summary (⌘B vs icons)
+
+| Action | Effect |
+|--------|--------|
+| ⌘B / sidebar button | Toggle left column collapsed; does not change active left pane |
+| First Mate / Files / Changes | Select that left pane (expand column if collapsed, same as today) |
+| Theme | Toggle appearance; no pane change |
+| Click worktree row | Select worktree; terminal shows that tree |
 
 ## Success criteria
 
@@ -188,4 +202,5 @@ Orders carousel behavior can remain below the list if it already lives in the ov
 - Two columns with one draggable divider; width persists.
 - ⌘B collapses sidebar; lights + icons relocate to terminal header; title remains visible.
 - Sidebar is translucent glass; terminal is opaque.
-- Worktrees appear under repo group headers with the three-line item layout above.
+- Default navigator shows worktrees under repo group headers with the two-line item layout above.
+- Header icons still switch left-pane content (navigator / First Mate / Files / Changes).
