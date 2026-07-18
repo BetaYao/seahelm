@@ -251,6 +251,7 @@
 		C44DA54E0C66DC612DB80D80 /* StatusBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79FF4E0C39BAB48A48179246 /* StatusBarPage.swift */; };
 		C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */; };
 		C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */; };
+		C7CB9AA977EF6E8B1C8F1F57 /* ChromeLayoutStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */; };
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
 		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
@@ -291,6 +292,7 @@
 		E5020C3F03A4093F06D0F2E4 /* FileTreeOutlineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */; };
 		E7AB85089D6CD9A1AF14B3CF /* OverviewFocusModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */; };
 		E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */; };
+		E9339C5A896240727780948E /* ChromeLayoutState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */; };
 		EA4CB7D6CFBBA74792B00BB6 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52EF0C4896EE233186B21980 /* GatewayState.swift */; };
 		EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */; };
 		EBE5F0C17B4DDC6FBD06BB53 /* ActivityFeedRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */; };
@@ -408,6 +410,7 @@
 		3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorTheme+Seahelm.swift"; sourceTree = "<group>"; };
 		3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorTests.swift; sourceTree = "<group>"; };
 		3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGitStats.swift; sourceTree = "<group>"; };
+		3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutState.swift; sourceTree = "<group>"; };
 		3D002748AEBEA4297919DC48 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
 		3F67CBC84404085C3483C910 /* TestViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestViewHelpers.swift; sourceTree = "<group>"; };
 		401A403F90AAF10933AC1869 /* WeComFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParser.swift; sourceTree = "<group>"; };
@@ -623,6 +626,7 @@
 		E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
 		E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePluginInstaller.swift; sourceTree = "<group>"; };
 		E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
+		E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutStateTests.swift; sourceTree = "<group>"; };
 		E16FBC8322498A92AB007AAB /* ModalPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPage.swift; sourceTree = "<group>"; };
 		E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinator.swift; sourceTree = "<group>"; };
 		E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRef.swift; sourceTree = "<group>"; };
@@ -980,6 +984,7 @@
 				446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */,
 				5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */,
 				4890F1362CCDACF15E685662 /* ChromeLayoutMetricsTests.swift */,
+				E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */,
 				72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */,
 				ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */,
 				20D815BD3789070197196037 /* CodexHooksSetupTests.swift */,
@@ -1178,6 +1183,7 @@
 			isa = PBXGroup;
 			children = (
 				F11134E3FD389088A2D35EEE /* ChromeLayoutMetrics.swift */,
+				3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */,
 			);
 			path = Chrome;
 			sourceTree = "<group>";
@@ -1391,6 +1397,7 @@
 				A90FADB8FDAA218DAEA7D694 /* BridgeCommandRouterTests.swift in Sources */,
 				9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */,
 				12B626905E1B75F6419CD452 /* ChromeLayoutMetricsTests.swift in Sources */,
+				C7CB9AA977EF6E8B1C8F1F57 /* ChromeLayoutStateTests.swift in Sources */,
 				6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */,
 				6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */,
 				2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */,
@@ -1549,6 +1556,7 @@
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
 				72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */,
 				BB5E223E00A8D668BDC9391C /* ChromeLayoutMetrics.swift in Sources */,
+				E9339C5A896240727780948E /* ChromeLayoutState.swift in Sources */,
 				D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */,
 				0DA6D2D48F320DFB8671C67C /* ClaudeStatuslineBridgeInstaller.swift in Sources */,
 				10D70ABC6FF1371989A62258 /* ClaudeUsageSummaryProvider.swift in Sources */,
