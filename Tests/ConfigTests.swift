@@ -264,6 +264,30 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.themeMode, "system")
     }
 
+    func testSidebarWidthDefault() {
+        let config = Config()
+        XCTAssertEqual(config.sidebarWidth, 300)
+    }
+
+    func testDecodeSidebarWidth() throws {
+        let json = #"{"sidebar_width": 280}"#.data(using: .utf8)!
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        XCTAssertEqual(config.sidebarWidth, 280)
+    }
+
+    func testDecodeMissingSidebarWidth_UsesDefault() throws {
+        let config = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
+        XCTAssertEqual(config.sidebarWidth, 300)
+    }
+
+    func testEncodeDecodeSidebarWidthRoundtrip() throws {
+        var original = Config()
+        original.sidebarWidth = 264
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Config.self, from: data)
+        XCTAssertEqual(decoded.sidebarWidth, 264)
+    }
+
     func testDecodeMissingNewFields() throws {
         let json = """
         {

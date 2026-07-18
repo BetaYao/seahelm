@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 struct Config: Codable {
     var workspacePaths: [String]
@@ -30,6 +31,7 @@ struct Config: Codable {
     var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
+    var sidebarWidth: CGFloat
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -54,6 +56,7 @@ struct Config: Codable {
         case firstMate
         case notifications
         case islandEnabled = "island_enabled"
+        case sidebarWidth = "sidebar_width"
     }
 
     init() {
@@ -79,6 +82,7 @@ struct Config: Codable {
         firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
+        sidebarWidth = 300
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +110,7 @@ struct Config: Codable {
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
+        sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
