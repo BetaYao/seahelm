@@ -1682,8 +1682,13 @@ extension MainWindowController {
         let model = islandController.model
 
         // Aggregate per-worktree: the highest-urgency pane wins the row.
+        // The island only shows worktrees with activity in the last 24 hours —
+        // it is a "what's happening now" surface, not the full fleet list.
+        let activityCutoff = Date().addingTimeInterval(-24 * 60 * 60)
         var byWorktree: [String: IslandAgentRow] = [:]
         for sailor in ShipLog.shared.allSailors() {
+            let lastActivity = statusAggregator.lastActivity(for: sailor.worktreePath) ?? sailor.startedAt
+            guard let lastActivity, lastActivity >= activityCutoff else { continue }
             let row = IslandAgentRow(
                 id: sailor.worktreePath,
                 project: sailor.project,

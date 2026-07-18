@@ -1936,9 +1936,6 @@ final class DashboardOverviewView: NSView {
     private var menuToken = ""
     private var menuFullText = ""
 
-    // Group order: most actionable first.
-    private static let groupOrder: [SailorStatus] = [.waiting, .running, .idle, .error, .exited, .unknown]
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
@@ -2280,10 +2277,23 @@ final class DashboardOverviewView: NSView {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
 
-        let grouped = Dictionary(grouping: sailors, by: { Self.primaryStatus($0) })
-        for (gi, status) in Self.groupOrder.enumerated() {
-            guard let items = grouped[status], !items.isEmpty else { continue }
-            let meta = Self.groupMeta(status)
+        // Group by repo, in first-seen order (which follows the configured
+        // card/workspace order). Within a repo: main worktree first, then the
+        // linked worktrees by creation time (oldest first).
+        var repoOrder: [String] = []
+        var grouped: [String: [SailorDisplayInfo]] = [:]
+        for sailor in sailors {
+            if grouped[sailor.project] == nil { repoOrder.append(sailor.project) }
+            grouped[sailor.project, default: []].append(sailor)
+        }
+        for (gi, repo) in repoOrder.enumerated() {
+            let items = (grouped[repo] ?? []).sorted { a, b in
+                if a.isMainWorktree != b.isMainWorktree { return a.isMainWorktree }
+                return Self.creationDate(a.worktreePath) < Self.creationDate(b.worktreePath)
+            }
+            guard !items.isEmpty else { continue }
+            let meta: (glyph: String, color: NSColor, info: NSColor, label: String) =
+                ("▸", Self.inkDim, Self.inkDim, repo)
             let header = makeGroupHeader(meta: meta, count: items.count, topGap: gi == 0 ? 0 : 13)
             stack.addArrangedSubview(header)
             pin(header)
@@ -2293,7 +2303,9 @@ final class DashboardOverviewView: NSView {
             rowsBox.alignment = .leading
             rowsBox.translatesAutoresizingMaskIntoConstraints = false
             for item in items {
-                let row = RowView(sailor: item, status: status, infoColor: meta.info,
+                let status = Self.primaryStatus(item)
+                let row = RowView(sailor: item, status: status,
+                                  infoColor: Self.groupMeta(status).info,
                                   selected: item.id == self.selectedId)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
@@ -2303,6 +2315,17 @@ final class DashboardOverviewView: NSView {
             stack.addArrangedSubview(rowsBox)
             pin(rowsBox)
         }
+    }
+
+    /// Worktree directory creation date, cached — the sort key inside a repo
+    /// group. Missing/unreadable paths sort first (distantPast).
+    private static var creationDateCache: [String: Date] = [:]
+    private static func creationDate(_ path: String) -> Date {
+        if let cached = creationDateCache[path] { return cached }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let date = attrs?[.creationDate] as? Date ?? .distantPast
+        creationDateCache[path] = date
+        return date
     }
 
     /// Selected worktree id, so the fleet can mark the current row (accent border).
