@@ -44,6 +44,13 @@ class StationRegistry {
         return stations.values.first { $0.sessionName == name }
     }
 
+    /// Snapshot of all live stations (for broadcast operations like
+    /// propagating a system appearance change to every surface).
+    func allStations() -> [Station] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(stations.values)
+    }
+
     func removeAll() {
         lock.lock(); defer { lock.unlock() }
         stations.removeAll()

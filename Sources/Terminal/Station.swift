@@ -150,6 +150,7 @@ class Station {
         ghostty_surface_set_content_scale(s, Double(scale), Double(scale))
         ghostty_surface_set_size(s, UInt32(size.width * scale), UInt32(size.height * scale))
         ghostty_surface_set_focus(s, false)  // Start unfocused; focus set via makeFirstResponder
+        ghostty_surface_set_color_scheme(s, GhosttyBridge.shared.currentColorScheme)
     }
 
     /// Reparent this terminal's view to a different container

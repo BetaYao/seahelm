@@ -7,6 +7,7 @@ class GhosttyBridge {
 
     private(set) var app: ghostty_app_t?
     private var isInitialized = false
+    private var appearanceObservation: NSKeyValueObservation?
 
     private init() {}
 
@@ -99,6 +100,33 @@ class GhosttyBridge {
         self.app = ghosttyApp
         self.isInitialized = true
 
+        // Follow the system light/dark appearance so `theme = light:...,dark:...`
+        // configs switch automatically. libghostty only learns about appearance
+        // changes when the host tells it.
+        syncColorScheme()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.syncColorScheme() }
+        }
+    }
+
+    /// The Ghostty color scheme matching the current system appearance.
+    var currentColorScheme: ghostty_color_scheme_e {
+        let isDark = NSApp.effectiveAppearance
+            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+    }
+
+    /// Push the current system appearance to the app and every live surface.
+    private func syncColorScheme() {
+        guard let app else { return }
+        let scheme = currentColorScheme
+        ghostty_app_set_color_scheme(app, scheme)
+        for station in StationRegistry.shared.allStations() {
+            guard let surface = station.surface else { continue }
+            station.ghosttyLock.lock()
+            ghostty_surface_set_color_scheme(surface, scheme)
+            station.ghosttyLock.unlock()
+        }
     }
 
     func tick() {
