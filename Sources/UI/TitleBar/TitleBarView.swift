@@ -47,18 +47,17 @@ final class TitleBarView: NSView {
 
     // Left control — collapse the worktrees sidebar. Aligned to the first
     // column's right edge when expanded; tucked next to the traffic lights when collapsed.
-    private let collapseLeftButton = NSButton()
+    private let collapseLeftButton = TitleBarIconButton()
 
-    // Left control cluster — collapse · dashboard · theme · files · changes · First Mate.
+    // Left control cluster — First Mate · files · changes.
     private let leftClusterStack = NSStackView()
-    private let dashboardButton = NSButton()
-    private let themeButton = NSButton()
-    private let firstMateButton = NSButton()
+    private let themeButton = TitleBarIconButton()
+    private let firstMateButton = TitleBarIconButton()
     private var paneButtons: [LeftPane: NSButton] = [:]
     private var selectedLeftPane: LeftPane = .file
 
     // Fixed worktree-list icon at the front of the tab strip; opens a popover.
-    private let tabWorktreeButton = NSButton()
+    private let tabWorktreeButton = TitleBarIconButton()
     private var worktreeButtonExpandedLeading: NSLayoutConstraint?
     private var worktreeButtonCollapsedLeading: NSLayoutConstraint?
 
@@ -120,10 +119,9 @@ final class TitleBarView: NSView {
 
     /// The single lit toolbar tool. Exactly one icon shows the accent tint; every
     /// other reverts to the idle grey (only the selected one lights up).
-    enum ActiveTool { case dashboard, files, changes, firstMate, none }
+    enum ActiveTool { case files, changes, firstMate, none }
     func setActiveTool(_ tool: ActiveTool) {
         let idle = NSColor(hex: 0x888888)
-        dashboardButton.contentTintColor = tool == .dashboard ? Theme.accent : idle
         paneButtons[.file]?.contentTintColor = tool == .files ? Theme.accent : idle
         paneButtons[.change]?.contentTintColor = tool == .changes ? Theme.accent : idle
         firstMateButton.contentTintColor = tool == .firstMate ? Theme.accent : idle
@@ -201,21 +199,21 @@ final class TitleBarView: NSView {
         leftClusterStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leftClusterStack)
 
-        // Order: Dashboard · Files · Changes · First Mate. The theme toggle
-        // lives at the far right of the title bar (see the tab-strip section).
-        // (The collapse icon was removed — each pane icon now toggles its own
-        // panel: click to open, click again to collapse.)
-        configureArcIconButton(dashboardButton, symbol: "square.grid.2x2",
-                               identifier: "titlebar.dashboard", label: "Dashboard",
-                               hoverTracking: false, action: #selector(dashboardClicked))
-        leftClusterStack.addArrangedSubview(dashboardButton)
+        // Order: First Mate · Files · Changes. The theme toggle lives at the
+        // far right of the title bar (see the tab-strip section).
+        // (Each pane icon toggles its own panel: click to open, click again
+        // to collapse. The dashboard icon was removed — First Mate covers it.)
+        configureArcIconButton(firstMateButton, symbol: "sailboat",
+                               identifier: "titlebar.firstMate", label: "First Mate",
+                               hoverTracking: false, action: #selector(firstMateClicked))
+        leftClusterStack.addArrangedSubview(firstMateButton)
 
         let panes: [(LeftPane, String, String)] = [
             (.file, "folder", "Files"),
             (.change, "plusminus", "Changes"),
         ]
         for (pane, symbol, label) in panes {
-            let btn = NSButton()
+            let btn = TitleBarIconButton()
             configureArcIconButton(btn, symbol: symbol,
                                    identifier: "titlebar.pane.\(pane.rawValue)", label: label,
                                    hoverTracking: false, action: #selector(paneButtonClicked(_:)))
@@ -223,12 +221,6 @@ final class TitleBarView: NSView {
             paneButtons[pane] = btn
             leftClusterStack.addArrangedSubview(btn)
         }
-
-        // First Mate — opens the Dashboard as a left side panel over the terminal.
-        configureArcIconButton(firstMateButton, symbol: "sailboat",
-                               identifier: "titlebar.firstMate", label: "First Mate",
-                               hoverTracking: false, action: #selector(firstMateClicked))
-        leftClusterStack.addArrangedSubview(firstMateButton)
 
         NSLayoutConstraint.activate([
             leftClusterStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
@@ -530,8 +522,8 @@ final class TitleBarView: NSView {
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 24),
-            button.heightAnchor.constraint(equalToConstant: 24),
+            button.widthAnchor.constraint(equalToConstant: 26),
+            button.heightAnchor.constraint(equalToConstant: 26),
         ])
         if hoverTracking { setupHoverTracking(for: button) }
     }
@@ -592,8 +584,6 @@ final class TitleBarView: NSView {
     }
 
     @objc private func collapseLeftClicked() { delegate?.titleBarDidRequestCollapseLeftColumn() }
-
-    @objc private func dashboardClicked() { delegate?.titleBarDidRequestOverview() }
 
     @objc private func firstMateClicked() { delegate?.titleBarDidToggleFirstMate() }
 
@@ -793,6 +783,16 @@ private final class WorktreeTabButton: NSView {
         hovered = false
         applySelectedStyle(isSelected)
     }
+}
+
+// MARK: - TitleBarIconButton
+
+/// Icon button that behaves reliably inside the title-bar accessory: it takes
+/// the very first click even when the window isn't key (no click-to-activate
+/// swallowing the press) and never hands its area to window dragging.
+final class TitleBarIconButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 }
 
 // MARK: - HoverTrackingView
