@@ -38,7 +38,7 @@ Traffic lights and tool icons must live in column headers, not in a spanning bar
 | Topic | Decision |
 |-------|----------|
 | Worktree tabs in title bar | **Remove** — sidebar list is the only switcher |
-| Header icons | Keep **Theme / First Mate / Files / Changes**; icons still **switch sidebar content** (worktree navigator is the default pane) |
+| Header icons | Keep **Theme / First Mate / Files / Changes**; First Mate = navigator (§6), Files/Changes = side panel |
 | Sidebar collapse | **⌘B** (+ matching menu/button); not `ViewMode` as layout mode |
 | Terminal top chrome | **Yes** — `Repo · pane title` |
 | Collapsed traffic lights | Move into **terminal header** left |
@@ -93,12 +93,14 @@ When sidebar collapsed (⌘B):
 Same row, ~36–40pt tall, aligned with TerminalHeader:
 
 - **Left:** system traffic lights (repositioned `standardWindowButton`s — no fake buttons).
-- **Right:** Theme · First Mate · Files · Changes (migrated from `TitleBarView`; mutual exclusive active tint among First Mate / Files / Changes; Theme is independent).
-- **Icon → sidebar content (unchanged product behavior):** these icons still **swap what the left column shows**. The glass sidebar is a slot:
-  - **Default / worktrees navigator:** repo-grouped worktree list (this spec’s §6).
-  - **First Mate / Files / Changes:** existing `WorktreeSidePanelViewController` (or equivalent) content for that pane, same as today’s `LeftPane` switching.
-  - ⌘B collapses the **whole** left column regardless of which pane is active; it does not change the selected pane.
-- When no worktree is selected, Files / Changes / First Mate stay visible but disabled at 0.3 alpha (today’s overview behavior).
+- **Right:** Theme · First Mate · Files · Changes (migrated from `TitleBarView`).
+- **Icon → sidebar content (preserve today’s product mapping):**
+  - **First Mate** ↔ §6 repo-grouped worktree navigator (today’s overview / First Mate column). This is the **default** left pane.
+  - **Files / Changes** ↔ existing `WorktreeSidePanelViewController` host (not the navigator list).
+  - **Theme** ↔ appearance toggle only; no pane change.
+  - Mutual exclusive active tint among First Mate / Files / Changes.
+  - ⌘B collapses the **whole** left column regardless of which pane is active; it does not change the selected pane. Opening from collapsed via ⌘B restores the last pane, or defaults to First Mate/navigator (same spirit as today’s `toggleSidebarDefaultDashboard`).
+- When no worktree is selected, Files / Changes stay visible but disabled at 0.3 alpha; First Mate/navigator remains available.
 - Optional **sidebar.left** icon as mouse affordance for ⌘B (recommended).
 
 ### 3. TerminalHeader
@@ -191,8 +193,9 @@ Replace the current overview row presentation for the **default navigator pane**
 
 | Action | Effect |
 |--------|--------|
-| ⌘B / sidebar button | Toggle left column collapsed; does not change active left pane |
-| First Mate / Files / Changes | Select that left pane (expand column if collapsed, same as today) |
+| ⌘B / sidebar button | Toggle left column collapsed; does not change active left pane. From collapsed, reopen last pane or default to First Mate/navigator |
+| First Mate | Show §6 navigator in the left column (expand if collapsed). Click again when already active may collapse (today’s toggleSide behavior — preserve) |
+| Files / Changes | Show side-panel host for that tab (expand if collapsed); same toggle-to-collapse when already active |
 | Theme | Toggle appearance; no pane change |
 | Click worktree row | Select worktree; terminal shows that tree |
 
@@ -203,4 +206,4 @@ Replace the current overview row presentation for the **default navigator pane**
 - ⌘B collapses sidebar; lights + icons relocate to terminal header; title remains visible.
 - Sidebar is translucent glass; terminal is opaque.
 - Default navigator shows worktrees under repo group headers with the two-line item layout above.
-- Header icons still switch left-pane content (navigator / First Mate / Files / Changes).
+- Header icons: First Mate ↔ navigator; Files/Changes ↔ side panel; Theme independent.
