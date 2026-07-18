@@ -76,18 +76,12 @@ class TabCoordinator {
             config: fmConfig,
             queue: orders,
             notify: { action in
+                // Watch feed only. The pane status path (deliverPaneStatusChange)
+                // already notified on the same running → waiting/error edge; a
+                // second NotificationManager call here used a different cooldown
+                // key ("wt:" vs "tid:") and re-bannered the same episode ~30s
+                // later. First Mate watches are now a feed record, not a banner.
                 feed.record(action)
-                let status: SailorStatus = action.kind == .watchError ? .error : .waiting
-                // First Mate watches are background attention signals — surface
-                // them even when frontmost (isTargetVisible defaults to false).
-                NotificationManager.shared.notify(
-                    worktreePath: action.worktreePath,
-                    workspaceName: action.project,
-                    branch: action.branch,
-                    oldStatus: .running,
-                    newStatus: status,
-                    lastMessage: action.message
-                )
             },
             runInspection: { [weak self] action in
                 self?.runFirstMateInspection(action)
@@ -735,12 +729,19 @@ class TabCoordinator {
     /// the directory itself (discovery then synthesizes a fake main worktree for it).
     /// Only the hook-driven path consults this; an explicit Add Repo is the user's call.
     static func isEphemeralRepoPath(_ path: String) -> Bool {
-        let canon = WorktreeDiscovery.canonicalPath(path)
-        var roots = ["/tmp", "/var/folders", "/var/tmp"]
-            .map { WorktreeDiscovery.canonicalPath($0) }
-        roots.append(WorktreeDiscovery.canonicalPath(NSTemporaryDirectory()))
+        // Foundation's resolvingSymlinksInPath deliberately leaves "/var" and
+        // "/tmp" unresolved, while real cwds (hook payloads, $TMPDIR) often
+        // arrive as "/private/var/...". Strip the "/private" prefix on both
+        // sides so the two spellings of the same directory always match.
+        func normalize(_ p: String) -> String {
+            let canon = WorktreeDiscovery.canonicalPath(p)
+            return canon.hasPrefix("/private/") ? String(canon.dropFirst("/private".count)) : canon
+        }
+        let canon = normalize(path)
+        var roots = ["/tmp", "/var/folders", "/var/tmp"].map(normalize)
+        roots.append(normalize(NSTemporaryDirectory()))
         if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            roots.append(WorktreeDiscovery.canonicalPath(caches.path))
+            roots.append(normalize(caches.path))
         }
         return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
     }
@@ -1115,6 +1116,15 @@ class TabCoordinator {
         // without it completed panes surface placeholder labels like
         // "Processing prompt".
         let lastAssistantMessage = ShipLog.shared.sailor(for: terminalID)?.lastAssistantMessage ?? ""
+
+        // A pending order card (AskUserQuestion / suggestion) for this pane
+        // already surfaces the "needs input" state in the island and cockpit —
+        // a banner + history entry on top of the card is the same event shown
+        // twice. Errors and completions still notify.
+        if newStatus == .waiting, !terminalID.isEmpty,
+           pendingOrders.all().contains(where: { $0.action.terminalID == terminalID }) {
+            return
+        }
 
         NotificationManager.shared.notify(
             worktreePath: worktreePath,
