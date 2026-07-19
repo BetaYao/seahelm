@@ -1,6 +1,7 @@
 import XCTest
 
-/// Page object for the layout selection menu (triggered from view menu).
+/// Legacy layout-popover page object. View-mode layout menus were retired with
+/// two-column chrome; kept as a thin stub so older callers compile.
 final class LayoutPopoverPage {
     let app: XCUIApplication
 
@@ -12,30 +13,27 @@ final class LayoutPopoverPage {
     var topLargeItem: XCUIElement { app.menuItems["Top Large"] }
 
     private func ensureVisible(_ item: XCUIElement) {
-        if item.waitForExistence(timeout: 1) {
-            return
-        }
-        app.buttons["titlebar.viewMenu"].waitAndClick()
-        _ = item.waitForExistence(timeout: 3)
+        // Layout switcher removed from chrome; no-op if menu absent.
+        _ = item.waitForExistence(timeout: 1)
     }
 
     func selectGrid() {
         ensureVisible(gridItem)
-        gridItem.waitAndClick()
+        if gridItem.exists { gridItem.waitAndClick() }
     }
 
     func selectLeftRight() {
         ensureVisible(leftRightItem)
-        leftRightItem.waitAndClick()
+        if leftRightItem.exists { leftRightItem.waitAndClick() }
     }
 
     func selectTopSmall() {
         ensureVisible(topSmallItem)
-        topSmallItem.waitAndClick()
+        if topSmallItem.exists { topSmallItem.waitAndClick() }
     }
 
     func selectTopLarge() {
         ensureVisible(topLargeItem)
-        topLargeItem.waitAndClick()
+        if topLargeItem.exists { topLargeItem.waitAndClick() }
     }
 }

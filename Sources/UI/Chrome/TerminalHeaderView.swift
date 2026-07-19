@@ -67,6 +67,7 @@ final class TerminalHeaderView: NSView {
     private func setup() {
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
+        // Identifier for UITests; children (icon buttons / title) remain interactive a11y elements.
         setAccessibilityIdentifier("chrome.terminalHeader")
 
         trafficLightSlot.translatesAutoresizingMaskIntoConstraints = false

@@ -2403,6 +2403,9 @@ final class DashboardOverviewView: NSView {
             wantsLayer = true
             layer?.cornerRadius = Self.cornerRadius
             layer?.masksToBounds = true
+            setAccessibilityElement(true)
+            setAccessibilityIdentifier("chrome.worktreeRow.\(sailor.id)")
+            setAccessibilityLabel(sailor.name)
             applyBackground(hovered: false)
 
             // Current pane title: session summary → task subject → message → branch.

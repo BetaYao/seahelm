@@ -27,7 +27,9 @@ class AppPage {
         app.terminate()
     }
 
-    lazy var titleBar = TitleBarPage(app)
+    lazy var chrome = ChromeHeaderPage(app)
+    /// Backward-compatible alias for older tests still naming the chrome header strip.
+    lazy var titleBar = chrome
     lazy var layoutPopover = LayoutPopoverPage(app)
     lazy var dashboard = DashboardPage(app)
     lazy var sidebar = SidebarPage(app)
