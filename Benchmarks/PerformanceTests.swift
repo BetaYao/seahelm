@@ -310,23 +310,16 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
-    // MARK: - Test 12: TitleBar updateLayer cascade to all project tabs
+    // MARK: - Test 12: Chrome header title updates
 
-    func testTitleBarUpdateLayerCascadePerformance() {
-        // TitleBar.updateLayer() calls needsDisplay on every project tab
-        // Each ProjectTabView.updateLayer() accesses SemanticColors
-        let titleBar = TitleBarView()
-        titleBar.wantsLayer = true
-        titleBar.frame = NSRect(x: 0, y: 0, width: 1200, height: 36)
-
-        // Add 10 project tabs
-        titleBar.projects = (0..<10).map { "project-\($0)" }
-        titleBar.renderTabs()
+    func testChromeTerminalHeaderTitleUpdatePerformance() {
+        let header = TerminalHeaderView()
+        header.wantsLayer = true
+        header.frame = NSRect(x: 0, y: 0, width: 800, height: ChromeLayoutMetrics.headerHeight)
 
         measure {
-            // Simulate 60 frames of updateLayer cascade
-            for _ in 0..<60 {
-                titleBar.updateLayer()
+            for i in 0..<60 {
+                header.setTitle(repo: "repo-\(i % 10)", pane: "pane-\(i)")
             }
         }
     }

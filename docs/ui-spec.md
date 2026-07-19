@@ -9,19 +9,18 @@
 
 ### 1.1 Window Structure
 
+Main window uses **two-column chrome** (`WindowChromeController`): glass sidebar + opaque terminal, per-column headers (no spanning title-bar accessory). ⌘B collapses the sidebar; icons move into the terminal header.
+
 ```
-+-----------------------------------------------------------------------+
-|  Title Bar (40px) — traffic lights + project tabs + actions           |
-+-----------------------------------------------------------------------+
-|         |                              |                              |
-| Sidebar |     Main Terminal Area       |    Review Panel (optional)   |
-| (300px) |        (flexible)            |        (360px)               |
-|         |                              |                              |
-|  Thread |   Immersive terminal view    |   Git diff / AI chat /      |
-|  List   |   (Ghostty + tmux)          |   Notifications              |
-|         |                              |                              |
-+-----------------------------------------------------------------------+
-|  Status Bar (32px) — status text + indicators                         |
++---------------------------+-------------------------------------------+
+| Sidebar header (lights +  | Terminal header (title; icons when        |
+| icons)                    | collapsed)                                |
++---------------------------+-------------------------------------------+
+| Glass sidebar             | Opaque terminal area                      |
+| (navigator / Files /      | (Ghostty + zmx)                           |
+| Changes)                  |                                           |
++---------------------------+-------------------------------------------+
+| Status Bar — mode + hints                                             |
 +-----------------------------------------------------------------------+
 ```
 
@@ -42,19 +41,13 @@
 
 ## 2. Component Inventory
 
-### 2.1 Title Bar (40px height)
+### 2.1 Column Headers
 
-```
-[Traffic Lights]  [Dashboard]  [Project1 x]  [Project2 x]  [+]  ...  [Layout] [Bell] [AI] [Theme]
-```
+- **Sidebar header**: Traffic lights + Theme · First Mate · Files · Changes · sidebar toggle
+- **Terminal header**: `Repo · pane` title; when collapsed, also hosts lights + the same icon strip + expand
+- Worktree switching lives in the First Mate navigator (repo-grouped rows), not a tab strip
 
-- **Traffic lights**: Custom (close/minimize/zoom), left-aligned
-- **Project tabs**: Clickable pills, active tab highlighted with accent
-- **Close button (x)**: On each project tab, triggers confirmation modal
-- **Add button (+)**: Opens folder picker to add new project
-- **Right actions**: Layout toggle, notifications bell, AI panel, theme toggle
-
-### 2.2 Sidebar (300px)
+### 2.2 Sidebar (default 300px, `Config.sidebarWidth`)
 
 **Thread List** — Each row (60px height):
 ```
@@ -68,7 +61,7 @@
 - **Status dot**: 8px circle, color matches agent status
 - **Thread name**: Bold, 12px
 - **Subtitle**: Muted color, 12px, 2-line clamp
-- **Empty state**: Centered text "No thread yet. Click New Thread in titlebar."
+- **Empty state**: Centered text prompting to add a worktree / project
 - **Context menu**: Right-click for "Delete Worktree..."
 
 ### 2.3 Terminal Area (flexible width)

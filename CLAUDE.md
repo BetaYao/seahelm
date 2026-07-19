@@ -50,7 +50,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `Dashboard/` — Four layout modes: Grid, LeftRight, TopSmall, TopLarge. Grid uses frame-based layout; focus layouts use Auto Layout with a `FocusPanelView` + mini card sidebar
    - `Repo/` — `RepoViewController` with `SidebarViewController` for worktree switching; `SplitContainerView` hosts split panes
    - `Split/` — `SplitContainerView` renders `SplitTree` as frame-based leaf views with `DividerView` drag handles and dim overlays on unfocused panes
-   - `TitleBar/` — Custom `TitleBarView` with project tabs, layout switcher, notification badge
+   - `Chrome/` — Two-column `WindowChromeController` (sidebar/terminal headers, divider, collapse)
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
 
 3. **Core Services** (`Sources/Core/`, `Sources/Status/`)
