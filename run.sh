@@ -45,11 +45,12 @@ if [[ ! -d "$APP" ]]; then
 fi
 
 echo "==> Killing existing Seahelm..."
-# PRODUCT_NAME is Seahelm; kill both casings. Also reap orphaned `zmx attach`
-# clients left behind when the app is SIGKILL'd — they hold sessions with
-# clients=0 and confuse the next attach.
+# PRODUCT_NAME is Seahelm; kill both casings.
+# Do NOT pkill `zmx attach` processes here: SIGTERM to an attach client kills
+# its session daemon (and the agent running inside) — that was the "restart
+# loses all pane content" bug. Orphaned attach clients are harmless; the app
+# re-attaches alongside them.
 killall Seahelm seahelm 2>/dev/null || true
-pkill -f "${APP}/Contents/Resources/bin/zmx attach" 2>/dev/null || true
 sleep 1
 
 echo "==> Launching Seahelm (Ctrl+C to quit)..."
