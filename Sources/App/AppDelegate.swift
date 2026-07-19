@@ -37,7 +37,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ThemeMode.applyAppearance(mode)
         NSAppearance.current = NSApp.effectiveAppearance
 
-        if !config.onboardingCompleted {
+        // `--render-onboarding <dir>` renders the wizard steps to PNGs and
+        // exits — headless design iteration.
+        if let idx = CommandLine.arguments.firstIndex(of: "--render-onboarding"),
+           CommandLine.arguments.count > idx + 1 {
+            OnboardingWindowController.renderSnapshots(to: CommandLine.arguments[idx + 1])
+            exit(0)
+        }
+
+        // `--show-onboarding` forces the wizard for design iteration without
+        // resetting config (finishing it still saves normally).
+        if !config.onboardingCompleted || CommandLine.arguments.contains("--show-onboarding") {
             let wizard = OnboardingWindowController(config: config)
             wizard.onComplete = { [weak self] updated in
                 self?.onboardingController = nil

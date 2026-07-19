@@ -11,7 +11,7 @@ final class OnboardingAgentStepView: NSView {
     private let stack = NSStackView()
     private let detectedLabel = NSTextField(labelWithString: "")
     private let moreButton = NSButton(title: "Show more agents →", target: nil, action: nil)
-    private let yoloButton = NSButton(checkboxWithTitle: "Yolo / dangerously skip permission checks", target: nil, action: nil)
+    private let yoloButton = NSButton(checkboxWithTitle: "Yolo — dangerously skip permission checks", target: nil, action: nil)
 
     var isYoloEnabled: Bool { yoloButton.state == .on }
 
@@ -40,18 +40,15 @@ final class OnboardingAgentStepView: NSView {
     }
 
     private func setup() {
-        detectedLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        detectedLabel.textColor = .secondaryLabelColor
         detectedLabel.translatesAutoresizingMaskIntoConstraints = false
 
         moreButton.isBordered = false
-        moreButton.font = .systemFont(ofSize: 12, weight: .medium)
-        moreButton.contentTintColor = .controlAccentColor
+        moreButton.contentTintColor = OnboardingStyle.accent
         moreButton.target = self
         moreButton.action = #selector(toggleMore)
         moreButton.translatesAutoresizingMaskIntoConstraints = false
 
-        yoloButton.font = .systemFont(ofSize: 13)
+        OnboardingStyle.monoTitle(yoloButton, size: 12, color: OnboardingStyle.textSecondary)
         yoloButton.translatesAutoresizingMaskIntoConstraints = false
 
         stack.orientation = .vertical
@@ -90,16 +87,35 @@ final class OnboardingAgentStepView: NSView {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let detected = agents.filter(\.detected)
         let hidden = agents.filter { !$0.detected }
-        detectedLabel.stringValue = "● Detected on this Mac · \(detected.count)"
+
+        let header = NSMutableAttributedString()
+        header.append(NSAttributedString(string: "● ", attributes: [
+            .font: AppFont.mono(size: 11, weight: .bold),
+            .foregroundColor: OnboardingStyle.accent,
+        ]))
+        header.append(NSAttributedString(string: "detected on this mac · \(detected.count)", attributes: [
+            .font: AppFont.mono(size: 11, weight: .medium),
+            .foregroundColor: OnboardingStyle.textSecondary,
+        ]))
+        detectedLabel.attributedStringValue = header
 
         let visible = showingMore ? agents : detected.isEmpty ? agents : detected
         moreButton.isHidden = hidden.isEmpty
         moreButton.title = showingMore ? "Hide undetected agents" : "Show \(hidden.count) more agents →"
+        OnboardingStyle.monoTitle(moreButton, size: 11, color: OnboardingStyle.accent)
 
         for info in visible {
             let card = makeCard(info)
             stack.addArrangedSubview(card)
             card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        // Show the list from the top (non-flipped scroll views start at bottom).
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let doc = self.scroll.documentView else { return }
+            let topY = max(0, doc.frame.height - self.scroll.contentSize.height)
+            self.scroll.contentView.scroll(to: NSPoint(x: 0, y: topY))
+            self.scroll.reflectScrolledClipView(self.scroll.contentView)
         }
 
         // Ensure stack width tracks scroll
@@ -117,67 +133,107 @@ final class OnboardingAgentStepView: NSView {
     }
 
     private func makeCard(_ info: OnboardingAgentDetector.AgentInfo) -> NSView {
-        let box = NSView()
-        box.wantsLayer = true
-        box.layer?.cornerRadius = 10
-        box.layer?.borderWidth = info.type == defaultType ? 2 : 1
-        box.layer?.borderColor = (info.type == defaultType
-            ? NSColor.controlAccentColor
-            : NSColor.separatorColor).cgColor
-        box.translatesAutoresizingMaskIntoConstraints = false
+        let box = OnboardingPanel()
+        box.isSelected = info.type == defaultType
+        let type = info.type
+        box.onClick = { [weak self] in
+            guard let self else { return }
+            self.defaultType = type
+            self.hookChecked.insert(type)
+            self.rebuildCards()
+        }
 
-        let title = NSTextField(labelWithString: info.type.displayName)
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
-        title.translatesAutoresizingMaskIntoConstraints = false
+        // Terminal glyph tile — stands in for per-agent icons.
+        let iconTile = NSView()
+        iconTile.wantsLayer = true
+        iconTile.layer?.cornerRadius = 7
+        iconTile.layer?.backgroundColor = (info.type == defaultType
+            ? OnboardingStyle.accent.withAlphaComponent(0.22)
+            : NSColor.white.withAlphaComponent(0.07)).cgColor
+        iconTile.translatesAutoresizingMaskIntoConstraints = false
+        let glyph = OnboardingStyle.label("❯_", size: 13, weight: .bold,
+                                          color: info.type == defaultType
+                                              ? OnboardingStyle.accent
+                                              : OnboardingStyle.textSecondary)
+        iconTile.addSubview(glyph)
 
-        let cmd = NSTextField(labelWithString: info.command)
-        cmd.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        cmd.textColor = .secondaryLabelColor
-        cmd.translatesAutoresizingMaskIntoConstraints = false
+        let title = OnboardingStyle.label(info.type.displayName, size: 13, weight: .semibold)
+        let cmd = OnboardingStyle.label(info.command, size: 11, color: OnboardingStyle.textFaint)
 
         let hook = NSButton(checkboxWithTitle: "Install hooks", target: nil, action: nil)
         hook.state = hookChecked.contains(info.type) ? .on : .off
         hook.tag = agents.firstIndex(where: { $0.type == info.type }) ?? 0
         hook.target = self
         hook.action = #selector(hookToggled(_:))
+        OnboardingStyle.monoTitle(hook, size: 11, color: OnboardingStyle.textSecondary)
         hook.translatesAutoresizingMaskIntoConstraints = false
 
-        let pick = NSButton(title: info.type == defaultType ? "Default ✓" : "Set default", target: nil, action: nil)
-        pick.bezelStyle = .roundRect
-        pick.tag = agents.firstIndex(where: { $0.type == info.type }) ?? 0
-        pick.target = self
-        pick.action = #selector(defaultTapped(_:))
-        pick.translatesAutoresizingMaskIntoConstraints = false
-
-        if !info.detected {
-            let badge = NSTextField(labelWithString: "Not on PATH")
-            badge.font = .systemFont(ofSize: 10, weight: .medium)
-            badge.textColor = .secondaryLabelColor
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            box.addSubview(badge)
-            NSLayoutConstraint.activate([
-                badge.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
-                badge.topAnchor.constraint(equalTo: box.topAnchor, constant: 10),
-            ])
-        }
-
+        box.addSubview(iconTile)
         box.addSubview(title)
         box.addSubview(cmd)
         box.addSubview(hook)
-        box.addSubview(pick)
+
+        var trailing: NSView = box
+        if info.type == defaultType {
+            let badge = makeBadge("DEFAULT", color: OnboardingStyle.accent, filled: true)
+            box.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+                badge.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            ])
+            trailing = badge
+        } else if !info.detected {
+            let badge = makeBadge("not on PATH", color: OnboardingStyle.textFaint, filled: false)
+            box.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+                badge.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            ])
+            trailing = badge
+        }
+        _ = trailing
 
         NSLayoutConstraint.activate([
-            box.heightAnchor.constraint(equalToConstant: 64),
-            title.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
-            title.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
+            box.heightAnchor.constraint(equalToConstant: 66),
+
+            iconTile.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
+            iconTile.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            iconTile.widthAnchor.constraint(equalToConstant: 36),
+            iconTile.heightAnchor.constraint(equalToConstant: 36),
+            glyph.centerXAnchor.constraint(equalTo: iconTile.centerXAnchor),
+            glyph.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor),
+
+            title.leadingAnchor.constraint(equalTo: iconTile.trailingAnchor, constant: 12),
+            title.topAnchor.constraint(equalTo: box.topAnchor, constant: 11),
             cmd.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            cmd.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2),
-            hook.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
-            hook.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -8),
-            pick.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
-            pick.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            cmd.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 1),
+
+            hook.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            hook.topAnchor.constraint(equalTo: cmd.bottomAnchor, constant: 3),
         ])
         return box
+    }
+
+    private func makeBadge(_ text: String, color: NSColor, filled: Bool) -> NSView {
+        let badge = NSView()
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 5
+        if filled {
+            badge.layer?.backgroundColor = color.withAlphaComponent(0.18).cgColor
+        } else {
+            badge.layer?.borderWidth = 1
+            badge.layer?.borderColor = color.withAlphaComponent(0.4).cgColor
+        }
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        let label = OnboardingStyle.label(text, size: 9.5, weight: .bold, color: color)
+        badge.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: badge.leadingAnchor, constant: 7),
+            label.trailingAnchor.constraint(equalTo: badge.trailingAnchor, constant: -7),
+            label.topAnchor.constraint(equalTo: badge.topAnchor, constant: 3),
+            label.bottomAnchor.constraint(equalTo: badge.bottomAnchor, constant: -3),
+        ])
+        return badge
     }
 
     @objc private func toggleMore() {
@@ -193,13 +249,6 @@ final class OnboardingAgentStepView: NSView {
         } else {
             hookChecked.remove(type)
         }
-    }
-
-    @objc private func defaultTapped(_ sender: NSButton) {
-        guard agents.indices.contains(sender.tag) else { return }
-        defaultType = agents[sender.tag].type
-        hookChecked.insert(defaultType)
-        rebuildCards()
     }
 
     override func layout() {

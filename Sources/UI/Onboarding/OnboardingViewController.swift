@@ -7,18 +7,19 @@ final class OnboardingViewController: NSViewController {
     private var config: Config
     private var stepIndex = 0
 
-    private let logoLabel = NSTextField(labelWithString: "Seahelm")
-    private let progressLabel = NSTextField(labelWithString: "1 / 3")
-    private let progressTrack = NSView()
-    private let progressFill = NSView()
-    private var progressFillWidth: NSLayoutConstraint?
+    private let logoLabel = NSTextField(labelWithString: "")
+    private let progressLabel = OnboardingStyle.label("[1/3]", size: 12, color: OnboardingStyle.textSecondary)
+    private let progressStack = NSStackView()
+    private var progressSegments: [NSView] = []
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "")
     private let stepContainer = NSView()
 
-    private let backButton = NSButton(title: "< Back", target: nil, action: nil)
-    private let continueButton = NSButton(title: "Continue", target: nil, action: nil)
+    private let footerRule = NSView()
+    private let backButton = NSButton(title: "← Back", target: nil, action: nil)
+    private let shortcutHint = OnboardingStyle.label("⌘↩", size: 11, color: OnboardingStyle.textFaint)
+    private let continueButton = OnboardingPrimaryButton(frame: .zero)
 
     private lazy var agentStep = OnboardingAgentStepView()
     private lazy var themeStep = OnboardingThemeStepView()
@@ -35,9 +36,9 @@ final class OnboardingViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 720, height: 640))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 640))
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        view.layer?.backgroundColor = OnboardingStyle.background.cgColor
     }
 
     override func viewDidLoad() {
@@ -62,97 +63,112 @@ final class OnboardingViewController: NSViewController {
     }
 
     private func buildChrome() {
-        logoLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        // Wordmark: cyan prompt glyph + product name, like the cockpit.
+        let logo = NSMutableAttributedString()
+        logo.append(NSAttributedString(string: "❯ ", attributes: [
+            .font: AppFont.mono(size: 16, weight: .bold),
+            .foregroundColor: OnboardingStyle.accent,
+        ]))
+        logo.append(NSAttributedString(string: "seahelm", attributes: [
+            .font: AppFont.mono(size: 16, weight: .bold),
+            .foregroundColor: OnboardingStyle.textPrimary,
+        ]))
+        logo.append(NSAttributedString(string: "  setup", attributes: [
+            .font: AppFont.mono(size: 12),
+            .foregroundColor: OnboardingStyle.textFaint,
+        ]))
+        logoLabel.attributedStringValue = logo
         logoLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        progressLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        progressLabel.textColor = .secondaryLabelColor
-        progressLabel.translatesAutoresizingMaskIntoConstraints = false
+        // Segmented progress: one cyan bar per step.
+        progressStack.orientation = .horizontal
+        progressStack.spacing = 6
+        progressStack.distribution = .fillEqually
+        progressStack.translatesAutoresizingMaskIntoConstraints = false
+        for _ in 0..<3 {
+            let seg = NSView()
+            seg.wantsLayer = true
+            seg.layer?.cornerRadius = 2
+            seg.translatesAutoresizingMaskIntoConstraints = false
+            seg.heightAnchor.constraint(equalToConstant: 4).isActive = true
+            progressSegments.append(seg)
+            progressStack.addArrangedSubview(seg)
+        }
 
-        progressTrack.wantsLayer = true
-        progressTrack.layer?.cornerRadius = 2
-        progressTrack.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        progressTrack.translatesAutoresizingMaskIntoConstraints = false
-
-        progressFill.wantsLayer = true
-        progressFill.layer?.cornerRadius = 2
-        progressFill.layer?.backgroundColor = NSColor.labelColor.cgColor
-        progressFill.translatesAutoresizingMaskIntoConstraints = false
-        progressTrack.addSubview(progressFill)
-
-        titleLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        titleLabel.font = AppFont.mono(size: 24, weight: .bold)
+        titleLabel.textColor = OnboardingStyle.textPrimary
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        subtitleLabel.font = .systemFont(ofSize: 14)
-        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.font = AppFont.mono(size: 12.5)
+        subtitleLabel.textColor = OnboardingStyle.textSecondary
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         stepContainer.translatesAutoresizingMaskIntoConstraints = false
 
+        footerRule.wantsLayer = true
+        footerRule.layer?.backgroundColor = OnboardingStyle.stroke.cgColor
+        footerRule.translatesAutoresizingMaskIntoConstraints = false
+
         backButton.target = self
         backButton.action = #selector(backTapped)
         backButton.isBordered = false
-        backButton.font = .systemFont(ofSize: 13, weight: .medium)
+        OnboardingStyle.monoTitle(backButton, size: 12, color: OnboardingStyle.textSecondary)
         backButton.translatesAutoresizingMaskIntoConstraints = false
 
         continueButton.target = self
         continueButton.action = #selector(continueTapped)
-        continueButton.bezelStyle = .rounded
-        if #available(macOS 14.0, *) {
-            continueButton.controlSize = .large
-        }
         continueButton.keyEquivalent = "\r"
-        continueButton.keyEquivalentModifierMask = .command
-        continueButton.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(logoLabel)
         view.addSubview(progressLabel)
-        view.addSubview(progressTrack)
+        view.addSubview(progressStack)
         view.addSubview(titleLabel)
         view.addSubview(subtitleLabel)
         view.addSubview(stepContainer)
+        view.addSubview(footerRule)
         view.addSubview(backButton)
+        view.addSubview(shortcutHint)
         view.addSubview(continueButton)
 
-        let fillW = progressFill.widthAnchor.constraint(equalToConstant: 80)
-        progressFillWidth = fillW
-
         NSLayoutConstraint.activate([
-            logoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
-            logoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            logoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 30),
+            logoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
 
             progressLabel.centerYAnchor.constraint(equalTo: logoLabel.centerYAnchor),
-            progressLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            progressLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
 
-            progressTrack.topAnchor.constraint(equalTo: logoLabel.bottomAnchor, constant: 16),
-            progressTrack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            progressTrack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-            progressTrack.heightAnchor.constraint(equalToConstant: 4),
+            progressStack.topAnchor.constraint(equalTo: logoLabel.bottomAnchor, constant: 18),
+            progressStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            progressStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
 
-            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
-            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
-            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
-            fillW,
+            titleLabel.topAnchor.constraint(equalTo: progressStack.bottomAnchor, constant: 30),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
 
-            titleLabel.topAnchor.constraint(equalTo: progressTrack.bottomAnchor, constant: 28),
-            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
             subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
 
-            stepContainer.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 24),
-            stepContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            stepContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-            stepContainer.bottomAnchor.constraint(equalTo: continueButton.topAnchor, constant: -20),
+            stepContainer.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 26),
+            stepContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            stepContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            stepContainer.bottomAnchor.constraint(equalTo: footerRule.topAnchor, constant: -20),
 
-            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            backButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28),
+            footerRule.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            footerRule.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footerRule.heightAnchor.constraint(equalToConstant: 1),
+            footerRule.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -76),
 
-            continueButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-            continueButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
-            continueButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            backButton.centerYAnchor.constraint(equalTo: continueButton.centerYAnchor),
+
+            continueButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            continueButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -22),
+            continueButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            continueButton.heightAnchor.constraint(equalToConstant: 36),
+
+            shortcutHint.trailingAnchor.constraint(equalTo: continueButton.leadingAnchor, constant: -12),
+            shortcutHint.centerYAnchor.constraint(equalTo: continueButton.centerYAnchor),
         ])
     }
 
@@ -160,30 +176,49 @@ final class OnboardingViewController: NSViewController {
         stepIndex = index
         currentStepView?.removeFromSuperview()
         let step: NSView
+        let title: String
         switch index {
         case 0:
-            titleLabel.stringValue = "Choose your default agent"
+            title = "Choose your default agent"
             subtitleLabel.stringValue = "Seahelm works with CLI agents. Pick the one you use most — you can switch anytime. Detected agents are selected for hook install by default."
-            continueButton.title = "Continue ⌘↩"
+            continueButton.title = "Continue"
             backButton.isHidden = true
             step = agentStep
         case 1:
-            titleLabel.stringValue = "Make it feel like home"
+            title = "Make it feel like home"
             subtitleLabel.stringValue = "Choose a theme you'd like to stare at for hours."
-            continueButton.title = "Continue ⌘↩"
+            continueButton.title = "Continue"
             backButton.isHidden = false
             themeStep.configure(config: config)
             step = themeStep
         default:
-            titleLabel.stringValue = "Set up notifications"
+            title = "Set up notifications"
             subtitleLabel.stringValue = "Seahelm notifies you when an agent finishes or needs help."
-            continueButton.title = "Get started ⌘↩"
+            continueButton.title = "Get started"
             backButton.isHidden = false
             permissionsStep.configure(config: config)
             step = permissionsStep
         }
-        progressLabel.stringValue = "\(index + 1) / 3"
-        progressFillWidth?.constant = CGFloat(index + 1) / 3.0 * (720 - 72)
+
+        // Prompt-style title: cyan ❯ prefix.
+        let attributed = NSMutableAttributedString()
+        attributed.append(NSAttributedString(string: "❯ ", attributes: [
+            .font: AppFont.mono(size: 24, weight: .bold),
+            .foregroundColor: OnboardingStyle.accent,
+        ]))
+        attributed.append(NSAttributedString(string: title, attributes: [
+            .font: AppFont.mono(size: 24, weight: .bold),
+            .foregroundColor: OnboardingStyle.textPrimary,
+        ]))
+        titleLabel.attributedStringValue = attributed
+
+        progressLabel.stringValue = "[\(index + 1)/3]"
+        for (i, seg) in progressSegments.enumerated() {
+            seg.layer?.backgroundColor = (i <= index
+                ? OnboardingStyle.accent
+                : NSColor.white.withAlphaComponent(0.12)).cgColor
+        }
+
         step.translatesAutoresizingMaskIntoConstraints = false
         stepContainer.addSubview(step)
         NSLayoutConstraint.activate([
@@ -193,6 +228,25 @@ final class OnboardingViewController: NSViewController {
             step.bottomAnchor.constraint(equalTo: stepContainer.bottomAnchor),
         ])
         currentStepView = step
+
+        // Gentle fade-in so step changes don't hard-swap. Skip when offscreen
+        // (snapshot rendering) — the animator never runs without a runloop and
+        // the step would stay at alpha 0.
+        if view.window?.isVisible == true {
+            step.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                step.animator().alphaValue = 1
+            }
+        } else {
+            step.alphaValue = 1
+        }
+    }
+
+    /// Design-iteration hook for offscreen snapshots (`--render-onboarding`).
+    func debugShowStep(_ index: Int) {
+        showStep(index)
     }
 
     @objc private func backTapped() {
