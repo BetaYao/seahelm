@@ -335,7 +335,7 @@ class MainWindowController: NSWindowController {
     }
 
     /// ⌘B / navigateBack — chrome collapse is the only layout collapse signal.
-    func toggleChromeCollapsed() {
+    @objc func toggleChromeCollapsed() {
         chromeState.toggleCollapsed()
         applyChromeState(animated: true)
     }
@@ -351,11 +351,18 @@ class MainWindowController: NSWindowController {
         applyChromeState(animated: true)
     }
 
+    /// Header / keymap pane icons — uses `selectPane` (re-click collapses).
+    func selectChromePane(_ pane: ChromeLeftPane) {
+        chromeState.selectPane(pane)
+        applyChromeState(animated: true)
+    }
+
     private func applyChromeState(animated: Bool) {
         windowChrome?.applyState(chromeState, animated: animated)
         positionStandardWindowButtons()
         dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed, activePane: chromeState.activePane)
         syncKeyboardToChromeCollapse()
+        refreshChromeWorktreeContextEnabled()
     }
 
     private func syncKeyboardToChromeCollapse() {
@@ -364,6 +371,12 @@ class MainWindowController: NSWindowController {
         } else {
             keyboardMode.enterNormal()
         }
+    }
+
+    private func refreshChromeWorktreeContextEnabled() {
+        let hasSelection = tabCoordinator.selectedSailor != nil
+            || !(dashboardVC?.selectedSailorId.isEmpty ?? true)
+        windowChrome?.setWorktreeContextEnabled(hasSelection)
     }
 
     // MARK: - Ctrl double-tap detection
@@ -595,6 +608,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         dashboard.onRequestSetChromeCollapsed = { [weak self] collapsed in
             self?.setChromeCollapsed(collapsed)
+        }
+        dashboard.onRequestSelectChromePane = { [weak self] pane in
+            self?.selectChromePane(pane)
         }
         // Light exactly one toolbar icon for the active view; dim the rest.
         dashboard.onActiveToolChanged = { [weak self] tool in
@@ -1175,6 +1191,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 activePane: .firstMate
             )
             chrome.applyState(chromeState, animated: false)
+            chrome.headerDelegate = self
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1194,9 +1211,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
 
         guard let chrome = windowChrome else { return }
+        chrome.headerDelegate = self
         chrome.setSidebarContent(dashboard.navigatorHostView)
         chrome.setTerminalContent(dashboard.terminalHostView)
         positionStandardWindowButtons()
+        refreshChromeWorktreeContextEnabled()
     }
 
     private func handleChromeStateChange(_ state: ChromeLayoutState) {
@@ -1410,17 +1429,17 @@ class SeahelmWindow: NSWindow {
         case .prevWorktree:
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
-            mwc.tabCoordinator.dashboardVC?.toggleSidebarDefaultDashboard(); return true
+            mwc.toggleChromeCollapsed(); return true
         case .exitInsert:
             mwc.navigateBack(); return true
         case .toggleOverview:
             mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
         case .firstMatePane:
-            mwc.tabCoordinator.dashboardVC?.toggleFirstMateSide(); return true
+            mwc.selectChromePane(.firstMate); return true
         case .filesPane:
-            mwc.tabCoordinator.dashboardVC?.selectLeftPane(.file); return true
+            mwc.selectChromePane(.files); return true
         case .changesPane:
-            mwc.tabCoordinator.dashboardVC?.selectLeftPane(.change); return true
+            mwc.selectChromePane(.changes); return true
         }
     }
 
@@ -1504,10 +1523,58 @@ extension MainWindowController: NSWindowDelegate {
     }
 }
 
-// MARK: - TitleBarDelegate
+// MARK: - ChromeHeaderDelegate
+
+extension MainWindowController: ChromeHeaderDelegate {
+    func chromeDidToggleTheme() {
+        toggleThemeAppearance()
+    }
+
+    func chromeDidSelectPane(_ pane: ChromeLeftPane) {
+        selectChromePane(pane)
+    }
+
+    func chromeDidToggleSidebar() {
+        toggleChromeCollapsed()
+    }
+}
+
+// MARK: - TitleBarDelegate (legacy; accessory removed — forwards to chrome)
 
 extension MainWindowController: TitleBarDelegate {
     func titleBarDidToggleTheme() {
+        toggleThemeAppearance()
+    }
+
+    func titleBarDidRequestCollapseLeftColumn() {
+        toggleChromeCollapsed()
+        titleBar.setLeftColumnCollapsed(chromeState.isCollapsed)
+    }
+
+    func titleBarDidSelectLeftPane(_ pane: LeftPane) {
+        selectChromePane(pane == .change ? .changes : .files)
+    }
+
+    func titleBarDidToggleWorktreeList(from sourceView: NSView) {
+        tabCoordinator.dashboardVC?.openWorktreesTab()
+    }
+
+    func titleBarDidSelectWorktree(_ path: String) {
+        tabCoordinator.selectTab(forWorktree: path)
+        setChromeCollapsed(true)
+    }
+
+    func titleBarDidRequestOverview() {
+        tabCoordinator.switchToTab(0)
+        chromeState.selectPane(.firstMate)
+        applyChromeState(animated: true)
+    }
+
+    func titleBarDidToggleFirstMate() {
+        selectChromePane(.firstMate)
+    }
+
+    private func toggleThemeAppearance() {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
@@ -1516,7 +1583,6 @@ extension MainWindowController: TitleBarDelegate {
         updateCoordinator.config.themeMode = next.rawValue
         saveConfig()
         ThemeMode.applyAppearance(next)
-        // Window appearance must also be updated since it was set explicitly in init
         switch next {
         case .dark:
             window?.appearance = NSAppearance(named: .darkAqua)
@@ -1525,37 +1591,8 @@ extension MainWindowController: TitleBarDelegate {
         case .system:
             window?.appearance = nil
         }
-        // Update NSAppearance.current so .cgColor resolves correctly outside drawing cycles
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         applyWindowBackgroundStyle()
-    }
-
-    func titleBarDidRequestCollapseLeftColumn() {
-        guard let collapsed = tabCoordinator.dashboardVC?.toggleLeftColumnCollapse() else { return }
-        titleBar.setLeftColumnCollapsed(collapsed)
-    }
-
-    func titleBarDidSelectLeftPane(_ pane: LeftPane) {
-        tabCoordinator.dashboardVC?.selectLeftPane(pane)
-    }
-
-    func titleBarDidToggleWorktreeList(from sourceView: NSView) {
-        tabCoordinator.dashboardVC?.openWorktreesTab()
-    }
-
-    func titleBarDidSelectWorktree(_ path: String) {
-        // Picking a worktree from the popover drills into its working view.
-        tabCoordinator.selectTab(forWorktree: path)
-        dashboardVC?.setViewMode(.terminal)
-    }
-
-    func titleBarDidRequestOverview() {
-        tabCoordinator.switchToTab(0)
-        dashboardVC?.enterOverview()
-    }
-
-    func titleBarDidToggleFirstMate() {
-        dashboardVC?.toggleFirstMateSide()
     }
 }
 
@@ -1654,14 +1691,15 @@ extension MainWindowController: DashboardDelegate {
         tabCoordinator.saveSelectedWorktree()
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         saveConfig()
+        refreshChromeWorktreeContextEnabled()
     }
 
     func dashboardDidRequestBrowseFiles(worktreePath: String) {
-        tabCoordinator.dashboardVC?.selectLeftPane(.file)
+        selectChromePane(.files)
     }
 
     func dashboardDidRequestShowChanges(worktreePath: String) {
-        tabCoordinator.dashboardVC?.selectLeftPane(.change)
+        selectChromePane(.changes)
     }
 
 }

@@ -82,6 +82,15 @@ enum MenuBuilder {
         dashItem.target = target
         viewMenu.addItem(dashItem)
 
+        let toggleSidebarItem = NSMenuItem(
+            title: "Toggle Sidebar",
+            action: #selector(MainWindowController.toggleChromeCollapsed),
+            keyEquivalent: "b"
+        )
+        toggleSidebarItem.keyEquivalentModifierMask = .command
+        toggleSidebarItem.target = target
+        viewMenu.addItem(toggleSidebarItem)
+
         let closePaneItem = NSMenuItem(title: "Close Pane", action: #selector(MainWindowController.closePaneOrTab), keyEquivalent: "w")
         closePaneItem.keyEquivalentModifierMask = .command
         closePaneItem.target = target

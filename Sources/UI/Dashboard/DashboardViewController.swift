@@ -100,6 +100,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     var onRequestToggleChromeCollapse: (() -> Void)?
     /// Ask MainWindow to set chrome collapse (ViewMode / enter-terminal paths).
     var onRequestSetChromeCollapsed: ((Bool) -> Void)?
+    /// Ask MainWindow to run `ChromeLayoutState.selectPane` (re-click collapses).
+    var onRequestSelectChromePane: ((ChromeLeftPane) -> Void)?
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
@@ -432,6 +434,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         viewMode = mode
 
         if collapsed {
+            if firstMateSideOpen { flushPendingPreview() }
             lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
                 ?? lastCommittedWorktreePath
             DispatchQueue.main.async { [weak self] in
@@ -497,37 +500,12 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         ])
     }
 
-    /// First Mate icon: dock/undock the Dashboard as the left column (pushes the
-    /// terminal right, same as files/changes). No-op in the overview.
-    /// First Mate icon (title bar) → toggle the First Mate column.
-    func toggleFirstMateSide() { toggleSide(.firstMate) }
+    /// First Mate icon → chrome `selectPane(.firstMate)` (re-click collapses).
+    func toggleFirstMateSide() { onRequestSelectChromePane?(.firstMate) }
 
     /// Cmd+B: forward to chrome collapse SSOT (restores last pane on expand).
     func toggleSidebarDefaultDashboard() {
         onRequestToggleChromeCollapse?()
-    }
-
-    /// Each pane icon toggles its own panel: click when inactive → open that pane;
-    /// click when already the active pane → collapse the whole side column.
-    private func toggleSide(_ side: SidePane) {
-        if currentSide == side && !isLeftColumnCollapsed {
-            collapseCurrentSide()
-            return
-        }
-        switch side {
-        case .firstMate:
-            openFirstMateColumn()
-            currentSide = .firstMate
-            onRequestSetChromeCollapsed?(false)
-            notifyActiveTool()
-            return
-        case .files:     openFilesColumn(.files)
-        case .changes:   openFilesColumn(.changes)
-        case .none:      collapseCurrentSide(); return
-        }
-        currentSide = side
-        onRequestSetChromeCollapsed?(false)
-        notifyActiveTool()
     }
 
     private func openFirstMateColumn() {
@@ -545,25 +523,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         sidePanelVC.view.isHidden = false
     }
 
-    private func collapseCurrentSide() {
-        if firstMateSideOpen {
-            flushPendingPreview()
-        }
-        onRequestSetChromeCollapsed?(true)
-        currentSide = .none
-        notifyActiveTool()
-    }
-
     /// Undock First Mate: restore the file/change side panel in the column.
-    private func closeFirstMateSide(collapse: Bool = false) {
+    private func closeFirstMateSide() {
         guard firstMateSideOpen else { return }
         firstMateSideOpen = false
         overviewView.isHidden = true
         overviewView.removeFromSuperview()
         sidePanelVC.view.isHidden = false
-        if collapse {
-            onRequestSetChromeCollapsed?(true)
-        }
     }
 
     /// Open the fleet overview as the left column (⌘E / title-bar dashboard icon).
@@ -616,11 +582,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         return isLeftColumnCollapsed
     }
 
-    /// Switch the left column's active pane. Driven by the title-bar pane-switch
-    /// icons. Expands the column first if it was collapsed.
+    /// Switch the left column's active pane via chrome `selectPane`.
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
-        toggleSide(pane == .change ? .changes : .files)
+        onRequestSelectChromePane?(pane == .change ? .changes : .files)
     }
 
     /// Expand via chrome SSOT if currently collapsed.
