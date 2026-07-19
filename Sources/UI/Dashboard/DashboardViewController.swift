@@ -490,7 +490,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private func mountOverviewInColumn() {
         overviewView.removeFromSuperview()
         overviewView.translatesAutoresizingMaskIntoConstraints = false
-        overviewView.layer?.backgroundColor = Self.overviewSideBg.cgColor
+        overviewView.layer?.backgroundColor = NSColor.clear.cgColor
         leftColumnContainer.addSubview(overviewView)
         NSLayoutConstraint.activate([
             overviewView.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
@@ -911,7 +911,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         navigatorHostView.wantsLayer = true
         navigatorHostView.layer?.cornerRadius = 0
         navigatorHostView.layer?.masksToBounds = true
-        navigatorHostView.layer?.backgroundColor = Self.overviewSideBg.cgColor
+        // Transparent so chrome sidebar vibrancy shows through.
+        navigatorHostView.layer?.backgroundColor = NSColor.clear.cgColor
         navigatorHostView.setAccessibilityIdentifier("dashboard.leftColumn")
 
         // Worktree list (handed to the sidebar's Worktrees tab as worktreesTabView).
@@ -1882,7 +1883,8 @@ final class DashboardOverviewView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = Self.bg.cgColor
+        // Clear so WindowChromeController's sidebar vibrancy shows through.
+        layer?.backgroundColor = NSColor.clear.cgColor
 
         // --- Header: ◍ Dashboard   N worktrees · M running  (border-bottom) ---
         let headerIcon = NSTextField(labelWithString: "◍")
@@ -2015,7 +2017,8 @@ final class DashboardOverviewView: NSView {
     private func setupComposer() -> NSView {
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = Self.bg.cgColor
+        // Translucent so sidebar glass remains visible behind the composer.
+        bar.layer?.backgroundColor = Self.panelBg.cgColor
         bar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
 

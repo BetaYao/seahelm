@@ -17,7 +17,8 @@ final class WindowChromeController: NSViewController {
         activePane: .firstMate
     )
 
-    private let sidebarColumn = NSView()
+    /// Vibrancy glass column (header + navigator). Terminal column stays opaque.
+    private let sidebarColumn = NSVisualEffectView()
     private let sidebarHeader = SidebarHeaderView()
     private let sidebarContentHost = NSView()
 
@@ -81,16 +82,19 @@ final class WindowChromeController: NSViewController {
     // MARK: - Setup
 
     private func setupHierarchy() {
+        configureSidebarGlass(sidebarColumn)
         sidebarColumn.translatesAutoresizingMaskIntoConstraints = false
-        sidebarColumn.wantsLayer = true
         sidebarColumn.setAccessibilityIdentifier("chrome.sidebarColumn")
 
         sidebarContentHost.translatesAutoresizingMaskIntoConstraints = false
+        sidebarContentHost.wantsLayer = true
+        sidebarContentHost.layer?.backgroundColor = NSColor.clear.cgColor
         sidebarContentHost.setAccessibilityIdentifier("chrome.sidebarContent")
 
         terminalColumn.translatesAutoresizingMaskIntoConstraints = false
         terminalColumn.wantsLayer = true
-        terminalColumn.layer?.backgroundColor = SemanticColors.panel.cgColor
+        // Opaque terminal column — vibrancy stays on the sidebar only.
+        terminalColumn.layer?.backgroundColor = SemanticColors.panel2.cgColor
         terminalColumn.setAccessibilityIdentifier("chrome.terminalColumn")
 
         terminalContentHost.translatesAutoresizingMaskIntoConstraints = false
@@ -231,5 +235,19 @@ final class WindowChromeController: NSViewController {
             content.topAnchor.constraint(equalTo: host.topAnchor),
             content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
         ])
+    }
+
+    /// Sidebar material: macOS 26+ prefers the newest sidebar/glass semantic material
+    /// when the SDK exposes one; otherwise `.sidebar` + `.behindWindow` (works on 14+).
+    private func configureSidebarGlass(_ effect: NSVisualEffectView) {
+        effect.blendingMode = .behindWindow
+        effect.state = .followsWindowActiveState
+        if #available(macOS 26.0, *) {
+            // Tahoe+: `.sidebar` is the semantic Liquid Glass sidebar material in
+            // current SDKs. Prefer it over window-background materials.
+            effect.material = .sidebar
+        } else {
+            effect.material = .sidebar
+        }
     }
 }
