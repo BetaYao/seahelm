@@ -317,9 +317,10 @@ class StatusPublisher {
         lock.lock()
         // Never downgrade a known identity to unknown on a transient probe miss.
         if type != .unknown { probedTypes[terminalID] = type }
-        if let cmd = probe.commandLine {
-            probedCommandLines[terminalID] = cmd
-        }
+        // Unlike agent identity, the command line tracks the *current* foreground
+        // job: a nil probe means the job ended, so clear the cache — otherwise a
+        // finished `brew update` would title the pane until app restart.
+        probedCommandLines[terminalID] = probe.commandLine
         probedAtCycle[terminalID] = pollCycle
         let resultType = probedTypes[terminalID] ?? .unknown
         let resultCmd = probedCommandLines[terminalID]

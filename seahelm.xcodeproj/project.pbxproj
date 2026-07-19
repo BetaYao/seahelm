@@ -152,6 +152,7 @@
 		7839409D46CC0B8E4810B869 /* WorktreeCreatorEnvCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */; };
 		7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */; };
 		7A85312BE720DFFA0A03ADAB /* Keymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F12DC83A838ABCF3346194 /* Keymap.swift */; };
+		7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */; };
 		7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */; };
 		7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */; };
 		7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */; };
@@ -239,6 +240,7 @@
 		B2E723320C2AAA22C82B98B4 /* WeComBotChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94D0809EF8A568E5C3A80A5 /* WeComBotChannel.swift */; };
 		B484B87A3E1D684239F4C957 /* ChromeIconClusterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */; };
 		B489F50E6BDE70E1F24CB076 /* SessionTitleLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */; };
+		B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */; };
 		B5A6416221795024BC063D17 /* ChromeIconButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4347F9E7EF04217AB29D93E /* ChromeIconButton.swift */; };
 		B624161842A284D12A4CBBB1 /* DashboardFocusController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D241FA217901216F43E4BDBE /* DashboardFocusController.swift */; };
 		B658CA193508F17D6F6BA66D /* TaskProgressParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 249CA31487C12997605E1512 /* TaskProgressParserTests.swift */; };
@@ -482,6 +484,7 @@
 		5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNode.swift; sourceTree = "<group>"; };
 		5E39B8D0CAEA529E6BA78F29 /* ShipLogIngestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogIngestTests.swift; sourceTree = "<group>"; };
 		5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceOptionParserTests.swift; sourceTree = "<group>"; };
+		5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorHooksSetupTests.swift; sourceTree = "<group>"; };
 		60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStore.swift; sourceTree = "<group>"; };
 		6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTitleResolver.swift; sourceTree = "<group>"; };
 		6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryTests.swift; sourceTree = "<group>"; };
@@ -584,6 +587,7 @@
 		AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManifest.swift; sourceTree = "<group>"; };
 		ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEventDecoderTests.swift; sourceTree = "<group>"; };
 		AE1079E906A5CC63135C2DD5 /* MenuRowButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuRowButton.swift; sourceTree = "<group>"; };
+		B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorHooksSetup.swift; sourceTree = "<group>"; };
 		B032E95F9035447EBF27883B /* GitDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiff.swift; sourceTree = "<group>"; };
 		B07FF7C768D8C4871A88AA48 /* WorkspaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManager.swift; sourceTree = "<group>"; };
 		B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstaller.swift; sourceTree = "<group>"; };
@@ -740,6 +744,7 @@
 				4F0C5FB141D86ECC0B6D8E66 /* Config.swift */,
 				42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */,
 				59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */,
+				B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */,
 				2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */,
 				FAFF4D1021558298332264D5 /* DebugFlags.swift */,
 				DA02A8188B616E0F6F413FC1 /* EventHub.swift */,
@@ -1021,6 +1026,7 @@
 				B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */,
 				4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */,
 				536A8D31229E4F3D3D5D4DE8 /* ControlSocketServerTests.swift */,
+				5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */,
 				201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */,
 				BA242C3631BD163C19CFDD38 /* DashboardFocusControllerTests.swift */,
 				42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */,
@@ -1448,6 +1454,7 @@
 				E3B3F5D302481F3DF776ED95 /* ConfigTests.swift in Sources */,
 				C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */,
 				1F17BE40E11A063D21FD2B1C /* ControlSocketServerTests.swift in Sources */,
+				B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */,
 				0B486DC8922CD428C8D48A90 /* CursorSessionTitleLookupTests.swift in Sources */,
 				43BD24E5D16ABA5AC477E89C /* DashboardFocusControllerTests.swift in Sources */,
 				D6494907C3E68AED14842187 /* DashboardViewControllerClickTests.swift in Sources */,
@@ -1620,6 +1627,7 @@
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,
+				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,
 				1BB8C6D16F033D0337FB2BAD /* CursorSessionTitleLookup.swift in Sources */,
 				B624161842A284D12A4CBBB1 /* DashboardFocusController.swift in Sources */,
 				DBC71AE11E16638FD7EE341D /* DashboardViewController.swift in Sources */,
@@ -1802,7 +1810,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.3;
+				MARKETING_VERSION = 2.0.12;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2033,7 +2041,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.3;
+				MARKETING_VERSION = 2.0.12;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",

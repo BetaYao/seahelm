@@ -41,6 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ClaudeHooksSetup.ensureHooksConfigured()
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
             CodexHooksSetup.ensureHooksConfigured()
+            CursorHooksSetup.ensureHooksConfigured()
             SeahelmSuggestInstaller.ensureInstalled()
             // After SeahelmSuggestInstaller: the plugin shells out to the script
             // it writes.
@@ -100,13 +101,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .utility).async {
             guard ZmxLocator.isAvailable else { return }
             let config = Config.load()
-            let worktreePaths = config.workspacePaths.flatMap { repoPath in
+            let discovered = config.workspacePaths.map { repoPath in
                 WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
             }
-            // If discovery returned nothing while workspaces exist, it likely failed
-            // transiently (git lock, timing). Skipping avoids classifying every live
-            // session as orphan and force-killing attached panes.
-            guard !(worktreePaths.isEmpty && !config.workspacePaths.isEmpty) else { return }
+            // A repo always has at least its main worktree, so an empty result
+            // for ANY repo means discovery failed transiently (git lock, timing,
+            // unmounted volume) — not that the repo has no sessions. Proceeding
+            // would classify that repo's live sessions as orphans and force-kill
+            // attached panes (agents included). Skip the whole sweep this round.
+            guard !discovered.contains(where: \.isEmpty) else {
+                if !config.workspacePaths.isEmpty {
+                    NSLog("[App] Skipping orphan zmx cleanup — worktree discovery incomplete")
+                }
+                return
+            }
+            let worktreePaths = discovered.flatMap { $0 }
             let activeSessionNames = SessionManager.expectedSessionNames(
                 config: config,
                 discoveredWorktreePaths: worktreePaths
