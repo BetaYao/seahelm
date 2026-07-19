@@ -70,12 +70,48 @@ enum ProcessProbe {
     /// Full identification for a live session: read the session pid from zmx,
     /// enumerate its descendants, and match against the manifest store.
     static func identifyAgent(sessionName: String) -> String? {
+        probeSession(sessionName: sessionName).agentId
+    }
+
+    /// One sysctl walk: agent identity (if any) + foreground command line.
+    static func probeSession(sessionName: String) -> (agentId: String?, commandLine: String?) {
         guard let out = ProcessRunner.output([ZmxLocator.executable(), "list"]),
-              let root = sessionPid(sessionName: sessionName, zmxListOutput: out) else { return nil }
-        let all = allProcesses()
-        let descendants = descendants(of: root, in: all)
-        guard !descendants.isEmpty else { return nil }
-        return identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
+              let root = sessionPid(sessionName: sessionName, zmxListOutput: out) else {
+            return (nil, nil)
+        }
+        let descendants = descendants(of: root, in: allProcesses())
+        guard !descendants.isEmpty else { return (nil, nil) }
+        let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
+        return (agentId, foregroundCommandLine(from: descendants))
+    }
+
+    /// Human-facing command for pane titles: prefer a non-shell leaf under the
+    /// session shell (e.g. `brew update` over a `bash -c` wrapper).
+    static func foregroundCommandLine(from procs: [Proc]) -> String? {
+        let candidates = procs.filter { !isShellBasename($0.execBasename) && !$0.argv.isEmpty }
+        guard !candidates.isEmpty else { return nil }
+        let leaves = candidates.filter { cand in
+            !candidates.contains { $0.ppid == cand.pid }
+        }
+        let pick = leaves.last ?? candidates.last
+        guard let pick else { return nil }
+        return displayCommandLine(argv: pick.argv)
+    }
+
+    private static let shellBasenames: Set<String> = [
+        "zsh", "bash", "sh", "fish", "dash", "tcsh", "csh", "login",
+    ]
+
+    private static func isShellBasename(_ name: String) -> Bool {
+        shellBasenames.contains(name)
+    }
+
+    /// Basename argv0 so titles read `brew update` not `/opt/homebrew/bin/brew update`.
+    private static func displayCommandLine(argv: [String]) -> String {
+        guard let first = argv.first else { return "" }
+        let head = (first as NSString).lastPathComponent
+        if argv.count == 1 { return head }
+        return ([head] + argv.dropFirst()).joined(separator: " ")
     }
 
     /// Collect the descendant processes (excluding the root shell itself) of `root`.

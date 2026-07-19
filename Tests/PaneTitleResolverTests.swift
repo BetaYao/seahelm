@@ -35,6 +35,23 @@ final class PaneTitleResolverTests: XCTestCase {
         )
     }
 
+    func testShellIgnoresWorktreeSessionTitle() {
+        let sailor = makeSailor(
+            agentType: .shellCommand,
+            prompt: "",
+            branch: "main",
+            commandLine: "brew update"
+        )
+        XCTAssertEqual(
+            PaneTitleResolver.title(
+                for: sailor,
+                sessionTitle: { _, _ in nil },
+                worktreeSessionTitle: { _ in "Seahelm Layout Redesign" }
+            ),
+            "brew update"
+        )
+    }
+
     func testAgentFallsBackToPromptThenBranch() {
         var sailor = makeSailor(agentType: .claudeCode, prompt: "Do the thing", branch: "feat/x")
         XCTAssertEqual(
@@ -101,6 +118,25 @@ final class PaneTitleResolverTests: XCTestCase {
                 worktreeSessionTitle: { _ in nil }
             ),
             "ops/rds-cpu-degrade"
+        )
+    }
+
+    func testShellUsesCommandLineEvenWhenSiblingIsAgent() {
+        // Per-pane: shellCommand must win over branch even if an agent shares
+        // the worktree (isAgentPane must not use worktree-scoped agent type).
+        let sailor = makeSailor(
+            agentType: .shellCommand,
+            prompt: "",
+            branch: "main",
+            commandLine: "brew update"
+        )
+        XCTAssertEqual(
+            PaneTitleResolver.title(
+                for: sailor,
+                sessionTitle: { _, _ in nil },
+                worktreeSessionTitle: { _ in "Cursor Session Title" }
+            ),
+            "brew update"
         )
     }
 

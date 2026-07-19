@@ -413,8 +413,8 @@ class Station {
 
     // MARK: - Zmx Session Recovery
 
-    /// Schedule a health check after zmx attach. If the surface has no content
-    /// after the delay, the session is presumed stale — kill it and recreate.
+    /// Schedule a health check after zmx attach. If the attach client has
+    /// exited, re-attach (and only recreate the daemon when it is truly gone).
     private func scheduleZmxHealthCheck(sessionName: String, container: NSView, workingDirectory: String?) {
         recoveryTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -427,36 +427,64 @@ class Station {
     private func checkZmxHealth(sessionName: String, container: NSView, workingDirectory: String?) {
         // If the surface was already destroyed, nothing to do.
         guard surface != nil else { return }
-        guard ZmxSessionRecovery.shouldRecover(processExited: processStatus == .exited) else { return }
+        let exited = processStatus == .exited
+        guard ZmxSessionRecovery.shouldRecover(processExited: exited) else { return }
 
-        NSLog("Station: zmx session '%@' attach exited — recovering", sessionName)
-        recoverZmxSession(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+        // Session existence is a blocking `zmx list` — probe off the main thread,
+        // then recover with a plan that never force-kills a still-living session.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let exists = SessionManager.sessionExists(name: sessionName, backend: "zmx")
+            let plan = ZmxSessionRecovery.plan(processExited: exited, sessionExists: exists)
+            guard plan != .none else { return }
+            NSLog("Station: zmx session '%@' attach exited — plan=%@", sessionName, String(describing: plan))
+            DispatchQueue.main.async {
+                self?.recoverZmxSession(
+                    sessionName: sessionName,
+                    container: container,
+                    workingDirectory: workingDirectory,
+                    plan: plan
+                )
+            }
+        }
     }
 
-    private func recoverZmxSession(sessionName: String, container: NSView, workingDirectory: String?) {
+    private func recoverZmxSession(
+        sessionName: String,
+        container: NSView,
+        workingDirectory: String?,
+        plan: ZmxSessionRecovery.Plan
+    ) {
         let resumeCmd = agentSessionRef?.resumeCommandLine()
-        // 1. Kill the stale session in the background
         DispatchQueue.global(qos: .utility).async {
-            ZmxSessionRecovery.forceKillSession(sessionName)
-
-            // 1b. If this pane runs an agent, seed a fresh session with the
-            // agent's resume command so recovery brings the agent back instead
-            // of a bare shell.
-            if let resumeCmd, let cwd = workingDirectory {
-                ZmxSessionRecovery.seedSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+            switch plan {
+            case .none:
+                return
+            case .reattach:
+                // Client died; daemon (and agent) still alive — do not kill.
+                break
+            case .recreate:
+                // Session is gone. Clear any stale socket, then optionally seed
+                // an agent resume so we don't land in an empty shell.
+                ZmxSessionRecovery.forceKillSession(sessionName)
+                if let resumeCmd, let cwd = workingDirectory {
+                    ZmxSessionRecovery.seedSessionIfMissing(
+                        name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+                }
             }
 
-            // 2. Recreate on main thread
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 guard let app = GhosttyBridge.shared.app else { return }
 
-                // Tear down old surface
                 self.destroy()
 
-                // Recreate with a fresh zmx attach
                 let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
-                self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+                self._createWithCommand(
+                    app: app,
+                    container: container,
+                    workingDirectory: workingDirectory,
+                    command: zmxCommand
+                )
                 self.delegate?.stationDidRecover(self)
             }
         }

@@ -77,4 +77,26 @@ final class ProcessProbeTests: XCTestCase {
         let d = ProcessProbe.descendants(of: 2, in: all).map(\.pid).sorted()
         XCTAssertEqual(d, [3, 4])
     }
+
+    func testForegroundCommandLinePrefersLeafJob() {
+        // Session shell descendants: node wrapper → real command.
+        let procs = [
+            p(3, 2, ["node", "/opt/tool/bin/wrapper.js"]),
+            p(4, 3, ["/opt/homebrew/bin/brew", "update"]),
+        ]
+        XCTAssertEqual(ProcessProbe.foregroundCommandLine(from: procs), "brew update")
+    }
+
+    func testForegroundCommandLineSkipsNestedShells() {
+        let procs = [
+            p(3, 2, ["/bin/bash", "-c", "sleep 1"]),
+            p(4, 3, ["/bin/sleep", "1"]),
+        ]
+        XCTAssertEqual(ProcessProbe.foregroundCommandLine(from: procs), "sleep 1")
+    }
+
+    func testForegroundCommandLineNilWhenOnlyShells() {
+        let procs = [p(3, 2, ["/bin/zsh"]), p(4, 3, ["bash"])]
+        XCTAssertNil(ProcessProbe.foregroundCommandLine(from: procs))
+    }
 }

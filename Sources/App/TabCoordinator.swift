@@ -100,6 +100,9 @@ class TabCoordinator {
                 lastMessage: outcome.info.lastMessage,
                 lastUserPrompt: outcome.info.lastUserPrompt,
                 agentType: outcome.info.agentType)
+            // Aggregator ignores commandLine-only changes; chrome pane title
+            // still needs a refresh when the foreground shell job updates.
+            self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,

@@ -113,4 +113,18 @@ final class StopHookResponderTests: XCTestCase {
         XCTAssertFalse(StopHookResponder.isAskingQuestion(["last_assistant_message": "Done."]))
         XCTAssertFalse(StopHookResponder.isAskingQuestion(nil))
     }
+
+    func testCursorAbortedStopDoesNotBlock() {
+        let e = WebhookEvent(
+            source: "cursor", sessionId: "c", event: .agentStop, cwd: "/wt", timestamp: nil,
+            data: ["stop_hook_active": false, "status": "aborted"])
+        XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+    }
+
+    func testCursorCompletedStopBlocks() {
+        let e = WebhookEvent(
+            source: "cursor", sessionId: "c", event: .agentStop, cwd: "/wt", timestamp: nil,
+            data: ["stop_hook_active": false, "status": "completed"])
+        XCTAssertNotNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+    }
 }

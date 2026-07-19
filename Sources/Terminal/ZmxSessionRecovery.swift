@@ -5,6 +5,19 @@ import Foundation
 /// These are subprocess/filesystem concerns, kept separate from Station's
 /// surface lifecycle.
 enum ZmxSessionRecovery {
+    /// What to do when a Ghostty surface's `zmx attach` client has exited.
+    ///
+    /// Important: client disconnect ≠ session death. zmx keeps the daemon (and
+    /// any agent inside) alive with `clients=0`. Force-killing a still-living
+    /// session on client exit was wiping agents across app restarts.
+    enum Plan: Equatable {
+        case none
+        /// Session daemon still up — re-attach only; never kill.
+        case reattach
+        /// Session gone — optionally seed an agent resume, then attach (creates).
+        case recreate
+    }
+
     /// Seed a zmx session running `agentCommandLine` if one doesn't already
     /// exist, blocking (briefly) until it comes up. Safe no-op when the session
     /// is already alive. Call off the main thread.
@@ -19,12 +32,16 @@ enum ZmxSessionRecovery {
         _ = SessionManager.waitUntilSessionExists(name: name, backend: "zmx", timeoutSeconds: 5)
     }
 
-    /// Decide whether a zmx-attached surface should be torn down and re-attached.
-    /// A freshly-attached shell legitimately shows a blank/short viewport for the
-    /// first few seconds, so an empty viewport must NOT trigger recovery — only a
-    /// genuinely exited attach process (the session is gone) warrants it. Keying
-    /// on "viewport empty" was killing live plain-terminal panes, leaving them
-    /// unresponsive until the user closed them with Cmd+W.
+    /// Decide how to recover after an attach-client health check.
+    /// A blank viewport alone must never trigger recovery (live shells look empty
+    /// for the first few seconds). Only an exited attach process qualifies, and
+    /// even then we reattach without killing when the session daemon is alive.
+    static func plan(processExited: Bool, sessionExists: Bool) -> Plan {
+        guard processExited else { return .none }
+        return sessionExists ? .reattach : .recreate
+    }
+
+    /// Legacy bool: true when the attach process exited (recovery may be needed).
     static func shouldRecover(processExited: Bool) -> Bool {
         processExited
     }

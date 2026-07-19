@@ -116,6 +116,40 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.data?["model"] as? String, "gpt-5.4")
     }
 
+    // MARK: - Cursor native payload adapter
+
+    func testParseCursorStopMapsLoopCountToStopHookActive() throws {
+        let first = """
+        {"hook_event_name":"stop","conversation_id":"conv_1","cursor_version":"1.7.2",
+         "workspace_roots":["/tmp/wt"],"status":"completed","loop_count":0}
+        """.data(using: .utf8)!
+        let e1 = try WebhookEvent.parse(from: first)
+        XCTAssertEqual(e1.source, "cursor")
+        XCTAssertEqual(e1.event, .agentStop)
+        XCTAssertEqual(e1.sessionId, "conv_1")
+        XCTAssertEqual(e1.cwd, "/tmp/wt")
+        XCTAssertEqual(e1.data?["stop_hook_active"] as? Bool, false)
+        XCTAssertEqual(e1.data?["status"] as? String, "completed")
+
+        let second = """
+        {"hook_event_name":"stop","conversation_id":"conv_1","cursor_version":"1.7.2",
+         "workspace_roots":["/tmp/wt"],"status":"completed","loop_count":1}
+        """.data(using: .utf8)!
+        let e2 = try WebhookEvent.parse(from: second)
+        XCTAssertEqual(e2.data?["stop_hook_active"] as? Bool, true)
+    }
+
+    func testParseCursorBeforeSubmitPrompt() throws {
+        let json = """
+        {"hook_event_name":"beforeSubmitPrompt","conversation_id":"c","cursor_version":"1.7.2",
+         "workspace_roots":["/repo"],"prompt":"hello"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.source, "cursor")
+        XCTAssertEqual(event.event, .userPrompt)
+        XCTAssertEqual(event.cwd, "/repo")
+    }
+
     // MARK: - Event → SailorStatus mapping
 
     func testEventToSailorStatus() {

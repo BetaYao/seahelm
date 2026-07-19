@@ -32,10 +32,12 @@ class StatusPublisher {
     // Cache: skip detection when viewport text hasn't changed
     private var lastViewportHashes: [String: UInt64] = [:]           // keyed by terminal ID
 
-    /// Process-tree agent identity cache (keyed by terminal ID) + the poll cycle
-    /// it was last refreshed on. Re-probed every `probeRefreshStride` cycles since
-    /// the sysctl walk is comparatively expensive.
+    /// Process-tree probe cache (keyed by terminal ID) + the poll cycle it was
+    /// last refreshed on. Re-probed every `probeRefreshStride` cycles since the
+    /// sysctl walk is comparatively expensive. Command line is refreshed on the
+    /// same walk so shell pane titles stay in sync with the foreground job.
     private var probedTypes: [String: SailorType] = [:]
+    private var probedCommandLines: [String: String] = [:]
     private var probedAtCycle: [String: Int] = [:]
     private let probeRefreshStride = 5
     // Pre-lowercased agent names for faster matching
@@ -101,6 +103,7 @@ class StatusPublisher {
         runningStartTimes.removeValue(forKey: terminalID)
         lastViewportHashes.removeValue(forKey: terminalID)
         probedTypes.removeValue(forKey: terminalID)
+        probedCommandLines.removeValue(forKey: terminalID)
         probedAtCycle.removeValue(forKey: terminalID)
     }
 
@@ -225,9 +228,16 @@ class StatusPublisher {
             // Prefer process-tree identification over screen-text scraping; it is
             // robust to wrappers (node→codex) and to agents that clear their name
             // off screen. Falls back to text detection when the probe is unsure.
-            let probedType = probedSailorType(terminalID: terminalID, sessionName: surface.sessionName, pollCycle: pollCycle)
+            let probe = probedSession(terminalID: terminalID, sessionName: surface.sessionName, pollCycle: pollCycle)
+            let probedType = probe.agentType
+            let commandLine = probe.commandLine
             let detectedSailorType = probedType != .unknown ? probedType : SailorType.detect(fromLowercased: lowerContent)
-            let agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            var agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            // Shell jobs (brew, make, …) are not in AI manifests — classify from argv.
+            if let commandLine, !agentType.isAIAgent {
+                let fromCmd = SailorType.detect(fromCommand: commandLine)
+                if fromCmd != .unknown { agentType = fromCmd }
+            }
             let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
 
@@ -237,6 +247,8 @@ class StatusPublisher {
             // produce a status that gets discarded. Only its activity extraction
             // is actually consumed, so run just that.
             let activityEvents = detector.extractActivityEvents(from: content)
+            // Agent type only here — commandLine must land via ingest so the
+            // displayed-state gate sees nil→cmd and notifies observers.
             ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
             // Rich detection gives us the visible_idle signal for debounce.
@@ -267,7 +279,7 @@ class StatusPublisher {
             let normalized = NormalizedEvent(
                 terminalID: terminalID, source: .scan,
                 kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
-                                      commandLine: nil, agentType: agentType,
+                                      commandLine: commandLine, agentType: agentType,
                                       roundDuration: roundDur, tasks: webhookTasks))
             ShipLog.shared.ingest(normalized)
             // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
@@ -277,25 +289,42 @@ class StatusPublisher {
         }
     }
 
-    /// Cached process-tree agent identity for a pane. Re-probes at most every
+    /// Cached process-tree probe for a pane. Re-probes at most every
     /// `probeRefreshStride` cycles. Runs on the poll background queue.
-    private func probedSailorType(terminalID: String, sessionName: String?, pollCycle: Int) -> SailorType {
-        guard let sessionName else { return .unknown }
+    private func probedSession(
+        terminalID: String,
+        sessionName: String?,
+        pollCycle: Int
+    ) -> (agentType: SailorType, commandLine: String?) {
+        guard let sessionName else { return (.unknown, nil) }
         lock.lock()
-        let cached = probedTypes[terminalID]
+        let cachedType = probedTypes[terminalID]
+        let cachedCmd = probedCommandLines[terminalID]
         let last = probedAtCycle[terminalID]
         lock.unlock()
-        if let cached, let last, pollCycle - last < probeRefreshStride, cached != .unknown {
-            return cached
+        // Reuse cache when still fresh. Allow a known command line with unknown
+        // agent type (shell jobs) — that is the brew-update title path.
+        if let last, pollCycle - last < probeRefreshStride {
+            if let cachedType, cachedType != .unknown {
+                return (cachedType, cachedCmd)
+            }
+            if cachedCmd != nil {
+                return (cachedType ?? .unknown, cachedCmd)
+            }
         }
-        let type = SailorType.fromManifestId(ProcessProbe.identifyAgent(sessionName: sessionName))
+        let probe = ProcessProbe.probeSession(sessionName: sessionName)
+        let type = SailorType.fromManifestId(probe.agentId)
         lock.lock()
         // Never downgrade a known identity to unknown on a transient probe miss.
         if type != .unknown { probedTypes[terminalID] = type }
+        if let cmd = probe.commandLine {
+            probedCommandLines[terminalID] = cmd
+        }
         probedAtCycle[terminalID] = pollCycle
-        let result = probedTypes[terminalID] ?? .unknown
+        let resultType = probedTypes[terminalID] ?? .unknown
+        let resultCmd = probedCommandLines[terminalID]
         lock.unlock()
-        return result
+        return (resultType, resultCmd)
     }
 
     /// Find agent definition using pre-lowercased content and names

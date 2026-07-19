@@ -1728,6 +1728,8 @@ extension MainWindowController: SplitContainerDelegate {
             object: self,
             userInfo: ["worktreePath": worktreePath, "focusedLeafId": leafId]
         )
+        // Spec: pane focus change drives `Repo · pane` in the terminal header.
+        updateChromeTitle()
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {

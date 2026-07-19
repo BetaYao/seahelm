@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Order:
 /// 1. Per-session title (Claude JSONL / Cursor `meta.json`) when `agentSessionRef` is set
-/// 2. Worktree-scoped session title (Claude, then Cursor)
+/// 2. Worktree-scoped session title (Claude, then Cursor) — agent panes only
 /// 3. Last user prompt
 /// 4. Shell: last command line (non-AI only)
 /// 5. Branch
@@ -30,7 +30,10 @@ enum PaneTitleResolver {
             return title
         }
 
-        if let title = worktreeSessionTitle(sailor.worktreePath)?
+        // Worktree-scoped session title only for agent panes. A shell sibling
+        // must not inherit the agent session name (e.g. "Seahelm Layout Redesign").
+        if isAgentPane(sailor),
+           let title = worktreeSessionTitle(sailor.worktreePath)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
             return title
@@ -73,12 +76,11 @@ enum PaneTitleResolver {
 
     // MARK: - Private
 
+    /// Per-pane only — a worktree-scoped agent pick must not make shell siblings
+    /// skip `commandLine` (they'd fall through to branch).
     private static func isAgentPane(_ sailor: SailorInfo) -> Bool {
         if sailor.agentType.isAIAgent { return true }
         if sailor.station?.agentSessionRef != nil { return true }
-        if WorktreeSailorTypeStore.shared.agentType(forWorktree: sailor.worktreePath)?.isAIAgent == true {
-            return true
-        }
         return false
     }
 

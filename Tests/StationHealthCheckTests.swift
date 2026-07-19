@@ -7,12 +7,37 @@ final class StationHealthCheckTests: XCTestCase {
     /// the viewport read empty, leaving plain-terminal panes dead (no input, must
     /// Cmd+W). A live attach process must NOT be recovered.
     func testLiveShellWithBlankViewportIsNotRecovered() {
-        XCTAssertFalse(ZmxSessionRecovery.shouldRecover(processExited: false))
+        XCTAssertEqual(
+            ZmxSessionRecovery.plan(processExited: false, sessionExists: true),
+            .none
+        )
+        XCTAssertEqual(
+            ZmxSessionRecovery.plan(processExited: false, sessionExists: false),
+            .none
+        )
     }
 
-    /// When `zmx attach` has actually exited, the session is gone and the pane is
-    /// genuinely dead — recovery is warranted.
-    func testExitedAttachIsRecovered() {
+    /// Attach client died but the zmx daemon (and any agent inside) is still
+    /// alive — only re-attach. Force-killing would wipe the user's session.
+    func testExitedAttachWithLiveSessionReattachesOnly() {
+        XCTAssertEqual(
+            ZmxSessionRecovery.plan(processExited: true, sessionExists: true),
+            .reattach
+        )
+    }
+
+    /// Attach exited and the session is gone — recreate (seed agent if we have
+    /// a resume ref; otherwise `zmx attach` creates an empty shell).
+    func testExitedAttachWithMissingSessionRecreates() {
+        XCTAssertEqual(
+            ZmxSessionRecovery.plan(processExited: true, sessionExists: false),
+            .recreate
+        )
+    }
+
+    /// Legacy bool helper: still true only when the attach process exited.
+    func testShouldRecoverMatchesProcessExited() {
+        XCTAssertFalse(ZmxSessionRecovery.shouldRecover(processExited: false))
         XCTAssertTrue(ZmxSessionRecovery.shouldRecover(processExited: true))
     }
 }
