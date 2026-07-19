@@ -106,6 +106,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     var onRequestSetChromeCollapsed: ((Bool) -> Void)?
     /// Ask MainWindow to run `ChromeLayoutState.selectPane` (re-click collapses).
     var onRequestSelectChromePane: ((ChromeLeftPane) -> Void)?
+    /// File / changelog overlay title for the chrome terminal header (`nil` = restore pane title).
+    var onCenterOverlayTitleChange: ((String?) -> Void)?
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
@@ -1704,6 +1706,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
     // MARK: - Center Overlay
 
     /// Shows a full-cover overlay over the center terminal panel.
+    /// Title is shown in the chrome `TerminalHeaderView` (not a second overlay header).
     /// Any existing overlay is removed first.
     @discardableResult
     func showCenterOverlay(
@@ -1715,7 +1718,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
         dismissCenterOverlay()
 
         let overlay = CenterOverlayView(
-            title: title, content: content, onSave: onSave, onPreview: onPreview
+            content: content, onSave: onSave, onPreview: onPreview
         ) { [weak self] in
             self?.dismissCenterOverlay()
         }
@@ -1730,6 +1733,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
         ])
 
         centerOverlay = overlay
+        onCenterOverlayTitleChange?(title)
         overlay.window?.makeFirstResponder(overlay)
         return overlay
     }
@@ -1739,6 +1743,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
         guard let overlay = centerOverlay else { return }
         overlay.removeFromSuperview()
         centerOverlay = nil
+        onCenterOverlayTitleChange?(nil)
 
         DispatchQueue.main.async { [weak self] in
             guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
@@ -1783,7 +1788,8 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
         let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
-        let title = "Changes: \(URL(fileURLWithPath: path).lastPathComponent)"
+        let fileName = URL(fileURLWithPath: path).lastPathComponent
+        let title = fileName.isEmpty ? "Changes" : fileName
         showCenterOverlay(DiffReviewView(worktreePath: worktreePath), title: title)
     }
 }
@@ -1907,6 +1913,9 @@ final class DashboardOverviewView: NSView {
     private var menuTrigger: Character = "/"
     private var menuToken = ""
     private var menuFullText = ""
+    /// Local mouse-down monitor so clicks on non-focusable chrome (fleet list,
+    /// labels) dismiss the slash menu even when the field stays first responder.
+    private var menuClickMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1914,7 +1923,10 @@ final class DashboardOverviewView: NSView {
     }
     required init?(coder: NSCoder) { super.init(coder: coder); setup() }
 
-    deinit { pendingOrders?.removeObserver(ordersToken) }
+    deinit {
+        stopMenuClickMonitor()
+        pendingOrders?.removeObserver(ordersToken)
+    }
 
     private func setup() {
         wantsLayer = true
@@ -2079,6 +2091,11 @@ final class DashboardOverviewView: NSView {
             return self.onCommandArrowUpAtEmpty?() ?? false
         }
         commandInput.onFocused = { [weak self] in self?.onCommandFocused?() }
+        // Blur (or click outside) closes the slash menu. Defer so a menu-row
+        // mouseDown can run first and re-focus via applyCompletion.
+        commandInput.onUnfocused = { [weak self] in
+            DispatchQueue.main.async { self?.hideMenuIfBlurred() }
+        }
 
         // System menu glass — same vibrancy as sidebar / InlineWorktreeCreate.
         menuContainer.kind = .menu
@@ -2183,6 +2200,7 @@ final class DashboardOverviewView: NSView {
             menuRows.append(row)
         }
         menuContainer.isHidden = false
+        startMenuClickMonitor()
         setMenuSelection(0)
     }
 
@@ -2215,11 +2233,42 @@ final class DashboardOverviewView: NSView {
     }
 
     private func hideMenu() {
+        stopMenuClickMonitor()
         menuContainer.isHidden = true
         menuContainer.subviews.forEach { $0.removeFromSuperview() }
         menuRows = []
         menuItems = []
         menuSel = 0
+    }
+
+    /// Hide the menu once the command field has truly lost focus (not just the
+    /// transient resign → field-editor handoff, and not a menu-row pick that
+    /// immediately re-focuses).
+    private func hideMenuIfBlurred() {
+        guard !menuContainer.isHidden else { return }
+        if commandInput.isFieldFocused { return }
+        hideMenu()
+    }
+
+    private func startMenuClickMonitor() {
+        guard menuClickMonitor == nil else { return }
+        menuClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, !self.menuContainer.isHidden else { return event }
+            let loc = event.locationInWindow
+            let inMenu = self.menuContainer.bounds.contains(self.menuContainer.convert(loc, from: nil))
+            let inField = self.commandInput.bounds.contains(self.commandInput.convert(loc, from: nil))
+            if !inMenu && !inField {
+                self.hideMenu()
+            }
+            return event
+        }
+    }
+
+    private func stopMenuClickMonitor() {
+        if let monitor = menuClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            menuClickMonitor = nil
+        }
     }
 
     private static func primaryStatus(_ s: SailorDisplayInfo) -> SailorStatus {

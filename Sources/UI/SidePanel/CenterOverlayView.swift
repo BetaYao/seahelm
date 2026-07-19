@@ -2,27 +2,26 @@ import AppKit
 
 // MARK: - CenterOverlayView
 
-/// Full-cover overlay rendered on top of the center terminal panel.
-/// Contains a header bar (title + close button) and a content area below.
-/// The terminal keeps running underneath; dismiss via Esc or the close button.
+/// Full-cover overlay on the center terminal panel. Title lives in the chrome
+/// `TerminalHeaderView` above; this view only hosts an action toolbar + content.
+/// The terminal keeps running underneath; dismiss via Esc or Close.
 final class CenterOverlayView: NSView {
 
     // MARK: Private
 
-    private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = NSButton()
     private let saveButton = NSButton()
     private let previewButton = NSButton()
-    private let headerBar = NSView()
+    private let toolbar = NSView()
     private let contentContainer = NSView()
     private let onClose: () -> Void
     private let onSave: (() -> Void)?
     private let onPreview: (() -> Void)?
+    private var colorSchemeObserver: NSObjectProtocol?
 
     // MARK: Init
 
     init(
-        title: String,
         content: NSView,
         onSave: (() -> Void)? = nil,
         onPreview: (() -> Void)? = nil,
@@ -35,34 +34,60 @@ final class CenterOverlayView: NSView {
 
         wantsLayer = true
 
-        setupHeader(title: title)
+        setupToolbar()
         setupContent(content)
-        // Header must sit above the content (e.g. the editor gutter) in z-order.
-        addSubview(headerBar, positioned: .above, relativeTo: contentContainer)
-        applyOpaqueBackground()
+        // Toolbar must sit above the content (e.g. the editor gutter) in z-order.
+        addSubview(toolbar, positioned: .above, relativeTo: contentContainer)
+        applyImmersion()
+
+        colorSchemeObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyColorSchemeDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.applyImmersion()
+        }
+    }
+
+    deinit {
+        if let colorSchemeObserver {
+            NotificationCenter.default.removeObserver(colorSchemeObserver)
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyOpaqueBackground()
+        applyImmersion()
     }
 
-    /// The center terminal renders via a Metal layer that bleeds through any
-    /// translucent background, so the overlay (and its header) must be fully
-    /// opaque. Re-resolve the color whenever the appearance changes.
-    private func applyOpaqueBackground() {
-        var resolved = NSColor.windowBackgroundColor
+    /// Toolbar matches `TerminalHeaderView` (Ghostty chrome). Content stays opaque
+    /// so the Metal terminal underneath does not bleed through.
+    private func applyImmersion() {
+        let bridge = GhosttyBridge.shared
+        let chromeBG = bridge.terminalChromeBackground
+        let chromeFG = bridge.terminalChromeForeground
+
+        toolbar.layer?.backgroundColor = chromeBG.cgColor
+        // Root fill under the toolbar seam — same chrome so title + toolbar read as one strip.
+        layer?.backgroundColor = chromeBG.cgColor
+
+        var contentBG = NSColor.windowBackgroundColor
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            resolved = SemanticColors.panel.usingColorSpace(.sRGB)?.withAlphaComponent(1.0)
+            contentBG = SemanticColors.panel.usingColorSpace(.sRGB)?.withAlphaComponent(1.0)
                 ?? NSColor.windowBackgroundColor
         }
-        layer?.backgroundColor = resolved.cgColor
-        headerBar.layer?.backgroundColor = resolved.cgColor
+        contentContainer.wantsLayer = true
+        contentContainer.layer?.backgroundColor = contentBG.cgColor
+
+        let tint = chromeFG.withAlphaComponent(0.85)
+        closeButton.contentTintColor = tint
+        saveButton.contentTintColor = tint
+        previewButton.contentTintColor = tint
     }
 
     /// Reflect the editor's dirty state on the Save button.
     func setDirty(_ dirty: Bool) {
-        saveButton.title = dirty ? "Save•" : "Saved"
+        saveButton.title = dirty ? "Save•" : "✓ Saved"
         saveButton.isEnabled = dirty
     }
 
@@ -76,41 +101,30 @@ final class CenterOverlayView: NSView {
 
     // MARK: Setup
 
-    private func setupHeader(title: String) {
-        headerBar.translatesAutoresizingMaskIntoConstraints = false
-        // Opaque background applied in applyOpaqueBackground() — the center
-        // terminal's Metal layer bleeds through any translucent fill.
-        headerBar.wantsLayer = true
-        addSubview(headerBar)
-
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.stringValue = title
-        titleLabel.textColor = SemanticColors.text
-        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        headerBar.addSubview(titleLabel)
+    private func setupToolbar() {
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.wantsLayer = true
+        toolbar.setAccessibilityIdentifier("centerOverlay.toolbar")
+        addSubview(toolbar)
 
         closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.bezelStyle = .recessed
         closeButton.isBordered = false
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
-        closeButton.contentTintColor = SemanticColors.text
+        closeButton.title = "✕ Close"
+        closeButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         closeButton.target = self
         closeButton.action = #selector(closeButtonTapped)
-        headerBar.addSubview(closeButton)
+        closeButton.setAccessibilityIdentifier("centerOverlay.closeButton")
+        toolbar.addSubview(closeButton)
 
         NSLayoutConstraint.activate([
-            headerBar.topAnchor.constraint(equalTo: topAnchor),
-            headerBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            headerBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            headerBar.heightAnchor.constraint(equalToConstant: 32),
+            toolbar.topAnchor.constraint(equalTo: topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 32),
 
-            titleLabel.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 12),
-            titleLabel.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
-
-            closeButton.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -8),
-            closeButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 20),
-            closeButton.heightAnchor.constraint(equalToConstant: 20),
+            closeButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -12),
+            closeButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
         ])
 
         // Right cluster, laid out right→left: Close, Save, Preview.
@@ -121,14 +135,13 @@ final class CenterOverlayView: NSView {
             button.bezelStyle = .recessed
             button.isBordered = false
             button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-            button.contentTintColor = SemanticColors.text
             button.target = self
             button.action = action
             button.setAccessibilityIdentifier(id)
-            headerBar.addSubview(button)
+            toolbar.addSubview(button)
             NSLayoutConstraint.activate([
                 button.trailingAnchor.constraint(equalTo: leftmost.leadingAnchor, constant: -12),
-                button.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+                button.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             ])
             leftmost = button
         }
@@ -141,19 +154,18 @@ final class CenterOverlayView: NSView {
             configureTextButton(previewButton, id: "centerOverlay.previewButton", action: #selector(previewButtonTapped))
             setPreviewing(false)
         }
-
-        titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: leftmost.leadingAnchor, constant: -8).isActive = true
     }
 
     private func setupContent(_ content: NSView) {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.wantsLayer = true
         addSubview(contentContainer)
 
         content.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(content)
 
         NSLayoutConstraint.activate([
-            contentContainer.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
+            contentContainer.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),

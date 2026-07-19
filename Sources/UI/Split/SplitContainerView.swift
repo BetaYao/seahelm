@@ -12,7 +12,27 @@ protocol SplitContainerDelegate: AnyObject {
 /// Transparent overlay that dims unfocused panes. Passes all mouse events through
 /// so clicks reach the terminal view underneath.
 private class DimOverlayView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        refreshAppearance()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        // Light: barely-there wash (0.35 black turns Catppuccin Latte muddy grey).
+        // Dark: keep a readable focus cue without crushing the surface.
+        let alpha: CGFloat = effectiveAppearance.isDark ? 0.28 : 0.055
+        layer?.backgroundColor = resolvedCGColor(NSColor.black.withAlphaComponent(alpha))
+    }
 }
 
 // MARK: - SplitContainerView
@@ -43,6 +63,11 @@ class SplitContainerView: NSView, DividerDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        dimOverlays.values.forEach { $0.refreshAppearance() }
+    }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
@@ -223,10 +248,9 @@ class SplitContainerView: NSView, DividerDelegate {
                     CATransaction.setDisableActions(true)
                     overlay.frame = frame
                     CATransaction.commit()
+                    overlay.refreshAppearance()
                 } else {
                     let overlay = DimOverlayView(frame: frame)
-                    overlay.wantsLayer = true
-                    overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
                     // Insert above terminal views but below dividers
                     if let firstDivider = dividers.values.first {
                         addSubview(overlay, positioned: .below, relativeTo: firstDivider)
@@ -289,10 +313,18 @@ class SplitContainerView: NSView, DividerDelegate {
             dividers[id] = divider
         }
 
+        let hit = DividerView.hitThickness
         switch axis {
         case .horizontal:
             let firstWidth = floor((rect.width - dividerSize) * ratio)
-            divider.frame = CGRect(x: rect.origin.x + firstWidth, y: rect.origin.y, width: dividerSize, height: rect.height)
+            // Wide hit strip centered on the 1pt seam (overlaps both panes).
+            let seamCenterX = rect.origin.x + firstWidth + dividerSize / 2
+            divider.frame = CGRect(
+                x: seamCenterX - hit / 2,
+                y: rect.origin.y,
+                width: hit,
+                height: rect.height
+            )
             divider.parentSplitSize = rect.width
             divider.currentRatio = ratio
             let firstRect = CGRect(x: rect.origin.x, y: rect.origin.y, width: firstWidth, height: rect.height)
@@ -301,7 +333,13 @@ class SplitContainerView: NSView, DividerDelegate {
             layoutDividers(node: second, in: secondRect)
         case .vertical:
             let firstHeight = floor((rect.height - dividerSize) * ratio)
-            divider.frame = CGRect(x: rect.origin.x, y: rect.origin.y + firstHeight, width: rect.width, height: dividerSize)
+            let seamCenterY = rect.origin.y + firstHeight + dividerSize / 2
+            divider.frame = CGRect(
+                x: rect.origin.x,
+                y: seamCenterY - hit / 2,
+                width: rect.width,
+                height: hit
+            )
             divider.parentSplitSize = rect.height
             divider.currentRatio = ratio
             let firstRect = CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: firstHeight)
@@ -384,22 +422,30 @@ class SplitContainerView: NSView, DividerDelegate {
         return bestLeaf
     }
 
+    func dividerDidBeginDrag(_ splitNodeId: String) {
+        // Defer Ghostty PTY set_size for the whole drag — same SIGWINCH
+        // tolerance as chrome sidebar / window live-resize.
+        GhosttyBridge.shared.beginLiveResize(pinHeight: false)
+    }
+
     func dividerDidMove(_ splitNodeId: String, newRatio: CGFloat) {
-        // Fires on every mouse-move during a drag — take the frames-only path.
-        // The full layoutTree (constraint teardown, focus closures, forced
-        // surface size sync) and layout persistence run once at drag end.
+        // Fires on every mouse-move during a drag — frames only; PTY sync waits
+        // for dividerDidEndDrag → endLiveResize.
         tree?.updateRatio(splitId: splitNodeId, newRatio: newRatio)
         applyFramesOnly()
     }
 
     func dividerDidEndDrag(_ splitNodeId: String) {
-        layoutTree()
+        // One set_size / SIGWINCH per pane after the grip is released.
+        GhosttyBridge.shared.endLiveResize()
         delegate?.splitContainerDidChangeLayout(self)
     }
 
     func dividerDidDoubleClick(_ splitNodeId: String) {
         tree?.updateRatio(splitId: splitNodeId, newRatio: 0.5)
-        layoutTree()
+        GhosttyBridge.shared.beginLiveResize(pinHeight: false)
+        applyFramesOnly()
+        GhosttyBridge.shared.endLiveResize()
         delegate?.splitContainerDidChangeLayout(self)
     }
 }

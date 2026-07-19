@@ -1,6 +1,6 @@
 import AppKit
 
-/// Right-column chrome header. Expanded: title only. Collapsed: lights + icons + title + expand.
+/// Right-column chrome header. Expanded: centered title. Collapsed: lights + icons + title + expand.
 final class TerminalHeaderView: NSView {
     weak var delegate: ChromeHeaderDelegate? {
         didSet { iconCluster.delegate = delegate }
@@ -94,6 +94,7 @@ final class TerminalHeaderView: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
         titleLabel.cell?.usesSingleLineMode = true
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.setAccessibilityIdentifier("chrome.terminalTitle")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
@@ -109,10 +110,12 @@ final class TerminalHeaderView: NSView {
             self?.refreshImmersion()
         }
 
+        // Expanded: true horizontal center in the terminal column.
         expandedConstraints = [
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
         ]
 
         collapsedConstraints = [
@@ -179,7 +182,7 @@ final class TerminalHeaderView: NSView {
             trafficLightSlot.isHidden = true
             collapsedLeadingStack.isHidden = true
             expandButton.isHidden = true
-            titleLabel.alignment = .left
+            titleLabel.alignment = .center
         }
         needsLayout = true
     }

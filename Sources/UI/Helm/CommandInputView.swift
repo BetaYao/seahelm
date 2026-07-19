@@ -25,6 +25,8 @@ final class CommandInputView: NSView {
     /// The field became first responder (keyboard OR mouse click) — lets the
     /// host's focus model track that the command row is active.
     var onFocused: (() -> Void)?
+    /// The field resigned first responder (click elsewhere, Tab, etc.).
+    var onUnfocused: (() -> Void)?
 
     private let field = FocusReportingTextField()
     private let box = FrostedPanelView()
@@ -80,7 +82,11 @@ final class CommandInputView: NSView {
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityIdentifier("helm.commandInput")
         field.onFocusChange = { [weak self] focused in
-            if focused { self?.onFocused?() }
+            if focused {
+                self?.onFocused?()
+            } else {
+                self?.onUnfocused?()
+            }
         }
         box.addSubview(field)
 
@@ -139,6 +145,14 @@ final class CommandInputView: NSView {
     }
 
     func focusInput() { window?.makeFirstResponder(field) }
+
+    /// Whether the command field (or its field editor) currently owns focus.
+    var isFieldFocused: Bool {
+        guard let window else { return false }
+        if window.firstResponder === field { return true }
+        if let editor = field.currentEditor(), window.firstResponder === editor { return true }
+        return false
+    }
 
     /// Show a busy state while an async command runs: disable editing, swap the
     /// placeholder to `message`, and spin.
@@ -207,11 +221,31 @@ extension CommandInputView: NSTextFieldDelegate {
 
 /// NSTextField that reports focus changes (becomeFirstResponder fires on focus,
 /// unlike controlTextDidBeginEditing which only fires on the first edit).
+///
+/// Unfocus is deferred one turn so we don't treat the handoff to the field
+/// editor as a blur — AppKit resigns the text field itself when the editor
+/// becomes first responder.
 final class FocusReportingTextField: NSTextField {
     var onFocusChange: ((Bool) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { onFocusChange?(true) }
+        return ok
+    }
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard let window = self.window else {
+                    self.onFocusChange?(false)
+                    return
+                }
+                if window.firstResponder === self { return }
+                if let editor = self.currentEditor(), window.firstResponder === editor { return }
+                self.onFocusChange?(false)
+            }
+        }
         return ok
     }
 }

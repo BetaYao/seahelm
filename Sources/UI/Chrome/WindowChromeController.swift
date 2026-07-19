@@ -33,6 +33,12 @@ final class WindowChromeController: NSViewController {
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var colorSchemeObserver: NSObjectProtocol?
 
+    /// Last pane/repo title from the live terminal. Restored when an overlay closes.
+    private var lastPaneTitle = ""
+    /// When set, the chrome title shows the file/changelog overlay name instead
+    /// of the pane title (single title strip — no second header in the overlay).
+    private var overlayTitle: String?
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -92,8 +98,24 @@ final class WindowChromeController: NSViewController {
     var layoutState: ChromeLayoutState { state }
 
     func updateTerminalTitle(repo: String, pane: String) {
-        // Immersive chrome: show the current pane title only.
-        terminalHeader.setPaneTitle(pane.isEmpty ? repo : pane)
+        // Immersive chrome: show the current pane title only — unless a file /
+        // changelog overlay is borrowing the title strip.
+        lastPaneTitle = pane.isEmpty ? repo : pane
+        if overlayTitle == nil {
+            terminalHeader.setPaneTitle(lastPaneTitle)
+        }
+    }
+
+    /// Drive the chrome title from a center overlay (file / changelog). Pass
+    /// `nil` to restore the live pane title.
+    func setOverlayTitle(_ title: String?) {
+        overlayTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let overlayTitle, !overlayTitle.isEmpty {
+            terminalHeader.setPaneTitle(overlayTitle)
+        } else {
+            overlayTitle = nil
+            terminalHeader.setPaneTitle(lastPaneTitle)
+        }
     }
 
     func trafficLightHostView(collapsed: Bool) -> NSView {

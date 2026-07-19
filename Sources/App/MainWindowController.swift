@@ -643,6 +643,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onRequestSelectChromePane = { [weak self] pane in
             self?.selectChromePane(pane)
         }
+        // File / changelog overlays reuse the chrome terminal title (no second header).
+        dashboard.onCenterOverlayTitleChange = { [weak self] title in
+            self?.windowChrome?.setOverlayTitle(title)
+        }
         // Keep chrome header icon tint in sync when dashboard changes side.
         dashboard.onActiveToolChanged = { [weak self] pane in
             guard let self else { return }

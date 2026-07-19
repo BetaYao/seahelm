@@ -41,6 +41,15 @@ cd "$REPO_ROOT"
 ln -sfn "$CACHED_XCFRAMEWORK" GhosttyKit.xcframework
 echo "==> Symlinked GhosttyKit.xcframework"
 
+# Keep the bridging header in lockstep with the linked libghostty. Action
+# enum ordinals drift when Ghostty adds cases; a stale ghostty.h silently
+# misroutes RELOAD_CONFIG and breaks light/dark theme swaps on live panes.
+XC_HEADER="$REPO_ROOT/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h"
+if [ -f "$XC_HEADER" ]; then
+    cp "$XC_HEADER" "$REPO_ROOT/ghostty.h"
+    echo "==> Synced ghostty.h from GhosttyKit.xcframework"
+fi
+
 # Copy Ghostty resources for app bundle
 RESOURCES_DIR="$REPO_ROOT/Resources/ghostty"
 mkdir -p "$RESOURCES_DIR"

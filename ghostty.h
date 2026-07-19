@@ -515,6 +515,15 @@ typedef struct {
   ghostty_quick_terminal_size_s secondary;
 } ghostty_config_quick_terminal_size_s;
 
+// config.Fullscreen
+typedef enum {
+  GHOSTTY_CONFIG_FULLSCREEN_FALSE,
+  GHOSTTY_CONFIG_FULLSCREEN_TRUE,
+  GHOSTTY_CONFIG_FULLSCREEN_NON_NATIVE,
+  GHOSTTY_CONFIG_FULLSCREEN_NON_NATIVE_VISIBLE_MENU,
+  GHOSTTY_CONFIG_FULLSCREEN_NON_NATIVE_PADDED_NOTCH,
+} ghostty_config_fullscreen_e;
+
 // apprt.Target.Key
 typedef enum {
   GHOSTTY_TARGET_APP,
@@ -583,9 +592,9 @@ typedef enum {
 // apprt.action.Fullscreen
 typedef enum {
   GHOSTTY_FULLSCREEN_NATIVE,
-  GHOSTTY_FULLSCREEN_NON_NATIVE,
-  GHOSTTY_FULLSCREEN_NON_NATIVE_VISIBLE_MENU,
-  GHOSTTY_FULLSCREEN_NON_NATIVE_PADDED_NOTCH,
+  GHOSTTY_FULLSCREEN_MACOS_NON_NATIVE,
+  GHOSTTY_FULLSCREEN_MACOS_NON_NATIVE_VISIBLE_MENU,
+  GHOSTTY_FULLSCREEN_MACOS_NON_NATIVE_PADDED_NOTCH,
 } ghostty_action_fullscreen_e;
 
 // apprt.action.FloatWindow
@@ -715,7 +724,7 @@ typedef struct {
 
 // renderer.Health
 typedef enum {
-  GHOSTTY_RENDERER_HEALTH_OK,
+  GHOSTTY_RENDERER_HEALTH_HEALTHY,
   GHOSTTY_RENDERER_HEALTH_UNHEALTHY,
 } ghostty_action_renderer_health_e;
 
@@ -880,6 +889,7 @@ typedef enum {
   GHOSTTY_ACTION_RENDER_INSPECTOR,
   GHOSTTY_ACTION_DESKTOP_NOTIFICATION,
   GHOSTTY_ACTION_SET_TITLE,
+  GHOSTTY_ACTION_SET_TAB_TITLE,
   GHOSTTY_ACTION_PROMPT_TITLE,
   GHOSTTY_ACTION_PWD,
   GHOSTTY_ACTION_MOUSE_SHAPE,
@@ -910,6 +920,7 @@ typedef enum {
   GHOSTTY_ACTION_SEARCH_TOTAL,
   GHOSTTY_ACTION_SEARCH_SELECTED,
   GHOSTTY_ACTION_READONLY,
+  GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -927,6 +938,7 @@ typedef union {
   ghostty_action_inspector_e inspector;
   ghostty_action_desktop_notification_s desktop_notification;
   ghostty_action_set_title_s set_title;
+  ghostty_action_set_title_s set_tab_title;
   ghostty_action_prompt_title_e prompt_title;
   ghostty_action_pwd_s pwd;
   ghostty_action_mouse_shape_e mouse_shape;
@@ -1114,8 +1126,6 @@ void ghostty_surface_complete_clipboard_request(ghostty_surface_t,
                                                 void*,
                                                 bool);
 bool ghostty_surface_has_selection(ghostty_surface_t);
-bool ghostty_surface_select_cursor_cell(ghostty_surface_t);
-bool ghostty_surface_clear_selection(ghostty_surface_t);
 bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
 bool ghostty_surface_read_text(ghostty_surface_t,
                                ghostty_selection_s,

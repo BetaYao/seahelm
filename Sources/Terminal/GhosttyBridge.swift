@@ -207,12 +207,20 @@ class GhosttyBridge {
     private func syncColorScheme() {
         guard let app else { return }
         let scheme = currentColorScheme
-        ghostty_app_set_color_scheme(app, scheme)
+        // Surfaces first: `ghostty_app_update_config` fans `change_config` out to
+        // every surface using each surface's own conditional state. If app-level
+        // set_color_scheme runs first, that fan-out still sees the old theme.
         for station in StationRegistry.shared.allStations() {
             guard let surface = station.surface else { continue }
             station.ghosttyLock.lock()
             ghostty_surface_set_color_scheme(surface, scheme)
             station.ghosttyLock.unlock()
+        }
+        ghostty_app_set_color_scheme(app, scheme)
+        // Explicit soft reload so a live palette swap doesn't depend solely on
+        // the RELOAD_CONFIG action callback (stale ghostty.h has dropped it).
+        if let config {
+            ghostty_app_update_config(app, config)
         }
     }
 
