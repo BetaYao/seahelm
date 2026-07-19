@@ -56,7 +56,13 @@ class MainWindowController: NSWindowController {
         pc.titleBar = titleBar
         return pc
     }()
-    private let titleBarAccessory = NSTitlebarAccessoryViewController()
+
+    private var windowChrome: WindowChromeController?
+    private var chromeState = ChromeLayoutState(
+        width: ChromeLayoutMetrics.defaultSidebarWidth,
+        collapsed: false,
+        activePane: .firstMate
+    )
 
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
@@ -581,7 +587,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self?.performWorktreeCreate(task: taskDescription, repoPath: repoPath, agentType: agentType, reuseEnv: reuseEnv)
         }
 
-        embedViewController(dashboard)
+        embedChromeShell(dashboard: dashboard)
         updateTitleBar()
         titleBar.setChromeMode(overview: false)
 
@@ -1059,32 +1065,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func setupNativeTitleBar() {
         guard let window else { return }
 
-        let toolbar = NSToolbar(identifier: "seahelm.mainToolbar")
-        toolbar.displayMode = .iconOnly
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unifiedCompact
-
+        // Spanning NSTitlebarAccessoryViewController / TitleBarView removed —
+        // column headers live in WindowChromeController. Keep transparent
+        // fullSizeContentView titlebar so traffic lights can be reparented.
+        window.toolbar = nil
         titleBar.delegate = self
-        titleBar.translatesAutoresizingMaskIntoConstraints = false
-
-        let accessoryContainer = NSView(frame: NSRect(x: 0, y: 0, width: 860, height: TitleBarView.Layout.barHeight))
-        accessoryContainer.translatesAutoresizingMaskIntoConstraints = false
-        accessoryContainer.addSubview(titleBar)
-        NSLayoutConstraint.activate([
-            titleBar.leadingAnchor.constraint(equalTo: accessoryContainer.leadingAnchor),
-            titleBar.trailingAnchor.constraint(equalTo: accessoryContainer.trailingAnchor),
-            titleBar.topAnchor.constraint(equalTo: accessoryContainer.topAnchor),
-            titleBar.bottomAnchor.constraint(equalTo: accessoryContainer.bottomAnchor),
-            accessoryContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 860),
-        ])
-
-        titleBarAccessory.view = accessoryContainer
-        titleBarAccessory.fullScreenMinHeight = TitleBarView.Layout.barHeight
-        titleBarAccessory.layoutAttribute = .top
-        if !window.titlebarAccessoryViewControllers.contains(where: { $0 === titleBarAccessory }) {
-            window.addTitlebarAccessoryViewController(titleBarAccessory)
-        }
 
         DispatchQueue.main.async { [weak self] in
             self?.positionStandardWindowButtons()
@@ -1092,22 +1077,31 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func positionStandardWindowButtons() {
-        guard let window else { return }
+        guard let window, let chrome = windowChrome else { return }
         guard let close = window.standardWindowButton(.closeButton),
               let mini = window.standardWindowButton(.miniaturizeButton),
-              let zoom = window.standardWindowButton(.zoomButton),
-              let container = close.superview
+              let zoom = window.standardWindowButton(.zoomButton)
         else {
             return
         }
 
-        let xOffset: CGFloat = 12
-        let spacing: CGFloat = 6
+        let host = chrome.trafficLightHostView(collapsed: chromeState.isCollapsed)
+        host.layoutSubtreeIfNeeded()
 
-        let y = WindowStyling.trafficLightButtonOriginY(containerHeight: container.bounds.height, buttonHeight: close.frame.height)
-        close.setFrameOrigin(NSPoint(x: xOffset, y: y))
-        mini.setFrameOrigin(NSPoint(x: xOffset + close.frame.width + spacing, y: y))
-        zoom.setFrameOrigin(NSPoint(x: xOffset + (close.frame.width + spacing) * 2, y: y))
+        let buttons = [close, mini, zoom]
+        for button in buttons where button.superview !== host {
+            button.removeFromSuperview()
+            host.addSubview(button)
+        }
+
+        let spacing: CGFloat = 6
+        var x: CGFloat = 0
+        let hostHeight = host.bounds.height > 0 ? host.bounds.height : 14
+        for button in buttons {
+            let y = (hostHeight - button.frame.height) / 2
+            button.setFrameOrigin(NSPoint(x: x, y: max(0, y)))
+            x += button.frame.width + spacing
+        }
     }
 
     private func setupWindowHoverTracking(contentView: NSView) {
@@ -1129,7 +1123,68 @@ dashboard.stationManager = terminalCoordinator.stationManager
         titleBar.setWindowHovered(false)
     }
 
+    /// Embed `WindowChromeController` in `contentContainer` and slot dashboard hosts.
+    private func embedChromeShell(dashboard: DashboardViewController) {
+        if windowChrome == nil {
+            let chrome = WindowChromeController()
+            windowChrome = chrome
+            chrome.view.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(chrome.view)
+            NSLayoutConstraint.activate([
+                chrome.view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                chrome.view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                chrome.view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                chrome.view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+            ])
+
+            chromeState = ChromeLayoutState(
+                width: config.sidebarWidth,
+                collapsed: false,
+                activePane: .firstMate
+            )
+            chrome.applyState(chromeState, animated: false)
+            chrome.onStateChange = { [weak self] state in
+                self?.handleChromeStateChange(state)
+            }
+        }
+
+        // Keep dashboard.view in the window (below chrome) for first-responder
+        // association and overlays (help). Content hosts live in chrome slots.
+        if let chrome = windowChrome, dashboard.view.superview !== contentContainer {
+            dashboard.view.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(dashboard.view, positioned: .below, relativeTo: chrome.view)
+            NSLayoutConstraint.activate([
+                dashboard.view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                dashboard.view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                dashboard.view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                dashboard.view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+            ])
+        }
+
+        guard let chrome = windowChrome else { return }
+        chrome.setSidebarContent(dashboard.navigatorHostView)
+        chrome.setTerminalContent(dashboard.terminalHostView)
+        positionStandardWindowButtons()
+    }
+
+    private func handleChromeStateChange(_ state: ChromeLayoutState) {
+        let widthChanged = abs(state.width - config.sidebarWidth) > 0.5
+        chromeState = state
+        if widthChanged {
+            // Persist width only — never write 0 for a collapsed sidebar.
+            config.sidebarWidth = state.width
+            tabCoordinator.config.sidebarWidth = state.width
+            saveConfig()
+        }
+        positionStandardWindowButtons()
+    }
+
     private func embedViewController(_ vc: NSViewController) {
+        if let dashboard = vc as? DashboardViewController {
+            embedChromeShell(dashboard: dashboard)
+            return
+        }
+
         for child in contentContainer.subviews {
             child.removeFromSuperview()
         }
@@ -1956,9 +2011,7 @@ extension MainWindowController: TabCoordinatorDelegate {
         showNewBranchDialog()
     }
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator) {
-        for child in contentContainer.subviews {
-            child.removeFromSuperview()
-        }
+        // Keep the chrome shell mounted; switchToTab(0) re-slots dashboard hosts.
     }
 }
 

@@ -63,12 +63,19 @@ final class WindowChromeController: NSViewController {
         layoutColumns(animated: animated)
     }
 
+    var layoutState: ChromeLayoutState { state }
+
     func updateTerminalTitle(repo: String, pane: String) {
         terminalHeader.setTitle(repo: repo, pane: pane)
     }
 
     func trafficLightHostView(collapsed: Bool) -> NSView {
         collapsed ? terminalHeader.trafficLightSlot : sidebarHeader.trafficLightSlot
+    }
+
+    func setWorktreeContextEnabled(_ enabled: Bool) {
+        sidebarHeader.setWorktreeContextEnabled(enabled)
+        terminalHeader.setWorktreeContextEnabled(enabled)
     }
 
     // MARK: - Setup

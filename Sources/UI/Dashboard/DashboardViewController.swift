@@ -145,9 +145,12 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private let inlineCreateView = InlineWorktreeCreateView()
     private var inlineCreateHeightConstraint: NSLayoutConstraint?
 
-    // Left column container — hosts the worktree list, inline create, and the
-    // bridge/file/change side panel (one pane visible at a time).
-    private let leftColumnContainer = NSView()
+    // Left column content host — overview + side panel swap (no outer width/collapse;
+    // WindowChromeController owns column chrome). Exposed for MainWindow embedding.
+    let navigatorHostView = NSView()
+    /// Terminal / focus-panel host for the chrome terminal slot.
+    let terminalHostView = NSView()
+    private var leftColumnContainer: NSView { navigatorHostView }
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
         let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
@@ -208,11 +211,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         root.setAccessibilityIdentifier("dashboard.view")
         self.view = root
 
-        setupEmptyState()
         setupLeftRightLayout()
+        setupEmptyState()
         sidePanelVC.worktreesTabView = leftRightSidebarScroll
 
-        // Show the 3-column layout immediately; hide empty state
+        // Content hosts are live once chrome mounts them; empty state starts hidden.
         leftRightContainer.isHidden = false
 
         // Fleet overview (spread First Mate). Full-bleed in .overview mode; in a
@@ -310,11 +313,14 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if agents.isEmpty || DebugFlags.forceEmptyState {
             refreshEmptyStateGuide()
             emptyStateView.isHidden = false
+            terminalHostView.addSubview(emptyStateView) // keep above focus panel
             leftRightContainer.isHidden = true
+            leftRightFocusPanel.isHidden = true
             sidePanelVC.setWorktree(nil)
             return
         } else {
             emptyStateView.isHidden = true
+            leftRightFocusPanel.isHidden = false
             leftRightContainer.isHidden = false
         }
 
@@ -612,12 +618,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     @discardableResult
     func toggleLeftColumnCollapse() -> Bool {
+        // Outer column width is owned by WindowChromeController. Keep a local
+        // collapsed flag for ViewMode / tool tint until Task 5b retires it.
         isLeftColumnCollapsed.toggle()
-        leftColumnWidthExpanded?.isActive = !isLeftColumnCollapsed
-        leftColumnWidthCollapsed?.isActive = isLeftColumnCollapsed
-        animateColumnLayout {
-            self.leftColumnContainer.animator().alphaValue = self.isLeftColumnCollapsed ? 0 : 1
-        }
+        leftColumnWidthExpanded?.isActive = false
+        leftColumnWidthCollapsed?.isActive = false
         return isLeftColumnCollapsed
     }
 
@@ -632,11 +637,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     func expandLeftColumnIfCollapsed() {
         guard isLeftColumnCollapsed else { return }
         isLeftColumnCollapsed = false
-        leftColumnWidthExpanded?.isActive = true
+        leftColumnWidthExpanded?.isActive = false
         leftColumnWidthCollapsed?.isActive = false
-        animateColumnLayout {
-            self.leftColumnContainer.animator().alphaValue = 1
-        }
     }
 
     /// Open the global Worktrees tab in the left sidebar: refresh the card list,
@@ -812,7 +814,8 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     private func setupEmptyState() {
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.isHidden = true
-        view.addSubview(emptyStateView)
+        // Hosted in the terminal slot so it remains visible after chrome reparents hosts.
+        terminalHostView.addSubview(emptyStateView)
 
         // Folder icon button
         let button = NSButton()
@@ -854,10 +857,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         refreshEmptyStateGuide()
 
         NSLayoutConstraint.activate([
-            emptyStateView.topAnchor.constraint(equalTo: view.topAnchor),
-            emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            emptyStateView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            emptyStateView.topAnchor.constraint(equalTo: terminalHostView.topAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: terminalHostView.leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: terminalHostView.trailingAnchor),
+            emptyStateView.bottomAnchor.constraint(equalTo: terminalHostView.bottomAnchor),
 
             button.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
             button.centerYAnchor.constraint(equalTo: emptyStateView.centerYAnchor, constant: -64),
@@ -941,23 +944,22 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // MARK: - Setup: Left-Right
 
     private func setupLeftRightLayout() {
+        // Content hosts are slotted into WindowChromeController by MainWindow —
+        // they are not laid out as a side-by-side pair inside dashboard.view.
+        // leftRightContainer remains a visibility flag for empty-state toggles.
         leftRightContainer.translatesAutoresizingMaskIntoConstraints = false
         leftRightContainer.wantsLayer = true
         leftRightContainer.isHidden = true
         leftRightContainer.setAccessibilityIdentifier("dashboard.layout.left-right")
         leftRightContainer.setAccessibilityElement(true)
-        view.addSubview(leftRightContainer)
 
-        // --- Left column container: hosts worktree list + inline create + side panel ---
-        leftColumnContainer.translatesAutoresizingMaskIntoConstraints = false
-        leftColumnContainer.wantsLayer = true
-        // Square (Bare-TUI) + First Mate card background, so First Mate and the
-        // Files/Changes pane share one consistent docked side-panel look.
-        leftColumnContainer.layer?.cornerRadius = 0
-        leftColumnContainer.layer?.masksToBounds = true
-        leftColumnContainer.layer?.backgroundColor = Self.overviewSideBg.cgColor
-        leftColumnContainer.setAccessibilityIdentifier("dashboard.leftColumn")
-        leftRightContainer.addSubview(leftColumnContainer)
+        // --- Navigator host: overview + side panel content swap (no width chrome) ---
+        navigatorHostView.translatesAutoresizingMaskIntoConstraints = false
+        navigatorHostView.wantsLayer = true
+        navigatorHostView.layer?.cornerRadius = 0
+        navigatorHostView.layer?.masksToBounds = true
+        navigatorHostView.layer?.backgroundColor = Self.overviewSideBg.cgColor
+        navigatorHostView.setAccessibilityIdentifier("dashboard.leftColumn")
 
         // Worktree list (handed to the sidebar's Worktrees tab as worktreesTabView).
         leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
@@ -971,66 +973,47 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         leftRightSidebarStack.alignment = .leading
         leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.documentView = leftRightSidebarStack
-        // Pin the stack to the scroll's visible width so cards fill the column
-        // (no horizontal scroll) regardless of when they're populated.
         leftRightSidebarStack.widthAnchor.constraint(
             equalTo: leftRightSidebarScroll.contentView.widthAnchor).isActive = true
 
-        // The First Mate bottom bar (fleet status + task input) was removed — the
-        // command line now lives in the Helm cockpit (`/new` creates worktrees).
-
-        // File/change side panel — fills the column, hidden until selected.
         addChild(sidePanelVC)
         sidePanelVC.view.translatesAutoresizingMaskIntoConstraints = false
-        leftColumnContainer.addSubview(sidePanelVC.view)
+        navigatorHostView.addSubview(sidePanelVC.view)
 
-        // --- Center column: focus panel ---
+        // --- Terminal host: focus panel fills the chrome terminal slot ---
+        terminalHostView.translatesAutoresizingMaskIntoConstraints = false
+        terminalHostView.wantsLayer = true
+        terminalHostView.setAccessibilityIdentifier("dashboard.terminalHost")
+
         leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
         leftRightFocusPanel.setCornerMask(
             [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner],
             radius: 0
         )
-        leftRightContainer.addSubview(leftRightFocusPanel)
+        terminalHostView.addSubview(leftRightFocusPanel)
 
-        let spacing = LayoutMetrics.columnSpacing
-        let edge: CGFloat = 8
-
-        // Fixed width for the left column; centre fills the rest. The column
-        // starts collapsed (hidden) — the user reveals it with Cmd+B / the
-        // title-bar pane icons.
-        leftColumnWidthExpanded = leftColumnContainer.widthAnchor.constraint(equalToConstant: LayoutMetrics.leftColumnWidth)
-        leftColumnWidthCollapsed = leftColumnContainer.widthAnchor.constraint(equalToConstant: 0)
-        leftColumnWidthCollapsed?.isActive = true
-        isLeftColumnCollapsed = true
-        leftColumnContainer.alphaValue = 0
+        // Width/collapse constraints are retired as window chrome — chrome owns
+        // sidebar width. Keep inactive stubs so existing toggle helpers compile
+        // until Task 5b rewires collapse to ChromeLayoutState.
+        leftColumnWidthExpanded = navigatorHostView.widthAnchor.constraint(equalToConstant: LayoutMetrics.leftColumnWidth)
+        leftColumnWidthCollapsed = navigatorHostView.widthAnchor.constraint(equalToConstant: 0)
+        leftColumnWidthExpanded?.isActive = false
+        leftColumnWidthCollapsed?.isActive = false
+        isLeftColumnCollapsed = false
+        navigatorHostView.alphaValue = 1
 
         NSLayoutConstraint.activate([
-            leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            leftRightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
-            leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
-            leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
+            sidePanelVC.view.topAnchor.constraint(equalTo: navigatorHostView.topAnchor),
+            sidePanelVC.view.leadingAnchor.constraint(equalTo: navigatorHostView.leadingAnchor),
+            sidePanelVC.view.trailingAnchor.constraint(equalTo: navigatorHostView.trailingAnchor),
+            sidePanelVC.view.bottomAnchor.constraint(equalTo: navigatorHostView.bottomAnchor),
 
-            // Left column container — flush to the window's left edge, so when it
-            // collapses (width 0) the centre terminal sits flush left too (no strip).
-            leftColumnContainer.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftColumnContainer.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
-            leftColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
-
-            // Side panel fills the whole column now that the bottom bar is gone.
-            sidePanelVC.view.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
-            sidePanelVC.view.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
-            sidePanelVC.view.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
-
-            // Centre terminal panel: flush to left/right/bottom — no gap, no card.
-            leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
-            leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor),
+            leftRightFocusPanel.topAnchor.constraint(equalTo: terminalHostView.topAnchor),
+            leftRightFocusPanel.leadingAnchor.constraint(equalTo: terminalHostView.leadingAnchor),
+            leftRightFocusPanel.bottomAnchor.constraint(equalTo: terminalHostView.bottomAnchor),
+            leftRightFocusPanel.trailingAnchor.constraint(equalTo: terminalHostView.trailingAnchor),
         ])
 
-        // Pre-select the Files pane WITHOUT expanding the column (it stays
-        // collapsed by default; selectLeftPane would force-expand it).
         currentLeftPane = .file
         sidePanelVC.selectTab(.files)
     }
