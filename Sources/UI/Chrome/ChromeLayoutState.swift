@@ -32,11 +32,15 @@ struct ChromeLayoutState: Equatable {
     }
 
     mutating func toggleCollapsed() {
-        if isCollapsed {
+        setCollapsed(!isCollapsed)
+    }
+
+    mutating func setCollapsed(_ collapsed: Bool) {
+        if collapsed {
+            isCollapsed = true
+        } else {
             isCollapsed = false
             if activePane == nil { activePane = .firstMate }
-        } else {
-            isCollapsed = true
         }
     }
 }

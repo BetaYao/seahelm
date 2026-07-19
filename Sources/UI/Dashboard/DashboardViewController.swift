@@ -89,16 +89,17 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     var selectedSailorId: String = ""
 
-    /// The two keyboard-navigation view modes (the full-bleed overview mode was
-    /// removed — the fleet overview only exists docked as the left column now):
-    /// - `.split` (mode 2): overview docked as the left column + terminal right,
-    ///   keyboard focus stays on the overview ring (terminal live-previews)
-    /// - `.terminal` (mode 3): left column collapsed, terminal owns the keyboard
+    /// Deprecated layout alias for chrome collapse (SSOT is `ChromeLayoutState`):
+    /// - `.split` == sidebar expanded (`!chrome.isCollapsed`)
+    /// - `.terminal` == sidebar collapsed (`chrome.isCollapsed`)
     enum ViewMode: Equatable { case split, terminal }
     private(set) var viewMode: ViewMode = .split
-    /// Fired after every view-mode switch (MainWindowController syncs the
-    /// keyboard NORMAL/INSERT mode and status-bar hints off this).
+    /// Fired after view-mode mirrors chrome collapse (keyboard NORMAL/INSERT).
     var onViewModeChanged: ((ViewMode) -> Void)?
+    /// Ask MainWindow to toggle chrome sidebar collapse (⌘B / legacy shims).
+    var onRequestToggleChromeCollapse: (() -> Void)?
+    /// Ask MainWindow to set chrome collapse (ViewMode / enter-terminal paths).
+    var onRequestSetChromeCollapsed: ((Bool) -> Void)?
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
@@ -413,22 +414,42 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         syncSidePanelToSelection()
     }
 
-    // MARK: - View mode (split ⇄ terminal)
+    // MARK: - View mode (alias of chrome collapse)
 
-    /// Switch between the two keyboard view modes. No-op if unchanged.
+    /// Request a chrome collapse change. Layout width is owned by chrome — this
+    /// only asks MainWindow to update `ChromeLayoutState`.
     func setViewMode(_ mode: ViewMode) {
         guard mode != viewMode else { return }
-        applyViewMode(mode)
+        onRequestSetChromeCollapsed?(mode == .terminal)
     }
 
-    private func applyViewMode(_ mode: ViewMode) {
+    /// Mirror chrome collapse into the deprecated `ViewMode` alias and apply
+    /// content-only side effects (no local column width constraints).
+    func adoptChromeCollapse(_ collapsed: Bool, activePane: ChromeLeftPane?) {
+        isLeftColumnCollapsed = collapsed
+        let mode: ViewMode = collapsed ? .terminal : .split
+        let modeChanged = mode != viewMode
         viewMode = mode
-        switch mode {
-        case .split:
-            // Overview docks as the left column; the terminal live-previews on the
-            // right but keyboard focus stays on the overview ring.
-            openFirstMateColumn()
-            currentSide = .firstMate
+
+        if collapsed {
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+                ?? lastCommittedWorktreePath
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.viewMode == .terminal else { return }
+                self.embedSplitContainerForSelectedSailor(focusTerminal: true)
+            }
+        } else {
+            switch activePane {
+            case .files:
+                openFilesColumn(.files)
+                currentSide = .files
+            case .changes:
+                openFilesColumn(.changes)
+                currentSide = .changes
+            case .firstMate, .none:
+                openFirstMateColumn()
+                currentSide = .firstMate
+            }
             if activeSplitContainer == nil {
                 embedSplitContainerForSelectedSailor(focusTerminal: false)
             }
@@ -438,22 +459,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 guard let self, self.viewMode == .split else { return }
                 self.view.window?.makeFirstResponder(self)
             }
-        case .terminal:
-            closeFirstMateSide()
-            currentSide = .none
-            overviewView.isHidden = true
-            if !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
-            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
-                ?? lastCommittedWorktreePath
-            // Hand the keyboard to the terminal after Ghostty's own deferred focus
-            // handling (existing convention).
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.viewMode == .terminal else { return }
-                self.embedSplitContainerForSelectedSailor(focusTerminal: true)
-            }
         }
         notifyActiveTool()
-        onViewModeChanged?(mode)
+        if modeChanged {
+            onViewModeChanged?(mode)
+        }
     }
 
     /// Compute + publish the single lit toolbar tool from the current state.
@@ -492,15 +502,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// First Mate icon (title bar) → toggle the First Mate column.
     func toggleFirstMateSide() { toggleSide(.firstMate) }
 
-    /// Cmd+B: toggle the left side column. Opening from a collapsed state defaults
-    /// to the dashboard (First Mate overview) pane instead of whatever content was
-    /// left mounted; when a pane is showing, Cmd+B collapses the column.
+    /// Cmd+B: forward to chrome collapse SSOT (restores last pane on expand).
     func toggleSidebarDefaultDashboard() {
-        if isLeftColumnCollapsed {
-            toggleSide(.firstMate)
-        } else {
-            collapseCurrentSide()
-        }
+        onRequestToggleChromeCollapse?()
     }
 
     /// Each pane icon toggles its own panel: click when inactive → open that pane;
@@ -512,15 +516,17 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
         switch side {
         case .firstMate:
-            // Opening the First Mate column IS mode 2 — route through the mode
-            // machine so keyboard focus and hints follow.
-            setViewMode(.split)
+            openFirstMateColumn()
+            currentSide = .firstMate
+            onRequestSetChromeCollapsed?(false)
+            notifyActiveTool()
             return
         case .files:     openFilesColumn(.files)
         case .changes:   openFilesColumn(.changes)
         case .none:      collapseCurrentSide(); return
         }
         currentSide = side
+        onRequestSetChromeCollapsed?(false)
         notifyActiveTool()
     }
 
@@ -531,56 +537,44 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         overviewView.isHidden = false
         overviewView.selectedId = overviewSelectedId
         overviewView.update(agents)
-        leftColumnWidthExpanded?.constant = Self.firstMateColumnWidth
-        expandLeftColumnIfCollapsed()
     }
 
     private func openFilesColumn(_ tab: SidePanelTab) {
         closeFirstMateSide()                      // undock First Mate if it was showing
-        // Files/changes replace the First Mate column: keyboard-wise that's the
-        // terminal mode (the ring lives on the overview only).
-        if viewMode == .split {
-            viewMode = .terminal
-            onViewModeChanged?(.terminal)
-        }
-        leftColumnWidthExpanded?.constant = LayoutMetrics.leftColumnWidth
         sidePanelVC.selectTab(tab)
-        expandLeftColumnIfCollapsed()
+        sidePanelVC.view.isHidden = false
     }
 
     private func collapseCurrentSide() {
         if firstMateSideOpen {
-            // Closing the First Mate column leaves mode 2 → full terminal. Cash in
-            // a queued preview first, so the terminal we expand is the selected
-            // worktree's rather than the one it happened to be showing.
             flushPendingPreview()
-            setViewMode(.terminal)
-            return
-        } else if !isLeftColumnCollapsed {
-            _ = toggleLeftColumnCollapse()
         }
+        onRequestSetChromeCollapsed?(true)
         currentSide = .none
         notifyActiveTool()
     }
 
     /// Undock First Mate: restore the file/change side panel in the column.
-    /// `collapse` also collapses the column so the terminal reclaims the space.
     private func closeFirstMateSide(collapse: Bool = false) {
         guard firstMateSideOpen else { return }
         firstMateSideOpen = false
         overviewView.isHidden = true
         overviewView.removeFromSuperview()
         sidePanelVC.view.isHidden = false
-        leftColumnWidthExpanded?.constant = LayoutMetrics.leftColumnWidth
-        if collapse, !isLeftColumnCollapsed { _ = toggleLeftColumnCollapse() }
+        if collapse {
+            onRequestSetChromeCollapsed?(true)
+        }
     }
 
     /// Open the fleet overview as the left column (⌘E / title-bar dashboard icon).
-    func enterOverview() { setViewMode(.split) }
+    func enterOverview() { onRequestSetChromeCollapsed?(false) }
 
-    /// Force the initial state at launch. `setViewMode` no-ops when the mode is
-    /// unchanged, so the very first activation needs an explicit apply.
-    func activateInitialSplit() { applyViewMode(.split) }
+    /// Force the initial expanded First Mate state at launch.
+    func activateInitialSplit() {
+        openFirstMateColumn()
+        currentSide = .firstMate
+        onRequestSetChromeCollapsed?(false)
+    }
 
     /// Open the First Mate column and start a command in its composer.
     func startNewCommand(prefill: String = "/new ") {
@@ -618,11 +612,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     @discardableResult
     func toggleLeftColumnCollapse() -> Bool {
-        // Outer column width is owned by WindowChromeController. Keep a local
-        // collapsed flag for ViewMode / tool tint until Task 5b retires it.
-        isLeftColumnCollapsed.toggle()
-        leftColumnWidthExpanded?.isActive = false
-        leftColumnWidthCollapsed?.isActive = false
+        onRequestToggleChromeCollapse?()
         return isLeftColumnCollapsed
     }
 
@@ -633,12 +623,10 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         toggleSide(pane == .change ? .changes : .files)
     }
 
-    /// Expand the left column if it is currently collapsed (no-op otherwise).
+    /// Expand via chrome SSOT if currently collapsed.
     func expandLeftColumnIfCollapsed() {
         guard isLeftColumnCollapsed else { return }
-        isLeftColumnCollapsed = false
-        leftColumnWidthExpanded?.isActive = false
-        leftColumnWidthCollapsed?.isActive = false
+        onRequestSetChromeCollapsed?(false)
     }
 
     /// Open the global Worktrees tab in the left sidebar: refresh the card list,

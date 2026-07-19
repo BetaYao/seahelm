@@ -328,14 +328,41 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
 
-    /// Unified back key (double-Ctrl and Cmd+Esc): toggle between the full
-    /// terminal (mode 3) and the First Mate split (mode 2).
+    /// Unified back key (double-Ctrl and Cmd+Esc): toggle chrome sidebar collapse.
     func navigateBack() {
         tabCoordinator.switchToTab(0)
-        guard let dashboard = dashboardVC else { return }
-        switch dashboard.viewMode {
-        case .terminal:  dashboard.setViewMode(.split)
-        case .split:     dashboard.setViewMode(.terminal)
+        toggleChromeCollapsed()
+    }
+
+    /// ⌘B / navigateBack — chrome collapse is the only layout collapse signal.
+    func toggleChromeCollapsed() {
+        chromeState.toggleCollapsed()
+        applyChromeState(animated: true)
+    }
+
+    func setChromeCollapsed(_ collapsed: Bool) {
+        guard chromeState.isCollapsed != collapsed else {
+            // Still refresh dashboard content / keyboard when already in sync.
+            dashboardVC?.adoptChromeCollapse(collapsed, activePane: chromeState.activePane)
+            syncKeyboardToChromeCollapse()
+            return
+        }
+        chromeState.setCollapsed(collapsed)
+        applyChromeState(animated: true)
+    }
+
+    private func applyChromeState(animated: Bool) {
+        windowChrome?.applyState(chromeState, animated: animated)
+        positionStandardWindowButtons()
+        dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed, activePane: chromeState.activePane)
+        syncKeyboardToChromeCollapse()
+    }
+
+    private func syncKeyboardToChromeCollapse() {
+        if chromeState.isCollapsed {
+            keyboardMode.enterInsert()
+        } else {
+            keyboardMode.enterNormal()
         }
     }
 
@@ -550,19 +577,24 @@ dashboard.stationManager = terminalCoordinator.stationManager
         )
 
         dashboard.onEnterTerminal = { [weak self] in
-            // Drilling into a terminal = entering the worktree working view.
-            self?.dashboardVC?.setViewMode(.terminal)
-            self?.keyboardMode.enterInsert()
+            // Drilling into a terminal collapses the chrome sidebar (INSERT).
+            self?.setChromeCollapsed(true)
         }
-        // Keyboard NORMAL/INSERT is now derived from the view mode: only the
-        // full-terminal mode hands the keyboard to the terminal.
+        // ViewMode is a deprecated alias of chrome collapse; keyboard follows chrome.
         dashboard.onViewModeChanged = { [weak self] mode in
             guard let self else { return }
-            if mode == .terminal {
+            // Prefer chrome SSOT; ViewMode should already match after adoptChromeCollapse.
+            if mode == .terminal || self.chromeState.isCollapsed {
                 self.keyboardMode.enterInsert()
             } else {
                 self.keyboardMode.enterNormal()
             }
+        }
+        dashboard.onRequestToggleChromeCollapse = { [weak self] in
+            self?.toggleChromeCollapsed()
+        }
+        dashboard.onRequestSetChromeCollapsed = { [weak self] collapsed in
+            self?.setChromeCollapsed(collapsed)
         }
         // Light exactly one toolbar icon for the active view; dim the rest.
         dashboard.onActiveToolChanged = { [weak self] tool in
@@ -1169,6 +1201,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     private func handleChromeStateChange(_ state: ChromeLayoutState) {
         let widthChanged = abs(state.width - config.sidebarWidth) > 0.5
+        let collapseChanged = state.isCollapsed != chromeState.isCollapsed
         chromeState = state
         if widthChanged {
             // Persist width only — never write 0 for a collapsed sidebar.
@@ -1177,6 +1210,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
             saveConfig()
         }
         positionStandardWindowButtons()
+        if collapseChanged {
+            dashboardVC?.adoptChromeCollapse(state.isCollapsed, activePane: state.activePane)
+            syncKeyboardToChromeCollapse()
+        }
     }
 
     private func embedViewController(_ vc: NSViewController) {
