@@ -239,7 +239,7 @@ class Station {
 
     /// Reparent this terminal's view to a different container
     func reparent(to container: NSView) {
-        guard let view, let surface else { return }
+        guard let view, surface != nil else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -254,16 +254,22 @@ class Station {
             view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
+        // Resolve constraints and sync the surface inside the same disabled-
+        // actions transaction, so the first displayed frame already has the
+        // final geometry — the old deferred sync showed one frame at the
+        // previous grid size after a reparent.
+        container.layoutSubtreeIfNeeded()
+        syncContentScale()
+        syncSize()
+
         CATransaction.commit()
 
         self.containerView = container
 
-        // Force size sync after the run loop has resolved constraints (set the
-        // frame) so Ghostty recalculates its grid from the final geometry.
+        // Focus restoration stays deferred: it must run after Ghostty's own
+        // deferred focus handling on this runloop turn.
         DispatchQueue.main.async { [weak self] in
-            guard let self, let view = self.view, let surface = self.surface else { return }
-            self.syncContentScale()
-            self.syncSize()
+            guard let self, let view = self.view, self.surface != nil else { return }
             // Restore AppKit first responder so keyboard events reach the terminal.
             // Only grab focus if no other terminal already has it (e.g. in a split pane
             // where showTerminal() already focused the correct leaf).
@@ -333,13 +339,35 @@ class Station {
     }
 
     func readViewportText() -> String? {
+        var contended = false
+        return readViewportText(tryOnly: false, contended: &contended)
+    }
+
+    /// Background poll variant: gives up without blocking when `ghosttyLock` is
+    /// held (someone is typing / pasting) — input latency matters more than one
+    /// poll cycle, and the poller retries 2s later. `contended` lets the caller
+    /// tell "skip this cycle" apart from "viewport is empty".
+    func readViewportTextForPoll() -> (contended: Bool, text: String?) {
+        var contended = false
+        let text = readViewportText(tryOnly: true, contended: &contended)
+        return (contended, text)
+    }
+
+    private func readViewportText(tryOnly: Bool, contended: inout Bool) -> String? {
         // Hold ghosttyLock only for the C calls plus a raw byte copy. Building
         // the String (UTF-8 validation + allocation over a full viewport) used
         // to happen inside the lock, stalling main-thread input that contends
         // for it during every background status poll. `surface` must be read
         // inside the lock — destroy() frees it under the same lock.
         var bytes: [UInt8]?
-        ghosttyLock.lock()
+        if tryOnly {
+            guard ghosttyLock.try() else {
+                contended = true
+                return nil
+            }
+        } else {
+            ghosttyLock.lock()
+        }
         guard let surface else {
             ghosttyLock.unlock()
             return nil

@@ -204,8 +204,19 @@ enum MarkdownHTMLRenderer {
         replace(s, pattern: pattern, groups: 1) { transform($0[0]) }
     }
 
+    // Patterns are a fixed set; compiling per render() call paid ~10 regex
+    // compiles on the main thread for every preview refresh.
+    private static var regexCache: [String: NSRegularExpression] = [:]
+
+    private static func cachedRegex(_ pattern: String) -> NSRegularExpression? {
+        if let re = regexCache[pattern] { return re }
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        regexCache[pattern] = re
+        return re
+    }
+
     private static func replace(_ s: String, pattern: String, groups: Int, _ transform: ([String]) -> String) -> String {
-        guard let re = try? NSRegularExpression(pattern: pattern) else { return s }
+        guard let re = cachedRegex(pattern) else { return s }
         let ns = s as NSString
         var result = ""
         var last = 0

@@ -41,9 +41,15 @@ final class DiffReviewView: NSView {
         fatalError("init(coder:) not supported")
     }
 
+    private var didSetInitialDividerPosition = false
+
     override func layout() {
         super.layout()
-        guard splitView.subviews.count > 1 else { return }
+        guard splitView.subviews.count > 1, bounds.width > 0 else { return }
+        // Set the divider once — re-asserting it every layout pass fights user
+        // drags and re-enters layout on every resize frame.
+        guard !didSetInitialDividerPosition else { return }
+        didSetInitialDividerPosition = true
         splitView.setPosition(min(260, bounds.width * 0.45), ofDividerAt: 0)
     }
 
@@ -185,7 +191,27 @@ final class DiffReviewView: NSView {
         render(matchingFiles)
     }
 
+    private var renderGeneration = 0
+    // Serial: renders must not overlap (DiffSyntaxHighlighter keeps a lazily
+    // populated static regex cache), and stale generations are dropped anyway.
+    private static let renderQueue = DispatchQueue(label: "com.seahelm.diff-render", qos: .userInitiated)
+
+    /// Highlighting runs 5-6 regex passes per hunk line; building the full
+    /// attributed document synchronously beachballed the main thread on large
+    /// changesets. Build off-main and apply only the newest generation.
     private func render(_ filesToRender: [DiffFile]) {
+        renderGeneration += 1
+        let generation = renderGeneration
+        Self.renderQueue.async { [weak self] in
+            let attributed = Self.buildAttributedDiff(filesToRender)
+            DispatchQueue.main.async {
+                guard let self, generation == self.renderGeneration else { return }
+                self.diffTextView.textStorage?.setAttributedString(attributed)
+            }
+        }
+    }
+
+    private static func buildAttributedDiff(_ filesToRender: [DiffFile]) -> NSAttributedString {
         let attributed = NSMutableAttributedString()
         let monoFont = AppFont.mono(size: 12, weight: .regular)
 
@@ -235,7 +261,7 @@ final class DiffReviewView: NSView {
             ]))
         }
 
-        diffTextView.textStorage?.setAttributedString(attributed)
+        return attributed
     }
 
     private func statusColor(_ status: String) -> NSColor {

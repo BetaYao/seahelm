@@ -951,6 +951,13 @@ class TabCoordinator {
             self.refreshBranches()
             // Re-evaluate worktree-tab idle collapse even when nothing changed.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+            // ShipLog no longer fans out on roundDuration ticks (see
+            // displayedStateUnchanged), so elapsed-time and activity-age labels
+            // are advanced here at a gentle cadence while anything is running.
+            if self.branchRefreshTick % 2 == 0,
+               ShipLog.shared.allSailors().contains(where: { $0.status == .running }) {
+                self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
+            }
         }
     }
 

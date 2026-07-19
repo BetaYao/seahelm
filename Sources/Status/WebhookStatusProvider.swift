@@ -303,6 +303,10 @@ class WebhookStatusProvider {
     /// Returns tasks from the most recent session for a worktree
     func tasks(for worktreePath: String) -> [TaskItem] {
         queue.sync {
+            // Common case is no webhook sessions at all — skip the path
+            // canonicalization (filesystem resolution) the poll would otherwise
+            // pay for every changed pane.
+            guard !sessions.isEmpty else { return [] }
             let canon = canonicalize(worktreePath)
             return sessions.values
                 .filter { $0.worktreePath == canon }

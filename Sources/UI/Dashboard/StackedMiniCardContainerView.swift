@@ -91,6 +91,11 @@ final class StackedMiniCardContainerView: NSView {
 
             // Visual lift
             layer?.zPosition = 100
+            // Explicit path: keeps the lift shadow from forcing per-frame
+            // offscreen shape derivation while the card is dragged around.
+            layer?.shadowPath = CGPath(
+                roundedRect: bounds, cornerWidth: 6, cornerHeight: 6, transform: nil
+            )
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.15
                 ctx.allowsImplicitAnimation = true

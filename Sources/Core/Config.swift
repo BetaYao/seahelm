@@ -164,6 +164,7 @@ struct Config: Codable {
     }
 
     private static let saveQueue = DispatchQueue(label: "com.seahelm.config-save", qos: .utility)
+    private static let pendingSaveLock = NSLock()
     private static var pendingSaveWorkItem: DispatchWorkItem?
 
     func save() {
@@ -171,8 +172,9 @@ struct Config: Codable {
         // live app; saving would persist its pretend-empty view over the real one.
         guard !DebugFlags.forceEmptyState else { return }
 
-        // Debounced async save: coalesces rapid saves into a single write
-        Config.pendingSaveWorkItem?.cancel()
+        // Debounced async save: coalesces rapid saves into a single write.
+        // The pending-item swap is lock-protected — save() has many call sites
+        // and an unsynchronized cancel/reassign race can drop a save.
         let configCopy = self
         let workItem = DispatchWorkItem {
             do {
@@ -185,7 +187,10 @@ struct Config: Codable {
                 NSLog("Failed to save config: \(error)")
             }
         }
+        Config.pendingSaveLock.lock()
+        Config.pendingSaveWorkItem?.cancel()
         Config.pendingSaveWorkItem = workItem
+        Config.pendingSaveLock.unlock()
         Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
 }

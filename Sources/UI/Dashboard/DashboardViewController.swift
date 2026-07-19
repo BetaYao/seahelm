@@ -1062,16 +1062,29 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
         splitView.surfaceViews = surfaceViews
 
-        // Embed
+        // Embed with a short crossfade — a hard cut swaps the whole terminal
+        // surface in one frame and reads as a flash.
         splitView.frame = container.bounds
         splitView.autoresizingMask = [.width, .height]
+        splitView.alphaValue = previousSplitView == nil ? 1 : 0
         container.addSubview(splitView)
         splitView.tree = tree
         activeSplitContainer = splitView
         activeSplitWorktreePath = worktreePath
 
-        previousSplitView?.removeFromSuperview()
-        previousSplitView?.alphaValue = 1
+        if let previousSplitView {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                splitView.animator().alphaValue = 1
+            }, completionHandler: {
+                // Only detach if a later switch hasn't already re-embedded it.
+                if previousSplitView !== self.activeSplitContainer {
+                    previousSplitView.removeFromSuperview()
+                }
+                previousSplitView.alphaValue = 1
+            })
+        }
         syncSidePanelToSelection()
 
         // Focus the active leaf — defer to let the view hierarchy settle.

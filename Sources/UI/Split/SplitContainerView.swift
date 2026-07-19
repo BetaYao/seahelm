@@ -239,18 +239,32 @@ class SplitContainerView: NSView, DividerDelegate {
 
         for leaf in tree.allLeaves {
             if leaf.id == focusedId {
-                dimOverlays[leaf.id]?.removeFromSuperview()
-                dimOverlays.removeValue(forKey: leaf.id)
+                // Fade out, then remove — an instant pop reads as flicker during
+                // rapid focus navigation.
+                if let overlay = dimOverlays.removeValue(forKey: leaf.id) {
+                    NSAnimationContext.runAnimationGroup({ context in
+                        context.duration = 0.12
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        overlay.animator().alphaValue = 0
+                    }, completionHandler: {
+                        overlay.removeFromSuperview()
+                    })
+                }
             } else {
                 let frame = leafFrames[leaf.id] ?? .zero
                 if let overlay = dimOverlays[leaf.id] {
                     CATransaction.begin()
                     CATransaction.setDisableActions(true)
                     overlay.frame = frame
-                    CATransaction.commit()
+                    // Color update stays inside the transaction so an appearance
+                    // flip can't land a frame behind the just-moved overlay.
                     overlay.refreshAppearance()
+                    // Re-dimming a pane that was mid-fade-out: bring it back.
+                    overlay.alphaValue = 1
+                    CATransaction.commit()
                 } else {
                     let overlay = DimOverlayView(frame: frame)
+                    overlay.alphaValue = 0
                     // Insert above terminal views but below dividers
                     if let firstDivider = dividers.values.first {
                         addSubview(overlay, positioned: .below, relativeTo: firstDivider)
@@ -258,6 +272,11 @@ class SplitContainerView: NSView, DividerDelegate {
                         addSubview(overlay)
                     }
                     dimOverlays[leaf.id] = overlay
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.12
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        overlay.animator().alphaValue = 1
+                    }
                 }
             }
         }

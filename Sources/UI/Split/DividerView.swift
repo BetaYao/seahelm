@@ -38,6 +38,14 @@ class DividerView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         hoverFillLayer.opacity = 0
+        // Manually-added sublayers keep default implicit actions (0.25s), which
+        // makes the seam lag the cursor during drags — disable them.
+        let noActions: [String: CAAction] = [
+            "position": NSNull(), "bounds": NSNull(),
+            "backgroundColor": NSNull(), "opacity": NSNull(),
+        ]
+        hoverFillLayer.actions = noActions
+        lineLayer.actions = noActions
         layer?.addSublayer(hoverFillLayer)
         layer?.addSublayer(lineLayer)
         refreshAppearance()

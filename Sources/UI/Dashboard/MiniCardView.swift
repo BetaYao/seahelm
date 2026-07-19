@@ -1,5 +1,22 @@
 import AppKit
 
+protocol SailorCardDelegate: AnyObject {
+    func agentCardClicked(agentId: String)
+    func agentCardDoubleClicked(agentId: String)
+    func agentCardDidRequestBrowseFiles(agentId: String)
+    func agentCardDidRequestShowChanges(agentId: String)
+    func agentCardDidRequestDelete(agentId: String)
+    func agentCardDidRequestCloseRepo(agentId: String)
+}
+
+extension SailorCardDelegate {
+    func agentCardDoubleClicked(agentId: String) {}
+    func agentCardDidRequestBrowseFiles(agentId: String) {}
+    func agentCardDidRequestShowChanges(agentId: String) {}
+    func agentCardDidRequestDelete(agentId: String) {}
+    func agentCardDidRequestCloseRepo(agentId: String) {}
+}
+
 final class MiniCardView: NSView {
     enum Typography {
         static let primaryPointSize: CGFloat = 12
@@ -223,6 +240,15 @@ final class MiniCardView: NSView {
     func hideDimOverlay() {
         dimOverlayLayer?.removeFromSuperlayer()
         dimOverlayLayer = nil
+    }
+
+    override func layout() {
+        super.layout()
+        // Explicit shadowPath: without it Core Animation derives the shadow
+        // shape from the layer contents every frame (offscreen pass per card).
+        layer?.shadowPath = CGPath(
+            roundedRect: bounds, cornerWidth: 6, cornerHeight: 6, transform: nil
+        )
     }
 
     override var acceptsFirstResponder: Bool { false }

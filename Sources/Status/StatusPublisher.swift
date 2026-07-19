@@ -178,8 +178,12 @@ class StatusPublisher {
                 continue
             }
             let processStatus = surface.processStatus
-            // readViewportText() can be slow — do NOT hold the lock here
-            var content = surface.readViewportText() ?? ""
+            // readViewportText() can be slow — do NOT hold the lock here.
+            // If input is actively holding ghosttyLock, skip this pane for the
+            // cycle rather than making keystrokes wait behind a viewport read.
+            let read = surface.readViewportTextForPoll()
+            if read.contended { continue }
+            var content = read.text ?? ""
 
             // No live surface: this is a dashboard overview card that was never
             // opened, so there is nothing to screen-scrape. Fall back to a
@@ -203,7 +207,7 @@ class StatusPublisher {
             // title, and that spinner is the running signal (osc_title rule). The
             // spinner changing between two 2s polls busts the hash and re-scans;
             // when truly idle (static title) the hash is stable and we still skip.
-            let contentHash = (content + "\u{1}" + surface.oscTitle + "\u{1}" + surface.oscProgress).stableHash
+            let contentHash = String.stableHash(parts: content, surface.oscTitle, surface.oscProgress)
 
             lock.lock()
             let lastHash = lastViewportHashes[terminalID]
@@ -407,9 +411,25 @@ private extension String {
     /// Simple stable hash (djb2) for change detection.
     var stableHash: UInt64 {
         var hash: UInt64 = 5381
-        for byte in self.utf8 {
-            hash = ((hash &<< 5) &+ hash) &+ UInt64(byte)
+        Self.accumulate(&hash, self)
+        return hash
+    }
+
+    /// djb2 over several parts with a separator byte between them — same result
+    /// class as hashing the joined string, without materializing the join
+    /// (the viewport part alone can be thousands of bytes, every poll).
+    static func stableHash(parts: String...) -> UInt64 {
+        var hash: UInt64 = 5381
+        for (index, part) in parts.enumerated() {
+            if index > 0 { hash = ((hash &<< 5) &+ hash) &+ 1 }
+            accumulate(&hash, part)
         }
         return hash
+    }
+
+    private static func accumulate(_ hash: inout UInt64, _ s: String) {
+        for byte in s.utf8 {
+            hash = ((hash &<< 5) &+ hash) &+ UInt64(byte)
+        }
     }
 }

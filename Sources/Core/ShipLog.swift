@@ -362,7 +362,10 @@ class ShipLog {
             && a.lastMessage == b.lastMessage
             && a.lastUserPrompt == b.lastUserPrompt
             && a.commandLine == b.commandLine
-            && a.roundDuration == b.roundDuration
+            // roundDuration deliberately excluded: it ticks every poll for any
+            // running pane, which forced a full delegate fan-out every 2s just to
+            // advance a clock. Elapsed-time labels are refreshed by the slow
+            // dashboard tick in TabCoordinator instead.
             && a.agentType == b.agentType
             && a.scanStatus == b.scanStatus
             && a.hookStatus == b.hookStatus

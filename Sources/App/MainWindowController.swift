@@ -76,6 +76,7 @@ class MainWindowController: NSWindowController {
     // Vibe-island notch overlay
     private let islandController = IslandPanelController()
     private var islandRefreshTimer: Timer?
+    private var historyChangeObserver: NSObjectProtocol?
     private var islandKnownOrderIDs: Set<String> = []
     private var islandKnownUnread = 0
 
@@ -1370,6 +1371,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         primaryCapsuleDismissWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
         NotificationCenter.default.removeObserver(self, name: .notificationHistoryDidChange, object: nil)
+        if let historyChangeObserver {
+            NotificationCenter.default.removeObserver(historyChangeObserver)
+        }
     }
 
     // MARK: - Split Pane Actions (forwarded to TerminalCoordinator)
@@ -1812,8 +1816,10 @@ extension MainWindowController {
         // tabCoordinatorRequestUpdateTitleBar, notification changes via the
         // history's NotificationCenter post. The timer is only a slow fallback
         // for async stragglers (e.g. title resolution finishing later).
-        NotificationCenter.default.addObserver(forName: .notificationHistoryDidChange,
-                                               object: nil, queue: .main) { [weak self] _ in
+        historyChangeObserver = NotificationCenter.default.addObserver(
+            forName: .notificationHistoryDidChange,
+            object: nil, queue: .main
+        ) { [weak self] _ in
             self?.refreshIsland()
         }
         islandRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in

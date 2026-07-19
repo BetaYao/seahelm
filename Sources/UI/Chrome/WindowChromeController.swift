@@ -260,11 +260,15 @@ final class WindowChromeController: NSViewController {
             return
         }
 
+        // Defer PTY set_size for the whole slide — otherwise every animation
+        // frame reflows the terminal grid (SIGWINCH storm) while the sidebar moves.
+        GhosttyBridge.shared.beginLiveResize(pinHeight: true)
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = duration
             context.allowsImplicitAnimation = true
             self.sidebarWidthConstraint.animator().constant = targetSidebarWidth
         }, completionHandler: {
+            GhosttyBridge.shared.endLiveResize()
             if collapsed {
                 self.sidebarColumn.isHidden = true
                 self.divider.isHidden = true
@@ -336,13 +340,17 @@ final class WindowChromeController: NSViewController {
 
     private func applyRegionHighlight(to view: NSView, focused: Bool) {
         view.wantsLayer = true
-        if focused {
-            view.layer?.borderWidth = 1.5
-            view.layer?.borderColor = Theme.accent.cgColor
-            view.layer?.cornerRadius = 6
-        } else {
-            view.layer?.borderWidth = 0
-            view.layer?.borderColor = nil
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.allowsImplicitAnimation = true
+            if focused {
+                view.layer?.borderWidth = 1.5
+                view.layer?.borderColor = Theme.accent.cgColor
+                view.layer?.cornerRadius = 6
+            } else {
+                view.layer?.borderWidth = 0
+                view.layer?.borderColor = nil
+            }
         }
     }
 
