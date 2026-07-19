@@ -70,6 +70,7 @@
 		3996E70F14274967ED09305E /* IdeaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */; };
 		3A5FD6063BF092FB51DC280A /* WorktreeGitStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */; };
 		3BB046CB910F5735999EAF2F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 23B112FAA14CF6135A4F7202 /* Assets.xcassets */; };
+		3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */; };
 		3C498141117B2348743A7A3E /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */; };
 		3D646290FE05FFC7FE24794B /* StatusBarViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */; };
 		3E0A2D0C2DF1DF7A2C5E9493 /* TitleBarWorktreeNavTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C125471594B9F8733383167 /* TitleBarWorktreeNavTests.swift */; };
@@ -150,6 +151,7 @@
 		7A85312BE720DFFA0A03ADAB /* Keymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F12DC83A838ABCF3346194 /* Keymap.swift */; };
 		7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */; };
 		7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */; };
+		7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */; };
 		7DD2666A7F2FE0E895A38F8B /* WorktreeTaskStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */; };
 		7DD9FAF08617D890BBFE56A9 /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDD687DFAD37A155D65D0541 /* MiniCardView.swift */; };
 		816F3CA472BDEC66F9204781 /* UpdateCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B818999765D614712A04F53 /* UpdateCoordinatorTests.swift */; };
@@ -348,6 +350,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeController.swift; sourceTree = "<group>"; };
 		03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstallerTests.swift; sourceTree = "<group>"; };
 		03D413F175A4E9C458F6EC77 /* SemVer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemVer.swift; sourceTree = "<group>"; };
 		04AB034D22AB8AD81A9FA9DD /* IslandShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandShapes.swift; sourceTree = "<group>"; };
@@ -582,6 +585,7 @@
 		BA6D55A3BC776F3500FE595B /* SailorInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorInfo.swift; sourceTree = "<group>"; };
 		BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEvent.swift; sourceTree = "<group>"; };
 		BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstallerTests.swift; sourceTree = "<group>"; };
+		BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeDividerView.swift; sourceTree = "<group>"; };
 		BB9854E3679A7AF9524F5077 /* LayoutNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNode.swift; sourceTree = "<group>"; };
 		BBA707703AD383C078C3DFC3 /* SeahelmSkillInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSkillInstallerTests.swift; sourceTree = "<group>"; };
 		BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHelpOverlay.swift; sourceTree = "<group>"; };
@@ -1195,6 +1199,7 @@
 		DCB8806B236D6D54F4202827 /* Chrome */ = {
 			isa = PBXGroup;
 			children = (
+				BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */,
 				3F4CB69B94BFFAB30A5D430C /* ChromeHeaderDelegate.swift */,
 				E4347F9E7EF04217AB29D93E /* ChromeIconButton.swift */,
 				34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */,
@@ -1202,6 +1207,7 @@
 				3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */,
 				FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */,
 				D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */,
+				0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */,
 			);
 			path = Chrome;
 			sourceTree = "<group>";
@@ -1574,6 +1580,7 @@
 				E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */,
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
 				72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */,
+				3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */,
 				DCD355D8BE1EF13AECD21332 /* ChromeHeaderDelegate.swift in Sources */,
 				B5A6416221795024BC063D17 /* ChromeIconButton.swift in Sources */,
 				B484B87A3E1D684239F4C957 /* ChromeIconClusterView.swift in Sources */,
@@ -1716,6 +1723,7 @@
 				865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */,
 				1E992A5758BD000FADE4E084 /* WebhookEvent.swift in Sources */,
 				43EF6A61FC26F6221292A0A3 /* WebhookStatusProvider.swift in Sources */,
+				7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */,
 				4BBA37E55963FD4DBDC549E4 /* WorkspaceManager.swift in Sources */,
 				B0AF97B3F50FA1567DBD5CD9 /* WorktreeCreator.swift in Sources */,
 				D27F424356DE8B506B1C7C05 /* WorktreeDeleter.swift in Sources */,
