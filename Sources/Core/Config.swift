@@ -32,6 +32,17 @@ struct Config: Codable {
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
     var sidebarWidth: CGFloat
+    /// First-launch wizard gate. New installs start `false`; legacy configs that
+    /// omit the key decode as `true` so existing users never see the wizard.
+    var onboardingCompleted: Bool
+    /// Primary AI agent chosen during onboarding (`SailorType.rawValue`).
+    var defaultAgent: String
+    /// When true, agent launch commands append skip-permission / yolo flags.
+    var agentYolo: Bool
+    /// Agent manifest ids whose hooks were installed during onboarding.
+    var enabledHookAgents: [String]
+    /// Desktop notification sound: `default`, `defaultCritical`, or `none`.
+    var notificationSound: String
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -57,6 +68,11 @@ struct Config: Codable {
         case notifications
         case islandEnabled = "island_enabled"
         case sidebarWidth = "sidebar_width"
+        case onboardingCompleted = "onboarding_completed"
+        case defaultAgent = "default_agent"
+        case agentYolo = "agent_yolo"
+        case enabledHookAgents = "enabled_hook_agents"
+        case notificationSound = "notification_sound"
     }
 
     init() {
@@ -83,6 +99,11 @@ struct Config: Codable {
         notifications = NotificationConfig()
         islandEnabled = true
         sidebarWidth = 300
+        onboardingCompleted = false
+        defaultAgent = SailorType.claudeCode.rawValue
+        agentYolo = false
+        enabledHookAgents = []
+        notificationSound = "default"
     }
 
     init(from decoder: Decoder) throws {
@@ -111,6 +132,17 @@ struct Config: Codable {
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
+        // Missing key = legacy install → skip wizard. Explicit false = unfinished.
+        if container.contains(.onboardingCompleted) {
+            onboardingCompleted = try container.decode(Bool.self, forKey: .onboardingCompleted)
+        } else {
+            onboardingCompleted = true
+        }
+        defaultAgent = try container.decodeIfPresent(String.self, forKey: .defaultAgent)
+            ?? SailorType.claudeCode.rawValue
+        agentYolo = try container.decodeIfPresent(Bool.self, forKey: .agentYolo) ?? false
+        enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
+        notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -139,7 +171,11 @@ struct Config: Codable {
     static func load() -> Config {
         // Pretend a fresh install: no repos to restore means no stations, and so
         // no `zmx attach` into sessions the live app is already driving.
-        if DebugFlags.forceEmptyState { return Config() }
+        if DebugFlags.forceEmptyState {
+            var empty = Config()
+            empty.onboardingCompleted = true
+            return empty
+        }
 
         migrateLegacyConfigDirIfNeeded()
         // Support UI test config override via launch argument

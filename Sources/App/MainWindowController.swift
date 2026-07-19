@@ -445,7 +445,7 @@ class MainWindowController: NSWindowController {
                 self?.handleCtrlDoubleTapEvent(event)
             }
         if config.islandEnabled {
-            requestAccessibilityIfNeededForGlobalHotkey()
+            _ = NotificationManager.requestAccessibilityPermission()
         }
     }
 
@@ -475,11 +475,6 @@ class MainWindowController: NSWindowController {
     }
 
     /// Global key monitors require Accessibility trust; prompt once if missing.
-    private func requestAccessibilityIfNeededForGlobalHotkey() {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)
-    }
-
     private var ctrlDoubleTapLocalMonitor: Any?
     private var ctrlDoubleTapGlobalMonitor: Any?
     /// Timestamp of the last bare left-Ctrl press; 0 when broken by another key.

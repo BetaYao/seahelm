@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import UserNotifications
 
 extension Notification.Name {
@@ -21,6 +22,9 @@ class NotificationManager: NSObject {
     /// 0 disables the gate (deliver on the edge). Injected from config.
     var stabilityDelay: TimeInterval = 1.0
 
+    /// Sound preference from onboarding / settings: `default`, `defaultCritical`, `none`.
+    var soundPreference: String = "default"
+
     /// Latest observed status per key, updated on *every* edge (not just
     /// qualifying ones) so a pending fire can tell the agent moved on.
     private var latestStatus: [String: SailorStatus] = [:]
@@ -29,14 +33,16 @@ class NotificationManager: NSObject {
 
     private override init() {
         super.init()
-        requestPermission()
+        // Permission is requested from onboarding or the first delivery path.
+        configureCategories()
     }
 
     private static let categoryIdentifier = "seahelm.agentStatus"
     private static let openTerminalAction = "open_terminal"
     private static let maxBodyLength = 80
 
-    private func requestPermission() {
+    /// Request notification authorization (idempotent).
+    func requestPermission(completion: ((Bool) -> Void)? = nil) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
                 NSLog("Notification permission error: \(error)")
@@ -44,10 +50,13 @@ class NotificationManager: NSObject {
             if !granted {
                 NSLog("Notification permission NOT granted — system banners will be dropped (System Settings → Notifications → seahelm)")
             }
+            DispatchQueue.main.async { completion?(granted) }
         }
         UNUserNotificationCenter.current().delegate = self
+    }
 
-        // Register notification category with action buttons
+    private func configureCategories() {
+        UNUserNotificationCenter.current().delegate = self
         let openAction = UNNotificationAction(
             identifier: Self.openTerminalAction,
             title: "Open Terminal",
@@ -59,6 +68,59 @@ class NotificationManager: NSObject {
             intentIdentifiers: []
         )
         UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
+    static func openNotificationSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    static func openAccessibilitySystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @discardableResult
+    static func requestAccessibilityPermission() -> Bool {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(opts)
+    }
+
+    static var isAccessibilityTrusted: Bool {
+        AXIsProcessTrusted()
+    }
+
+    func sendTestNotification(completion: ((Error?) -> Void)? = nil) {
+        requestPermission { [weak self] _ in
+            guard let self else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Seahelm"
+            content.body = "Test notification — you're all set."
+            if let sound = self.resolvedSound(forError: false) {
+                content.sound = sound
+            }
+            let request = UNNotificationRequest(
+                identifier: "seahelm-test-\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request) { error in
+                DispatchQueue.main.async { completion?(error) }
+            }
+        }
+    }
+
+    func resolvedSound(forError: Bool) -> UNNotificationSound? {
+        switch soundPreference {
+        case "none":
+            return nil
+        case "defaultCritical":
+            return .defaultCritical
+        default:
+            return forError ? .defaultCritical : .default
+        }
     }
 
     /// Eligibility gate: only fire on a `running → (waiting | error | idle)` edge,
@@ -452,7 +514,7 @@ class NotificationManager: NSObject {
             lastUserPrompt: lastUserPrompt,
             lastAssistantMessage: lastAssistantMessage
         )
-        content.sound = newStatus == .error ? .defaultCritical : .default
+        content.sound = resolvedSound(forError: newStatus == .error)
         // Group all notifications for a worktree together in Notification Center.
         content.threadIdentifier = worktreePath
         // Let errors punch through Focus / Do Not Disturb.

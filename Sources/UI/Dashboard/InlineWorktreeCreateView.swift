@@ -24,7 +24,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     var onSubmitCommand: ((String) -> Void)?
 
     static let agentChoices = SailorType.allCases.filter { $0.isAIAgent }
-    var selectedSailorType: SailorType = .claudeCode
+    var selectedSailorType: SailorType = {
+        SailorType(rawValue: Config.load().defaultAgent) ?? .claudeCode
+    }()
 
     private let promptTextView = PromptTextView()
     private let repoChip = DropdownChip()

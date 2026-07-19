@@ -2,6 +2,7 @@ import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var mainWindowController: MainWindowController?
+    private var onboardingController: OnboardingWindowController?
 
     /// Periodically sweeps zmx sessions whose worktree no longer exists.
     private var orphanCleanupTimer: Timer?
@@ -21,43 +22,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Register bundled JetBrains Mono before any view builds its fonts.
         AppFont.registerBundledFonts()
 
-        // Ensure notification delegate is set before any notification response arrives
+        // Categories / delegate only — permission is requested in onboarding or later.
         _ = NotificationManager.shared
 
-        // Force dark appearance globally BEFORE any views are created.
-        // Must set BOTH NSApp.appearance AND NSAppearance.current so that
-        // NSColor(name:) dynamic colors resolve correctly even for views
-        // not yet added to a window (e.g. during init/setup).
         let config = Config.load()
+        NotificationManager.shared.cooldown = config.notifications.cooldown
+        NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
+        NotificationManager.shared.soundPreference = config.notificationSound
+
         cleanOrphanZmxSessions()
         scheduleOrphanZmxCleanup()
-        let mode = ThemeMode(rawValue: config.themeMode) ?? .dark
-        ThemeMode.applyAppearance(mode)
 
-        // Ensure supported CLI hook integrations are configured
-        if config.webhook.enabled {
-            // Install the hook bridge before writing hook configs that reference it.
-            SeahelmHookInstaller.ensureInstalled()
-            ClaudeHooksSetup.ensureHooksConfigured()
-            ClaudeStatuslineBridgeInstaller.ensureInstalled()
-            CodexHooksSetup.ensureHooksConfigured()
-            CursorHooksSetup.ensureHooksConfigured()
-            SeahelmSuggestInstaller.ensureInstalled()
-            // After SeahelmSuggestInstaller: the plugin shells out to the script
-            // it writes.
-            OpenCodePluginInstaller.ensureInstalled()
-            SeahelmCliInstaller.ensureInstalled()
-            SeahelmSkillInstaller.ensureInstalled()
-        }
+        let mode = ThemeMode(rawValue: config.themeMode) ?? .system
+        ThemeMode.applyAppearance(mode)
         NSAppearance.current = NSApp.effectiveAppearance
 
-        // Load TODO and Ideas stores
+        if !config.onboardingCompleted {
+            let wizard = OnboardingWindowController(config: config)
+            wizard.onComplete = { [weak self] updated in
+                self?.onboardingController = nil
+                self?.bootstrapMainApp(config: updated)
+            }
+            onboardingController = wizard
+            wizard.show()
+            return
+        }
+
+        bootstrapMainApp(config: config)
+    }
+
+    /// Hooks, stores, channels, Ghostty, and main window — after onboarding (or immediately).
+    private func bootstrapMainApp(config: Config) {
+        OnboardingHookInstaller.installForLaunch(config: config)
+        NSAppearance.current = NSApp.effectiveAppearance
+
         TodoStore.shared.load()
         IdeaStore.shared.load()
-        // Restore in-app notification history so it survives relaunch.
         NotificationHistory.shared.load()
 
-        // Auto-connect WeCom bot if configured
+        // Existing users who skipped the wizard still need a permission prompt once.
+        if config.onboardingCompleted {
+            NotificationManager.shared.requestPermission()
+        }
+
         if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
             let channel = WeComBotChannel(config: wecomConfig)
             ShipLog.shared.registerChannel(channel)
@@ -65,7 +72,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[App] WeCom bot auto-connecting: \(wecomConfig.resolvedName)")
         }
 
-        // Auto-connect WeChat if configured
         if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
             let channel = WeChatChannel(config: wechatConfig)
             channel.onAuthExpired = { [weak self] in
@@ -76,10 +82,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[App] WeChat auto-connecting")
         }
 
-        // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()
 
-        // Create and show main window
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
     }
@@ -138,6 +142,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let window = mainWindowController?.window {
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
+        } else if let window = onboardingController?.window {
+            window.makeKeyAndOrderFront(nil)
         }
         return false
     }
@@ -147,6 +153,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Bring existing window to front instead of creating a new one
         if let window = mainWindowController?.window {
             window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        } else if let window = onboardingController?.window {
             window.makeKeyAndOrderFront(nil)
         }
     }

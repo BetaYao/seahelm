@@ -291,6 +291,9 @@ class Station {
     /// Sync the surface size with the current container bounds
     func syncSize() {
         guard let view else { return }
+        // Explicit sync (window resize / reparent) must override a split absorb
+        // freeze — otherwise the PTY grid stays stuck at the pre-split size.
+        view.clearPtyGridResizeFreeze()
         // Reset the debounce so syncSurfaceSize() will run even if the
         // same size was already synced through setFrameSize.
         view.resetLastSyncedSize()

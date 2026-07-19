@@ -99,8 +99,16 @@ enum SailorType: String, Codable, CaseIterable {
     }
 
     func launchCommand(withTask task: String) -> String? {
+        launchCommand(withTask: task, agentYolo: Config.load().agentYolo)
+    }
+
+    /// Testable overload — avoids Config.load() in unit tests.
+    func launchCommand(withTask task: String, agentYolo: Bool) -> String? {
         guard let base = launchCommand else { return nil }
         var cmd = base
+        if agentYolo, let yolo = yoloFlag {
+            cmd += " \(yolo)"
+        }
         if let flag = appendSystemPromptFlag {
             cmd += " \(flag) \(ShellEscape.singleQuote(Self.suggestInstruction))"
         }
@@ -109,6 +117,22 @@ enum SailorType: String, Codable, CaseIterable {
             cmd += " \(ShellEscape.singleQuote(trimmed))"
         }
         return cmd
+    }
+
+    /// Skip-permission / YOLO CLI flag for this agent, if known.
+    var yoloFlag: String? {
+        switch self {
+        case .claudeCode:
+            return "--dangerously-skip-permissions"
+        case .codex:
+            return "--dangerously-bypass-approvals-and-sandbox"
+        case .cursor:
+            return "--yolo"
+        case .openCode:
+            return "--yolo"
+        default:
+            return nil
+        }
     }
 
     /// Short label for compact UI (the picker chip).

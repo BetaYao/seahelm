@@ -165,10 +165,16 @@ class TerminalCoordinator {
 
         // Existing panes must NOT receive TIOCSWINSZ during the split.
         // Even a single SIGWINCH makes starship/zsh reprint a blank prompt line.
-        // Absorb the AppKit frame now; flush the real grid when that pane is
-        // focused/typed into again (see GhosttyNSView.pendingPtyGridSync).
+        // Absorb the AppKit frame now; flush the real grid on the next keypress.
         GhosttyBridge.shared.beginLiveResize(pinHeight: false)
         container.suppressStructuralLayout = true
+        // Freeze existing panes *before* create/layout so any incidental
+        // setFrame / viewDidMoveToWindow during addSubview cannot SIGWINCH.
+        let newId = newStation.id
+        for leaf in tree.allLeaves where leaf.stationId != newId {
+            StationRegistry.shared.station(forId: leaf.stationId)?
+                .view?.absorbBoundsWithoutPtyResize()
+        }
         _ = newStation.create(
             in: container,
             workingDirectory: tree.worktreePath,
@@ -179,7 +185,6 @@ class TerminalCoordinator {
         container.suppressStructuralLayout = false
         container.layoutTree()
 
-        let newId = newStation.id
         for leaf in tree.allLeaves where leaf.stationId != newId {
             StationRegistry.shared.station(forId: leaf.stationId)?
                 .view?.absorbBoundsWithoutPtyResize()
@@ -285,20 +290,23 @@ class TerminalCoordinator {
         StationRegistry.shared.unregister(closed.stationId)
         ShipLog.shared.unregister(terminalID: closed.stationId)
         container.surfaceViews.removeValue(forKey: closed.stationId)
-        container.layoutTree()
 
-        // Focus new leaf
+        // Same SIGWINCH tolerance as structural split: grow the remaining pane's
+        // AppKit frame without TIOCSWINSZ until the user types in it.
+        GhosttyBridge.shared.beginLiveResize(pinHeight: false)
+        container.layoutTree()
+        for leaf in tree.allLeaves {
+            StationRegistry.shared.station(forId: leaf.stationId)?
+                .view?.absorbBoundsWithoutPtyResize()
+        }
+        GhosttyBridge.shared.endLiveResize()
+
+        // Focus new leaf — do NOT syncSize(); that clears the freeze and reprints prompts.
         if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
            let focusStation = StationRegistry.shared.station(forId: focusedLeaf.stationId),
            let terminalView = focusStation.view {
-            container.window?.makeFirstResponder(terminalView)
-        }
-
-        // Re-sync surface size after Ghostty processes the pixel resize.
-        if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
-           let focusStation = StationRegistry.shared.station(forId: focusedLeaf.stationId) {
             DispatchQueue.main.async {
-                focusStation.syncSize()
+                container.window?.makeFirstResponder(terminalView)
             }
         }
 

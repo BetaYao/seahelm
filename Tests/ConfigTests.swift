@@ -11,6 +11,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.activeWorkspaceIndex, 0)
         XCTAssertEqual(config.terminalRowCacheSize, 200)
         XCTAssertFalse(config.agentDetect.agents.isEmpty)
+        XCTAssertFalse(config.onboardingCompleted)
     }
 
     // MARK: - JSON Decode
@@ -46,6 +47,8 @@ final class ConfigTests: XCTestCase {
         let json = "{}".data(using: .utf8)!
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertTrue(config.workspacePaths.isEmpty)
+        // Missing onboarding_completed → legacy skip (completed).
+        XCTAssertTrue(config.onboardingCompleted)
     }
 
     // MARK: - JSON Roundtrip
