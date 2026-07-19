@@ -2231,9 +2231,7 @@ final class DashboardOverviewView: NSView {
                 return Self.creationDate(a.worktreePath) < Self.creationDate(b.worktreePath)
             }
             guard !items.isEmpty else { continue }
-            let meta: (glyph: String, color: NSColor, info: NSColor, label: String) =
-                ("▸", Self.inkDim, Self.inkDim, repo)
-            let header = makeGroupHeader(meta: meta, count: items.count, topGap: gi == 0 ? 0 : 13)
+            let header = makeGroupHeader(repo: repo, topGap: gi == 0 ? 0 : 13)
             stack.addArrangedSubview(header)
             pin(header)
             let rowsBox = NSStackView()
@@ -2244,7 +2242,6 @@ final class DashboardOverviewView: NSView {
             for item in items {
                 let status = Self.primaryStatus(item)
                 let row = RowView(sailor: item, status: status,
-                                  infoColor: Self.groupMeta(status).info,
                                   selected: item.id == self.selectedId)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
@@ -2329,24 +2326,15 @@ final class DashboardOverviewView: NSView {
         v.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -15).isActive = true
     }
 
-    private func makeGroupHeader(meta: (glyph: String, color: NSColor, info: NSColor, label: String),
-                                 count: Int, topGap: CGFloat) -> NSView {
-        // glyph(8px, group colour) · label(11px, group colour, +0.5 tracking) · count(11px, ink-faint)
-        let glyph = NSTextField(labelWithString: meta.glyph)
-        glyph.font = AppFont.mono(size: 8)
-        glyph.textColor = meta.color
+    /// Repo name only — worktrees under this header share the project.
+    private func makeGroupHeader(repo: String, topGap: CGFloat) -> NSView {
+        let label = NSTextField(labelWithString: repo)
+        label.font = AppFont.mono(size: 11, weight: .semibold)
+        label.textColor = Self.inkDim
+        label.lineBreakMode = .byTruncatingTail
 
-        let label = NSTextField(labelWithString: meta.label)
-        label.font = AppFont.mono(size: 11)
-        label.textColor = meta.color
-
-        let count = NSTextField(labelWithString: "\(count)")
-        count.font = AppFont.mono(size: 11)
-        count.textColor = Self.inkFaint
-
-        let row = NSStackView(views: [glyph, label, count])
+        let row = NSStackView(views: [label])
         row.orientation = .horizontal
-        row.spacing = 7
         row.alignment = .centerY
         row.edgeInsets = NSEdgeInsets(top: topGap, left: 0, bottom: 7, right: 0)
         return row
@@ -2354,10 +2342,19 @@ final class DashboardOverviewView: NSView {
 
     // MARK: - Fleet row
 
+    /// Two-line navigator item under a repo group:
+    /// ```
+    /// ●  current pane title                         time
+    ///    git diff                                   N panes
+    /// ```
     private final class RowView: NSView {
         var onTap: ((String) -> Void)?
         private let path: String
         private let selected: Bool
+
+        private static let cornerRadius: CGFloat = 8
+        private static let highlightFill = NSColor.white.withAlphaComponent(0.08)
+        private static let hoverFill = NSColor.white.withAlphaComponent(0.05)
 
         private static func label(_ s: String, _ color: NSColor, _ size: CGFloat) -> NSTextField {
             let l = NSTextField(labelWithString: s)
@@ -2386,25 +2383,16 @@ final class DashboardOverviewView: NSView {
             return v
         }
 
-        init(sailor: SailorDisplayInfo, status: SailorStatus, infoColor: NSColor, selected: Bool) {
+        init(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool) {
             self.path = sailor.worktreePath
             self.selected = selected
             super.init(frame: .zero)
-            wantsLayer = true   // Bare-TUI: radius 0, no rounding
-            if selected { layer?.backgroundColor = DashboardOverviewView.panelBg.cgColor }
+            wantsLayer = true
+            layer?.cornerRadius = Self.cornerRadius
+            layer?.masksToBounds = true
+            applyBackground(hovered: false)
 
-            let waiting = (status == .waiting)
-
-            // Left border bar: awaiting=red, selected=accent, else transparent.
-            let bar = NSView()
-            bar.wantsLayer = true
-            bar.layer?.backgroundColor = (waiting ? DashboardOverviewView.red
-                : (selected ? DashboardOverviewView.sea : NSColor.clear)).cgColor
-            bar.translatesAutoresizingMaskIntoConstraints = false
-
-            // Line 1: [repo tag]  ● title                              time
-            // The title is the worktree's session summary (shared resolver, same
-            // source as the cards), falling back to task subject / latest message.
+            // Current pane title: session summary → task subject → message → branch.
             let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
             let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
             let subject = sailor.tasks.first?.subject
@@ -2412,9 +2400,6 @@ final class DashboardOverviewView: NSView {
             let titleText = [cachedTitle, subject, msg].compactMap { $0 }
                 .first(where: { !$0.isEmpty }) ?? branch
 
-            // Per-repo colored tag; the same project always gets the same color.
-            let repoTag = Self.repoTag(sailor.project)
-            // Status dot colored by the row's arbitrated status.
             let dot = Self.label("\u{25CF}", status.color, 8)
             dot.setContentHuggingPriority(.required, for: .horizontal)
             let title = Self.label(titleText, DashboardOverviewView.ink, 12)
@@ -2423,25 +2408,23 @@ final class DashboardOverviewView: NSView {
             let time = Self.label(Self.compactAge(since: lastActive), DashboardOverviewView.inkFaint, 10)
             time.setContentHuggingPriority(.required, for: .horizontal)
 
+            // Line 1: ●  current pane title                         time
             let line1 = NSStackView()
             line1.orientation = .horizontal
             line1.alignment = .centerY
             line1.spacing = 7
             line1.translatesAutoresizingMaskIntoConstraints = false
-            if !sailor.project.isEmpty { line1.addArrangedSubview(repoTag) }
             line1.addArrangedSubview(dot)
             line1.addArrangedSubview(title)
-            if waiting { line1.addArrangedSubview(Self.pill("NEEDS INPUT", color: DashboardOverviewView.red)) }
             line1.addArrangedSubview(Self.spacer())
             line1.addArrangedSubview(time)
 
-            // Line 2: worktree name   git info                       N panes
-            let name = Self.label(branch, DashboardOverviewView.inkDim, 10.5)
-            name.setContentCompressionResistancePriority(.required, for: .horizontal)
+            // Line 2: git diff                                   N panes
             let git = NSTextField(labelWithString: "")
             git.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
             git.translatesAutoresizingMaskIntoConstraints = false
-            git.setContentHuggingPriority(.required, for: .horizontal)
+            git.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            git.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) panes" : "—",
                                    DashboardOverviewView.inkFaint, 10)
             panes.setContentHuggingPriority(.required, for: .horizontal)
@@ -2451,7 +2434,11 @@ final class DashboardOverviewView: NSView {
             line2.alignment = .firstBaseline
             line2.spacing = 9
             line2.translatesAutoresizingMaskIntoConstraints = false
-            line2.addArrangedSubview(name)
+            // Indent under the title (past the status dot).
+            let indent = NSView()
+            indent.translatesAutoresizingMaskIntoConstraints = false
+            indent.widthAnchor.constraint(equalToConstant: 15).isActive = true
+            line2.addArrangedSubview(indent)
             line2.addArrangedSubview(git)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(panes)
@@ -2462,15 +2449,10 @@ final class DashboardOverviewView: NSView {
             col.alignment = .leading
             col.translatesAutoresizingMaskIntoConstraints = false
 
-            addSubview(bar); addSubview(col)
+            addSubview(col)
             NSLayoutConstraint.activate([
-                bar.leadingAnchor.constraint(equalTo: leadingAnchor),
-                bar.topAnchor.constraint(equalTo: topAnchor),
-                bar.bottomAnchor.constraint(equalTo: bottomAnchor),
-                bar.widthAnchor.constraint(equalToConstant: 2),
-
-                col.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
-                col.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -13),
+                col.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                col.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
                 col.topAnchor.constraint(equalTo: topAnchor, constant: 8),
                 col.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
@@ -2479,33 +2461,6 @@ final class DashboardOverviewView: NSView {
             ])
         }
         required init?(coder: NSCoder) { fatalError() }
-
-        /// Per-repo colored tag: a stable brand color (shared with the cards) as a
-        /// subtle fill + border + colored text. Radius 0 to match the bare-TUI look.
-        static func repoTag(_ project: String) -> NSView {
-            let color = MiniCardView.repoColor(for: project)
-            let l = NSTextField(labelWithString: project)
-            l.font = AppFont.mono(size: 10)
-            l.textColor = color
-            l.lineBreakMode = .byTruncatingTail
-            l.translatesAutoresizingMaskIntoConstraints = false
-            let pad = NSView()
-            pad.wantsLayer = true
-            pad.layer?.borderWidth = 1
-            pad.layer?.borderColor = color.withAlphaComponent(0.55).cgColor
-            pad.layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
-            pad.translatesAutoresizingMaskIntoConstraints = false
-            pad.setContentHuggingPriority(.required, for: .horizontal)
-            pad.setContentCompressionResistancePriority(.required, for: .horizontal)
-            pad.addSubview(l)
-            NSLayoutConstraint.activate([
-                l.topAnchor.constraint(equalTo: pad.topAnchor, constant: 1),
-                l.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -1),
-                l.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 5),
-                l.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -5),
-            ])
-            return pad
-        }
 
         /// Compact git summary "+adds −dels  ↑ahead↓behind", colored. Empty when
         /// there are no changes and no divergence (or stats not yet resolved).
@@ -2531,27 +2486,6 @@ final class DashboardOverviewView: NSView {
             return result
         }
 
-        /// Bare-TUI pill: coloured text + 1px border, no fill, radius 0.
-        static func pill(_ text: String, color: NSColor) -> NSView {
-            let l = NSTextField(labelWithString: text)
-            l.font = AppFont.mono(size: 9.5)
-            l.textColor = color
-            l.translatesAutoresizingMaskIntoConstraints = false
-            let pad = NSView()
-            pad.wantsLayer = true
-            pad.layer?.borderWidth = 1
-            pad.layer?.borderColor = color.cgColor
-            pad.translatesAutoresizingMaskIntoConstraints = false
-            pad.addSubview(l)
-            NSLayoutConstraint.activate([
-                l.topAnchor.constraint(equalTo: pad.topAnchor, constant: 1),
-                l.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -1),
-                l.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 5),
-                l.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -5),
-            ])
-            return pad
-        }
-
         override func mouseDown(with event: NSEvent) { onTap?(path) }
 
         private var tracking: NSTrackingArea?
@@ -2562,10 +2496,20 @@ final class DashboardOverviewView: NSView {
             addTrackingArea(t); tracking = t
         }
         override func mouseEntered(with event: NSEvent) {
-            layer?.backgroundColor = DashboardOverviewView.panelBg.cgColor
+            applyBackground(hovered: true)
         }
         override func mouseExited(with event: NSEvent) {
-            layer?.backgroundColor = selected ? DashboardOverviewView.panelBg.cgColor : NSColor.clear.cgColor
+            applyBackground(hovered: false)
+        }
+
+        private func applyBackground(hovered: Bool) {
+            if selected {
+                layer?.backgroundColor = Self.highlightFill.cgColor
+            } else if hovered {
+                layer?.backgroundColor = Self.hoverFill.cgColor
+            } else {
+                layer?.backgroundColor = NSColor.clear.cgColor
+            }
         }
     }
 
