@@ -60,6 +60,10 @@ final class IslandModel {
 
     /// SwiftUI-measured height of the opened surface (for hit testing).
     var measuredOpenedHeight: CGFloat = 0
+    /// Last measured natural height of the opened list area — persisted
+    /// across open cycles so reopening renders at the right size immediately
+    /// instead of resizing mid-animation when the measurement lands.
+    var cachedListHeight: CGFloat = 0
 
     // Wired by MainWindowController.
     var onNavigate: ((_ worktreePath: String, _ paneIndex: Int?) -> Void)?

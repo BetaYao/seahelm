@@ -43,24 +43,3 @@ struct NotchShape: Shape {
         return p
     }
 }
-
-/// Closed pill: flat top (flush with the screen edge / hardware notch),
-/// rounded bottom corners only.
-struct ClosedPillShape: Shape {
-    var bottomRadius: CGFloat = 14
-
-    var animatableData: CGFloat {
-        get { bottomRadius }
-        set { bottomRadius = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        Path(
-            roundedRect: rect,
-            cornerRadii: RectangleCornerRadii(
-                topLeading: 0, bottomLeading: bottomRadius,
-                bottomTrailing: bottomRadius, topTrailing: 0
-            )
-        )
-    }
-}

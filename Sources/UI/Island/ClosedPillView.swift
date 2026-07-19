@@ -6,6 +6,7 @@ import SwiftUI
 /// behind the physical notch on MacBooks.
 struct ClosedPillView: View {
     let model: IslandModel
+    let namespace: Namespace.ID
     /// One shared pulse phase for every waiting tile — a single repeatForever
     /// animation instead of one per tile.
     @State private var pulsing = false
@@ -24,7 +25,6 @@ struct ClosedPillView: View {
         }
         .padding(.horizontal, 10)
         .frame(width: model.closedWidth, height: model.notchHeight)
-        .background(ClosedPillShape(bottomRadius: 14).fill(IslandStyle.background))
         .contentShape(Rectangle())
         // Material-style curve so wing content (badge/tiles) slides in and
         // out smoothly as counts change while closed.
@@ -75,6 +75,7 @@ struct ClosedPillView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(IslandStyle.accent.opacity(0.25)))
+                .matchedGeometryEffect(id: "unread-badge", in: namespace, isSource: !model.isOpened)
                 .transition(.opacity.combined(with: .move(edge: .leading)))
         }
     }

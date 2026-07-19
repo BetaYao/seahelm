@@ -4,6 +4,7 @@ import SwiftUI
 /// then per-worktree agent rows, then recent notifications.
 struct OpenedSurfaceView: View {
     let model: IslandModel
+    let namespace: Namespace.ID
     @State private var hoveredRowID: String?
     @State private var commandText = ""
     @FocusState private var commandFocused: Bool
@@ -14,9 +15,9 @@ struct OpenedSurfaceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Spacer band matching the physical notch so content starts
-            // below the hardware cutout.
-            Color.clear.frame(height: model.notchHeight + 6)
+            // The root's header band already spans the hardware notch; just
+            // leave breathing room below it.
+            Color.clear.frame(height: 6)
 
             VStack(alignment: .leading, spacing: 10) {
                 header
@@ -32,21 +33,13 @@ struct OpenedSurfaceView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
-        .background(
-            NotchShape(topRadius: 10, bottomRadius: 22)
-                .fill(IslandStyle.background)
-                .overlay(
-                    NotchShape(topRadius: 10, bottomRadius: 22)
-                        .stroke(IslandStyle.accent.opacity(0.16), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
-        )
     }
 
     /// Auto-height list area: renders at natural height, and past the cap it
-    /// becomes an internal scroll instead of overflowing the panel.
+    /// becomes an internal scroll instead of overflowing the panel. The
+    /// measured height lives in the model so it survives close/reopen.
     private static let maxListHeight: CGFloat = 380
-    @State private var listHeight: CGFloat = 0
+    private var listHeight: CGFloat { model.cachedListHeight }
 
     private var middleSection: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -92,7 +85,11 @@ struct OpenedSurfaceView: View {
         // Before the first preference lands, let the list size naturally —
         // pinning it to 1pt made the surface open squashed, then jump.
         .frame(height: listHeight > 0 ? min(listHeight, Self.maxListHeight) : nil)
-        .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
+        .onPreferenceChange(ListHeightKey.self) { height in
+            // Ignore the 0 that fires as this view is removed on close —
+            // it would wipe the cache and cause a first-frame jump next open.
+            if height > 0 { model.cachedListHeight = height }
+        }
     }
 
     private var commandBar: some View {
@@ -275,6 +272,7 @@ struct OpenedSurfaceView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(IslandStyle.accent.opacity(0.22)))
+                    .matchedGeometryEffect(id: "unread-badge", in: namespace, isSource: model.isOpened)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
             Spacer()
