@@ -312,11 +312,16 @@ class MainWindowController: NSWindowController {
         dashboardVC?.startNewCommand(prefill: prefill)
     }
 
-    @objc func helmRemoveCommand() { openHelmCockpit(prefill: "/remove ") }
+    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/task ") }
+    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/agents") }
+    @objc func helmRepoCommand() { openHelmCockpit(prefill: "/repo") }
     @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
-    @objc func helmCommitCommand() { openHelmCockpit(prefill: "/commit ") }
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
+    @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
+
+    @objc func splitHorizontal() { splitFocusedPane(axis: .horizontal) }
+    @objc func splitVertical() { splitFocusedPane(axis: .vertical) }
 
     /// Cmd+Esc / Cmd+E: toggle chrome sidebar collapse.
     func navigateBack() {

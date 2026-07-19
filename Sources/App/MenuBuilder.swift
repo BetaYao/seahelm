@@ -24,29 +24,18 @@ enum MenuBuilder {
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
-        // File menu
-        let fileMenuItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "File")
-        let newBranchItem = NSMenuItem(title: "New Branch...", action: #selector(MainWindowController.showNewBranchDialog), keyEquivalent: "n")
-        newBranchItem.keyEquivalentModifierMask = .command
-        newBranchItem.target = target
-        fileMenu.addItem(newBranchItem)
-        let quickSwitchItem = NSMenuItem(title: "Quick Switch...", action: #selector(MainWindowController.showQuickSwitcher), keyEquivalent: "p")
-        quickSwitchItem.keyEquivalentModifierMask = .command
-        quickSwitchItem.target = target
-        fileMenu.addItem(quickSwitchItem)
-        fileMenuItem.submenu = fileMenu
-        mainMenu.addItem(fileMenuItem)
-
         // First Mate menu — opens the Helm cockpit with a slash command prefilled.
-        // Cmd+R is plain; the rest take Shift to avoid Cmd+C (copy) and Cmd+B (sidebar).
+        // Aligned with BridgeCommand verbs. Cmd+R is plain; letter chords take
+        // Shift to avoid Cmd+C (copy), Cmd+B (sidebar), and Cmd+A (select all).
         let firstMateMenuItem = NSMenuItem()
         let firstMateMenu = NSMenu(title: "First Mate")
         let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
-            ("Remove (/remove)", #selector(MainWindowController.helmRemoveCommand), "r", .command),
-            ("Order Worktree (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
-            ("Commit Worktree (/commit)", #selector(MainWindowController.helmCommitCommand), "c", [.command, .shift]),
+            ("Task (/task)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
+            ("Agents (/agents)", #selector(MainWindowController.helmAgentsCommand), "", []),
+            ("Repos (/repo)", #selector(MainWindowController.helmRepoCommand), "", []),
+            ("Order (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
+            ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
             ("Add Repo (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
         ]
         for (title, action, key, mods) in commands {
@@ -77,10 +66,25 @@ enum MenuBuilder {
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
 
-        let dashItem = NSMenuItem(title: "Dashboard", action: #selector(MainWindowController.switchToDashboard), keyEquivalent: "0")
-        dashItem.keyEquivalentModifierMask = .command
-        dashItem.target = target
-        viewMenu.addItem(dashItem)
+        let splitHItem = NSMenuItem(
+            title: "Split Horizontally",
+            action: #selector(MainWindowController.splitHorizontal),
+            keyEquivalent: "d"
+        )
+        splitHItem.keyEquivalentModifierMask = .command
+        splitHItem.target = target
+        viewMenu.addItem(splitHItem)
+
+        let splitVItem = NSMenuItem(
+            title: "Split Vertically",
+            action: #selector(MainWindowController.splitVertical),
+            keyEquivalent: "d"
+        )
+        splitVItem.keyEquivalentModifierMask = [.command, .shift]
+        splitVItem.target = target
+        viewMenu.addItem(splitVItem)
+
+        viewMenu.addItem(NSMenuItem.separator())
 
         let toggleSidebarItem = NSMenuItem(
             title: "Toggle Sidebar",
