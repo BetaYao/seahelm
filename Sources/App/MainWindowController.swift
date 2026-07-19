@@ -51,6 +51,11 @@ class MainWindowController: NSWindowController {
     /// Outer Tab-cycle focus among panes / sidebar / chrome header / helm.
     let regionFocus = RegionFocusController()
     private var windowTrackingArea: NSTrackingArea?
+    /// The system titlebar view the traffic lights originally live in. They are
+    /// reparented into the sidebar header while windowed; fullscreen hands them
+    /// back here so macOS drives the native hide/reveal + exit-fullscreen zoom.
+    private weak var nativeTrafficLightHome: NSView?
+    private var isWindowFullscreen = false
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
         pc.delegate = self
@@ -1159,13 +1164,49 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
+    // Fullscreen must hand the traffic lights back to the system titlebar,
+    // otherwise they stay pinned in the sidebar header and lose the native
+    // auto-hide / top-edge reveal / exit-fullscreen zoom behaviors.
+    // (NSWindowDelegate — this controller is the window's delegate.)
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        isWindowFullscreen = true
+        restoreNativeWindowButtons()
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        isWindowFullscreen = false
+        positionStandardWindowButtons()
+    }
+
+    /// Return the traffic lights to the system titlebar so macOS manages them.
+    private func restoreNativeWindowButtons() {
+        guard let window, let home = nativeTrafficLightHome else { return }
+        let buttons: [NSButton] = [.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }
+        for button in buttons where button.superview !== home {
+            button.removeFromSuperview()
+            home.addSubview(button)
+        }
+        // The titlebar view owns standard-button layout; poke it once.
+        home.needsLayout = true
+    }
+
     private func positionStandardWindowButtons() {
         guard let window, let chrome = windowChrome else { return }
+        // Fullscreen: buttons belong to the system titlebar (native auto-hide
+        // and top-edge reveal) — never steal them while fullscreen.
+        guard !isWindowFullscreen else { return }
         guard let close = window.standardWindowButton(.closeButton),
               let mini = window.standardWindowButton(.miniaturizeButton),
               let zoom = window.standardWindowButton(.zoomButton)
         else {
             return
+        }
+
+        // Remember where the system put them before the first reparent.
+        if nativeTrafficLightHome == nil, let home = close.superview,
+           home.isDescendant(of: chrome.view) == false {
+            nativeTrafficLightHome = home
         }
 
         let host = chrome.trafficLightHostView(collapsed: chromeState.isCollapsed)
