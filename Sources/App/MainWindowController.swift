@@ -1840,19 +1840,25 @@ extension MainWindowController {
         for sailor in ShipLog.shared.allSailors() {
             let lastActivity = statusAggregator.lastActivity(for: sailor.worktreePath) ?? sailor.startedAt
             guard let lastActivity, lastActivity >= activityCutoff else { continue }
+            // Same resolver as the dashboard cards, but via the shared TTL
+            // cache — a direct resolve() reads session JSONL from disk, and
+            // this runs on main for every sailor on every island refresh.
+            // Warm the cache off-main; the next tick picks up the result.
+            WorktreeTitleCache.shared.title(
+                worktreePath: sailor.worktreePath,
+                lastUserPrompt: sailor.lastUserPrompt,
+                branch: sailor.branch
+            ) { _ in }
+            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
             let row = IslandAgentRow(
                 id: sailor.worktreePath,
                 project: sailor.project,
                 branch: sailor.branch,
                 status: sailor.status,
                 message: sailor.lastAssistantMessage.isEmpty ? sailor.lastMessage : sailor.lastAssistantMessage,
-                // Same resolver as the dashboard cards; empty branch fallback —
-                // the island row already renders the branch separately.
-                title: WorktreeTitleResolver.resolve(
-                    worktreePath: sailor.worktreePath,
-                    lastUserPrompt: sailor.lastUserPrompt,
-                    branch: ""
-                )
+                // The island row already renders the branch separately — drop a
+                // title that is just the branch fallback.
+                title: (cachedTitle == sailor.branch ? "" : cachedTitle) ?? sailor.lastUserPrompt
             )
             if let existing = byWorktree[sailor.worktreePath] {
                 if Self.notificationPriorityScoreForIsland(row.status) > Self.notificationPriorityScoreForIsland(existing.status) {

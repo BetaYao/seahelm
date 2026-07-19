@@ -89,7 +89,9 @@ struct OpenedSurfaceView: View {
                 }
             )
         }
-        .frame(height: min(max(listHeight, 1), Self.maxListHeight))
+        // Before the first preference lands, let the list size naturally —
+        // pinning it to 1pt made the surface open squashed, then jump.
+        .frame(height: listHeight > 0 ? min(listHeight, Self.maxListHeight) : nil)
         .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
     }
 

@@ -260,6 +260,8 @@ final class IslandPanelController {
     // MARK: - Mouse handling
 
     private func handleMouseMoved(_ location: NSPoint) {
+        // Hidden panel (fullscreen space): nothing to hover or engage.
+        guard panel?.isVisible == true else { return }
         let inPill = !model.isOpened && (visibleContentRect()?.insetBy(dx: -8, dy: -4).contains(location) ?? false)
         if inPill {
             scheduleHoverOpen()
