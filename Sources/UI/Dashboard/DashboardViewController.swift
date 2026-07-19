@@ -105,8 +105,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
-    /// Fires whenever the lit toolbar tool should change (mode or side switch).
-    var onActiveToolChanged: ((TitleBarView.ActiveTool) -> Void)?
+    /// Fires whenever the lit chrome header tool should change (mode or side switch).
+    /// `nil` means no pane lit (sidebar collapsed).
+    var onActiveToolChanged: ((ChromeLeftPane?) -> Void)?
 
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
@@ -469,20 +470,20 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
     }
 
-    /// Compute + publish the single lit toolbar tool from the current state.
+    /// Compute + publish the single lit chrome header tool from the current state.
     private func notifyActiveTool() {
-        let tool: TitleBarView.ActiveTool
+        let pane: ChromeLeftPane?
         if isLeftColumnCollapsed {
-            tool = .none
+            pane = nil
         } else {
             switch currentSide {
-            case .firstMate: tool = .firstMate
-            case .files:     tool = .files
-            case .changes:   tool = .changes
-            case .none:      tool = .none
+            case .firstMate: pane = .firstMate
+            case .files:     pane = .files
+            case .changes:   pane = .changes
+            case .none:      pane = nil
             }
         }
-        onActiveToolChanged?(tool)
+        onActiveToolChanged?(pane)
     }
 
     /// Dock the overview into the left column (worktree First Mate) so expanding

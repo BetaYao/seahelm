@@ -5,6 +5,13 @@ enum ChromeLeftPane: Equatable {
     case firstMate, files, changes
 }
 
+/// Legacy left-column pane tags used by dashboard keymap shortcuts (files / changes).
+enum LeftPane: Int, CaseIterable {
+    case bridge = 0
+    case file = 1
+    case change = 2
+}
+
 struct ChromeLayoutState: Equatable {
     var width: CGFloat
     private(set) var isCollapsed: Bool

@@ -6,7 +6,6 @@ protocol PanelCoordinatorDelegate: AnyObject {
 
 class PanelCoordinator: NSObject {
     weak var delegate: PanelCoordinatorDelegate?
-    weak var titleBar: TitleBarView?
 }
 
 // MARK: - NotificationHistoryDelegate

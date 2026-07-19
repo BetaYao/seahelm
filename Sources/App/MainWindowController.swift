@@ -37,14 +37,13 @@ enum WindowStyling {
     }
 
     static func trafficLightButtonOriginY(containerHeight: CGFloat, buttonHeight: CGFloat) -> CGFloat {
-        (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
+        (containerHeight / 2) + 1 - (buttonHeight / 2)
     }
 }
 
 class MainWindowController: NSWindowController {
     private static let primaryCapsuleDisplayDuration: TimeInterval = 8.0
 
-    private let titleBar = TitleBarView()
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private let statusBar = StatusBarView()
@@ -53,7 +52,6 @@ class MainWindowController: NSWindowController {
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
         pc.delegate = self
-        pc.titleBar = titleBar
         return pc
     }()
 
@@ -612,9 +610,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onRequestSelectChromePane = { [weak self] pane in
             self?.selectChromePane(pane)
         }
-        // Light exactly one toolbar icon for the active view; dim the rest.
-        dashboard.onActiveToolChanged = { [weak self] tool in
-            self?.titleBar.setActiveTool(tool)
+        // Keep chrome header icon tint in sync when dashboard changes side.
+        dashboard.onActiveToolChanged = { [weak self] pane in
+            guard let self else { return }
+            if let pane {
+                self.chromeState.setActivePane(pane)
+            }
+            self.windowChrome?.applyState(self.chromeState, animated: false)
         }
         dashboard.onRequestNewWorktree = { [weak self] in
             // Opens the Helm cockpit with `/new ` prefilled (the inline creator and
@@ -637,7 +639,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         embedChromeShell(dashboard: dashboard)
         updateTitleBar()
-        titleBar.setChromeMode(overview: false)
 
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
@@ -1113,11 +1114,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func setupNativeTitleBar() {
         guard let window else { return }
 
-        // Spanning NSTitlebarAccessoryViewController / TitleBarView removed —
-        // column headers live in WindowChromeController. Keep transparent
-        // fullSizeContentView titlebar so traffic lights can be reparented.
+        // Spanning NSTitlebarAccessoryViewController removed — column headers
+        // live in WindowChromeController. Keep transparent fullSizeContentView
+        // titlebar so traffic lights can be reparented.
         window.toolbar = nil
-        titleBar.delegate = self
 
         DispatchQueue.main.async { [weak self] in
             self?.positionStandardWindowButtons()
@@ -1163,13 +1163,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         windowTrackingArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        titleBar.setWindowHovered(true)
-    }
+    override func mouseEntered(with event: NSEvent) {}
 
-    override func mouseExited(with event: NSEvent) {
-        titleBar.setWindowHovered(false)
-    }
+    override func mouseExited(with event: NSEvent) {}
 
     /// Embed `WindowChromeController` in `contentContainer` and slot dashboard hosts.
     private func embedChromeShell(dashboard: DashboardViewController) {
@@ -1256,83 +1252,62 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func updateTitleBar() {
-        titleBar.updateChromeState(
-            isGridLayout: false,
-            hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty,
-            canCleanWorktrees: tabCoordinator.allWorktrees.contains { !$0.info.isMainWorktree }
-        )
-        refreshWorktreeTabs()
+        refreshIdleWorktreePaths()
+        updateChromeTitle()
         updatePrimaryCapsuleNotification()
-        refreshFocusedWorktreeCapsule()
     }
 
-    /// Worktrees with no agent interaction for longer than this collapse into
-    /// the title-bar overflow menu instead of occupying a tab slot.
+    /// Worktrees with no agent interaction for longer than this are treated as
+    /// idle for the card-grid expander (overview navigator does not collapse them).
     private static let tabIdleCollapseInterval: TimeInterval = 8 * 3600
 
-    private func refreshWorktreeTabs() {
+    private func refreshIdleWorktreePaths() {
         let selectedPath = tabCoordinator.selectedSailor?.worktreePath
         let now = Date()
-        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, agentGlyph: String?, agentColor: NSColor, statusColor: NSColor, paneCount: Int, isSelected: Bool, collapsed: Bool) in
+        var idle: Set<String> = []
+        for entry in tabCoordinator.allWorktrees {
             let path = entry.info.path
-            let paneCount = terminalCoordinator.stationManager.tree(forPath: path)?.leafCount ?? 1
-            let repo = tabCoordinator.repoName(forWorktree: path)
-            let name = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
-            // Keep more text than the inline tab needs — the overflow menu wraps it to 2 lines.
-            let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 56)
-
-            let agent = ShipLog.shared.sailor(forWorktree: path)
-            let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
-            let agentGlyph = agent?.agentType.tabGlyph
-            let agentColor: NSColor
-            switch agent?.agentType {
-            case .claudeCode: agentColor = NSColor(hex: 0xff8a3d)  // orange
-            case .codex:      agentColor = NSColor(hex: 0x5b93f0)  // cornflower
-            default:          agentColor = Theme.accent
-            }
             let isSelected = path == selectedPath
-
-            // Idle = the most recent pane status/message change (a signal that
-            // only advances on real activity, not background polling) is older
-            // than the collapse interval. The selected worktree stays visible.
-            // The main worktree (base repo / main branch) is never collapsed —
-            // it always stays pinned at the top of the list.
+            let agent = ShipLog.shared.sailor(forWorktree: path)
             let lastActivity = statusAggregator.lastActivity(for: path) ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
-            let collapsed = isIdle && !isSelected && !entry.info.isMainWorktree
-
-            return (path: path, title: title, agentGlyph: agentGlyph, agentColor: agentColor, statusColor: statusColor, paneCount: paneCount, isSelected: isSelected, collapsed: collapsed)
+            if isIdle && !isSelected && !entry.info.isMainWorktree {
+                idle.insert(path)
+            }
         }
-        titleBar.setWorktreeTabs(tabs)
-
         tabCoordinator.dashboardVC?.updateFleetSummary(
             repos: tabCoordinator.workspaceManager.tabs.count,
-            worktrees: tabs.count,
-            hidden: tabs.filter(\.collapsed).count
+            worktrees: tabCoordinator.allWorktrees.count,
+            hidden: idle.count
         )
-        tabCoordinator.dashboardVC?.idleWorktreePaths = Set(tabs.filter(\.collapsed).map(\.path))
+        tabCoordinator.dashboardVC?.idleWorktreePaths = idle
     }
 
-    private func refreshFocusedWorktreeCapsule() {
+    /// Drive the terminal chrome header: `Repo · pane title`.
+    private func updateChromeTitle() {
         guard let agent = tabCoordinator.selectedSailor else {
-            titleBar.updateFocusedWorktree(title: "", path: "")
+            windowChrome?.updateTerminalTitle(repo: "", pane: "")
             return
         }
         let path = agent.worktreePath
         let info = ShipLog.shared.sailor(forWorktree: path)
-        let branch = info?.branch ?? ""
-        // One line: repo · branch · worktree title, with the path appended
-        // (muted) by the title bar itself.
-        let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 } ?? (path as NSString).lastPathComponent
-        let worktreeTitle = WorktreeTitleResolver.resolve(
-            worktreePath: path,
-            lastUserPrompt: info?.lastUserPrompt ?? "",
-            branch: ""
-        )
-        let title = [repo, branch, worktreeTitle]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-        titleBar.updateFocusedWorktree(title: title, path: path)
+        let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 }
+            ?? tabCoordinator.repoName(forWorktree: path)
+
+        let paneTitle: String
+        if let tree = terminalCoordinator.stationManager.tree(forPath: path),
+           let focused = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
+           let focusedSailor = ShipLog.shared.sailors(forWorktree: path)
+            .first(where: { $0.id == focused.stationId }) {
+            paneTitle = Self.agentTitle(for: focusedSailor)
+        } else {
+            paneTitle = WorktreeTitleResolver.resolve(
+                worktreePath: path,
+                lastUserPrompt: info?.lastUserPrompt ?? "",
+                branch: info?.branch ?? ""
+            )
+        }
+        windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
     }
 
 
@@ -1379,10 +1354,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
         terminalCoordinator.resetSplitRatio()
     }
 
-    /// Keyboard cycle through worktree tabs (Ctrl+Tab / Ctrl+Shift+Tab), filling the
-    /// previously mouse-only titlebar gap (docs/keyboard-redesign.md §7).
+    /// Keyboard cycle through worktrees (Ctrl+Tab / Ctrl+Shift+Tab).
     func selectAdjacentWorktree(forward: Bool) {
-        titleBar.selectAdjacentWorktree(forward: forward)
+        let paths = tabCoordinator.allWorktrees.map(\.info.path)
+        let current = tabCoordinator.selectedSailor?.worktreePath
+        guard let path = WorktreePathNavigation.adjacentPath(
+            paths: paths, from: current, forward: forward
+        ) else { return }
+        tabCoordinator.selectTab(forWorktree: path)
     }
 
 }
@@ -1539,42 +1518,10 @@ extension MainWindowController: ChromeHeaderDelegate {
     }
 }
 
-// MARK: - TitleBarDelegate (legacy; accessory removed — forwards to chrome)
+// MARK: - Theme
 
-extension MainWindowController: TitleBarDelegate {
-    func titleBarDidToggleTheme() {
-        toggleThemeAppearance()
-    }
-
-    func titleBarDidRequestCollapseLeftColumn() {
-        toggleChromeCollapsed()
-        titleBar.setLeftColumnCollapsed(chromeState.isCollapsed)
-    }
-
-    func titleBarDidSelectLeftPane(_ pane: LeftPane) {
-        selectChromePane(pane == .change ? .changes : .files)
-    }
-
-    func titleBarDidToggleWorktreeList(from sourceView: NSView) {
-        tabCoordinator.dashboardVC?.openWorktreesTab()
-    }
-
-    func titleBarDidSelectWorktree(_ path: String) {
-        tabCoordinator.selectTab(forWorktree: path)
-        setChromeCollapsed(true)
-    }
-
-    func titleBarDidRequestOverview() {
-        tabCoordinator.switchToTab(0)
-        chromeState.selectPane(.firstMate)
-        applyChromeState(animated: true)
-    }
-
-    func titleBarDidToggleFirstMate() {
-        selectChromePane(.firstMate)
-    }
-
-    private func toggleThemeAppearance() {
+extension MainWindowController {
+    fileprivate func toggleThemeAppearance() {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
@@ -1928,10 +1875,6 @@ extension MainWindowController {
             primaryCapsuleDismissWorkItem = nil
         }
         let unreadCount = NotificationHistory.shared.unreadCount
-        titleBar.updateNotificationSummary(
-            entry: entry,
-            unreadCount: unreadCount
-        )
         statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
     }
 
@@ -1977,10 +1920,6 @@ extension MainWindowController {
             if self.primaryCapsuleNotification?.id == entry.id {
                 self.primaryCapsuleNotification = nil
                 let unreadCount = NotificationHistory.shared.unreadCount
-                self.titleBar.updateNotificationSummary(
-                    entry: nil,
-                    unreadCount: unreadCount
-                )
                 self.statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
             }
         }
