@@ -103,7 +103,10 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         ov.addTableColumn(column)
         ov.outlineTableColumn = column
         ov.headerView = nil
-        ov.rowHeight = 20
+        ov.rowHeight = 24
+        ov.style = .sourceList
+        ov.backgroundColor = .clear
+        ov.selectionHighlightStyle = .regular
         self.outlineView = ov
         super.init()
         ov.dataSource = self
@@ -321,6 +324,7 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             cellView.imageView = imageView
 
             let textField = NSTextField(labelWithString: "")
+            textField.font = AppFont.mono(size: 12)
             textField.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(textField)
             cellView.textField = textField
@@ -341,7 +345,8 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         cellView.imageView?.contentTintColor = tint
         // Dim dotfiles so hidden items read as secondary.
         let isDotfile = node.url.lastPathComponent.hasPrefix(".")
-        cellView.textField?.textColor = isDotfile ? .secondaryLabelColor : .labelColor
+        cellView.textField?.font = AppFont.mono(size: 12)
+        cellView.textField?.textColor = isDotfile ? SemanticColors.muted : SemanticColors.text
         cellView.textField?.stringValue = node.url.lastPathComponent
         return cellView
     }

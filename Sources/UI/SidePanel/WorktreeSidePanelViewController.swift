@@ -66,9 +66,8 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     override func loadView() {
         let root = ThemedBackgroundView()
-        // Match the First Mate side panel (Bare-TUI card background #0e2d37) so the
-        // Files/Changes pane and First Mate read as the same docked side panel.
-        root.backgroundToken = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
+        // Clear — same glass as First Mate / Dashboard overview.
+        root.backgroundToken = .clear
         root.setAccessibilityIdentifier("sidePanel.view")
 
         tabBar.orientation = .horizontal
@@ -98,15 +97,14 @@ final class WorktreeSidePanelViewController: NSViewController {
         }
 
         // The internal tab bar is hidden — pane switching is driven by the
-        // title-bar pane-switch icons now. tabBar is left unused but in place
-        // so the highlight bookkeeping in updateTabBarHighlight() stays valid.
+        // chrome header icons. tabBar stays for updateTabBarHighlight().
         tabBar.isHidden = true
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentView)
 
         NSLayoutConstraint.activate([
-            contentView.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+            contentView.topAnchor.constraint(equalTo: root.topAnchor),
             contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -114,6 +112,82 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         view = root
         rebuildContent()
+    }
+
+    // MARK: - Shared chrome (matches DashboardOverviewView)
+
+    private static let sea = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
+    private static let ink: NSColor = SemanticColors.text
+    private static let inkDim: NSColor = SemanticColors.muted
+    private static let inkFaint: NSColor = SemanticColors.subtle
+    private static let line = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
+            : NSColor(srgbRed: 0x1f/255, green: 0x23/255, blue: 0x2b/255, alpha: 0.10)
+    }
+
+    /// `◍ Title` + optional subtitle + hairline — same rhythm as First Mate.
+    private func makePaneHeader(title: String, subtitle: String = "") -> NSView {
+        let icon = NSTextField(labelWithString: "◍")
+        icon.font = AppFont.mono(size: 13)
+        icon.textColor = Self.sea
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = AppFont.mono(size: 12.5, weight: .bold)
+        titleLabel.textColor = Self.ink
+
+        let subLabel = NSTextField(labelWithString: subtitle)
+        subLabel.font = AppFont.mono(size: 11)
+        subLabel.textColor = Self.inkFaint
+        subLabel.isHidden = subtitle.isEmpty
+
+        let row = NSStackView(views: [icon, titleLabel, subLabel])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.alignment = .firstBaseline
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let hairline = NSView()
+        hairline.wantsLayer = true
+        hairline.layer?.backgroundColor = hairline.resolvedCGColor(Self.line)
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+
+        let wrap = NSView()
+        wrap.translatesAutoresizingMaskIntoConstraints = false
+        wrap.addSubview(row)
+        wrap.addSubview(hairline)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: wrap.topAnchor, constant: 13),
+            row.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 15),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: wrap.trailingAnchor, constant: -15),
+
+            hairline.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 11),
+            hairline.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
+            hairline.heightAnchor.constraint(equalToConstant: 1),
+            hairline.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
+        ])
+        return wrap
+    }
+
+    private func styleImmersiveSearchField(_ field: NSSearchField) {
+        field.focusRingType = .none
+        field.font = AppFont.mono(size: 12)
+        field.textColor = Self.ink
+        field.placeholderAttributedString = NSAttributedString(
+            string: field.placeholderString ?? "Search",
+            attributes: [
+                .foregroundColor: Self.inkDim,
+                .font: AppFont.mono(size: 12),
+            ]
+        )
+        field.wantsLayer = true
+        field.layer?.backgroundColor = NSColor.clear.cgColor
+        if let cell = field.cell as? NSSearchFieldCell {
+            cell.isBordered = false
+            cell.drawsBackground = false
+            cell.focusRingType = .none
+        }
     }
 
     @objc private func tabButtonClicked(_ sender: NSButton) {
@@ -180,13 +254,27 @@ final class WorktreeSidePanelViewController: NSViewController {
             showFirstMateTab()
         case .files:
             guard let path = worktreePath else {
-                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder")
+                let header = makePaneHeader(title: "Files")
+                contentView.addSubview(header)
+                NSLayoutConstraint.activate([
+                    header.topAnchor.constraint(equalTo: contentView.topAnchor),
+                    header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                    header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+                ])
+                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder", below: header)
                 return
             }
             showFilesTab(path)
         case .changes:
             guard let path = worktreePath else {
-                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder")
+                let header = makePaneHeader(title: "Changes")
+                contentView.addSubview(header)
+                NSLayoutConstraint.activate([
+                    header.topAnchor.constraint(equalTo: contentView.topAnchor),
+                    header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                    header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+                ])
+                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder", below: header)
                 return
             }
             showChangesTab(path)
@@ -237,6 +325,8 @@ final class WorktreeSidePanelViewController: NSViewController {
         }
         fileTreeController = controller
 
+        let header = makePaneHeader(title: "Files")
+
         // Search + hidden-files toggle row.
         let searchField = NSSearchField()
         searchField.placeholderString = "Search files"
@@ -246,6 +336,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         searchField.sendsSearchStringImmediately = false
         searchField.sendsWholeSearchString = false
         searchField.setAccessibilityIdentifier("sidePanel.fileSearch")
+        styleImmersiveSearchField(searchField)
         self.fileSearchField = searchField
 
         let hiddenToggle = NSButton()
@@ -254,7 +345,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         hiddenToggle.imagePosition = .imageOnly
         hiddenToggle.image = NSImage(systemSymbolName: showHiddenFiles ? "eye" : "eye.slash",
                                      accessibilityDescription: "Toggle hidden files")
-        hiddenToggle.contentTintColor = Theme.textSecondary
+        hiddenToggle.contentTintColor = Self.inkDim
         hiddenToggle.target = self
         hiddenToggle.action = #selector(toggleHiddenFiles(_:))
         hiddenToggle.translatesAutoresizingMaskIntoConstraints = false
@@ -264,26 +355,35 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         let scrollView = NSScrollView()
         scrollView.documentView = controller.outlineView
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        contentView.addSubview(header)
         contentView.addSubview(searchField)
         contentView.addSubview(hiddenToggle)
         contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
-            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            header.topAnchor.constraint(equalTo: contentView.topAnchor),
+            header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+
+            searchField.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            searchField.heightAnchor.constraint(equalToConstant: 26),
 
             hiddenToggle.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            hiddenToggle.leadingAnchor.constraint(equalTo: searchField.trailingAnchor, constant: 4),
-            hiddenToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            hiddenToggle.leadingAnchor.constraint(equalTo: searchField.trailingAnchor, constant: 6),
+            hiddenToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
             hiddenToggle.widthAnchor.constraint(equalToConstant: 22),
 
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
@@ -321,8 +421,21 @@ final class WorktreeSidePanelViewController: NSViewController {
     private func presentChanges(_ entries: [GitChangedFile]) {
         changedFiles = entries
 
+        contentView.subviews.forEach { $0.removeFromSuperview() }
+
+        let header = makePaneHeader(
+            title: "Changes",
+            subtitle: changedFiles.isEmpty ? "clean" : "\(changedFiles.count) files"
+        )
+        contentView.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: contentView.topAnchor),
+            header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+        ])
+
         if changedFiles.isEmpty {
-            showPlaceholder("No changes", identifier: "sidePanel.changesEmpty")
+            showPlaceholder("No changes", identifier: "sidePanel.changesEmpty", below: header)
             return
         }
 
@@ -332,26 +445,30 @@ final class WorktreeSidePanelViewController: NSViewController {
         let tableView = NSTableView()
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 22
+        tableView.rowHeight = 26
+        tableView.style = .sourceList
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
         tableView.action = #selector(changeRowClicked)
         tableView.setAccessibilityIdentifier("sidePanel.changesTable")
         tableView.backgroundColor = .clear
+        tableView.selectionHighlightStyle = .regular
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
@@ -366,22 +483,31 @@ final class WorktreeSidePanelViewController: NSViewController {
         handleChangeSelection(changedFiles[row].path)
     }
 
-    private func showPlaceholder(_ message: String, identifier: String) {
+    private func showPlaceholder(_ message: String, identifier: String, below header: NSView? = nil) {
         let label = NSTextField(labelWithString: message)
-        label.font = NSFont.systemFont(ofSize: 13)
-        label.textColor = Theme.textSecondary
+        label.font = AppFont.mono(size: 12)
+        label.textColor = Self.inkDim
         label.alignment = .center
         label.maximumNumberOfLines = 0
         label.lineBreakMode = .byWordWrapping
         label.setAccessibilityIdentifier(identifier)
         label.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
-        ])
+        if let header {
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                label.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 40),
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
+            ])
+        }
     }
 }
 
@@ -395,12 +521,23 @@ extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDel
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry = changedFiles[row]
         let badge: String
+        let badgeColor: NSColor
         switch entry.status {
-        case .added:    badge = "A"
-        case .modified: badge = "M"
-        case .deleted:  badge = "D"
-        case .renamed:  badge = "R"
-        case .unknown:  badge = "?"
+        case .added:
+            badge = "A"
+            badgeColor = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
+        case .modified:
+            badge = "M"
+            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
+        case .deleted:
+            badge = "D"
+            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
+        case .renamed:
+            badge = "R"
+            badgeColor = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
+        case .unknown:
+            badge = "?"
+            badgeColor = Self.inkDim
         }
 
         let id = NSUserInterfaceItemIdentifier("ChangeCell")
@@ -417,7 +554,8 @@ extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDel
             badgeLabel.tag = 100
 
             let pathLabel = NSTextField(labelWithString: "")
-            pathLabel.font = NSFont.systemFont(ofSize: 12)
+            pathLabel.font = AppFont.mono(size: 12)
+            pathLabel.textColor = Self.ink
             pathLabel.lineBreakMode = .byTruncatingMiddle
             pathLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.textField = pathLabel
@@ -426,18 +564,23 @@ extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDel
             cellView.addSubview(pathLabel)
 
             NSLayoutConstraint.activate([
-                badgeLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 6),
+                badgeLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 8),
                 badgeLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
                 badgeLabel.widthAnchor.constraint(equalToConstant: 14),
 
-                pathLabel.leadingAnchor.constraint(equalTo: badgeLabel.trailingAnchor, constant: 6),
-                pathLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -6),
+                pathLabel.leadingAnchor.constraint(equalTo: badgeLabel.trailingAnchor, constant: 8),
+                pathLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -8),
                 pathLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
             ])
         }
 
-        (cellView.viewWithTag(100) as? NSTextField)?.stringValue = badge
+        if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
+            badgeLabel.stringValue = badge
+            badgeLabel.textColor = badgeColor
+        }
         cellView.textField?.stringValue = entry.path
+        cellView.textField?.textColor = Self.ink
+        cellView.textField?.font = AppFont.mono(size: 12)
         return cellView
     }
 }

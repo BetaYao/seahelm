@@ -1,15 +1,14 @@
 import AppKit
 
-/// Helm command line: a bordered input box (`/ command · @ repo · # agent` placeholder).
+/// Helm command line (`/ command · @ repo · # agent` placeholder).
 /// Pure input surface — it emits text changes and submit; the cockpit owns the
 /// autocomplete dropdown (so it can float over the Orders/Watch list unclipped).
 /// Keyboard navigation of the menu is deferred to WP-6; completion is mouse-driven.
 final class CommandInputView: NSView {
 
-    // Bare-TUI palette (prototype THEME.A)
-    private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
-    private static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)
-    private static let accent     = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
+    // Appearance-aware text; accents stay fixed.
+    private static let ink: NSColor = SemanticColors.text
+    private static let inkDim: NSColor = SemanticColors.muted
 
     enum MenuKey { case up, down, accept }
 
@@ -28,21 +27,11 @@ final class CommandInputView: NSView {
     var onFocused: (() -> Void)?
 
     private let field = FocusReportingTextField()
-    private let box = NSView()
+    private let box = FrostedPanelView()
     private let spinner = NSProgressIndicator()
     private var savedPlaceholder: String?
     private var placeholder: String = "" {
-        // The Bare-TUI surface is a fixed dark navy, so the placeholder can't use
-        // the system default (secondaryLabelColor goes near-black under .aqua).
-        didSet {
-            field.placeholderAttributedString = NSAttributedString(
-                string: placeholder,
-                attributes: [
-                    .foregroundColor: Self.inkDim,
-                    .font: field.font ?? AppFont.mono(size: 12.5, weight: .regular),
-                ]
-            )
-        }
+        didSet { refreshPlaceholder() }
     }
 
     /// Anchors of the bordered input box, so the host can align the autocomplete
@@ -56,10 +45,14 @@ final class CommandInputView: NSView {
         set { field.stringValue = newValue }
     }
 
-    /// Corner radius of the input box. Defaults to 7 (Cockpit/THEME B). The
-    /// Dashboard overview (Bare TUI / THEME A) sets 0 for square corners.
-    var boxCornerRadius: CGFloat = 7 {
+    /// Corner radius of the input box. Defaults to 8 (system menu glass).
+    var boxCornerRadius: CGFloat = 8 {
         didSet { box.layer?.cornerRadius = boxCornerRadius }
+    }
+
+    /// When false, no hairline border — glass fill only.
+    var showsChrome: Bool = true {
+        didSet { refreshChromeColors() }
     }
 
     override init(frame frameRect: NSRect) {
@@ -68,18 +61,10 @@ final class CommandInputView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    private static let lineStrong = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
-    private static let boxBg      = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.03)
-
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        // Bordered rounded input box (prototype).
-        box.wantsLayer = true
-        box.layer?.cornerRadius = 7
-        box.layer?.borderWidth = 1
-        box.layer?.borderColor = Self.lineStrong.cgColor
-        box.layer?.backgroundColor = Self.boxBg.cgColor
+        box.kind = .input
         box.translatesAutoresizingMaskIntoConstraints = false
 
         field.isBordered = false
@@ -88,6 +73,7 @@ final class CommandInputView: NSView {
         field.font = AppFont.mono(size: 12.5, weight: .regular)
         field.textColor = Self.ink
         placeholder = "Give an order — / command · @ repo · # agent"
+        refreshChromeColors()
         field.delegate = self
         field.target = self
         field.action = #selector(submit)
@@ -121,6 +107,35 @@ final class CommandInputView: NSView {
 
             box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshChromeColors()
+    }
+
+    private func refreshPlaceholder() {
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: Self.inkDim,
+                .font: field.font ?? AppFont.mono(size: 12.5, weight: .regular),
+            ]
+        )
+    }
+
+    private func refreshChromeColors() {
+        box.kind = .input
+        box.layer?.cornerRadius = boxCornerRadius
+        if showsChrome {
+            box.layer?.borderWidth = 0.5
+            box.layer?.borderColor = resolvedCGColor(NSColor.separatorColor.withAlphaComponent(0.55))
+        } else {
+            box.layer?.borderWidth = 0
+            box.layer?.borderColor = nil
+        }
+        field.textColor = Self.ink
+        refreshPlaceholder()
     }
 
     func focusInput() { window?.makeFirstResponder(field) }

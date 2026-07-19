@@ -1,5 +1,11 @@
 # Seahelm Remote Protocol (SRP) v1
 
+> **Status (2026-07-19):** Host topology & transport direction are superseded by
+> [`docs/superpowers/specs/2026-07-19-multiplatform-host-design.md`](superpowers/specs/2026-07-19-multiplatform-host-design.md)
+> (Fat Host `seahelmd`, LAN WSS + optional Cloudflare Tunnel, MQTT/ESP deferred).
+> Keep using this file for JSON-RPC method/event/capability ideas; do not treat
+> §5 MQTT-first matrix or “three transports from day one” as the current plan.
+
 对外远程协议设计。参考 Zed ACP(Agent Client Protocol)的核心思路 —— JSON-RPC 2.0
 语义、双向消息、能力协商、会话化 —— 但 ACP 是 stdio 上的本地协议,SRP 面向跨网远程
 客户端(手机、网页、脚本、ESP32 嵌入式设备)。

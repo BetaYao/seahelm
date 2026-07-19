@@ -2,11 +2,11 @@ import XCTest
 @testable import seahelm
 
 final class TerminalHeaderViewTests: XCTestCase {
-    func testTerminalTitleFormat() {
-        XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "seahelm", pane: "main"), "seahelm · main")
+    func testTerminalTitlePrefersPane() {
+        XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "seahelm", pane: "Fix login"), "Fix login")
     }
 
-    func testTerminalTitleFormatOmitsEmptyPieces() {
+    func testTerminalTitleFallsBackToRepo() {
         XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "seahelm", pane: ""), "seahelm")
         XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "", pane: "main"), "main")
         XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "", pane: ""), "")

@@ -46,7 +46,6 @@ class MainWindowController: NSWindowController {
 
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
-    private let statusBar = StatusBarView()
     let keyboardMode = KeyboardModeController()
     /// Outer Tab-cycle focus among panes / sidebar / chrome header / helm.
     let regionFocus = RegionFocusController()
@@ -212,18 +211,7 @@ class MainWindowController: NSWindowController {
         )
         handleNotificationHistoryDidChange(nil)
         setupIsland()
-        usageSummaryStore.onUpdate = { [weak self] frames in
-            let usageText = frames
-                .filter { $0.kind == .usage }
-                .map { frame in
-                    [frame.leadingText, frame.bodyText, frame.trailingText]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " ")
-                }
-                .filter { !$0.isEmpty }
-                .joined(separator: "  \u{00B7}  ")
-            self?.statusBar.updateUsage(text: usageText)
-        }
+        usageSummaryStore.onUpdate = { _ in }
         usageSummaryStore.start()
     }
 
@@ -570,16 +558,12 @@ class MainWindowController: NSWindowController {
         backgroundEffectView.state = .followsWindowActiveState
         contentView.addSubview(backgroundEffectView, positioned: .below, relativeTo: nil)
 
-        // Content container (fills middle)
+        // Content container fills the window (status bar removed for immersive chrome).
         contentContainer.wantsLayer = true
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(contentContainer)
 
-        // Fixed-height bottom status bar
-        statusBar.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(statusBar)
         keyboardMode.delegate = self
-        statusBar.updateMode(keyboardMode.mode, hint: keyboardMode.hintText)
 
         NSLayoutConstraint.activate([
             backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -594,12 +578,7 @@ class MainWindowController: NSWindowController {
             contentContainer.topAnchor.constraint(equalTo: updateCoordinator.banner.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-
-            statusBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            statusBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            statusBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            statusBar.heightAnchor.constraint(equalToConstant: StatusBarView.height),
+            contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
         // Window hover tracking for arc block styling
@@ -863,24 +842,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// Title for one agent, keyed by that pane's own session.
-    ///
-    /// Deliberately not `WorktreeTitleResolver`: its session lookup is keyed by
-    /// worktree, which is right for the capsule and the mini cards (one title per
-    /// tree) and wrong here (every agent in the tree would read the same). The
-    /// fallbacks below mirror it, minus that first step — an agent whose session
-    /// has no title yet, or that keeps no transcript under ~/.claude, still needs
-    /// words on its row.
+    /// Title for one agent/pane — see `PaneTitleResolver`.
     private static func agentTitle(for sailor: SailorInfo) -> String {
-        if let ref = sailor.station?.agentSessionRef, ref.kind == .id,
-           let title = SessionTitleLookup.title(worktreePath: sailor.worktreePath, sessionId: ref.sessionId)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !title.isEmpty {
-            return title
-        }
-        let prompt = sailor.lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty { return prompt }
-        return sailor.branch
+        PaneTitleResolver.title(for: sailor)
     }
 
     private static func describeChatError(_ err: BridgeCommandError) -> String {
@@ -1354,15 +1318,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         let paneTitle: String
         if let tree = terminalCoordinator.stationManager.tree(forPath: path),
-           let focused = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
+           let stationId = PaneTitleResolver.focusedStationId(in: tree),
            let focusedSailor = ShipLog.shared.sailors(forWorktree: path)
-            .first(where: { $0.id == focused.stationId }) {
-            paneTitle = Self.agentTitle(for: focusedSailor)
+            .first(where: { $0.id == stationId }) {
+            paneTitle = PaneTitleResolver.title(for: focusedSailor)
+        } else if let info {
+            paneTitle = PaneTitleResolver.title(for: info)
         } else {
             paneTitle = WorktreeTitleResolver.resolve(
                 worktreePath: path,
-                lastUserPrompt: info?.lastUserPrompt ?? "",
-                branch: info?.branch ?? ""
+                lastUserPrompt: "",
+                branch: ""
             )
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
@@ -1547,7 +1513,17 @@ extension MainWindowController: NSWindowDelegate {
         positionStandardWindowButtons()
     }
 
+    func windowWillStartLiveResize(_ notification: Notification) {
+        // Clears chrome-drag suppression so the grid can match the new window.
+        GhosttyBridge.shared.beginLiveResize(pinHeight: false)
+    }
+
     func windowDidEndLiveResize(_ notification: Notification) {
+        GhosttyBridge.shared.endLiveResize()
+        // Force a real grid sync now that suppression is cleared.
+        for station in StationRegistry.shared.allStations() {
+            station.syncSize()
+        }
         positionStandardWindowButtons()
     }
 
@@ -1611,6 +1587,9 @@ extension MainWindowController {
         }
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         applyWindowBackgroundStyle()
+        // libghostty only learns about appearance when the host pushes it; the
+        // KVO observer can race window.appearance, so sync explicitly after toggle.
+        GhosttyBridge.shared.refreshColorScheme()
     }
 }
 
@@ -1945,8 +1924,6 @@ extension MainWindowController {
             primaryCapsuleDismissWorkItem?.cancel()
             primaryCapsuleDismissWorkItem = nil
         }
-        let unreadCount = NotificationHistory.shared.unreadCount
-        statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
     }
 
     static func selectPrimaryCapsuleNotification(
@@ -1990,8 +1967,6 @@ extension MainWindowController {
             self.dismissedPrimaryCapsuleNotificationIDs.insert(entry.id)
             if self.primaryCapsuleNotification?.id == entry.id {
                 self.primaryCapsuleNotification = nil
-                let unreadCount = NotificationHistory.shared.unreadCount
-                self.statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
             }
         }
         primaryCapsuleDismissWorkItem = workItem
@@ -2116,10 +2091,10 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
 extension MainWindowController: KeyboardModeDelegate {
     func keyboardModeDidChange(_ mode: KeyboardMode, substate: KeyboardSubstate) {
-        statusBar.updateMode(mode, hint: keyboardMode.hintText)
+        // Status bar removed — mode still drives keyboard routing.
     }
     func keyboardHintDidChange(_ hint: String) {
-        statusBar.updateMode(keyboardMode.mode, hint: hint)
+        // Status bar removed — hints unused in chrome.
     }
 }
 

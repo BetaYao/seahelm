@@ -89,7 +89,9 @@ private func makeSailor(id: String, worktreePath: String) -> SailorDisplayInfo {
         tasks: [],
         activityEvents: [],
         lastActivityAge: "",
-        gitStats: nil
+        gitStats: nil,
+        currentPaneTitle: id,
+        currentPaneRunTime: ""
     )
 }
 

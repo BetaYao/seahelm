@@ -37,6 +37,10 @@ struct SailorDisplayInfo {
     let activityEvents: [ActivityEvent]
     let lastActivityAge: String        // "3m"/"2h" since last real activity ("" if unknown)
     let gitStats: WorktreeGitStats?    // diff size + ahead/behind (nil until first resolve)
+    /// Focused (last-selected) pane title for First Mate fleet rows.
+    let currentPaneTitle: String
+    /// Running / activity age for that focused pane (compact: `12s` / `3m`).
+    let currentPaneRunTime: String
 
     /// Rolled-up status for display/grouping: the highest-priority pane, so a
     /// worktree whose first pane is idle but a later pane is running still reads
@@ -938,6 +942,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // --- Terminal host: focus panel fills the chrome terminal slot ---
         terminalHostView.translatesAutoresizingMaskIntoConstraints = false
         terminalHostView.wantsLayer = true
+        terminalHostView.layer?.backgroundColor = NSColor.clear.cgColor
         terminalHostView.setAccessibilityIdentifier("dashboard.terminalHost")
 
         leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
@@ -1663,11 +1668,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 private class DashboardRootView: NSView {
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() {
-        layer?.backgroundColor = resolvedCGColor(SemanticColors.bg)
-    }
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
+        // Chrome owns the glass sidebar + opaque terminal. Keep the dashboard
+        // root fully clear so vibrancy isn't covered by a solid panel fill.
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 }
 
@@ -1834,22 +1837,36 @@ final class DashboardOverviewView: NSView {
     }
     private var ordersToken: Int?
 
-    // Palette — SeaHelm.dc.html THEME A ("Bare TUI"), matched 1:1.
-    private static let bg         = NSColor(srgbRed: 0x08/255, green: 0x22/255, blue: 0x2a/255, alpha: 1) // --app-bg
-    private static let panelBg    = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045) // --panel-alt
-    private static let line       = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)  // --line
-    private static let lineStrong = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)  // --line-strong
-    private static let cardBg     = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)  // --card-bg
-    private static let cardBorder = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.12)  // --card-border
-    private static let sea        = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)  // --accent
-    private static let onSea      = NSColor(srgbRed: 0x06/255, green: 0x20/255, blue: 0x28/255, alpha: 1)
-    private static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)  // --ink
-    private static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)  // --ink-dim
-    private static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)  // --ink-faint
-    private static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)  // --red
-    private static let orange     = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)  // --orange
-    private static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)  // --emerald
-    private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)  // --cornflower
+    // Palette — accent hues stay fixed; text/line/panel adapt to light/dark so
+    // the navigator stays readable on the glass sidebar in both appearances.
+    private static let panelBg = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
+            : NSColor(srgbRed: 0/255, green: 0/255, blue: 0/255, alpha: 0.04)
+    }
+    private static let line = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
+            : NSColor(srgbRed: 0x1f/255, green: 0x23/255, blue: 0x2b/255, alpha: 0.10)
+    }
+    private static let lineStrong = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
+            : NSColor(srgbRed: 0x1f/255, green: 0x23/255, blue: 0x2b/255, alpha: 0.14)
+    }
+    private static let cardBg = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 0.55)
+            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55)
+    }
+    private static let sea        = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
+    private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
+    fileprivate static let ink: NSColor = SemanticColors.text
+    fileprivate static let inkDim: NSColor = SemanticColors.muted
+    fileprivate static let inkFaint: NSColor = SemanticColors.subtle
+    fileprivate static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
+    private static let orange     = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
+    fileprivate static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
 
     /// Per-status group presentation (glyph, group colour, info-line colour, label).
     private static func groupMeta(_ s: SailorStatus) -> (glyph: String, color: NSColor, info: NSColor, label: String) {
@@ -1863,22 +1880,27 @@ final class DashboardOverviewView: NSView {
         }
     }
 
-    private let headerTitle = NSTextField(labelWithString: "Dashboard")
+    private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
+    private let headerLine = NSView()
     private let scroll = NonFirstResponderScrollView()
     private let stack = FlippedStackView()
 
     // ORDERS zone
     private let ordersZone = NSView()
+    private let ordersTopLine = NSView()
     private let ordersCountLabel = NSTextField(labelWithString: "")
     private let ordersCarousel = NSStackView()
     private var ordersZoneHeight: NSLayoutConstraint?
+
+    // Composer chrome (layer fills need appearance refresh)
+    private let composerBar = NSView()
 
     // Composer — the real First Mate command input (identical styling), plus the
     // same `/ @ #` autocomplete menu the cockpit uses.
     let commandInput = CommandInputView()
     var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
-    private let menuContainer = NSView()
+    private let menuContainer = FrostedPanelView()
     private var menuRows: [MenuRowButton] = []
     private var menuItems: [(name: String, desc: String)] = []
     private var menuSel = 0
@@ -1899,11 +1921,11 @@ final class DashboardOverviewView: NSView {
         // Clear so WindowChromeController's sidebar vibrancy shows through.
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        // --- Header: ◍ Dashboard   N worktrees · M running  (border-bottom) ---
+        // --- Header: ◍ First mate   N worktrees · M running  (border-bottom) ---
         let headerIcon = NSTextField(labelWithString: "◍")
         headerIcon.font = AppFont.mono(size: 13)
         headerIcon.textColor = Self.sea
-        headerTitle.stringValue = "Dashboard"
+        headerTitle.stringValue = "First mate"
         headerTitle.font = AppFont.mono(size: 12.5, weight: .bold)
         headerTitle.textColor = Self.ink
         headerSub.font = AppFont.mono(size: 11)
@@ -1914,9 +1936,7 @@ final class DashboardOverviewView: NSView {
         headerRow.alignment = .firstBaseline
         headerRow.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerRow)
-        let headerLine = NSView()
         headerLine.wantsLayer = true
-        headerLine.layer?.backgroundColor = Self.line.cgColor
         headerLine.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerLine)
 
@@ -1971,14 +1991,11 @@ final class DashboardOverviewView: NSView {
 
     private func setupOrdersZone() {
         ordersZone.wantsLayer = true
-        ordersZone.layer?.backgroundColor = Self.panelBg.cgColor
         ordersZone.translatesAutoresizingMaskIntoConstraints = false
         addSubview(ordersZone)
 
-        let topLine = NSView()
-        topLine.wantsLayer = true
-        topLine.layer?.backgroundColor = Self.line.cgColor
-        topLine.translatesAutoresizingMaskIntoConstraints = false
+        ordersTopLine.wantsLayer = true
+        ordersTopLine.translatesAutoresizingMaskIntoConstraints = false
 
         let lbl = NSTextField(labelWithString: "ORDERS")
         lbl.font = AppFont.mono(size: 11, weight: .bold)
@@ -2005,15 +2022,15 @@ final class DashboardOverviewView: NSView {
         cscroll.borderType = .noBorder
         cscroll.translatesAutoresizingMaskIntoConstraints = false
         cscroll.documentView = ordersCarousel
-        ordersZone.addSubview(topLine)
+        ordersZone.addSubview(ordersTopLine)
         ordersZone.addSubview(head)
         ordersZone.addSubview(cscroll)
 
         NSLayoutConstraint.activate([
-            topLine.topAnchor.constraint(equalTo: ordersZone.topAnchor),
-            topLine.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor),
-            topLine.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor),
-            topLine.heightAnchor.constraint(equalToConstant: 1),
+            ordersTopLine.topAnchor.constraint(equalTo: ordersZone.topAnchor),
+            ordersTopLine.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor),
+            ordersTopLine.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor),
+            ordersTopLine.heightAnchor.constraint(equalToConstant: 1),
 
             head.topAnchor.constraint(equalTo: ordersZone.topAnchor, constant: 12),
             head.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor, constant: 22),
@@ -2028,21 +2045,14 @@ final class DashboardOverviewView: NSView {
     }
 
     private func setupComposer() -> NSView {
-        let bar = NSView()
+        let bar = composerBar
         bar.wantsLayer = true
-        // Translucent so sidebar glass remains visible behind the composer.
-        bar.layer?.backgroundColor = Self.panelBg.cgColor
         bar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
 
-        let topLine = NSView()
-        topLine.wantsLayer = true
-        topLine.layer?.backgroundColor = Self.line.cgColor
-        topLine.translatesAutoresizingMaskIntoConstraints = false
-
-        // Reuse the real First Mate command input verbatim, including its
-        // `/ @ #` autocomplete menu behaviour. Square corners for Bare-TUI (THEME A).
-        commandInput.boxCornerRadius = 0
+        // Immersive composer: filled bar, no border / top rule.
+        commandInput.showsChrome = false
+        commandInput.boxCornerRadius = 8
         commandInput.translatesAutoresizingMaskIntoConstraints = false
         commandInput.onSubmit = { [weak self] text in
             let t = text.trimmingCharacters(in: .whitespaces)
@@ -2070,26 +2080,14 @@ final class DashboardOverviewView: NSView {
         }
         commandInput.onFocused = { [weak self] in self?.onCommandFocused?() }
 
-        // The autocomplete dropdown, opening upward above the input box (the
-        // composer sits at the window bottom). Added to `self` so it can overlay
-        // the fleet area above the composer.
-        menuContainer.wantsLayer = true
-        menuContainer.layer?.backgroundColor = Bare.cardBg.cgColor
-        menuContainer.layer?.borderWidth = 1
-        menuContainer.layer?.borderColor = Bare.line.cgColor
-        menuContainer.layer?.cornerRadius = 7
+        // System menu glass — same vibrancy as sidebar / InlineWorktreeCreate.
+        menuContainer.kind = .menu
         menuContainer.translatesAutoresizingMaskIntoConstraints = false
         menuContainer.isHidden = true
 
-        bar.addSubview(topLine)
         bar.addSubview(commandInput)
         addSubview(menuContainer)
         NSLayoutConstraint.activate([
-            topLine.topAnchor.constraint(equalTo: bar.topAnchor),
-            topLine.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            topLine.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-            topLine.heightAnchor.constraint(equalToConstant: 1),
-
             commandInput.topAnchor.constraint(equalTo: bar.topAnchor),
             commandInput.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
             commandInput.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
@@ -2099,7 +2097,26 @@ final class DashboardOverviewView: NSView {
             menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
             menuContainer.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -6),
         ])
+        refreshChromeColors()
         return bar
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshChromeColors()
+    }
+
+    /// Layer `CGColor`s don't auto-track dynamic `NSColor`s — re-resolve on appearance flips.
+    private func refreshChromeColors() {
+        layer?.backgroundColor = NSColor.clear.cgColor
+        headerLine.layer?.backgroundColor = resolvedCGColor(Self.line)
+        ordersZone.layer?.backgroundColor = resolvedCGColor(Self.panelBg)
+        ordersTopLine.layer?.backgroundColor = resolvedCGColor(Self.line)
+        composerBar.layer?.backgroundColor = NSColor.clear.cgColor
+        menuContainer.applyAppearance()
+        headerTitle.textColor = Self.ink
+        headerSub.textColor = Self.inkFaint
+        ordersCountLabel.textColor = Self.inkFaint
     }
 
     // MARK: - `/ @ #` autocomplete (overview composer)
@@ -2132,9 +2149,9 @@ final class DashboardOverviewView: NSView {
         menuContainer.subviews.forEach { $0.removeFromSuperview() }
         let triggerColor: NSColor
         switch trigger {
-        case "@": triggerColor = Bare.cornflower
-        case "#": triggerColor = Bare.orange
-        default:  triggerColor = Bare.accent
+        case "@": triggerColor = Self.cornflower
+        case "#": triggerColor = Self.orange
+        default:  triggerColor = Self.sea
         }
 
         let stack = NSStackView()
@@ -2358,7 +2375,7 @@ final class DashboardOverviewView: NSView {
     /// Two-line navigator item under a repo group:
     /// ```
     /// ●  current pane title                         time
-    ///    git diff                                   N panes
+    ///    branch  git info                           N panes
     /// ```
     private final class RowView: NSView {
         var onTap: ((String) -> Void)?
@@ -2366,27 +2383,24 @@ final class DashboardOverviewView: NSView {
         private let selected: Bool
 
         private static let cornerRadius: CGFloat = 8
-        private static let highlightFill = NSColor.white.withAlphaComponent(0.08)
-        private static let hoverFill = NSColor.white.withAlphaComponent(0.05)
+        private static let highlightFill = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.10)
+                : NSColor.black.withAlphaComponent(0.08)
+        }
+        private static let hoverFill = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.05)
+                : NSColor.black.withAlphaComponent(0.04)
+        }
 
-        private static func label(_ s: String, _ color: NSColor, _ size: CGFloat) -> NSTextField {
+        private static func label(_ s: String, _ color: NSColor, _ size: CGFloat,
+                                  weight: NSFont.Weight = .regular) -> NSTextField {
             let l = NSTextField(labelWithString: s)
-            l.font = AppFont.mono(size: size)
+            l.font = AppFont.mono(size: size, weight: weight)
             l.textColor = color
             l.lineBreakMode = .byTruncatingTail
             return l
-        }
-        /// Time since a date as a compact largest-unit age: 8s / 5m / 8h / 3d.
-        /// Nil (no known activity) renders blank.
-        private static func compactAge(since date: Date?) -> String {
-            guard let date else { return "" }
-            let secs = Int(max(0, Date().timeIntervalSince(date)))
-            if secs < 60 { return "\(secs)s" }
-            let m = secs / 60
-            if m < 60 { return "\(m)m" }
-            let h = m / 60
-            if h < 24 { return "\(h)h" }
-            return "\(h / 24)d"
         }
         private static func spacer() -> NSView {
             let v = NSView()
@@ -2408,20 +2422,13 @@ final class DashboardOverviewView: NSView {
             setAccessibilityLabel(sailor.name)
             applyBackground(hovered: false)
 
-            // Current pane title: session summary → task subject → message → branch.
             let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
-            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
-            let subject = sailor.tasks.first?.subject
-            let msg = sailor.mostRecentMessage == "No active task." ? nil : sailor.mostRecentMessage
-            let titleText = [cachedTitle, subject, msg].compactMap { $0 }
-                .first(where: { !$0.isEmpty }) ?? branch
 
             let dot = Self.label("\u{25CF}", status.color, 8)
             dot.setContentHuggingPriority(.required, for: .horizontal)
-            let title = Self.label(titleText, DashboardOverviewView.ink, 12)
+            let title = Self.label(sailor.currentPaneTitle, DashboardOverviewView.ink, 12)
             title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            let lastActive = sailor.activityEvents.map(\.timestamp).max()
-            let time = Self.label(Self.compactAge(since: lastActive), DashboardOverviewView.inkFaint, 10)
+            let time = Self.label(sailor.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
             time.setContentHuggingPriority(.required, for: .horizontal)
 
             // Line 1: ●  current pane title                         time
@@ -2435,12 +2442,17 @@ final class DashboardOverviewView: NSView {
             line1.addArrangedSubview(Self.spacer())
             line1.addArrangedSubview(time)
 
-            // Line 2: git diff                                   N panes
+            // Line 2: branch  git info                              N panes
+            let branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
+            branchLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
             let git = NSTextField(labelWithString: "")
             git.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
             git.translatesAutoresizingMaskIntoConstraints = false
             git.setContentHuggingPriority(.defaultLow, for: .horizontal)
             git.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
             let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) panes" : "—",
                                    DashboardOverviewView.inkFaint, 10)
             panes.setContentHuggingPriority(.required, for: .horizontal)
@@ -2448,13 +2460,14 @@ final class DashboardOverviewView: NSView {
             let line2 = NSStackView()
             line2.orientation = .horizontal
             line2.alignment = .firstBaseline
-            line2.spacing = 9
+            line2.spacing = 8
             line2.translatesAutoresizingMaskIntoConstraints = false
             // Indent under the title (past the status dot).
             let indent = NSView()
             indent.translatesAutoresizingMaskIntoConstraints = false
             indent.widthAnchor.constraint(equalToConstant: 15).isActive = true
             line2.addArrangedSubview(indent)
+            line2.addArrangedSubview(branchLabel)
             line2.addArrangedSubview(git)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(panes)
@@ -2520,12 +2533,17 @@ final class DashboardOverviewView: NSView {
 
         private func applyBackground(hovered: Bool) {
             if selected {
-                layer?.backgroundColor = Self.highlightFill.cgColor
+                layer?.backgroundColor = resolvedCGColor(Self.highlightFill)
             } else if hovered {
-                layer?.backgroundColor = Self.hoverFill.cgColor
+                layer?.backgroundColor = resolvedCGColor(Self.hoverFill)
             } else {
                 layer?.backgroundColor = NSColor.clear.cgColor
             }
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyBackground(hovered: false)
         }
     }
 

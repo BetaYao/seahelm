@@ -85,25 +85,13 @@ class TerminalCoordinator {
         let leafId = UUID().uuidString
         tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
 
-        // Create the terminal
-        _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
-
-        // Register view and re-layout
-        container.surfaceViews[station.id] = station.view
-        container.layoutTree()
-
-        // Focus the new pane. Runs deferred so it fires after _createWithCommand's own
-        // deferred async (which skips makeFirstResponder when a GhosttyNSView already has focus).
-        // This ensures resignFirstResponder fires on the old pane, clearing its visual focus state.
-        let capturedLeafId = leafId
-        DispatchQueue.main.async { [weak container] in
-            guard let container,
-                  let tree = container.tree,
-                  let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
-                  let newStation = StationRegistry.shared.station(forId: newLeaf.stationId),
-                  let termView = newStation.view else { return }
-            container.window?.makeFirstResponder(termView)
-        }
+        performStructuralSplitLayout(
+            container: container,
+            tree: tree,
+            newStation: station,
+            newLeafId: leafId,
+            focusNew: true
+        )
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
@@ -145,34 +133,70 @@ class TerminalCoordinator {
         // the 0.5 default. layoutTree below reads it.
         if let ratio { tree.updateRatio(splitId: split.splitId, newRatio: ratio) }
 
-        _ = station.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
-        container.surfaceViews[station.id] = station.view
-        container.layoutTree()
-
-        if focus {
-            let capturedLeafId = leafId
-            DispatchQueue.main.async { [weak container] in
-                guard let container, let tree = container.tree,
-                      let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
-                      let newStation = StationRegistry.shared.station(forId: newLeaf.stationId),
-                      let termView = newStation.view else { return }
-                container.window?.makeFirstResponder(termView)
-            }
-        } else {
-            // Keep focus where it was; do not steal the caller's cursor.
-            tree.focusedId = previousFocus
-            DispatchQueue.main.async { [weak container] in
-                guard let container, let tree = container.tree,
-                      let prevLeaf = tree.allLeaves.first(where: { $0.id == previousFocus }),
-                      let prevStation = StationRegistry.shared.station(forId: prevLeaf.stationId),
-                      let view = prevStation.view else { return }
-                container.window?.makeFirstResponder(view)
-            }
-        }
+        if !focus { tree.focusedId = previousFocus }
+        performStructuralSplitLayout(
+            container: container,
+            tree: tree,
+            newStation: station,
+            newLeafId: leafId,
+            focusNew: focus,
+            restoreFocusLeafId: focus ? nil : previousFocus
+        )
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
         return station.id
+    }
+
+    /// Create the new leaf and relayout without mid-create SIGWINCH storms on
+    /// the existing pane (Auto Layout fill + partial `layoutTree` used to shrink
+    /// the old surface before final frames existed — starship reprints a blank
+    /// prompt line per SIGWINCH).
+    private func performStructuralSplitLayout(
+        container: SplitContainerView,
+        tree: SplitTree,
+        newStation: Station,
+        newLeafId: String,
+        focusNew: Bool,
+        restoreFocusLeafId: String? = nil
+    ) {
+        let frames = SplitContainerView.computeFrames(node: tree.root, in: container.bounds)
+        let newFrame = frames[newLeafId] ?? container.bounds
+
+        // Existing panes must NOT receive TIOCSWINSZ during the split.
+        // Even a single SIGWINCH makes starship/zsh reprint a blank prompt line.
+        // Absorb the AppKit frame now; flush the real grid when that pane is
+        // focused/typed into again (see GhosttyNSView.pendingPtyGridSync).
+        GhosttyBridge.shared.beginLiveResize(pinHeight: false)
+        container.suppressStructuralLayout = true
+        _ = newStation.create(
+            in: container,
+            workingDirectory: tree.worktreePath,
+            sessionName: newStation.sessionName,
+            initialFrame: newFrame
+        )
+        container.surfaceViews[newStation.id] = newStation.view
+        container.suppressStructuralLayout = false
+        container.layoutTree()
+
+        let newId = newStation.id
+        for leaf in tree.allLeaves where leaf.stationId != newId {
+            StationRegistry.shared.station(forId: leaf.stationId)?
+                .view?.absorbBoundsWithoutPtyResize()
+        }
+        GhosttyBridge.shared.endLiveResize()
+
+        let focusLeafId = focusNew ? newLeafId : (restoreFocusLeafId ?? tree.focusedId)
+        DispatchQueue.main.async { [weak container] in
+            guard let container,
+                  let tree = container.tree,
+                  let leaf = tree.allLeaves.first(where: { $0.id == focusLeafId }),
+                  let station = StationRegistry.shared.station(forId: leaf.stationId),
+                  let termView = station.view else { return }
+            // Focusing the *new* pane must not flush a pending sync on the old
+            // one — only becomeFirstResponder on the absorbed view does that.
+            container.window?.makeFirstResponder(termView)
+        }
     }
 
     /// tmux-style zoom of a pane in the active container. `mode`: on|off|toggle.

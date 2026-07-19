@@ -23,10 +23,14 @@ class Station {
     private let oscLock = NSLock()
     private var _oscTitle = ""
     private var _oscProgress = ""
+    /// Live shell cwd from OSC 7 / `GHOSTTY_ACTION_PWD` (empty until reported).
+    private var _pwd = ""
     var oscTitle: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscTitle }
     var oscProgress: String { oscLock.lock(); defer { oscLock.unlock() }; return _oscProgress }
+    var pwd: String { oscLock.lock(); defer { oscLock.unlock() }; return _pwd }
     func setOscTitle(_ t: String) { oscLock.lock(); _oscTitle = t; oscLock.unlock() }
     func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
+    func setPwd(_ p: String) { oscLock.lock(); _pwd = p; oscLock.unlock() }
 
     /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
@@ -44,6 +48,14 @@ class Station {
     private var recoveryTimer: DispatchWorkItem?
     private static let recoveryDelay: TimeInterval = 3.0
 
+    /// Owned C strings passed into `ghostty_surface_config_s`. libghostty's
+    /// embedded path copies `working_directory` into its arena but assigns
+    /// `command` as a borrowed slice — if we only use `String.withCString`,
+    /// the pointer dies when the closure returns and the PTY starts a plain
+    /// login shell instead of `zmx attach` (sessions look "brand new" every launch).
+    private var ownedCommand: UnsafeMutablePointer<CChar>?
+    private var ownedWorkingDirectory: UnsafeMutablePointer<CChar>?
+
     /// Serializes Ghostty C API access across threads.
     /// Background polling (readViewportText) and main-thread input (key/mouse)
     /// must not call into the same ghostty_surface_t concurrently.
@@ -51,7 +63,16 @@ class Station {
 
     /// Create the terminal surface and add it to the given container view.
     /// If sessionName is provided, the surface runs inside a persistent backend session.
-    func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil, completion: (() -> Void)? = nil) -> Bool {
+    /// - Parameter initialFrame: When set (split create), embed with frame layout at
+    ///   this rect and size the PTY to it immediately — avoids Auto Layout fill of the
+    ///   full container (which used to SIGWINCH the sibling pane mid-create).
+    func create(
+        in container: NSView,
+        workingDirectory: String? = nil,
+        sessionName: String? = nil,
+        initialFrame: CGRect? = nil,
+        completion: (() -> Void)? = nil
+    ) -> Bool {
         guard let app = GhosttyBridge.shared.app else {
             NSLog("GhosttyBridge not initialized")
             return false
@@ -70,32 +91,69 @@ class Station {
                         ZmxSessionRecovery.seedSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
                         DispatchQueue.main.async {
                             guard let self else { return }
-                            self.attachZmx(app: app, container: container, workingDirectory: workingDirectory, sessionName: sessionName)
+                            self.attachZmx(
+                                app: app,
+                                container: container,
+                                workingDirectory: workingDirectory,
+                                sessionName: sessionName,
+                                initialFrame: initialFrame
+                            )
                             completion?()
                         }
                     }
                     return true  // Surface creation is deferred
                 }
-                attachZmx(app: app, container: container, workingDirectory: workingDirectory, sessionName: sessionName)
+                attachZmx(
+                    app: app,
+                    container: container,
+                    workingDirectory: workingDirectory,
+                    sessionName: sessionName,
+                    initialFrame: initialFrame
+                )
                 return surface != nil
             }
         }
 
-        _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: nil)
+        _createWithCommand(
+            app: app,
+            container: container,
+            workingDirectory: workingDirectory,
+            command: nil,
+            initialFrame: initialFrame
+        )
         return surface != nil
     }
 
     /// Attach to a zmx session and schedule the post-attach health check.
-    private func attachZmx(app: ghostty_app_t, container: NSView, workingDirectory: String?, sessionName: String) {
+    private func attachZmx(
+        app: ghostty_app_t,
+        container: NSView,
+        workingDirectory: String?,
+        sessionName: String,
+        initialFrame: CGRect? = nil
+    ) {
         let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
-        _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+        _createWithCommand(
+            app: app,
+            container: container,
+            workingDirectory: workingDirectory,
+            command: zmxCommand,
+            initialFrame: initialFrame
+        )
         if surface != nil {
             scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
         }
     }
 
-    private func _createWithCommand(app: ghostty_app_t, container: NSView, workingDirectory: String?, command: String?) {
-        let termView = GhosttyNSView(frame: container.bounds)
+    private func _createWithCommand(
+        app: ghostty_app_t,
+        container: NSView,
+        workingDirectory: String?,
+        command: String?,
+        initialFrame: CGRect? = nil
+    ) {
+        let frame = initialFrame ?? container.bounds
+        let termView = GhosttyNSView(frame: frame)
         termView.wantsLayer = true
 
         var config = ghostty_surface_config_new()
@@ -103,28 +161,44 @@ class Station {
         config.platform.macos.nsview = Unmanaged.passUnretained(termView).toOpaque()
         config.scale_factor = Double(container.window?.backingScaleFactor ?? 2.0)
 
-        // Use a flat closure that receives C pointers directly.
-        // Pointers are only valid within the withCString scope,
-        // so _createSurface must be called inside the innermost closure.
-        let create = { [self] (wdPtr: UnsafePointer<CChar>?, cmdPtr: UnsafePointer<CChar>?) in
-            if let wdPtr { config.working_directory = wdPtr }
-            if let cmdPtr { config.command = cmdPtr }
-            self._createSurface(app: app, config: &config, view: termView, container: container)
+        // strdup + retain until destroy — see `ownedCommand` docs.
+        freeOwnedSurfaceStrings()
+        if let workingDirectory {
+            ownedWorkingDirectory = strdup(workingDirectory)
+            config.working_directory = UnsafePointer(ownedWorkingDirectory)
+        }
+        if let command {
+            ownedCommand = strdup(command)
+            config.command = UnsafePointer(ownedCommand)
         }
 
-        switch (workingDirectory, command) {
-        case let (wd?, cmd?):
-            wd.withCString { wdPtr in cmd.withCString { cmdPtr in create(wdPtr, cmdPtr) } }
-        case let (wd?, nil):
-            wd.withCString { wdPtr in create(wdPtr, nil) }
-        case let (nil, cmd?):
-            cmd.withCString { cmdPtr in create(nil, cmdPtr) }
-        case (nil, nil):
-            create(nil, nil)
+        _createSurface(
+            app: app,
+            config: &config,
+            view: termView,
+            container: container,
+            initialFrame: initialFrame
+        )
+    }
+
+    private func freeOwnedSurfaceStrings() {
+        if let ownedCommand {
+            free(ownedCommand)
+            self.ownedCommand = nil
+        }
+        if let ownedWorkingDirectory {
+            free(ownedWorkingDirectory)
+            self.ownedWorkingDirectory = nil
         }
     }
 
-    private func _createSurface(app: ghostty_app_t, config: inout ghostty_surface_config_s, view: GhosttyNSView, container: NSView) {
+    private func _createSurface(
+        app: ghostty_app_t,
+        config: inout ghostty_surface_config_s,
+        view: GhosttyNSView,
+        container: NSView,
+        initialFrame: CGRect? = nil
+    ) {
         guard let s = ghostty_surface_new(app, &config) else {
             NSLog("Failed to create Ghostty surface")
             return
@@ -135,20 +209,30 @@ class Station {
         view.surface = s
         view.station = self
 
-        view.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
+        if let initialFrame {
+            // Split create: frame-based at the final leaf rect. Auto Layout fill
+            // of the whole container would trigger a partial layoutTree and
+            // SIGWINCH the sibling before this leaf is registered.
+            view.translatesAutoresizingMaskIntoConstraints = true
+            view.frame = initialFrame
+            container.addSubview(view)
+        } else {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+        }
 
         // Set initial size — Ghostty expects pixel (framebuffer) dimensions, not points
-        let size = container.bounds.size
+        let size = (initialFrame ?? container.bounds).size
         let scale = container.window?.backingScaleFactor ?? 2.0
         ghostty_surface_set_content_scale(s, Double(scale), Double(scale))
         ghostty_surface_set_size(s, UInt32(size.width * scale), UInt32(size.height * scale))
+        view.markSurfaceSizeSynced(size)
         ghostty_surface_set_focus(s, false)  // Start unfocused; focus set via makeFirstResponder
         ghostty_surface_set_color_scheme(s, GhosttyBridge.shared.currentColorScheme)
     }
@@ -393,6 +477,7 @@ class Station {
         }
         surface = nil
         ghosttyLock.unlock()
+        freeOwnedSurfaceStrings()
         view = nil
         containerView = nil
     }

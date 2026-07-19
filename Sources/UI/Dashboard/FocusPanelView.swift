@@ -102,7 +102,9 @@ final class FocusPanelView: NSView {
     }
 
     private func applyColors() {
-        layer?.borderColor = resolvedCGColor(SemanticColors.lineAlpha70)
-        layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
+        // Clear so chrome glass + Ghostty fill read as one surface (no tile seam
+        // under the terminal header).
+        layer?.borderColor = nil
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 }

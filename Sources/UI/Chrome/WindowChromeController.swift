@@ -17,11 +17,13 @@ final class WindowChromeController: NSViewController {
         activePane: .firstMate
     )
 
-    /// Vibrancy glass column (header + navigator). Terminal column stays opaque.
+    /// Vibrancy glass for the sidebar only — terminal column is solid Ghostty bg
+    /// so the title strip immerses into the surface.
     private let sidebarColumn = NSVisualEffectView()
     private let sidebarHeader = SidebarHeaderView()
     private let sidebarContentHost = NSView()
 
+    /// Overlay hit-target; does not take layout space between the columns.
     private let divider = ChromeDividerView()
 
     private let terminalColumn = NSView()
@@ -29,23 +31,46 @@ final class WindowChromeController: NSViewController {
     private let terminalContentHost = NSView()
 
     private var sidebarWidthConstraint: NSLayoutConstraint!
-    private var dividerWidthConstraint: NSLayoutConstraint!
+    private var colorSchemeObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
-        view.wantsLayer = true
+        let root = ChromeRootView()
+        root.wantsLayer = true
+        root.onAppearanceChange = { [weak self] in
+            self?.refreshChromeAppearance()
+        }
+        view = root
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         setupHierarchy()
         setupConstraints()
+        divider.onDragBegan = { [weak self] in
+            self?.handleDividerDragBegan()
+        }
         divider.onDrag = { [weak self] deltaX in
             self?.handleDividerDrag(deltaX: deltaX)
         }
+        divider.onDragEnded = { [weak self] in
+            self?.handleDividerDragEnded()
+        }
+        colorSchemeObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyColorSchemeDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshTerminalImmersion()
+        }
         applyState(state, animated: false)
+    }
+
+    deinit {
+        if let colorSchemeObserver {
+            NotificationCenter.default.removeObserver(colorSchemeObserver)
+        }
     }
 
     // MARK: - Public API
@@ -67,7 +92,8 @@ final class WindowChromeController: NSViewController {
     var layoutState: ChromeLayoutState { state }
 
     func updateTerminalTitle(repo: String, pane: String) {
-        terminalHeader.setTitle(repo: repo, pane: pane)
+        // Immersive chrome: show the current pane title only.
+        terminalHeader.setPaneTitle(pane.isEmpty ? repo : pane)
     }
 
     func trafficLightHostView(collapsed: Bool) -> NSView {
@@ -101,7 +127,7 @@ final class WindowChromeController: NSViewController {
     // MARK: - Setup
 
     private func setupHierarchy() {
-        configureSidebarGlass(sidebarColumn)
+        configureColumnGlass(sidebarColumn)
         sidebarColumn.translatesAutoresizingMaskIntoConstraints = false
         sidebarColumn.setAccessibilityIdentifier("chrome.sidebarColumn")
 
@@ -110,21 +136,24 @@ final class WindowChromeController: NSViewController {
         sidebarContentHost.layer?.backgroundColor = NSColor.clear.cgColor
         sidebarContentHost.setAccessibilityIdentifier("chrome.sidebarContent")
 
-        terminalColumn.translatesAutoresizingMaskIntoConstraints = false
         terminalColumn.wantsLayer = true
-        // Opaque terminal column — vibrancy stays on the sidebar only.
-        terminalColumn.layer?.backgroundColor = SemanticColors.panel2.cgColor
+        terminalColumn.translatesAutoresizingMaskIntoConstraints = false
         terminalColumn.setAccessibilityIdentifier("chrome.terminalColumn")
 
         terminalContentHost.translatesAutoresizingMaskIntoConstraints = false
+        terminalContentHost.wantsLayer = true
+        terminalContentHost.layer?.backgroundColor = NSColor.clear.cgColor
         terminalContentHost.setAccessibilityIdentifier("chrome.terminalContent")
+
+        refreshTerminalImmersion()
 
         sidebarHeader.delegate = headerDelegate
         terminalHeader.delegate = headerDelegate
 
+        // Divider last so its hit strip sits above both columns without a layout gap.
         view.addSubview(sidebarColumn)
-        view.addSubview(divider)
         view.addSubview(terminalColumn)
+        view.addSubview(divider)
 
         sidebarColumn.addSubview(sidebarHeader)
         sidebarColumn.addSubview(sidebarContentHost)
@@ -136,11 +165,6 @@ final class WindowChromeController: NSViewController {
     private func setupConstraints() {
         sidebarWidthConstraint = sidebarColumn.widthAnchor.constraint(
             equalToConstant: ChromeLayoutMetrics.defaultSidebarWidth)
-        // ChromeDividerView also pins its own width; we own an explicit constraint so
-        // collapse can zero the hit strip without leaving a layout gap.
-        dividerWidthConstraint = divider.widthAnchor.constraint(
-            equalToConstant: ChromeLayoutMetrics.dividerHitWidth)
-        dividerWidthConstraint.priority = .required
 
         NSLayoutConstraint.activate([
             sidebarColumn.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -157,12 +181,8 @@ final class WindowChromeController: NSViewController {
             sidebarContentHost.topAnchor.constraint(equalTo: sidebarHeader.bottomAnchor),
             sidebarContentHost.bottomAnchor.constraint(equalTo: sidebarColumn.bottomAnchor),
 
-            divider.leadingAnchor.constraint(equalTo: sidebarColumn.trailingAnchor),
-            divider.topAnchor.constraint(equalTo: view.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            dividerWidthConstraint,
-
-            terminalColumn.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            // Columns meet flush — no reserved gutter for the divider.
+            terminalColumn.leadingAnchor.constraint(equalTo: sidebarColumn.trailingAnchor),
             terminalColumn.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalColumn.topAnchor.constraint(equalTo: view.topAnchor),
             terminalColumn.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -175,6 +195,12 @@ final class WindowChromeController: NSViewController {
             terminalContentHost.trailingAnchor.constraint(equalTo: terminalColumn.trailingAnchor),
             terminalContentHost.topAnchor.constraint(equalTo: terminalHeader.bottomAnchor),
             terminalContentHost.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
+
+            // 1px line centered on the seam; wider hit target overlays both sides.
+            divider.centerXAnchor.constraint(equalTo: sidebarColumn.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: view.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: ChromeLayoutMetrics.dividerHitWidth),
         ])
     }
 
@@ -193,7 +219,6 @@ final class WindowChromeController: NSViewController {
         let targetSidebarWidth = collapsed
             ? 0
             : ChromeLayoutMetrics.clampWidth(state.width, windowWidth: windowWidthForClamp())
-        let targetDividerWidth = collapsed ? 0 : ChromeLayoutMetrics.dividerHitWidth
 
         if !collapsed {
             sidebarColumn.isHidden = false
@@ -205,7 +230,6 @@ final class WindowChromeController: NSViewController {
 
         if duration == 0 {
             sidebarWidthConstraint.constant = targetSidebarWidth
-            dividerWidthConstraint.constant = targetDividerWidth
             if collapsed {
                 sidebarColumn.isHidden = true
                 divider.isHidden = true
@@ -218,13 +242,17 @@ final class WindowChromeController: NSViewController {
             context.duration = duration
             context.allowsImplicitAnimation = true
             self.sidebarWidthConstraint.animator().constant = targetSidebarWidth
-            self.dividerWidthConstraint.animator().constant = targetDividerWidth
         }, completionHandler: {
             if collapsed {
                 self.sidebarColumn.isHidden = true
                 self.divider.isHidden = true
             }
         })
+    }
+
+    private func handleDividerDragBegan() {
+        // Pin height: sidebar drag is horizontal-only; avoid row jitter → SIGWINCH.
+        GhosttyBridge.shared.beginLiveResize(pinHeight: true)
     }
 
     private func handleDividerDrag(deltaX: CGFloat) {
@@ -236,6 +264,14 @@ final class WindowChromeController: NSViewController {
         guard next != state.width else { return }
         state.width = next
         sidebarWidthConstraint.constant = next
+        // Let AppKit layout on the next pass — forcing layout every delta was
+        // amplifying sub-pixel height jitter into extra PTY resizes.
+    }
+
+    private func handleDividerDragEnded() {
+        view.layoutSubtreeIfNeeded()
+        // endLiveResize(pinHeight) skips PTY set_size — see GhosttyNSView.
+        GhosttyBridge.shared.endLiveResize()
         onStateChange?(state)
     }
 
@@ -256,18 +292,24 @@ final class WindowChromeController: NSViewController {
         ])
     }
 
-    /// Sidebar material: macOS 26+ prefers the newest sidebar/glass semantic material
-    /// when the SDK exposes one; otherwise `.sidebar` + `.behindWindow` (works on 14+).
-    private func configureSidebarGlass(_ effect: NSVisualEffectView) {
+    /// Column vibrancy — same materials as `WindowStyling.glassBackgroundConfig`.
+    private func configureColumnGlass(_ effect: NSVisualEffectView) {
         effect.blendingMode = .behindWindow
         effect.state = .followsWindowActiveState
-        if #available(macOS 26.0, *) {
-            // Tahoe+: `.sidebar` is the semantic Liquid Glass sidebar material in
-            // current SDKs. Prefer it over window-background materials.
-            effect.material = .sidebar
-        } else {
-            effect.material = .sidebar
-        }
+        let isDark = effect.effectiveAppearance.isDark
+        effect.material = isDark ? .hudWindow : .underWindowBackground
+    }
+
+    private func refreshChromeAppearance() {
+        configureColumnGlass(sidebarColumn)
+        refreshTerminalImmersion()
+    }
+
+    /// Solid Catppuccin bg on the terminal column + immersive title (no glass strip).
+    private func refreshTerminalImmersion() {
+        let bg = GhosttyBridge.shared.terminalChromeBackground
+        terminalColumn.layer?.backgroundColor = bg.cgColor
+        terminalHeader.refreshImmersion()
     }
 
     private func applyRegionHighlight(to view: NSView, focused: Bool) {
@@ -288,5 +330,15 @@ final class WindowChromeController: NSViewController {
             if let found = firstIconButton(in: sub) { return found }
         }
         return nil
+    }
+}
+
+/// Forwards appearance flips so layer fills / vibrancy materials stay in sync.
+private final class ChromeRootView: NSView {
+    var onAppearanceChange: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
     }
 }

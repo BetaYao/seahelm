@@ -38,11 +38,25 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug \
   -skipPackagePluginValidation \
   build
 
-APP="$BUILD_DIR/Build/Products/Debug/seahelm.app"
+# PRODUCT_NAME is Seahelm; on case-insensitive APFS seahelm.app resolves to the same bundle.
+APP="$BUILD_DIR/Build/Products/Debug/Seahelm.app"
+if [[ ! -d "$APP" ]]; then
+  APP="$BUILD_DIR/Build/Products/Debug/seahelm.app"
+fi
 
 echo "==> Killing existing Seahelm..."
-killall seahelm 2>/dev/null || true
+# PRODUCT_NAME is Seahelm; kill both casings. Also reap orphaned `zmx attach`
+# clients left behind when the app is SIGKILL'd — they hold sessions with
+# clients=0 and confuse the next attach.
+killall Seahelm seahelm 2>/dev/null || true
+pkill -f "${APP}/Contents/Resources/bin/zmx attach" 2>/dev/null || true
 sleep 1
 
 echo "==> Launching Seahelm (Ctrl+C to quit)..."
-"$APP/Contents/MacOS/seahelm"
+# Executable follows PRODUCT_NAME (Seahelm); keep the historical `seahelm`
+# path working on case-insensitive APFS via the same bundle.
+if [[ -x "$APP/Contents/MacOS/Seahelm" ]]; then
+  "$APP/Contents/MacOS/Seahelm"
+else
+  "$APP/Contents/MacOS/seahelm"
+fi

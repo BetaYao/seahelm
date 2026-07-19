@@ -4,31 +4,34 @@ import AppKit
 /// `/ @ #` autocomplete row. Internal so the Dashboard overview's composer can
 /// render the command menu.
 final class MenuRowButton: NSView {
-    private static let ink      = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
-    private static let inkFaint = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
-    private static let hoverBg  = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 0.10)
-
-    private static let selBg    = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 0.16)
-
-    var onPick: (() -> Void)?
     private var trackingArea: NSTrackingArea?
     private var selected = false
+    private var hovered = false
     private let accentBar = NSView()
+    private let nameLabel: NSTextField
+    private let descLabel: NSTextField
+    private let symLabel: NSTextField
+    private let triggerColor: NSColor
+
+    var onPick: (() -> Void)?
 
     func setSelected(_ on: Bool) {
         selected = on
-        layer?.backgroundColor = (on ? Self.selBg : NSColor.clear).cgColor
+        refreshBackground()
         accentBar.isHidden = !on
     }
 
     init(name: String, desc: String, triggerSymbol: String, triggerColor: NSColor) {
+        self.triggerColor = triggerColor
+        self.symLabel = NSTextField(labelWithString: triggerSymbol)
+        self.nameLabel = NSTextField(labelWithString: name)
+        self.descLabel = NSTextField(labelWithString: desc)
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         accentBar.wantsLayer = true
-        accentBar.layer?.backgroundColor = triggerColor.cgColor
         accentBar.isHidden = true
         accentBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(accentBar)
@@ -39,37 +42,59 @@ final class MenuRowButton: NSView {
             accentBar.widthAnchor.constraint(equalToConstant: 2),
         ])
 
-        let sym = NSTextField(labelWithString: triggerSymbol)
-        sym.font = AppFont.mono(size: 12, weight: .bold)
-        sym.textColor = triggerColor
-        sym.translatesAutoresizingMaskIntoConstraints = false
+        symLabel.font = AppFont.mono(size: 12, weight: .bold)
+        symLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let nameLabel = NSTextField(labelWithString: name)
         nameLabel.font = AppFont.mono(size: 12, weight: .regular)
-        nameLabel.textColor = Self.ink
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let descLabel = NSTextField(labelWithString: desc)
         descLabel.font = AppFont.mono(size: 11, weight: .regular)
-        descLabel.textColor = Self.inkFaint
         descLabel.alignment = .right
         descLabel.lineBreakMode = .byTruncatingTail
         descLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         descLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(sym); addSubview(nameLabel); addSubview(descLabel)
+        addSubview(symLabel)
+        addSubview(nameLabel)
+        addSubview(descLabel)
         NSLayoutConstraint.activate([
-            sym.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            sym.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nameLabel.leadingAnchor.constraint(equalTo: sym.trailingAnchor, constant: 9),
+            symLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            symLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            nameLabel.leadingAnchor.constraint(equalTo: symLabel.trailingAnchor, constant: 9),
             nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             descLabel.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 10),
             descLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             descLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        refreshColors()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshColors()
+    }
+
+    private func refreshColors() {
+        accentBar.layer?.backgroundColor = resolvedCGColor(triggerColor)
+        symLabel.textColor = triggerColor
+        nameLabel.textColor = SemanticColors.text
+        descLabel.textColor = SemanticColors.muted
+        refreshBackground()
+    }
+
+    private func refreshBackground() {
+        let fill: NSColor
+        if selected {
+            fill = NSColor.controlAccentColor.withAlphaComponent(0.18)
+        } else if hovered {
+            fill = NSColor.controlAccentColor.withAlphaComponent(0.10)
+        } else {
+            fill = .clear
+        }
+        layer?.backgroundColor = resolvedCGColor(fill)
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -78,9 +103,13 @@ final class MenuRowButton: NSView {
                                owner: self, userInfo: nil)
         addTrackingArea(t); trackingArea = t
     }
-    override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = Self.hoverBg.cgColor }
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        refreshBackground()
+    }
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = (selected ? Self.selBg : NSColor.clear).cgColor
+        hovered = false
+        refreshBackground()
     }
     // mouseDown (not click recognizer) so the field editor's resignFirstResponder
     // doesn't swallow the first interaction with the menu.

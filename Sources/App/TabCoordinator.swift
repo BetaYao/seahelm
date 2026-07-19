@@ -345,6 +345,19 @@ class TabCoordinator {
                                             lastUserPrompt: mostRecentUserPrompt,
                                             branch: worktreeName) { _ in }
 
+            // Current pane = last-focused leaf in the split tree, else first pane.
+            let focusedStationId = PaneTitleResolver.focusedStationId(in: tree) ?? agent.id
+            let focusedSailor = (agentsByWorktree[agent.worktreePath] ?? [])
+                .first(where: { $0.id == focusedStationId }) ?? agent
+            let currentPaneTitle = PaneTitleResolver.title(for: focusedSailor)
+            let currentPaneRunTime: String = {
+                if focusedSailor.status == .running, focusedSailor.roundDuration > 0 {
+                    return SailorDisplayHelpers.compactDuration(
+                        SailorDisplayHelpers.formatDuration(focusedSailor.roundDuration))
+                }
+                return lastActivityAge
+            }()
+
             result.append(SailorDisplayInfo(
                 id: agent.id,
                 name: worktreeName,
@@ -364,7 +377,9 @@ class TabCoordinator {
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents,
                 lastActivityAge: lastActivityAge,
-                gitStats: gitStats
+                gitStats: gitStats,
+                currentPaneTitle: currentPaneTitle,
+                currentPaneRunTime: currentPaneRunTime
             ))
         }
 

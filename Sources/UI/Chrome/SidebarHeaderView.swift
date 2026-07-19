@@ -37,6 +37,7 @@ final class SidebarHeaderView: NSView {
 
     private func setup() {
         wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
         translatesAutoresizingMaskIntoConstraints = false
         // Identifier for UITests; children (icon buttons) remain the interactive a11y elements.
         setAccessibilityIdentifier("chrome.sidebarHeader")

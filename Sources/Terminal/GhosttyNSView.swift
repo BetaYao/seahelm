@@ -38,6 +38,38 @@ class GhosttyNSView: NSView, NSTextInputClient {
         lastSyncedSize = .zero
     }
 
+    /// Record that the PTY was already sized to `size` (e.g. Station.create's
+    /// initial `ghostty_surface_set_size`) so the next `setFrame` of the same
+    /// size does not emit a redundant SIGWINCH.
+    func markSurfaceSizeSynced(_ size: NSSize) {
+        lastSyncedSize = size
+    }
+
+    /// Adopt current AppKit bounds without `ghostty_surface_set_size`.
+    /// Structural splits use this on the *existing* pane so starship/zsh do
+    /// not reprint a blank prompt line. The PTY grid is corrected on the next
+    /// focus/key via `flushPendingPtyGridSyncIfNeeded()`.
+    func absorbBoundsWithoutPtyResize() {
+        surfaceSizeDeferred = false
+        surfaceSyncScheduled = false
+        lastSyncedSize = bounds.size
+        pendingPtyGridSync = true
+        if let surface {
+            ghostty_surface_refresh(surface)
+        }
+        needsDisplay = true
+    }
+
+    /// Apply a deferred PTY `set_size` from `absorbBoundsWithoutPtyResize()`.
+    @discardableResult
+    func flushPendingPtyGridSyncIfNeeded() -> Bool {
+        guard pendingPtyGridSync else { return false }
+        pendingPtyGridSync = false
+        lastSyncedSize = .zero
+        syncSurfaceSize()
+        return true
+    }
+
     /// Test accessor for lastSyncedSize
     var lastSyncedSizeForTesting: NSSize { lastSyncedSize }
 
@@ -70,6 +102,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     private var lastSurfaceSyncTime: CFTimeInterval = 0
     private var surfaceSyncScheduled = false
+    private var surfaceSizeDeferred = false
+    /// After a structural split we adopt the new AppKit frame without
+    /// `set_size` (avoids SIGWINCH → starship blank line). Flush the real
+    /// PTY grid the next time this pane is focused or typed into.
+    private var pendingPtyGridSync = false
     /// Divider drags and animated layouts call setFrameSize once per mouse/frame
     /// event; resizing the Ghostty grid at that rate is the dominant drag cost.
     /// Coalesce to ~30Hz — the deferred pass re-reads bounds, so the final size
@@ -80,6 +117,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         guard size != lastSyncedSize else { return }
+
+        // During chrome/window live-resize, grow/shrink the view but hold the
+        // PTY grid until the gesture ends (one SIGWINCH). Rapid set_size floods
+        // starship/zsh and leaves blank prompt gaps in the scrollback.
+        if GhosttyBridge.shared.isLiveResizing {
+            surfaceSizeDeferred = true
+            needsDisplay = true
+            return
+        }
 
         let now = CACurrentMediaTime()
         let elapsed = now - lastSurfaceSyncTime
@@ -97,10 +143,45 @@ class GhosttyNSView: NSView, NSTextInputClient {
             }
             return
         }
-        lastSurfaceSyncTime = now
-        lastSyncedSize = size
+        applySurfaceSize(size)
+    }
 
-        guard let surface else { return }
+    /// Flush a size sync deferred during `GhosttyBridge.beginLiveResize()`.
+    /// - Parameter pinHeight: Chrome sidebar drag (horizontal). We deliberately
+    ///   do **not** call `ghostty_surface_set_size` — any PTY resize sends
+    ///   SIGWINCH and starship/zsh reprint a blank line above the prompt.
+    ///   The view frame already follows Auto Layout; the grid catches up on the
+    ///   next real window resize instead.
+    func flushDeferredSurfaceSize(pinHeight: Bool = false) {
+        guard surfaceSizeDeferred || bounds.size != lastSyncedSize else { return }
+        surfaceSizeDeferred = false
+        surfaceSyncScheduled = false
+
+        if pinHeight {
+            // Absorb the new AppKit size so a follow-up layout doesn't immediately
+            // re-enter applySurfaceSize / SIGWINCH. Surface pixels stay put.
+            lastSyncedSize = bounds.size
+            if let surface {
+                ghostty_surface_refresh(surface)
+            }
+            needsDisplay = true
+            return
+        }
+
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        applySurfaceSize(size)
+    }
+
+    private func applySurfaceSize(_ size: NSSize) {
+        lastSurfaceSyncTime = CACurrentMediaTime()
+        surfaceSizeDeferred = false
+        pendingPtyGridSync = false
+
+        guard let surface else {
+            lastSyncedSize = size
+            return
+        }
 
         // Update content scale in case we moved to a different window/screen
         if let window {
@@ -108,8 +189,48 @@ class GhosttyNSView: NSView, NSTextInputClient {
             ghostty_surface_set_content_scale(surface, scale, scale)
         }
 
-        let scale = window?.backingScaleFactor ?? 2.0
-        ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
+        let scale = CGFloat(window?.backingScaleFactor ?? 2.0)
+        let pixelW = UInt32((size.width * scale).rounded(.towardZero))
+        let pixelH = UInt32((size.height * scale).rounded(.towardZero))
+        guard pixelW > 0, pixelH > 0 else { return }
+
+        let current = ghostty_surface_size(surface)
+        if current.width_px == pixelW, current.height_px == pixelH {
+            lastSyncedSize = size
+            return
+        }
+
+        // Sidebar drag: never SIGWINCH. View size may diverge from the PTY grid
+        // until the next window resize clears this suppression.
+        if GhosttyBridge.shared.suppressSurfaceGridResize {
+            lastSyncedSize = size
+            ghostty_surface_refresh(surface)
+            needsDisplay = true
+            return
+        }
+
+        // Ghostty's TIOCSWINSZ path fires SIGWINCH even when only pixel size
+        // changes. Skip when the character grid is unchanged so starship/zsh
+        // don't reprint a blank prompt line on every sub-cell drag.
+        if current.cell_width_px > 0, current.cell_height_px > 0,
+           current.columns > 0, current.rows > 0 {
+            let colSpan = UInt32(current.columns) * current.cell_width_px
+            let rowSpan = UInt32(current.rows) * current.cell_height_px
+            let padX = current.width_px > colSpan ? current.width_px - colSpan : 0
+            let padY = current.height_px > rowSpan ? current.height_px - rowSpan : 0
+            let usableW = pixelW > padX ? pixelW - padX : pixelW
+            let usableH = pixelH > padY ? pixelH - padY : pixelH
+            let newCols = usableW / current.cell_width_px
+            let newRows = usableH / current.cell_height_px
+            if newCols == UInt32(current.columns), newRows == UInt32(current.rows) {
+                lastSyncedSize = size
+                needsDisplay = true
+                return
+            }
+        }
+
+        lastSyncedSize = size
+        ghostty_surface_set_size(surface, pixelW, pixelH)
         ghostty_surface_refresh(surface)
         needsDisplay = true
     }
@@ -119,6 +240,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if let surface {
             ghostty_surface_set_focus(surface, true)
         }
+        // Correct PTY grid after a split that absorbed size without SIGWINCH.
+        // Doing it on focus (not during the split) keeps the blank starship
+        // line off the pane the user was looking at when they hit Cmd+D.
+        flushPendingPtyGridSyncIfNeeded()
         onFocusAcquired?()
         return super.becomeFirstResponder()
     }
@@ -150,6 +275,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     override func keyDown(with event: NSEvent) {
         guard event.type == .keyDown else { return }
         guard let surface else { return }
+        flushPendingPtyGridSyncIfNeeded()
 
         let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
         keyTextAccumulator = []

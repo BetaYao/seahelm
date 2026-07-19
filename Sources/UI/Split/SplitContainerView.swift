@@ -25,6 +25,11 @@ class SplitContainerView: NSView, DividerDelegate {
     var zoomedLeafId: String?
     weak var delegate: SplitContainerDelegate?
 
+    /// While true, Auto Layout from a mid-create `addSubview` must not run
+    /// `layoutTree` — that would shrink the existing pane (SIGWINCH / starship
+    /// blank line) before the new leaf is registered and final frames exist.
+    var suppressStructuralLayout = false
+
     private var dividers: [String: DividerView] = [:]
     private var leafFrames: [String: CGRect] = [:]
     private var dimOverlays: [String: DimOverlayView] = [:]
@@ -41,6 +46,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
+        guard !suppressStructuralLayout else { return }
         // Live-resize fires this continuously; the full layoutTree (constraint
         // teardown, re-embedding, delegate rewiring, forced size sync) is only
         // needed on structural changes. If every visible leaf is already embedded
@@ -111,7 +117,10 @@ class SplitContainerView: NSView, DividerDelegate {
                 }
             }
 
-            // Notify Ghostty of the new size
+            // Wire recovery + content scale. Do NOT call `syncSize()` here —
+            // `setFrame` already synced the surface, and `syncSize()` resets
+            // `lastSyncedSize` which can force a second `set_size` / SIGWINCH
+            // (starship reprints a blank prompt line on the existing pane).
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
                 // Wire recovery re-embed to this container: layoutTree runs on every
                 // embed/relayout, so the station's delegate always points at whichever
@@ -119,7 +128,6 @@ class SplitContainerView: NSView, DividerDelegate {
                 // and a recovered (recreated) surface was orphaned — a dead pane.
                 station.delegate = self
                 station.syncContentScale()
-                station.syncSize()
             }
         }
         if zoomLeaf != nil {

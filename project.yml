@@ -50,6 +50,10 @@ targets:
       - path: Resources/Manifests
         type: folder
         buildPhase: resources
+      # Ghostty themes/terminfo — required for light/dark `theme = light:…,dark:…` switching.
+      - path: Resources/ghostty
+        type: folder
+        buildPhase: resources
       - path: ghostty.h
         type: file
         buildPhase: none

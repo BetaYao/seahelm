@@ -17,6 +17,7 @@ final class TerminalHeaderView: NSView {
     private var isCollapsed = false
     private var collapsedConstraints: [NSLayoutConstraint] = []
     private var expandedConstraints: [NSLayoutConstraint] = []
+    private var colorSchemeObserver: NSObjectProtocol?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -28,24 +29,29 @@ final class TerminalHeaderView: NSView {
         setup()
     }
 
+    deinit {
+        if let colorSchemeObserver {
+            NotificationCenter.default.removeObserver(colorSchemeObserver)
+        }
+    }
+
     // MARK: - Title formatting
 
-    /// `"repo · pane"`, omitting empty pieces so a lone side never leaves a dangling separator.
+    /// Chrome title is the current pane title only (repo lives in the fleet row).
     static func formatTitle(repo: String, pane: String) -> String {
-        let r = repo.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = pane.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch (r.isEmpty, p.isEmpty) {
-        case (true, true): return ""
-        case (false, true): return r
-        case (true, false): return p
-        case (false, false): return "\(r) · \(p)"
-        }
+        if !p.isEmpty { return p }
+        return repo.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Public API
 
     func setTitle(repo: String, pane: String) {
         titleLabel.stringValue = Self.formatTitle(repo: repo, pane: pane)
+    }
+
+    func setPaneTitle(_ pane: String) {
+        titleLabel.stringValue = pane.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func setCollapsed(_ collapsed: Bool) {
@@ -69,6 +75,7 @@ final class TerminalHeaderView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         // Identifier for UITests; children (icon buttons / title) remain interactive a11y elements.
         setAccessibilityIdentifier("chrome.terminalHeader")
+        refreshImmersion()
 
         trafficLightSlot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(trafficLightSlot)
@@ -84,7 +91,6 @@ final class TerminalHeaderView: NSView {
         addSubview(collapsedLeadingStack)
 
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        titleLabel.textColor = SemanticColors.text
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
         titleLabel.cell?.usesSingleLineMode = true
@@ -94,6 +100,14 @@ final class TerminalHeaderView: NSView {
 
         configureExpandButton()
         addSubview(expandButton)
+
+        colorSchemeObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyColorSchemeDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshImmersion()
+        }
 
         expandedConstraints = [
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
@@ -172,5 +186,18 @@ final class TerminalHeaderView: NSView {
 
     @objc private func expandClicked() {
         delegate?.chromeDidToggleSidebar()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshImmersion()
+    }
+
+    /// Match Ghostty surface colors so the title strip disappears into the terminal.
+    func refreshImmersion() {
+        let bridge = GhosttyBridge.shared
+        layer?.backgroundColor = bridge.terminalChromeBackground.cgColor
+        titleLabel.textColor = bridge.terminalChromeForeground
+        expandButton.contentTintColor = bridge.terminalChromeForeground.withAlphaComponent(0.55)
     }
 }

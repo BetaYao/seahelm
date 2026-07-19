@@ -6,13 +6,63 @@ class GhosttyBridge {
     static let shared = GhosttyBridge()
 
     private(set) var app: ghostty_app_t?
+    /// Owned config kept alive for soft `reload_config` (light/dark theme swap).
+    private var config: ghostty_config_t?
     private var isInitialized = false
     private var appearanceObservation: NSKeyValueObservation?
 
+    /// Nested live-resize sessions (chrome divider / window resize). While > 0,
+    /// GhosttyNSView defers `ghostty_surface_set_size` so the PTY isn't flooded
+    /// with SIGWINCH (which makes shells like starship reprint blank prompts).
+    private var liveResizeDepth = 0
+    /// Chrome sidebar drag is horizontal-only — pin surface height so layout
+    /// jitter can't change rows (each row change also redraws the prompt).
+    private(set) var liveResizePinsHeight = false
+    /// After a chrome sidebar drag, keep skipping PTY `set_size` until the next
+    /// real window resize. Otherwise a post-drag layout pass re-enters sync and
+    /// still injects a blank starship prompt line.
+    private(set) var suppressSurfaceGridResize = false
+    var isLiveResizing: Bool { liveResizeDepth > 0 }
+
     private init() {}
+
+    func beginLiveResize(pinHeight: Bool = false) {
+        if !pinHeight {
+            // Window resize is allowed to change the grid again.
+            suppressSurfaceGridResize = false
+        }
+        if liveResizeDepth == 0 {
+            liveResizePinsHeight = pinHeight
+        } else {
+            liveResizePinsHeight = liveResizePinsHeight || pinHeight
+        }
+        liveResizeDepth += 1
+    }
+
+    func endLiveResize() {
+        guard liveResizeDepth > 0 else { return }
+        liveResizeDepth -= 1
+        guard liveResizeDepth == 0 else { return }
+        let pinHeight = liveResizePinsHeight
+        liveResizePinsHeight = false
+        if pinHeight {
+            suppressSurfaceGridResize = true
+        }
+        for station in StationRegistry.shared.allStations() {
+            station.view?.flushDeferredSurfaceSize(pinHeight: pinHeight)
+        }
+    }
+
+    /// Allow PTY grid sync again (e.g. after a real window live-resize ends).
+    func clearSurfaceGridResizeSuppression() {
+        suppressSurfaceGridResize = false
+    }
 
     func initialize() {
         guard !isInitialized else { return }
+
+        // Point libghostty at bundled themes before config load / finalize.
+        Self.configureResourcesEnvironment()
 
         // Initialize Ghostty runtime
         let argc = CommandLine.argc
@@ -37,10 +87,16 @@ class GhosttyBridge {
             ghostty_config_load_file(config, seahelmConfigPath)
         }
 
-        ghostty_config_finalize(config)
+        // Dual light/dark themes last so `ghostty_*_set_color_scheme` can swap
+        // palettes even when ~/.config/ghostty only names a single dark theme.
+        // Prefer `theme = light:…,dark:…` in seahelm/ghostty.conf if you want a
+        // custom pair — set both sides there and comment out this override later
+        // if needed; for now Seahelm owns appearance-toggle correctness.
+        if let dualThemePath = Self.writeDualThemeOverride() {
+            ghostty_config_load_file(config, (dualThemePath as NSString).fileSystemRepresentation)
+        }
 
-        // Always free config — ghostty_app_new copies what it needs
-        defer { ghostty_config_free(config) }
+        ghostty_config_finalize(config)
 
         // Set up runtime callbacks
         var runtimeConfig = ghostty_runtime_config_s()
@@ -94,9 +150,13 @@ class GhosttyBridge {
         // Create the app
         guard let ghosttyApp = ghostty_app_new(&runtimeConfig, config) else {
             NSLog("Failed to create Ghostty app")
+            ghostty_config_free(config)
             return
         }
 
+        // Keep config for soft reload when the color scheme flips. libghostty
+        // asks the embedder to `reload_config`; without this the palette never swaps.
+        self.config = config
         self.app = ghosttyApp
         self.isInitialized = true
 
@@ -116,6 +176,33 @@ class GhosttyBridge {
         return isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
     }
 
+    /// Matches bundled Catppuccin Mocha / Latte `background` — used for immersive
+    /// terminal chrome (title strip) so it blends with the Ghostty surface.
+    var terminalChromeBackground: NSColor {
+        switch currentColorScheme {
+        case GHOSTTY_COLOR_SCHEME_LIGHT:
+            return NSColor(srgbRed: 0xef/255, green: 0xf1/255, blue: 0xf5/255, alpha: 1) // Latte
+        default:
+            return NSColor(srgbRed: 0x1e/255, green: 0x1e/255, blue: 0x2e/255, alpha: 1) // Mocha
+        }
+    }
+
+    var terminalChromeForeground: NSColor {
+        switch currentColorScheme {
+        case GHOSTTY_COLOR_SCHEME_LIGHT:
+            return NSColor(srgbRed: 0x4c/255, green: 0x4f/255, blue: 0x69/255, alpha: 1)
+        default:
+            return NSColor(srgbRed: 0xcd/255, green: 0xd6/255, blue: 0xf4/255, alpha: 1)
+        }
+    }
+
+    /// Push the current app appearance to Ghostty and every live surface.
+    /// Call after theme toggles so light/dark terminal palettes apply immediately.
+    func refreshColorScheme() {
+        syncColorScheme()
+        NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
+    }
+
     /// Push the current system appearance to the app and every live surface.
     private func syncColorScheme() {
         guard let app else { return }
@@ -129,6 +216,82 @@ class GhosttyBridge {
         }
     }
 
+    /// Soft-reload config so `theme = light:…,dark:…` resolves to the active scheme.
+    private func reloadConfig(target: ghostty_target_s, soft: Bool) {
+        guard let config else { return }
+        switch target.tag {
+        case GHOSTTY_TARGET_APP:
+            guard let app else { return }
+            if soft {
+                ghostty_app_update_config(app, config)
+            } else if let rebuilt = Self.buildConfig() {
+                ghostty_app_update_config(app, rebuilt)
+                ghostty_config_free(config)
+                self.config = rebuilt
+            }
+        case GHOSTTY_TARGET_SURFACE:
+            guard let surface = target.target.surface else { return }
+            if soft {
+                ghostty_surface_update_config(surface, config)
+            } else if let rebuilt = Self.buildConfig() {
+                ghostty_surface_update_config(surface, rebuilt)
+                ghostty_config_free(rebuilt)
+            }
+        default:
+            break
+        }
+        NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
+    }
+
+    /// Rebuild the same config stack used at initialize (for hard reload).
+    private static func buildConfig() -> ghostty_config_t? {
+        guard let config = ghostty_config_new() else { return nil }
+        ghostty_config_load_default_files(config)
+        let seahelmConfigPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/seahelm/ghostty.conf").path
+        if FileManager.default.fileExists(atPath: seahelmConfigPath) {
+            ghostty_config_load_file(config, seahelmConfigPath)
+        }
+        if let dualThemePath = Self.writeDualThemeOverride() {
+            ghostty_config_load_file(config, (dualThemePath as NSString).fileSystemRepresentation)
+        }
+        ghostty_config_finalize(config)
+        return config
+    }
+
+    /// `GHOSTTY_RESOURCES_DIR` → `Bundle/.../Resources/ghostty` (contains `themes/`).
+    private static func configureResourcesEnvironment() {
+        guard let dir = bundledResourcesURL()?.path,
+              FileManager.default.fileExists(atPath: dir) else { return }
+        setenv("GHOSTTY_RESOURCES_DIR", dir, 1)
+    }
+
+    private static func bundledResourcesURL() -> URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("ghostty")
+    }
+
+    /// Writes a tiny conf that pins absolute light/dark theme paths from the bundle.
+    private static func writeDualThemeOverride() -> String? {
+        guard let themes = bundledResourcesURL()?.appendingPathComponent("themes") else { return nil }
+        let light = themes.appendingPathComponent("Catppuccin Latte").path
+        let dark = themes.appendingPathComponent("Catppuccin Mocha").path
+        guard FileManager.default.fileExists(atPath: light),
+              FileManager.default.fileExists(atPath: dark) else {
+            NSLog("Ghostty dual themes missing under %@", themes.path)
+            return nil
+        }
+        let conf = "theme = light:\(light),dark:\(dark)\n"
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seahelm-ghostty-dual-theme.conf")
+        do {
+            try conf.write(to: tmp, atomically: true, encoding: .utf8)
+            return tmp.path
+        } catch {
+            NSLog("Failed to write Ghostty dual-theme override: %@", "\(error)")
+            return nil
+        }
+    }
+
     func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
@@ -138,6 +301,10 @@ class GhosttyBridge {
         if let app {
             ghostty_app_free(app)
             self.app = nil
+        }
+        if let config {
+            ghostty_config_free(config)
+            self.config = nil
         }
         isInitialized = false
     }
@@ -158,6 +325,12 @@ class GhosttyBridge {
                 station.setOscTitle(String(cString: cstr))
             }
             return true
+        case GHOSTTY_ACTION_PWD:
+            if let station = station(for: target),
+               let cstr = action.action.pwd.pwd {
+                station.setPwd(String(cString: cstr))
+            }
+            return true
         case GHOSTTY_ACTION_PROGRESS_REPORT:
             if let station = station(for: target) {
                 let r = action.action.progress_report
@@ -166,6 +339,11 @@ class GhosttyBridge {
                 let percent = r.progress < 0 ? "" : String(r.progress)
                 station.setOscProgress("\(r.state.rawValue);\(percent)")
             }
+            return true
+        case GHOSTTY_ACTION_RELOAD_CONFIG:
+            // Required for light/dark `theme = light:…,dark:…` to take effect.
+            // libghostty flips conditional state then asks the embedder to reload.
+            GhosttyBridge.shared.reloadConfig(target: target, soft: action.action.reload_config.soft)
             return true
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             return true
@@ -213,4 +391,5 @@ class GhosttyBridge {
 
 extension Notification.Name {
     static let ghosttySurfaceCloseRequested = Notification.Name("ghosttySurfaceCloseRequested")
+    static let ghosttyColorSchemeDidChange = Notification.Name("ghosttyColorSchemeDidChange")
 }
