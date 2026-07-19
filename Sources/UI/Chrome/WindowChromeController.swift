@@ -79,6 +79,25 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setWorktreeContextEnabled(enabled)
     }
 
+    /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
+    func titlebarRegionFocusTarget() -> NSView {
+        state.isCollapsed ? terminalHeader : sidebarHeader
+    }
+
+    /// Apply / clear the visual + first-responder focus for `Region.titlebar`.
+    /// Targets the live chrome header icon strip — never a title-bar accessory.
+    func setTitlebarRegionFocused(_ focused: Bool) {
+        let target = titlebarRegionFocusTarget()
+        let other = state.isCollapsed ? sidebarHeader as NSView : terminalHeader as NSView
+        applyRegionHighlight(to: other, focused: false)
+        applyRegionHighlight(to: target, focused: focused)
+        if focused, let window = view.window {
+            // Prefer the first icon button so keyboard activation lands on chrome tools.
+            let icon = firstIconButton(in: target) ?? target
+            window.makeFirstResponder(icon)
+        }
+    }
+
     // MARK: - Setup
 
     private func setupHierarchy() {
@@ -249,5 +268,25 @@ final class WindowChromeController: NSViewController {
         } else {
             effect.material = .sidebar
         }
+    }
+
+    private func applyRegionHighlight(to view: NSView, focused: Bool) {
+        view.wantsLayer = true
+        if focused {
+            view.layer?.borderWidth = 1.5
+            view.layer?.borderColor = Theme.accent.cgColor
+            view.layer?.cornerRadius = 6
+        } else {
+            view.layer?.borderWidth = 0
+            view.layer?.borderColor = nil
+        }
+    }
+
+    private func firstIconButton(in root: NSView) -> NSView? {
+        if root is ChromeIconButton { return root }
+        for sub in root.subviews {
+            if let found = firstIconButton(in: sub) { return found }
+        }
+        return nil
     }
 }

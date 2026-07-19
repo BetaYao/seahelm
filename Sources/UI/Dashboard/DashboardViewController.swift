@@ -1365,8 +1365,20 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     }
 
     private func handleNavTab() {
-        guard let card = overviewFocus.selectedCardIndex else { return }
-        overviewView.cycleChipOnCard(at: card)
+        // On an orders card, Tab cycles option chips. Otherwise Tab advances the
+        // outer region cycle (panes → sidebar → titlebar/chrome header → helm).
+        if let card = overviewFocus.selectedCardIndex {
+            overviewView.cycleChipOnCard(at: card)
+            return
+        }
+        let forward = !(NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false)
+        (view.window?.windowController as? MainWindowController)?
+            .cycleKeyboardRegion(forward: forward)
+    }
+
+    /// Focus the First Mate composer (helm region).
+    func focusOverviewCommand() {
+        overviewView.focusCommand(prefill: "")
     }
 
     private func handleNavReturn() {

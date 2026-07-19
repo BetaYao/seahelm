@@ -6,10 +6,15 @@ import Foundation
 /// `panes` and `dashboard` are mutually exclusive for a given layout (a repo tab
 /// shows split panes; the dashboard tab shows the card ring) — availability is
 /// decided by the host and fed to `RegionFocusController`.
+///
+/// `titlebar` is the chrome header icon strip — `SidebarHeaderView` when the
+/// sidebar is expanded, `TerminalHeaderView` when collapsed. It must never target
+/// the removed spanning title-bar accessory.
 enum Region: String, CaseIterable, Equatable {
     case panes
     case dashboard
     case sidebar
+    /// Chrome header icon strip (sidebar header expanded / terminal header collapsed).
     case titlebar
     case helm
 }

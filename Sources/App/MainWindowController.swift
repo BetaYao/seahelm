@@ -48,6 +48,8 @@ class MainWindowController: NSWindowController {
     private let contentContainer = NSView()
     private let statusBar = StatusBarView()
     let keyboardMode = KeyboardModeController()
+    /// Outer Tab-cycle focus among panes / sidebar / chrome header / helm.
+    let regionFocus = RegionFocusController()
     private var windowTrackingArea: NSTrackingArea?
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
@@ -361,6 +363,11 @@ class MainWindowController: NSWindowController {
         dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed, activePane: chromeState.activePane)
         syncKeyboardToChromeCollapse()
         refreshChromeWorktreeContextEnabled()
+        refreshRegionAvailability()
+        // Collapse swaps which header owns `Region.titlebar` — re-apply if focused.
+        if regionFocus.current == .titlebar {
+            applyRegionFocus()
+        }
     }
 
     private func syncKeyboardToChromeCollapse() {
@@ -375,6 +382,53 @@ class MainWindowController: NSWindowController {
         let hasSelection = tabCoordinator.selectedSailor != nil
             || !(dashboardVC?.selectedSailorId.isEmpty ?? true)
         windowChrome?.setWorktreeContextEnabled(hasSelection)
+    }
+
+    // MARK: - Region focus (Tab cycle)
+
+    /// Refresh which keyboard regions exist for the current chrome / split layout.
+    /// Order is canonical: panes → dashboard → sidebar → titlebar(header) → helm.
+    func refreshRegionAvailability() {
+        var regions: [Region] = []
+        let hasSplit = tabCoordinator.dashboardVC?.activeSplitContainer != nil
+        if hasSplit {
+            regions.append(.panes)
+        } else {
+            regions.append(.dashboard)
+        }
+        if !chromeState.isCollapsed {
+            regions.append(.sidebar)
+        }
+        // Chrome headers always present — `titlebar` maps to header icon strip.
+        regions.append(.titlebar)
+        regions.append(.helm)
+        regionFocus.setAvailable(regions)
+    }
+
+    /// Translate `regionFocus.current` into first-responder + highlights.
+    func applyRegionFocus() {
+        let current = regionFocus.current
+        windowChrome?.setTitlebarRegionFocused(current == .titlebar)
+
+        guard let current else { return }
+        switch current {
+        case .titlebar:
+            // Header focus handled above.
+            break
+        case .sidebar, .dashboard:
+            dashboardVC?.enterDashboardNavigation()
+        case .panes:
+            dashboardVC?.activateInitialSplit()
+        case .helm:
+            dashboardVC?.focusOverviewCommand()
+        }
+    }
+
+    /// Advance / reverse the outer region Tab cycle and apply focus.
+    func cycleKeyboardRegion(forward: Bool) {
+        refreshRegionAvailability()
+        if forward { regionFocus.next() } else { regionFocus.prev() }
+        applyRegionFocus()
     }
 
     // MARK: - Ctrl double-tap detection
@@ -1212,6 +1266,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         chrome.setTerminalContent(dashboard.terminalHostView)
         positionStandardWindowButtons()
         refreshChromeWorktreeContextEnabled()
+        refreshRegionAvailability()
     }
 
     private func handleChromeStateChange(_ state: ChromeLayoutState) {
@@ -1255,6 +1310,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         refreshIdleWorktreePaths()
         updateChromeTitle()
         updatePrimaryCapsuleNotification()
+        // Sailors load / auto-select land here — keep Files/Changes enablement in sync.
+        refreshChromeWorktreeContextEnabled()
+        refreshRegionAvailability()
     }
 
     /// Worktrees with no agent interaction for longer than this are treated as
@@ -1458,6 +1516,19 @@ class SeahelmWindow: NSWindow {
                let mwc = windowController as? MainWindowController {
                 mwc.navigateBack()
                 return
+            }
+            // Tab / Shift+Tab while the chrome header owns region focus: cycle
+            // regions (dashboard's keyDown won't see these — icons are first responder).
+            if event.keyCode == 48,
+               let mwc = windowController as? MainWindowController,
+               mwc.keyboardMode.mode == .normal,
+               mwc.keyboardMode.substate == .none,
+               mwc.regionFocus.current == .titlebar {
+                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                if flags.isDisjoint(with: [.command, .control, .option]) {
+                    mwc.cycleKeyboardRegion(forward: !flags.contains(.shift))
+                    return
+                }
             }
         }
         super.sendEvent(event)
