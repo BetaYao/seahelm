@@ -108,7 +108,8 @@ enum UsageSummaryFormatter {
     static let shortcutTips: [(leading: String, body: String)] = [
         ("Tip", "Cmd+1..4 switch layout"),
         ("Tip", "hjkl/arrows navigate, Return or i enter terminal"),
-        ("Tip", "Cmd+Esc or double-Esc leave terminal"),
+        ("Tip", "Cmd+Esc leave terminal / toggle sidebar"),
+        ("Tip", "Double-Ctrl open island command"),
         ("Tip", "Cmd+B toggle sidebar"),
         ("Tip", "Cmd+D split horizontally"),
         ("Tip", "Cmd+Shift+D split vertically"),

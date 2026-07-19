@@ -87,10 +87,21 @@ final class IslandPanelController {
 
     /// Open the island with the command field focused (Cmd+N entry point).
     func openCommandBar(prefill: String) {
+        presentCommandBar { model.pendingCommandPrefill = prefill }
+    }
+
+    /// Open the island and focus the command field without changing its text
+    /// (global double-Ctrl summon).
+    func openCommandBarFocused() {
+        presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    private func presentCommandBar(_ prepare: () -> Void) {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
-        model.pendingCommandPrefill = prefill
+        prepare()
         model.open(reason: .click)
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
     }
 

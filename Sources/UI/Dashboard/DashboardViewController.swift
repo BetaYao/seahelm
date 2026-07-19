@@ -1401,12 +1401,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         }
     }
 
-    /// Click on a fleet row. Clicking steps the same ladder as ⏎/→, so the mouse
-    /// and the nav ring never disagree about which mode a row lands you in:
-    /// - mode 1 (dashboard): commit the clicked worktree → mode 2 (split)
-    /// - mode 2, clicking the *selected* row: → mode 3 (terminal), sidebar hidden
-    /// - mode 2, clicking a *different* row: stay in mode 2 and just switch
-    ///   worktrees — identical to walking there with ↑/↓.
+    /// Click on a fleet row:
+    /// - mode 2, clicking a *different* row: stay in split and switch worktrees
+    /// - mode 2, clicking the *selected* row: no-op (sidebar stays open)
+    /// - mode 3: drill into the clicked worktree's terminal
+    /// Keyboard ⏎/→ still advances split → terminal via `commitFocusedWorktreeForward`.
     private func handleWorktreeRowClick(path: String) {
         guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
             // Not a fleet row (orders card path, stale list) — drill in as before.
@@ -1421,10 +1420,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         switch viewMode {
         case .split:
             if row.id == overviewSelectedId {
-                commitFocusedWorktreeForward()
-            } else {
-                applyOverviewEffect(.previewWorktree(i))
+                return
             }
+            applyOverviewEffect(.previewWorktree(i))
         case .terminal:
             // Overview is hidden here, but a docked side panel can still surface
             // rows — keep the direct drill-in.
@@ -2426,6 +2424,7 @@ final class DashboardOverviewView: NSView {
     /// ●  current pane title                         time
     ///    branch  git info                           N panes
     /// ```
+    /// Title and branch share a text column so their leading edges align.
     private final class RowView: NSView {
         var onTap: ((String) -> Void)?
         private let path: String
@@ -2473,20 +2472,24 @@ final class DashboardOverviewView: NSView {
 
             let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
 
+            // Status dot sits in its own column so both text lines share one
+            // leading edge — a fixed indent under "● + spacing" drifts with glyph metrics.
             let dot = Self.label("\u{25CF}", status.color, 8)
+            dot.translatesAutoresizingMaskIntoConstraints = false
             dot.setContentHuggingPriority(.required, for: .horizontal)
+            dot.setContentCompressionResistancePriority(.required, for: .horizontal)
+
             let title = Self.label(sailor.currentPaneTitle, DashboardOverviewView.ink, 12)
             title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let time = Self.label(sailor.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
             time.setContentHuggingPriority(.required, for: .horizontal)
 
-            // Line 1: ●  current pane title                         time
+            // Line 1: current pane title                         time
             let line1 = NSStackView()
             line1.orientation = .horizontal
             line1.alignment = .centerY
             line1.spacing = 7
             line1.translatesAutoresizingMaskIntoConstraints = false
-            line1.addArrangedSubview(dot)
             line1.addArrangedSubview(title)
             line1.addArrangedSubview(Self.spacer())
             line1.addArrangedSubview(time)
@@ -2511,31 +2514,30 @@ final class DashboardOverviewView: NSView {
             line2.alignment = .firstBaseline
             line2.spacing = 8
             line2.translatesAutoresizingMaskIntoConstraints = false
-            // Indent under the title (past the status dot).
-            let indent = NSView()
-            indent.translatesAutoresizingMaskIntoConstraints = false
-            indent.widthAnchor.constraint(equalToConstant: 15).isActive = true
-            line2.addArrangedSubview(indent)
             line2.addArrangedSubview(branchLabel)
             line2.addArrangedSubview(git)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(panes)
 
-            let col = NSStackView(views: [line1, line2])
-            col.orientation = .vertical
-            col.spacing = 3
-            col.alignment = .leading
-            col.translatesAutoresizingMaskIntoConstraints = false
+            let textCol = NSStackView(views: [line1, line2])
+            textCol.orientation = .vertical
+            textCol.spacing = 3
+            textCol.alignment = .leading
+            textCol.translatesAutoresizingMaskIntoConstraints = false
 
-            addSubview(col)
+            addSubview(dot)
+            addSubview(textCol)
             NSLayoutConstraint.activate([
-                col.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-                col.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-                col.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-                col.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+                textCol.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 7),
+                textCol.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                textCol.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                textCol.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
-                line1.widthAnchor.constraint(equalTo: col.widthAnchor),
-                line2.widthAnchor.constraint(equalTo: col.widthAnchor),
+                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                dot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
+
+                line1.widthAnchor.constraint(equalTo: textCol.widthAnchor),
+                line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
             ])
         }
         required init?(coder: NSCoder) { fatalError() }

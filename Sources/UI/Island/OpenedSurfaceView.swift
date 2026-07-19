@@ -140,8 +140,12 @@ struct OpenedSurfaceView: View {
             .onTapGesture { commandFocused = true }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: menuItems.map(\.name))
-        .onAppear { consumePrefill() }
+        .onAppear {
+            consumePrefill()
+            consumeFocusRequest()
+        }
         .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
+        .onChange(of: model.pendingCommandFocus) { consumeFocusRequest() }
     }
 
     private func consumePrefill() {
@@ -149,6 +153,12 @@ struct OpenedSurfaceView: View {
         commandText = prefill
         model.pendingCommandPrefill = nil
         // Focus after the field is mounted and the panel is key.
+        DispatchQueue.main.async { commandFocused = true }
+    }
+
+    private func consumeFocusRequest() {
+        guard model.pendingCommandFocus else { return }
+        model.pendingCommandFocus = false
         DispatchQueue.main.async { commandFocused = true }
     }
 

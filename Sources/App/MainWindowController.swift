@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 
 enum WindowStyling {
     struct GlassBackgroundConfig {
@@ -316,7 +317,7 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
 
-    /// Unified back key (double-Ctrl and Cmd+Esc): toggle chrome sidebar collapse.
+    /// Cmd+Esc / Cmd+E: toggle chrome sidebar collapse.
     func navigateBack() {
         tabCoordinator.switchToTab(0)
         toggleChromeCollapsed()
@@ -419,58 +420,69 @@ class MainWindowController: NSWindowController {
         applyRegionFocus()
     }
 
-    // MARK: - Ctrl double-tap detection
+    // MARK: - Ctrl double-tap (summon island)
 
     private static let ctrlDoubleTapWindow: TimeInterval = 0.35
     private static let leftControlKeyCode: UInt16 = 59
 
-    /// Detect a bare left-Ctrl double-tap (JetBrains-style) via a local event
-    /// monitor. A monitor sees flagsChanged before window dispatch, so it works
-    /// regardless of which view is first responder (terminal, cockpit text
-    /// field, …). Any keyDown between the two taps breaks the sequence so
-    /// Ctrl+C-style chords don't trigger it.
-    /// (fn was the original choice, but many third-party keyboards handle Fn in
-    /// firmware and never report it to macOS.)
+    /// Bare left-Ctrl double-tap (JetBrains-style) opens the island command bar.
+    /// Local monitor: works app-wide regardless of first responder.
+    /// Global monitor: works while Seahelm is in the background (needs
+    /// Accessibility permission). Any keyDown between taps breaks the sequence
+    /// so Ctrl+C chords don't trigger it.
     private func installFnDoubleTapMonitor() {
-        fnTapMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+        let handle: (NSEvent) -> NSEvent? = { [weak self] event in
             guard let self else { return event }
-            if event.type == .keyDown {
-                self.lastFnPressAt = 0
-                return event
-            }
-            guard event.keyCode == Self.leftControlKeyCode else { return event }
-            let isPress = event.modifierFlags
-                .intersection(.deviceIndependentFlagsMask)
-                .contains(.control)
-            self.fnTapLog("flagsChanged keyCode=\(event.keyCode) isPress=\(isPress)")
-            guard isPress else { return event }
-            let now = ProcessInfo.processInfo.systemUptime
-            if now - self.lastFnPressAt < Self.ctrlDoubleTapWindow {
-                self.lastFnPressAt = 0
-                self.fnTapLog("double-tap → navigateBack")
-                self.navigateBack()
-            } else {
-                self.lastFnPressAt = now
-            }
+            self.handleCtrlDoubleTapEvent(event)
             return event
         }
-    }
-
-    private var fnTapMonitor: Any?
-    /// Timestamp of the last bare fn press; 0 when broken by another key.
-    private var lastFnPressAt: TimeInterval = 0
-
-    /// Temporary fn-double-tap diagnostics — appends to /tmp/seahelm-fntap.log.
-    private func fnTapLog(_ message: String) {
-        let line = "\(Date()) \(message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        let url = URL(fileURLWithPath: "/tmp/seahelm-fntap.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
-        } else {
-            try? data.write(to: url)
+        // Local: when Seahelm is frontmost. Global: when another app is active.
+        ctrlDoubleTapLocalMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.flagsChanged, .keyDown], handler: handle)
+        ctrlDoubleTapGlobalMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.flagsChanged, .keyDown]) { [weak self] event in
+                self?.handleCtrlDoubleTapEvent(event)
+            }
+        if config.islandEnabled {
+            requestAccessibilityIfNeededForGlobalHotkey()
         }
     }
+
+    private func handleCtrlDoubleTapEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            lastCtrlPressAt = 0
+            return
+        }
+        guard event.type == .flagsChanged,
+              event.keyCode == Self.leftControlKeyCode else { return }
+        let isPress = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.control)
+        guard isPress else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastCtrlPressAt < Self.ctrlDoubleTapWindow {
+            lastCtrlPressAt = 0
+            openIslandCommandFromHotkey()
+        } else {
+            lastCtrlPressAt = now
+        }
+    }
+
+    private func openIslandCommandFromHotkey() {
+        guard config.islandEnabled else { return }
+        islandController.openCommandBarFocused()
+    }
+
+    /// Global key monitors require Accessibility trust; prompt once if missing.
+    private func requestAccessibilityIfNeededForGlobalHotkey() {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+    }
+
+    private var ctrlDoubleTapLocalMonitor: Any?
+    private var ctrlDoubleTapGlobalMonitor: Any?
+    /// Timestamp of the last bare left-Ctrl press; 0 when broken by another key.
+    private var lastCtrlPressAt: TimeInterval = 0
 
     @objc func closeCurrentTab() {
         // No-op: dashboard is always the only tab; individual project close is handled via dashboard UI.

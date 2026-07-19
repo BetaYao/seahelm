@@ -74,6 +74,8 @@ final class IslandModel {
     /// One-shot: when set, the opened surface prefills the command field with
     /// this text, focuses it, then clears the flag.
     var pendingCommandPrefill: String?
+    /// One-shot: focus the command field without changing its text (double-Ctrl).
+    var pendingCommandFocus: Bool = false
 
     /// Transient one-line text shown in the closed pill's left wing when a
     /// notification arrives (cleared automatically).

@@ -39,7 +39,7 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     // Files tab
     private var fileTreeController: FileTreeOutlineController?
-    private var fileSearchField: NSSearchField?
+    private var fileSearchField: NSTextField?
     private var hiddenToggleButton: NSButton?
     private var showHiddenFiles = false
     /// Folder expansion state remembered per worktree, restored on return.
@@ -168,26 +168,6 @@ final class WorktreeSidePanelViewController: NSViewController {
             hairline.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
         ])
         return wrap
-    }
-
-    private func styleImmersiveSearchField(_ field: NSSearchField) {
-        field.focusRingType = .none
-        field.font = AppFont.mono(size: 12)
-        field.textColor = Self.ink
-        field.placeholderAttributedString = NSAttributedString(
-            string: field.placeholderString ?? "Search",
-            attributes: [
-                .foregroundColor: Self.inkDim,
-                .font: AppFont.mono(size: 12),
-            ]
-        )
-        field.wantsLayer = true
-        field.layer?.backgroundColor = NSColor.clear.cgColor
-        if let cell = field.cell as? NSSearchFieldCell {
-            cell.isBordered = false
-            cell.drawsBackground = false
-            cell.focusRingType = .none
-        }
     }
 
     @objc private func tabButtonClicked(_ sender: NSButton) {
@@ -327,16 +307,36 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         let header = makePaneHeader(title: "Files")
 
-        // Search + hidden-files toggle row.
-        let searchField = NSSearchField()
-        searchField.placeholderString = "Search files"
+        // Search row: separate magnifier + text field (borderless NSSearchField
+        // collapses its icon onto the placeholder and breaks hit-testing).
+        let searchRow = NSView()
+        searchRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let magnifier = NSImageView()
+        magnifier.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+        magnifier.contentTintColor = Self.inkDim
+        magnifier.translatesAutoresizingMaskIntoConstraints = false
+
+        let searchField = NSTextField(string: "")
+        searchField.isEditable = true
+        searchField.isSelectable = true
+        searchField.isBordered = false
+        searchField.isBezeled = false
+        searchField.drawsBackground = false
+        searchField.focusRingType = .none
+        searchField.font = AppFont.mono(size: 12)
+        searchField.textColor = Self.ink
+        searchField.placeholderAttributedString = NSAttributedString(
+            string: "Search files",
+            attributes: [
+                .foregroundColor: Self.inkDim,
+                .font: AppFont.mono(size: 12),
+            ]
+        )
+        searchField.delegate = self
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.target = self
-        searchField.action = #selector(searchChanged(_:))
-        searchField.sendsSearchStringImmediately = false
-        searchField.sendsWholeSearchString = false
         searchField.setAccessibilityIdentifier("sidePanel.fileSearch")
-        styleImmersiveSearchField(searchField)
         self.fileSearchField = searchField
 
         let hiddenToggle = NSButton()
@@ -353,6 +353,10 @@ final class WorktreeSidePanelViewController: NSViewController {
         hiddenToggle.setAccessibilityIdentifier("sidePanel.toggleHidden")
         self.hiddenToggleButton = hiddenToggle
 
+        searchRow.addSubview(magnifier)
+        searchRow.addSubview(searchField)
+        searchRow.addSubview(hiddenToggle)
+
         let scrollView = NSScrollView()
         scrollView.documentView = controller.outlineView
         scrollView.drawsBackground = false
@@ -363,8 +367,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(header)
-        contentView.addSubview(searchField)
-        contentView.addSubview(hiddenToggle)
+        contentView.addSubview(searchRow)
         contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
@@ -372,16 +375,25 @@ final class WorktreeSidePanelViewController: NSViewController {
             header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            searchField.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
-            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            searchField.heightAnchor.constraint(equalToConstant: 26),
+            searchRow.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            searchRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            searchRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            searchRow.heightAnchor.constraint(equalToConstant: 26),
 
-            hiddenToggle.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            hiddenToggle.leadingAnchor.constraint(equalTo: searchField.trailingAnchor, constant: 6),
-            hiddenToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            magnifier.leadingAnchor.constraint(equalTo: searchRow.leadingAnchor),
+            magnifier.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor),
+            magnifier.widthAnchor.constraint(equalToConstant: 14),
+            magnifier.heightAnchor.constraint(equalToConstant: 14),
+
+            searchField.leadingAnchor.constraint(equalTo: magnifier.trailingAnchor, constant: 6),
+            searchField.trailingAnchor.constraint(equalTo: hiddenToggle.leadingAnchor, constant: -6),
+            searchField.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor),
+
+            hiddenToggle.trailingAnchor.constraint(equalTo: searchRow.trailingAnchor),
+            hiddenToggle.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor),
             hiddenToggle.widthAnchor.constraint(equalToConstant: 22),
 
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: searchRow.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
             scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -389,10 +401,6 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         // Restore the folder expansion remembered for this worktree.
         controller.restoreExpansion(expandedByWorktree[path] ?? [])
-    }
-
-    @objc private func searchChanged(_ sender: NSSearchField) {
-        fileTreeController?.filterText = sender.stringValue
     }
 
     @objc private func toggleHiddenFiles(_ sender: NSButton) {
@@ -508,6 +516,15 @@ final class WorktreeSidePanelViewController: NSViewController {
                 label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
             ])
         }
+    }
+}
+
+// MARK: - File search
+
+extension WorktreeSidePanelViewController: NSTextFieldDelegate {
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === fileSearchField else { return }
+        fileTreeController?.filterText = field.stringValue
     }
 }
 
