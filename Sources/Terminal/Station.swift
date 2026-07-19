@@ -125,6 +125,14 @@ class Station {
     }
 
     /// Attach to a zmx session and schedule the post-attach health check.
+    /// Build the pane command for attaching to a zmx session. `env -u` guards
+    /// against a leaked ZMX_SESSION (e.g. app relaunched from inside a pane):
+    /// zmx attach prefers $ZMX_SESSION over its argument, which would silently
+    /// attach every pane to the wrong session.
+    static func zmxAttachCommand(sessionName: String) -> String {
+        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
+    }
+
     private func attachZmx(
         app: ghostty_app_t,
         container: NSView,
@@ -132,7 +140,7 @@ class Station {
         sessionName: String,
         initialFrame: CGRect? = nil
     ) {
-        let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
+        let zmxCommand = Self.zmxAttachCommand(sessionName: sessionName)
         _createWithCommand(
             app: app,
             container: container,
@@ -506,7 +514,7 @@ class Station {
 
                 self.destroy()
 
-                let zmxCommand = "\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
+                let zmxCommand = Self.zmxAttachCommand(sessionName: sessionName)
                 self._createWithCommand(
                     app: app,
                     container: container,

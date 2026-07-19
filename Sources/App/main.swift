@@ -1,5 +1,16 @@
 import AppKit
 
+// The app may be (re)launched from a shell that lives inside a seahelm pane
+// (dev rebuilds, agents relaunching the app). That shell runs inside a zmx
+// session, so ZMX_SESSION / SEAHELM_* leak into our environment — and every
+// Ghostty surface inherits it. `zmx attach <name>` silently prefers
+// $ZMX_SESSION over its argument, so a leaked value makes every pane attach
+// to the wrong (often dead) session: layout restores, content doesn't.
+// Scrub before anything can spawn a child.
+for leaked in ["ZMX_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID"] {
+    unsetenv(leaked)
+}
+
 let app = NSApplication.shared
 NSWindow.allowsAutomaticWindowTabbing = false
 
