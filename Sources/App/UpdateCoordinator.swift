@@ -48,7 +48,16 @@ class UpdateCoordinator {
                     }
                 }
             } catch {
+                // A manual check must always answer. Swallowing this is why the
+                // menu item looked dead while the checker was 404ing.
                 NSLog("Update check failed: \(error)")
+                await MainActor.run {
+                    let alert = NSAlert()
+                    alert.messageText = "Couldn't check for updates"
+                    alert.informativeText = error.localizedDescription
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
             }
         }
     }

@@ -83,6 +83,15 @@ class UpdateManager: NSObject, UpdateManaging {
             return
         }
 
+        // The swap is done by a detached script after we exit, so a permission
+        // failure there is invisible to the user (they just see the old version
+        // come back). Check writability while we can still show an error.
+        let installDir = (currentApp as NSString).deletingLastPathComponent
+        guard FileManager.default.isWritableFile(atPath: installDir) else {
+            state = .failed(.installDirectoryNotWritable(path: installDir))
+            return
+        }
+
         // Write helper script to user-private temp directory
         let scriptPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("seahelm-updater-\(UUID().uuidString).sh")
@@ -94,14 +103,26 @@ class UpdateManager: NSObject, UpdateManaging {
         NEW_APP="$3"
         # Wait for the app to exit
         while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
-        # Replace app (keep backup)
-        mv "$CURRENT_APP" "${CURRENT_APP}.bak"
-        mv "$NEW_APP" "$CURRENT_APP"
+        # Replace the app, keeping a backup until the swap is known to have
+        # worked. Deleting the backup unconditionally would destroy the user's
+        # install whenever the second mv fails (permissions, full disk).
+        if ! mv "$CURRENT_APP" "${CURRENT_APP}.bak"; then
+          open "$CURRENT_APP"
+          rm -f "$0"
+          exit 1
+        fi
+        if ! mv "$NEW_APP" "$CURRENT_APP"; then
+          # Roll back to the version the user had.
+          mv "${CURRENT_APP}.bak" "$CURRENT_APP"
+          open "$CURRENT_APP"
+          rm -f "$0"
+          exit 1
+        fi
         # Remove quarantine
         xattr -d com.apple.quarantine "$CURRENT_APP" 2>/dev/null
         # Launch new version
         open "$CURRENT_APP"
-        # Clean up
+        # Clean up — only now that the new bundle is in place
         rm -rf "${CURRENT_APP}.bak"
         rm -f "$0"
         """
@@ -180,8 +201,16 @@ class UpdateManager: NSObject, UpdateManaging {
         }
 
         if codesign.terminationStatus != 0 {
-            // Signature invalid — still allow for unsigned dev builds
+            #if DEBUG
+            // Locally built bundles are ad-hoc signed; don't block dev testing.
             NSLog("Warning: code signature verification failed (status \(codesign.terminationStatus))")
+            #else
+            // Release builds refuse to install a bundle we can't verify — this is
+            // the only thing standing between a hijacked download and `mv` over
+            // the running app.
+            state = .failed(.signatureInvalid)
+            return
+            #endif
         }
 
         state = .readyToInstall(appPath: appPath)

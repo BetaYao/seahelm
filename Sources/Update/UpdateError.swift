@@ -8,6 +8,7 @@ enum UpdateError: Error, LocalizedError {
     case invalidAppPath
     case versionParseError(String)
     case rateLimited(retryAfter: Date)
+    case installDirectoryNotWritable(path: String)
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +19,8 @@ enum UpdateError: Error, LocalizedError {
         case .invalidAppPath: return "Invalid app path"
         case .versionParseError(let v): return "Failed to parse version: \(v)"
         case .rateLimited: return "Too many requests, try again later"
+        case .installDirectoryNotWritable(let path):
+            return "Can't write to \(path) — move seahelm somewhere you own, or reinstall with scripts/install.sh"
         }
     }
 }

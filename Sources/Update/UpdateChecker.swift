@@ -13,7 +13,7 @@ protocol UpdateCheckerDelegate: AnyObject {
 
 /// Checks GitHub Releases API for new versions of seahelm.
 class UpdateChecker {
-    static let repositoryOwner = "nicematt"
+    static let repositoryOwner = "BetaYao"
     static let repositoryName = "seahelm"
 
     #if arch(arm64)
