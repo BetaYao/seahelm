@@ -132,6 +132,24 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+# Terminal typography must be self-contained. A fresh install cannot depend on
+# fonts or Ghostty configuration already present on the user's Mac.
+echo "==> Verifying bundled terminal typography"
+for RESOURCE in \
+  "ghostty.conf" \
+  "JetBrainsMono-Regular.ttf" \
+  "JetBrainsMono-Medium.ttf" \
+  "JetBrainsMono-Bold.ttf"; do
+  if [[ ! -f "$APP_PATH/Contents/Resources/$RESOURCE" ]]; then
+    echo "Missing required terminal typography resource: $RESOURCE" >&2
+    exit 1
+  fi
+done
+if ! grep -Fqx "font-family = JetBrains Mono" "$APP_PATH/Contents/Resources/ghostty.conf"; then
+  echo "Bundled ghostty.conf does not select JetBrains Mono" >&2
+  exit 1
+fi
+
 # The x86_64 slice is cross-compiled on Apple Silicon, where a stray
 # ONLY_ACTIVE_ARCH=YES would silently yield an arm64 binary in a zip labelled
 # x86_64. Fail loudly instead of shipping the wrong architecture.

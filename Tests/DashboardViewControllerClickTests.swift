@@ -3,6 +3,38 @@ import XCTest
 
 final class DashboardViewControllerClickTests: XCTestCase {
 
+    // MARK: - Worktree entry
+
+    func testEnteringWorktreeKeepsExpandedSidebarExpanded() {
+        let vc = DashboardViewController()
+        vc.loadViewIfNeeded()
+        vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        var requestedCollapse: Bool?
+        vc.onRequestSetChromeCollapsed = { requestedCollapse = $0 }
+        XCTAssertFalse(vc.isLeftColumnCollapsedState)
+
+        vc.enterWorktree(byWorktreePath: "/repo/a")
+
+        XCTAssertNil(requestedCollapse)
+        XCTAssertFalse(vc.isLeftColumnCollapsedState)
+    }
+
+    func testEnteringWorktreeKeepsCollapsedSidebarCollapsed() {
+        let vc = DashboardViewController()
+        vc.loadViewIfNeeded()
+        vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
+        vc.adoptChromeCollapse(true, activePane: .firstMate)
+        var requestedCollapse: Bool?
+        vc.onRequestSetChromeCollapsed = { requestedCollapse = $0 }
+        XCTAssertTrue(vc.isLeftColumnCollapsedState)
+
+        vc.enterWorktree(byWorktreePath: "/repo/a")
+
+        XCTAssertNil(requestedCollapse)
+        XCTAssertTrue(vc.isLeftColumnCollapsedState)
+    }
+
     // MARK: - Row click
 
     func testRowClickOnUnknownPathDoesNotCallSelectProject() {

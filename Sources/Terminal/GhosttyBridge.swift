@@ -80,7 +80,14 @@ class GhosttyBridge {
         }
         ghostty_config_load_default_files(config)
 
-        // Load seahelm-specific overrides (e.g. copy-on-select = false)
+        // Keep terminal typography consistent with the rest of Seahelm. The
+        // bundled config resets any font families inherited from Ghostty's
+        // global config before selecting the JetBrains Mono faces registered
+        // by AppFont at launch.
+        Self.loadBundledTerminalDefaults(into: config)
+
+        // Load Seahelm-specific user overrides last so users can still adjust
+        // the bundled terminal defaults (e.g. font size or copy-on-select).
         let seahelmConfigPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/seahelm/ghostty.conf").path
         if FileManager.default.fileExists(atPath: seahelmConfigPath) {
@@ -255,6 +262,7 @@ class GhosttyBridge {
     private static func buildConfig() -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
         ghostty_config_load_default_files(config)
+        loadBundledTerminalDefaults(into: config)
         let seahelmConfigPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/seahelm/ghostty.conf").path
         if FileManager.default.fileExists(atPath: seahelmConfigPath) {
@@ -265,6 +273,12 @@ class GhosttyBridge {
         }
         ghostty_config_finalize(config)
         return config
+    }
+
+    private static func loadBundledTerminalDefaults(into config: ghostty_config_t) {
+        if let path = Bundle.main.path(forResource: "ghostty", ofType: "conf") {
+            ghostty_config_load_file(config, path)
+        }
     }
 
     /// `GHOSTTY_RESOURCES_DIR` → `Bundle/.../Resources/ghostty` (contains `themes/`).

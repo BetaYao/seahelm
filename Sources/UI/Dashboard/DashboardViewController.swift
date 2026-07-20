@@ -531,7 +531,7 @@ class DashboardViewController: NSViewController {
         overviewView.commandMenuProvider = commandMenuProvider
     }
 
-    /// Drill into a specific worktree: select it, then flip to worktree mode.
+    /// Drill into a specific worktree without changing the chrome sidebar state.
     /// Clicking a row is what sets the overview's selection highlight.
     func enterWorktree(byWorktreePath path: String) {
         selectSailor(byWorktreePath: path)
@@ -542,7 +542,6 @@ class DashboardViewController: NSViewController {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
         }
-        setViewMode(.terminal)
     }
 
     var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
