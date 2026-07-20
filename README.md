@@ -8,10 +8,13 @@ Seahelm brings the moving parts of modern AI-assisted development into one place
 
 当开发日常变成多个仓库、多个分支、多个 worktree、多个 agent 同时推进时，Seahelm 用一个原生 macOS 界面把这些上下文整理到一起。
 
-Download:
-[`Apple Silicon`](https://github.com/BetaYao/seahelm/releases/latest) · [`Intel`](https://github.com/BetaYao/seahelm/releases/latest)
+Install / 安装：
 
-下载：
+```bash
+curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+```
+
+Or download manually / 或手动下载：
 [`Apple Silicon`](https://github.com/BetaYao/seahelm/releases/latest) · [`Intel`](https://github.com/BetaYao/seahelm/releases/latest)
 
 ## Screenshots
@@ -157,11 +160,17 @@ Seahelm 不是替代终端，而是让这套终端工作流更像一个完整产
 
 ### 下载
 
-如果你只是想直接试用：
+如果你只是想直接试用，一行命令安装（自动识别架构，装到 /Applications）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+```
+
+或手动安装：
 
 - 打开 [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest)
 - 下载对应架构的 `seahelm-macos-arm64.zip` 或 `seahelm-macos-x86_64.zip`
-- 解压并启动应用
+- 解压，把 `seahelm.app` 拖入「应用程序」并启动
 
 ### 本地开发
 
@@ -339,11 +348,17 @@ Seahelm does not replace the terminal. It gives that workflow a cleaner surface 
 
 ### Download
 
-If you just want to try it:
+If you just want to try it, install with one line (detects your architecture, installs into /Applications):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+```
+
+Or manually:
 
 - Open [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest)
 - Download `seahelm-macos-arm64.zip` or `seahelm-macos-x86_64.zip`
-- Unzip it and launch the app
+- Unzip it, drag `seahelm.app` into Applications, and launch it
 
 ### Local Development
 
