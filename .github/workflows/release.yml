@@ -152,13 +152,20 @@ jobs:
           SIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
           ENABLE_NOTARIZATION: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && '1' || '0' }}
           NOTARYTOOL_PROFILE: seahelm-notarytool
+          # Signs the appcast entry. Must stay in the macOS job: the publish job
+          # runs on ubuntu and has no Sparkle tooling, and the key should not
+          # travel further than the step that needs it.
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
         run: ./scripts/package_release.sh
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
-          path: dist/seahelm-macos-${{ matrix.arch }}.zip
+          path: |
+            dist/seahelm-macos-${{ matrix.arch }}.zip
+            dist/appcast-${{ matrix.arch }}.xml
           if-no-files-found: error
 
   publish:
@@ -180,6 +187,8 @@ jobs:
           files: |
             dist/seahelm-macos-arm64.zip
             dist/seahelm-macos-x86_64.zip
+            dist/appcast-arm64.xml
+            dist/appcast-x86_64.xml
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

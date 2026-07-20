@@ -120,7 +120,6 @@ class MainWindowController: NSWindowController {
     // Auto-update
     private lazy var updateCoordinator: UpdateCoordinator = {
         let uc = UpdateCoordinator(config: config)
-        uc.delegate = self
         uc.banner.delegate = uc
         return uc
     }()
@@ -522,7 +521,7 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func openDocumentation() {
-        let repositoryURL = URL(string: "https://github.com/\(UpdateChecker.repositoryOwner)/\(UpdateChecker.repositoryName)")!
+        let repositoryURL = URL(string: "https://github.com/\(UpdateCoordinator.repositoryOwner)/\(UpdateCoordinator.repositoryName)")!
         NSWorkspace.shared.open(repositoryURL)
     }
 
@@ -2137,13 +2136,18 @@ extension MainWindowController {
     @objc func checkForUpdates() {
         updateCoordinator.checkForUpdates()
     }
+
 }
 
-// MARK: - UpdateCoordinatorDelegate
+// MARK: - NSMenuItemValidation
 
-extension MainWindowController: UpdateCoordinatorDelegate {
-    func updateCoordinator(_ coordinator: UpdateCoordinator, showBanner banner: UpdateBanner) {
-        // Banner display handled by coordinator's banner property
+extension MainWindowController: NSMenuItemValidation {
+    /// Sparkle disables "Check for Updates..." while a check is already in flight.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(checkForUpdates) {
+            return updateCoordinator.validateMenuItem(item)
+        }
+        return true
     }
 }
 

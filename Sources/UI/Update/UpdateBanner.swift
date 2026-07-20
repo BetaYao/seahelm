@@ -115,10 +115,20 @@ class UpdateBanner: NSView {
         bannerHeightConstraint.constant = visible ? 32 : 0
     }
 
-    func update(state: UpdateManager.State) {
+    func update(state: UpdateState) {
         switch state {
         case .idle:
             setBannerVisible(false)
+
+        case .checking:
+            statusLabel.stringValue = "Checking for updates..."
+            progressBar.isHidden = true
+            actionButton.isHidden = true
+            skipButton.isHidden = true
+            setBannerVisible(true)
+
+        case .available(let version):
+            showNewVersion(version)
 
         case .downloading(let progress):
             statusLabel.stringValue = "Downloading... \(Int(progress * 100))%"
@@ -128,14 +138,15 @@ class UpdateBanner: NSView {
             skipButton.isHidden = true
             setBannerVisible(true)
 
-        case .extracting:
-            statusLabel.stringValue = "Extracting..."
-            progressBar.isHidden = true
+        case .extracting(let progress):
+            statusLabel.stringValue = "Extracting... \(Int(progress * 100))%"
+            progressBar.doubleValue = progress
+            progressBar.isHidden = false
             actionButton.isHidden = true
             skipButton.isHidden = true
 
-        case .verifying:
-            statusLabel.stringValue = "Verifying signature..."
+        case .installing:
+            statusLabel.stringValue = "Installing..."
             progressBar.isHidden = true
             actionButton.isHidden = true
             skipButton.isHidden = true

@@ -15,6 +15,10 @@ NOTARYTOOL_PROFILE="${NOTARYTOOL_PROFILE:-}"
 APPLE_ID="${APPLE_ID:-}"
 APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+# EdDSA public key baked into Info.plist as SUPublicEDKey. Sparkle refuses to
+# start without it, so a build with this empty ships an app whose updater is
+# inert — deliberate: an unverified feed is worse than no auto-update.
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
 
 case "$ARCH" in
   arm64|x86_64)
@@ -73,6 +77,30 @@ sign_app() {
       codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$binary"
     fi
   done
+
+  # Sparkle ships its own helper executables and XPC services inside the
+  # framework. Each is independently loaded code and each needs the hardened
+  # runtime plus a secure timestamp of its own; signing only the outer app
+  # leaves them stale and notarization rejects the bundle. Order matters —
+  # deepest first, because signing a container seals the hashes of everything
+  # already inside it.
+  local sparkle="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+  if [[ -d "$sparkle" ]]; then
+    echo "==> Signing Sparkle helpers"
+    local sparkle_nested=(
+      "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+      "$sparkle/Versions/B/XPCServices/Installer.xpc"
+      "$sparkle/Versions/B/Autoupdate"
+      "$sparkle/Versions/B/Updater.app"
+    )
+    for item in "${sparkle_nested[@]}"; do
+      if [[ -e "$item" ]]; then
+        echo "==> Signing ${item#"$APP_PATH/"}"
+        codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$item"
+      fi
+    done
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$sparkle"
+  fi
 
   codesign \
     --force \
@@ -156,6 +184,7 @@ xcodebuild \
   ARCHS="$ARCH" \
   ONLY_ACTIVE_ARCH=NO \
   ${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"} \
+  SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
@@ -210,5 +239,66 @@ echo "==> Packaging $ARTIFACT_NAME"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT_PATH"
 
 notarize_artifact
+
+# The appcast is generated last, from the *final* zip. Signing the pre-staple
+# zip would produce a signature for bytes we never ship.
+generate_appcast() {
+  if [[ -z "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+    echo "==> SPARKLE_PRIVATE_KEY unset; skipping appcast (this build cannot be auto-updated to)"
+    return
+  fi
+  if [[ -z "$RELEASE_VERSION" ]]; then
+    echo "==> No RELEASE_VERSION; skipping appcast"
+    return
+  fi
+
+  # sign_update ships inside Sparkle's SPM binary artifact, which lands under the
+  # derived data path we just built into.
+  local sign_update
+  sign_update="$(find "$ARCHIVE_ROOT/SourcePackages/artifacts" -name sign_update -type f -perm -u+x 2>/dev/null | head -1)"
+  if [[ -z "$sign_update" ]]; then
+    echo "sign_update not found under $ARCHIVE_ROOT/SourcePackages/artifacts" >&2
+    exit 1
+  fi
+
+  echo "==> Signing $ARTIFACT_NAME for the appcast"
+  # sign_update prints an attribute fragment: sparkle:edSignature="..." length="..."
+  local attrs
+  attrs="$("$sign_update" "$OUTPUT_PATH" --ed-key-file -  <<<"$SPARKLE_PRIVATE_KEY")"
+  if [[ -z "$attrs" ]]; then
+    echo "sign_update produced no signature" >&2
+    exit 1
+  fi
+
+  local appcast="$PROJECT_DIR/dist/appcast-${ARCH}.xml"
+  local url="https://github.com/BetaYao/seahelm/releases/download/${RELEASE_VERSION}/${ARTIFACT_NAME}"
+  # RFC 822 date, which is what the RSS envelope requires.
+  local pubdate
+  pubdate="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+
+  echo "==> Writing ${appcast##*/}"
+  cat >"$appcast" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Seahelm ($ARCH)</title>
+    <link>https://github.com/BetaYao/seahelm</link>
+    <description>Seahelm updates for $ARCH</description>
+    <language>en</language>
+    <item>
+      <title>$MARKETING_VERSION</title>
+      <link>https://github.com/BetaYao/seahelm/releases/tag/$RELEASE_VERSION</link>
+      <sparkle:version>$MARKETING_VERSION</sparkle:version>
+      <sparkle:shortVersionString>$MARKETING_VERSION</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>$pubdate</pubDate>
+      <enclosure url="$url" type="application/octet-stream" $attrs />
+    </item>
+  </channel>
+</rss>
+XML
+}
+
+generate_appcast
 
 echo "==> Created $OUTPUT_PATH"
