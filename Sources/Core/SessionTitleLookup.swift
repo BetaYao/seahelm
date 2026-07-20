@@ -74,7 +74,39 @@ enum SessionTitleLookup {
         return result
     }
 
+    /// Memoized `lastSummary` results, keyed by path and stamped with the file's
+    /// size + mtime. Transcripts routinely run to tens of megabytes and the pane
+    /// title is resolved on every focus change, so re-reading one per click
+    /// stalls the main thread — switching panes quickly visibly lagged the title.
+    private static let summaryCacheLock = NSLock()
+    private static var summaryCache: [String: (size: Int, mtime: Date, summary: String?)] = [:]
+
     private static func lastSummary(in fileURL: URL) -> String? {
+        let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let stamp = (values?.fileSize).flatMap { size in
+            (values?.contentModificationDate).map { (size, $0) }
+        }
+
+        if let stamp {
+            summaryCacheLock.lock()
+            let hit = summaryCache[fileURL.path]
+            summaryCacheLock.unlock()
+            if let hit, hit.size == stamp.0, hit.mtime == stamp.1 {
+                return hit.summary
+            }
+        }
+
+        let summary = readLastSummary(in: fileURL)
+
+        if let stamp {
+            summaryCacheLock.lock()
+            summaryCache[fileURL.path] = (stamp.0, stamp.1, summary)
+            summaryCacheLock.unlock()
+        }
+        return summary
+    }
+
+    private static func readLastSummary(in fileURL: URL) -> String? {
         guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
         // Newer Claude Code writes `ai-title` records (and `custom-title` when the
         // user renames a session in the resume picker); older versions wrote

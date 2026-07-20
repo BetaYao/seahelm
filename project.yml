@@ -32,6 +32,14 @@ targets:
         product: CodeEditSourceEditor
       - package: CodeEditLanguages
         product: CodeEditLanguages
+      # Media preview backends. AVKit auto-links SwiftUICore, which can only be
+      # linked through SwiftUI — so SwiftUI must be explicit here or the link
+      # fails with "not an allowed client of it".
+      - sdk: SwiftUI.framework
+      - sdk: AVKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework
+      - sdk: QuickLookUI.framework
     preBuildScripts:
       - name: "Embed and sign bundled zmx"
         basedOnDependencyAnalysis: false

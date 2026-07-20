@@ -4,6 +4,9 @@ import AppKit
 /// Keyboard: j/k move selection, 1-9 pick options, n dismiss, x clear watch, → navigate.
 final class BridgePanelViewController: NSViewController {
 
+    /// Resolves a worktree's current-pane title for order cards.
+    var currentPaneTitleProvider: ((String) -> String?)?
+
     var queue: PendingOrdersQueue? {
         didSet {
             oldValue?.removeObserver(queueToken); queueToken = nil
@@ -132,6 +135,14 @@ final class BridgePanelViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Card titles track the current pane, so a pane switch must repaint them.
+        NotificationCenter.default.addObserver(
+            forName: .repoViewDidChangeFocusedPane,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.ordersTableView.reloadData()
+        }
         reload()
     }
 
@@ -434,6 +445,7 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
             let card = (tableView.makeView(withIdentifier: id, owner: self) as? OrderCardView) ?? OrderCardView()
             card.identifier = id
             card.configure(order: order,
+                           currentPaneTitle: currentPaneTitleProvider?(order.action.worktreePath),
                            onOption: { [weak self] idx in self?.applyOption(order, index: idx) })
             card.onNavigate = { [weak self] in self?.onNavigateToWorktree?(order.action.worktreePath) }
             card.onDismiss = { [weak self] in self?.queue?.resolve(id: order.id) }
@@ -716,7 +728,7 @@ final class OrderCardView: NSTableCellView {
         chipRow.arrangedSubviews.compactMap { $0 as? OptionChipButton }.map(\.frame)
     }
 
-    func configure(order: PendingOrder, onOption: @escaping (Int) -> Void) {
+    func configure(order: PendingOrder, currentPaneTitle: String? = nil, onOption: @escaping (Int) -> Void) {
         self.onOption = onOption
         self.armedDangerousIndex = nil
 
@@ -732,7 +744,7 @@ final class OrderCardView: NSTableCellView {
 
         let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: order.action.worktreePath)
         let branch = order.action.branch.isEmpty ? order.action.project : order.action.branch
-        taskLabel.stringValue = [cachedTitle, sailor?.lastUserPrompt].compactMap { $0 }
+        taskLabel.stringValue = [currentPaneTitle, cachedTitle, sailor?.lastUserPrompt].compactMap { $0 }
             .first(where: { !$0.isEmpty }) ?? branch
 
         let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)

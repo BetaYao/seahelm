@@ -60,6 +60,20 @@ sign_app() {
   fi
 
   echo "==> Signing $APP_NAME.app with identity: $SIGN_IDENTITY"
+
+  # Sign inside-out. `--deep` does NOT cover standalone executables under
+  # Resources/ (Apple treats that directory as data, not code), and the
+  # build-phase signing of zmx is skipped here because we build with
+  # CODE_SIGNING_ALLOWED=NO. That left zmx unsigned inside an otherwise signed
+  # bundle, which notarization rejects as Invalid.
+  local nested=("$APP_PATH/Contents/Resources/bin/zmx")
+  for binary in "${nested[@]}"; do
+    if [[ -f "$binary" ]]; then
+      echo "==> Signing nested binary: ${binary#"$APP_PATH/"}"
+      codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$binary"
+    fi
+  done
+
   codesign \
     --force \
     --deep \
@@ -69,6 +83,10 @@ sign_app() {
     "$APP_PATH"
 
   codesign --verify --deep --strict "$APP_PATH"
+
+  # Catch anything still unsigned or missing the hardened runtime before we pay
+  # for a notarization round-trip.
+  codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/zmx" 2>&1 | sed 's/^/    /'
 }
 
 notarize_artifact() {
@@ -83,20 +101,36 @@ notarize_artifact() {
 
   echo "==> Notarizing $ARTIFACT_NAME"
 
+  # notarytool exits 0 even when Apple rejects the submission, so the status has
+  # to be read out of the output. Without this the script sails on to `stapler`,
+  # which fails with a generic "Error 65" that says nothing about the real cause.
+  # The rejection reason only lives in `notarytool log`, so fetch it before exiting.
+  local auth=()
   if [[ -n "$NOTARYTOOL_PROFILE" ]]; then
-    xcrun notarytool submit "$OUTPUT_PATH" --keychain-profile "$NOTARYTOOL_PROFILE" --wait
+    auth=(--keychain-profile "$NOTARYTOOL_PROFILE")
   else
     if [[ -z "$APPLE_ID" || -z "$APPLE_APP_SPECIFIC_PASSWORD" || -z "$APPLE_TEAM_ID" ]]; then
       echo "Missing notarization credentials. Set NOTARYTOOL_PROFILE or APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID." >&2
       exit 1
     fi
+    auth=(--apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID")
+  fi
 
-    xcrun notarytool submit \
-      "$OUTPUT_PATH" \
-      --apple-id "$APPLE_ID" \
-      --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-      --team-id "$APPLE_TEAM_ID" \
-      --wait
+  local submit_output
+  submit_output="$(xcrun notarytool submit "$OUTPUT_PATH" "${auth[@]}" --wait 2>&1)"
+  echo "$submit_output"
+
+  local submission_id
+  submission_id="$(printf '%s\n' "$submit_output" | awk '/^ *id: /{print $2; exit}')"
+
+  if ! printf '%s\n' "$submit_output" | grep -q "status: Accepted"; then
+    echo "==> Notarization was not accepted; fetching Apple's log" >&2
+    if [[ -n "$submission_id" ]]; then
+      xcrun notarytool log "$submission_id" "${auth[@]}" >&2 || true
+    else
+      echo "No submission id found in notarytool output" >&2
+    fi
+    exit 1
   fi
 
   echo "==> Stapling notarization ticket"

@@ -157,6 +157,12 @@ class StatusPublisher {
         preferredPaths = Set(paths)
     }
 
+    /// Force an out-of-band poll (e.g. the user just clicked a pane and the
+    /// header title would otherwise wait up to a full cycle to catch up).
+    func refreshNow() {
+        schedulePoll()
+    }
+
     private func schedulePoll() {
         // Capture surfaces snapshot under lock, then poll on background
         lock.lock()

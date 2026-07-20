@@ -153,8 +153,24 @@ class DashboardViewController: NSViewController {
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
         let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
+        // First Mate titles follow the worktree's current pane, same as the
+        // terminal chrome header.
+        vc.currentPaneTitleProvider = { [weak self] path in
+            self?.currentPaneTitle(forWorktree: path)
+        }
         return vc
     }()
+
+    /// Title of the worktree's current pane — the same `focusedId` the terminal
+    /// chrome header follows, so First Mate and the header never disagree.
+    private func currentPaneTitle(forWorktree path: String) -> String? {
+        guard let tree = stationManager?.tree(forPath: path),
+              let stationId = PaneTitleResolver.focusedStationId(in: tree),
+              let sailor = ShipLog.shared.sailors(forWorktree: path)
+                .first(where: { $0.id == stationId })
+        else { return nil }
+        return PaneTitleResolver.title(for: sailor)
+    }
 
     // Center overlay
     private var centerOverlay: CenterOverlayView?
@@ -165,7 +181,13 @@ class DashboardViewController: NSViewController {
 
     // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
     // open as a 392pt left side panel over the terminal in .worktree mode.
-    private let overviewView = DashboardOverviewView()
+    private lazy var overviewView: DashboardOverviewView = {
+        let view = DashboardOverviewView()
+        view.currentPaneTitleProvider = { [weak self] path in
+            self?.currentPaneTitle(forWorktree: path)
+        }
+        return view
+    }()
     private var firstMateSideOpen = false
     /// Which content the left side column currently shows (.none = collapsed).
     private enum SidePane { case none, firstMate, files, changes }
@@ -1547,6 +1569,13 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
         let title = URL(fileURLWithPath: path).lastPathComponent
 
+        // Images, media and QuickLook-able documents get a native viewer.
+        // Text types (including .svg / .html) fall through to the editor.
+        if let media = MediaPreviewView.make(path: path) {
+            showCenterOverlay(media, title: title)
+            return
+        }
+
         // Editable, syntax-highlighted editor for UTF-8 text; fall back to the
         // read-only placeholder for binary / oversized files.
         guard let editor = CodeEditorView(path: path) else {
@@ -1598,6 +1627,9 @@ extension Array {
 }
 
 final class DashboardOverviewView: NSView {
+
+    /// Resolves a worktree's current-pane title for order cards.
+    var currentPaneTitleProvider: ((String) -> String?)?
     var onSelectWorktree: ((String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
@@ -2288,7 +2320,8 @@ final class DashboardOverviewView: NSView {
             // The real First Mate order card, laid out horizontally.
             let card = OrderCardView()
             card.wantsLayer = true
-            card.configure(order: order) { [weak self] idx in
+            card.configure(order: order,
+                           currentPaneTitle: currentPaneTitleProvider?(order.action.worktreePath)) { [weak self] idx in
                 let opt = order.action.options?.indices.contains(idx) == true ? order.action.options![idx] : ""
                 self?.onOrderAction?(order, opt)
             }

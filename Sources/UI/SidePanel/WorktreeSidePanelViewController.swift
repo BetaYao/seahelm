@@ -17,6 +17,9 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     weak var delegate: WorktreeSidePanelDelegate?
 
+    /// Resolves a worktree's current-pane title for First Mate cards.
+    var currentPaneTitleProvider: ((String) -> String?)?
+
     private let tabBar = NSStackView()
     private let contentView = NSView()
 
@@ -262,6 +265,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     private func showFirstMateTab() {
         let vc = BridgePanelViewController()
         vc.queue = pendingOrdersQueue
+        vc.currentPaneTitleProvider = currentPaneTitleProvider
         vc.watchFeed = watchFeed
         vc.onSuggestionTapped = { [weak self] order, optionText in self?.onSuggestionTapped?(order, optionText) }
         vc.onNavigateToWorktree = { [weak self] path in self?.onBridgeNavigate?(path) }

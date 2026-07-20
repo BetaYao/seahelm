@@ -156,6 +156,34 @@ final class PaneTitleResolverTests: XCTestCase {
         XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), a)
     }
 
+    func testFocusedStationIdIsNilWithoutTree() {
+        XCTAssertNil(PaneTitleResolver.focusedStationId(in: nil))
+    }
+
+    func testFocusedStationIdTracksFocusAcrossSplit() {
+        // The "current pane" the chrome header and First Mate both follow: with
+        // several leaves it must be the focused one, not simply the first.
+        let leafA = UUID().uuidString
+        let tree = SplitTree(worktreePath: "/wt", rootLeafId: leafA, stationId: "station-a", sessionName: "")
+        let leafB = UUID().uuidString
+        _ = tree.splitFocusedLeaf(
+            axis: .vertical,
+            newLeafId: leafB,
+            newStationId: "station-b",
+            newSessionName: "s2"
+        )
+
+        tree.focusedId = leafB
+        XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), "station-b")
+
+        tree.focusedId = leafA
+        XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), "station-a")
+
+        // Stale focus id (pane closed underneath) degrades to the first leaf.
+        tree.focusedId = "gone"
+        XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), "station-a")
+    }
+
     // MARK: - Helpers
 
     private func makeSailor(

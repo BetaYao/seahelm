@@ -1778,7 +1778,10 @@ extension MainWindowController: SplitContainerDelegate {
             userInfo: ["worktreePath": worktreePath, "focusedLeafId": leafId]
         )
         // Spec: pane focus change drives `Repo · pane` in the terminal header.
+        // Paint from cached state immediately, then force a poll so a pane whose
+        // title changed since the last cycle refreshes on click rather than in ~2s.
         updateChromeTitle()
+        statusPublisher.refreshNow()
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {

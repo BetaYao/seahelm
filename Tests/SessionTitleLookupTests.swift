@@ -21,6 +21,40 @@ final class SessionTitleLookupTests: XCTestCase {
         return dir
     }
 
+    /// Transcripts are huge and the title is resolved on every pane focus change,
+    /// so results are cached — but a rewritten transcript must still win.
+    func testRereadsAfterTranscriptChanges() throws {
+        let wt = "/Users/me/repo-worktrees/cache-x"
+        let dir = projectDir(for: wt)
+        let url = dir.appendingPathComponent("sess-1.jsonl")
+
+        try #"{"type":"summary","summary":"Before"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            "Before"
+        )
+        // Cached read: same file, same answer, no reparse required.
+        XCTAssertEqual(
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            "Before"
+        )
+
+        // Rewrite with different content and a distinct mtime.
+        let newLines = [
+            #"{"type":"summary","summary":"Before"}"#,
+            #"{"type":"summary","summary":"After"}"#,
+        ].joined(separator: "\n")
+        try newLines.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: url.path
+        )
+
+        XCTAssertEqual(
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            "After"
+        )
+    }
+
     func testReturnsLastSummary() throws {
         let wt = "/Users/me/repo-worktrees/feature-x"
         let dir = projectDir(for: wt)

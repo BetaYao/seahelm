@@ -102,6 +102,17 @@ class TerminalCoordinator {
     /// isn't in the active container. When `focus` is false the previously focused
     /// pane keeps focus (the control API's `--no-focus`, for agents spawning a
     /// sibling without stealing their own cursor). Must be called on the main thread.
+    /// Announce the tree's current `focusedId` to the container delegate.
+    ///
+    /// Split/close/focus mutate `focusedId` directly instead of going through
+    /// `GhosttyNSView.becomeFirstResponder`, so `onFocusAcquired` may not fire
+    /// (notably when the view is already first responder) and title-following
+    /// UI would keep showing the previous pane. Re-announcing is idempotent.
+    private func announceFocusChange(_ container: SplitContainerView) {
+        guard let tree = container.tree, !tree.focusedId.isEmpty else { return }
+        container.delegate?.splitContainer(container, didChangeFocus: tree.focusedId)
+    }
+
     @discardableResult
     func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool, ratio: CGFloat? = nil) -> String? {
         guard let container = activeSplitContainer(),
@@ -145,6 +156,7 @@ class TerminalCoordinator {
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
+        announceFocusChange(container)
         return station.id
     }
 
@@ -312,6 +324,7 @@ class TerminalCoordinator {
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
+        announceFocusChange(container)
     }
 
     /// Close a specific pane (by station id) in the active container. Returns
@@ -336,6 +349,7 @@ class TerminalCoordinator {
         tree.focusedId = leaf.id
         container.window?.makeFirstResponder(view)
         container.layoutTree()
+        announceFocusChange(container)
         return true
     }
 
