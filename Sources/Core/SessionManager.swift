@@ -6,13 +6,13 @@ enum SessionManager {
     private static let maxSessionNameLength = 40
 
     /// Generate a stable persistent session name from a worktree path.
-    /// Format: amux-<parent>-<name>, with dots and colons replaced by underscores.
+    /// Format: seahelm-<parent>-<name>, with dots and colons replaced by underscores.
     /// Names exceeding maxSessionNameLength are truncated with a hash suffix for uniqueness.
     static func persistentSessionName(for path: String) -> String {
         let url = URL(fileURLWithPath: path)
         let parent = url.deletingLastPathComponent().lastPathComponent
         let name = url.lastPathComponent
-        let raw = "amux-\(parent)-\(name)"
+        let raw = "seahelm-\(parent)-\(name)"
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: ":", with: "_")
 
@@ -44,7 +44,7 @@ enum SessionManager {
         for layout in config.splitLayouts.values {
             names.formUnion(sessionNames(in: layout))
         }
-        return names.filter { $0.hasPrefix("amux-") }
+        return names.filter { $0.hasPrefix("seahelm-") }
     }
 
     static func parseZmxSessionNames(listOutput: String) -> [String] {
@@ -74,7 +74,7 @@ enum SessionManager {
             guard !trimmed.isEmpty else { return nil }
             let name = zmxListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
-            guard name.hasPrefix("amux-"), !activeSessionNames.contains(name) else { return nil }
+            guard name.hasPrefix("seahelm-"), !activeSessionNames.contains(name) else { return nil }
             // Only reap a session we can *positively* confirm is idle. A busy
             // daemon that misses the `zmx list` control-socket probe reports
             // `status=unreachable`/`err=…` with no `clients=` field — but a pane

@@ -9,14 +9,14 @@ final class PaneTransferTests: XCTestCase {
     func testRecordAndMatch() {
         let tracker = PendingTransferTracker()
         tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1",
-                       paneId: "amux-repo-main")
+                       paneId: "seahelm-repo-main")
 
         let result = tracker.consume(newWorktreePath: "/repo/.worktrees/feature-x")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.sourceWorktreePath, "/repo")
         XCTAssertEqual(result?.worktreeName, "feature-x")
         XCTAssertEqual(result?.sessionId, "s1")
-        XCTAssertEqual(result?.paneId, "amux-repo-main")   // carried for precise transfer
+        XCTAssertEqual(result?.paneId, "seahelm-repo-main")   // carried for precise transfer
     }
 
     func testPaneIdDefaultsNil() {

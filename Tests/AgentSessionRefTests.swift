@@ -132,10 +132,10 @@ final class AgentSessionRefTests: XCTestCase {
 
     func testConfigRoundTripCarriesAgentSessions() throws {
         var config = Config()
-        config.agentSessions["amux-repo-main"] = AgentSessionRef(agent: "claude", sessionId: uuid)
+        config.agentSessions["seahelm-repo-main"] = AgentSessionRef(agent: "claude", sessionId: uuid)
         let data = try JSONEncoder().encode(config)
         let back = try JSONDecoder().decode(Config.self, from: data)
-        XCTAssertEqual(back.agentSessions["amux-repo-main"]?.sessionId, uuid)
+        XCTAssertEqual(back.agentSessions["seahelm-repo-main"]?.sessionId, uuid)
     }
 
     func testConfigBackwardCompatMissingKey() throws {

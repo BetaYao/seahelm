@@ -47,7 +47,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/amux-signing.keychain-db"
+          KEYCHAIN_PATH="$RUNNER_TEMP/seahelm-signing.keychain-db"
           openssl base64 -d -A -out "$CERT_PATH" <<< "$APPLE_CERTIFICATE_P12"
           security create-keychain -p "" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -67,7 +67,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool store-credentials "amux-notarytool" \
+          xcrun notarytool store-credentials "seahelm-notarytool" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID"
@@ -98,7 +98,7 @@ jobs:
           RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           SIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
           ENABLE_NOTARIZATION: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && '1' || '0' }}
-          NOTARYTOOL_PROFILE: amux-notarytool
+          NOTARYTOOL_PROFILE: seahelm-notarytool
         run: ./scripts/package_release.sh
 
       - name: Upload packaged app

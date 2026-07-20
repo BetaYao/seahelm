@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seahelm
 
 final class PerformanceTests: XCTestCase {
 

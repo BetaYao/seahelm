@@ -20,10 +20,10 @@ final class ProcessProbeTests: XCTestCase {
 
     func testSessionPidParse() {
         let out = """
-          name=amux-repo-feat\tpid=4242\tclients=1\tstart_dir=/x
+          name=seahelm-repo-feat\tpid=4242\tclients=1\tstart_dir=/x
           name=other\tpid=99\tclients=0\tstart_dir=/y
         """
-        XCTAssertEqual(ProcessProbe.sessionPid(sessionName: "amux-repo-feat", zmxListOutput: out), 4242)
+        XCTAssertEqual(ProcessProbe.sessionPid(sessionName: "seahelm-repo-feat", zmxListOutput: out), 4242)
         XCTAssertNil(ProcessProbe.sessionPid(sessionName: "missing", zmxListOutput: out))
     }
 

@@ -20,7 +20,7 @@ final class StationRegistryConcurrencyTests: XCTestCase {
         StationRegistry.shared.removeAll()
         let stations: [Station] = (0..<40).map { i in
             let s = Station()
-            s.sessionName = "amux-test-\(i)"
+            s.sessionName = "seahelm-test-\(i)"
             return s
         }
 

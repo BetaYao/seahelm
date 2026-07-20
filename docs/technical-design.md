@@ -36,7 +36,7 @@
 | **Port / ReturnToPort**（入坞） | 把一个 worktree 合并回主干并回收（"返航靠岸"）。 | `ReturnToPort`, `WorktreeDeleter` |
 | **Bridge**（舰桥） | First Mate 面板 / 命令路由层。 | `BridgePanelViewController`, `BridgeCommandRouter` |
 
-> 历史遗留：早期项目名为 **amux**（后 seamux）。会话名前缀 `amux-`、配置目录迁移逻辑、部分注释仍带此名。见 §7 兼容性。
+> 历史遗留：早期项目名为 **amux**（后 seamux）。目前仅配置目录迁移逻辑（`~/.config/seamux` / `~/.config/amux` → `~/.config/seahelm`）仍带此名。会话名前缀已从 `amux-` 改为 `seahelm-`，**未做兼容**：升级后旧的 `amux-` 会话不再被识别，也不会被孤儿清理回收，需手动 `zmx kill` 处理。见 §7 兼容性。
 
 ---
 
@@ -117,10 +117,10 @@
 - `SplitContainerView`（`SplitContainerView.swift:20`）：递归按 axis/ratio 切矩形做 frame 定位，插 `DividerView` 拖拽把手，非 focused pane 加 `DimOverlayView` 暗化（hitTest 穿透）。**关键**：`layoutTree()` 把 `station.delegate` 重新指向当前容器，保证恢复的 surface 不成孤儿 pane。
 
 ### 5.4 会话后端（zmx / tmux）
-- **命名**：`amux-<parent>-<name>`（点/冒号转下划线，超 40 字符截断 + 6 位哈希）；附加 pane 加 `-<index>` 后缀。
+- **命名**：`seahelm-<parent>-<name>`（点/冒号转下划线，超 40 字符截断 + 6 位哈希）；附加 pane 加 `-<index>` 后缀。
 - **选择**：`BackendResolver` 优先 zmx（要求版本 ≥ 0.4.2），回退 tmux，再回退 local（纯 shell 无持久化）。
 - **健康检查/恢复（zmx 专属）**：attach 后 3s 检查，**仅看 attach 进程是否退出**（刻意不看 viewport 是否空，避免误杀刚起的正常 shell）；需恢复时后台强杀会话（graceful kill → 确认 → lsof 找 daemon SIGKILL → 删 socket），必要时用 agent resume 命令 reseed，再主线程重建 surface。
-- **孤儿清理**：只 reap `clients=0` 且可达的 `amux-` 会话（防误杀在用会话）。
+- **孤儿清理**：只 reap `clients=0` 且可达的 `seahelm-` 会话（防误杀在用会话）。
 - `ZmxLocator` 是 zmx 路径唯一来源（bundle 优先，dev 回退 PATH）；`TmuxChannel`/`ZmxChannel` 实现 `SailorChannel`，作为对任意 agent 的**通用回退通道**（send-keys 注入 / capture-pane 读屏）。
 
 ### 5.5 线程安全模型

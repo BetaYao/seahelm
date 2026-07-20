@@ -4,7 +4,7 @@ import XCTest
 final class LayoutNodeTests: XCTestCase {
 
     func testPaneRoundTrip() {
-        let node = LayoutNode.pane(label: "amux-repo-main", command: "claude", agent: "Claude Code", cwd: "/wt")
+        let node = LayoutNode.pane(label: "seahelm-repo-main", command: "claude", agent: "Claude Code", cwd: "/wt")
         let back = LayoutNode(dict: node.dict)
         XCTAssertEqual(back, node)
     }

@@ -5,7 +5,7 @@ final class SessionLaunchCommandTests: XCTestCase {
     func testZmxBuildsRunWithShellWrapperAndCd() {
         let cmds = SessionManager.detachedLaunchCommands(
             backend: "zmx",
-            name: "amux-repo-feat",
+            name: "seahelm-repo-feat",
             cwd: "/work/repo/feat",
             agentCommandLine: "claude 'fix bug'",
             shell: "/bin/zsh"
@@ -16,7 +16,7 @@ final class SessionLaunchCommandTests: XCTestCase {
             + " && cd '/work/repo/feat' && clear && claude 'fix bug'"
         XCTAssertEqual(
             cmds[0],
-            [ZmxLocator.executable(), "run", "amux-repo-feat", "/bin/zsh", "-lic", inner]
+            [ZmxLocator.executable(), "run", "seahelm-repo-feat", "/bin/zsh", "-lic", inner]
         )
     }
 

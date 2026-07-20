@@ -215,7 +215,7 @@ class WeChatChannel: ExternalChannel {
         request.httpMethod = "POST"
         applyHeaders(&request)
 
-        let clientId = "amux:\(Int(Date().timeIntervalSince1970 * 1000))-\(UInt32.random(in: 0...UInt32.max))"
+        let clientId = "seahelm:\(Int(Date().timeIntervalSince1970 * 1000))-\(UInt32.random(in: 0...UInt32.max))"
         let body: [String: Any] = [
             "msg": [
                 "from_user_id": "",
