@@ -22,7 +22,16 @@ enum PaneTitleResolver {
         },
         pathDisplay: (String) -> String = { shortenPath($0) }
     ) -> String {
-        // Per-session first — two agents in one tree must not share a title.
+        // The terminal's own OSC title is the only per-pane source that updates
+        // live. Everything below it is either worktree-scoped (identical for
+        // sibling agent panes, so switching panes appeared to do nothing) or
+        // only refreshed when the agent next writes — hence a title that moved
+        // on message, not on click.
+        if isAgentPane(sailor), let osc = oscTitle(for: sailor) {
+            return osc
+        }
+
+        // Per-session next — two agents in one tree must not share a title.
         if let ref = sailor.station?.agentSessionRef, ref.kind == .id,
            let title = sessionTitle(sailor.worktreePath, ref.sessionId)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -75,6 +84,30 @@ enum PaneTitleResolver {
     }
 
     // MARK: - Private
+
+    /// The pane's OSC title, stripped of the agent's leading spinner frame
+    /// (`✳`, `⠐`, `⠂`, …). The glyph changes every animation tick, so keeping it
+    /// would rewrite the header continuously. Nil when nothing usable is left,
+    /// or when the title is just the pane's directory.
+    ///
+    /// Public because the click→title fast path resolves straight from a
+    /// `Station` (no ShipLog round-trip — its snapshots trail the poll cycle).
+    static func displayOscTitle(_ raw: String?, worktreePath: String) -> String? {
+        guard let raw else { return nil }
+        let stripped = raw.drop { ch in
+            ch.isWhitespace || !(ch.isLetter || ch.isNumber || ch.isPunctuation)
+        }
+        let title = String(stripped).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        // Shells and some agents park the cwd in the title — the path fallback
+        // below already handles that, and handles it better.
+        guard title != worktreePath, title != shortenPath(worktreePath) else { return nil }
+        return title
+    }
+
+    private static func oscTitle(for sailor: SailorInfo) -> String? {
+        displayOscTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath)
+    }
 
     /// Per-pane only — a worktree-scoped agent pick must not make shell siblings
     /// skip `commandLine` (they'd fall through to branch).

@@ -216,6 +216,10 @@ class MainWindowController: NSWindowController {
             self, selector: #selector(handleNotificationHistoryDidChange(_:)),
             name: .notificationHistoryDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handlePaneDidAcquireFocus(_:)),
+            name: .paneDidAcquireFocus, object: nil
+        )
         handleNotificationHistoryDidChange(nil)
         setupIsland()
         usageSummaryStore.onUpdate = { _ in }
@@ -1361,6 +1365,18 @@ dashboard.stationManager = terminalCoordinator.stationManager
             hidden: idle.count
         )
         tabCoordinator.dashboardVC?.idleWorktreePaths = idle
+    }
+
+    /// Click→title fast path: the clicked pane's live OSC title goes straight to
+    /// the chrome header, synchronously with the focus click. The resolver path
+    /// below still runs afterwards (via the focus delegate) and repaints with the
+    /// full fallback chain, but it reads ShipLog snapshots that trail the 2s
+    /// poll — without this the title visibly lagged rapid pane switching.
+    @objc private func handlePaneDidAcquireFocus(_ note: Notification) {
+        guard let station = note.object as? Station else { return }
+        let path = tabCoordinator.selectedSailor?.worktreePath ?? ""
+        guard let title = PaneTitleResolver.displayOscTitle(station.oscTitle, worktreePath: path) else { return }
+        windowChrome?.updateTerminalTitle(repo: "", pane: title)
     }
 
     /// Drive the terminal chrome header: `Repo · pane title`.

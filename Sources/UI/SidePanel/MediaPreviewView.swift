@@ -11,29 +11,91 @@ import UniformTypeIdentifiers
 /// can't decode fall through to `FileContentView`'s placeholder.
 enum MediaPreviewView {
 
-    /// Builds a preview view for `path`, or nil when the file should not be
-    /// handled here (unknown type, or a text type that belongs in the editor).
+    /// Claims only files we positively want to render as media: images and
+    /// audio/video. Everything else returns nil and goes to the editor, which
+    /// decides by actually reading the bytes.
+    ///
+    /// This is deliberately a whitelist. Excluding text by UTType instead does
+    /// not work: `.md` is `net.daringfireball.markdown`, which conforms to
+    /// `public.data` and *not* `public.text`, and any extension no installed app
+    /// claims (`.toml`, `.lock`, …) resolves to a `dyn.*` type that conforms to
+    /// nothing. Both would be misrouted away from the editor.
     static func make(path: String) -> NSView? {
         let url = URL(fileURLWithPath: path)
         guard let type = UTType(filenameExtension: url.pathExtension) else { return nil }
 
-        // Text-ish types stay in the editor even when they render as media
-        // (.svg, .html) — editing them is more useful than viewing them.
-        guard !type.conforms(to: .text) else { return nil }
-
-        if type.conforms(to: .image) {
+        // SVG conforms to both image and text; editing it beats viewing it, and
+        // the editor already renders an HTML/markdown-style preview toggle.
+        if type.conforms(to: .image), !type.conforms(to: .text) {
             return ImagePreview(url: url)
         }
         if type.conforms(to: .audiovisualContent) {
             return MediaPlayerPreview(url: url)
         }
-        // PDF, iWork/Office documents, fonts, archives — whatever QuickLook has
-        // a generator for. It renders its own "no preview" state if it doesn't.
+        return nil
+    }
+
+    /// Last resort once the editor has refused the file (binary or oversized):
+    /// PDF, iWork/Office documents, fonts, archives — whatever QuickLook has a
+    /// generator for. Returns nil for types QuickLook can't identify, so the
+    /// caller can show its own placeholder instead of an empty QuickLook frame.
+    static func fallback(path: String) -> NSView? {
+        let url = URL(fileURLWithPath: path)
+        guard let type = UTType(filenameExtension: url.pathExtension),
+              !type.identifier.hasPrefix("dyn.") else { return nil }
         return QuickLookPreview(url: url)
     }
 }
 
 // MARK: - Image
+
+/// Borderless control-bar button that fills a rounded backing on hover, so the
+/// (deliberately oversized) hit area is visible before you click rather than
+/// only discoverable by trial.
+private final class HoverButton: NSButton {
+
+    private var hoverArea: NSTrackingArea?
+    private var isHovered = false { didSet { applyHoverBackground() } }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        // `.inVisibleRect` keeps the area correct as the control bar re-lays out.
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    /// The mouse can leave without an exit event when the overlay is dismissed
+    /// out from under the cursor; clear the state so it isn't stuck lit.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { isHovered = false }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyHoverBackground()
+    }
+
+    private func applyHoverBackground() {
+        wantsLayer = true
+        layer?.cornerRadius = 5
+        // Resolved against the current appearance each time, so the tint stays
+        // right when the terminal colour scheme flips light/dark.
+        let color: NSColor = isHovered
+            ? SemanticColors.text.withAlphaComponent(0.15)
+            : .clear
+        layer?.backgroundColor = color.cgColor
+    }
+}
 
 /// Clip view that centres the document while it is smaller than the viewport.
 /// The default behaviour pins it to the bottom-left corner. Doing this in
@@ -163,11 +225,12 @@ private final class ImagePreview: NSView {
         percentLabel.alignment = .center
 
         let stack = NSStackView(views: [
-            button("minus", action: #selector(zoomOut), tip: "Zoom out"),
+            button("minus", action: #selector(zoomOut), tip: "Zoom out (⌘−)"),
             percentLabel,
-            button("plus", action: #selector(zoomIn), tip: "Zoom in"),
-            textButton("100%", action: #selector(actualSize), tip: "Actual size"),
-            button("arrow.up.left.and.arrow.down.right", action: #selector(fitToWindow), tip: "Fit to window"),
+            button("plus", action: #selector(zoomIn), tip: "Zoom in (⌘+)"),
+            textButton("100%", action: #selector(actualSize), tip: "Actual size (⌘9)"),
+            button("arrow.up.left.and.arrow.down.right",
+                   action: #selector(fitToWindow), tip: "Fit to window (⌘0)"),
         ])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .horizontal
@@ -194,15 +257,19 @@ private final class ImagePreview: NSView {
 
     private func button(_ symbol: String, action: Selector, tip: String) -> NSButton {
         let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
+        let button = HoverButton()
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
             .withSymbolConfiguration(config)
-        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.imagePosition = .imageOnly
+        button.target = self
+        button.action = action
         return style(button, tip: tip)
     }
 
     private func textButton(_ title: String, action: Selector, tip: String) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.font = AppFont.mono(size: NSFont.smallSystemFontSize, weight: .medium)
+        let button = HoverButton()
+        button.target = self
+        button.action = action
         button.attributedTitle = NSAttributedString(
             string: title,
             attributes: [
@@ -286,6 +353,29 @@ private final class ImagePreview: NSView {
 
     private func updatePercentLabel() {
         percentLabel.stringValue = "\(Int((scrollView.magnification * 100).rounded()))%"
+    }
+
+    // MARK: Keyboard
+
+    /// `SeahelmWindow.performKeyEquivalent` runs first but falls through to
+    /// `super` for anything not in its table, which walks down to us here — so
+    /// this needs no first-responder status. Cmd+Ctrl+= (reset split ratio) is
+    /// the only nearby binding and it keeps working, since we require bare Cmd.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard naturalSize.width > 0 else { return super.performKeyEquivalent(with: event) }
+        // Shift is ignored so Cmd+Shift+= ("+") works on layouts that need it.
+        let flags = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(.shift)
+        guard flags == .command else { return super.performKeyEquivalent(with: event) }
+
+        switch event.charactersIgnoringModifiers {
+        case "=", "+": zoomIn(); return true
+        case "-": zoomOut(); return true
+        case "0": fitToWindow(); return true
+        case "9": actualSize(); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
     }
 
     // MARK: Layout

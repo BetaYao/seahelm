@@ -5,6 +5,9 @@ import UserNotifications
 extension Notification.Name {
     static let navigateToWorktree = Notification.Name("seahelm.navigateToWorktree")
     static let repoViewDidChangeFocusedPane = Notification.Name("seahelm.repoViewDidChangeFocusedPane")
+    /// Posted by `GhosttyNSView.becomeFirstResponder` with the `Station` as
+    /// object — the synchronous click→title path, independent of ShipLog polling.
+    static let paneDidAcquireFocus = Notification.Name("seahelm.paneDidAcquireFocus")
 }
 
 /// Sends macOS system notifications when agent status changes to actionable states.

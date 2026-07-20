@@ -156,6 +156,75 @@ final class PaneTitleResolverTests: XCTestCase {
         XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), a)
     }
 
+    /// Sibling agent panes in one worktree share every other title source, so
+    /// the per-pane OSC title has to win or switching panes changes nothing.
+    func testAgentPrefersOscTitleOverWorktreeSessionTitle() {
+        let station = Station()
+        station.setOscTitle("✳ 修复重启后的onboarding重复弹出")
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "old prompt", branch: "main")
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(
+                for: sailor,
+                sessionTitle: { _, _ in nil },
+                worktreeSessionTitle: { _ in "Shared Worktree Title" }
+            ),
+            "修复重启后的onboarding重复弹出"
+        )
+    }
+
+    func testOscSpinnerFramesResolveToStableTitle() {
+        // The leading glyph animates; the header must not churn with it.
+        let titles = ["✳ Update title", "⠐ Update title", "⠂ Update title", "   Update title"]
+        for raw in titles {
+            let station = Station()
+            station.setOscTitle(raw)
+            var sailor = makeSailor(agentType: .claudeCode, prompt: "p", branch: "main")
+            sailor.station = station
+            XCTAssertEqual(
+                PaneTitleResolver.title(
+                    for: sailor,
+                    sessionTitle: { _, _ in nil },
+                    worktreeSessionTitle: { _ in nil }
+                ),
+                "Update title",
+                "failed for \(raw)"
+            )
+        }
+    }
+
+    func testOscTitleIgnoredForShellAndWhenItIsJustThePath() {
+        // Shell panes keep using the command line.
+        let shellStation = Station()
+        shellStation.setOscTitle("some-shell-title")
+        var shell = makeSailor(
+            agentType: .shellCommand, prompt: "", branch: "main", commandLine: "brew update"
+        )
+        shell.station = shellStation
+        XCTAssertEqual(
+            PaneTitleResolver.title(
+                for: shell,
+                sessionTitle: { _, _ in nil },
+                worktreeSessionTitle: { _ in nil }
+            ),
+            "brew update"
+        )
+
+        // An agent parking the cwd in the title falls through to the real chain.
+        let agentStation = Station()
+        agentStation.setOscTitle("/tmp/wt")
+        var agent = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        agent.station = agentStation
+        XCTAssertEqual(
+            PaneTitleResolver.title(
+                for: agent,
+                sessionTitle: { _, _ in nil },
+                worktreeSessionTitle: { _ in nil }
+            ),
+            "feat/x"
+        )
+    }
+
     func testFocusedStationIdIsNilWithoutTree() {
         XCTAssertNil(PaneTitleResolver.focusedStationId(in: nil))
     }

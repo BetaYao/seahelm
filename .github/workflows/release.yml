@@ -10,8 +10,49 @@ permissions:
   contents: write
 
 jobs:
+  # GhosttyKit is the dominant cost of a release (~7.5 min from source) and its
+  # macOS slice is universal, so both arch jobs consume the identical artifact.
+  # Building it once here instead of inside the matrix halves that cost, and
+  # keeps the two arch jobs from racing to save the same cache key (the loser's
+  # save is silently dropped).
+  ghostty:
+    name: GhosttyKit
+    runs-on: macos-14
+    timeout-minutes: 60
+    outputs:
+      sha: ${{ steps.ghostty.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve Ghostty commit
+        id: ghostty
+        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache GhosttyKit.xcframework
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/seahelm/ghosttykit
+          key: ghosttykit-${{ steps.ghostty.outputs.sha }}
+          # A miss on the exact sha still restores the previous build, so zig
+          # reuses its intermediates instead of starting cold.
+          restore-keys: ghosttykit-
+
+      - name: Install Zig
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build GhosttyKit.xcframework
+        run: ./scripts/setup.sh
+
   build:
     name: Build ${{ matrix.arch }}
+    needs: ghostty
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
@@ -72,23 +113,28 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID"
 
-      - name: Resolve Ghostty commit
-        id: ghostty
-        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"
-
-      - name: Cache GhosttyKit.xcframework
-        uses: actions/cache@v4
+      - name: Restore GhosttyKit
+        # The `ghostty` job has already populated this key, so this is a hit.
+        # Restore-only: the arch jobs must never race to write it. Artifacts
+        # would be the obvious alternative, but upload-artifact flattens the
+        # symlinks inside an xcframework.
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/seahelm/ghosttykit
-          key: ghosttykit-${{ steps.ghostty.outputs.sha }}
+          key: ghosttykit-${{ needs.ghostty.outputs.sha }}
+          fail-on-cache-miss: true
 
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Build GhosttyKit.xcframework
+      - name: Link GhosttyKit
+        # Cache is populated, so this only symlinks it into the repo and syncs
+        # ghostty.h — no zig, no build.
         run: ./scripts/setup.sh
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ hashFiles('**/Package.resolved', 'project.yml') }}
+          restore-keys: spm-
 
       - name: Build release artifact
         env:

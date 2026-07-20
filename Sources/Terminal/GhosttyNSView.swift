@@ -291,6 +291,12 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // the old pane would still SIGWINCH and trash powerline prompts. Sync on
         // the first keypress instead (see keyDown).
         onFocusAcquired?()
+        // Click→title fast path: announce from the view itself so every host
+        // (repo tab, dashboard focus panel) hears it — `onFocusAcquired` is only
+        // wired by SplitContainerView, and the ShipLog path trails the 2s poll.
+        if let station {
+            NotificationCenter.default.post(name: .paneDidAcquireFocus, object: station)
+        }
         return super.becomeFirstResponder()
     }
 

@@ -1569,17 +1569,18 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
         let title = URL(fileURLWithPath: path).lastPathComponent
 
-        // Images, media and QuickLook-able documents get a native viewer.
-        // Text types (including .svg / .html) fall through to the editor.
+        // Images and audio/video get a native viewer. Everything else — including
+        // markdown and unregistered extensions — goes to the editor first.
         if let media = MediaPreviewView.make(path: path) {
             showCenterOverlay(media, title: title)
             return
         }
 
-        // Editable, syntax-highlighted editor for UTF-8 text; fall back to the
-        // read-only placeholder for binary / oversized files.
+        // Editable, syntax-highlighted editor for UTF-8 text; for binary /
+        // oversized files try QuickLook, then the read-only placeholder.
         guard let editor = CodeEditorView(path: path) else {
-            showCenterOverlay(FileContentView(path: path), title: title)
+            let fallback = MediaPreviewView.fallback(path: path) ?? FileContentView(path: path)
+            showCenterOverlay(fallback, title: title)
             return
         }
 
