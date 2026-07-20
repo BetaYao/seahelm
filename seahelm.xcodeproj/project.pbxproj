@@ -1326,6 +1326,7 @@
 				F03FF9473419A754054908EA /* Sources */,
 				21283461340CBF88A3E68FC9 /* Resources */,
 				B903EB00832368C62C8A20D8 /* Frameworks */,
+				05920B5863E0906DAF2B66D4 /* Mirror terminfo beside ghostty resources */,
 			);
 			buildRules = (
 			);
@@ -1436,6 +1437,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		05920B5863E0906DAF2B66D4 /* Mirror terminfo beside ghostty resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Mirror terminfo beside ghostty resources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nRES=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources\"\nrm -rf \"${RES}/terminfo\"\ncp -R \"${RES}/ghostty/terminfo\" \"${RES}/terminfo\"\n";
+		};
 		3763F5E56F6A12443B0393C2 /* Embed and sign bundled zmx */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -1846,7 +1866,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.14;
+				MARKETING_VERSION = 2.0.15;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2077,7 +2097,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.14;
+				MARKETING_VERSION = 2.0.15;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
