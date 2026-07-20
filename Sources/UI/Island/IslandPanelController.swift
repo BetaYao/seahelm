@@ -33,7 +33,12 @@ final class IslandPanelController {
             defer: false
         )
         panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = false
+        // Key status only when something actually needs text input (the command
+        // field). Buttons still fire on a single click without it. This keeps
+        // the panel from holding key while merely hovered — otherwise the next
+        // click outside is spent handing key back, and we'd have to synthesize
+        // a replacement click (which requires Accessibility authorization).
+        panel.becomesKeyOnlyIfNeeded = true
         panel.level = .statusBar
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -116,7 +121,6 @@ final class IslandPanelController {
         guard panel.isVisible else { return }
         eventOpenEngaged = false
         model.open(reason: .event)
-        panel.makeKey()
         scheduleEventAutoClose()
     }
 
@@ -286,22 +290,15 @@ final class IslandPanelController {
     private func handleMouseDown(_ location: NSPoint) {
         guard let rect = visibleContentRect() else { return }
         if model.isOpened {
-            if rect.contains(location) {
-                // Monitors run before normal dispatch — make the panel key
-                // now so the SwiftUI Button fires instead of consuming the
-                // click for key acquisition. (hitTest may route mouseDown to
-                // an internal SwiftUI subview, bypassing the hosting view's
-                // own makeKey fallback.)
-                panel?.makeKey()
-            } else {
+            if !rect.contains(location) {
+                // The panel isn't key (becomesKeyOnlyIfNeeded), so this click
+                // lands on whatever is underneath on its own — just collapse.
                 model.close()
-                repostMouseDown(at: location)
             }
         } else if rect.contains(location) {
             hoverTimer?.cancel()
             hoverTimer = nil
             model.open(reason: .click)
-            panel?.makeKey()
         }
     }
 
@@ -311,30 +308,12 @@ final class IslandPanelController {
             guard let self, !self.model.isOpened else { return }
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             self.model.open(reason: .hover)
-            self.panel?.makeKey()
             self.hoverTimer = nil
         }
         hoverTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + IslandModel.hoverOpenDelay, execute: work)
     }
 
-    /// The click that closed the island was swallowed by our monitors —
-    /// re-post it so it still lands on the app underneath.
-    private func repostMouseDown(at screenPoint: NSPoint) {
-        let flippedY = NSScreen.screens.first.map { $0.frame.height - screenPoint.y } ?? screenPoint.y
-        let position = CGPoint(x: screenPoint.x, y: flippedY)
-        guard let down = CGEvent(
-            mouseEventSource: nil, mouseType: .leftMouseDown,
-            mouseCursorPosition: position, mouseButton: .left
-        ) else { return }
-        down.post(tap: .cghidEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            CGEvent(
-                mouseEventSource: nil, mouseType: .leftMouseUp,
-                mouseCursorPosition: position, mouseButton: .left
-            )?.post(tap: .cghidEventTap)
-        }
-    }
 }
 
 // MARK: - IslandPanel
@@ -390,12 +369,6 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
         return super.hitTest(point) ?? self
     }
 
-    override func mouseDown(with event: NSEvent) {
-        // Non-activating panels aren't key when hover-opened; make key
-        // before SwiftUI sees the click so gestures fire on the first tap.
-        window?.makeKey()
-        super.mouseDown(with: event)
-    }
 }
 
 // MARK: - IslandEventMonitors

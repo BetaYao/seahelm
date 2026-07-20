@@ -43,6 +43,8 @@ struct Config: Codable {
     var enabledHookAgents: [String]
     /// Desktop notification sound: `default`, `defaultCritical`, or `none`.
     var notificationSound: String
+    /// Ask before quitting. Cleared by the alert's "Don't ask again" checkbox.
+    var confirmBeforeQuit: Bool
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -73,6 +75,7 @@ struct Config: Codable {
         case agentYolo = "agent_yolo"
         case enabledHookAgents = "enabled_hook_agents"
         case notificationSound = "notification_sound"
+        case confirmBeforeQuit = "confirm_before_quit"
     }
 
     init() {
@@ -104,6 +107,7 @@ struct Config: Codable {
         agentYolo = false
         enabledHookAgents = []
         notificationSound = "default"
+        confirmBeforeQuit = true
     }
 
     init(from decoder: Decoder) throws {
@@ -143,6 +147,7 @@ struct Config: Codable {
         agentYolo = try container.decodeIfPresent(Bool.self, forKey: .agentYolo) ?? false
         enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
+        confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser

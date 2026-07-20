@@ -173,6 +173,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Covers Cmd+Q and the menu item. The close-button path also lands here,
+        // but QuitConfirmation has already latched the answer by then.
+        return QuitConfirmation.shouldQuit(for: mainWindowController?.window) ? .terminateNow : .terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         orphanCleanupTimer?.invalidate()
         orphanCleanupTimer = nil

@@ -86,6 +86,7 @@
 		459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */; };
 		466072F2F8768C44A206D990 /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */; };
 		4670998F86598F2E5C84ACD3 /* StationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F9565C3156144526A74B08 /* StationManager.swift */; };
+		476D67C49BFE7D8093D880F3 /* QuitConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */; };
 		478A900B42820F9CAC0829BF /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = 3C22FD399E95F8A453F40C3A /* ghostty */; };
 		489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */; };
 		498DDC59CBB6DB32CB865CDC /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */; };
@@ -543,6 +544,7 @@
 		7C16AC1C12C568E0A2971C9E /* CodexSessionPromptLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSessionPromptLookup.swift; sourceTree = "<group>"; };
 		7C1D507BEBD483B978CC2DBC /* seahelm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = seahelm.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeaStoreTests.swift; sourceTree = "<group>"; };
+		7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitConfirmation.swift; sourceTree = "<group>"; };
 		7E4B1DF4150360B756C4539C /* OnboardingAgentStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAgentStepView.swift; sourceTree = "<group>"; };
 		7F2C37E0232BF78E7DCFAAC4 /* WorktreeDeleter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleter.swift; sourceTree = "<group>"; };
 		810968D6A752BC9C5B9C5F27 /* WorktreeDeleterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleterTests.swift; sourceTree = "<group>"; };
@@ -898,6 +900,7 @@
 				63F65EEAACEE71D08FEF9313 /* MainWindowController.swift */,
 				5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */,
 				B953D23003F184833FA1CFBA /* PanelCoordinator.swift */,
+				7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */,
 				777994FF5519110FAD559388 /* Region.swift */,
 				7A4DC3FC06EC4D5EFE6BFA7F /* TabCoordinator.swift */,
 				35D82D53B83B8C48E71D9E57 /* TerminalCoordinator.swift */,
@@ -1753,6 +1756,7 @@
 				DEDCDC483983AFA6EE444A63 /* ProcessProbe.swift in Sources */,
 				07D61705F36F11CF9B8CF316 /* ProcessRunner.swift in Sources */,
 				9E70B1DBD63DBC4873DC38EB /* QuickSwitcherViewController.swift in Sources */,
+				476D67C49BFE7D8093D880F3 /* QuitConfirmation.swift in Sources */,
 				DD26E727E1605031773062C1 /* Region.swift in Sources */,
 				B2CBFC70838A059CB5433714 /* RepoColor.swift in Sources */,
 				7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */,

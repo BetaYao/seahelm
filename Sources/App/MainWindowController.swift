@@ -1593,6 +1593,10 @@ extension MainWindowController: NSWindowDelegate {
     }
 
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        return QuitConfirmation.shouldQuit(for: sender)
+    }
+
     func windowWillClose(_ notification: Notification) {
         usageSummaryStore.stop()
         statusPublisher.stop()

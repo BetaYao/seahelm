@@ -151,6 +151,9 @@ class UpdateManager: NSObject, UpdateManaging {
             return
         }
 
+        // The relaunch helper is already running and will reopen the new build;
+        // a quit confirmation here would strand the user between two versions.
+        QuitConfirmation.isBypassed = true
         NSApp.terminate(nil)
     }
 

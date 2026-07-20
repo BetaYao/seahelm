@@ -51,6 +51,28 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.onboardingCompleted)
     }
 
+    // MARK: - Quit Confirmation
+
+    func testConfirmBeforeQuit_DefaultsOn() throws {
+        XCTAssertTrue(Config().confirmBeforeQuit)
+        // Existing configs predate the key, so they must opt in, not out.
+        let legacy = try JSONDecoder().decode(Config.self, from: "{}".data(using: .utf8)!)
+        XCTAssertTrue(legacy.confirmBeforeQuit)
+    }
+
+    func testConfirmBeforeQuit_SuppressionSurvivesRoundtrip() throws {
+        // What the "Don't ask again" checkbox writes must still be off after a reload.
+        var config = Config()
+        config.confirmBeforeQuit = false
+
+        let data = try JSONEncoder().encode(config)
+        let reloaded = try JSONDecoder().decode(Config.self, from: data)
+        XCTAssertFalse(reloaded.confirmBeforeQuit)
+
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("confirm_before_quit"), "must persist under its snake_case key")
+    }
+
     // MARK: - JSON Roundtrip
 
     func testEncodeDecodeRoundtrip() throws {
