@@ -645,13 +645,36 @@ class ShipLog {
     /// is the fallback. Resolving by cwd alone always picked the worktree's FIRST
     /// pane, so a suggestion raised in a split pane was attributed to — and its
     /// picked option sent into — a sibling pane.
+    ///
+    /// Pane resolution must be *stable*: a pane id that resolves to a live station
+    /// always wins, even if that pane has no `agents` entry yet — we adopt it into
+    /// the index instead. It used to require a pre-existing entry, so the same pane
+    /// resolved to itself or to the worktree's first pane depending on registration
+    /// timing. A suggestion filed under one id and the `UserPromptSubmit` that
+    /// should clear it filed under the other never matched, and the card stuck.
     func handleWebhookEvent(_ event: WebhookEvent) {
-        let paneTid = event.paneId.flatMap { StationRegistry.shared.station(forSessionName: $0)?.id }
+        let paneStation = event.paneId.flatMap { StationRegistry.shared.station(forSessionName: $0) }
+        let paneTid = paneStation?.id
         lock.lock()
         // Find the agent whose worktree path matches the event's cwd
         let matchingTIDs = worktreeIndex.first { (worktreePath, _) in
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
+        // Adopt a live-but-unregistered pane, inheriting worktree/branch/project from
+        // a sibling in the same worktree, so the guard in `ingest` doesn't drop its
+        // events. Without a sibling to inherit from we have no worktree for it and
+        // must fall back to cwd matching.
+        if let paneTid, let paneStation, agents[paneTid] == nil,
+           let sibling = matchingTIDs?.first.flatMap({ agents[$0] }) {
+            agents[paneTid] = SailorInfo(
+                id: paneTid, worktreePath: sibling.worktreePath, agentType: .unknown,
+                project: sibling.project, branch: sibling.branch, status: .unknown,
+                lastMessage: "", commandLine: nil, roundDuration: 0, startedAt: nil,
+                station: paneStation, channel: nil, taskProgress: TaskProgress())
+            worktreeIndex[sibling.worktreePath, default: []].append(paneTid)
+            if !orderedIDs.contains(paneTid) { orderedIDs.append(paneTid) }
+            NSLog("[hook] adopted unregistered pane — paneId=\(event.paneId ?? "nil") tid=\(paneTid) worktree=\(sibling.worktreePath)")
+        }
         let resolvedTid: String? = {
             if let paneTid, agents[paneTid] != nil { return paneTid }
             return matchingTIDs?.first
