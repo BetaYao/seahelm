@@ -74,6 +74,7 @@
 		3A5FD6063BF092FB51DC280A /* WorktreeGitStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */; };
 		3BB046CB910F5735999EAF2F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 23B112FAA14CF6135A4F7202 /* Assets.xcassets */; };
 		3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */; };
+		A1424D5B7D8F491EB5A3C621 /* ghostty.conf in Resources */ = {isa = PBXBuildFile; fileRef = A1424D5B7D8F491EB5A3C620 /* ghostty.conf */; };
 		3C498141117B2348743A7A3E /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */; };
 		3D646290FE05FFC7FE24794B /* StatusBarViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */; };
 		426F95A44B1C856837684FCF /* IslandPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2761438177A32EEF5CCFE031 /* IslandPanelController.swift */; };
@@ -590,6 +591,7 @@
 		A6F12DC83A838ABCF3346194 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
 		A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducerTests.swift; sourceTree = "<group>"; };
 		A94DAD757D9F452B11283244 /* Manifests */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifests; path = Resources/Manifests; sourceTree = SOURCE_ROOT; };
+		A1424D5B7D8F491EB5A3C620 /* ghostty.conf */ = {isa = PBXFileReference; lastKnownFileType = text; path = Resources/ghostty.conf; sourceTree = SOURCE_ROOT; };
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManifest.swift; sourceTree = "<group>"; };
@@ -1204,6 +1206,7 @@
 			children = (
 				23B112FAA14CF6135A4F7202 /* Assets.xcassets */,
 				3C22FD399E95F8A453F40C3A /* ghostty */,
+				A1424D5B7D8F491EB5A3C620 /* ghostty.conf */,
 				E02B47C1F399F29F6BDC084B /* ghostty.h */,
 				36D5F3B1BC616505486ACBA0 /* licenses */,
 				A94DAD757D9F452B11283244 /* Manifests */,
@@ -1416,6 +1419,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3BB046CB910F5735999EAF2F /* Assets.xcassets in Resources */,
+				A1424D5B7D8F491EB5A3C621 /* ghostty.conf in Resources */,
 				89C41D7167472A785EA66D4F /* JetBrainsMono-Bold.ttf in Resources */,
 				756AC63650FCD59FB6D44243 /* JetBrainsMono-Medium.ttf in Resources */,
 				346BF50E3F02C947F8D62DB5 /* JetBrainsMono-Regular.ttf in Resources */,
