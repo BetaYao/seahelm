@@ -30,6 +30,20 @@ struct WorktreeGroupingItem: Equatable {
     let creationDate: Date
 }
 
+extension SailorDisplayInfo {
+    func groupingItem(creationDate: Date) -> WorktreeGroupingItem {
+        WorktreeGroupingItem(
+            id: id,
+            path: worktreePath,
+            repository: project,
+            status: SailorStatus.highestPriority(paneStatuses),
+            lastActivityAt: lastActivityAt,
+            isMainWorktree: isMainWorktree,
+            creationDate: creationDate
+        )
+    }
+}
+
 struct WorktreeGroup: Equatable {
     let id: WorktreeGroupID
     let title: String

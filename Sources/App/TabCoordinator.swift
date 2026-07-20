@@ -380,6 +380,7 @@ class TabCoordinator {
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents,
                 lastActivityAge: lastActivityAge,
+                lastActivityAt: lastActivity,
                 gitStats: gitStats,
                 currentPaneTitle: currentPaneTitle,
                 currentPaneRunTime: currentPaneRunTime

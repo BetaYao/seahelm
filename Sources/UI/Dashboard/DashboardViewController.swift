@@ -36,6 +36,7 @@ struct SailorDisplayInfo {
     let tasks: [TaskItem]              // webhook-tracked task items
     let activityEvents: [ActivityEvent]
     let lastActivityAge: String        // "3m"/"2h" since last real activity ("" if unknown)
+    let lastActivityAt: Date?
     let gitStats: WorktreeGitStats?    // diff size + ahead/behind (nil until first resolve)
     /// Focused (last-selected) pane title for First Mate fleet rows.
     let currentPaneTitle: String
