@@ -58,6 +58,7 @@
 		2BC7A5243BDCCBADED457B44 /* SplitContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF31BD8D110A45D923D8B7D /* SplitContainerView.swift */; };
 		2C2802EE819E3CFE15765F18 /* WebhookStatusProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D1A230FCEF8663316AD13F /* WebhookStatusProviderTests.swift */; };
 		2CE3679CE395A49CDD452CEB /* FuzzyMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */; };
+		2D473084E59DC7776E010F78 /* WorktreeGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448BBAB293764647E8FDB894 /* WorktreeGroupingTests.swift */; };
 		2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D815BD3789070197196037 /* CodexHooksSetupTests.swift */; };
 		2F5B5EC7F0428265CC344717 /* CodexHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A51B009382FE3586E735355D /* CodexHooksSetup.swift */; };
 		303FCEA37D46939EB9451358 /* WorktreeCreatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */; };
@@ -164,6 +165,7 @@
 		8579DC09CEA0D01A125D5273 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */; };
 		859DBEFE2BAE0BA0C975FD3E /* TaskProgressParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */; };
 		865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401A403F90AAF10933AC1869 /* WeComFrameParser.swift */; };
+		86EB2D1A015733623B873AA9 /* WorktreeGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */; };
 		88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19639EE57241F8A021EBD2 /* PaneStatus.swift */; };
 		88FC5A9FA39ABA172ED4FAD7 /* SessionLaunchCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */; };
 		89A6025BEEB8CC143CD40664 /* AgentManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */; };
@@ -396,6 +398,7 @@
 		1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewController.swift; sourceTree = "<group>"; };
 		1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorDisplayHelpers.swift; sourceTree = "<group>"; };
 		201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSessionTitleLookupTests.swift; sourceTree = "<group>"; };
+		20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGrouping.swift; sourceTree = "<group>"; };
 		20D815BD3789070197196037 /* CodexHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetupTests.swift; sourceTree = "<group>"; };
 		20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmUITestCase.swift; sourceTree = "<group>"; };
 		20E7934A548F91E1E9FB161C /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
@@ -456,6 +459,7 @@
 		42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewControllerClickTests.swift; sourceTree = "<group>"; };
 		42F821C1D0FA64C98C0E1E1B /* StatusBarModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarModeTests.swift; sourceTree = "<group>"; };
 		446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommandRouterTests.swift; sourceTree = "<group>"; };
+		448BBAB293764647E8FDB894 /* WorktreeGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGroupingTests.swift; sourceTree = "<group>"; };
 		46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoderTests.swift; sourceTree = "<group>"; };
 		472ACEFBD0F23747FC60EB0D /* TerminalHeaderViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalHeaderViewTests.swift; sourceTree = "<group>"; };
 		4775959C72857610AC1F12DC /* WorktreeStatusAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusAggregator.swift; sourceTree = "<group>"; };
@@ -1148,6 +1152,7 @@
 				3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */,
 				810968D6A752BC9C5B9C5F27 /* WorktreeDeleterTests.swift */,
 				22DBAC51DE05D73135AD2889 /* WorktreeDiscoveryTests.swift */,
+				448BBAB293764647E8FDB894 /* WorktreeGroupingTests.swift */,
 				4C97F6C22C29552377720F4D /* WorktreePathNavigationTests.swift */,
 				63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */,
 				517E6B353B84EA6AE224E0C1 /* WorktreeStatusAggregatorTests.swift */,
@@ -1168,6 +1173,7 @@
 				1320CBDF38D301E85655F40B /* InlineWorktreeCreateView.swift */,
 				78D1BBB07A2822E90114369F /* OverviewFocusModel.swift */,
 				3B2A81A9280FBAAA13232BAF /* RepoColor.swift */,
+				20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -1592,6 +1598,7 @@
 				303FCEA37D46939EB9451358 /* WorktreeCreatorTests.swift in Sources */,
 				BAC8750B961A40953BC4841F /* WorktreeDeleterTests.swift in Sources */,
 				02D9F0D1B7092AAE247A22A1 /* WorktreeDiscoveryTests.swift in Sources */,
+				2D473084E59DC7776E010F78 /* WorktreeGroupingTests.swift in Sources */,
 				80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */,
 				E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */,
 				C444DD64D874C76934185DD6 /* WorktreeStatusAggregatorTests.swift in Sources */,
@@ -1803,6 +1810,7 @@
 				D27F424356DE8B506B1C7C05 /* WorktreeDeleter.swift in Sources */,
 				56D7FA05EEF91495A4DCED81 /* WorktreeDiscovery.swift in Sources */,
 				3A5FD6063BF092FB51DC280A /* WorktreeGitStats.swift in Sources */,
+				86EB2D1A015733623B873AA9 /* WorktreeGrouping.swift in Sources */,
 				C33A3CB170F8BA3BB37273E5 /* WorktreePathNavigation.swift in Sources */,
 				37BE597E2E04BAF208D95E3D /* WorktreeSailorTypeStore.swift in Sources */,
 				75772A087B197B7F7050BC43 /* WorktreeShellActions.swift in Sources */,
