@@ -58,23 +58,15 @@ struct SailorDisplayInfo {
 
 // MARK: - DashboardViewController
 
-class DashboardViewController: NSViewController, SailorCardDelegate {
+class DashboardViewController: NSViewController {
     enum LayoutMetrics {
         static let focusPanelCornerRadius: CGFloat = 10
         static let containerHorizontalInset: CGFloat = 0
         static let containerBottomInset: CGFloat = 0
-        static let leftRightSidebarTrailingInset: CGFloat = 8
         static let leftColumnWidth: CGFloat = 300
         static let columnSpacing: CGFloat = 8
 
         static let leftRightFocusMaskedCorners: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-    }
-
-    private struct FocusLayoutRefs {
-        let focusPanel: FocusPanelView
-        let scrollView: NSScrollView
-        let stack: NSStackView
-        var miniCards: [StackedMiniCardContainerView]
     }
 
     weak var dashboardDelegate: DashboardDelegate?
@@ -126,7 +118,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     /// Worktree paths idle > 8h — collapsed under the expander in the popover list.
     var idleWorktreePaths: Set<String> = []
-    private var worktreeIdleExpanded = false
 
     var selectedSailorIndex: Int {
         agents.firstIndex(where: { $0.id == selectedSailorId }) ?? 0
@@ -146,9 +137,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     // Left-Right layout
     private let leftRightContainer = NSView()
     private let leftRightFocusPanel = FocusPanelView()
-    private let leftRightSidebarScroll = NonFirstResponderScrollView()
-    private let leftRightSidebarStack = FlippedStackView()
-    private var leftRightMiniCards: [StackedMiniCardContainerView] = []
     // The inline worktree creator is no longer shown (the cockpit `/new` command
     // replaces it); the object is kept only so the existing setup/report wiring
     // in MainWindowController still compiles.
@@ -223,7 +211,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
         setupLeftRightLayout()
         setupEmptyState()
-        sidePanelVC.worktreesTabView = leftRightSidebarScroll
 
         // Content hosts are live once chrome mounts them; empty state starts hidden.
         leftRightContainer.isHidden = false
@@ -233,6 +220,11 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         // pushing the terminal right — not a floating overlay).
         overviewView.onSelectWorktree = { [weak self] path in
             self?.handleWorktreeRowClick(path: path)
+        }
+        // Row context menu → the delegate's confirm-and-tear-down path.
+        overviewView.onDeleteWorktree = { [weak self] path in
+            guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
+            self.dashboardDelegate?.dashboardDidRequestDelete(agent.id)
         }
         // Nav-ring ↔ command-field hand-off (see OverviewFocusModel).
         overviewView.onCommandArrowUpAtEmpty = { [weak self] in
@@ -342,8 +334,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         if structureChanged {
             rebuildFocusLayout()
         } else {
-            updateFocusLayoutInPlace(agents, miniCards: focusLayoutRefs.miniCards, focusPanel: focusLayoutRefs.focusPanel,
-                                     changedWorktreePath: changedWorktreePath)
+            reembedSplitContainerIfDetached()
         }
         syncSidePanelToSelection()
     }
@@ -353,45 +344,13 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         sidePanelVC.setWorktree(path)
     }
 
-    private func updateFocusLayoutInPlace(_ sorted: [SailorDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView,
-                                          changedWorktreePath: String? = nil) {
-        // Count mismatch means structure changed — handled by structureChanged check in updateSailors
-        guard sorted.count == miniCards.count else { return }
-
-        // Re-embed split container if it was detached (e.g. after tab switch),
-        // but only when the dashboard is actually visible.
-        // Skip if a terminal already has focus — avoids stealing focus during
-        // periodic updates (branch refresh, status polling).
+    /// Re-embed the split container if it was detached (e.g. after a tab switch),
+    /// but only when the dashboard is visible and no terminal already holds focus
+    /// (avoids stealing focus during periodic status/branch refreshes).
+    private func reembedSplitContainerIfDetached() {
         if activeSplitContainer == nil, view.window != nil,
            !(view.window?.firstResponder is GhosttyNSView) {
             embedSplitContainerForSelectedSailor()
-        }
-        for (index, agent) in sorted.enumerated() {
-            // Selection highlight is cheap and may change for any card; the full
-            // reconfigure below is not — skip cards the caller says didn't change.
-            miniCards[index].isSelected = (agent.id == selectedSailorId)
-            if let changed = changedWorktreePath, agent.worktreePath != changed { continue }
-            miniCards[index].configure(paneCount: agent.paneCount)
-            miniCards[index].layoutChildren()
-            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
-            miniCards[index].miniCardView.configure(
-                id: agent.id,
-                project: agent.project,
-                thread: agent.thread,
-                status: agent.status,
-                lastMessage: agent.lastMessage,
-                lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
-                totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration,
-                lastActivityAge: agent.lastActivityAge,
-                gitStats: agent.gitStats,
-                paneStatuses: agent.paneStatuses,
-                isMainWorktree: agent.isMainWorktree,
-                tasks: agent.tasks,
-                activityEvents: agent.activityEvents,
-                agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                    ?? ShipLog.shared.sailor(forWorktree: agent.worktreePath)?.agentType ?? .unknown
-            )
         }
     }
 
@@ -419,7 +378,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         selectedSailorId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: focusTerminal)
-        updateMiniCardSelection()
         syncSidePanelToSelection()
     }
 
@@ -601,15 +559,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         onRequestSetChromeCollapsed?(false)
     }
 
-    /// Open the global Worktrees tab in the left sidebar: refresh the card list,
-    /// select the tab, and expand the column if collapsed. Replaces the old
-    /// floating worktree popover.
-    func openWorktreesTab() {
-        populateWorktreeCards()
-        sidePanelVC.selectTab(.worktrees)
-        expandLeftColumnIfCollapsed()
-    }
-
     /// Fleet status line was removed with the left bottom bar; kept as a no-op so
     /// the existing caller compiles. (Could move into the status bar later.)
     func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {}
@@ -670,10 +619,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     // MARK: - Layout
 
-    private var focusLayoutRefs: FocusLayoutRefs {
-        FocusLayoutRefs(focusPanel: leftRightFocusPanel, scrollView: leftRightSidebarScroll, stack: leftRightSidebarStack, miniCards: leftRightMiniCards)
-    }
-
     private func rebuildFocusLayout() {
         if let selected = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first {
             selectedSailorId = selected.id
@@ -683,90 +628,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
                 embedSplitContainerForSelectedSailor()
             }
         }
-        populateWorktreeCards()
-    }
-
-    /// Build the worktree mini-card list (shown in the sidebar's Worktrees tab).
-    /// Idle worktrees (in `idleWorktreePaths`) collapse below a "N hidden" expander row.
-    private func populateWorktreeCards() {
-        let refs = focusLayoutRefs
-        refs.miniCards.forEach { $0.removeFromSuperview() }
-        refs.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        guard !agents.isEmpty else { leftRightMiniCards = []; return }
-
-        // One card per agent, kept parallel to `agents` for in-place updates.
-        // Cards are width-pinned to the stack in addToSidebar (after they're added).
-        let cards = agents.map { makeMiniCard(for: $0) }
-        leftRightMiniCards = cards
-
-        let activeCards = zip(agents, cards).filter { !idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
-        let idleCards = zip(agents, cards).filter { idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
-
-        activeCards.forEach { addToSidebar($0, stack: refs.stack) }
-        if !idleCards.isEmpty {
-            addToSidebar(makeIdleExpanderRow(hiddenCount: idleCards.count), stack: refs.stack)
-            if worktreeIdleExpanded {
-                idleCards.forEach { addToSidebar($0, stack: refs.stack) }
-            }
-        }
-    }
-
-    /// Add a row to the sidebar stack and pin its width to the stack. The width
-    /// constraint can only be activated once both views share the stack as a
-    /// common ancestor, so it must happen after `addArrangedSubview`.
-    private func addToSidebar(_ view: NSView, stack: NSStackView) {
-        stack.addArrangedSubview(view)
-        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-    }
-
-    private func makeMiniCard(for agent: SailorDisplayInfo) -> StackedMiniCardContainerView {
-        let container = StackedMiniCardContainerView()
-        container.delegate = self
-        container.reorderDelegate = self
-        container.configure(paneCount: agent.paneCount)
-        WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
-        container.miniCardView.configure(
-            id: agent.id, project: agent.project, thread: agent.thread,
-            status: agent.status, lastMessage: agent.lastMessage,
-            lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
-            totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
-            lastActivityAge: agent.lastActivityAge, gitStats: agent.gitStats,
-            paneStatuses: agent.paneStatuses,
-            isMainWorktree: agent.isMainWorktree,
-            tasks: agent.tasks,
-            activityEvents: agent.activityEvents,
-            agentType: WorktreeSailorTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                ?? ShipLog.shared.sailor(forWorktree: agent.worktreePath)?.agentType ?? .unknown
-        )
-        container.isSelected = (agent.id == selectedSailorId)
-        container.translatesAutoresizingMaskIntoConstraints = false
-        // Width is pinned to the stack once the card is added to it (see
-        // pinToSidebarWidth) — activating it here would have no common ancestor.
-        container.heightAnchor.constraint(equalToConstant: 84).isActive = true
-        return container
-    }
-
-    private func makeIdleExpanderRow(hiddenCount: Int) -> NSView {
-        let title = worktreeIdleExpanded
-            ? "▾ Hide \(hiddenCount) idle"
-            : "▸ \(hiddenCount) idle worktree\(hiddenCount == 1 ? "" : "s")"
-        let btn = NSButton(title: title, target: self, action: #selector(toggleWorktreeIdleExpanded))
-        btn.isBordered = false
-        btn.bezelStyle = .recessed
-        btn.contentTintColor = Theme.textSecondary
-        btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        btn.alignment = .left
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.setAccessibilityIdentifier("worktree.idleExpander")
-        // Width is pinned once added to the stack (see pinToSidebarWidth).
-        btn.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        return btn
-    }
-
-    @objc private func toggleWorktreeIdleExpanded() {
-        worktreeIdleExpanded.toggle()
-        populateWorktreeCards()
     }
 
     // MARK: - Setup: Empty State
@@ -923,19 +784,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         navigatorHostView.setAccessibilityIdentifier("dashboard.leftColumn")
 
         // Worktree list (handed to the sidebar's Worktrees tab as worktreesTabView).
-        leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
-        leftRightSidebarScroll.hasVerticalScroller = true
-        leftRightSidebarScroll.scrollerStyle = .overlay
-        leftRightSidebarScroll.drawsBackground = false
-        leftRightSidebarScroll.borderType = .noBorder
 
-        leftRightSidebarStack.orientation = .vertical
-        leftRightSidebarStack.spacing = 8
-        leftRightSidebarStack.alignment = .leading
-        leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
-        leftRightSidebarScroll.documentView = leftRightSidebarStack
-        leftRightSidebarStack.widthAnchor.constraint(
-            equalTo: leftRightSidebarScroll.contentView.widthAnchor).isActive = true
 
         addChild(sidePanelVC)
         sidePanelVC.view.translatesAutoresizingMaskIntoConstraints = false
@@ -1010,7 +859,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
     /// VC as first responder so arrow keys keep driving the nav ring.
     func embedSplitContainerForSelectedSailor(focusTerminal: Bool = true) {
-        let container = focusLayoutRefs.focusPanel.terminalContainer
+        let container = leftRightFocusPanel.terminalContainer
 
         guard let agent = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
@@ -1212,32 +1061,25 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
 
     private func applyKeyboardFocusVisuals() {
         clearKeyboardFocusVisuals()
-        let refs = focusLayoutRefs
         switch focusController.focusedTarget {
         case .none: return
         case .bigPanel:
-            refs.focusPanel.isKeyboardFocused = true
-        case .card(let agentId):
-            refs.miniCards.first(where: { $0.agentId == agentId })?.miniCardView.isKeyboardFocused = true
+            leftRightFocusPanel.isKeyboardFocused = true
+        case .card:
+            break
         }
     }
 
     private func clearKeyboardFocusVisuals() {
-        let refs = focusLayoutRefs
-        refs.focusPanel.isKeyboardFocused = false
-        refs.miniCards.forEach { $0.miniCardView.isKeyboardFocused = false }
+        leftRightFocusPanel.isKeyboardFocused = false
     }
 
     private func applyDimOverlayIfNeeded() {
-        let refs = focusLayoutRefs
-        refs.focusPanel.showDimOverlay(opacity: 0.05)
-        refs.miniCards.forEach { $0.miniCardView.showDimOverlay(opacity: 0.05) }
+        leftRightFocusPanel.showDimOverlay(opacity: 0.05)
     }
 
     private func clearDimOverlay() {
-        let refs = focusLayoutRefs
-        refs.focusPanel.hideDimOverlay()
-        refs.miniCards.forEach { $0.miniCardView.hideDimOverlay() }
+        leftRightFocusPanel.hideDimOverlay()
     }
 
     // MARK: - D-state key handling
@@ -1419,6 +1261,9 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     /// - mode 2, clicking the *selected* row: no-op (sidebar stays open)
     /// - mode 3: drill into the clicked worktree's terminal
     /// Keyboard ⏎/→ still advances split → terminal via `commitFocusedWorktreeForward`.
+    /// Test seam for the row-click path (the click itself arrives via a closure).
+    func handleWorktreeRowClickForTesting(path: String) { handleWorktreeRowClick(path: path) }
+
     private func handleWorktreeRowClick(path: String) {
         guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
             // Not a fleet row (orders card path, stale list) — drill in as before.
@@ -1508,7 +1353,6 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         selectedSailorId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: false)
-        updateMiniCardSelection()
         syncSidePanelToSelection()
     }
 
@@ -1602,11 +1446,7 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
     }
 
     private func scrollFocusedIntoView() {
-        guard case .card(let agentId) = focusController.focusedTarget else { return }
-        let refs = focusLayoutRefs
-        if let card = refs.miniCards.first(where: { $0.agentId == agentId }) {
-            card.scrollToVisible(card.bounds)
-        }
+        guard case .card = focusController.focusedTarget else { return }
     }
 
     /// In focus layouts, live-preview the focused mini card in the main panel as the
@@ -1620,60 +1460,12 @@ class DashboardViewController: NSViewController, SailorCardDelegate {
         selectedSailorId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: false)
-        updateMiniCardSelection()
         // Re-assert nav visuals: embedding mutated the panel's subviews.
         applyKeyboardFocusVisuals()
         applyDimOverlayIfNeeded()
     }
 
-    // MARK: - SailorCardDelegate
 
-    func agentCardClicked(agentId: String) {
-        // Mouse click exits D-state — mouse takes over from keyboard.
-        if isInDState {
-            exitDashboardNavigation(restoreSnapshot: false)
-        }
-        // Close any open file/diff overlay so the terminal is shown.
-        dismissCenterOverlay()
-        // Click selects agent and embeds its split container
-        detachTerminals()
-        selectedSailorId = agentId
-        embedSplitContainerForSelectedSailor()
-        updateMiniCardSelection()
-        syncSidePanelToSelection()
-        dashboardDelegate?.dashboardDidChangeSelection(self)
-    }
-
-    func agentCardDoubleClicked(agentId: String) {
-        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
-        dashboardDelegate?.dashboardDidSelectProject(agent.project, thread: agent.thread)
-    }
-
-    func agentCardDidRequestDelete(agentId: String) {
-        dashboardDelegate?.dashboardDidRequestDelete(agentId)
-    }
-
-    func agentCardDidRequestCloseRepo(agentId: String) {
-        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
-        dashboardDelegate?.dashboardDidRequestCloseRepo(agent.project)
-    }
-
-    func agentCardDidRequestBrowseFiles(agentId: String) {
-        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
-        dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
-    }
-
-    func agentCardDidRequestShowChanges(agentId: String) {
-        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
-        dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
-    }
-
-    private func updateMiniCardSelection() {
-        let refs = focusLayoutRefs
-        for card in refs.miniCards {
-            card.isSelected = (card.agentId == selectedSailorId)
-        }
-    }
 }
 
 // MARK: - Dashboard Root View (resolves bg color via updateLayer)
@@ -1687,32 +1479,8 @@ private class DashboardRootView: NSView {
     }
 }
 
-extension DashboardViewController: MiniCardReorderDelegate {
-    func miniCardReorderBegan(_ card: StackedMiniCardContainerView) {
-        // No-op — visual lift handled by the card itself
-    }
+extension DashboardViewController {
 
-    func miniCardReorderEnded(_ card: StackedMiniCardContainerView) {
-        let refs = focusLayoutRefs
-        // Read the new order from the stack's arrangedSubviews
-        let newOrder = refs.stack.arrangedSubviews.compactMap { ($0 as? StackedMiniCardContainerView)?.agentId }
-        guard newOrder.count == agents.count else { return }
-
-        // Rebuild agents in the new order
-        var reordered: [SailorDisplayInfo] = []
-        for id in newOrder {
-            if let agent = agents.first(where: { $0.id == id }) {
-                reordered.append(agent)
-            }
-        }
-        agents = reordered
-
-        // Sync the stored miniCards array to match the new stack order
-        leftRightMiniCards = refs.stack.arrangedSubviews.compactMap { $0 as? StackedMiniCardContainerView }
-
-        // Persist — pass worktree paths directly to avoid ID→ShipLog lookup failures
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
-    }
 
     // MARK: - Center Overlay
 
@@ -1826,6 +1594,7 @@ extension Array {
 
 final class DashboardOverviewView: NSView {
     var onSelectWorktree: ((String) -> Void)?
+    var onDeleteWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
     /// A card's primary/secondary button was tapped. `optionText` is the chosen
     /// option label (or "" for a plain approve).
@@ -2334,6 +2103,7 @@ final class DashboardOverviewView: NSView {
                 let row = RowView(sailor: item, status: status,
                                   selected: item.id == self.selectedId)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
+                row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((item.id, item.worktreePath))
@@ -2440,6 +2210,7 @@ final class DashboardOverviewView: NSView {
     /// Title and branch share a text column so their leading edges align.
     private final class RowView: NSView {
         var onTap: ((String) -> Void)?
+        var onDelete: ((String) -> Void)?
         private let path: String
         private let selected: Bool
 
@@ -2580,6 +2351,41 @@ final class DashboardOverviewView: NSView {
         }
 
         override func mouseDown(with event: NSEvent) { onTap?(path) }
+
+        // MARK: - Context menu
+
+        override func menu(for event: NSEvent) -> NSMenu? {
+            let menu = NSMenu()
+            for (title, action) in [
+                ("Open in Editor", #selector(openInEditorAction)),
+                ("Reveal in Finder", #selector(revealInFinderAction)),
+                ("Copy Path", #selector(copyPathAction)),
+            ] {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+            let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteAction), keyEquivalent: "")
+            deleteItem.target = self
+            menu.addItem(deleteItem)
+            return menu
+        }
+
+        @objc private func openInEditorAction() {
+            if !WorktreeShellActions.openInEditor(path) {
+                let alert = NSAlert()
+                alert.messageText = "No supported editor found"
+                alert.informativeText = "Install VS Code, Cursor, Zed, or Xcode to use Open in Editor."
+                alert.runModal()
+            }
+        }
+
+        @objc private func revealInFinderAction() { WorktreeShellActions.revealInFinder(path) }
+
+        @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
+
+        @objc private func deleteAction() { onDelete?(path) }
 
         private var tracking: NSTrackingArea?
         override func updateTrackingAreas() {

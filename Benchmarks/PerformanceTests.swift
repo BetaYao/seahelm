@@ -22,39 +22,6 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
-    // MARK: - Test 2: MiniCardView creation + constraint activation (simulates rebuildLeftRight)
-
-    func testMiniCardRebuildPerformance() {
-        measure {
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.spacing = 8
-            stack.translatesAutoresizingMaskIntoConstraints = false
-
-            for i in 0..<20 {
-                let card = MiniCardView()
-                card.configure(
-                    id: "/path/to/worktree/\(i)",
-                    project: "my-project",
-                    thread: "feature-branch-\(i)",
-                    status: ["running", "waiting", "idle", "error"][i % 4],
-                    lastMessage: "Some agent output message line \(i)",
-                    totalDuration: "00:45:12",
-                    roundDuration: "00:02:30"
-                )
-                card.translatesAutoresizingMaskIntoConstraints = false
-                stack.addArrangedSubview(card)
-
-                NSLayoutConstraint.activate([
-                    card.widthAnchor.constraint(equalToConstant: 200),
-                ])
-            }
-
-            // Simulate what happens: destroy everything (like rebuildLeftRight does)
-            stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        }
-    }
-
     // MARK: - Test 3: SemanticColors allocation overhead
 
     func testSemanticColorsAllocationPerformance() {

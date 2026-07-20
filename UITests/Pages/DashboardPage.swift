@@ -17,11 +17,7 @@ class DashboardPage {
     var cards: XCUIElementQuery {
         app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'dashboard.card.'"))
     }
-    var miniCards: XCUIElementQuery {
-        app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'dashboard.miniCard.'"))
-    }
 
     func tapCard(id: String) { app.groups["dashboard.card.\(id)"].waitAndClick() }
-    func tapMiniCard(id: String) { app.groups["dashboard.miniCard.\(id)"].waitAndClick() }
     func tapEnterProject() { enterProjectButton.waitAndClick() }
 }

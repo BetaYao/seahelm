@@ -11,8 +11,16 @@ packages:
   CodeEditSourceEditor:
     url: https://github.com/CodeEditApp/CodeEditSourceEditor
     exactVersion: 0.15.2
+  # Fork of CodeEditApp/CodeEditLanguages that links only the tree-sitter grammars
+  # this app needs. Upstream's CodeLanguage.tsLanguage switch names all ~50, which
+  # pulls every member of the static grammar archive into the binary — 95.7 MB of a
+  # 138 MB release build. The fork returns nil for 12 unused languages (they still
+  # render, as plain text); everything else is untouched.
+  #
+  # Tagged 0.1.20 on the fork because CodeEditSourceEditor pins that version exactly,
+  # and SPM resolves both to the same package identity.
   CodeEditLanguages:
-    url: https://github.com/CodeEditApp/CodeEditLanguages
+    url: https://github.com/BetaYao/CodeEditLanguages
     exactVersion: 0.1.20
 
 targets:
@@ -113,6 +121,16 @@ targets:
           - UniformTypeIdentifiers
           - "-framework"
           - Carbon
+      configs:
+        Release:
+          # package_release.sh runs `xcodebuild build`, not `install`, so Xcode's
+          # default STRIP_INSTALLED_PRODUCT never fires and the shipped binary kept
+          # its full symbol table — 14 MB of the zip. Strip explicitly instead.
+          # non-global keeps exported symbols, so crash reports still symbolicate
+          # against the linked frameworks.
+          DEPLOYMENT_POSTPROCESSING: YES
+          STRIP_INSTALLED_PRODUCT: YES
+          STRIP_STYLE: non-global
 
   seahelmTests:
     type: bundle.unit-test

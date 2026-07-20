@@ -3,66 +3,28 @@ import XCTest
 
 final class DashboardViewControllerClickTests: XCTestCase {
 
-    // MARK: - Single-click
+    // MARK: - Row click
 
-    func testSingleClickUpdatesSelectedSailorId() {
-        let vc = DashboardViewController()
-        vc.agentCardClicked(agentId: "agent-1")
-        XCTAssertEqual(vc.selectedSailorId, "agent-1")
-    }
-
-    func testSingleClickDoesNotCallDelegate() {
+    func testRowClickOnUnknownPathDoesNotCallSelectProject() {
         let vc = DashboardViewController()
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
-        vc.agentCardClicked(agentId: "agent-1")
+        vc.loadViewIfNeeded()
+        vc.handleWorktreeRowClickForTesting(path: "/nonexistent")
         XCTAssertFalse(spy.didSelectProjectCalled,
-                       "Single click must not call dashboardDidSelectProject")
+                       "A row click must not call dashboardDidSelectProject")
     }
 
-    // MARK: - Double-click on unknown agentId (guard path)
-
-    func testDoubleClickWithUnknownSailorIdIsNoop() {
+    func testRowClickSelectsThatWorktree() {
         let vc = DashboardViewController()
-        let spy = DashboardDelegateSpy()
-        vc.dashboardDelegate = spy
-        vc.agentCardDoubleClicked(agentId: "nonexistent")
-        XCTAssertFalse(spy.didSelectProjectCalled,
-                       "Double click on unknown agentId must not call delegate")
-    }
-
-    func testBrowseFilesRequestUsesRightClickedAgentWorktreePath() {
-        let vc = DashboardViewController()
-        let spy = DashboardDelegateSpy()
-        vc.dashboardDelegate = spy
+        vc.dashboardDelegate = DashboardDelegateSpy()
         vc.loadViewIfNeeded()
         vc.updateSailors([
             makeSailor(id: "agent-a", worktreePath: "/repo/a"),
             makeSailor(id: "agent-b", worktreePath: "/repo/b"),
         ])
-        vc.agentCardClicked(agentId: "agent-a")
-
-        vc.agentCardDidRequestBrowseFiles(agentId: "agent-b")
-
-        XCTAssertEqual(spy.browsePath, "/repo/b")
-        XCTAssertNil(spy.changesPath)
-    }
-
-    func testShowChangesRequestUsesRightClickedSailorWorktreePath() {
-        let vc = DashboardViewController()
-        let spy = DashboardDelegateSpy()
-        vc.dashboardDelegate = spy
-        vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
-        ])
-        vc.agentCardClicked(agentId: "agent-a")
-
-        vc.agentCardDidRequestShowChanges(agentId: "agent-b")
-
-        XCTAssertEqual(spy.changesPath, "/repo/b")
-        XCTAssertNil(spy.browsePath)
+        vc.handleWorktreeRowClickForTesting(path: "/repo/b")
+        XCTAssertEqual(vc.selectedSailorId, "agent-b")
     }
 }
 
