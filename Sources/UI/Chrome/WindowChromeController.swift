@@ -322,8 +322,10 @@ final class WindowChromeController: NSViewController {
     private func configureColumnGlass(_ effect: NSVisualEffectView) {
         effect.blendingMode = .behindWindow
         effect.state = .followsWindowActiveState
-        let isDark = effect.effectiveAppearance.isDark
-        effect.material = isDark ? .hudWindow : .underWindowBackground
+        // Theme-independent (see WindowStyling.glassBackgroundConfig): dark's
+        // `.hudWindow` let the wallpaper tint the sidebar, and picking by
+        // `effectiveAppearance` here raced the toggle's appearance flip anyway.
+        effect.material = .underWindowBackground
     }
 
     private func refreshChromeAppearance() {

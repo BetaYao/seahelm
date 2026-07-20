@@ -9,10 +9,11 @@ enum WindowStyling {
     }
 
     static func glassBackgroundConfig(isDark: Bool) -> GlassBackgroundConfig {
-        if isDark {
-            return GlassBackgroundConfig(enabled: true, material: .hudWindow, blendingMode: .behindWindow)
-        }
-        return GlassBackgroundConfig(enabled: true, material: .underWindowBackground, blendingMode: .behindWindow)
+        // One material for both themes. Dark used `.hudWindow`, which is so
+        // translucent the wallpaper tinted the whole chrome; the preferred dark
+        // look is `.underWindowBackground` (deeper, near-opaque) — previously
+        // only reachable by accident via a light→dark toggle race.
+        GlassBackgroundConfig(enabled: true, material: .underWindowBackground, blendingMode: .behindWindow)
     }
 
     static func shouldUseWindowFrameAutosave(
