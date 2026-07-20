@@ -195,7 +195,11 @@ struct Config: Codable {
             return try JSONDecoder().decode(Config.self, from: data)
         } catch {
             NSLog("Failed to load config: \(error)")
-            return Config()
+            // A corrupt/undecodable config is NOT a fresh install — falling back
+            // to defaults here would re-run the onboarding wizard on every launch.
+            var fallback = Config()
+            fallback.onboardingCompleted = true
+            return fallback
         }
     }
 
