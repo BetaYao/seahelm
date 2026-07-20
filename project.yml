@@ -39,6 +39,19 @@ targets:
             codesign --force --options runtime $TS \
               --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/zmx"
           fi
+    postBuildScripts:
+      # libghostty derives TERMINFO as a SIBLING of GHOSTTY_RESOURCES_DIR
+      # (dirname(resources_dir)/terminfo — see ghostty/src/termio/Exec.zig).
+      # Our terminfo ships inside Resources/ghostty/terminfo, so mirror it to
+      # Resources/terminfo or TERM=xterm-ghostty is unresolvable on machines
+      # without a standalone Ghostty.app install (garbled ZLE redraws).
+      - name: "Mirror terminfo beside ghostty resources"
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources"
+          rm -rf "${RES}/terminfo"
+          cp -R "${RES}/ghostty/terminfo" "${RES}/terminfo"
     sources:
       - path: Sources
         type: group
