@@ -7,18 +7,23 @@ final class OnboardingViewController: NSViewController {
     private var config: Config
     private var stepIndex = 0
 
-    private let logoLabel = NSTextField(labelWithString: "")
-    private let progressLabel = OnboardingStyle.label("[1/3]", size: 12, color: OnboardingStyle.textSecondary)
-    private let progressStack = NSStackView()
-    private var progressSegments: [NSView] = []
+    private let margin: CGFloat = 48
 
+    private let logoGlyph = OnboardingStyle.monoLabel("❯", size: 17, weight: .bold, color: OnboardingStyle.accent)
+    private let logoName = OnboardingStyle.label("Seahelm", size: 16, weight: .semibold)
+    private let progressStack = NSStackView()
+    private let progressLabel = OnboardingStyle.label("1 / 3", size: 12, color: OnboardingStyle.textFaint)
+    private var progressSegments: [NSView] = []
+    private var progressWidths: [NSLayoutConstraint] = []
+
+    private let eyebrowLabel = OnboardingStyle.label("", size: 11.5, weight: .semibold,
+                                                     color: OnboardingStyle.textFaint)
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "")
     private let stepContainer = NSView()
 
     private let footerRule = NSView()
-    private let backButton = NSButton(title: "← Back", target: nil, action: nil)
-    private let shortcutHint = OnboardingStyle.label("⌘↩", size: 11, color: OnboardingStyle.textFaint)
+    private let backButton = NSButton(title: "‹  Back", target: nil, action: nil)
     private let continueButton = OnboardingPrimaryButton(frame: .zero)
 
     private lazy var agentStep = OnboardingAgentStepView()
@@ -36,7 +41,7 @@ final class OnboardingViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 640))
+        view = NSView(frame: NSRect(origin: .zero, size: OnboardingWindowController.windowSize))
         view.wantsLayer = true
         view.layer?.backgroundColor = OnboardingStyle.background.cgColor
     }
@@ -63,112 +68,107 @@ final class OnboardingViewController: NSViewController {
     }
 
     private func buildChrome() {
-        // Wordmark: cyan prompt glyph + product name, like the cockpit.
-        let logo = NSMutableAttributedString()
-        logo.append(NSAttributedString(string: "❯ ", attributes: [
-            .font: AppFont.mono(size: 16, weight: .bold),
-            .foregroundColor: OnboardingStyle.accent,
-        ]))
-        logo.append(NSAttributedString(string: "seahelm", attributes: [
-            .font: AppFont.mono(size: 16, weight: .bold),
-            .foregroundColor: OnboardingStyle.textPrimary,
-        ]))
-        logo.append(NSAttributedString(string: "  setup", attributes: [
-            .font: AppFont.mono(size: 12),
-            .foregroundColor: OnboardingStyle.textFaint,
-        ]))
-        logoLabel.attributedStringValue = logo
-        logoLabel.translatesAutoresizingMaskIntoConstraints = false
+        // Wordmark: accent prompt glyph + product name.
+        let logoStack = NSStackView(views: [logoGlyph, logoName])
+        logoStack.orientation = .horizontal
+        logoStack.spacing = 7
+        logoStack.alignment = .firstBaseline
+        logoStack.translatesAutoresizingMaskIntoConstraints = false
 
-        // Segmented progress: one cyan bar per step.
+        // Segmented progress, left-aligned: the active segment stretches and
+        // darkens; the rest stay short and faint. "1 / 3" sits alongside.
         progressStack.orientation = .horizontal
-        progressStack.spacing = 6
-        progressStack.distribution = .fillEqually
+        progressStack.spacing = 8
+        progressStack.alignment = .centerY
         progressStack.translatesAutoresizingMaskIntoConstraints = false
         for _ in 0..<3 {
             let seg = NSView()
             seg.wantsLayer = true
-            seg.layer?.cornerRadius = 2
+            seg.layer?.cornerRadius = 1.5
             seg.translatesAutoresizingMaskIntoConstraints = false
-            seg.heightAnchor.constraint(equalToConstant: 4).isActive = true
+            seg.heightAnchor.constraint(equalToConstant: 3).isActive = true
+            let width = seg.widthAnchor.constraint(equalToConstant: 26)
+            width.isActive = true
+            progressWidths.append(width)
             progressSegments.append(seg)
             progressStack.addArrangedSubview(seg)
         }
+        progressStack.setCustomSpacing(14, after: progressSegments[2])
+        progressStack.addArrangedSubview(progressLabel)
 
-        titleLabel.font = AppFont.mono(size: 24, weight: .bold)
+        eyebrowLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = NSFont.systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = OnboardingStyle.textPrimary
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        subtitleLabel.font = AppFont.mono(size: 12.5)
+        subtitleLabel.font = NSFont.systemFont(ofSize: 14.5)
         subtitleLabel.textColor = OnboardingStyle.textSecondary
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         stepContainer.translatesAutoresizingMaskIntoConstraints = false
 
         footerRule.wantsLayer = true
-        footerRule.layer?.backgroundColor = OnboardingStyle.stroke.cgColor
+        footerRule.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
         footerRule.translatesAutoresizingMaskIntoConstraints = false
 
+        backButton.bezelStyle = .rounded
+        backButton.controlSize = .large
         backButton.target = self
         backButton.action = #selector(backTapped)
-        backButton.isBordered = false
-        OnboardingStyle.monoTitle(backButton, size: 12, color: OnboardingStyle.textSecondary)
+        OnboardingStyle.systemTitle(backButton, size: 13, color: OnboardingStyle.textPrimary)
         backButton.translatesAutoresizingMaskIntoConstraints = false
 
         continueButton.target = self
         continueButton.action = #selector(continueTapped)
         continueButton.keyEquivalent = "\r"
 
-        view.addSubview(logoLabel)
-        view.addSubview(progressLabel)
+        view.addSubview(logoStack)
         view.addSubview(progressStack)
+        view.addSubview(eyebrowLabel)
         view.addSubview(titleLabel)
         view.addSubview(subtitleLabel)
         view.addSubview(stepContainer)
         view.addSubview(footerRule)
         view.addSubview(backButton)
-        view.addSubview(shortcutHint)
         view.addSubview(continueButton)
 
         NSLayoutConstraint.activate([
-            logoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 30),
-            logoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            logoStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 34),
+            logoStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
 
-            progressLabel.centerYAnchor.constraint(equalTo: logoLabel.centerYAnchor),
-            progressLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            progressStack.topAnchor.constraint(equalTo: logoStack.bottomAnchor, constant: 26),
+            progressStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
 
-            progressStack.topAnchor.constraint(equalTo: logoLabel.bottomAnchor, constant: 18),
-            progressStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
-            progressStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            eyebrowLabel.topAnchor.constraint(equalTo: progressStack.bottomAnchor, constant: 30),
+            eyebrowLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
 
-            titleLabel.topAnchor.constraint(equalTo: progressStack.bottomAnchor, constant: 30),
-            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
-            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            titleLabel.topAnchor.constraint(equalTo: eyebrowLabel.bottomAnchor, constant: 6),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin),
 
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
 
-            stepContainer.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 26),
-            stepContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
-            stepContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            stepContainer.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 28),
+            stepContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
+            stepContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin),
             stepContainer.bottomAnchor.constraint(equalTo: footerRule.topAnchor, constant: -20),
 
-            footerRule.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            footerRule.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footerRule.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin),
+            footerRule.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin),
             footerRule.heightAnchor.constraint(equalToConstant: 1),
-            footerRule.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -76),
+            footerRule.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -82),
 
-            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            continueButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin),
+            continueButton.centerYAnchor.constraint(equalTo: view.bottomAnchor, constant: -41),
+            continueButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            continueButton.heightAnchor.constraint(equalToConstant: 40),
+
+            backButton.trailingAnchor.constraint(equalTo: continueButton.leadingAnchor, constant: -10),
             backButton.centerYAnchor.constraint(equalTo: continueButton.centerYAnchor),
-
-            continueButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
-            continueButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -22),
-            continueButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
-            continueButton.heightAnchor.constraint(equalToConstant: 36),
-
-            shortcutHint.trailingAnchor.constraint(equalTo: continueButton.leadingAnchor, constant: -12),
-            shortcutHint.centerYAnchor.constraint(equalTo: continueButton.centerYAnchor),
+            backButton.heightAnchor.constraint(equalToConstant: 34),
         ])
     }
 
@@ -176,47 +176,48 @@ final class OnboardingViewController: NSViewController {
         stepIndex = index
         currentStepView?.removeFromSuperview()
         let step: NSView
-        let title: String
         switch index {
         case 0:
-            title = "Choose your default agent"
-            subtitleLabel.stringValue = "Seahelm works with CLI agents. Pick the one you use most — you can switch anytime. Detected agents are selected for hook install by default."
-            continueButton.title = "Continue"
+            eyebrowLabel.stringValue = "WELCOME TO SEAHELM"
+            titleLabel.stringValue = "Choose your default agent"
+            subtitleLabel.stringValue = "Seahelm works with CLI agents. Pick the one you use most — you can switch anytime."
+            continueButton.text = "Continue"
             backButton.isHidden = true
             step = agentStep
         case 1:
-            title = "Make it feel like home"
+            eyebrowLabel.stringValue = ""
+            titleLabel.stringValue = "Make it feel like home"
             subtitleLabel.stringValue = "Choose a theme you'd like to stare at for hours."
-            continueButton.title = "Continue"
+            continueButton.text = "Continue"
             backButton.isHidden = false
             themeStep.configure(config: config)
             step = themeStep
         default:
-            title = "Set up notifications"
+            eyebrowLabel.stringValue = ""
+            titleLabel.stringValue = "Set up notifications"
             subtitleLabel.stringValue = "Seahelm notifies you when an agent finishes or needs help."
-            continueButton.title = "Get started"
+            continueButton.text = "Get started"
             backButton.isHidden = false
             permissionsStep.configure(config: config)
             step = permissionsStep
         }
+        eyebrowLabel.attributedStringValue = NSAttributedString(
+            string: eyebrowLabel.stringValue,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+                .foregroundColor: OnboardingStyle.textFaint,
+                .kern: 1.6,
+            ]
+        )
 
-        // Prompt-style title: cyan ❯ prefix.
-        let attributed = NSMutableAttributedString()
-        attributed.append(NSAttributedString(string: "❯ ", attributes: [
-            .font: AppFont.mono(size: 24, weight: .bold),
-            .foregroundColor: OnboardingStyle.accent,
-        ]))
-        attributed.append(NSAttributedString(string: title, attributes: [
-            .font: AppFont.mono(size: 24, weight: .bold),
-            .foregroundColor: OnboardingStyle.textPrimary,
-        ]))
-        titleLabel.attributedStringValue = attributed
-
-        progressLabel.stringValue = "[\(index + 1)/3]"
+        progressLabel.stringValue = "\(index + 1) / 3"
         for (i, seg) in progressSegments.enumerated() {
-            seg.layer?.backgroundColor = (i <= index
-                ? OnboardingStyle.accent
-                : NSColor.white.withAlphaComponent(0.12)).cgColor
+            let active = i == index
+            let done = i < index
+            seg.layer?.backgroundColor = (active
+                ? NSColor.black.withAlphaComponent(0.85)
+                : NSColor.black.withAlphaComponent(done ? 0.45 : 0.14)).cgColor
+            progressWidths[i].constant = active ? 44 : 26
         }
 
         step.translatesAutoresizingMaskIntoConstraints = false

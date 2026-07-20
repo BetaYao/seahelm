@@ -4,21 +4,24 @@ import AppKit
 final class OnboardingPermissionsStepView: NSView {
     private let notifBox = OnboardingPanel()
     private let notifIcon = OnboardingPermissionsStepView.makeIconTile(symbol: "bell.badge.fill")
-    private let notifTitle = OnboardingStyle.label("Allow Seahelm to send notifications", size: 13, weight: .semibold)
-    private let notifSubtitle = OnboardingStyle.label("Click Allow in the macOS dialog.", size: 11, color: OnboardingStyle.textSecondary)
+    private let notifTitle = OnboardingStyle.label("Allow Seahelm to send notifications", size: 14, weight: .semibold)
+    private let notifSubtitle = OnboardingStyle.label("Click Allow in the macOS dialog.", size: 12.5,
+                                                      color: OnboardingStyle.textSecondary)
     private let openNotifButton = NSButton(title: "Open System Settings", target: nil, action: nil)
     private let requestNotifButton = NSButton(title: "Request permission", target: nil, action: nil)
 
-    private let soundLabel = OnboardingStyle.label("Notification sound", size: 12, weight: .medium)
+    private let soundLabel = OnboardingStyle.label("Notification sound", size: 13.5, weight: .semibold)
+    private let soundSubtitle = OnboardingStyle.label("The alert Seahelm plays with desktop notifications.",
+                                                      size: 12.5, color: OnboardingStyle.textSecondary)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let testButton = NSButton(title: "Send test notification", target: nil, action: nil)
 
     private let axBox = OnboardingPanel()
     private let axIcon = OnboardingPermissionsStepView.makeIconTile(symbol: "accessibility")
-    private let axTitle = OnboardingStyle.label("Accessibility (Island hotkey)", size: 13, weight: .semibold)
+    private let axTitle = OnboardingStyle.label("Accessibility (Island hotkey)", size: 14, weight: .semibold)
     private let axSubtitle = OnboardingStyle.wrappingLabel(
         "Needed for Ctrl-double-tap to summon the Island while Seahelm is in the background.",
-        size: 11
+        size: 12.5
     )
     private let axStatus = NSTextField(labelWithString: "")
     private let axButton = NSButton(title: "Enable Accessibility", target: nil, action: nil)
@@ -53,24 +56,24 @@ final class OnboardingPermissionsStepView: NSView {
         }
     }
 
-    /// Cyan-tinted rounded tile holding an SF Symbol.
+    /// Accent-tinted rounded tile holding an SF Symbol.
     private static func makeIconTile(symbol: String) -> NSView {
         let tile = NSView()
         tile.wantsLayer = true
-        tile.layer?.cornerRadius = 7
-        tile.layer?.backgroundColor = OnboardingStyle.accent.withAlphaComponent(0.16).cgColor
+        tile.layer?.cornerRadius = 9
+        tile.layer?.backgroundColor = OnboardingStyle.accent.withAlphaComponent(0.12).cgColor
         tile.translatesAutoresizingMaskIntoConstraints = false
 
         let image = NSImageView()
         image.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 14, weight: .semibold))
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .semibold))
         image.contentTintColor = OnboardingStyle.accent
         image.translatesAutoresizingMaskIntoConstraints = false
         tile.addSubview(image)
 
         NSLayoutConstraint.activate([
-            tile.widthAnchor.constraint(equalToConstant: 32),
-            tile.heightAnchor.constraint(equalToConstant: 32),
+            tile.widthAnchor.constraint(equalToConstant: 36),
+            tile.heightAnchor.constraint(equalToConstant: 36),
             image.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
             image.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
         ])
@@ -78,29 +81,28 @@ final class OnboardingPermissionsStepView: NSView {
     }
 
     private func setup() {
-        openNotifButton.bezelStyle = .rounded
+        for button in [openNotifButton, requestNotifButton, testButton, axButton, axSettingsButton] {
+            button.bezelStyle = .rounded
+            button.controlSize = .large
+            OnboardingStyle.systemTitle(button, size: 12.5)
+        }
         openNotifButton.target = self
         openNotifButton.action = #selector(openNotifSettings)
-
-        requestNotifButton.bezelStyle = .rounded
         requestNotifButton.target = self
         requestNotifButton.action = #selector(requestNotif)
 
         soundPopup.addItems(withTitles: ["System default", "Critical", "None"])
+        soundPopup.controlSize = .large
         soundPopup.target = self
         soundPopup.action = #selector(soundChanged)
 
-        testButton.bezelStyle = .rounded
         testButton.target = self
         testButton.action = #selector(sendTest)
 
-        axStatus.font = AppFont.mono(size: 11, weight: .medium)
+        axStatus.font = NSFont.systemFont(ofSize: 12, weight: .medium)
 
-        axButton.bezelStyle = .rounded
         axButton.target = self
         axButton.action = #selector(enableAx)
-
-        axSettingsButton.bezelStyle = .rounded
         axSettingsButton.target = self
         axSettingsButton.action = #selector(openAxSettings)
 
@@ -108,7 +110,7 @@ final class OnboardingPermissionsStepView: NSView {
             v.translatesAutoresizingMaskIntoConstraints = false
             notifBox.addSubview(v)
         }
-        for v in [soundLabel, soundPopup, testButton, axBox] as [NSView] {
+        for v in [soundLabel, soundSubtitle, soundPopup, testButton, axBox] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -124,52 +126,55 @@ final class OnboardingPermissionsStepView: NSView {
             notifBox.leadingAnchor.constraint(equalTo: leadingAnchor),
             notifBox.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            notifIcon.leadingAnchor.constraint(equalTo: notifBox.leadingAnchor, constant: 14),
+            notifIcon.leadingAnchor.constraint(equalTo: notifBox.leadingAnchor, constant: 16),
             notifIcon.centerYAnchor.constraint(equalTo: notifBox.centerYAnchor),
 
-            notifTitle.topAnchor.constraint(equalTo: notifBox.topAnchor, constant: 14),
-            notifTitle.leadingAnchor.constraint(equalTo: notifIcon.trailingAnchor, constant: 12),
+            notifTitle.topAnchor.constraint(equalTo: notifBox.topAnchor, constant: 16),
+            notifTitle.leadingAnchor.constraint(equalTo: notifIcon.trailingAnchor, constant: 14),
             notifSubtitle.topAnchor.constraint(equalTo: notifTitle.bottomAnchor, constant: 3),
             notifSubtitle.leadingAnchor.constraint(equalTo: notifTitle.leadingAnchor),
-            requestNotifButton.trailingAnchor.constraint(equalTo: notifBox.trailingAnchor, constant: -14),
+            requestNotifButton.trailingAnchor.constraint(equalTo: notifBox.trailingAnchor, constant: -16),
             requestNotifButton.centerYAnchor.constraint(equalTo: notifBox.centerYAnchor),
             openNotifButton.trailingAnchor.constraint(equalTo: requestNotifButton.leadingAnchor, constant: -8),
             openNotifButton.centerYAnchor.constraint(equalTo: notifBox.centerYAnchor),
-            notifBox.bottomAnchor.constraint(equalTo: notifSubtitle.bottomAnchor, constant: 14),
+            notifBox.bottomAnchor.constraint(equalTo: notifSubtitle.bottomAnchor, constant: 16),
 
-            soundLabel.topAnchor.constraint(equalTo: notifBox.bottomAnchor, constant: 22),
+            soundLabel.topAnchor.constraint(equalTo: notifBox.bottomAnchor, constant: 28),
             soundLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            soundSubtitle.topAnchor.constraint(equalTo: soundLabel.bottomAnchor, constant: 3),
+            soundSubtitle.leadingAnchor.constraint(equalTo: leadingAnchor),
             soundPopup.leadingAnchor.constraint(equalTo: leadingAnchor),
-            soundPopup.topAnchor.constraint(equalTo: soundLabel.bottomAnchor, constant: 8),
-            testButton.leadingAnchor.constraint(equalTo: soundPopup.trailingAnchor, constant: 12),
+            soundPopup.topAnchor.constraint(equalTo: soundSubtitle.bottomAnchor, constant: 12),
+            soundPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            testButton.leadingAnchor.constraint(equalTo: soundPopup.trailingAnchor, constant: 10),
             testButton.centerYAnchor.constraint(equalTo: soundPopup.centerYAnchor),
 
-            axBox.topAnchor.constraint(equalTo: soundPopup.bottomAnchor, constant: 22),
+            axBox.topAnchor.constraint(equalTo: soundPopup.bottomAnchor, constant: 28),
             axBox.leadingAnchor.constraint(equalTo: leadingAnchor),
             axBox.trailingAnchor.constraint(equalTo: trailingAnchor),
             axBox.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
 
-            axIcon.leadingAnchor.constraint(equalTo: axBox.leadingAnchor, constant: 14),
-            axIcon.topAnchor.constraint(equalTo: axBox.topAnchor, constant: 14),
+            axIcon.leadingAnchor.constraint(equalTo: axBox.leadingAnchor, constant: 16),
+            axIcon.topAnchor.constraint(equalTo: axBox.topAnchor, constant: 16),
 
-            axTitle.topAnchor.constraint(equalTo: axBox.topAnchor, constant: 14),
-            axTitle.leadingAnchor.constraint(equalTo: axIcon.trailingAnchor, constant: 12),
+            axTitle.topAnchor.constraint(equalTo: axBox.topAnchor, constant: 16),
+            axTitle.leadingAnchor.constraint(equalTo: axIcon.trailingAnchor, constant: 14),
             axSubtitle.topAnchor.constraint(equalTo: axTitle.bottomAnchor, constant: 3),
             axSubtitle.leadingAnchor.constraint(equalTo: axTitle.leadingAnchor),
-            axSubtitle.trailingAnchor.constraint(equalTo: axBox.trailingAnchor, constant: -14),
+            axSubtitle.trailingAnchor.constraint(equalTo: axBox.trailingAnchor, constant: -16),
             axStatus.topAnchor.constraint(equalTo: axSubtitle.bottomAnchor, constant: 8),
             axStatus.leadingAnchor.constraint(equalTo: axTitle.leadingAnchor),
-            axButton.topAnchor.constraint(equalTo: axStatus.bottomAnchor, constant: 10),
+            axButton.topAnchor.constraint(equalTo: axStatus.bottomAnchor, constant: 12),
             axButton.leadingAnchor.constraint(equalTo: axTitle.leadingAnchor),
             axSettingsButton.leadingAnchor.constraint(equalTo: axButton.trailingAnchor, constant: 8),
             axSettingsButton.centerYAnchor.constraint(equalTo: axButton.centerYAnchor),
-            axBox.bottomAnchor.constraint(equalTo: axButton.bottomAnchor, constant: 14),
+            axBox.bottomAnchor.constraint(equalTo: axButton.bottomAnchor, constant: 16),
         ])
     }
 
     private func refreshAxStatus() {
         let trusted = NotificationManager.isAccessibilityTrusted
-        axStatus.stringValue = trusted ? "● enabled" : "○ not enabled"
+        axStatus.stringValue = trusted ? "● Enabled" : "○ Not enabled"
         axStatus.textColor = trusted ? .systemGreen : OnboardingStyle.textFaint
         axButton.isEnabled = !trusted
     }
