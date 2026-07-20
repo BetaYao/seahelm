@@ -246,6 +246,9 @@ class DashboardViewController: NSViewController {
         overviewView.onOrdersChanged = { [weak self] in
             self?.syncOverviewFocusCounts()
         }
+        overviewView.onGroupingChanged = { [weak self] in
+            self?.syncOverviewFocusCounts()
+        }
     }
 
     // MARK: - `?` keyboard help overlay
@@ -1586,7 +1589,7 @@ private final class NonFirstResponderScrollView: NSScrollView {
 
 // MARK: - Dashboard overview (spread First Mate fleet page)
 
-/// Full-width fleet overview: every worktree as a row grouped by status, a
+/// Full-width fleet overview: every worktree as a row grouped by the chosen mode, a
 /// horizontal ORDERS carousel, and a command composer. This is the landing
 /// surface (the "spread First Mate"); clicking a row drills into that worktree.
 extension Array {
@@ -1597,6 +1600,7 @@ final class DashboardOverviewView: NSView {
     var onSelectWorktree: ((String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
+    var onGroupingChanged: (() -> Void)?
     /// A card's primary/secondary button was tapped. `optionText` is the chosen
     /// option label (or "" for a plain approve).
     var onOrderAction: ((PendingOrder, String) -> Void)?
@@ -1669,6 +1673,8 @@ final class DashboardOverviewView: NSView {
 
     private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
+    private let groupingButton = NSButton()
+    private let groupingMenu = NSMenu()
     private let headerLine = NSView()
     private let scroll = NonFirstResponderScrollView()
     private let stack = FlippedStackView()
@@ -1698,11 +1704,39 @@ final class DashboardOverviewView: NSView {
     /// labels) dismiss the slash menu even when the field stays first responder.
     private var menuClickMonitor: Any?
 
+    private let groupingPreference: WorktreeGroupingPreference
+    private let now: () -> Date
+    private var groupingMode: WorktreeGroupingMode
+    private var latestSailors: [SailorDisplayInfo] = []
+    private var rowViewsByID: [String: RowView] = [:]
+    private var renderedGroupTitles: [String] = []
+    private var revealedRowID: String?
+
     override init(frame frameRect: NSRect) {
+        let preference = WorktreeGroupingPreference(defaults: .standard)
+        groupingPreference = preference
+        now = Date.init
+        groupingMode = preference.load()
         super.init(frame: frameRect)
         setup()
     }
-    required init?(coder: NSCoder) { super.init(coder: coder); setup() }
+    required init?(coder: NSCoder) {
+        let preference = WorktreeGroupingPreference(defaults: .standard)
+        groupingPreference = preference
+        now = Date.init
+        groupingMode = preference.load()
+        super.init(coder: coder)
+        setup()
+    }
+
+    init(frame frameRect: NSRect, defaults: UserDefaults, now: @escaping () -> Date) {
+        let preference = WorktreeGroupingPreference(defaults: defaults)
+        groupingPreference = preference
+        self.now = now
+        groupingMode = preference.load()
+        super.init(frame: frameRect)
+        setup()
+    }
 
     deinit {
         stopMenuClickMonitor()
@@ -1723,10 +1757,14 @@ final class DashboardOverviewView: NSView {
         headerTitle.textColor = Self.ink
         headerSub.font = AppFont.mono(size: 11)
         headerSub.textColor = Self.inkFaint
-        let headerRow = NSStackView(views: [headerIcon, headerTitle, headerSub])
+        configureGroupingMenu()
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let headerRow = NSStackView(views: [headerIcon, headerTitle, headerSub, spacer, groupingButton])
         headerRow.orientation = .horizontal
         headerRow.spacing = 10
-        headerRow.alignment = .firstBaseline
+        headerRow.alignment = .centerY
         headerRow.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerRow)
         headerLine.wantsLayer = true
@@ -1756,7 +1794,7 @@ final class DashboardOverviewView: NSView {
         NSLayoutConstraint.activate([
             headerRow.topAnchor.constraint(equalTo: topAnchor, constant: 13),
             headerRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
-            headerRow.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -15),
+            headerRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
 
             headerLine.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 11),
             headerLine.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1780,6 +1818,70 @@ final class DashboardOverviewView: NSView {
         ])
         ordersZoneHeight = ordersZone.heightAnchor.constraint(equalToConstant: 0)
         ordersZoneHeight?.isActive = true
+    }
+
+    private func configureGroupingMenu() {
+        groupingButton.isBordered = false
+        let groupingImage = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: nil)
+        groupingButton.image = groupingImage?.withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+        groupingButton.contentTintColor = Self.inkDim
+        if groupingButton.image == nil {
+            groupingButton.title = "☷"
+            groupingButton.font = AppFont.mono(size: 13)
+        } else {
+            groupingButton.title = ""
+            groupingButton.imagePosition = .imageOnly
+        }
+        groupingButton.refusesFirstResponder = true
+        groupingButton.target = self
+        groupingButton.action = #selector(showGroupingMenu(_:))
+
+        let entries: [(WorktreeGroupingMode, String)] = [
+            (.repository, "Group by Repository"),
+            (.status, "Group by Status"),
+            (.activityTime, "Group by Time"),
+        ]
+        for (mode, title) in entries {
+            let item = NSMenuItem(title: title, action: #selector(selectGroupingMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            groupingMenu.addItem(item)
+        }
+        refreshGroupingMenuPresentation()
+    }
+
+    @objc private func showGroupingMenu(_ sender: NSButton) {
+        groupingMenu.popUp(positioning: nil,
+                           at: NSPoint(x: 0, y: sender.bounds.maxY + 4),
+                           in: sender)
+    }
+
+    @objc private func selectGroupingMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = WorktreeGroupingMode(rawValue: rawValue) else { return }
+        applyGroupingMode(mode)
+    }
+
+    private func applyGroupingMode(_ mode: WorktreeGroupingMode) {
+        groupingMode = mode
+        groupingPreference.save(mode)
+        refreshGroupingMenuPresentation()
+        render(latestSailors, revealSelection: true)
+        onGroupingChanged?()
+    }
+
+    private func refreshGroupingMenuPresentation() {
+        for item in groupingMenu.items {
+            item.state = (item.representedObject as? String) == groupingMode.rawValue ? .on : .off
+        }
+        let description: String
+        switch groupingMode {
+        case .repository: description = "Group worktrees by repository"
+        case .status: description = "Group worktrees by status"
+        case .activityTime: description = "Group worktrees by time"
+        }
+        groupingButton.toolTip = description
+        groupingButton.setAccessibilityLabel(description)
     }
 
     private func setupOrdersZone() {
@@ -2052,15 +2154,6 @@ final class DashboardOverviewView: NSView {
         }
     }
 
-    private static func primaryStatus(_ s: SailorDisplayInfo) -> SailorStatus {
-        let ps = s.paneStatuses
-        if ps.contains(.waiting) { return .waiting }
-        if ps.contains(.running) { return .running }
-        if ps.contains(.error) { return .error }
-        if ps.contains(.idle) { return .idle }
-        return ps.first ?? .unknown
-    }
-
     /// Focus the command input with a prefilled command (e.g. "/new ").
     func focusCommand(prefill: String) {
         commandInput.setTextAndFocusEnd(prefill)
@@ -2070,28 +2163,27 @@ final class DashboardOverviewView: NSView {
     private(set) var orderedRows: [(id: String, path: String)] = []
 
     func update(_ sailors: [SailorDisplayInfo]) {
-        let running = sailors.filter { Self.primaryStatus($0) == .running }.count
+        latestSailors = sailors
+        render(sailors, revealSelection: false)
+    }
+
+    private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
+        let running = sailors.filter { SailorStatus.highestPriority($0.paneStatuses) == .running }.count
         headerSub.stringValue = "\(sailors.count) worktrees · \(running) running"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
+        rowViewsByID = [:]
+        renderedGroupTitles = []
+        revealedRowID = nil
 
-        // Group by repo, in first-seen order (which follows the configured
-        // card/workspace order). Within a repo: main worktree first, then the
-        // linked worktrees by creation time (oldest first).
-        var repoOrder: [String] = []
-        var grouped: [String: [SailorDisplayInfo]] = [:]
-        for sailor in sailors {
-            if grouped[sailor.project] == nil { repoOrder.append(sailor.project) }
-            grouped[sailor.project, default: []].append(sailor)
-        }
-        for (gi, repo) in repoOrder.enumerated() {
-            let items = (grouped[repo] ?? []).sorted { a, b in
-                if a.isMainWorktree != b.isMainWorktree { return a.isMainWorktree }
-                return Self.creationDate(a.worktreePath) < Self.creationDate(b.worktreePath)
-            }
-            guard !items.isEmpty else { continue }
-            let header = makeGroupHeader(repo: repo, topGap: gi == 0 ? 0 : 13)
+        let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
+        let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
+        let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
+
+        for (groupIndex, group) in groups.enumerated() {
+            renderedGroupTitles.append(group.title)
+            let header = makeGroupHeader(group: group, topGap: groupIndex == 0 ? 0 : 13)
             stack.addArrangedSubview(header)
             pin(header)
             let rowsBox = NSStackView()
@@ -2099,18 +2191,27 @@ final class DashboardOverviewView: NSView {
             rowsBox.spacing = 4
             rowsBox.alignment = .leading
             rowsBox.translatesAutoresizingMaskIntoConstraints = false
-            for item in items {
-                let status = Self.primaryStatus(item)
-                let row = RowView(sailor: item, status: status,
-                                  selected: item.id == self.selectedId)
+            for groupedItem in group.items {
+                guard let sailor = sailorsByPath[groupedItem.path] else { continue }
+                let row = RowView(sailor: sailor,
+                                  status: groupedItem.status,
+                                  selected: groupedItem.id == selectedId,
+                                  showsRepository: groupingMode != .repository)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
-                orderedRows.append((item.id, item.worktreePath))
+                orderedRows.append((groupedItem.id, groupedItem.path))
+                rowViewsByID[groupedItem.id] = row
             }
             stack.addArrangedSubview(rowsBox)
             pin(rowsBox)
+        }
+
+        if revealSelection, let selectedRow = rowViewsByID[selectedId] {
+            layoutSubtreeIfNeeded()
+            selectedRow.scrollToVisible(selectedRow.bounds)
+            revealedRowID = selectedId
         }
     }
 
@@ -2127,6 +2228,24 @@ final class DashboardOverviewView: NSView {
 
     /// Selected worktree id, so the fleet can mark the current row (accent border).
     var selectedId: String = ""
+
+    // Focused AppKit contract exposed to unit tests without leaking mutable UI.
+    var groupingModeForTesting: WorktreeGroupingMode { groupingMode }
+    var groupingMenuTitlesForTesting: [String] { groupingMenu.items.map(\.title) }
+    var groupingMenuKeyEquivalentsForTesting: [String] { groupingMenu.items.map(\.keyEquivalent) }
+    var checkedGroupingModesForTesting: [WorktreeGroupingMode] {
+        groupingMenu.items.compactMap { item in
+            guard item.state == .on, let rawValue = item.representedObject as? String else { return nil }
+            return WorktreeGroupingMode(rawValue: rawValue)
+        }
+    }
+    var renderedGroupTitlesForTesting: [String] { renderedGroupTitles }
+    var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
+    var revealedRowIDForTesting: String? { revealedRowID }
+    var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
+    var groupingButtonAccessibilityLabelForTesting: String? { groupingButton.accessibilityLabel() }
+    var groupingButtonRefusesFirstResponderForTesting: Bool { groupingButton.refusesFirstResponder }
+    func selectGroupingModeForTesting(_ mode: WorktreeGroupingMode) { applyGroupingMode(mode) }
 
     /// Cards in carousel order + each card's worktree path, for keyboard nav.
     private(set) var orderCards: [OrderCardView] = []
@@ -2187,15 +2306,36 @@ final class DashboardOverviewView: NSView {
         v.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -15).isActive = true
     }
 
-    /// Repo name only — worktrees under this header share the project.
-    private func makeGroupHeader(repo: String, topGap: CGFloat) -> NSView {
-        let label = NSTextField(labelWithString: repo)
-        label.font = AppFont.mono(size: 11, weight: .semibold)
-        label.textColor = Self.inkDim
-        label.lineBreakMode = .byTruncatingTail
+    private func makeGroupHeader(group: WorktreeGroup, topGap: CGFloat) -> NSView {
+        var views: [NSView] = []
+        if let status = group.status {
+            let meta = Self.groupMeta(status)
+            let glyph = NSTextField(labelWithString: meta.glyph)
+            glyph.font = AppFont.mono(size: 8)
+            glyph.textColor = meta.color
+            views.append(glyph)
 
-        let row = NSStackView(views: [label])
+            let title = NSTextField(labelWithString: meta.label)
+            title.font = AppFont.mono(size: 11)
+            title.textColor = meta.color
+            title.lineBreakMode = .byTruncatingTail
+            views.append(title)
+
+            let count = NSTextField(labelWithString: "\(group.items.count)")
+            count.font = AppFont.mono(size: 11)
+            count.textColor = Self.inkFaint
+            views.append(count)
+        } else {
+            let title = NSTextField(labelWithString: group.title)
+            title.font = AppFont.mono(size: 11, weight: .semibold)
+            title.textColor = Self.inkDim
+            title.lineBreakMode = .byTruncatingTail
+            views.append(title)
+        }
+
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
+        row.spacing = 7
         row.alignment = .centerY
         row.edgeInsets = NSEdgeInsets(top: topGap, left: 0, bottom: 7, right: 0)
         return row
@@ -2243,7 +2383,8 @@ final class DashboardOverviewView: NSView {
             return v
         }
 
-        init(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool) {
+        init(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool,
+             showsRepository: Bool) {
             self.path = sailor.worktreePath
             self.selected = selected
             super.init(frame: .zero)
@@ -2299,6 +2440,13 @@ final class DashboardOverviewView: NSView {
             line2.alignment = .firstBaseline
             line2.spacing = 8
             line2.translatesAutoresizingMaskIntoConstraints = false
+            if showsRepository {
+                let repository = Self.label(sailor.project.isEmpty ? "Unknown repository" : sailor.project,
+                                            RepoColor.color(for: sailor.project), 10, weight: .semibold)
+                repository.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+                repository.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                line2.addArrangedSubview(repository)
+            }
             line2.addArrangedSubview(branchLabel)
             line2.addArrangedSubview(git)
             line2.addArrangedSubview(Self.spacer())
