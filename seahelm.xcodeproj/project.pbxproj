@@ -1898,7 +1898,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.18;
+				MARKETING_VERSION = 2.0.19;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -1917,7 +1917,7 @@
 				PRODUCT_MODULE_NAME = seahelm;
 				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
-				SPARKLE_PUBLIC_ED_KEY = "";
+				SPARKLE_PUBLIC_ED_KEY = "Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds=";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
 				SWIFT_VERSION = 5.10;
 			};
@@ -2131,7 +2131,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.18;
+				MARKETING_VERSION = 2.0.19;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2150,7 +2150,7 @@
 				PRODUCT_MODULE_NAME = seahelm;
 				PRODUCT_NAME = Seahelm;
 				SDKROOT = macosx;
-				SPARKLE_PUBLIC_ED_KEY = "";
+				SPARKLE_PUBLIC_ED_KEY = "Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds=";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = "non-global";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/seahelm-Bridging-Header.h";
