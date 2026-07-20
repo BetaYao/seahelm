@@ -207,6 +207,25 @@ struct Config: Codable {
     private static let pendingSaveLock = NSLock()
     private static var pendingSaveWorkItem: DispatchWorkItem?
 
+    /// Synchronous write. Use when a later `Config.load()` on this same turn of
+    /// the run loop must observe the change — the debounced `save()` would still
+    /// be pending and the reader would get the stale file.
+    func saveNow() {
+        guard !DebugFlags.forceEmptyState else { return }
+        Config.pendingSaveLock.lock()
+        Config.pendingSaveWorkItem?.cancel()
+        Config.pendingSaveWorkItem = nil
+        Config.pendingSaveLock.unlock()
+        do {
+            try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(self).write(to: Config.configPath, options: .atomic)
+        } catch {
+            NSLog("Failed to save config: \(error)")
+        }
+    }
+
     func save() {
         // A forced-empty-state instance shares the real config path with the
         // live app; saving would persist its pretend-empty view over the real one.

@@ -298,7 +298,9 @@ final class OnboardingViewController: NSViewController {
     private func finish() {
         applyCurrentStepToConfig()
         config.onboardingCompleted = true
-        config.save()
+        // Synchronous: bootstrapMainApp -> MainWindowController does its own
+        // Config.load() right after this, and a debounced write would lose the race.
+        config.saveNow()
         onFinished?(config)
     }
 }
