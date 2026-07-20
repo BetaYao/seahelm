@@ -93,6 +93,30 @@ final class CodeEditorView: NSView {
         self.hosting = hosting
 
         observeDirty()
+
+        // Build the web view up front for previewable files: creating it lazily
+        // put the WebKit process launch on the first toggle, where it read as lag.
+        if isPreviewable {
+            makePreviewView().prewarm()
+        }
+    }
+
+    /// Creates (once) the hidden preview view layered over the editor.
+    @discardableResult
+    private func makePreviewView() -> PreviewWebView {
+        if let previewView { return previewView }
+        let view = PreviewWebView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: topAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        previewView = view
+        return view
     }
 
     /// Toggle between the editor and a rendered Markdown preview. Returns the
@@ -101,23 +125,12 @@ final class CodeEditorView: NSView {
     func togglePreview() -> Bool {
         isPreviewing.toggle()
         if isPreviewing {
-            let preview = previewView ?? {
-                let v = PreviewWebView()
-                v.translatesAutoresizingMaskIntoConstraints = false
-                addSubview(v)
-                NSLayoutConstraint.activate([
-                    v.topAnchor.constraint(equalTo: topAnchor),
-                    v.leadingAnchor.constraint(equalTo: leadingAnchor),
-                    v.trailingAnchor.constraint(equalTo: trailingAnchor),
-                    v.bottomAnchor.constraint(equalTo: bottomAnchor),
-                ])
-                previewView = v
-                return v
-            }()
+            let preview = makePreviewView()
+            let directory = model.fileURL.deletingLastPathComponent()
             if isHTML {
-                preview.renderHTML(model.text, baseURL: model.fileURL.deletingLastPathComponent())
+                preview.renderHTML(model.text, baseURL: directory)
             } else {
-                preview.render(markdown: model.text)
+                preview.render(markdown: model.text, baseDirectory: directory)
             }
             preview.isHidden = false
             hosting.isHidden = true
