@@ -5,7 +5,8 @@ import XCTest
 /// the agent-suggestion path into the pure rule engine (no longer special-cased
 /// in FirstMateCoordinator).
 final class FirstMateEvaluateOutcomeTests: XCTestCase {
-    private func outcome(kind: NormalizedEventKind, changed: Bool = false,
+    private func outcome(kind: NormalizedEventKind, source: EventSource = .hook("claude-code"),
+                         changed: Bool = false,
                          completion: Bool = false, newStatus: SailorStatus = .running,
                          hold: Double = 0) -> IngestOutcome {
         let info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
@@ -14,7 +15,7 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
                               channel: nil, taskProgress: TaskProgress())
         return IngestOutcome(info: info, statusChanged: changed, oldStatus: .running,
                              newStatus: newStatus, holdSeconds: hold, isCompletionSignal: completion,
-                             event: NormalizedEvent(terminalID: "t1", source: .hook("claude-code"), kind: kind))
+                             event: NormalizedEvent(terminalID: "t1", source: source, kind: kind))
     }
 
     func testSuggestEventEmitsRedSuggestNextOrderWithOptions() {
@@ -43,6 +44,15 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
         let acts = FirstMate.evaluate(
             outcome(kind: .question(prompt: "Pick?", options: [], followups: [])), config: .default)
         XCTAssertTrue(acts.isEmpty)
+    }
+
+    func testScreenChoiceUsesViewportPayloadMarker() {
+        let acts = FirstMate.evaluate(
+            outcome(kind: .question(prompt: "Codex requires approval",
+                                    options: ["Yes", "No"], followups: []),
+                    source: .scan),
+            config: .default)
+        XCTAssertEqual(acts.first?.payload, FirstMateAction.screenChoicePayload)
     }
 
     func testStatusTransitionRoutedThroughOutcomeEntry() {

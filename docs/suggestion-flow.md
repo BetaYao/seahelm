@@ -51,9 +51,13 @@ end-of-turn Stop fell through to `Y` and forced a wasted round-trip.
 `sessionSuggestedAt[turnKey]` is cleared on each new `.userPrompt`. A fresh user
 message starts a new turn, so the agent must suggest again.
 
-## Not the same thing: `pane.options`
+## Viewport choices — permission prompts and `pane.options`
 
 `SeahelmControlDataSource.paneOptions(paneId:)` reads the pane's **live viewport
 text** and parses on-screen choices via `ChoiceOptionParser` (Happy-style
-detection of permission prompts / AskUserQuestion). That is screen scanning, a
-separate channel from the `seahelm-suggest` hook events described above.
+detection of permission prompts / AskUserQuestion). The status poller uses the
+same parser to emit a screen-native question event, which becomes a First Mate
+card on desktop. Picking a card option drives the original TUI with arrow keys
+and Return. Wrapped labels and confirmation footers after the option list are
+supported. This remains a separate channel from the `seahelm-suggest` hook
+events described above.

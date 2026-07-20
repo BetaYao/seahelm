@@ -73,7 +73,7 @@ final class PendingOrdersQueue {
     func resolveQuestion(terminalID: String) {
         let before = orders.count
         orders.removeAll {
-            $0.action.payload == FirstMateAction.askUserQuestionPayload
+            FirstMateAction.isQuestionPayload($0.action.payload)
                 && $0.action.terminalID == terminalID
         }
         if orders.count != before { notify() }

@@ -16,6 +16,13 @@ struct FirstMateAction: Equatable {
     /// Payload marking an AskUserQuestion card (answered by option NUMBER in the
     /// TUI). Such cards auto-resolve once the agent moves on (tool use / stop).
     static let askUserQuestionPayload = "ask-user-question"
+    /// A choice prompt discovered from the live terminal viewport. These are
+    /// answered with arrow keys because not every TUI supports number shortcuts.
+    static let screenChoicePayload = "screen-choice"
+
+    static func isQuestionPayload(_ payload: String?) -> Bool {
+        payload == askUserQuestionPayload || payload == screenChoicePayload
+    }
 
     let kind: FirstMateActionKind
     let zone: FirstMateZone
@@ -69,14 +76,20 @@ enum FirstMate {
         if case .question(let prompt, let options, let followups) = outcome.event.kind {
             guard !options.isEmpty else { return [] }
             let i = outcome.info
-            // AskUserQuestion card: the question itself is the summary, and the
-            // payload marks the tap handler to answer by option NUMBER (the TUI
-            // selects by digit), not by typing the label text.
+            let payload: String
+            if case .scan = outcome.event.source {
+                payload = FirstMateAction.screenChoicePayload
+            } else {
+                payload = FirstMateAction.askUserQuestionPayload
+            }
+            // The question itself is the summary. The payload tells the tap
+            // handler whether to answer a native tool by number or drive a
+            // viewport-discovered choice with arrow keys.
             return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
                                     message: String(prompt.prefix(200)),
-                                    payload: FirstMateAction.askUserQuestionPayload, options: options,
+                                    payload: payload, options: options,
                                     followups: followups.isEmpty ? nil : followups)]
         }
 

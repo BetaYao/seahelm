@@ -295,10 +295,15 @@ class ShipLog {
             if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             message = text
         case .question(let prompt, _, _):
-            // Agent is blocked on an AskUserQuestion choice — same as awaiting input.
-            next.hookStatus = .waiting
-            hookRunningSince[event.terminalID] = nil
-            if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
+            // Hook-native questions own hook status. Viewport-discovered choices
+            // own scan status so the next screen frame can clear them naturally.
+            if case .scan = event.source {
+                next.scanStatus = .waiting
+            } else {
+                next.hookStatus = .waiting
+                hookRunningSince[event.terminalID] = nil
+                if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
+            }
             message = prompt
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
@@ -611,12 +616,14 @@ class ShipLog {
 
     /// Answer an on-screen choice dialog by arrow keys: Down × index, then Return.
     /// For agent TUIs without digit shortcuts (opencode's question tool) — their
-    /// selection starts at index 0 when the dialog opens, so the offset is absolute
-    /// as long as the user hasn't moved it.
-    func answerChoiceByArrows(to terminalID: String, index: Int) {
+    /// `selectedIndex` defaults to the first row for native question tools, while
+    /// viewport-discovered prompts pass their currently highlighted row.
+    func answerChoiceByArrows(to terminalID: String, index: Int, from selectedIndex: Int = 0) {
         guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
         DispatchQueue.main.async {
-            for _ in 0..<max(0, index) { station.sendText("\u{1b}[B") }
+            let offset = index - selectedIndex
+            let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
+            for _ in 0..<abs(offset) { station.sendText(arrow) }
             // Same beat as sendCommand: let the TUI ingest the arrows first.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                 station.sendEnterKey()

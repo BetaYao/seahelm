@@ -2190,7 +2190,18 @@ extension MainWindowController {
                 branch: order.action.branch,
                 deleteBranch: deleteBranch,
                 force: force)
-        } else if order.action.payload == "ask-user-question" {
+        } else if order.action.payload == FirstMateAction.screenChoicePayload {
+            // Permission prompts discovered from the viewport are not guaranteed
+            // to support digit shortcuts (Codex advertises y/p/esc). Drive the
+            // visible list relative to its current selected row instead.
+            if let idx = order.action.options?.firstIndex(of: optionText) {
+                let selectedIndex = StationRegistry.shared.station(forId: order.action.terminalID)
+                    .flatMap { $0.readViewportText() }
+                    .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) } ?? 0
+                ShipLog.shared.answerChoiceByArrows(
+                    to: order.action.terminalID, index: idx, from: selectedIndex)
+            }
+        } else if order.action.payload == FirstMateAction.askUserQuestionPayload {
             // AskUserQuestion TUI selects by digit; typing the label text would
             // land in the free-form field instead. Send the option's number —
             // sendCommand follows with a Return that confirms the selection.
