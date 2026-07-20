@@ -1,6 +1,6 @@
 #!/bin/sh
 # Seahelm installer — downloads the latest (or given) release and installs
-# seahelm.app into /Applications (or ~/Applications without write access).
+# Seahelm.app into /Applications (or ~/Applications without write access).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
@@ -43,22 +43,29 @@ mkdir -p "$DEST"
 TMP=$(mktemp -d /tmp/seahelm-install.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 
-printf '==> Downloading seahelm %s (%s)\n' "$VERSION" "$ARCH"
+printf '==> Downloading Seahelm %s (%s)\n' "$VERSION" "$ARCH"
 curl -fSL --progress-bar -o "$TMP/$ASSET" "$URL" \
   || err "download failed: $URL"
 
 printf '==> Unpacking\n'
 ditto -x -k "$TMP/$ASSET" "$TMP/unpacked"
-[ -d "$TMP/unpacked/seahelm.app" ] || err "archive did not contain seahelm.app"
+# The bundle is capitalised (PRODUCT_NAME in project.yml), so match that exactly:
+# on a case-sensitive volume a lowercase path fails to find it and the error above
+# reads as a corrupt download.
+[ -d "$TMP/unpacked/Seahelm.app" ] || err "archive did not contain Seahelm.app"
 
-APP="$DEST/seahelm.app"
-if [ -d "$APP" ]; then
-  if pgrep -xq seahelm 2>/dev/null; then
-    printf '==> Note: seahelm is running; the new version takes effect on next launch\n'
+APP="$DEST/Seahelm.app"
+# Installs before 2.0.16 landed as lowercase seahelm.app. A case-insensitive volume
+# (the macOS default) resolves both to the same directory, but a case-sensitive one
+# would keep the old bundle alongside the new one, so remove it by name too.
+for OLD in "$APP" "$DEST/seahelm.app"; do
+  [ -d "$OLD" ] || continue
+  if pgrep -xq Seahelm 2>/dev/null; then
+    printf '==> Note: Seahelm is running; the new version takes effect on next launch\n'
   fi
-  rm -rf "$APP"
-fi
-mv "$TMP/unpacked/seahelm.app" "$APP"
+  rm -rf "$OLD"
+done
+mv "$TMP/unpacked/Seahelm.app" "$APP"
 
 printf '==> Installed %s to %s\n' "$VERSION" "$APP"
 printf 'Launch with: open "%s"\n' "$APP"

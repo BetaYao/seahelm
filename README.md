@@ -170,7 +170,7 @@ curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/instal
 
 - 打开 [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest)
 - 下载对应架构的 `seahelm-macos-arm64.zip` 或 `seahelm-macos-x86_64.zip`
-- 解压，把 `seahelm.app` 拖入「应用程序」并启动
+- 解压，把 `Seahelm.app` 拖入「应用程序」并启动
 
 ### 本地开发
 
@@ -358,7 +358,7 @@ Or manually:
 
 - Open [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest)
 - Download `seahelm-macos-arm64.zip` or `seahelm-macos-x86_64.zip`
-- Unzip it, drag `seahelm.app` into Applications, and launch it
+- Unzip it, drag `Seahelm.app` into Applications, and launch it
 
 ### Local Development
 

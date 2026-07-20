@@ -144,11 +144,11 @@ jobs:
             1. Download the zip for your Mac below and unpack it
                - `seahelm-macos-arm64.zip`: Apple Silicon
                - `seahelm-macos-x86_64.zip`: Intel
-            2. Drag `seahelm.app` into `/Applications`
+            2. Drag `Seahelm.app` into `/Applications`
             3. If macOS blocks the app on first launch, run:
                ```bash
-               xattr -dr com.apple.quarantine /Applications/seahelm.app
+               xattr -dr com.apple.quarantine /Applications/Seahelm.app
                ```
-            4. Launch seahelm
+            4. Launch Seahelm
 
             Artifacts are notarized when the required Apple signing secrets are configured in this repository; the quarantine step is only needed for un-notarized builds.
