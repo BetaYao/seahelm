@@ -12,6 +12,8 @@ final class SidebarHeaderView: NSView {
     private let iconCluster = ChromeIconClusterView()
     private let sidebarButton = ChromeIconButton()
     private let trailingStack = NSStackView()
+    private let brandStack = NSStackView()
+    private var trafficLightWidth: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -45,6 +47,9 @@ final class SidebarHeaderView: NSView {
         trafficLightSlot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(trafficLightSlot)
 
+        configureBrand()
+        addSubview(brandStack)
+
         trailingStack.orientation = .horizontal
         trailingStack.spacing = 2
         trailingStack.alignment = .centerY
@@ -62,14 +67,63 @@ final class SidebarHeaderView: NSView {
 
             trafficLightSlot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             trafficLightSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            trafficLightSlot.widthAnchor.constraint(equalToConstant: 70),
+            trafficLightWidth,
             trafficLightSlot.heightAnchor.constraint(equalToConstant: 14),
+
+            brandStack.leadingAnchor.constraint(
+                equalTo: trafficLightSlot.trailingAnchor, constant: 10),
+            brandStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             trailingStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             trailingStack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: trafficLightSlot.trailingAnchor, constant: 8),
+                greaterThanOrEqualTo: brandStack.trailingAnchor, constant: 8),
         ])
+    }
+
+    /// Sailboat glyph + wordmark. Sits where the traffic lights leave off, so it fills
+    /// the gap that opens up in full screen once the slot collapses to zero.
+    private func configureBrand() {
+        brandStack.orientation = .horizontal
+        brandStack.spacing = 5
+        brandStack.alignment = .centerY
+        brandStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let mark = NSImageView()
+        mark.image = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
+        mark.imageScaling = .scaleProportionallyUpOrDown
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: 20),
+            mark.heightAnchor.constraint(equalToConstant: 20),
+        ])
+        brandStack.addArrangedSubview(mark)
+
+        let label = NSTextField(labelWithString: "Seahelm")
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.textColor = NSColor(hex: 0x888888)
+        brandStack.addArrangedSubview(label)
+
+        trafficLightWidth = trafficLightSlot.widthAnchor.constraint(equalToConstant: 70)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncTrafficLightSlot()
+        guard let window else { return }
+        let center = NotificationCenter.default
+        for name in [NSWindow.didEnterFullScreenNotification,
+                     NSWindow.didExitFullScreenNotification] {
+            center.addObserver(self, selector: #selector(syncTrafficLightSlot),
+                               name: name, object: window)
+        }
+    }
+
+    @objc private func syncTrafficLightSlot() {
+        let fullScreen = window?.styleMask.contains(.fullScreen) ?? false
+        trafficLightWidth.constant = fullScreen ? 0 : 70
+        // Only shown in full screen, where the traffic lights vacate the corner.
+        brandStack.isHidden = !fullScreen
     }
 
     private func configureSidebarButton() {
