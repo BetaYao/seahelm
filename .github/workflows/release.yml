@@ -131,9 +131,24 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
-            ## Downloads
+            ## Install
 
-            - `seahelm-macos-arm64.zip`: Apple Silicon
-            - `seahelm-macos-x86_64.zip`: Intel
+            ### macOS (one-line install)
 
-            Artifacts are notarized when the required Apple signing secrets are configured in this repository.
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+            ```
+
+            ### macOS (manual)
+
+            1. Download the zip for your Mac below and unpack it
+               - `seahelm-macos-arm64.zip`: Apple Silicon
+               - `seahelm-macos-x86_64.zip`: Intel
+            2. Drag `seahelm.app` into `/Applications`
+            3. If macOS blocks the app on first launch, run:
+               ```bash
+               xattr -dr com.apple.quarantine /Applications/seahelm.app
+               ```
+            4. Launch seahelm
+
+            Artifacts are notarized when the required Apple signing secrets are configured in this repository; the quarantine step is only needed for un-notarized builds.
