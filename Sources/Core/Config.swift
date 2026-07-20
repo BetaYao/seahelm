@@ -394,7 +394,7 @@ struct NotificationConfig: Codable {
 
 struct UpdateConfig: Codable {
     var enabled: Bool = true
-    var checkIntervalHours: Int = 6
+    var checkIntervalHours: Int = 1
     var skippedVersion: String? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -408,7 +408,7 @@ struct UpdateConfig: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        checkIntervalHours = try container.decodeIfPresent(Int.self, forKey: .checkIntervalHours) ?? 6
+        checkIntervalHours = try container.decodeIfPresent(Int.self, forKey: .checkIntervalHours) ?? 1
         skippedVersion = try container.decodeIfPresent(String.self, forKey: .skippedVersion)
     }
 }

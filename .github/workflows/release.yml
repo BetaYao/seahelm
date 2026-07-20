@@ -27,6 +27,13 @@ jobs:
         with:
           submodules: recursive
 
+      # Must match the arch jobs: Ghostty's cimport of CoreVideo fails to find
+      # kCVPixelFormatType_30RGB_r210 against a newer SDK than 16.1's.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.1"
+
       - name: Resolve Ghostty commit
         id: ghostty
         run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"

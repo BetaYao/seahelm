@@ -1,0 +1,57 @@
+name: Warm GhosttyKit cache
+
+# Actions caches are scoped by ref: a cache written by a run on refs/tags/v2.0.17
+# is invisible to a run on refs/tags/v2.0.18. Only the default branch's caches
+# are readable from every ref. Releases are tag-triggered, so without this the
+# GhosttyKit cache never hits and every release pays ~7 minutes to rebuild it.
+#
+# Building it here, on main, is what makes the release workflow's cache useful.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ghostty"
+      - "scripts/setup.sh"
+      - ".github/workflows/warm-ghostty-cache.yml"
+  workflow_dispatch:
+
+jobs:
+  warm:
+    name: Build and cache GhosttyKit
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Must match the release workflow: Ghostty's cimport of CoreVideo fails to
+      # find kCVPixelFormatType_30RGB_r210 against a newer SDK than 16.1's.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.1"
+
+      - name: Resolve Ghostty commit
+        id: ghostty
+        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache GhosttyKit.xcframework
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/seahelm/ghosttykit
+          key: ghosttykit-${{ steps.ghostty.outputs.sha }}
+          restore-keys: ghosttykit-
+
+      - name: Install Zig
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build GhosttyKit.xcframework
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: ./scripts/setup.sh
