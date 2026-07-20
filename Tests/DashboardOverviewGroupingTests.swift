@@ -96,6 +96,33 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    func testGroupingModeSwitchFallsBackFromStaleSelectionToFirstRow() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.selectedId = "removed"
+            view.update([
+                makeSailor(id: "idle", project: "charlie", worktreePath: "/idle",
+                           paneStatuses: [.idle], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-300)),
+                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                           paneStatuses: [.waiting], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-100)),
+                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-200)),
+            ])
+
+            view.selectGroupingModeForTesting(.status)
+
+            XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
+            XCTAssertEqual(view.selectedId, "wait")
+            XCTAssertEqual(view.renderedSelectedRowIDForTesting, "wait")
+            XCTAssertEqual(view.revealedRowIDForTesting, "wait")
+        }
+    }
+
     func testGroupingButtonDescriptionReflectsCurrentMode() {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })

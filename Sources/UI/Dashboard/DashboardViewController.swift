@@ -247,7 +247,9 @@ class DashboardViewController: NSViewController {
             self?.syncOverviewFocusCounts()
         }
         overviewView.onGroupingChanged = { [weak self] in
-            self?.syncOverviewFocusCounts()
+            guard let self else { return }
+            overviewSelectedId = overviewView.selectedId
+            syncOverviewFocusCounts()
         }
     }
 
@@ -2180,6 +2182,16 @@ final class DashboardOverviewView: NSView {
         let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
         let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
         let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
+
+        // A mode switch is an explicit navigation action. If its previous
+        // identity is stale, land on the first row in the new ordering before
+        // constructing rows so the resolved selection is highlighted and can be
+        // revealed. Ordinary data refreshes intentionally preserve stale/empty
+        // selection without moving the user's focus.
+        if revealSelection, !selectedId.isEmpty,
+           !groups.contains(where: { group in group.items.contains(where: { $0.id == selectedId }) }) {
+            selectedId = groups.first?.items.first?.id ?? ""
+        }
 
         for (groupIndex, group) in groups.enumerated() {
             renderedGroupTitles.append(group.title)
