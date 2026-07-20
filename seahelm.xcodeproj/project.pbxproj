@@ -1854,7 +1854,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.16;
+				MARKETING_VERSION = 2.0.17;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2086,7 +2086,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.16;
+				MARKETING_VERSION = 2.0.17;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
