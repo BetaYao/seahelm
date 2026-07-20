@@ -389,7 +389,7 @@ private struct SuggestionCard: View {
     let onDismiss: () -> Void
 
     private var isQuestion: Bool {
-        order.action.payload == FirstMateAction.askUserQuestionPayload
+        FirstMateAction.isQuestionPayload(order.action.payload)
     }
 
     var body: some View {

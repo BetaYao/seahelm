@@ -51,6 +51,24 @@ final class FirstMateCoordinatorOutcomeTests: XCTestCase {
         XCTAssertTrue(q.all().isEmpty, "answered AskUserQuestion card must clear on agent stop")
     }
 
+    func testRunningScreenFrameResolvesViewportQuestionCard() {
+        let q = PendingOrdersQueue()
+        let action = FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt",
+            branch: "b", project: "p", terminalID: "t1",
+            message: "Codex requires approval",
+            payload: FirstMateAction.screenChoicePayload, options: ["Yes", "No"])
+        q.upsert(action)
+        let coord = FirstMateCoordinator(config: .default, queue: q,
+            notify: { _ in }, runInspection: { _ in })
+        coord.handle(outcome(
+            kind: .screenObserved(status: .running, message: "", activity: [],
+                                  commandLine: nil, agentType: .codex,
+                                  roundDuration: 0, tasks: []),
+            changed: true, completion: false, newStatus: .running))
+        XCTAssertTrue(q.all().isEmpty)
+    }
+
     func testToolUseKeepsQuestionCardOfOtherWorktree() {
         let q = PendingOrdersQueue()
         q.upsert(questionAction(worktree: "/other", terminalID: "t2"))

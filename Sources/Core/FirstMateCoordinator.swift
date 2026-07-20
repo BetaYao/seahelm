@@ -29,6 +29,10 @@ final class FirstMateCoordinator {
             // the question card is stale, clear it. (AskUserQuestion's own
             // tool_use_start is decoded as .question, so it can't self-clear.)
             queue.resolveQuestion(terminalID: outcome.info.id)
+        case .screenObserved where outcome.newStatus != .waiting:
+            // A viewport-discovered permission dialog disappeared. Remove its
+            // card once the same pane is visibly no longer awaiting input.
+            queue.resolveQuestion(terminalID: outcome.info.id)
         default:
             break
         }

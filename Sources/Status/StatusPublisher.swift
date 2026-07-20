@@ -286,6 +286,19 @@ class StatusPublisher {
                                       commandLine: commandLine, agentType: agentType,
                                       roundDuration: roundDur, tasks: webhookTasks))
             ShipLog.shared.ingest(normalized)
+
+            // Agent permission dialogs are rendered by the TUI rather than sent
+            // through Codex/Claude hooks. Surface their numbered choices through
+            // the same First Mate question-card pipeline used by native tools.
+            let choices = ChoiceOptionParser.parse(content)
+            if agentType.isAIAgent, !choices.isEmpty {
+                let question = NormalizedEvent(
+                    terminalID: terminalID, source: .scan,
+                    kind: .question(
+                        prompt: "\(agentType.displayName) requires approval",
+                        options: choices.map(\.label), followups: []))
+                ShipLog.shared.ingest(question)
+            }
             // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
             // scan+hook+OSC) in TabCoordinator, not directly here — the scan path
             // is viewport-hash-gated and would push a stale idle while an agent is
