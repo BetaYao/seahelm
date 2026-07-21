@@ -37,10 +37,10 @@ final class CabinGroupingTests: XCTestCase {
             item("/beta/main", repo: "beta", main: true),
         ], mode: .repository, now: now)
 
-        XCTAssertEqual(groups.map(\.title), ["beta", "Unknown repository", "alpha"])
+        XCTAssertEqual(groups.map(\.title), ["beta", "Unknown deck", "alpha"])
         XCTAssertEqual(groups.map(\.id), [
             .repository("beta"),
-            .repository("Unknown repository"),
+            .repository("Unknown deck"),
             .repository("alpha"),
         ])
     }

@@ -34,7 +34,7 @@ final class LeaderMenuTests: XCTestCase {
         let hints = LeaderMenu.hints(at: [])
         XCTAssertEqual(hints.first, LeaderHint(key: "s", label: "split ▸", isSubmenu: true))
         XCTAssertEqual(hints.first(where: { $0.key == "n" }),
-                       LeaderHint(key: "n", label: "new worktree", isSubmenu: false))
+                       LeaderHint(key: "n", label: "new cabin", isSubmenu: false))
     }
 
     // MARK: - resolve

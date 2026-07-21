@@ -35,7 +35,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              now: { self.now })
 
             XCTAssertEqual(view.groupingMenuTitlesForTesting, [
-                "Group by Repository", "Group by Status", "Group by Time", "Expand All Panes",
+                "Group by Deck", "Group by Status", "Group by Time", "Expand All Panes",
             ])
             XCTAssertEqual(view.groupingMenuKeyEquivalentsForTesting, ["", "", "", ""])
             XCTAssertTrue(view.groupingButtonRefusesFirstResponderForTesting)
@@ -127,15 +127,15 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by repository")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by deck")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group worktrees by repository")
+                           "Group cabins by deck")
 
             view.selectGroupingModeForTesting(.activityTime)
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by time")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by time")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group worktrees by time")
+                           "Group cabins by time")
         }
     }
 
