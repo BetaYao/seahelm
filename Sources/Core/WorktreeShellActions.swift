@@ -2,7 +2,7 @@ import AppKit
 
 /// Finder / clipboard / editor actions for a worktree directory, shared by the
 /// sidebar context menu and anything else that acts on a worktree path.
-enum WorktreeShellActions {
+enum CabinShellActions {
     /// Editors tried in order for "Open in Editor". First one installed wins —
     /// there is no editor preference in config yet.
     private static let editorBundleIds = [

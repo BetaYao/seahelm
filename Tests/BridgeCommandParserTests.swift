@@ -3,8 +3,8 @@ import XCTest
 
 final class BridgeCommandParserTests: XCTestCase {
     let wts = [
-        WorktreeRef(repo: "alpha", branch: "feat-x", path: "/repo/feat-x"),
-        WorktreeRef(repo: "beta", branch: "fix-y", path: "/repo/fix-y"),
+        CabinRef(repo: "alpha", branch: "feat-x", path: "/repo/feat-x"),
+        CabinRef(repo: "beta", branch: "fix-y", path: "/repo/fix-y"),
     ]
     let repos = ["/workspaces/alpha", "/workspaces/beta"]
     let agents = [
@@ -205,7 +205,7 @@ final class BridgeCommandParserTests: XCTestCase {
 
     /// Dropping a repo leaves the worktree on disk, so it is the recoverable guess.
     func testReturnPrefersRepoOnNameCollision() {
-        let collidingWts = [WorktreeRef(repo: "alpha", branch: "alpha", path: "/repo/alpha")]
+        let collidingWts = [CabinRef(repo: "alpha", branch: "alpha", path: "/repo/alpha")]
         XCTAssertEqual(
             BridgeCommandParser.parse("/return @alpha", worktrees: collidingWts, repoPaths: repos),
             .success(.removeRepo(repoPath: "/workspaces/alpha")))

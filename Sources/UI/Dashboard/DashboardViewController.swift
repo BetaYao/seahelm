@@ -157,7 +157,7 @@ class DashboardViewController: NSViewController {
     // The inline worktree creator is no longer shown (the cockpit `/new` command
     // replaces it); the object is kept only so the existing setup/report wiring
     // in MainWindowController still compiles.
-    private let inlineCreateView = InlineWorktreeCreateView()
+    private let inlineCreateView = InlineCabinCreateView()
     private var inlineCreateHeightConstraint: NSLayoutConstraint?
 
     // Left column content host — overview + side panel swap (no outer width/collapse;
@@ -166,8 +166,8 @@ class DashboardViewController: NSViewController {
     /// Terminal / focus-panel host for the chrome terminal slot.
     let terminalHostView = NSView()
     private var leftColumnContainer: NSView { navigatorHostView }
-    private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
-        let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
+    private(set) lazy var sidePanelVC: CabinSidePanelViewController = {
+        let vc = CabinSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
         // First Mate titles follow the worktree's current pane, same as the
         // terminal chrome header.
@@ -1937,10 +1937,10 @@ extension DashboardViewController {
     }
 }
 
-// MARK: - WorktreeSidePanelDelegate
+// MARK: - CabinSidePanelDelegate
 
-extension DashboardViewController: WorktreeSidePanelDelegate {
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
+extension DashboardViewController: CabinSidePanelDelegate {
+    func sidePanel(_ vc: CabinSidePanelViewController, didSelectFile path: String) {
         openFile(path: path)
     }
 
@@ -2000,7 +2000,7 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
         }
     }
 
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
+    func sidePanel(_ vc: CabinSidePanelViewController, didSelectChange path: String) {
         let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let title = fileName.isEmpty ? "Changes" : fileName
@@ -2129,16 +2129,16 @@ final class DashboardOverviewView: NSView {
     /// labels) dismiss the slash menu even when the field stays first responder.
     private var menuClickMonitor: Any?
 
-    private let groupingPreference: WorktreeGroupingPreference
+    private let groupingPreference: CabinGroupingPreference
     private let now: () -> Date
-    private var groupingMode: WorktreeGroupingMode
+    private var groupingMode: CabinGroupingMode
     private var latestSailors: [SailorDisplayInfo] = []
     private var rowViewsByID: [String: RowView] = [:]
     private var renderedGroupTitles: [String] = []
     private var revealedRowID: String?
 
     override init(frame frameRect: NSRect) {
-        let preference = WorktreeGroupingPreference(defaults: .standard)
+        let preference = CabinGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
         groupingMode = preference.load()
@@ -2146,7 +2146,7 @@ final class DashboardOverviewView: NSView {
         setup()
     }
     required init?(coder: NSCoder) {
-        let preference = WorktreeGroupingPreference(defaults: .standard)
+        let preference = CabinGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
         groupingMode = preference.load()
@@ -2155,7 +2155,7 @@ final class DashboardOverviewView: NSView {
     }
 
     init(frame frameRect: NSRect, defaults: UserDefaults, now: @escaping () -> Date) {
-        let preference = WorktreeGroupingPreference(defaults: defaults)
+        let preference = CabinGroupingPreference(defaults: defaults)
         groupingPreference = preference
         self.now = now
         groupingMode = preference.load()
@@ -2261,7 +2261,7 @@ final class DashboardOverviewView: NSView {
         groupingButton.target = self
         groupingButton.action = #selector(showGroupingMenu(_:))
 
-        let entries: [(WorktreeGroupingMode, String)] = [
+        let entries: [(CabinGroupingMode, String)] = [
             (.repository, "Group by Deck"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
@@ -2284,11 +2284,11 @@ final class DashboardOverviewView: NSView {
 
     @objc private func selectGroupingMode(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
-              let mode = WorktreeGroupingMode(rawValue: rawValue) else { return }
+              let mode = CabinGroupingMode(rawValue: rawValue) else { return }
         applyGroupingMode(mode)
     }
 
-    private func applyGroupingMode(_ mode: WorktreeGroupingMode) {
+    private func applyGroupingMode(_ mode: CabinGroupingMode) {
         groupingMode = mode
         groupingPreference.save(mode)
         refreshGroupingMenuPresentation()
@@ -2606,7 +2606,7 @@ final class DashboardOverviewView: NSView {
 
         let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
         let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
-        let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
+        let groups = CabinGrouping.groups(groupingItems, mode: groupingMode, now: now())
 
         // A mode switch is an explicit navigation action. If its previous
         // identity is stale, land on the first row in the new ordering before
@@ -2681,13 +2681,13 @@ final class DashboardOverviewView: NSView {
     var selectedId: String = ""
 
     // Focused AppKit contract exposed to unit tests without leaking mutable UI.
-    var groupingModeForTesting: WorktreeGroupingMode { groupingMode }
+    var groupingModeForTesting: CabinGroupingMode { groupingMode }
     var groupingMenuTitlesForTesting: [String] { groupingMenu.items.map(\.title) }
     var groupingMenuKeyEquivalentsForTesting: [String] { groupingMenu.items.map(\.keyEquivalent) }
-    var checkedGroupingModesForTesting: [WorktreeGroupingMode] {
+    var checkedGroupingModesForTesting: [CabinGroupingMode] {
         groupingMenu.items.compactMap { item in
             guard item.state == .on, let rawValue = item.representedObject as? String else { return nil }
-            return WorktreeGroupingMode(rawValue: rawValue)
+            return CabinGroupingMode(rawValue: rawValue)
         }
     }
     var renderedGroupTitlesForTesting: [String] { renderedGroupTitles }
@@ -2696,7 +2696,7 @@ final class DashboardOverviewView: NSView {
     var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
     var groupingButtonAccessibilityLabelForTesting: String? { groupingButton.accessibilityLabel() }
     var groupingButtonRefusesFirstResponderForTesting: Bool { groupingButton.refusesFirstResponder }
-    func selectGroupingModeForTesting(_ mode: WorktreeGroupingMode) { applyGroupingMode(mode) }
+    func selectGroupingModeForTesting(_ mode: CabinGroupingMode) { applyGroupingMode(mode) }
 
     /// Cards in carousel order + each card's worktree path, for keyboard nav.
     private(set) var orderCards: [OrderCardView] = []
@@ -2758,7 +2758,7 @@ final class DashboardOverviewView: NSView {
         v.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -15).isActive = true
     }
 
-    private func makeGroupHeader(group: WorktreeGroup, topGap: CGFloat) -> NSView {
+    private func makeGroupHeader(group: CabinGroup, topGap: CGFloat) -> NSView {
         var views: [NSView] = []
         if let status = group.status {
             if status == .running {
@@ -2900,7 +2900,7 @@ final class DashboardOverviewView: NSView {
             line2.translatesAutoresizingMaskIntoConstraints = false
             if showsRepository {
                 let repository = Self.label(sailor.project.isEmpty ? "Unknown deck" : sailor.project,
-                                            RepoColor.color(for: sailor.project), 10, weight: .semibold)
+                                            DeckColor.color(for: sailor.project), 10, weight: .semibold)
                 repository.setContentHuggingPriority(.defaultHigh, for: .horizontal)
                 repository.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 line2.addArrangedSubview(repository)
@@ -2980,7 +2980,7 @@ final class DashboardOverviewView: NSView {
         }
 
         @objc private func openInEditorAction() {
-            if !WorktreeShellActions.openInEditor(path) {
+            if !CabinShellActions.openInEditor(path) {
                 let alert = NSAlert()
                 alert.messageText = "No supported editor found"
                 alert.informativeText = "Install VS Code, Cursor, Zed, or Xcode to use Open in Editor."
@@ -2988,9 +2988,9 @@ final class DashboardOverviewView: NSView {
             }
         }
 
-        @objc private func revealInFinderAction() { WorktreeShellActions.revealInFinder(path) }
+        @objc private func revealInFinderAction() { CabinShellActions.revealInFinder(path) }
 
-        @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
+        @objc private func copyPathAction() { CabinShellActions.copyPath(path) }
 
         @objc private func deleteAction() { onDelete?(path) }
 

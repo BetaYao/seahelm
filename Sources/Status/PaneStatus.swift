@@ -17,7 +17,7 @@ struct PaneStatus: Equatable {
     }
 }
 
-struct WorktreeStatus: Equatable {
+struct CabinStatus: Equatable {
     let worktreePath: String
     var panes: [PaneStatus]           // Ordered by SplitTree leaf position
     var mostRecentPaneIndex: Int      // Pane whose lastMessage is displayed

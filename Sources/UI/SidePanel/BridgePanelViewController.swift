@@ -736,13 +736,13 @@ final class OrderCardView: NSTableCellView {
         // No agent-type glyph/name — the repo + session title identify the order.
         let sailor = ShipLog.shared.sailor(forWorktree: order.action.worktreePath)
         glyphLabel.stringValue = order.action.project
-        glyphLabel.textColor = RepoColor.color(for: order.action.project)
+        glyphLabel.textColor = DeckColor.color(for: order.action.project)
         glyphLabel.isHidden = order.action.project.isEmpty
 
         agentLabel.stringValue = "\u{25CF}"
         agentLabel.textColor = (sailor?.status ?? .unknown).color
 
-        let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: order.action.worktreePath)
+        let cachedTitle = CabinTitleCache.shared.cachedTitle(worktreePath: order.action.worktreePath)
         let branch = order.action.branch.isEmpty ? order.action.project : order.action.branch
         taskLabel.stringValue = [currentPaneTitle, cachedTitle, sailor?.lastUserPrompt].compactMap { $0 }
             .first(where: { !$0.isEmpty }) ?? branch

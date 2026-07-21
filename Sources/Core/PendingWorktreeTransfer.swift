@@ -1,7 +1,7 @@
 import Foundation
 
 /// Records a pending worktree transfer intent from a WorktreeCreate hook event.
-struct PendingWorktreeTransfer {
+struct PendingCabinTransfer {
     let sourceWorktreePath: String
     let worktreeName: String
     let sessionId: String
@@ -15,7 +15,7 @@ struct PendingWorktreeTransfer {
 /// Tracks pending transfers between WorktreeCreate and the subsequent CwdChanged/discovery.
 /// Thread-safe — guarded by NSLock.
 class PendingTransferTracker {
-    private var pending: [PendingWorktreeTransfer] = []
+    private var pending: [PendingCabinTransfer] = []
     private let lock = NSLock()
     /// Transfers older than this are discarded (seconds).
     private let ttl: TimeInterval = 30
@@ -25,7 +25,7 @@ class PendingTransferTracker {
         lock.lock()
         defer { lock.unlock() }
         pruneStale()
-        pending.append(PendingWorktreeTransfer(
+        pending.append(PendingCabinTransfer(
             sourceWorktreePath: sourceWorktreePath,
             worktreeName: worktreeName,
             sessionId: sessionId,
@@ -37,7 +37,7 @@ class PendingTransferTracker {
     /// Try to match a newly discovered worktree path to a pending transfer.
     /// Matching strategy: the new path's last component equals the recorded worktreeName.
     /// Consumes (removes) the match if found.
-    func consume(newWorktreePath: String) -> PendingWorktreeTransfer? {
+    func consume(newWorktreePath: String) -> PendingCabinTransfer? {
         lock.lock()
         defer { lock.unlock() }
         pruneStale()

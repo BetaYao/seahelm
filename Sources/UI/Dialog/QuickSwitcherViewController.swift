@@ -37,7 +37,7 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
     /// names. Worktrees with a fresh cache entry resolve without disk access.
     private func primeTitles() {
         for info in allWorktrees {
-            WorktreeTitleCache.shared.title(
+            CabinTitleCache.shared.title(
                 worktreePath: info.path, lastUserPrompt: "", branch: info.branch
             ) { [weak self] _ in
                 self?.resultsTableView.reloadData()
@@ -268,7 +268,7 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         // Worktree title — resolved semantic title (Claude session summary →
         // stored task description → prompt), falling back to the branch/dir name
         // until the cache is primed.
-        let title = WorktreeTitleCache.shared.cachedTitle(worktreePath: info.path) ?? info.displayName
+        let title = CabinTitleCache.shared.cachedTitle(worktreePath: info.path) ?? info.displayName
         let branchLabel = NSTextField(labelWithString: title)
         branchLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         branchLabel.textColor = SemanticColors.text

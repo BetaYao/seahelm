@@ -17,8 +17,8 @@ final class WorktreeGroupingTests: XCTestCase {
         activity: Date? = nil,
         main: Bool = false,
         created: Date = .distantPast
-    ) -> WorktreeGroupingItem {
-        WorktreeGroupingItem(
+    ) -> CabinGroupingItem {
+        CabinGroupingItem(
             id: path,
             path: path,
             repository: repo,
@@ -30,7 +30,7 @@ final class WorktreeGroupingTests: XCTestCase {
     }
 
     func testRepositoryGroupsRemainInFirstSeenOrderAndNormalizeEmptyName() {
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/beta/linked", repo: "beta"),
             item("/unknown", repo: ""),
             item("/alpha", repo: "alpha"),
@@ -48,7 +48,7 @@ final class WorktreeGroupingTests: XCTestCase {
     func testRepositoryRowsSortMainFirstThenCreationDateThenPath() {
         let old = Date(timeIntervalSince1970: 10)
         let new = Date(timeIntervalSince1970: 20)
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/repo/z-new", repo: "repo", created: new),
             item("/repo/z-old", repo: "repo", created: old),
             item("/repo/main", repo: "repo", main: true, created: new),
@@ -61,7 +61,7 @@ final class WorktreeGroupingTests: XCTestCase {
     }
 
     func testStatusGroupsUseApprovedOrderAndTitles() {
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/unknown", repo: "repo", status: .unknown),
             item("/dormant", repo: "repo", status: .exited),
             item("/error", repo: "repo", status: .error),
@@ -81,7 +81,7 @@ final class WorktreeGroupingTests: XCTestCase {
     func testStatusRowsSortByLatestActivityThenPath() {
         let recent = now.addingTimeInterval(-10)
         let old = now.addingTimeInterval(-30)
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/none-z", repo: "repo", status: .running),
             item("/old", repo: "repo", status: .running, activity: old),
             item("/recent-z", repo: "repo", status: .running, activity: recent),
@@ -96,7 +96,7 @@ final class WorktreeGroupingTests: XCTestCase {
 
     func testActivityTimeBucketsUseUTCNowAndClampFutureActivity() throws {
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-20T12:00:00Z"))
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/future", repo: "repo", activity: now.addingTimeInterval(60)),
             item("/hour", repo: "repo", activity: now.addingTimeInterval(-3_599)),
             item("/today", repo: "repo", activity: now.addingTimeInterval(-7_200)),
@@ -113,7 +113,7 @@ final class WorktreeGroupingTests: XCTestCase {
 
     func testActivityTimeBucketsHonorExactHourAndSevenDayBoundaries() throws {
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-20T12:00:00Z"))
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/exact-hour", repo: "repo", activity: now.addingTimeInterval(-3_600)),
             item("/under-seven", repo: "repo", activity: now.addingTimeInterval(-(7 * 86_400 - 1))),
             item("/exact-seven", repo: "repo", activity: now.addingTimeInterval(-7 * 86_400)),
@@ -130,7 +130,7 @@ final class WorktreeGroupingTests: XCTestCase {
     func testActivityRowsSortByLatestActivityThenPath() throws {
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-20T12:00:00Z"))
         let tied = now.addingTimeInterval(-7_200)
-        let groups = WorktreeGrouping.groups([
+        let groups = CabinGrouping.groups([
             item("/today-z", repo: "repo", activity: tied),
             item("/today-old", repo: "repo", activity: tied.addingTimeInterval(-60)),
             item("/today-a", repo: "repo", activity: tied),
@@ -146,14 +146,14 @@ final class WorktreeGroupingTests: XCTestCase {
         let suite = "WorktreeGroupingTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let preference = WorktreeGroupingPreference(defaults: defaults)
+        let preference = CabinGroupingPreference(defaults: defaults)
 
         XCTAssertEqual(preference.load(), .repository)
         preference.save(.activityTime)
         XCTAssertEqual(preference.load(), .activityTime)
-        XCTAssertEqual(defaults.string(forKey: WorktreeGroupingPreference.key), "activityTime")
+        XCTAssertEqual(defaults.string(forKey: CabinGroupingPreference.key), "activityTime")
 
-        defaults.set("broken", forKey: WorktreeGroupingPreference.key)
+        defaults.set("broken", forKey: CabinGroupingPreference.key)
         XCTAssertEqual(preference.load(), .repository)
     }
 }

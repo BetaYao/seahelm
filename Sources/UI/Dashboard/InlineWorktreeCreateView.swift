@@ -4,7 +4,7 @@ import QuartzCore
 /// ChatGPT-style sticky worktree creator at the bottom of the sidebar: a tall
 /// rounded prompt box with the name field on top and a bottom row showing the
 /// target repo (tap to switch or add) plus the reuse-environment toggle.
-final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
+final class InlineCabinCreateView: NSView, NSTextViewDelegate {
     /// (taskDescription, repoPath, agentType, reuseEnvironment)
     var onCreate: ((String, String, SailorType, Bool) -> Void)?
     /// Requests an outer height constraint update. The dashboard owns the
@@ -604,7 +604,7 @@ private final class CompletionRowView: NSView {
         didSet { updateBackground() }
     }
 
-    init(item: InlineWorktreeCreateView.CommandItem, height: CGFloat, action: @escaping () -> Void) {
+    init(item: InlineCabinCreateView.CommandItem, height: CGFloat, action: @escaping () -> Void) {
         self.action = action
 
         nameLabel = NSTextField(labelWithString: "/\(item.name)")

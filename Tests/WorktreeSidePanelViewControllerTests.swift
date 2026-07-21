@@ -4,8 +4,8 @@ import AppKit
 @testable import seahelm
 
 final class WorktreeSidePanelViewControllerTests: XCTestCase {
-    private func makeVC(worktreePath: String?) -> WorktreeSidePanelViewController {
-        WorktreeSidePanelViewController(worktreePath: worktreePath)
+    private func makeVC(worktreePath: String?) -> CabinSidePanelViewController {
+        CabinSidePanelViewController(worktreePath: worktreePath)
     }
 
     func testInitHoldsWorktreePath() {

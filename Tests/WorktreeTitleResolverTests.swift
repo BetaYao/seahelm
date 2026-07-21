@@ -3,7 +3,7 @@ import XCTest
 
 final class WorktreeTitleResolverTests: XCTestCase {
     func testFallsBackToPromptWhenNoSummary() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/nonexistent/path",
             lastUserPrompt: "Fix the login bug",
             branch: "feature/login",
@@ -14,7 +14,7 @@ final class WorktreeTitleResolverTests: XCTestCase {
     }
 
     func testPrefersSessionTitle() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "prompt",
             branch: "br",
@@ -25,7 +25,7 @@ final class WorktreeTitleResolverTests: XCTestCase {
     }
 
     func testFallsBackToBranchWhenEmpty() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "",
             branch: "feature/x",
@@ -36,7 +36,7 @@ final class WorktreeTitleResolverTests: XCTestCase {
     }
 
     func testPrefersTaskOverPromptAndBranch() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "some detected prompt",
             branch: "feature/x",
@@ -47,7 +47,7 @@ final class WorktreeTitleResolverTests: XCTestCase {
     }
 
     func testSummaryStillWinsOverTask() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "prompt",
             branch: "br",
@@ -58,7 +58,7 @@ final class WorktreeTitleResolverTests: XCTestCase {
     }
 
     func testFallsThroughEmptyTaskToPrompt() {
-        let title = WorktreeTitleResolver.resolve(
+        let title = CabinTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "the prompt",
             branch: "br",

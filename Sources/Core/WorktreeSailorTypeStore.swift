@@ -4,8 +4,8 @@ import Foundation
 /// path, so the card badge reflects the user's pick immediately — instead of
 /// waiting for seahelm to detect the agent from terminal output. Stored as JSON
 /// alongside config.json (`~/.config/seahelm/worktree-agents.json`).
-final class WorktreeSailorTypeStore {
-    static let shared = WorktreeSailorTypeStore()
+final class CabinSailorTypeStore {
+    static let shared = CabinSailorTypeStore()
 
     private let store = PersistedStringMap(fileName: "worktree-agents.json")
 

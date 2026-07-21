@@ -4,7 +4,7 @@ import XCTest
 final class PaneStatusTests: XCTestCase {
 
     func testWorktreeStatusStatuses() {
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "building", lastUserPrompt: "", lastUpdated: Date()),
@@ -19,7 +19,7 @@ final class PaneStatusTests: XCTestCase {
 
     func testRepresentativeIsAgentOverBusyShell() {
         // Shell pane (npm) running forever must not mask a blocked AI agent.
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "shell", status: .running, lastMessage: "webpack…",
@@ -35,7 +35,7 @@ final class PaneStatusTests: XCTestCase {
 
     func testRepresentativeStatusAndMessageSamePane() {
         // Higher-priority pane owns both the badge status and the message.
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "a", status: .idle, lastMessage: "idle msg",
@@ -50,7 +50,7 @@ final class PaneStatusTests: XCTestCase {
     }
 
     func testWorktreeStatusHasUrgent() {
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
@@ -64,7 +64,7 @@ final class PaneStatusTests: XCTestCase {
     }
 
     func testWorktreeStatusNotUrgent() {
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
@@ -77,7 +77,7 @@ final class PaneStatusTests: XCTestCase {
     }
 
     func testWorktreeStatusHighestPriority() {
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "t1", status: .idle, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
@@ -92,7 +92,7 @@ final class PaneStatusTests: XCTestCase {
     }
 
     func testSinglePaneWorktreeStatus() {
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: "/repo/main",
             panes: [
                 PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "working", lastUserPrompt: "", lastUpdated: Date()),

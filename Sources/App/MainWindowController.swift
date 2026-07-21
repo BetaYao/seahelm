@@ -125,7 +125,7 @@ class MainWindowController: NSWindowController {
     }()
 
     // Status detection
-    private let statusAggregator = WorktreeStatusAggregator()
+    private let statusAggregator = CabinStatusAggregator()
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.aggregator = statusAggregator
@@ -727,8 +727,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             do {
                 let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
                 let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
-                WorktreeSailorTypeStore.shared.set(agentType, forWorktree: info.path)
-                WorktreeTaskStore.shared.set(task, forWorktree: info.path)
+                CabinSailorTypeStore.shared.set(agentType, forWorktree: info.path)
+                CabinTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
                     let sessionName = SessionManager.persistentSessionName(for: info.path)
@@ -765,9 +765,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// every worktree, not just the staffed ones, so an idle tree is still
     /// reachable and still sweepable. Both surfaces read this, which is what
     /// keeps their numbering identical.
-    private func currentWorktreeRefs() -> [WorktreeRef] {
+    private func currentWorktreeRefs() -> [CabinRef] {
         tabCoordinator.allWorktrees.map {
-            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+            CabinRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
                         branch: $0.info.branch,
                         path: $0.info.path)
         }
@@ -1414,7 +1414,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         } else if let info {
             paneTitle = PaneTitleResolver.title(for: info)
         } else {
-            paneTitle = WorktreeTitleResolver.resolve(
+            paneTitle = CabinTitleResolver.resolve(
                 worktreePath: path,
                 lastUserPrompt: "",
                 branch: ""
@@ -1485,7 +1485,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     func selectAdjacentWorktree(forward: Bool) {
         let paths = tabCoordinator.allWorktrees.map(\.info.path)
         let current = tabCoordinator.selectedSailor?.worktreePath
-        guard let path = WorktreePathNavigation.adjacentPath(
+        guard let path = CabinPathNavigation.adjacentPath(
             paths: paths, from: current, forward: forward
         ) else { return }
         tabCoordinator.selectTab(forWorktree: path)
@@ -1867,10 +1867,10 @@ extension MainWindowController: NewBranchDialogDelegate {
     }
 }
 
-// MARK: - WorktreeStatusDelegate
+// MARK: - CabinStatusDelegate
 
-extension MainWindowController: WorktreeStatusDelegate {
-    func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
+extension MainWindowController: CabinStatusDelegate {
+    func worktreeStatusDidUpdate(_ status: CabinStatus) {
         tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
@@ -1945,12 +1945,12 @@ extension MainWindowController {
             // cache — a direct resolve() reads session JSONL from disk, and
             // this runs on main for every sailor on every island refresh.
             // Warm the cache off-main; the next tick picks up the result.
-            WorktreeTitleCache.shared.title(
+            CabinTitleCache.shared.title(
                 worktreePath: sailor.worktreePath,
                 lastUserPrompt: sailor.lastUserPrompt,
                 branch: sailor.branch
             ) { _ in }
-            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
+            let cachedTitle = CabinTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
             let row = IslandAgentRow(
                 id: sailor.worktreePath,
                 project: sailor.project,
@@ -2304,7 +2304,7 @@ extension MainWindowController {
             // worktree here would pick its *first* pane, so a suggestion from a
             // split pane got answered in a sibling.
             let worktreePath = order.action.worktreePath
-            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
+            guard let task = CabinTaskStore.shared.task(forWorktree: worktreePath) else { return }
             let terminalID = order.action.terminalID.isEmpty
                 ? ShipLog.shared.sailor(forWorktree: worktreePath)?.id
                 : order.action.terminalID

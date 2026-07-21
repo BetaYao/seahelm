@@ -3,8 +3,8 @@ import Foundation
 /// Caches resolved worktree titles (Claude session summary → prompt → branch)
 /// with a short TTL so the top capsule and mini cards share one source instead
 /// of re-reading session JSONL from disk on every status poll.
-final class WorktreeTitleCache {
-    static let shared = WorktreeTitleCache()
+final class CabinTitleCache {
+    static let shared = CabinTitleCache()
 
     private struct Entry { let title: String; let at: Date }
     private var entries: [String: Entry] = [:]
@@ -36,7 +36,7 @@ final class WorktreeTitleCache {
         }
         lock.unlock()
         DispatchQueue.global(qos: .userInitiated).async {
-            let title = WorktreeTitleResolver.resolve(
+            let title = CabinTitleResolver.resolve(
                 worktreePath: worktreePath, lastUserPrompt: lastUserPrompt, branch: branch
             )
             self.lock.lock(); self.entries[worktreePath] = Entry(title: title, at: Date()); self.lock.unlock()

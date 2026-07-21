@@ -4,7 +4,7 @@ import XCTest
 
 final class PaneTransferTests: XCTestCase {
 
-    // MARK: - PendingWorktreeTransfer Tests
+    // MARK: - PendingCabinTransfer Tests
 
     func testRecordAndMatch() {
         let tracker = PendingTransferTracker()
@@ -59,7 +59,7 @@ final class PaneTransferTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = WorktreeStatusAggregator()
+        coordinator.statusAggregator = CabinStatusAggregator()
 
         // Repo A — the source pane's repo. Its main worktree is what must survive.
         let aMain = WorktreeInfo(path: "/repo-a", branch: "main", commitHash: "aaaa1111", isMainWorktree: true)

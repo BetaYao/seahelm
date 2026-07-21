@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pure adjacency helpers for cycling worktree paths (keyboard Ctrl+Tab).
-enum WorktreePathNavigation {
+enum CabinPathNavigation {
     /// The path forward/backward from `current` in `paths`, wrapping around.
     /// Returns nil only when `paths` is empty. When `current` is nil or not in
     /// the list, forward starts at the first path and backward at the last.

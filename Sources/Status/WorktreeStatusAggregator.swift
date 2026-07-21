@@ -1,7 +1,7 @@
 import Foundation
 
-protocol WorktreeStatusDelegate: AnyObject {
-    func worktreeStatusDidUpdate(_ status: WorktreeStatus)
+protocol CabinStatusDelegate: AnyObject {
+    func worktreeStatusDidUpdate(_ status: CabinStatus)
     func paneStatusDidChange(worktreePath: String, paneIndex: Int,
                              oldStatus: SailorStatus, newStatus: SailorStatus,
                              lastMessage: String)
@@ -9,10 +9,10 @@ protocol WorktreeStatusDelegate: AnyObject {
 
 /// Thread safety: All methods must be called on the main queue.
 /// StatusPublisher dispatches to main before calling agentDidUpdate.
-class WorktreeStatusAggregator {
-    weak var delegate: WorktreeStatusDelegate?
+class CabinStatusAggregator {
+    weak var delegate: CabinStatusDelegate?
 
-    private var worktreeStatuses: [String: WorktreeStatus] = [:]
+    private var worktreeStatuses: [String: CabinStatus] = [:]
     private var paneStates: [String: PaneStatus] = [:]
     private var terminalToWorktree: [String: String] = [:]
     private var worktreeTerminals: [String: [String]] = [:]
@@ -113,7 +113,7 @@ class WorktreeStatusAggregator {
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }
 
-    func status(for worktreePath: String) -> WorktreeStatus? {
+    func status(for worktreePath: String) -> CabinStatus? {
         worktreeStatuses[worktreePath]
     }
 
@@ -150,7 +150,7 @@ class WorktreeStatusAggregator {
         // badge and its message always describe the same pane.
         let representative = panes.max { $0.rollupRank < $1.rollupRank } ?? panes[0]
 
-        let ws = WorktreeStatus(
+        let ws = CabinStatus(
             worktreePath: worktreePath,
             panes: panes,
             mostRecentPaneIndex: representative.paneIndex,

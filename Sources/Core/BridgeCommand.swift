@@ -1,6 +1,6 @@
 import Foundation
 
-struct WorktreeRef: Equatable {
+struct CabinRef: Equatable {
     /// Repo display name. A branch alone is ambiguous once the workspace holds
     /// more than one repo — several can carry the same branch name, and the
     /// chat listing is the one surface with no tab bar to disambiguate it.
@@ -95,7 +95,7 @@ enum BridgeCommandParser {
     ///
     /// Repos win a name collision: dropping a repo leaves the worktree on disk,
     /// so guessing it is the recoverable mistake.
-    static func resolveRemoveTarget(_ rest: String, worktrees: [WorktreeRef],
+    static func resolveRemoveTarget(_ rest: String, worktrees: [CabinRef],
                                     repoPaths: [String]) -> Result<BridgeCommand, BridgeCommandError> {
         let first = rest.split(separator: " ", omittingEmptySubsequences: true).first.map(String.init) ?? ""
         let name = first.hasPrefix("@") ? String(first.dropFirst()) : first
@@ -138,7 +138,7 @@ enum BridgeCommandParser {
     ///   - worktrees: what `/task` lists and `/task #x` selects from.
     ///   - agents: what `/agents` lists and `/agents #x` / `/order #x` select
     ///     from — the current worktree's panes, not the whole fleet.
-    static func parse(_ text: String, worktrees: [WorktreeRef], agents: [AgentRef] = [],
+    static func parse(_ text: String, worktrees: [CabinRef], agents: [AgentRef] = [],
                       repoPaths: [String] = []) -> Result<BridgeCommand, BridgeCommandError> {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failure(.emptyTask) }
@@ -212,7 +212,7 @@ enum BridgeCommandFormatter {
         return (["**Repos**", ""] + lines).joined(separator: "\n")
     }
 
-    static func worktreeList(_ worktrees: [WorktreeRef], currentPath: String?) -> String {
+    static func worktreeList(_ worktrees: [CabinRef], currentPath: String?) -> String {
         guard !worktrees.isEmpty else { return "No tasks. `/task <description>` to start one." }
         let lines = worktrees.enumerated().map { index, wt in
             "\(index + 1). \(wt.repo) / \(wt.branch)\(wt.path == currentPath ? "  ← current" : "")"

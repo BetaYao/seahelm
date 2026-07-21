@@ -6,16 +6,16 @@ enum SidePanelTab: Int {
     case changes = 2
 }
 
-protocol WorktreeSidePanelDelegate: AnyObject {
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String)
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String)
+protocol CabinSidePanelDelegate: AnyObject {
+    func sidePanel(_ vc: CabinSidePanelViewController, didSelectFile path: String)
+    func sidePanel(_ vc: CabinSidePanelViewController, didSelectChange path: String)
 }
 
-final class WorktreeSidePanelViewController: NSViewController {
+final class CabinSidePanelViewController: NSViewController {
     private var worktreePath: String?
     private var selectedTab: SidePanelTab
 
-    weak var delegate: WorktreeSidePanelDelegate?
+    weak var delegate: CabinSidePanelDelegate?
 
     /// Resolves a worktree's current-pane title for First Mate cards.
     var currentPaneTitleProvider: ((String) -> String?)?
@@ -506,7 +506,7 @@ final class WorktreeSidePanelViewController: NSViewController {
 
 // MARK: - File search
 
-extension WorktreeSidePanelViewController: NSTextFieldDelegate {
+extension CabinSidePanelViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, field === fileSearchField else { return }
         fileTreeController?.filterText = field.stringValue
@@ -515,7 +515,7 @@ extension WorktreeSidePanelViewController: NSTextFieldDelegate {
 
 // MARK: - NSTableViewDataSource / Delegate (Changes tab)
 
-extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
+extension CabinSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
         changedFiles.count
     }

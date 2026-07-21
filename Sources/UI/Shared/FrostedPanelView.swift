@@ -39,7 +39,7 @@ final class FrostedPanelView: NSVisualEffectView {
     }
 
     func applyAppearance() {
-        // Match InlineWorktreeCreateView's completion panel and macOS menus:
+        // Match InlineCabinCreateView's completion panel and macOS menus:
         // `.menu` in both appearances — system resolves the correct light/dark glass.
         material = .menu
         switch kind {

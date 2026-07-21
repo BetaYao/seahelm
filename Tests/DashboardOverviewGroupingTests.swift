@@ -44,7 +44,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testStoredStatusLoadsAsTheOnlyCheckedMode() {
         withDefaults { defaults in
-            defaults.set("status", forKey: WorktreeGroupingPreference.key)
+            defaults.set("status", forKey: CabinGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -55,7 +55,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testInvalidStoredModeFallsBackToRepository() {
         withDefaults { defaults in
-            defaults.set("not-a-mode", forKey: WorktreeGroupingPreference.key)
+            defaults.set("not-a-mode", forKey: CabinGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -86,7 +86,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
             view.selectGroupingModeForTesting(.status)
 
-            XCTAssertEqual(defaults.string(forKey: WorktreeGroupingPreference.key), "status")
+            XCTAssertEqual(defaults.string(forKey: CabinGroupingPreference.key), "status")
             XCTAssertEqual(view.renderedGroupTitlesForTesting, ["Needs input", "Running", "Idle"])
             XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
             XCTAssertEqual(view.selectedId, "run")
