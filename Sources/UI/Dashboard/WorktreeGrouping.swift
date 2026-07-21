@@ -4,6 +4,10 @@ enum WorktreeGroupingMode: String, CaseIterable {
     case repository
     case status
     case activityTime
+    /// Fully-expanded three-level view: repository header → worktree row → pane
+    /// rows. Groups by repository like `.repository`; the pane expansion is a
+    /// render-time concern (see `DashboardOverviewView.render`).
+    case sailor
 }
 
 enum WorktreeActivityBucket: String, CaseIterable {
@@ -59,7 +63,7 @@ enum WorktreeGrouping {
         calendar: Calendar = .current
     ) -> [WorktreeGroup] {
         switch mode {
-        case .repository:
+        case .repository, .sailor:
             return repositoryGroups(items)
         case .status:
             return statusGroups(items)

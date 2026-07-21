@@ -34,6 +34,10 @@ class Station {
 
     /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
+    /// Last-known "strong" pane title (agent session / OSC title), persisted in
+    /// the split layout so a restored pane shows its real title immediately —
+    /// before a fresh OSC title or agent session ref lands after relaunch.
+    var persistedTitle: String?
     /// Persistence backend for the sessionName above.
     var backend: String = "zmx"
     /// Agent resume ref, if this pane runs a recognized agent. When a *fresh*

@@ -28,22 +28,32 @@ final class SplitNodeTests: XCTestCase {
     }
 
     func testCodableRoundTrip_Leaf() throws {
-        let node = CodableSplitNode.leaf(sessionName: "seahelm-repo-main")
+        let node = CodableSplitNode.leaf(sessionName: "seahelm-repo-main", title: "Fix the bug")
         let data = try JSONEncoder().encode(node)
         let decoded = try JSONDecoder().decode(CodableSplitNode.self, from: data)
-        if case .leaf(let name) = decoded {
+        if case .leaf(let name, let title) = decoded {
             XCTAssertEqual(name, "seahelm-repo-main")
+            XCTAssertEqual(title, "Fix the bug")
         } else {
             XCTFail("Expected leaf")
         }
+    }
+
+    func testCodableLeaf_DecodesLegacyWithoutTitle() throws {
+        // Older configs have no `title` key — must still decode (title = nil).
+        let json = Data(#"{"type":"leaf","sessionName":"seahelm-repo-main"}"#.utf8)
+        let decoded = try JSONDecoder().decode(CodableSplitNode.self, from: json)
+        guard case .leaf(let name, let title) = decoded else { return XCTFail("Expected leaf") }
+        XCTAssertEqual(name, "seahelm-repo-main")
+        XCTAssertNil(title)
     }
 
     func testCodableRoundTrip_Split() throws {
         let node = CodableSplitNode.split(
             axis: "horizontal",
             ratio: 0.6,
-            first: .leaf(sessionName: "seahelm-repo-main"),
-            second: .leaf(sessionName: "seahelm-repo-main-1")
+            first: .leaf(sessionName: "seahelm-repo-main", title: nil),
+            second: .leaf(sessionName: "seahelm-repo-main-1", title: nil)
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys

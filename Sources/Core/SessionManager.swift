@@ -32,7 +32,7 @@ enum SessionManager {
 
     static func sessionNames(in layout: CodableSplitNode) -> [String] {
         switch layout {
-        case .leaf(let sessionName):
+        case .leaf(let sessionName, _):
             return [sessionName]
         case .split(_, _, let first, let second):
             return sessionNames(in: first) + sessionNames(in: second)

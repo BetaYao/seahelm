@@ -17,25 +17,12 @@ final class PaneTitleResolverTests: XCTestCase {
         sailor.station = station
         let title = PaneTitleResolver.title(
             for: sailor,
-            sessionTitle: { _, _ in "Fix login flake" },
-            worktreeSessionTitle: { _ in nil }
+            sessionTitle: { _, _ in "Fix login flake" }
         )
         XCTAssertEqual(title, "Fix login flake")
     }
 
-    func testWorktreeSessionTitleBeforePrompt() {
-        let sailor = makeSailor(agentType: .cursor, prompt: "Do the thing", branch: "feat/x")
-        XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in "Check Error Logs" }
-            ),
-            "Check Error Logs"
-        )
-    }
-
-    func testShellIgnoresWorktreeSessionTitle() {
+    func testShellPrefersCommandOverBranch() {
         let sailor = makeSailor(
             agentType: .shellCommand,
             prompt: "",
@@ -43,65 +30,59 @@ final class PaneTitleResolverTests: XCTestCase {
             commandLine: "brew update"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in "Seahelm Layout Redesign" }
-            ),
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "brew update"
         )
     }
 
-    func testAgentFallsBackToPromptThenBranch() {
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "Do the thing", branch: "feat/x")
+    func testAgentWithoutSessionOrOscFallsBackToBranch() {
+        // Prompt is no longer a per-pane title source — an agent with no session
+        // title and no OSC title reads as its branch.
+        let sailor = makeSailor(agentType: .claudeCode, prompt: "Do the thing", branch: "feat/x")
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
-            "Do the thing"
-        )
-        sailor.lastUserPrompt = ""
-        XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "feat/x"
         )
     }
 
-    func testShellPrefersCommandThenWorktreePathNotWanderingPwd() {
+    func testPersistedTitleBridgesMissingLiveSources() {
+        // Restored pane: no session title, OSC not yet arrived — the persisted
+        // title stands in ahead of the branch/repo fallback.
+        let station = Station()
+        station.persistedTitle = "Add grouping mode"
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "Add grouping mode"
+        )
+    }
+
+    func testStrongTitleWritesBackToPersistedTitle() {
+        let station = Station()
+        station.setOscTitle("✳ Wire up the resolver")
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "main")
+        sailor.station = station
+        _ = PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil })
+        XCTAssertEqual(station.persistedTitle, "Wire up the resolver")
+    }
+
+    func testFallsBackToRepoThenPath() {
         let station = Station()
         station.setPwd("/Users/me/.cursor/plugins/cache/foo")
         var sailor = makeSailor(
             agentType: .shellCommand,
             prompt: "",
             branch: "",
-            commandLine: "git status",
+            commandLine: nil,
             worktreePath: "/Users/me/proj"
         )
         sailor.station = station
+        // Repo name wins as the default before falling through to the path.
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
-            "git status"
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "proj"
         )
-
-        sailor.commandLine = nil
-        let title = PaneTitleResolver.title(
-            for: sailor,
-            sessionTitle: { _, _ in nil },
-            worktreeSessionTitle: { _ in nil },
-            pathDisplay: { path in path == "/Users/me/proj" ? "~/proj" : path }
-        )
-        // Wandering tool cwd must not become the title.
-        XCTAssertEqual(title, "~/proj")
     }
 
     func testAgentIgnoresShellCommandLine() {
@@ -112,11 +93,7 @@ final class PaneTitleResolverTests: XCTestCase {
             commandLine: "cd ~/.cursor/plugins/cache"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "ops/rds-cpu-degrade"
         )
     }
@@ -131,11 +108,7 @@ final class PaneTitleResolverTests: XCTestCase {
             commandLine: "brew update"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in "Cursor Session Title" }
-            ),
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "brew update"
         )
     }
@@ -164,11 +137,7 @@ final class PaneTitleResolverTests: XCTestCase {
         var sailor = makeSailor(agentType: .claudeCode, prompt: "old prompt", branch: "main")
         sailor.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: sailor,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in "Shared Worktree Title" }
-            ),
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "修复重启后的onboarding重复弹出"
         )
     }
@@ -182,11 +151,7 @@ final class PaneTitleResolverTests: XCTestCase {
             var sailor = makeSailor(agentType: .claudeCode, prompt: "p", branch: "main")
             sailor.station = station
             XCTAssertEqual(
-                PaneTitleResolver.title(
-                    for: sailor,
-                    sessionTitle: { _, _ in nil },
-                    worktreeSessionTitle: { _ in nil }
-                ),
+                PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
                 "Update title",
                 "failed for \(raw)"
             )
@@ -202,11 +167,7 @@ final class PaneTitleResolverTests: XCTestCase {
         )
         shell.station = shellStation
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: shell,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
+            PaneTitleResolver.title(for: shell, sessionTitle: { _, _ in nil }),
             "brew update"
         )
 
@@ -216,11 +177,7 @@ final class PaneTitleResolverTests: XCTestCase {
         var agent = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
         agent.station = agentStation
         XCTAssertEqual(
-            PaneTitleResolver.title(
-                for: agent,
-                sessionTitle: { _, _ in nil },
-                worktreeSessionTitle: { _ in nil }
-            ),
+            PaneTitleResolver.title(for: agent, sessionTitle: { _, _ in nil }),
             "feat/x"
         )
     }

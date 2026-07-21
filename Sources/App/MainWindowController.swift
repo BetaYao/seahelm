@@ -1375,7 +1375,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
     @objc private func handlePaneDidAcquireFocus(_ note: Notification) {
         guard let station = note.object as? Station else { return }
         let path = tabCoordinator.selectedSailor?.worktreePath ?? ""
-        guard let title = PaneTitleResolver.displayOscTitle(station.oscTitle, worktreePath: path) else { return }
+        // Prefer the live OSC title; on a fresh launch it hasn't arrived yet, so
+        // fall back to the pane's persisted (last-known) title instead of leaving
+        // the header stale.
+        let persisted = station.persistedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = PaneTitleResolver.displayOscTitle(station.oscTitle, worktreePath: path)
+            ?? (persisted?.isEmpty == false ? persisted : nil)
+        guard let title else { return }
         windowChrome?.updateTerminalTitle(repo: "", pane: title)
     }
 
@@ -1391,10 +1397,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
             ?? tabCoordinator.repoName(forWorktree: path)
 
         let paneTitle: String
-        if let tree = terminalCoordinator.stationManager.tree(forPath: path),
-           let stationId = PaneTitleResolver.focusedStationId(in: tree),
-           let focusedSailor = ShipLog.shared.sailors(forWorktree: path)
-            .first(where: { $0.id == stationId }) {
+        let worktreeSailors = ShipLog.shared.sailors(forWorktree: path)
+        if let info, !worktreeSailors.isEmpty {
+            // Current (focused) pane, or the most-recently-active pane otherwise.
+            let tree = terminalCoordinator.stationManager.tree(forPath: path)
+            let focusedSailor = PaneTitleResolver.representativeSailor(
+                focusedStationId: PaneTitleResolver.focusedStationId(in: tree),
+                among: worktreeSailors,
+                fallback: info
+            )
             paneTitle = PaneTitleResolver.title(for: focusedSailor)
         } else if let info {
             paneTitle = PaneTitleResolver.title(for: info)

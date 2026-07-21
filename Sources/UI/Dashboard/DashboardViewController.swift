@@ -15,6 +15,16 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestShowChanges(worktreePath: String)
 }
 
+// MARK: - PaneDisplayInfo
+
+/// One split pane, for the fully-expanded "Group by Sailor" fleet rows.
+struct PaneDisplayInfo {
+    let stationId: String   // Station.id — the leaf's surface
+    let title: String       // per-pane title (PaneTitleResolver)
+    let status: SailorStatus
+    let isFocused: Bool      // the worktree's last-focused pane
+}
+
 // MARK: - SailorDisplayInfo
 
 struct SailorDisplayInfo {
@@ -42,6 +52,8 @@ struct SailorDisplayInfo {
     let currentPaneTitle: String
     /// Running / activity age for that focused pane (compact: `12s` / `3m`).
     let currentPaneRunTime: String
+    /// Per-pane rows for the expanded "Group by Sailor" mode (leaf order).
+    var panes: [PaneDisplayInfo] = []
 
     /// Rolled-up status for display/grouping: the highest-priority pane, so a
     /// worktree whose first pane is idle but a later pane is running still reads
@@ -244,6 +256,11 @@ class DashboardViewController: NSViewController {
         overviewView.onSelectWorktree = { [weak self] path in
             self?.handleWorktreeRowClick(path: path)
         }
+        // Pane row (expanded "Group by Sailor"): enter the worktree, then focus
+        // the specific pane once its split container is embedded.
+        overviewView.onSelectPane = { [weak self] path, stationId in
+            self?.handlePaneRowClick(path: path, stationId: stationId)
+        }
         // Row context menu → the delegate's confirm-and-tear-down path.
         overviewView.onDeleteWorktree = { [weak self] path in
             guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
@@ -394,11 +411,17 @@ class DashboardViewController: NSViewController {
     ///
     /// The worktree need not be staffed: the cursor still moves, and the caller
     /// tells the user there is no agent to talk to yet.
-    func commitWorktreeSelection(path: String) {
+    func commitWorktreeSelection(path: String, focusTerminal: Bool = false) {
         lastCommittedWorktreePath = path
         guard agents.contains(where: { $0.worktreePath == path }) else { return }
-        selectSailor(byWorktreePath: path, focusTerminal: false)
+        selectSailor(byWorktreePath: path, focusTerminal: focusTerminal)
         overviewSelectedId = selectedSailorId
+        // Push the highlight onto the overview so a programmatic commit (e.g. launch
+        // restore, chat steering) moves the selected row just like a click does.
+        if !overviewView.isHidden {
+            overviewView.selectedId = overviewSelectedId
+            overviewView.update(agents)
+        }
     }
 
     func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
@@ -1291,6 +1314,20 @@ class DashboardViewController: NSViewController {
     /// Test seam for the row-click path (the click itself arrives via a closure).
     func handleWorktreeRowClickForTesting(path: String) { handleWorktreeRowClick(path: path) }
 
+    /// Pane row click in "Group by Sailor": drill into the worktree, then focus
+    /// the clicked pane's leaf. The split container may still be settling, so the
+    /// focus attempt is deferred (mirrors `focusActiveTerminalLeaf`).
+    private func handlePaneRowClick(path: String, stationId: String) {
+        enterWorktree(byWorktreePath: path)
+        guard let container = activeSplitContainer, let tree = container.tree,
+              let leaf = tree.allLeaves.first(where: { $0.stationId == stationId }) else { return }
+        tree.focusedId = leaf.id
+        container.layoutTree()
+        DispatchQueue.main.async { [weak self] in
+            self?.focusActiveTerminalLeaf(tree: tree)
+        }
+    }
+
     private func handleWorktreeRowClick(path: String) {
         guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
             // Not a fleet row (orders card path, stale list) — drill in as before.
@@ -1632,6 +1669,9 @@ final class DashboardOverviewView: NSView {
     /// Resolves a worktree's current-pane title for order cards.
     var currentPaneTitleProvider: ((String) -> String?)?
     var onSelectWorktree: ((String) -> Void)?
+    /// A pane row was clicked in the expanded "Group by Sailor" mode. Args:
+    /// the pane's worktree path and its Station id.
+    var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
     var onGroupingChanged: (() -> Void)?
@@ -1692,18 +1732,6 @@ final class DashboardOverviewView: NSView {
     fileprivate static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
     private static let orange     = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
     fileprivate static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
-
-    /// Per-status group presentation (glyph, group colour, info-line colour, label).
-    private static func groupMeta(_ s: SailorStatus) -> (glyph: String, color: NSColor, info: NSColor, label: String) {
-        switch s {
-        case .waiting: return ("●", orange, orange, "Needs input")
-        case .running: return ("◐", sea, inkDim, "Running")
-        case .idle:    return ("○", emerald, inkDim, "Idle")
-        case .error:   return ("✕", red, red, "Error")
-        case .exited:  return ("◌", inkDim, inkFaint, "Dormant")
-        case .unknown: return ("◌", inkDim, inkFaint, "Unknown")
-        }
-    }
 
     private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
@@ -1874,6 +1902,7 @@ final class DashboardOverviewView: NSView {
             (.repository, "Group by Repository"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
+            (.sailor, "Expand All Panes"),
         ]
         for (mode, title) in entries {
             let item = NSMenuItem(title: title, action: #selector(selectGroupingMode(_:)), keyEquivalent: "")
@@ -1913,6 +1942,7 @@ final class DashboardOverviewView: NSView {
         case .repository: description = "Group worktrees by repository"
         case .status: description = "Group worktrees by status"
         case .activityTime: description = "Group worktrees by time"
+        case .sailor: description = "Expand worktrees into panes"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2247,6 +2277,20 @@ final class DashboardOverviewView: NSView {
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((groupedItem.id, groupedItem.path))
                 rowViewsByID[groupedItem.id] = row
+
+                // Fully-expanded third level: one clickable row per pane. A
+                // single-pane worktree is already represented by its own row, so
+                // expanding it would just duplicate — only expand 2+ panes.
+                if groupingMode == .sailor, sailor.panes.count > 1 {
+                    for pane in sailor.panes {
+                        let paneRow = PaneRowView(pane: pane)
+                        paneRow.onTap = { [weak self] stationId in
+                            self?.onSelectPane?(sailor.worktreePath, stationId)
+                        }
+                        rowsBox.addArrangedSubview(paneRow)
+                        paneRow.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
+                    }
+                }
             }
             stack.addArrangedSubview(rowsBox)
             pin(rowsBox)
@@ -2354,15 +2398,18 @@ final class DashboardOverviewView: NSView {
     private func makeGroupHeader(group: WorktreeGroup, topGap: CGFloat) -> NSView {
         var views: [NSView] = []
         if let status = group.status {
-            let meta = Self.groupMeta(status)
-            let glyph = NSTextField(labelWithString: meta.glyph)
-            glyph.font = AppFont.mono(size: 8)
-            glyph.textColor = meta.color
-            views.append(glyph)
+            if status == .running {
+                views.append(SpinnerDotView(color: status.color))
+            } else {
+                let glyph = NSTextField(labelWithString: status.glyph)
+                glyph.font = AppFont.mono(size: 8)
+                glyph.textColor = status.color
+                views.append(glyph)
+            }
 
-            let title = NSTextField(labelWithString: meta.label)
+            let title = NSTextField(labelWithString: status.groupLabel)
             title.font = AppFont.mono(size: 11)
-            title.textColor = meta.color
+            title.textColor = status.color
             title.lineBreakMode = .byTruncatingTail
             views.append(title)
 
@@ -2445,7 +2492,10 @@ final class DashboardOverviewView: NSView {
 
             // Status dot sits in its own column so both text lines share one
             // leading edge — a fixed indent under "● + spacing" drifts with glyph metrics.
-            let dot = Self.label("\u{25CF}", status.color, 8)
+            // `running` spins a 3/4 arc; every other status is a static glyph.
+            let dot: NSView = status == .running
+                ? SpinnerDotView(color: status.color)
+                : Self.label(status.glyph, status.color, 8)
             dot.translatesAutoresizingMaskIntoConstraints = false
             dot.setContentHuggingPriority(.required, for: .horizontal)
             dot.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -2608,6 +2658,76 @@ final class DashboardOverviewView: NSView {
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
             applyBackground(hovered: false)
+        }
+    }
+
+    // MARK: - Pane row (Group by Sailor)
+
+    /// Third-level row under a worktree in the expanded "Group by Sailor" mode:
+    /// an indented, clickable pane. `● pane title`, dimmed unless focused.
+    private final class PaneRowView: NSView {
+        var onTap: ((String) -> Void)?
+        private let stationId: String
+
+        private static let cornerRadius: CGFloat = 6
+        private static let hoverFill = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.05)
+                : NSColor.black.withAlphaComponent(0.04)
+        }
+
+        init(pane: PaneDisplayInfo) {
+            self.stationId = pane.stationId
+            super.init(frame: .zero)
+            wantsLayer = true
+            layer?.cornerRadius = Self.cornerRadius
+            layer?.masksToBounds = true
+            setAccessibilityElement(true)
+            setAccessibilityIdentifier("chrome.paneRow.\(pane.stationId)")
+            setAccessibilityLabel(pane.title)
+
+            let dot = NSTextField(labelWithString: "\u{25CF}")
+            dot.font = AppFont.mono(size: 7)
+            dot.textColor = pane.status.color
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.setContentHuggingPriority(.required, for: .horizontal)
+            dot.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let title = NSTextField(labelWithString: pane.title)
+            title.font = AppFont.mono(size: 11)
+            title.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
+            title.lineBreakMode = .byTruncatingTail
+            title.translatesAutoresizingMaskIntoConstraints = false
+            title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+            addSubview(dot)
+            addSubview(title)
+            NSLayoutConstraint.activate([
+                // Indent under the worktree row's status dot + text column.
+                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 27),
+                dot.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 7),
+                title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                title.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+                title.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            ])
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func mouseDown(with event: NSEvent) { onTap?(stationId) }
+
+        private var tracking: NSTrackingArea?
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+            addTrackingArea(t); tracking = t
+        }
+        override func mouseEntered(with event: NSEvent) {
+            layer?.backgroundColor = resolvedCGColor(Self.hoverFill)
+        }
+        override func mouseExited(with event: NSEvent) {
+            layer?.backgroundColor = NSColor.clear.cgColor
         }
     }
 

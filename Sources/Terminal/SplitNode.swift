@@ -147,11 +147,11 @@ indirect enum SplitNode {
 
 /// Serializable split layout (no live station references).
 indirect enum CodableSplitNode: Codable {
-    case leaf(sessionName: String)
+    case leaf(sessionName: String, title: String?)
     case split(axis: String, ratio: Double, first: CodableSplitNode, second: CodableSplitNode)
 
     private enum CodingKeys: String, CodingKey {
-        case type, sessionName, axis, ratio, first, second
+        case type, sessionName, title, axis, ratio, first, second
     }
 
     init(from decoder: Decoder) throws {
@@ -159,7 +159,8 @@ indirect enum CodableSplitNode: Codable {
         let type = try container.decode(String.self, forKey: .type)
         if type == "leaf" {
             let name = try container.decode(String.self, forKey: .sessionName)
-            self = .leaf(sessionName: name)
+            let title = try container.decodeIfPresent(String.self, forKey: .title)
+            self = .leaf(sessionName: name, title: title)
         } else {
             let axis = try container.decode(String.self, forKey: .axis)
             let ratio = try container.decode(Double.self, forKey: .ratio)
@@ -172,9 +173,10 @@ indirect enum CodableSplitNode: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .leaf(let sessionName):
+        case .leaf(let sessionName, let title):
             try container.encode("leaf", forKey: .type)
             try container.encode(sessionName, forKey: .sessionName)
+            try container.encodeIfPresent(title, forKey: .title)
         case .split(let axis, let ratio, let first, let second):
             try container.encode("split", forKey: .type)
             try container.encode(axis, forKey: .axis)
@@ -187,8 +189,11 @@ indirect enum CodableSplitNode: Codable {
     /// Convert runtime SplitNode to serializable form.
     static func from(_ node: SplitNode) -> CodableSplitNode {
         switch node {
-        case .leaf(_, _, let sessionName):
-            return .leaf(sessionName: sessionName)
+        case .leaf(_, let stationId, let sessionName):
+            // Capture the pane's last-known strong title so a restored layout can
+            // show it before fresh OSC/agent-session data arrives.
+            let title = StationRegistry.shared.station(forId: stationId)?.persistedTitle
+            return .leaf(sessionName: sessionName, title: title)
         case .split(_, let axis, let ratio, let first, let second):
             return .split(axis: axis.rawValue, ratio: Double(ratio), first: from(first), second: from(second))
         }
