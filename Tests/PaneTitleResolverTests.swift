@@ -47,15 +47,47 @@ final class PaneTitleResolverTests: XCTestCase {
 
     func testPersistedTitleBridgesMissingLiveSources() {
         // Restored pane: no session title, OSC not yet arrived — the persisted
-        // title stands in ahead of the branch/repo fallback.
+        // title stands in ahead of the branch/repo fallback while the restore
+        // bridge is active.
         let station = Station()
         station.persistedTitle = "Add grouping mode"
+        station.titleBridgeActive = true
         var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
         sailor.station = station
         XCTAssertEqual(
             PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
             "Add grouping mode"
         )
+    }
+
+    func testPersistedTitleIgnoredForLaterSessionInSamePane() {
+        // A new session started in a pane that already ran one (e.g. after
+        // `/clear` or an agent restart): its OSC title hasn't landed yet, but the
+        // bridge is no longer active, so the previous session's persisted title
+        // must NOT resurface — otherwise it duplicates the sibling pane's title.
+        let station = Station()
+        station.persistedTitle = "Add grouping mode"
+        station.titleBridgeActive = false
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "feat/x"
+        )
+    }
+
+    func testLiveTitleClosesTheRestoreBridge() {
+        // Once a live source resolves, the bridge flag flips false so a later
+        // gap in that same pane can't fall back to the (now stale) title.
+        let station = Station()
+        station.titleBridgeActive = true
+        station.setOscTitle("✳ Wire up the resolver")
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x",
+                                worktreePath: "/Users/me/proj")
+        sailor.station = station
+        _ = PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil })
+        XCTAssertFalse(station.titleBridgeActive)
+        XCTAssertEqual(station.persistedTitle, "Wire up the resolver")
     }
 
     func testStrongTitleWritesBackToPersistedTitle() {

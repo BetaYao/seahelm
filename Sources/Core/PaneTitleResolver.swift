@@ -43,6 +43,7 @@ enum PaneTitleResolver {
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
             sailor.station?.persistedTitle = title
+            sailor.station?.titleBridgeActive = false
             return title
         }
 
@@ -51,6 +52,7 @@ enum PaneTitleResolver {
         // rejected by displayOscTitle, so this never yields a bare path.)
         if treatAsAgent, let osc = oscTitle(for: sailor) {
             sailor.station?.persistedTitle = osc
+            sailor.station?.titleBridgeActive = false
             return osc
         }
 
@@ -60,6 +62,7 @@ enum PaneTitleResolver {
         if !treatAsAgent,
            let cmd = sailor.commandLine?.trimmingCharacters(in: .whitespacesAndNewlines),
            !cmd.isEmpty {
+            sailor.station?.titleBridgeActive = false
             return cmd
         }
 
@@ -67,11 +70,13 @@ enum PaneTitleResolver {
         // startup gap where OSC/session data hasn't landed yet — without it every
         // restored pane collapsed to the same branch/repo fallback.
         //
-        // Skip it when the pane is *right now* sitting at a shell prompt: that is
-        // live proof the agent has exited back to a shell, so its old strong title
-        // is stale. Without this guard an ex-agent pane keeps its dead agent title
-        // forever, and a sibling shell reads identical to the agent pane.
-        if !atShellPrompt,
+        // Only while `titleBridgeActive`: the flag is set at layout-restore and
+        // cleared the instant any live source above resolves, so the persisted
+        // title bridges *this* pane's restore gap but never leaks into a later
+        // session started in the same pane (after `/clear` or an agent restart),
+        // where the stale title would duplicate the sibling pane's. Also skipped
+        // at a live shell prompt — proof the agent has exited back to a shell.
+        if sailor.station?.titleBridgeActive == true, !atShellPrompt,
            let persisted = sailor.station?.persistedTitle?
             .trimmingCharacters(in: .whitespacesAndNewlines), !persisted.isEmpty {
             return persisted

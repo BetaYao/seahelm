@@ -92,6 +92,9 @@ class SplitTree {
             station.sessionName = sessionName
             station.backend = backend
             station.persistedTitle = title
+            // Bridge the header with the persisted title only until this restored
+            // pane's live title arrives — never on a later session in the pane.
+            station.titleBridgeActive = (title?.isEmpty == false)
             StationRegistry.shared.register(station)
             let leafId = UUID().uuidString
             return (.leaf(id: leafId, stationId: station.id, sessionName: sessionName), leafId)

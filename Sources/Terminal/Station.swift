@@ -42,6 +42,12 @@ class Station {
     /// the split layout so a restored pane shows its real title immediately —
     /// before a fresh OSC title or agent session ref lands after relaunch.
     var persistedTitle: String?
+    /// True only for a pane restored from the saved layout whose live title hasn't
+    /// arrived yet. `persistedTitle` bridges the header during that gap; once any
+    /// live source (OSC/session/command) resolves, this flips false so the stale
+    /// title can never resurface on a *later* session started in the same pane
+    /// (e.g. after `/clear` or an agent restart), which read as a duplicate title.
+    var titleBridgeActive: Bool = false
     /// Persistence backend for the sessionName above.
     var backend: String = "zmx"
     /// Agent resume ref, if this pane runs a recognized agent. When a *fresh*
