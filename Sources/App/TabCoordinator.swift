@@ -563,8 +563,8 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
                         self?.handleNewWorktreeFromHook(worktreePath)
                     }
-                    self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, ref in
-                        self?.recordAgentSession(worktreePath: worktreePath, ref: ref)
+                    self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
+                        self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
                     }
                     self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId, paneId in
                         guard let self else { return }
@@ -740,16 +740,29 @@ class TabCoordinator {
 
     // MARK: - Worktree Auto-Discovery (via Agent Hooks)
 
-    /// Persist an agent resume ref (keyed by backend session name) and apply it
-    /// to the live station so a mid-session zmx recovery can relaunch the agent.
-    /// Called on the main thread.
-    private func recordAgentSession(worktreePath: String, ref: AgentSessionRef) {
-        let name = SessionManager.persistentSessionName(for: worktreePath)
-        // Apply to the live primary station (best-effort; drives mid-session recovery).
-        terminalCoordinator.stationManager.primaryStation(forPath: worktreePath)?.agentSessionRef = ref
+    /// Persist an agent resume ref and apply it to the live station so a
+    /// mid-session zmx recovery can relaunch the agent. Called on the main thread.
+    ///
+    /// Routed to the *emitting* pane's own station (via `paneId`, the hook's
+    /// SEAHELM_PANE_ID = the pane's session name). Applying it to the worktree's
+    /// primary station instead let sibling agents in one worktree stomp a single
+    /// shared ref, so the primary pane's resolved title flipped to whichever
+    /// agent hooked last. Persisting under the pane's own session name also lets
+    /// restore reapply it — `config.agentSessions` is read back keyed by
+    /// `leaf.sessionName`, which the old worktree-scoped key never matched.
+    /// Falls back to the primary station / worktree name for legacy hooks that
+    /// carry no paneId.
+    private func recordAgentSession(worktreePath: String, paneId: String?, ref: AgentSessionRef) {
+        let station = paneId.flatMap { StationRegistry.shared.station(forSessionName: $0) }
+            ?? terminalCoordinator.stationManager.primaryStation(forPath: worktreePath)
+        station?.agentSessionRef = ref
+        // Prefer the resolved pane's own session name (matches restore); fall back
+        // to the raw paneId, then the worktree-scoped name.
+        let key = station?.sessionName ?? paneId
+            ?? SessionManager.persistentSessionName(for: worktreePath)
         // Write to the authoritative (TerminalCoordinator) copy, then persist.
-        guard terminalCoordinator.config.agentSessions[name] != ref else { return }
-        terminalCoordinator.config.agentSessions[name] = ref
+        guard terminalCoordinator.config.agentSessions[key] != ref else { return }
+        terminalCoordinator.config.agentSessions[key] = ref
         saveConfig()
     }
 
