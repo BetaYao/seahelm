@@ -15,6 +15,8 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Context-menu hooks, wired by `SplitContainerView` to the split delegate.
     var onRequestSplit: ((SplitAxis) -> Void)?
     var onRequestClose: (() -> Void)?
+    /// Wired by `SplitContainerView` to open a file in the app's file viewer.
+    var onRequestPreview: ((URL) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -441,10 +443,19 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     // MARK: - Mouse
 
+    /// Text of the most recent terminal selection, captured on `mouseUp`. The
+    /// live selection is often cleared by the time our `rightMouseDown` runs (the
+    /// right-button event delivery clears it before we can read it), so we snapshot
+    /// it here while it's still intact and use the snapshot to build the menu.
+    private var cachedSelectionText: String?
+
     override func mouseDown(with event: NSEvent) {
         if window?.firstResponder !== self {
             window?.makeFirstResponder(self)
         }
+        // A fresh left-click starts a new selection (or clears the old one);
+        // drop the snapshot until the matching mouseUp captures the result.
+        cachedSelectionText = nil
 
         guard let surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
@@ -457,12 +468,32 @@ class GhosttyNSView: NSView, NSTextInputClient {
         let pos = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, pos.x, Double(bounds.height) - pos.y, modsFromEvent(event))
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
+        // Copy-on-select has usually cleared the live selection by now, so only
+        // overwrite the drag-time snapshot if something is still readable (e.g.
+        // copy-on-select disabled). Never clobber a good snapshot with nil.
+        if let text = readSelectionText() { cachedSelectionText = text }
+    }
+
+    /// Read the current terminal selection as a string, or nil if there's none.
+    private func readSelectionText() -> String? {
+        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let cString = text.text else { return nil }
+        let s = String(cString: cString)
+        return s.isEmpty ? nil : s
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, pos.x, Double(bounds.height) - pos.y, modsFromEvent(event))
+        // Snapshot the selection *during* the drag. Ghostty's copy-on-select
+        // clears the live selection the moment the button is released, so by
+        // mouseUp (and certainly by right-click) it's already gone — but here,
+        // mid-drag, it's still intact and readable.
+        if let text = readSelectionText() { cachedSelectionText = text }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -486,7 +517,17 @@ class GhosttyNSView: NSView, NSTextInputClient {
         ghostty_surface_mouse_scroll(surface, event.scrollingDeltaX, event.scrollingDeltaY, scrollMods)
     }
 
+    /// File URL captured from the selection at right-click time, consumed when
+    /// building the context menu. Read *before* `makeFirstResponder`, which can
+    /// clear the terminal selection out from under us.
+    private var pendingPreviewURL: URL?
+
     override func rightMouseDown(with event: NSEvent) {
+        // Resolve a previewable file for the menu. Prefer the path token under the
+        // click point (works even in mouse-reporting TUIs like Claude Code, where
+        // dragging never creates a ghostty selection); fall back to an explicit
+        // text selection.
+        pendingPreviewURL = filePathAtClick(event) ?? selectedFilePath()
         // Focus the right-clicked pane so menu actions target it, then show
         // our pane context menu (split/close/copy/paste).
         if window?.firstResponder !== self {
@@ -514,7 +555,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
         menu.addItem(.separator())
 
-        if let path = selectedFilePath() {
+        if let path = pendingPreviewURL {
             let previewItem = NSMenuItem(title: "Preview", action: #selector(contextPreview), keyEquivalent: "")
             previewItem.target = self
             previewItem.representedObject = path
@@ -545,25 +586,59 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// paths resolved against the pane's working directory), return that file's
     /// URL. Returns nil for no selection, directories, or non-existent paths so
     /// the Preview menu item is only offered when it will actually work.
-    private func selectedFilePath() -> URL? {
-        let hasSel = surface.map { ghostty_surface_has_selection($0) } ?? false
-        NSLog("[preview] selectedFilePath called surface=%@ hasSelection=%@",
-              surface == nil ? "nil" : "set", hasSel ? "true" : "false")
-        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+    /// Resolve a previewable file from the terminal cell under the right-click.
+    /// Reads the whole clicked row, splits it into whitespace-delimited tokens,
+    /// and returns the first token that resolves to an existing file. This works
+    /// regardless of text selection — important in mouse-reporting TUIs where a
+    /// drag is consumed by the app and never becomes a ghostty selection.
+    private func filePathAtClick(_ event: NSEvent) -> URL? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
+        guard size.cell_height_px > 0, size.rows > 0, bounds.height > 0 else { return nil }
+
+        // Click point: AppKit points, origin bottom-left. Convert to a viewport
+        // row using the pixel cell height (scale = pixels per point).
+        let pos = convert(event.locationInWindow, from: nil)
+        let scale = Double(size.height_px) / Double(bounds.height)
+        let yPx = (Double(bounds.height) - pos.y) * scale
+        let row = Int(yPx / Double(size.cell_height_px))
+        guard row >= 0, row < Int(size.rows) else { return nil }
+
         var text = ghostty_text_s()
-        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        let sel = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                      x: 0, y: UInt32(row)),
+            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                          x: UInt32(max(0, Int(size.columns) - 1)), y: UInt32(row)),
+            rectangle: false
+        )
+        guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
         guard let cString = text.text else { return nil }
-        let raw = String(cString: cString)
-        // The pane's registered worktree root is the most reliable base on
-        // restore, where OSC 7 pwd is often unreported inside zmx sessions.
+        let line = String(cString: cString)
+
         let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
         let bases: [String?] = [station?.pwd, worktreePath, station?.initialWorkingDirectory]
-        let result = Self.resolveSelectedPath(raw: raw, bases: bases)
-        NSLog("[preview] raw=%@ pwd=%@ worktree=%@ initDir=%@ -> %@",
-              raw, station?.pwd ?? "nil", worktreePath ?? "nil",
-              station?.initialWorkingDirectory ?? "nil", result?.path ?? "nil")
-        return result
+        // First whitespace-delimited token that is an existing file wins. Multiple
+        // file-like tokens on one line are rare, so this reliably picks the path
+        // without needing exact column-to-character mapping (which CJK breaks).
+        for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+            if let url = Self.resolveSelectedPath(raw: String(token), bases: bases) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func selectedFilePath() -> URL? {
+        // Prefer the snapshot taken on mouseUp; fall back to the live selection
+        // in case one exists that we didn't capture (e.g. keyboard selection).
+        guard let raw = cachedSelectionText ?? readSelectionText() else { return nil }
+        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
+        return Self.resolveSelectedPath(
+            raw: raw,
+            bases: [station?.pwd, worktreePath, station?.initialWorkingDirectory]
+        )
     }
 
     /// Pure resolver (unit-testable): trims `raw`, rejects multi-token/multi-line
@@ -600,7 +675,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     @objc private func contextPreview(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
-        FilePreviewWindowController.shared.preview(url: url)
+        onRequestPreview?(url)
     }
 
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }

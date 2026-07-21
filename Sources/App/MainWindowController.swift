@@ -1841,6 +1841,10 @@ extension MainWindowController: SplitContainerDelegate {
         closeFocusedPane()
     }
 
+    func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL) {
+        dashboardVC?.openFile(path: url.path)
+    }
+
     func splitContainerDidChangeLayout(_ view: SplitContainerView) {
         guard let tree = view.tree else { return }
         terminalCoordinator.saveSplitLayout(tree)

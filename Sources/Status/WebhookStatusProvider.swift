@@ -13,9 +13,12 @@ class WebhookStatusProvider {
     var onNewWorktreeDetected: ((String) -> Void)?
 
     /// Called (on main) when an agent hook event resolves a persistable resume
-    /// ref for a known worktree. The owner persists it and applies it to live
-    /// stations so the agent can be relaunched after a session is recreated.
-    var onAgentSessionResolved: ((_ worktreePath: String, _ ref: AgentSessionRef) -> Void)?
+    /// ref for a known worktree. `paneId` is the emitting pane's session name
+    /// (SEAHELM_PANE_ID), so the owner can route the ref to that exact pane —
+    /// nil for legacy hooks that predate the export. The owner persists it and
+    /// applies it to live stations so the agent can be relaunched after a session
+    /// is recreated.
+    var onAgentSessionResolved: ((_ worktreePath: String, _ paneId: String?, _ ref: AgentSessionRef) -> Void)?
 
     /// Called when a WorktreeCreate event arrives, with source worktree path and worktree name.
     /// Fires before the new worktree is discoverable (the git operation may still be in progress).
@@ -133,8 +136,9 @@ class WebhookStatusProvider {
             // cross-worktree session id never reaches here.
             if event.data?["agent_id"] == nil,
                let ref = AgentSessionRef(source: event.source, sessionId: event.sessionId, sessionPath: event.sessionPath) {
+                let paneId = event.paneId
                 DispatchQueue.main.async { [weak self] in
-                    self?.onAgentSessionResolved?(worktreePath, ref)
+                    self?.onAgentSessionResolved?(worktreePath, paneId, ref)
                 }
             }
 

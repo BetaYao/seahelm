@@ -281,7 +281,6 @@
 		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
 		CA43EB5F470FF6E325C0934F /* SelectedFilePathResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */; };
 		CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */; };
-		CB4F8F747FB190D2107B173E /* FilePreviewWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC642ADEFDCCDFBFD150DC35 /* FilePreviewWindowController.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
 		CDE025440DDC3A5CFE827DB1 /* WeChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
@@ -613,7 +612,6 @@
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManifest.swift; sourceTree = "<group>"; };
-		AC642ADEFDCCDFBFD150DC35 /* FilePreviewWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewWindowController.swift; sourceTree = "<group>"; };
 		ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEventDecoderTests.swift; sourceTree = "<group>"; };
 		AE1079E906A5CC63135C2DD5 /* MenuRowButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuRowButton.swift; sourceTree = "<group>"; };
 		B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorHooksSetup.swift; sourceTree = "<group>"; };
@@ -959,7 +957,6 @@
 				D43DCAEEFB34DDC4D03467C3 /* CodeEditorView.swift */,
 				3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */,
 				DCC4A1C262ABBDCDACB560CD /* FileContentView.swift */,
-				AC642ADEFDCCDFBFD150DC35 /* FilePreviewWindowController.swift */,
 				A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */,
 				E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */,
 				DAFE8F526F75CD13158309C6 /* MediaPreviewView.swift */,
@@ -1743,7 +1740,6 @@
 				506F03CBC8DB229C2F20E98F /* EventHub.swift in Sources */,
 				9B78DBBAF5994540D7C95C0B /* ExternalChannel.swift in Sources */,
 				D561B55100D9032AC7C173E5 /* FileContentView.swift in Sources */,
-				CB4F8F747FB190D2107B173E /* FilePreviewWindowController.swift in Sources */,
 				C3E90FF67663F4290485E940 /* FileSystemProbe.swift in Sources */,
 				E5020C3F03A4093F06D0F2E4 /* FileTreeOutlineController.swift in Sources */,
 				FED31A3C39D21CA95E4FE06D /* FirstMate.swift in Sources */,
