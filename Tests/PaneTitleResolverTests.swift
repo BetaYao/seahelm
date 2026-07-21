@@ -85,6 +85,38 @@ final class PaneTitleResolverTests: XCTestCase {
         )
     }
 
+    func testStaleAgentAtShellPromptUsesCommandLine() {
+        // An agent that exited back to a shell keeps its agentType, and its OSC
+        // title becomes the shell prompt (`user@host:/path`). The command line
+        // must win, not the path.
+        let station = Station()
+        station.setOscTitle("matt.chow@host:/tmp/wt")
+        var sailor = makeSailor(
+            agentType: .claudeCode,
+            prompt: "",
+            branch: "main",
+            commandLine: "brew update",
+            worktreePath: "/tmp/wt"
+        )
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "brew update"
+        )
+    }
+
+    func testShellPromptOscTitleNeverBecomesTitle() {
+        XCTAssertNil(
+            PaneTitleResolver.displayOscTitle("matt.chow@host:/tmp/wt", worktreePath: "/tmp/wt")
+        )
+        XCTAssertTrue(
+            PaneTitleResolver.isShellPromptTitle("matt.chow@host:/tmp/wt", worktreePath: "/tmp/wt")
+        )
+        XCTAssertFalse(
+            PaneTitleResolver.isShellPromptTitle("Fix the bug", worktreePath: "/tmp/wt")
+        )
+    }
+
     func testAgentIgnoresShellCommandLine() {
         let sailor = makeSailor(
             agentType: .cursor,

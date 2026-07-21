@@ -33,6 +33,9 @@ class StationManager {
         trees[path]
     }
 
+    /// Every live tree, for bulk persistence (e.g. capturing pane titles at quit).
+    var allTrees: [SplitTree] { Array(trees.values) }
+
     /// Register a pre-built tree (e.g. restored from config) for the given path.
     /// Does nothing if a tree already exists for that path.
     func registerTree(_ tree: SplitTree, forPath path: String) {

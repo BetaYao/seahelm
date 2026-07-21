@@ -30,8 +30,15 @@ enum PaneTitleResolver {
         },
         pathDisplay: (String) -> String = { shortenPath($0) }
     ) -> String {
+        // A pane whose OSC title is the shell prompt (`user@host:/path`) is sitting
+        // at a shell right now — even if its agent type is stale (an agent that
+        // exited back to a shell keeps `claudeCode`/`codex`). Treat it as a shell
+        // so its command line wins instead of the agent session/OSC title.
+        let atShellPrompt = isShellPromptTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath)
+        let treatAsAgent = isAgentPane(sailor) && !atShellPrompt
+
         // 1. Per-session agent title — two agents in one tree must not share it.
-        if let ref = sailor.station?.agentSessionRef, ref.kind == .id,
+        if treatAsAgent, let ref = sailor.station?.agentSessionRef, ref.kind == .id,
            let title = sessionTitle(sailor.worktreePath, ref.sessionId)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
@@ -40,26 +47,28 @@ enum PaneTitleResolver {
         }
 
         // 2. The terminal's own OSC title — the only per-pane source that updates
-        // live, so it wins for agent panes.
-        if isAgentPane(sailor), let osc = oscTitle(for: sailor) {
+        // live, so it wins for agent panes. (Shell-prompt titles are already
+        // rejected by displayOscTitle, so this never yields a bare path.)
+        if treatAsAgent, let osc = oscTitle(for: sailor) {
             sailor.station?.persistedTitle = osc
             return osc
         }
 
-        // 3. Last-known strong title, restored from the saved layout. Bridges the
+        // 3. Shell command line — for real shell panes and for agent panes that
+        // have dropped back to a shell prompt. Guarded off for live agents so a
+        // cursor-agent tool `cd` can't steal the title.
+        if !treatAsAgent,
+           let cmd = sailor.commandLine?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !cmd.isEmpty {
+            return cmd
+        }
+
+        // 4. Last-known strong title, restored from the saved layout. Bridges the
         // startup gap where OSC/session data hasn't landed yet — without it every
         // restored pane collapsed to the same branch/repo fallback.
         if let persisted = sailor.station?.persistedTitle?
             .trimmingCharacters(in: .whitespacesAndNewlines), !persisted.isEmpty {
             return persisted
-        }
-
-        // 4. Shell command only when this pane isn't an AI agent — otherwise a
-        // cursor-agent tool `cd` would steal the row title.
-        if !isAgentPane(sailor),
-           let cmd = sailor.commandLine?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !cmd.isEmpty {
-            return cmd
         }
 
         // 5. Branch (the worktree default).
@@ -127,9 +136,20 @@ enum PaneTitleResolver {
         let title = String(stripped).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         // Shells and some agents park the cwd in the title — the path fallback
-        // below already handles that, and handles it better.
-        guard title != worktreePath, title != shortenPath(worktreePath) else { return nil }
+        // below already handles that, and handles it better. Reject both the bare
+        // path and the shell prompt form (`user@host:/path`).
+        guard title != worktreePath, title != shortenPath(worktreePath),
+              !isShellPromptTitle(title, worktreePath: worktreePath) else { return nil }
         return title
+    }
+
+    /// True when an OSC title is really a shell prompt — `user@host:/path` — for
+    /// this worktree (the title contains the worktree path or its `~` form). Such
+    /// a title is the shell announcing its cwd, never a meaningful pane title.
+    static func isShellPromptTitle(_ raw: String?, worktreePath: String) -> Bool {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+              !worktreePath.isEmpty else { return false }
+        return raw.contains(worktreePath) || raw.contains(shortenPath(worktreePath))
     }
 
     private static func oscTitle(for sailor: SailorInfo) -> String? {

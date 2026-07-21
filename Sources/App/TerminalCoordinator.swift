@@ -49,6 +49,19 @@ class TerminalCoordinator {
         config.save()
     }
 
+    /// Re-serialize every live tree so the latest per-pane titles (written into
+    /// each Station during status polling) are captured. Layouts are otherwise
+    /// only saved on structural changes, so a title that resolved after the last
+    /// split/close would be lost on relaunch.
+    func saveAllSplitLayouts() {
+        let trees = stationManager.allTrees
+        guard !trees.isEmpty else { return }
+        for tree in trees {
+            config.splitLayouts[tree.worktreePath] = tree.toCodable()
+        }
+        config.save()
+    }
+
     // MARK: - Split Pane Operations
 
     /// Enrol a freshly split pane in ShipLog. StationRegistry alone is not enough:

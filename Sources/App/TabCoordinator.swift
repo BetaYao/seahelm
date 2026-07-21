@@ -25,6 +25,9 @@ class TabCoordinator {
     }
     var branchRefreshTimer: Timer?
     weak var dashboardVC: DashboardViewController?
+    /// Per-worktree signature of the last-persisted pane titles, so the display
+    /// rebuild only re-saves a layout when a pane's title actually changed.
+    private var lastSavedPaneTitles: [String: [String]] = [:]
 
     // References provided by MainWindowController
     var terminalCoordinator: TerminalCoordinator!
@@ -378,6 +381,19 @@ class TabCoordinator {
                     status: paneSailor?.status ?? .unknown,
                     isFocused: paneStation.id == focusedStationId
                 )
+            }
+
+            // Resolving the titles above wrote each pane's strong title into its
+            // Station. Persist the layout when those titles changed since the last
+            // save, so a kill/relaunch (dev builds rarely get applicationWill-
+            // Terminate) still restores real per-pane titles. Change-gated, so the
+            // common no-change poll writes nothing.
+            if let tree {
+                let signature = paneStations.map { $0.persistedTitle ?? "" }
+                if lastSavedPaneTitles[agent.worktreePath] != signature {
+                    lastSavedPaneTitles[agent.worktreePath] = signature
+                    terminalCoordinator.saveSplitLayout(tree)
+                }
             }
 
             result.append(SailorDisplayInfo(

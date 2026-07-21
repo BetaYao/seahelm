@@ -1637,6 +1637,9 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
+        // Capture the latest per-pane titles before tearing down the stations,
+        // so restored panes show their real titles instead of the branch name.
+        terminalCoordinator.saveAllSplitLayouts()
         terminalCoordinator.cleanup()
     }
 }
