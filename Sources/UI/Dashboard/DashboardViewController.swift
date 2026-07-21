@@ -2265,7 +2265,7 @@ final class DashboardOverviewView: NSView {
             (.repository, "Group by Deck"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
-            (.sailor, "Expand All Panes"),
+            (.sailor, "Expand All Sailors"),
         ]
         for (mode, title) in entries {
             let item = NSMenuItem(title: title, action: #selector(selectGroupingMode(_:)), keyEquivalent: "")
@@ -2305,7 +2305,7 @@ final class DashboardOverviewView: NSView {
         case .repository: description = "Group cabins by deck"
         case .status: description = "Group cabins by status"
         case .activityTime: description = "Group cabins by time"
-        case .sailor: description = "Expand cabins into panes"
+        case .sailor: description = "Expand cabins into sailors"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2889,7 +2889,7 @@ final class DashboardOverviewView: NSView {
             git.setContentHuggingPriority(.defaultLow, for: .horizontal)
             git.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-            let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) panes" : "—",
+            let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—",
                                    DashboardOverviewView.inkFaint, 10)
             panes.setContentHuggingPriority(.required, for: .horizontal)
 
