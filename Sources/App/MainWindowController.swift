@@ -571,7 +571,7 @@ class MainWindowController: NSWindowController {
 
         setupNativeTitleBar()
 
-        // Update banner (above title bar, hidden by default)
+        // Update banner (pinned to the window bottom, hidden by default)
         updateCoordinator.banner.translatesAutoresizingMaskIntoConstraints = false
         updateCoordinator.banner.isHidden = true
         contentView.addSubview(updateCoordinator.banner)
@@ -593,14 +593,14 @@ class MainWindowController: NSWindowController {
             backgroundEffectView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             backgroundEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
-            updateCoordinator.banner.topAnchor.constraint(equalTo: contentView.topAnchor),
+            updateCoordinator.banner.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             updateCoordinator.banner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             updateCoordinator.banner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            contentContainer.topAnchor.constraint(equalTo: updateCoordinator.banner.bottomAnchor),
+            contentContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: updateCoordinator.banner.topAnchor),
         ])
 
         // Window hover tracking for arc block styling
