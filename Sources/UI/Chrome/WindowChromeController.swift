@@ -127,6 +127,11 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setWorktreeContextEnabled(enabled)
     }
 
+    /// Drive the terminal header's edit-mode toggle (availability + on-state).
+    func setEditMode(available: Bool, isOn: Bool) {
+        terminalHeader.setEditMode(available: available, isOn: isOn)
+    }
+
     /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
     func titlebarRegionFocusTarget() -> NSView {
         state.isCollapsed ? terminalHeader : sidebarHeader

@@ -514,6 +514,14 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
         menu.addItem(.separator())
 
+        if let path = selectedFilePath() {
+            let previewItem = NSMenuItem(title: "Preview", action: #selector(contextPreview), keyEquivalent: "")
+            previewItem.target = self
+            previewItem.representedObject = path
+            menu.addItem(previewItem)
+            menu.addItem(.separator())
+        }
+
         let copyItem = NSMenuItem(title: "Copy", action: #selector(contextCopy), keyEquivalent: "")
         copyItem.target = self
         copyItem.isEnabled = surface.map { ghostty_surface_has_selection($0) } ?? false
@@ -531,6 +539,68 @@ class GhosttyNSView: NSView, NSTextInputClient {
         menu.addItem(closeItem)
 
         return menu
+    }
+
+    /// If the current selection is a path pointing at an existing file (relative
+    /// paths resolved against the pane's working directory), return that file's
+    /// URL. Returns nil for no selection, directories, or non-existent paths so
+    /// the Preview menu item is only offered when it will actually work.
+    private func selectedFilePath() -> URL? {
+        let hasSel = surface.map { ghostty_surface_has_selection($0) } ?? false
+        NSLog("[preview] selectedFilePath called surface=%@ hasSelection=%@",
+              surface == nil ? "nil" : "set", hasSel ? "true" : "false")
+        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let cString = text.text else { return nil }
+        let raw = String(cString: cString)
+        // The pane's registered worktree root is the most reliable base on
+        // restore, where OSC 7 pwd is often unreported inside zmx sessions.
+        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
+        let bases: [String?] = [station?.pwd, worktreePath, station?.initialWorkingDirectory]
+        let result = Self.resolveSelectedPath(raw: raw, bases: bases)
+        NSLog("[preview] raw=%@ pwd=%@ worktree=%@ initDir=%@ -> %@",
+              raw, station?.pwd ?? "nil", worktreePath ?? "nil",
+              station?.initialWorkingDirectory ?? "nil", result?.path ?? "nil")
+        return result
+    }
+
+    /// Pure resolver (unit-testable): trims `raw`, rejects multi-token/multi-line
+    /// selections, then returns the first existing *file* found by treating `raw`
+    /// as an absolute/`~` path or resolving it against each base in `bases`
+    /// (first non-empty base that yields an existing file wins).
+    static func resolveSelectedPath(raw: String, bases: [String?]) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A path shouldn't span lines or contain interior whitespace; reject
+        // multi-token selections rather than guessing.
+        guard !trimmed.isEmpty,
+              !trimmed.contains(where: { $0 == "\n" || $0 == " " || $0 == "\t" }) else { return nil }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let candidates: [String]
+        if expanded.hasPrefix("/") {
+            candidates = [expanded]
+        } else {
+            candidates = bases
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .map { ($0 as NSString).appendingPathComponent(expanded) }
+        }
+
+        let fm = FileManager.default
+        for candidate in candidates {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: candidate, isDirectory: &isDir), !isDir.boolValue {
+                return URL(fileURLWithPath: candidate)
+            }
+        }
+        return nil
+    }
+
+    @objc private func contextPreview(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        FilePreviewWindowController.shared.preview(url: url)
     }
 
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }

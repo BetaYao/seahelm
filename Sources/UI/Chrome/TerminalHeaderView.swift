@@ -12,7 +12,11 @@ final class TerminalHeaderView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let iconCluster = ChromeIconClusterView()
     private let expandButton = ChromeIconButton()
+    private let editModeButton = ChromeIconButton()
     private let collapsedLeadingStack = NSStackView()
+
+    /// Whether edit mode is currently on (drives the icon's active tint).
+    private var editModeOn = false
 
     private var isCollapsed = false
     private var collapsedConstraints: [NSLayoutConstraint] = []
@@ -102,6 +106,9 @@ final class TerminalHeaderView: NSView {
         configureExpandButton()
         addSubview(expandButton)
 
+        configureEditModeButton()
+        addSubview(editModeButton)
+
         colorSchemeObserver = NotificationCenter.default.addObserver(
             forName: .ghosttyColorSchemeDidChange,
             object: nil,
@@ -110,12 +117,19 @@ final class TerminalHeaderView: NSView {
             self?.refreshImmersion()
         }
 
+        // Edit-mode toggle is always visible (both collapse states); center it
+        // vertically once and swap only its trailing anchor per state.
+        NSLayoutConstraint.activate([
+            editModeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
         // Expanded: true horizontal center in the terminal column.
         expandedConstraints = [
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editModeButton.leadingAnchor, constant: -8),
+            editModeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ]
 
         collapsedConstraints = [
@@ -132,7 +146,9 @@ final class TerminalHeaderView: NSView {
                 equalTo: collapsedLeadingStack.trailingAnchor, constant: 10),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: expandButton.leadingAnchor, constant: -8),
+                lessThanOrEqualTo: editModeButton.leadingAnchor, constant: -8),
+
+            editModeButton.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor, constant: -4),
 
             expandButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             expandButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -187,8 +203,43 @@ final class TerminalHeaderView: NSView {
         needsLayout = true
     }
 
+    private func configureEditModeButton() {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        if let image = NSImage(systemSymbolName: "square.split.2x1",
+                               accessibilityDescription: "Toggle File Edit Layout") {
+            editModeButton.image = image.withSymbolConfiguration(config)
+        }
+        editModeButton.bezelStyle = .recessed
+        editModeButton.isBordered = false
+        editModeButton.imagePosition = .imageOnly
+        editModeButton.target = self
+        editModeButton.action = #selector(editModeClicked)
+        editModeButton.translatesAutoresizingMaskIntoConstraints = false
+        editModeButton.setAccessibilityIdentifier("chrome.icon.editMode")
+        editModeButton.setAccessibilityLabel("Toggle File Edit Layout")
+        editModeButton.wantsLayer = true
+        editModeButton.layer?.cornerRadius = 7
+        editModeButton.isEnabled = false
+        NSLayoutConstraint.activate([
+            editModeButton.widthAnchor.constraint(equalToConstant: 26),
+            editModeButton.heightAnchor.constraint(equalToConstant: 26),
+        ])
+    }
+
+    /// Enable + light the edit-mode toggle. `available` gates it on there being
+    /// at least one open preview (empty set → focus mode only).
+    func setEditMode(available: Bool, isOn: Bool) {
+        editModeOn = isOn
+        editModeButton.isEnabled = available
+        refreshImmersion()
+    }
+
     @objc private func expandClicked() {
         delegate?.chromeDidToggleSidebar()
+    }
+
+    @objc private func editModeClicked() {
+        delegate?.chromeDidToggleEditMode()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -202,5 +253,14 @@ final class TerminalHeaderView: NSView {
         layer?.backgroundColor = bridge.terminalChromeBackground.cgColor
         titleLabel.textColor = bridge.terminalChromeForeground
         expandButton.contentTintColor = bridge.terminalChromeForeground.withAlphaComponent(0.55)
+        let editTint = editModeButton.isEnabled
+            ? (editModeOn
+                ? SemanticColors.accent
+                : bridge.terminalChromeForeground.withAlphaComponent(0.55))
+            : bridge.terminalChromeForeground.withAlphaComponent(0.2)
+        editModeButton.contentTintColor = editTint
+        editModeButton.layer?.backgroundColor = editModeOn && editModeButton.isEnabled
+            ? SemanticColors.accent.withAlphaComponent(0.15).cgColor
+            : NSColor.clear.cgColor
     }
 }

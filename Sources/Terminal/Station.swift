@@ -31,6 +31,10 @@ class Station {
     func setOscTitle(_ t: String) { oscLock.lock(); _oscTitle = t; oscLock.unlock() }
     func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
     func setPwd(_ p: String) { oscLock.lock(); _pwd = p; oscLock.unlock() }
+    /// Directory the pane's surface was created in (worktree root, typically).
+    /// Used as a fallback base for resolving relative paths when the live OSC 7
+    /// `pwd` hasn't been reported — which is the common case inside zmx sessions.
+    private(set) var initialWorkingDirectory: String?
 
     /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
@@ -176,6 +180,7 @@ class Station {
         // strdup + retain until destroy — see `ownedCommand` docs.
         freeOwnedSurfaceStrings()
         if let workingDirectory {
+            initialWorkingDirectory = workingDirectory
             ownedWorkingDirectory = strdup(workingDirectory)
             config.working_directory = UnsafePointer(ownedWorkingDirectory)
         }
