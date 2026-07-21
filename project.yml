@@ -140,7 +140,7 @@ targets:
         # it ships inside every app bundle so the client can verify the feed.
         SPARKLE_PUBLIC_ED_KEY: "Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds="
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: "2.0.20"
+        MARKETING_VERSION: "2.0.21"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_STYLE: Automatic
         COMBINE_HIDPI_IMAGES: YES
