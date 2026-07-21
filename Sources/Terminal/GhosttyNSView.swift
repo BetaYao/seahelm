@@ -124,6 +124,23 @@ class GhosttyNSView: NSView, NSTextInputClient {
         syncSurfaceSize()
     }
 
+    /// Dragging the window to a display with a different `backingScaleFactor`
+    /// (e.g. built-in Retina 2x ↔ external 1x) fires this. The view's *point*
+    /// bounds are unchanged, so `syncSurfaceSize()`'s `size == lastSyncedSize`
+    /// guard would skip the resync and the Metal framebuffer would keep
+    /// rendering at the old scale — the reported "font jumps big/small across
+    /// monitors" bug. Push the new content scale and force a resync past the
+    /// debounce (the pixel size *does* change with scale, so `set_size` fires
+    /// and the framebuffer re-renders at the correct DPI).
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let surface, let window else { return }
+        let scale = Double(window.backingScaleFactor)
+        ghostty_surface_set_content_scale(surface, scale, scale)
+        lastSyncedSize = .zero
+        syncSurfaceSize()
+    }
+
     private var lastSurfaceSyncTime: CFTimeInterval = 0
     private var surfaceSyncScheduled = false
     private var surfaceSizeDeferred = false
