@@ -19,7 +19,7 @@ scripts/setup.sh
 ./run_ui_tests.sh [TestClass]
 ```
 
-Note: `run.sh` launches the app from `.build/`, NOT the DerivedData bundle — when inspecting a running instance, use the bundle the live pid actually came from.
+Note: `run.sh` builds with `-derivedDataPath .build`, so the live app runs out of `.build/`, NOT the default `~/Library/Developer/Xcode/DerivedData` bundle a bare `xcodebuild` or Xcode.app run would produce — when inspecting a running instance, use the bundle the live pid actually came from.
 
 ```bash
 # Generate Xcode project from project.yml (requires xcodegen)
@@ -40,7 +40,9 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug 
 # Run a single test method
 xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:seahelmTests/ConfigTests/testDefaultConfig
 
-# Run UI tests
+# Run UI tests — prefer targeted unit classes during active development.
+# The full seahelmUITests suite is slow AND hijacks the live app's control
+# socket, freezing panes at "running". Avoid it unless you specifically need it.
 xcodebuild -project seahelm.xcodeproj -scheme seahelmUITests -configuration Debug test
 
 # Clean build
@@ -48,6 +50,8 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelm clean
 ```
 
 The project uses XcodeGen (`project.yml`) to generate the Xcode project file. After modifying `project.yml`, regenerate with `xcodegen generate`.
+
+**Helper scripts:** since zmx underpins session persistence, several scripts manage the vendored `zmx` binary — `scripts/fetch-zmx.sh` (fetch the pinned arm64 binary to a dest, verifying its SHA-256), `scripts/check-zmx.sh` (check whether a newer release exists than `Vendor/zmx.pin`; exit 10 if so), `scripts/bump-zmx.sh <version>` (download + rewrite the pin, no commit), and root `zmx-cleanup.sh` (kill all zmx sessions). `scripts/install-hooks.sh` symlinks `scripts/hooks/` into `.git/hooks`.
 
 ## Architecture
 
