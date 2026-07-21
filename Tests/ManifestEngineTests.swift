@@ -104,6 +104,53 @@ final class ManifestEngineTests: XCTestCase {
         }
     }
 
+    /// Regression: Cursor Agent CLI (entrypoint `agent`) no longer prints
+    /// "to interrupt". Live panes show "ctrl+c to stop" plus a status line
+    /// ("Working" / "Grepping  83.03k tokens"). Without these rules the sidebar
+    /// stuck on idle/unknown while the process was clearly busy.
+    func testCursorAgentCLIWorkingSignalsDetectAsRunning() {
+        guard let cm = ManifestStore.shared.manifest(for: "cursor") else {
+            return XCTFail("missing cursor manifest")
+        }
+        // Captured from live zmx history (lowercased as StatusPublisher does).
+        let workingScreens = [
+            """
+            ✶ grepping  83.03k tokens
+                tip: use /mcp to connect cursor to your tools and data sources.
+              ❯ add a follow-up                                     ctrl+c to stop
+              auto · 62.1% · 8 files edited                         run everything
+            """,
+            """
+            ✶ working
+              ❯ add a follow-up                                     ctrl+c to stop
+              auto · 27% · 5 files edited                           run everything
+            """,
+            """
+            ✶ updating  17.71k tokens
+              ❯ add a follow-up                                     ctrl+c to stop
+            """,
+            // Older CLI builds kept the interrupt hint.
+            "esc to interrupt\n(thinking)",
+        ]
+        for screen in workingScreens {
+            let d = cm.evaluate(DetectionInput(screen: screen.lowercased()))
+            XCTAssertEqual(d.state, .running, "expected running for:\n\(screen)")
+            XCTAssertTrue(d.visibleWorking)
+        }
+
+        // Idle follow-up prompt: no ctrl+c to stop, no token spinner.
+        let idle = """
+            ❯ add a follow-up
+            auto · 17.5%                                          run everything
+            """
+        XCTAssertEqual(cm.evaluate(DetectionInput(screen: idle.lowercased())).state, .unknown,
+                       "idle follow-up must not match running rules")
+        // Todo list prose must not trip the Working status-line rule.
+        let todoProse = "to-do working on 1 to-do · 1 done\n❯ add a follow-up"
+        XCTAssertEqual(cm.evaluate(DetectionInput(screen: todoProse.lowercased())).state, .unknown,
+                       "todo 'Working on' must not match bare Working status line")
+    }
+
     func testHighestPriorityWins() throws {
         // Two rules match; the higher-priority (waiting) must win over running.
         let cm = try manifest("""
