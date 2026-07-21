@@ -12,6 +12,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
     private var keyTextAccumulator: [String]?
     /// Called when this view becomes first responder (e.g. on mouse click).
     var onFocusAcquired: (() -> Void)?
+    /// Context-menu hooks, wired by `SplitContainerView` to the split delegate.
+    var onRequestSplit: ((SplitAxis) -> Void)?
+    var onRequestClose: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -484,13 +487,62 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        guard let surface else { return }
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, modsFromEvent(event))
+        // Focus the right-clicked pane so menu actions target it, then show
+        // our pane context menu (split/close/copy/paste).
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+        NSMenu.popUpContextMenu(makePaneContextMenu(), with: event, for: self)
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        guard let surface else { return }
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, modsFromEvent(event))
+        // Consumed by the context menu in rightMouseDown; nothing to forward.
+    }
+
+    // MARK: - Pane context menu
+
+    private func makePaneContextMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        let splitH = NSMenuItem(title: "Split Horizontally", action: #selector(contextSplitHorizontal), keyEquivalent: "")
+        splitH.target = self
+        menu.addItem(splitH)
+
+        let splitV = NSMenuItem(title: "Split Vertically", action: #selector(contextSplitVertical), keyEquivalent: "")
+        splitV.target = self
+        menu.addItem(splitV)
+
+        menu.addItem(.separator())
+
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(contextCopy), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = surface.map { ghostty_surface_has_selection($0) } ?? false
+        menu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(contextPaste), keyEquivalent: "")
+        pasteItem.target = self
+        pasteItem.isEnabled = NSPasteboard.general.string(forType: .string)?.isEmpty == false
+        menu.addItem(pasteItem)
+
+        menu.addItem(.separator())
+
+        let closeItem = NSMenuItem(title: "Close Pane", action: #selector(contextClose), keyEquivalent: "")
+        closeItem.target = self
+        menu.addItem(closeItem)
+
+        return menu
+    }
+
+    @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }
+    @objc private func contextSplitVertical() { onRequestSplit?(.vertical) }
+    @objc private func contextClose() { onRequestClose?() }
+    @objc private func contextPaste() { paste(nil) }
+
+    @objc private func contextCopy() {
+        guard let surface, ghostty_surface_has_selection(surface) else { return }
+        "copy_to_clipboard".withCString { ptr in
+            _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
+        }
     }
 
     // MARK: - Tracking area for mouseMoved

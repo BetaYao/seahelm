@@ -140,6 +140,14 @@ class SplitContainerView: NSView, DividerDelegate {
                     self.delegate?.splitContainer(self, didChangeFocus: leafId)
                     self.updateDimOverlays()
                 }
+                ghosttyView.onRequestSplit = { [weak self] axis in
+                    guard let self else { return }
+                    self.delegate?.splitContainer(self, didRequestSplit: axis)
+                }
+                ghosttyView.onRequestClose = { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.splitContainer(self, didRequestClosePane: leafId)
+                }
             }
 
             // Wire recovery + content scale. Do NOT call `syncSize()` here —
