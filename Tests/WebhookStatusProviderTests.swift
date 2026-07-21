@@ -69,7 +69,7 @@ final class WebhookStatusProviderTests: XCTestCase {
 
     func testAgentSessionResolvedFiresForClaude() {
         let fired = expectation(description: "agent session resolved")
-        provider.onAgentSessionResolved = { worktreePath, ref in
+        provider.onAgentSessionResolved = { worktreePath, _, ref in
             XCTAssertEqual(worktreePath, "/projects/repo/main")
             XCTAssertEqual(ref.agent, "claude")
             XCTAssertEqual(ref.sessionId, self.uuid)
@@ -82,7 +82,7 @@ final class WebhookStatusProviderTests: XCTestCase {
     func testAgentSessionResolvedExcludesSubagent() {
         let fired = expectation(description: "should not fire for subagent")
         fired.isInverted = true
-        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        provider.onAgentSessionResolved = { _, _, _ in fired.fulfill() }
         // Subagent events carry `agent_id`; they must not drive the main pane's ref.
         provider.handleEvent(makeEvent(sessionId: uuid, event: .subagentStop,
                                        cwd: "/projects/repo/main", data: ["agent_id": "sub-1"]))
@@ -91,7 +91,7 @@ final class WebhookStatusProviderTests: XCTestCase {
 
     func testAgentSessionResolvedFiresForCodex() {
         let fired = expectation(description: "agent session resolved for codex")
-        provider.onAgentSessionResolved = { _, ref in
+        provider.onAgentSessionResolved = { _, _, ref in
             XCTAssertEqual(ref.agent, "codex")
             fired.fulfill()
         }
@@ -104,7 +104,7 @@ final class WebhookStatusProviderTests: XCTestCase {
     func testAgentSessionResolvedSkipsUnsupportedSource() {
         let fired = expectation(description: "should not fire for unsupported agent")
         fired.isInverted = true
-        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        provider.onAgentSessionResolved = { _, _, _ in fired.fulfill() }
         let event = WebhookEvent(source: "gemini", sessionId: uuid, event: .sessionStart,
                                  cwd: "/projects/repo/main", timestamp: nil, data: nil)
         provider.handleEvent(event)
@@ -114,7 +114,7 @@ final class WebhookStatusProviderTests: XCTestCase {
     func testAgentSessionResolvedSkipsInvalidSessionId() {
         let fired = expectation(description: "should not fire for shell-unsafe id")
         fired.isInverted = true
-        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        provider.onAgentSessionResolved = { _, _, _ in fired.fulfill() }
         // A space makes the id shell-unsafe → AgentSessionRef rejects it.
         provider.handleEvent(makeEvent(sessionId: "bad id", event: .sessionStart, cwd: "/projects/repo/main"))
         wait(for: [fired], timeout: 0.3)
@@ -123,7 +123,7 @@ final class WebhookStatusProviderTests: XCTestCase {
     func testAgentSessionResolvedSkipsUnknownWorktree() {
         let fired = expectation(description: "should not fire for unmatched cwd")
         fired.isInverted = true
-        provider.onAgentSessionResolved = { _, _ in fired.fulfill() }
+        provider.onAgentSessionResolved = { _, _, _ in fired.fulfill() }
         provider.handleEvent(makeEvent(sessionId: uuid, event: .sessionStart, cwd: "/somewhere/else"))
         wait(for: [fired], timeout: 0.3)
     }
