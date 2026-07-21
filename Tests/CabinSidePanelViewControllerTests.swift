@@ -1,9 +1,9 @@
-// Tests/WorktreeSidePanelViewControllerTests.swift
+// Tests/CabinSidePanelViewControllerTests.swift
 import XCTest
 import AppKit
 @testable import seahelm
 
-final class WorktreeSidePanelViewControllerTests: XCTestCase {
+final class CabinSidePanelViewControllerTests: XCTestCase {
     private func makeVC(worktreePath: String?) -> CabinSidePanelViewController {
         CabinSidePanelViewController(worktreePath: worktreePath)
     }

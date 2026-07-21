@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class WorktreeStatusAggregatorTests: XCTestCase {
+final class CabinStatusAggregatorTests: XCTestCase {
 
     class MockDelegate: CabinStatusDelegate {
         var lastUpdatedStatus: CabinStatus?

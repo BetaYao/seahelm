@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class WorktreeTaskStoreTests: XCTestCase {
+final class CabinTaskStoreTests: XCTestCase {
     func testSetAndGetRoundTrip() {
         let path = "/tmp/seahelm-test-worktree-\(UUID().uuidString)"
         CabinTaskStore.shared.set("fix the login bug", forWorktree: path)

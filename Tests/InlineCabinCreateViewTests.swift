@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class InlineWorktreeCreateViewTests: XCTestCase {
+final class InlineCabinCreateViewTests: XCTestCase {
     func testSubmitInvokesCallbackWithTaskDescriptionAndValues() {
         let view = InlineCabinCreateView()
         view.configure(repoPaths: ["/Users/me/repoA", "/Users/me/repoB"])

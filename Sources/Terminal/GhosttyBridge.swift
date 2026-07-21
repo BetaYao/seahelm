@@ -63,6 +63,8 @@ class GhosttyBridge {
 
         // Point libghostty at bundled themes before config load / finalize.
         Self.configureResourcesEnvironment()
+        // Route zmx-spawned shells through Ghostty's OSC 133 shell integration.
+        Self.configureShellIntegrationEnvironment()
 
         // Initialize Ghostty runtime
         let argc = CommandLine.argc
@@ -288,6 +290,36 @@ class GhosttyBridge {
         setenv("GHOSTTY_RESOURCES_DIR", dir, 1)
     }
 
+    /// Inject Ghostty's OSC 133 shell integration into the shells zmx spawns, so
+    /// command boundaries emit `COMMAND_FINISHED` (real exit code + duration).
+    ///
+    /// The pane process is `zmx attach`, not a shell, so libghostty's own shell
+    /// integration never runs (it only wraps a shell it exec's directly). But
+    /// zmx's daemon `forkpty`'s the login shell inheriting *this* process's
+    /// environment, so setting `ZDOTDIR` here reaches the zsh it starts — the
+    /// same ZDOTDIR trick Ghostty uses (termio/shell_integration.zig `setupZsh`).
+    /// The bundled `.zshenv` restores the user's real `ZDOTDIR` from
+    /// `GHOSTTY_ZSH_ZDOTDIR` and chains to their config, so this is
+    /// non-destructive. Only affects zsh; bash/fish ignore `ZDOTDIR` (no-op).
+    /// Existing persisted zmx sessions keep their already-running shell — the
+    /// integration lands on newly created panes.
+    private static func configureShellIntegrationEnvironment() {
+        guard ProcessInfo.processInfo.environment["SEAHELM_DISABLE_SHELL_INTEGRATION"] == nil else { return }
+        guard let dir = bundledResourcesURL()?
+            .appendingPathComponent("shell-integration/zsh").path,
+              FileManager.default.fileExists(atPath: dir + "/.zshenv") else { return }
+
+        let current = ProcessInfo.processInfo.environment["ZDOTDIR"]
+        // Nesting guard: Seahelm launched from inside a Seahelm pane already has
+        // our ZDOTDIR — don't re-wrap (would clobber the preserved real one).
+        if current == dir { return }
+
+        if let current, !current.isEmpty {
+            setenv("GHOSTTY_ZSH_ZDOTDIR", current, 1)
+        }
+        setenv("ZDOTDIR", dir, 1)
+    }
+
     private static func bundledResourcesURL() -> URL? {
         Bundle.main.resourceURL?.appendingPathComponent("ghostty")
     }
@@ -340,6 +372,15 @@ class GhosttyBridge {
     }
 
     private static func handleAction(app: ghostty_app_t?, target: ghostty_target_s, action: ghostty_action_s) -> Bool {
+        // TEMP PROBE: verify OSC 133 injection makes command_finished auto-fire.
+        if action.tag == GHOSTTY_ACTION_COMMAND_FINISHED {
+            let cf = action.action.command_finished
+            let line = "command_finished surface=\(station(for: target)?.id.prefix(8) ?? "?") exit=\(cf.exit_code) duration_ns=\(cf.duration)\n"
+            if let d = line.data(using: .utf8) {
+                let u = URL(fileURLWithPath: "/tmp/seahelm_probe.log")
+                if let h = try? FileHandle(forWritingTo: u) { h.seekToEndOfFile(); h.write(d); try? h.close() } else { try? d.write(to: u) }
+            }
+        }
         switch action.tag {
         case GHOSTTY_ACTION_SET_TITLE:
             if let station = station(for: target),

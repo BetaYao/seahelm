@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class WorktreePathNavigationTests: XCTestCase {
+final class CabinPathNavigationTests: XCTestCase {
     private let paths = ["/a", "/b", "/c"]
 
     func testForwardFromMiddle() {

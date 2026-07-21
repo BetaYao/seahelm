@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class WorktreeGroupingTests: XCTestCase {
+final class CabinGroupingTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000)
 
     private var utcCalendar: Calendar {
@@ -143,7 +143,7 @@ final class WorktreeGroupingTests: XCTestCase {
     }
 
     func testPreferenceRoundTripsAndInvalidOrMissingValueFallsBack() {
-        let suite = "WorktreeGroupingTests.\(UUID().uuidString)"
+        let suite = "CabinGroupingTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preference = CabinGroupingPreference(defaults: defaults)

@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class WorktreeTitleResolverTests: XCTestCase {
+final class CabinTitleResolverTests: XCTestCase {
     func testFallsBackToPromptWhenNoSummary() {
         let title = CabinTitleResolver.resolve(
             worktreePath: "/nonexistent/path",
