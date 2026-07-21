@@ -669,6 +669,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onCenterOverlayTitleChange = { [weak self] title in
             self?.windowChrome?.setOverlayTitle(title)
         }
+        // Edit-mode toggle availability + on-state drive the chrome header icon.
+        dashboard.onEditModeStateChange = { [weak self] available, isOn in
+            self?.windowChrome?.setEditMode(available: available, isOn: isOn)
+        }
         // Keep chrome header icon tint in sync when dashboard changes side.
         dashboard.onActiveToolChanged = { [weak self] pane in
             guard let self else { return }
@@ -1455,6 +1459,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
+        // In edit mode the terminal split is presented as tabs, so spatial focus
+        // movement becomes tab cycling: horizontal walks the terminal tabs, and
+        // vertical walks the preview tabs on the right.
+        if let dashboard = tabCoordinator.dashboardVC, dashboard.isEditModeActive {
+            if axis == .horizontal {
+                dashboard.editModeCycleTerminalTab(forward: positive)
+            } else {
+                dashboard.editModeCyclePreviewTab(forward: positive)
+            }
+            return
+        }
         terminalCoordinator.moveFocus(axis, positive: positive)
     }
 
@@ -1657,6 +1672,10 @@ extension MainWindowController: ChromeHeaderDelegate {
 
     func chromeDidToggleSidebar() {
         toggleChromeCollapsed()
+    }
+
+    func chromeDidToggleEditMode() {
+        tabCoordinator.dashboardVC?.toggleEditMode()
     }
 }
 

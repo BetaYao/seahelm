@@ -9,6 +9,19 @@ Seahelm (sea + helm) is a native macOS terminal multiplexer built with Swift + A
 ## Build Commands
 
 ```bash
+# First-time setup: init the Ghostty submodule + build/reuse GhosttyKit.xcframework
+scripts/setup.sh
+
+# Build into .build/, kill any running Seahelm, and launch the debug app
+./run.sh                 # add --clean-restart to wipe .build first
+
+# Run UI tests (regenerates the project, optionally filtered to one class)
+./run_ui_tests.sh [TestClass]
+```
+
+Note: `run.sh` launches the app from `.build/`, NOT the DerivedData bundle — when inspecting a running instance, use the bundle the live pid actually came from.
+
+```bash
 # Generate Xcode project from project.yml (requires xcodegen)
 xcodegen generate
 
@@ -52,15 +65,21 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `Split/` — `SplitContainerView` renders `SplitTree` as frame-based leaf views with `DividerView` drag handles and dim overlays on unfocused panes
    - `Chrome/` — Two-column `WindowChromeController` (sidebar/terminal headers, divider, collapse)
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
+   - `SidePanel/` — Per-worktree right panel with First Mate / Files / Changes tabs (`WorktreeSidePanelViewController`, `BridgePanelViewController` for red/green-zone orders)
+   - `Diff/` — Code-review diff viewer (`DiffReviewView` + `DiffSyntaxHighlighter`)
+   - `Helm/` — The command-line "helm" input (`CommandInputView` with `/command · @repo · #agent` autocomplete) + keyboard-help overlay
+   - `StatusBar/` — Fixed 26pt bottom bar: mode indicator, global Claude/Codex usage, notification summary, shortcuts
+   - `Island/` — Floating "dynamic island" panel (morphs closed pill ↔ open surface) for notifications/status
+   - `Settings/`, `Onboarding/` — Tabbed settings window and the first-run wizard
 
 3. **Core Services** (`Sources/Core/`, `Sources/Status/`)
    - `ShipLog` — Single source of truth for all agent state; delegates notify UI of changes
    - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
-   - `StatusDetector` — Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
+   - `StatusDetector` — Authoritative status detector. Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown. Its text-pattern tier consults a `CompiledManifest` from the manifest engine (see below); the manifest layer augments, it does not replace, this ladder.
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
    - `Config` — JSON config at `~/.config/seahelm/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
    - `StationRegistry` — Global registry mapping surface IDs to `Station` instances
-   - `ExternalChannel` — Protocol for WeChat/WeCom bot integrations
+   - `ExternalChannel` — Protocol for inbound remote-control chat (`WeChatChannel`, `WeComBotChannel`)
 
 4. **Terminal & System** (`Sources/Terminal/`, `Sources/Git/`)
    - `GhosttyBridge` — Singleton wrapping the Ghostty C API (`ghostty.h` via bridging header)
@@ -87,6 +106,26 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 **Thread safety:** `ghosttyLock` (NSLock) serializes all Ghostty C API calls between the background status poll and main-thread input. Key input deliberately does NOT hold the lock (Ghostty is internally thread-safe for keys, and holding it would deadlock on synchronous callbacks).
 
 **Window key handling:** `SeahelmWindow.performKeyEquivalent` handles split pane shortcuts (Cmd+D split, Cmd+Shift+Arrow move focus, Cmd+Ctrl+Arrow resize) before menu key equivalents. `sendEvent` intercepts Escape.
+
+## Agent Orchestration ("the fleet")
+
+Seahelm frames each running agent with a nautical metaphor worth knowing before reading this code: a **Sailor** is one agent in one pane, and `ShipLog.shared` is the fleet-wide source of truth across worktree "ships."
+
+- **Sailor model** (`Sources/Core/Sailor*.swift`): `SailorType` = agent kind (claudeCode, codex, openCode, gemini, cline…), `SailorStatus` = state enum (owns the status-dot color), `SailorInfo` = per-pane snapshot, `SailorReducer` = pure `(old + inputs) → (new snapshot + delta)` (extracted from `ShipLog.updateStatus`), `SailorChannel` = protocol for talking to a sailor's terminal (`ZmxChannel` is the universal fallback via the `zmx` CLI; `HooksChannel` is the richer path for agents that report structured events).
+
+- **Manifest engine** (`Sources/Status/`): data-driven detection ported from a sibling project. `AgentManifest` is a JSON schema of priority-ordered regex rules/gates/process matchers (bundled under `Sources/Status/Manifests/`, overridable at `~/.config/seahelm/agents/<id>.json` — user override wins by id/alias). `ManifestStore` compiles them; `ManifestEngine` evaluates a terminal snapshot. The `*Decoder` files are the newer "signalman" seam: `SignalDecoder` translates one raw source into a unified `NormalizedEvent`; `ScanDecoder` wraps `StatusDetector` (screen-scan channel), `HookDecoder` maps webhook events. These feed the reducer/ingest pipeline broadcast through `EventHub`.
+
+- **Control socket & CLI** (`Sources/Core/`): `ControlSocketServer` listens on a 0600 Unix socket at `~/.config/seahelm/seahelm.sock` speaking newline-delimited JSON-RPC (`ControlProtocol` = transport-free router + `ControlDataSource` seam; `SeahelmControlDataSource` bridges it to live app state). `SeahelmCliInstaller` writes `~/.local/bin/seahelm` (python3 wrapper) so agents run e.g. `seahelm pane run <id> npm test` — this backs the `seahelm` skill. `BridgeCommand`/`BridgeCommandRouter` are a separate higher-level command grammar used by the chat/bridge surfaces (worktrees, orders, "return to port"). `EventHub` is the fan-out broker (bounded ring buffer, `events_after` replay) for control-socket subscribers.
+
+- **Hooks installers** (`Sources/Core/*HooksSetup.swift`, `*Installer.swift`): non-destructively install per-agent shims so third-party agent CLIs report lifecycle events back to seahelm. `SeahelmHookInstaller` writes `~/.local/bin/seahelm-hook` (the shared bridge: prefers the socket, falls back to HTTP webhook, relays Stop-hook block decisions via stdout); `ClaudeHooksSetup`/`CodexHooksSetup`/`CursorHooksSetup`/`OpenCodePluginInstaller` wire that bridge into each tool's config. `OnboardingHookInstaller` orchestrates which integrations get installed during the first-run wizard.
+
+- **FirstMate** (`Sources/Core/FirstMate*.swift`): an autonomous supervisor reacting to agent status transitions. A green-zone/red-zone action model (watchWaiting, watchError, inspect, autoCommit, suggestNextOrder, returnToPort, broadcastOrder); `FirstMateConfig` holds user policy; `FirstMateCoordinator` (main thread) consumes status edges, routes green-zone actions to side effects and red-zone actions to the `PendingOrdersQueue`. Watches idle/blocked/errored agents and either auto-handles or surfaces them for approval.
+
+- **Usage** (`Sources/Usage/`): `ClaudeUsageSummaryProvider`/`CodexUsageSummaryProvider` parse each tool's local session logs into token/quota figures; `UsageSummaryStore` refreshes both on a background timer and emits the global usage readout shown in the status bar.
+
+## Keyboard System (modal)
+
+`Sources/App/` has a modal Vim/which-key-style keyboard system (design in `docs/keyboard-redesign.md`). `KeyboardMode` = NORMAL vs INSERT (+ transient `KeyboardSubstate`); `KeyboardModeController` owns the mode machine and the leader (`Space`) which-key descent. `Keymap` resolves bare-key NORMAL chords to `KeyboardAction` (h/j/k/l focus, i=insert, d=delete, c=changes); `GlobalKeymap` centralizes window-level Cmd shortcuts; `DialogKeymap` unifies modal-dialog nav; `LeaderMenu` holds `LeaderCommand` leaf actions reachable through the leader tree (kept separate from `KeyboardAction`). Note `SeahelmWindow.performKeyEquivalent` (below) still handles the split-pane Cmd shortcuts.
 
 ## Key Technical Details
 
