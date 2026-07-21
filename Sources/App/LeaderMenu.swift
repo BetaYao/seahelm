@@ -68,10 +68,10 @@ enum LeaderMenu {
             .command(key: "x", label: "Close pane", command: .closePane),
             .command(key: "=", label: "Reset ratio", command: .resetRatio),
         ]),
-        .command(key: "n", label: "new worktree", command: .newWorktree),
-        .command(key: "d", label: "delete worktree", command: .deleteWorktree),
+        .command(key: "n", label: "new cabin", command: .newWorktree),
+        .command(key: "d", label: "delete cabin", command: .deleteWorktree),
         .submenu(key: "g", label: "go ▸", children: [
-            .command(key: "w", label: "Worktree switcher", command: .quickSwitcher),
+            .command(key: "w", label: "Cabin switcher", command: .quickSwitcher),
             .command(key: "0", label: "dashboard", command: .dashboard),
             .command(key: "b", label: "Toggle sidebar", command: .toggleSidebar),
         ]),

@@ -66,8 +66,8 @@ class NewBranchDialog: NSViewController {
         titleLabel.textColor = SemanticColors.text
         titleLabel.alignment = .center
         
-        // Repository picker
-        let repoLabel = createLabel("Repository")
+        // Deck (repository) picker
+        let repoLabel = createLabel("Deck")
         setupRepoPopup()
         
         // Branch name input

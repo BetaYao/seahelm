@@ -113,7 +113,16 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 ## Agent Orchestration ("the fleet")
 
-Seahelm frames each running agent with a nautical metaphor worth knowing before reading this code: a **Sailor** is one agent in one pane, and `ShipLog.shared` is the fleet-wide source of truth across worktree "ships."
+Seahelm frames the whole app with a nautical metaphor worth knowing before reading this code. You (the app / user) are the **Captain** of one **Ship**, and the structural hierarchy nests physically:
+
+| Concept | Term | Relationship |
+|---------|------|--------------|
+| the app / user | **Ship** (Captain) | top level, singular |
+| repo | **Deck** | a Ship has many Decks |
+| worktree | **Cabin** | a Deck has many Cabins |
+| pane / agent | **Sailor** | a Cabin has many Sailors doing the work |
+
+So: one Ship ⊃ many Decks (repos) ⊃ many Cabins (worktrees) ⊃ many Sailors (panes/agents). `ShipLog.shared` is the Ship-wide source of truth across all Sailors. (Note: `Station` is already taken for the surface wrapper, so it is deliberately not used for any tier above.)
 
 - **Sailor model** (`Sources/Core/Sailor*.swift`): `SailorType` = agent kind (claudeCode, codex, openCode, gemini, cline…), `SailorStatus` = state enum (owns the status-dot color), `SailorInfo` = per-pane snapshot, `SailorReducer` = pure `(old + inputs) → (new snapshot + delta)` (extracted from `ShipLog.updateStatus`), `SailorChannel` = protocol for talking to a sailor's terminal (`ZmxChannel` is the universal fallback via the `zmx` CLI; `HooksChannel` is the richer path for agents that report structured events).
 

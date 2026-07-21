@@ -77,7 +77,7 @@ enum WorktreeGrouping {
         var groupedItems: [String: [WorktreeGroupingItem]] = [:]
 
         for item in items {
-            let repository = item.repository.isEmpty ? "Unknown repository" : item.repository
+            let repository = item.repository.isEmpty ? "Unknown deck" : item.repository
             if groupedItems[repository] == nil {
                 repositoryOrder.append(repository)
             }

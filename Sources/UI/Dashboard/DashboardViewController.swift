@@ -747,8 +747,8 @@ class DashboardViewController: NSViewController {
         emptyStateView.addSubview(label)
 
         emptyStateGuideRows = [
-            EmptyStateGuideRow(marker: "1.", command: "Add a repo", detail: "pick a folder above"),
-            EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a worktree"),
+            EmptyStateGuideRow(marker: "1.", command: "Add a deck", detail: "pick a folder above"),
+            EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a cabin"),
             EmptyStateGuideRow(marker: "3.", command: "/order @branch", detail: "give the agent an order"),
             EmptyStateGuideRow(marker: "4.", command: "/remove", detail: "clean up finished work"),
         ]
@@ -1532,7 +1532,7 @@ class DashboardViewController: NSViewController {
         case .deleteFocused:
             guard let agent = focusedSailor else { return }
             guard !agent.isMainWorktree else {
-                windowKeyboardMode?.flashHint("The main worktree cannot be deleted")
+                windowKeyboardMode?.flashHint("The main cabin cannot be deleted")
                 return
             }
             windowKeyboardMode?.beginDelete(agentId: agent.id)
@@ -2262,7 +2262,7 @@ final class DashboardOverviewView: NSView {
         groupingButton.action = #selector(showGroupingMenu(_:))
 
         let entries: [(WorktreeGroupingMode, String)] = [
-            (.repository, "Group by Repository"),
+            (.repository, "Group by Deck"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
             (.sailor, "Expand All Panes"),
@@ -2302,10 +2302,10 @@ final class DashboardOverviewView: NSView {
         }
         let description: String
         switch groupingMode {
-        case .repository: description = "Group worktrees by repository"
-        case .status: description = "Group worktrees by status"
-        case .activityTime: description = "Group worktrees by time"
-        case .sailor: description = "Expand worktrees into panes"
+        case .repository: description = "Group cabins by deck"
+        case .status: description = "Group cabins by status"
+        case .activityTime: description = "Group cabins by time"
+        case .sailor: description = "Expand cabins into panes"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2596,7 +2596,7 @@ final class DashboardOverviewView: NSView {
 
     private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
         let running = sailors.filter { SailorStatus.highestPriority($0.paneStatuses) == .running }.count
-        headerSub.stringValue = "\(sailors.count) worktrees · \(running) running"
+        headerSub.stringValue = "\(sailors.count) cabins · \(running) running"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
@@ -2899,7 +2899,7 @@ final class DashboardOverviewView: NSView {
             line2.spacing = 8
             line2.translatesAutoresizingMaskIntoConstraints = false
             if showsRepository {
-                let repository = Self.label(sailor.project.isEmpty ? "Unknown repository" : sailor.project,
+                let repository = Self.label(sailor.project.isEmpty ? "Unknown deck" : sailor.project,
                                             RepoColor.color(for: sailor.project), 10, weight: .semibold)
                 repository.setContentHuggingPriority(.defaultHigh, for: .horizontal)
                 repository.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -2973,7 +2973,7 @@ final class DashboardOverviewView: NSView {
                 menu.addItem(item)
             }
             menu.addItem(.separator())
-            let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteAction), keyEquivalent: "")
+            let deleteItem = NSMenuItem(title: "Delete Cabin", action: #selector(deleteAction), keyEquivalent: "")
             deleteItem.target = self
             menu.addItem(deleteItem)
             return menu

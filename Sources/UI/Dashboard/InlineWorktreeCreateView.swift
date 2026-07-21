@@ -226,7 +226,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             menu.addItem(item)
         }
         if !paths.isEmpty { menu.addItem(.separator()) }
-        let add = NSMenuItem(title: "Add repo…", action: #selector(addRepoClicked), keyEquivalent: "")
+        let add = NSMenuItem(title: "Add deck…", action: #selector(addRepoClicked), keyEquivalent: "")
         add.target = self
         menu.addItem(add)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: repoChip.bounds.height + 4), in: repoChip)
@@ -286,10 +286,10 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 
     private static let commandCompletions: [CommandItem] = [
-        CommandItem(name: "new",       args: "<task>",            desc: "Create a worktree and assign a task"),
-        CommandItem(name: "order",     args: "<branch> <task>",   desc: "Assign a task to an existing worktree"),
+        CommandItem(name: "new",       args: "<task>",            desc: "Create a cabin and assign a task"),
+        CommandItem(name: "order",     args: "<branch> <task>",   desc: "Assign a task to an existing cabin"),
         CommandItem(name: "commit",    args: "<branch>",          desc: "Commit changes"),
-        CommandItem(name: "return",    args: "<branch>",          desc: "Return to port · delete worktree"),
+        CommandItem(name: "return",    args: "<branch>",          desc: "Return to port · delete cabin"),
         CommandItem(name: "broadcast", args: "<task>",            desc: "Broadcast to all agents"),
     ]
 

@@ -15,14 +15,14 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("↑ ↓ / k j", "Move: worktrees → cards → command"),
+        ("↑ ↓ / k j", "Move: cabins → cards → command"),
         ("⏎ / →", "Forward: dashboard → split → terminal"),
         ("← ", "Card row: previous card · split: back"),
         ("⌘esc / ⌃⌃", "Back: terminal → split → dashboard"),
         ("⇥", "Cycle options on selected card"),
-        ("1 – 9", "Enter Nth worktree"),
-        ("n", "New worktree"),
-        ("⌃⇥ / ⌃⇧⇥", "Next / previous worktree"),
+        ("1 – 9", "Enter Nth cabin"),
+        ("n", "New cabin"),
+        ("⌃⇥ / ⌃⇧⇥", "Next / previous cabin"),
         ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
         ("?", "Keyboard shortcuts"),
     ]
