@@ -87,6 +87,11 @@ enum SemanticColors {
         appearance.isDark ? NSColor(hex: 0xe84635) : NSColor(hex: 0xdc2626)
     }
 
+    /// Amber "needs input" accent — waiting statuses that want the user's attention.
+    static let attention: NSColor = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0xe0a458) : NSColor(hex: 0xd08706)
+    }
+
     // MARK: - Pre-computed derived colors
 
     static let cardBgSelected: NSColor = NSColor(name: nil) { a in

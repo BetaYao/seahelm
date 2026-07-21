@@ -87,10 +87,11 @@ class SplitTree {
 
     private static func restoreNode(from codable: CodableSplitNode, backend: String) -> (SplitNode?, String?) {
         switch codable {
-        case .leaf(let sessionName):
+        case .leaf(let sessionName, let title):
             let station = Station()
             station.sessionName = sessionName
             station.backend = backend
+            station.persistedTitle = title
             StationRegistry.shared.register(station)
             let leafId = UUID().uuidString
             return (.leaf(id: leafId, stationId: station.id, sessionName: sessionName), leafId)

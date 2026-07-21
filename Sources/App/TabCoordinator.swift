@@ -158,8 +158,8 @@ class TabCoordinator {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "Select a git repository to add"
-        panel.prompt = "Add Repo"
+        panel.message = "Select a directory to add (git repo or any folder)"
+        panel.prompt = "Add"
 
         guard let window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
@@ -198,7 +198,7 @@ class TabCoordinator {
     func integrateDiscoveredRepo(repoPath: String, worktrees: [WorktreeInfo], activateTab: Bool = true) -> Int {
         let effectiveWorktrees: [WorktreeInfo]
         if worktrees.isEmpty {
-            effectiveWorktrees = [WorktreeInfo(path: repoPath, branch: "main", commitHash: "", isMainWorktree: true)]
+            effectiveWorktrees = [WorktreeInfo(path: repoPath, branch: "", commitHash: "", isMainWorktree: true)]
         } else {
             effectiveWorktrees = worktrees
         }
@@ -348,10 +348,14 @@ class TabCoordinator {
                                             lastUserPrompt: mostRecentUserPrompt,
                                             branch: worktreeName) { _ in }
 
-            // Current pane = last-focused leaf in the split tree, else first pane.
-            let focusedStationId = PaneTitleResolver.focusedStationId(in: tree) ?? agent.id
-            let focusedSailor = (agentsByWorktree[agent.worktreePath] ?? [])
-                .first(where: { $0.id == focusedStationId }) ?? agent
+            // Worktree title = the current (focused) pane, or the most recently
+            // active pane when this worktree has no genuine focus.
+            let focusedStationId = PaneTitleResolver.focusedStationId(in: tree)
+            let focusedSailor = PaneTitleResolver.representativeSailor(
+                focusedStationId: focusedStationId,
+                among: agentsByWorktree[agent.worktreePath] ?? [],
+                fallback: agent
+            )
             let currentPaneTitle = PaneTitleResolver.title(for: focusedSailor)
             let currentPaneRunTime: String = {
                 if focusedSailor.status == .running, focusedSailor.roundDuration > 0 {
@@ -360,6 +364,21 @@ class TabCoordinator {
                 }
                 return lastActivityAge
             }()
+
+            // Per-pane rows for the expanded "Group by Sailor" mode. Aligned to
+            // paneStations (leaf order); title/status come from each pane's own
+            // ShipLog sailor, so sibling panes read distinctly.
+            let worktreeSailors = agentsByWorktree[agent.worktreePath] ?? []
+            let panes: [PaneDisplayInfo] = paneStations.map { paneStation in
+                let paneSailor = worktreeSailors.first(where: { $0.id == paneStation.id })
+                return PaneDisplayInfo(
+                    stationId: paneStation.id,
+                    title: paneSailor.map { PaneTitleResolver.title(for: $0) }
+                        ?? PaneTitleResolver.shortenPath(agent.worktreePath),
+                    status: paneSailor?.status ?? .unknown,
+                    isFocused: paneStation.id == focusedStationId
+                )
+            }
 
             result.append(SailorDisplayInfo(
                 id: agent.id,
@@ -383,7 +402,8 @@ class TabCoordinator {
                 lastActivityAt: lastActivity,
                 gitStats: gitStats,
                 currentPaneTitle: currentPaneTitle,
-                currentPaneRunTime: currentPaneRunTime
+                currentPaneRunTime: currentPaneRunTime,
+                panes: panes
             ))
         }
 
@@ -1054,9 +1074,12 @@ class TabCoordinator {
     }
 
     func restoreSessionState() {
-        // Restore selected agent card from config
+        // Restore selected agent card from config. Use commitWorktreeSelection
+        // (not selectSailor) so the left "First mate" overview selection stays in
+        // sync with the right-hand terminal — selectSailor moves only the terminal,
+        // leaving the overview highlight on the first row and mismatched on launch.
         if let savedPath = config.selectedWorktreePath {
-            dashboardVC?.selectSailor(byWorktreePath: savedPath)
+            dashboardVC?.commitWorktreeSelection(path: savedPath, focusTerminal: true)
         }
     }
 

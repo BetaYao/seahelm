@@ -61,6 +61,7 @@
 		2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D815BD3789070197196037 /* CodexHooksSetupTests.swift */; };
 		2F5B5EC7F0428265CC344717 /* CodexHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A51B009382FE3586E735355D /* CodexHooksSetup.swift */; };
 		303FCEA37D46939EB9451358 /* WorktreeCreatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */; };
+		321A7CB783FEBABFD944F744 /* SpinnerDotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */; };
 		3228A013E381D520EE386C05 /* UpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */; };
 		33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75D8071B308F62A8D6D3379 /* AppDelegate.swift */; };
 		33C396FE204DA5CF4648543C /* SplitPanePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36A62BF0D9481F17D7071390 /* SplitPanePage.swift */; };
@@ -647,6 +648,7 @@
 		C537B2B1B68C50EF9685736B /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 		C6F98DB046516F2EB312E63F /* ZmxChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxChannel.swift; sourceTree = "<group>"; };
 		C71C3A59719695387993016D /* FuzzyMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatch.swift; sourceTree = "<group>"; };
+		C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinnerDotView.swift; sourceTree = "<group>"; };
 		CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 		CD8F0A0F456C94284935BE32 /* RegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegressionTests.swift; sourceTree = "<group>"; };
@@ -996,6 +998,7 @@
 				0B4A39D9322D17CBEF79A686 /* FrostedPanelView.swift */,
 				1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */,
 				F15A95E0337AEDBCE9546B8F /* SemanticColors.swift */,
+				C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */,
 				8E004E8B96865467209D3F2D /* Theme.swift */,
 				0A25DADE8C435CBAA6E78BAB /* ThemedBackgroundView.swift */,
 			);
@@ -1807,6 +1810,7 @@
 				1945A6AC8F512F03D83EBB70 /* ShipLog.swift in Sources */,
 				06CF922E9ABD675BEC1F7502 /* SidebarHeaderView.swift in Sources */,
 				64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */,
+				321A7CB783FEBABFD944F744 /* SpinnerDotView.swift in Sources */,
 				2BC7A5243BDCCBADED457B44 /* SplitContainerView.swift in Sources */,
 				CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */,
 				BC59B36704952688AFE19EDC /* SplitTree.swift in Sources */,

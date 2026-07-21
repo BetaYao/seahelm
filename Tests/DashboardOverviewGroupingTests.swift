@@ -35,9 +35,9 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              now: { self.now })
 
             XCTAssertEqual(view.groupingMenuTitlesForTesting, [
-                "Group by Repository", "Group by Status", "Group by Time",
+                "Group by Repository", "Group by Status", "Group by Time", "Expand All Panes",
             ])
-            XCTAssertEqual(view.groupingMenuKeyEquivalentsForTesting, ["", "", ""])
+            XCTAssertEqual(view.groupingMenuKeyEquivalentsForTesting, ["", "", "", ""])
             XCTAssertTrue(view.groupingButtonRefusesFirstResponderForTesting)
         }
     }
