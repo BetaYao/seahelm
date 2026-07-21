@@ -105,6 +105,28 @@ final class PaneTitleResolverTests: XCTestCase {
         )
     }
 
+    func testStaleAgentAtShellPromptDoesNotResurrectPersistedTitle() {
+        // Agent exited back to a shell (OSC == prompt), and it has no live command
+        // line. The persisted strong title is now stale and must NOT stand in —
+        // otherwise the pane keeps its dead agent title and reads identical to its
+        // sibling agent pane. It falls through to the branch instead.
+        let station = Station()
+        station.setOscTitle("matt.chow@host:/tmp/wt")
+        station.persistedTitle = "Add grouping mode"
+        var sailor = makeSailor(
+            agentType: .claudeCode,
+            prompt: "",
+            branch: "main",
+            commandLine: nil,
+            worktreePath: "/tmp/wt"
+        )
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "main"
+        )
+    }
+
     func testShellPromptOscTitleNeverBecomesTitle() {
         XCTAssertNil(
             PaneTitleResolver.displayOscTitle("matt.chow@host:/tmp/wt", worktreePath: "/tmp/wt")

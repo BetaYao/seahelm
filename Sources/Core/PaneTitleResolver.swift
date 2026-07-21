@@ -66,7 +66,13 @@ enum PaneTitleResolver {
         // 4. Last-known strong title, restored from the saved layout. Bridges the
         // startup gap where OSC/session data hasn't landed yet — without it every
         // restored pane collapsed to the same branch/repo fallback.
-        if let persisted = sailor.station?.persistedTitle?
+        //
+        // Skip it when the pane is *right now* sitting at a shell prompt: that is
+        // live proof the agent has exited back to a shell, so its old strong title
+        // is stale. Without this guard an ex-agent pane keeps its dead agent title
+        // forever, and a sibling shell reads identical to the agent pane.
+        if !atShellPrompt,
+           let persisted = sailor.station?.persistedTitle?
             .trimmingCharacters(in: .whitespacesAndNewlines), !persisted.isEmpty {
             return persisted
         }
