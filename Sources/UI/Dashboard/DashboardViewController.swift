@@ -1941,6 +1941,13 @@ extension DashboardViewController {
 
 extension DashboardViewController: WorktreeSidePanelDelegate {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
+        openFile(path: path)
+    }
+
+    /// Open a file through the same viewer path as selecting it in the Files tab:
+    /// a right-column tab in edit mode, otherwise the fullscreen center overlay.
+    /// Used by the terminal pane's "Preview" context-menu action.
+    func openFile(path: String) {
         // Record the file into the (mode-decoupled) preview set. In edit mode it
         // becomes a right-column tab; otherwise it opens as the fullscreen overlay.
         guard let wt = currentWorktreePath else {

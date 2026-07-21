@@ -4,6 +4,7 @@ protocol SplitContainerDelegate: AnyObject {
     func splitContainer(_ view: SplitContainerView, didChangeFocus leafId: String)
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis)
     func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String)
+    func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL)
     func splitContainerDidChangeLayout(_ view: SplitContainerView)
 }
 
@@ -147,6 +148,10 @@ class SplitContainerView: NSView, DividerDelegate {
                 ghosttyView.onRequestClose = { [weak self] in
                     guard let self else { return }
                     self.delegate?.splitContainer(self, didRequestClosePane: leafId)
+                }
+                ghosttyView.onRequestPreview = { [weak self] url in
+                    guard let self else { return }
+                    self.delegate?.splitContainer(self, didRequestPreview: url)
                 }
             }
 
