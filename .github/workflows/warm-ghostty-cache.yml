@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -40,7 +40,7 @@ jobs:
 
       - name: Cache GhosttyKit.xcframework
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/seahelm/ghosttykit
           key: ghosttykit-${{ steps.ghostty.outputs.sha }}
