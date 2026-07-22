@@ -12,12 +12,14 @@ final class BridgeCommandRouterTests: XCTestCase {
                     addRepo: @escaping () -> Void = {},
                     removeRepo: @escaping (String) -> Void = { _ in },
                     removeWorktree: @escaping (String) -> Void = { _ in },
+                    flagIssue: @escaping (String) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created,
                             selectWorktree: selectWorktree, selectAgent: selectAgent,
                             showOverview: showOverview, orderAgent: ordered,
                             removeAll: removeAll, addRepo: addRepo, removeRepo: removeRepo,
                             removeWorktree: removeWorktree,
+                            flagIssue: flagIssue,
                             activeSailorCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
     }
@@ -114,5 +116,13 @@ final class BridgeCommandRouterTests: XCTestCase {
         XCTAssertEqual(q.all().first?.action.kind, .broadcastOrder)
         XCTAssertEqual(q.all().first?.action.payload, "run tests")
         XCTAssertTrue(q.all().first?.action.message.contains("3") ?? false)
+    }
+
+    func testFlagIssueCallsClosure() {
+        let q = PendingOrdersQueue()
+        var flagged: String?
+        makeRouter(queue: q, flagIssue: { flagged = $0 }).route(.flagIssue(title: "fix the thing"))
+        XCTAssertEqual(flagged, "fix the thing")
+        XCTAssertTrue(q.all().isEmpty)
     }
 }

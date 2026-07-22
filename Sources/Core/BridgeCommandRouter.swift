@@ -19,6 +19,8 @@ struct BridgeCommandRouter {
     let removeRepo: (String) -> Void
     /// Confirm, then delete the linked worktree at this path.
     let removeWorktree: (String) -> Void
+    /// Open a pre-filled GitHub issue in the browser.
+    let flagIssue: (String) -> Void
     let activeSailorCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
@@ -43,6 +45,8 @@ struct BridgeCommandRouter {
             removeRepo(path)
         case .removeWorktree(let path):
             removeWorktree(path)
+        case .flagIssue(let title):
+            flagIssue(title)
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",

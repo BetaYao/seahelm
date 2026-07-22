@@ -968,6 +968,7 @@ class ShipLog {
             `/broadcast <task>` — Send a task to every agent
             `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
             `/add` — Desktop only (needs a file picker)
+            `/flag <description>` — Open a GitHub issue for seahelm
 
             _Chat only:_
             `/status` — Status of all agents

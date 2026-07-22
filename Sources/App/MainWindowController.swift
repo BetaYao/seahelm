@@ -327,6 +327,7 @@ class MainWindowController: NSWindowController {
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
+    @objc func helmFlagCommand() { openHelmCockpit(prefill: "/flag ") }
 
     @objc func splitHorizontal() { splitFocusedPane(axis: .horizontal) }
     @objc func splitVertical() { splitFocusedPane(axis: .vertical) }
@@ -522,6 +523,15 @@ class MainWindowController: NSWindowController {
     @objc func openDocumentation() {
         let repositoryURL = URL(string: "https://github.com/\(UpdateCoordinator.repositoryOwner)/\(UpdateCoordinator.repositoryName)")!
         NSWorkspace.shared.open(repositoryURL)
+    }
+
+    private func openGitHubIssue(title: String) {
+        let encodedTitle = title.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed) ?? title
+        let urlString = "https://github.com/\(UpdateCoordinator.repositoryOwner)/\(UpdateCoordinator.repositoryName)/issues/new?title=\(encodedTitle)"
+        if let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc func cleanOrphanSessions() {
@@ -781,13 +791,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
             pool = [
                 ("task", "bare lists tasks · <description> starts one · #code switches"),
                 ("agents", "bare lists this task's agents · #code steers one"),
-                ("repo", "List repos"),
                 ("order", "#code <task> — send to one agent without switching"),
                 ("broadcast", "Broadcast to everyone"),
                 ("add", "Add a repo to the workspace"),
                 // Both kinds of `@` name are valid — the kind picks the verb,
                 // and no name at all sweeps every worktree.
                 ("return", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
+                ("flag", "<description> — open a GitHub issue for seahelm"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -945,6 +955,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
         case .addRepo:
             reply("`/add` is desktop only — it needs a file picker.")
 
+        case .flagIssue(let title):
+            openGitHubIssue(title: title)
+            reply("Opening GitHub issue for **seahelm**…")
+
         case .removeAll:
             // Cards, exactly as on the desktop. A blind sweep is the one place
             // direct execution could delete several worktrees from one stray line.
@@ -1036,6 +1050,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 // Same confirm sheet as the sidebar's Delete: typing a branch name is
                 // easy to get wrong, and the work in that tree is unrecoverable.
                 self.terminalCoordinator.confirmAndDeleteWorktree(item.info, window: self.window)
+            },
+            flagIssue: { [weak self] title in
+                self?.openGitHubIssue(title: title)
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },

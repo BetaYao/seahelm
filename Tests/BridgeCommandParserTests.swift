@@ -169,6 +169,17 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(parse("/add"), .success(.addRepo))
     }
 
+    // MARK: - /flag
+
+    func testFlagWithDescription() {
+        XCTAssertEqual(parse("/flag dark mode is broken"),
+                       .success(.flagIssue(title: "dark mode is broken")))
+    }
+
+    func testFlagEmptyFails() {
+        XCTAssertEqual(parse("/flag"), .failure(.emptyTask))
+    }
+
     func testUnknownCommand() {
         XCTAssertEqual(parse("/frobnicate"), .failure(.unknownCommand("frobnicate")))
     }

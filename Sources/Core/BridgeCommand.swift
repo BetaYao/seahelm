@@ -56,6 +56,8 @@ enum BridgeCommand: Equatable {
     /// `/return @branch` — delete one linked worktree (never the main one — that
     /// is `removeRepo`).
     case removeWorktree(worktreePath: String)
+    /// `/flag <description>` — open a GitHub issue pre-filled with the description.
+    case flagIssue(title: String)
 }
 
 enum BridgeCommandError: Error, Equatable {
@@ -189,6 +191,9 @@ enum BridgeCommandParser {
 
         case "return":
             return Self.resolveRemoveTarget(rest, worktrees: worktrees, repoPaths: repoPaths)
+
+        case "flag":
+            return rest.isEmpty ? .failure(.emptyTask) : .success(.flagIssue(title: rest))
 
         default:
             return .failure(.unknownCommand(verb))

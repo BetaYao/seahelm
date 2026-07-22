@@ -36,6 +36,7 @@ enum MenuBuilder {
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
             ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
             ("Add Deck (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
+            ("Flag (/flag)", #selector(MainWindowController.helmFlagCommand), "f", [.command, .shift]),
         ]
         for (title, action, key, mods) in commands {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
