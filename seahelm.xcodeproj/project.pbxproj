@@ -70,6 +70,7 @@
 		3228A013E381D520EE386C05 /* UpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */; };
 		33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75D8071B308F62A8D6D3379 /* AppDelegate.swift */; };
 		33C396FE204DA5CF4648543C /* SplitPanePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36A62BF0D9481F17D7071390 /* SplitPanePage.swift */; };
+		34295E2A78AAF5B432E08698 /* PiExtensionInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */; };
 		346BF50E3F02C947F8D62DB5 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 887D8D47490B9D11BC6072DA /* JetBrainsMono-Regular.ttf */; };
 		35B413CAB65CDFC7F5994E84 /* ActivityEventExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */; };
 		36A3C27B63B14CBA52BC3A4D /* OverviewFocusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D1BBB07A2822E90114369F /* OverviewFocusModel.swift */; };
@@ -144,6 +145,7 @@
 		6C822061BD36C74213F5D43B /* StationRegistryConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D9670C14DA62CDEE9828F5C /* StationRegistryConcurrencyTests.swift */; };
 		6CC09A4697C9EDE89CC73BD6 /* ShipLogTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8ABD117D5B106998086A53 /* ShipLogTransitionTests.swift */; };
 		6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB82719AC58E2E0289564007 /* HookDecoderTests.swift */; };
+		6D70BCF49CA131BECFA1CC41 /* PiExtensionInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */; };
 		6F46B38545D8EA067171AF5B /* EditorTheme+Seahelm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */; };
 		708FA82605788117E6142639 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */; };
 		718906FE9DB3F7AC492BA652 /* SailorReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */; };
@@ -480,6 +482,7 @@
 		49437644810F143C24E9273B /* PaneTitleResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTitleResolverTests.swift; sourceTree = "<group>"; };
 		49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
 		4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlRouterTests.swift; sourceTree = "<group>"; };
+		4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiExtensionInstallerTests.swift; sourceTree = "<group>"; };
 		4DA513259B19E55E2FB46C9F /* QuickSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSwitcherViewController.swift; sourceTree = "<group>"; };
 		4F0C5FB141D86ECC0B6D8E66 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		4F6248F858A60E04AAC76E22 /* OnboardingAgentDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAgentDetector.swift; sourceTree = "<group>"; };
@@ -655,6 +658,7 @@
 		C6F98DB046516F2EB312E63F /* ZmxChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxChannel.swift; sourceTree = "<group>"; };
 		C71C3A59719695387993016D /* FuzzyMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatch.swift; sourceTree = "<group>"; };
 		C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinnerDotView.swift; sourceTree = "<group>"; };
+		CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiExtensionInstaller.swift; sourceTree = "<group>"; };
 		CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 		CD8F0A0F456C94284935BE32 /* RegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegressionTests.swift; sourceTree = "<group>"; };
@@ -808,6 +812,7 @@
 				421A628841F0B8971AAA2D36 /* PendingCabinTransfer.swift */,
 				CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */,
 				EF3E143D632D86B7DBBC840E /* PersistedStringMap.swift */,
+				CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */,
 				CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */,
 				910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */,
 				83A953BA5BA82E18C03F5294 /* SailorChannel.swift */,
@@ -1141,6 +1146,7 @@
 				49437644810F143C24E9273B /* PaneTitleResolverTests.swift */,
 				5CF8D45DC59BA85924DB8D9E /* PaneTransferTests.swift */,
 				D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */,
+				4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */,
 				7BE708AEC9451A9A8135976C /* ProcessProbeTests.swift */,
 				14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */,
 				97C4FA6FDE7FEC53DDB662BD /* PtyGridAbsorbTests.swift */,
@@ -1595,6 +1601,7 @@
 				B192412250A276B2421D9AEB /* PaneTransferTests.swift in Sources */,
 				9B491C853EC9D44767FD6F90 /* PanelCoordinatorTests.swift in Sources */,
 				58A4DC34C98D37D2E6B90D09 /* PendingOrdersQueueTests.swift in Sources */,
+				34295E2A78AAF5B432E08698 /* PiExtensionInstallerTests.swift in Sources */,
 				AD2BB97C703A9CEAA447467C /* ProcessProbeTests.swift in Sources */,
 				8BB5F6D554A6F5BE68613FBA /* ProcessRunnerTests.swift in Sources */,
 				844747226335348450B94EEA /* PtyGridAbsorbTests.swift in Sources */,
@@ -1808,6 +1815,7 @@
 				A6F77AC811D7338AAEB50A00 /* PendingCabinTransfer.swift in Sources */,
 				9C55DE7AD6C3DCE23F18B842 /* PendingOrdersQueue.swift in Sources */,
 				9A03CF75CF0BCBBD3E4778FA /* PersistedStringMap.swift in Sources */,
+				6D70BCF49CA131BECFA1CC41 /* PiExtensionInstaller.swift in Sources */,
 				3B6E064F838BAF33075485C8 /* PreviewSetController.swift in Sources */,
 				DEDCDC483983AFA6EE444A63 /* ProcessProbe.swift in Sources */,
 				07D61705F36F11CF9B8CF316 /* ProcessRunner.swift in Sources */,
@@ -1918,7 +1926,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.27;
+				MARKETING_VERSION = 2.0.28;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2151,7 +2159,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.27;
+				MARKETING_VERSION = 2.0.28;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",

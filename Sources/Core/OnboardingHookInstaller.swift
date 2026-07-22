@@ -29,6 +29,9 @@ enum OnboardingHookInstaller {
         if set.contains("opencode") {
             OpenCodePluginInstaller.ensureInstalled()
         }
+        if set.contains("pi") {
+            PiExtensionInstaller.ensureInstalled()
+        }
     }
 
     /// Launch-time install: use `enabledHookAgents` when non-empty, otherwise
@@ -42,6 +45,7 @@ enum OnboardingHookInstaller {
             CodexHooksSetup.ensureHooksConfigured()
             CursorHooksSetup.ensureHooksConfigured()
             OpenCodePluginInstaller.ensureInstalled()
+            PiExtensionInstaller.ensureInstalled()
             SeahelmSkillInstaller.ensureInstalled()
         } else {
             install(agents: config.enabledHookAgents)
