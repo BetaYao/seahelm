@@ -599,6 +599,14 @@ class DashboardViewController: NSViewController {
         }
     }
 
+    /// The pending image URLs from pastes in the overview's command input, if any.
+    var pendingImageURLs: [URL] { overviewView.pendingImageURLs }
+
+    /// Clear the pending images from the overview's command input.
+    func clearPendingImage() {
+        overviewView.clearPendingImage()
+    }
+
     func configureOverview(pendingOrders: PendingOrdersQueue?,
                            onSubmitCommand: @escaping (String) -> Void,
                            onOrderAction: @escaping (PendingOrder, String) -> Void,
@@ -2381,6 +2389,7 @@ final class DashboardOverviewView: NSView {
             guard !t.isEmpty else { return }
             self?.onSubmitCommand?(t)
             self?.commandInput.text = ""
+            self?.commandInput.clearPendingImage()
             self?.hideMenu()
         }
         commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
@@ -2391,9 +2400,11 @@ final class DashboardOverviewView: NSView {
             if !self.menuContainer.isHidden { self.hideMenu(); return }
             if !self.commandInput.text.isEmpty {
                 self.commandInput.text = ""
+                self.commandInput.clearPendingImage()
                 self.hideMenu()
                 return
             }
+            self.commandInput.clearPendingImage()
             self.onCommandEscapeAtEmpty?()
         }
         commandInput.onArrowUpAtEmpty = { [weak self] in
@@ -2584,6 +2595,14 @@ final class DashboardOverviewView: NSView {
     /// Focus the command input with a prefilled command (e.g. "/new ").
     func focusCommand(prefill: String) {
         commandInput.setTextAndFocusEnd(prefill)
+    }
+
+    /// The pending image URLs from pastes in the command input, if any.
+    var pendingImageURLs: [URL] { commandInput.pendingImageURLs }
+
+    /// Clear the pending images from the command input.
+    func clearPendingImage() {
+        commandInput.clearPendingImage()
     }
 
     /// Worktrees in display (grouped) order — the sequence keyboard nav walks.

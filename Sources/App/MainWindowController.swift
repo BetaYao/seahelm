@@ -531,6 +531,15 @@ class MainWindowController: NSWindowController {
         let urlString = "https://github.com/\(UpdateCoordinator.repositoryOwner)/\(UpdateCoordinator.repositoryName)/issues/new?title=\(encodedTitle)"
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
+            // If images were pasted, put the first one on the pasteboard so the
+            // user can Cmd+V it into the issue body on GitHub. Subsequent images
+            // are kept on disk; the user pastes them one by one.
+            let imageURLs = dashboardVC?.pendingImageURLs ?? []
+            if let firstURL = imageURLs.first,
+               let image = NSImage(contentsOf: firstURL) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([image])
+            }
         }
     }
 
@@ -957,6 +966,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         case .flagIssue(let title):
             openGitHubIssue(title: title)
+            dashboardVC?.clearPendingImage()
             reply("Opening GitHub issue for **seahelm**…")
 
         case .removeAll:
@@ -1053,6 +1063,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             },
             flagIssue: { [weak self] title in
                 self?.openGitHubIssue(title: title)
+                self?.dashboardVC?.clearPendingImage()
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },

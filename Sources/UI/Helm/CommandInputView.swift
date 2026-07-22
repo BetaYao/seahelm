@@ -27,14 +27,26 @@ final class CommandInputView: NSView {
     var onFocused: (() -> Void)?
     /// The field resigned first responder (click elsewhere, Tab, etc.).
     var onUnfocused: (() -> Void)?
+    /// An image was pasted (or drag-dropped) into the field. The URL points to
+    /// a temp PNG file the host can pass downstream.
+    var onImagePasted: ((URL) -> Void)?
 
     private let field = FocusReportingTextField()
     private let box = FrostedPanelView()
     private let spinner = NSProgressIndicator()
+    private let thumbnailStrip = NSStackView()
     private var savedPlaceholder: String?
     private var placeholder: String = "" {
         didSet { refreshPlaceholder() }
     }
+
+    /// Temp file URLs of pasted images, in paste order. Cleared on submit/cancel.
+    private(set) var pendingImageURLs: [URL] = [] {
+        didSet { rebuildThumbnails() }
+    }
+
+    private var fieldLeadingConstraint: NSLayoutConstraint!
+    private var thumbnailStackLeadingConstraint: NSLayoutConstraint!
 
     /// Anchors of the bordered input box, so the host can align the autocomplete
     /// dropdown to the box's bottom edge.
@@ -88,6 +100,9 @@ final class CommandInputView: NSView {
                 self?.onUnfocused?()
             }
         }
+        field.onPasteImage = { [weak self] url in
+            self?.attachImage(url: url)
+        }
         box.addSubview(field)
 
         spinner.style = .spinning
@@ -96,7 +111,16 @@ final class CommandInputView: NSView {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(spinner)
 
+        thumbnailStrip.orientation = .horizontal
+        thumbnailStrip.alignment = .centerY
+        thumbnailStrip.spacing = 4
+        thumbnailStrip.translatesAutoresizingMaskIntoConstraints = false
+        thumbnailStackLeadingConstraint = thumbnailStrip.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 6)
+        box.addSubview(thumbnailStrip)
+
         addSubview(box)
+
+        fieldLeadingConstraint = field.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14)
 
         NSLayoutConstraint.activate([
             box.topAnchor.constraint(equalTo: topAnchor, constant: 12),
@@ -104,12 +128,16 @@ final class CommandInputView: NSView {
             box.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             box.heightAnchor.constraint(equalToConstant: 40),
 
-            field.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+            fieldLeadingConstraint,
             field.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
             field.centerYAnchor.constraint(equalTo: box.centerYAnchor),
 
             spinner.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
             spinner.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+
+            thumbnailStackLeadingConstraint,
+            thumbnailStrip.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            thumbnailStrip.heightAnchor.constraint(equalToConstant: 28),
 
             box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
@@ -184,12 +212,84 @@ final class CommandInputView: NSView {
         onTextChanged?(s)
     }
 
+    /// Clear any pending image attachments.
+    func clearPendingImage() {
+        pendingImageURLs = []
+    }
+
     @objc private func submit() {
         let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         onSubmit?(value)
         field.stringValue = ""
         onTextChanged?("")
+        clearPendingImage()
+    }
+
+    /// Save a pasted image to a temp PNG and show a thumbnail preview.
+    private func attachImage(url: URL) {
+        pendingImageURLs.append(url)
+        onImagePasted?(url)
+    }
+
+    @objc private func removeThumbnail(_ sender: NSButton) {
+        let index = sender.tag
+        guard index >= 0, index < pendingImageURLs.count else { return }
+        pendingImageURLs.remove(at: index)
+    }
+
+    private func rebuildThumbnails() {
+        thumbnailStrip.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (index, url) in pendingImageURLs.enumerated() {
+            let container = NSView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.wantsLayer = true
+            container.layer?.cornerRadius = 4
+            container.layer?.masksToBounds = true
+
+            let imageView = NSImageView()
+            imageView.imageScaling = .scaleProportionallyDown
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.image = NSImage(contentsOf: url)
+            container.addSubview(imageView)
+
+            let remove = NSButton()
+            remove.bezelStyle = .inline
+            remove.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove image")
+            remove.contentTintColor = NSColor.secondaryLabelColor
+            remove.isBordered = false
+            remove.translatesAutoresizingMaskIntoConstraints = false
+            remove.tag = index
+            remove.target = self
+            remove.action = #selector(removeThumbnail(_:))
+            container.addSubview(remove)
+
+            container.widthAnchor.constraint(equalToConstant: 28).isActive = true
+            container.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            NSLayoutConstraint.activate([
+                imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                imageView.topAnchor.constraint(equalTo: container.topAnchor),
+                imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                remove.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 4),
+                remove.topAnchor.constraint(equalTo: container.topAnchor, constant: -4),
+                remove.widthAnchor.constraint(equalToConstant: 16),
+                remove.heightAnchor.constraint(equalToConstant: 16),
+            ])
+
+            thumbnailStrip.addArrangedSubview(container)
+        }
+        updateThumbnailLayout()
+    }
+
+    private func updateThumbnailLayout() {
+        let count = pendingImageURLs.count
+        let hasImages = count > 0
+        thumbnailStrip.isHidden = !hasImages
+        // Each thumbnail is 28pt + 4pt spacing, plus 6pt leading margin.
+        let stripWidth = hasImages ? CGFloat(count) * 28 + CGFloat(max(0, count - 1)) * 4 : 0
+        thumbnailStackLeadingConstraint.constant = hasImages ? 6 : 0
+        fieldLeadingConstraint.constant = hasImages ? 14 + stripWidth + 6 : 14
     }
 }
 
@@ -227,6 +327,46 @@ extension CommandInputView: NSTextFieldDelegate {
 /// becomes first responder.
 final class FocusReportingTextField: NSTextField {
     var onFocusChange: ((Bool) -> Void)?
+    var onPasteImage: ((URL) -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers == "v" {
+            if let url = Self.extractImageFromPasteboard() {
+                onPasteImage?(url)
+                return true
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private static func extractImageFromPasteboard() -> URL? {
+        let pb = NSPasteboard.general
+        guard pb.types?.contains(where: {
+            $0 == .png || $0 == .tiff || $0 == NSPasteboard.PasteboardType("public.file-url")
+        }) == true else { return nil }
+
+        if let url = pb.readObjects(forClasses: [NSURL.self], options: nil)?.first as? URL,
+           let _ = NSImage(contentsOf: url) {
+            return url
+        }
+
+        guard let image = NSImage(pasteboard: pb) else { return nil }
+        let tiffData = image.tiffRepresentation
+        guard let rep = tiffData.flatMap({ NSBitmapImageRep(data: $0) }),
+              let pngData = rep.representation(using: .png, properties: [:]) else { return nil }
+
+        let tmpDir = FileManager.default.temporaryDirectory
+        let fileName = "seahelm-paste-\(Int(Date().timeIntervalSince1970)).png"
+        let fileURL = tmpDir.appendingPathComponent(fileName)
+        do {
+            try pngData.write(to: fileURL)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { onFocusChange?(true) }
