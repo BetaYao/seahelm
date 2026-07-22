@@ -27,7 +27,7 @@ struct BridgeCommandRouter {
         switch command {
         case .newWorktree(let task, let repoHint):
             createWorktree(task, repoHint)
-        case .listWorktrees, .listAgents, .listRepos:
+        case .listWorktrees, .listAgents:
             showOverview()
         case .selectWorktree(let path):
             selectWorktree(path)

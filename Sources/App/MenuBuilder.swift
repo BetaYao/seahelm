@@ -32,7 +32,6 @@ enum MenuBuilder {
         let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
             ("Task (/task)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
             ("Agents (/agents)", #selector(MainWindowController.helmAgentsCommand), "", []),
-            ("Decks (/repo)", #selector(MainWindowController.helmRepoCommand), "", []),
             ("Order (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
             ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),

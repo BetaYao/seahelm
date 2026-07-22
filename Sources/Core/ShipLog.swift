@@ -964,7 +964,6 @@ class ShipLog {
             `/task #<code|name>` — Switch to that task
             `/agents` — List this task's agents, numbered
             `/agents #<code|name>` — Steer that agent
-            `/repo` — List repos
             `/order #<code|name> <task>` — Send to one agent without switching
             `/broadcast <task>` — Send a task to every agent
             `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones

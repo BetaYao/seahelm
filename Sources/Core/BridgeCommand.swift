@@ -44,8 +44,6 @@ enum BridgeCommand: Equatable {
     case listAgents
     /// `/agents #<code|name>` — make one of them current.
     case selectAgent(id: String)
-    /// `/repo` — every repo, numbered.
-    case listRepos
     /// `/order #<code|name> <task>` — send to one agent without moving current.
     case orderAgent(agentId: String, task: String)
     case broadcast(task: String)
@@ -174,9 +172,6 @@ enum BridgeCommandParser {
             }
             return .success(.selectAgent(id: agent.id))
 
-        case "repo", "repos":
-            return .success(.listRepos)
-
         case "order":
             let argParts = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
             guard let target = argParts.first.map(String.init) else { return .failure(.missingArgument("order")) }
@@ -204,14 +199,6 @@ enum BridgeCommandParser {
 /// Renders the listings. Pure, so the numbering stays testable and stays in step
 /// with `BridgeCommandParser.resolveIndexed`.
 enum BridgeCommandFormatter {
-    static func repoList(_ repoPaths: [String]) -> String {
-        guard !repoPaths.isEmpty else { return "No repos configured. Use `/add` on the desktop." }
-        let lines = repoPaths.enumerated().map { index, path in
-            "\(index + 1). \(URL(fileURLWithPath: path).lastPathComponent)"
-        }
-        return (["**Repos**", ""] + lines).joined(separator: "\n")
-    }
-
     static func worktreeList(_ worktrees: [CabinRef], currentPath: String?) -> String {
         guard !worktrees.isEmpty else { return "No tasks. `/task <description>` to start one." }
         let lines = worktrees.enumerated().map { index, wt in

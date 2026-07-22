@@ -323,7 +323,6 @@ class MainWindowController: NSWindowController {
 
     @objc func helmTaskCommand() { openHelmCockpit(prefill: "/task ") }
     @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/agents") }
-    @objc func helmRepoCommand() { openHelmCockpit(prefill: "/repo") }
     @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
@@ -931,9 +930,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
             dashboardVC?.commitWorktreeSelection(path: s.worktreePath)
             reply("Now steering **\(s.project)** [\(s.branch)]")
-
-        case .listRepos:
-            reply(BridgeCommandFormatter.repoList(tabCoordinator.config.workspacePaths))
 
         case .orderAgent(let id, let task):
             guard let s = ShipLog.shared.sailor(for: id) else { reply("No such agent."); return }

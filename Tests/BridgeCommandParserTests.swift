@@ -118,13 +118,6 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(parse("/agents 9"), .failure(.unknownTarget("9")))
     }
 
-    // MARK: - /repo
-
-    func testRepoLists() {
-        XCTAssertEqual(parse("/repo"), .success(.listRepos))
-        XCTAssertEqual(parse("/repos"), .success(.listRepos))
-    }
-
     // MARK: - /order
 
     func testOrderResolvesAgentByCode() {
@@ -255,18 +248,7 @@ final class BridgeCommandParserTests: XCTestCase {
     }
 
     func testFormatterEmptyStates() {
-        XCTAssertEqual(BridgeCommandFormatter.repoList([]),
-                       "No repos configured. Use `/add` on the desktop.")
         XCTAssertEqual(BridgeCommandFormatter.agentList([], currentId: nil), "No agents in this task.")
         XCTAssertTrue(BridgeCommandFormatter.worktreeList([], currentPath: nil).contains("No tasks"))
-    }
-
-    func testRepoListIsNumbered() {
-        XCTAssertEqual(BridgeCommandFormatter.repoList(repos), """
-        **Repos**
-
-        1. alpha
-        2. beta
-        """)
     }
 }

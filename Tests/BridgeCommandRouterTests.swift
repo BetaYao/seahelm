@@ -91,7 +91,7 @@ final class BridgeCommandRouterTests: XCTestCase {
     /// The desktop's listing is the dashboard, so every list verb navigates there.
     func testListVerbsShowOverview() {
         let q = PendingOrdersQueue()
-        for command in [BridgeCommand.listWorktrees, .listAgents, .listRepos] {
+        for command in [BridgeCommand.listWorktrees, .listAgents] as [BridgeCommand] {
             var shown = false
             makeRouter(queue: q, showOverview: { shown = true }).route(command)
             XCTAssertTrue(shown, "\(command) should show the overview")
