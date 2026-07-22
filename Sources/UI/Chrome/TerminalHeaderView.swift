@@ -242,7 +242,27 @@ final class TerminalHeaderView: NSView {
         delegate?.chromeDidToggleEditMode()
     }
 
-    override var mouseDownCanMoveWindow: Bool { true }
+    // MARK: - Window drag / zoom
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Claim non-button points so `mouseDown` can handle drag/zoom.
+    /// Buttons (icon cluster, expand, edit-mode) still get their own hits.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let hit = super.hitTest(point), hit is NSButton {
+            return hit
+        }
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            window?.performZoom(nil)
+        } else {
+            window?.performDrag(with: event)
+        }
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
