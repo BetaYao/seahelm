@@ -14,12 +14,29 @@ final class ManifestEngineTests: XCTestCase {
     func testAllBundledManifestsDetectSpinnerTitle() {
         let store = ManifestStore.shared
         for id in ["claude", "codex", "opencode", "gemini", "cline", "goose",
-                   "amp", "aider", "cursor", "kiro", "agent"] {
+                   "amp", "aider", "cursor", "kiro", "pi", "agent"] {
             guard let cm = store.manifest(for: id) else { XCTFail("missing \(id)"); continue }
             let d = cm.evaluate(DetectionInput(screen: "", oscTitle: "\u{2810} 调查查询服务不稳定的问题"))
             XCTAssertEqual(d.state, .running, "\(id) did not detect the spinner title as running")
             XCTAssertTrue(d.visibleWorking, "\(id) spinner should be visible_working")
         }
+    }
+
+    /// Pi has no text permission prompts (it uses a project-trust model) and a
+    /// spinner-with-message working line ending "… to cancel". Verify the manifest
+    /// maps the trust prompt to waiting and the working line to running.
+    func testPiManifestDetection() {
+        guard let cm = ManifestStore.shared.manifest(for: "pi") else {
+            return XCTFail("missing pi manifest")
+        }
+        // The caller lowercases the viewport before evaluating, so tests do too.
+        let trust = cm.evaluate(DetectionInput(screen: "project trust\n/users/me/proj\n↑↓ navigate  save  cancel", oscTitle: ""))
+        XCTAssertEqual(trust.state, .waiting, "pi trust prompt should be waiting")
+        XCTAssertTrue(trust.visibleBlocker)
+        let working = cm.evaluate(DetectionInput(screen: "summarizing branch... (ctrl+c to cancel)", oscTitle: ""))
+        XCTAssertEqual(working.state, .running, "pi working line should be running")
+        // "pi" alias resolves to the same manifest.
+        XCTAssertNotNil(ManifestStore.shared.manifest(for: "pi-coding-agent"))
     }
 
     /// Regression: Claude Code at an idle prompt but with background tasks still

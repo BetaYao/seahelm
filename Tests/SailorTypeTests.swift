@@ -24,6 +24,23 @@ final class SailorTypeTests: XCTestCase {
         XCTAssertFalse(cmd.hasSuffix("''"))   // no empty positional task
     }
 
+    // MARK: - Pi agent
+
+    func testPiIsAFirstClassAgent() {
+        XCTAssertEqual(SailorType.pi.displayName, "Pi")
+        XCTAssertEqual(SailorType.pi.launchCommand, "pi")
+        XCTAssertTrue(SailorType.pi.isAIAgent)
+        XCTAssertEqual(SailorType.pi.manifestId, "pi")
+        XCTAssertEqual(SailorType.fromManifestId("pi"), .pi)
+        // Pi uses a project-trust model, not a skip-permissions flag.
+        XCTAssertNil(SailorType.pi.yoloFlag)
+    }
+
+    func testPiLaunchTakesTaskAsPositionalArg() {
+        let cmd = SailorType.pi.launchCommand(withTask: "fix the bug", agentYolo: true)!
+        XCTAssertEqual(cmd, "pi 'fix the bug'")   // no yolo flag, no system-prompt injection
+    }
+
     // MARK: - Detection from terminal content
 
     func testDetectClaudeCode() {

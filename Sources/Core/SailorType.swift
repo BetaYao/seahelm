@@ -12,6 +12,7 @@ enum SailorType: String, Codable, CaseIterable {
     case aider
     case cursor
     case kiro
+    case pi
     // Shell tasks
     case brew
     case btop
@@ -40,6 +41,7 @@ enum SailorType: String, Codable, CaseIterable {
         case .aider:        return "Aider"
         case .cursor:       return "Cursor"
         case .kiro:         return "Kiro"
+        case .pi:           return "Pi"
         case .brew:         return "Homebrew"
         case .btop:         return "btop"
         case .top:          return "top"
@@ -71,6 +73,7 @@ enum SailorType: String, Codable, CaseIterable {
         case .aider:      return "aider"
         case .cursor:     return "cursor"
         case .kiro:       return "kiro"
+        case .pi:         return "pi"
         default:          return nil
         }
     }
@@ -160,6 +163,7 @@ enum SailorType: String, Codable, CaseIterable {
         case .aider:      return "aider"
         case .cursor:     return "cursor"
         case .kiro:       return "kiro"
+        case .pi:         return "pi"
         default:          return "agent"
         }
     }
@@ -179,6 +183,7 @@ enum SailorType: String, Codable, CaseIterable {
         case "aider":    return .aider
         case "cursor":   return .cursor
         case "kiro":     return .kiro
+        case "pi":       return .pi
         default:         return .unknown
         }
     }
@@ -186,7 +191,7 @@ enum SailorType: String, Codable, CaseIterable {
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,
-             .goose, .amp, .aider, .cursor, .kiro:
+             .goose, .amp, .aider, .cursor, .kiro, .pi:
             return true
         default:
             return false
@@ -206,6 +211,7 @@ enum SailorType: String, Codable, CaseIterable {
         case .codex:      return "⟡"
         case .openCode:   return "◇"
         case .gemini:     return "✦"
+        case .pi:         return "π"
         case .unknown:    return nil
         default:          return isAIAgent ? "◆" : "❯"
         }

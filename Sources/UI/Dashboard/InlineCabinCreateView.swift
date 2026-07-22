@@ -724,6 +724,7 @@ private extension SailorType {
         case .aider:      return "wrench.and.screwdriver"
         case .cursor:     return "cursorarrow"
         case .kiro:       return "k.circle"
+        case .pi:         return "pi"
         default:          return "cpu"
         }
     }
