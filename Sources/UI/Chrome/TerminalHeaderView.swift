@@ -242,6 +242,8 @@ final class TerminalHeaderView: NSView {
         delegate?.chromeDidToggleEditMode()
     }
 
+    override var mouseDownCanMoveWindow: Bool { true }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshImmersion()

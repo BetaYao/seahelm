@@ -152,4 +152,6 @@ final class SidebarHeaderView: NSView {
     @objc private func sidebarClicked() {
         delegate?.chromeDidToggleSidebar()
     }
+
+    override var mouseDownCanMoveWindow: Bool { true }
 }
