@@ -1655,18 +1655,9 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func windowDidChangeScreen(_ notification: Notification) {
-        // Dragging between displays changes backingScaleFactor without a resize.
-        // Resync every station's content scale + pixel size so the grid adapts.
-        for station in StationRegistry.shared.allStations() {
-            station.syncContentScale()
-            station.syncSize()
-        }
-    }
-
-    func windowDidChangeBackingProperties(_ notification: Notification) {
-        // Backing scale changed (Retina ↔ external). The view-level
-        // viewDidChangeBackingProperties handles visible panes, but panes
-        // not in the active hierarchy may miss it — resync all stations.
+        // Dragging between displays with different backing scales. The
+        // view-level viewDidChangeBackingProperties handles visible panes,
+        // but panes not yet in the hierarchy may miss it — resync all.
         for station in StationRegistry.shared.allStations() {
             station.syncContentScale()
             station.syncSize()

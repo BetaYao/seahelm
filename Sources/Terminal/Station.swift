@@ -250,12 +250,15 @@ class Station {
             ])
         }
 
-        // Set initial size — Ghostty expects pixel (framebuffer) dimensions, not points
-        let size = (initialFrame ?? container.bounds).size
-        let scale = container.window?.backingScaleFactor ?? 2.0
-        ghostty_surface_set_content_scale(s, Double(scale), Double(scale))
-        ghostty_surface_set_size(s, UInt32(size.width * scale), UInt32(size.height * scale))
-        view.markSurfaceSizeSynced(size)
+        // Set initial size — Ghostty expects pixel (framebuffer) dimensions, not points.
+        // Use convertToBacking for the actual scale factor (handles non-integer scales).
+        let viewFrame = initialFrame ?? container.bounds
+        let fbFrame = container.convertToBacking(viewFrame)
+        let xScale = viewFrame.width > 0 ? fbFrame.width / viewFrame.width : 2.0
+        let yScale = viewFrame.height > 0 ? fbFrame.height / viewFrame.height : 2.0
+        ghostty_surface_set_content_scale(s, Double(xScale), Double(yScale))
+        ghostty_surface_set_size(s, UInt32(fbFrame.width), UInt32(fbFrame.height))
+        view.markSurfaceSizeSynced(viewFrame.size)
         ghostty_surface_set_focus(s, false)  // Start unfocused; focus set via makeFirstResponder
         ghostty_surface_set_color_scheme(s, GhosttyBridge.shared.currentColorScheme)
     }
@@ -317,9 +320,11 @@ class Station {
 
     /// Sync the content scale (Retina vs non-Retina)
     func syncContentScale() {
-        guard let surface, let view, let window = view.window else { return }
-        let scale = Double(window.backingScaleFactor)
-        ghostty_surface_set_content_scale(surface, scale, scale)
+        guard let surface, let view, view.bounds.width > 0, view.bounds.height > 0 else { return }
+        let fbFrame = view.convertToBacking(view.bounds)
+        let xScale = fbFrame.width / view.bounds.width
+        let yScale = fbFrame.height / view.bounds.height
+        ghostty_surface_set_content_scale(surface, Double(xScale), Double(yScale))
     }
 
     /// Check if the process has exited

@@ -126,7 +126,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     /// Dragging the window to a display with a different `backingScaleFactor`
     /// (e.g. built-in Retina 2x ↔ external 1x) fires this. The view's *point*
-    /// bounds are unchanged, so `syncSurfaceSize()`'s `size == lastSyncedSize`
+    /// bound are unchanged, so `syncSurfaceSize()`'s `size == lastSyncedSize`
     /// guard would skip the resync and the Metal framebuffer would keep
     /// rendering at the old scale — the reported "font jumps big/small across
     /// monitors" bug. Push the new content scale and force a resync past the
@@ -134,11 +134,32 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// and the framebuffer re-renders at the correct DPI).
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        guard let surface, let window else { return }
-        let scale = Double(window.backingScaleFactor)
-        ghostty_surface_set_content_scale(surface, scale, scale)
-        lastSyncedSize = .zero
-        syncSurfaceSize()
+
+        // Update the layer's contentsScale so Core Animation doesn't scale
+        // the Metal framebuffer during compositing. Must match the window's
+        // actual backing scale, not a cached value.
+        if let window {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.contentsScale = window.backingScaleFactor
+            CATransaction.commit()
+        }
+
+        guard let surface, let window, bounds.width > 0, bounds.height > 0 else { return }
+        // Use convertToBacking for the actual X/Y scale — window.backingScaleFactor
+        // is a single scalar and can be wrong for non-integer scales or when the
+        // view has a transform. This mirrors upstream Ghostty's approach.
+        let fbFrame = convertToBacking(bounds)
+        let xScale = fbFrame.size.width / bounds.width
+        let yScale = fbFrame.size.height / bounds.height
+        ghostty_surface_set_content_scale(surface, xScale, yScale)
+        // The pixel size changes with scale, so force a resync.
+        ghostty_surface_set_size(surface, UInt32(fbFrame.size.width), UInt32(fbFrame.size.height))
+        ghostty_surface_refresh(surface)
+        // Mark the point size as synced so the debounced syncSurfaceSize doesn't
+        // re-fire with stale scale info.
+        lastSyncedSize = bounds.size
+        needsDisplay = true
     }
 
     private var lastSurfaceSyncTime: CFTimeInterval = 0
@@ -252,15 +273,23 @@ class GhosttyNSView: NSView, NSTextInputClient {
             return
         }
 
-        // Update content scale in case we moved to a different window/screen
-        if let window {
-            let scale = Double(window.backingScaleFactor)
-            ghostty_surface_set_content_scale(surface, scale, scale)
+        // Update content scale in case we moved to a different window/screen.
+        // Use convertToBacking for the actual X/Y scale factor — more accurate
+        // than window.backingScaleFactor for non-integer or asymmetric scales.
+        let pixelW: UInt32
+        let pixelH: UInt32
+        if bounds.width > 0, bounds.height > 0 {
+            let fbFrame = convertToBacking(bounds)
+            let xScale = fbFrame.size.width / bounds.width
+            let yScale = fbFrame.size.height / bounds.height
+            ghostty_surface_set_content_scale(surface, xScale, yScale)
+            pixelW = UInt32(fbFrame.size.width.rounded(.towardZero))
+            pixelH = UInt32(fbFrame.size.height.rounded(.towardZero))
+        } else {
+            let scale = CGFloat(window?.backingScaleFactor ?? 2.0)
+            pixelW = UInt32((size.width * scale).rounded(.towardZero))
+            pixelH = UInt32((size.height * scale).rounded(.towardZero))
         }
-
-        let scale = CGFloat(window?.backingScaleFactor ?? 2.0)
-        let pixelW = UInt32((size.width * scale).rounded(.towardZero))
-        let pixelH = UInt32((size.height * scale).rounded(.towardZero))
         guard pixelW > 0, pixelH > 0 else { return }
 
         let current = ghostty_surface_size(surface)

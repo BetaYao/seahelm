@@ -46,6 +46,11 @@ if [[ -n "$RELEASE_VERSION" ]]; then
   fi
   echo "==> Version $MARKETING_VERSION (from tag $RELEASE_VERSION)"
   VERSION_ARGS+=("MARKETING_VERSION=$MARKETING_VERSION")
+  # Sparkle compares the appcast's sparkle:version against the installed app's
+  # CFBundleVersion. If the build number stays at 1, every release looks newer
+  # than the current install (2.0.26 > 1). Use the marketing version as the
+  # build number so they match and Sparkle correctly detects "already up to date."
+  VERSION_ARGS+=("CURRENT_PROJECT_VERSION=$MARKETING_VERSION")
 fi
 
 # The bundle is capitalised (PRODUCT_NAME) because it is what users read; the
