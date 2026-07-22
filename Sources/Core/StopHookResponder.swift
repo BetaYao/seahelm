@@ -4,24 +4,51 @@ import Foundation
 /// Returns a JSON body to force the agent to emit suggestions, or nil to let it stop.
 /// The block reason tells the agent to run the installed `seahelm-suggest` script.
 enum StopHookResponder {
-    /// Names the script by absolute path, and says "run … via Bash".
+    /// The agent declares next-step options by ending its reply with a line that
+    /// begins with this token, e.g. `::seahelm-suggest:: build | test | ship`.
     ///
-    /// Both halves were bugs on a fresh install. The bare name only resolved on
-    /// machines whose shell profile had added `~/.local/bin` — the installers put
-    /// the CLIs there, but nothing puts it on PATH, so every agent on a clean
-    /// machine was told to call a command it could not find. The hook itself never
-    /// had this problem because it is registered by absolute path
-    /// (`ClaudeHooksSetup`, `CodexHooksSetup`); only the instruction it hands the
-    /// agent was left to guess.
-    ///
-    /// "call `x`" also reads to an agent as the name of a *tool*: they search their
-    /// toolset, find nothing, and report the tool missing rather than reaching for
-    /// a shell. Naming Bash outright removes the ambiguity.
+    /// This replaces the old "run `seahelm-suggest` via Bash" instruction. That
+    /// made the agent's FINAL action a tool call, so its real answer prose sat
+    /// immediately before a trailing tool_use — exactly the position Claude Code's
+    /// TUI drops as "text between tool calls", swallowing the answer. Options now
+    /// ride the Stop hook's own `last_assistant_message` round-trip (parsed by
+    /// `parseSuggestions`), so the turn ends on plain text and nothing is lost.
+    static let sentinel = "::seahelm-suggest::"
+
+    /// Instruction handed to the agent when it stops without having declared
+    /// options inline. Asks for one final PLAIN-TEXT line — no tool/shell call —
+    /// so no trailing tool_use follows the answer.
     static var reason: String {
-        "Before ending this turn, run `\(SeahelmSuggestInstaller.scriptPath()) 'option one' 'option two'` "
-            + "via Bash, with 2-5 short imperative next-step options for the user. "
-            + "It is a shell script, not a tool. "
-            + "Do NOT print them as text — the user sees them as clickable buttons."
+        "Before ending this turn, add one final line to your reply, formatted exactly as: "
+            + "`\(sentinel) first option | second option` — put 2-5 short imperative next-step "
+            + "options for the user there, separated by ` | `. seahelm turns that line into "
+            + "clickable buttons for the user. Write it as plain text on its own line as the LAST "
+            + "thing in your message; do NOT run any tool or shell command to do this."
+    }
+
+    /// Extract the declared options from a `last_assistant_message`. Returns nil
+    /// when the sentinel line is absent (so the caller knows to prompt for it);
+    /// otherwise a trimmed, non-empty list capped at 5. Tolerant of surrounding
+    /// backticks / code fences the agent may wrap the line in.
+    static func parseSuggestions(from message: String) -> [String]? {
+        for raw in message.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard let r = raw.range(of: sentinel) else { continue }
+            let opts = raw[r.upperBound...]
+                .split(separator: "|")
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \t`")) }
+                .filter { !$0.isEmpty }
+            return opts.isEmpty ? nil : Array(opts.prefix(5))
+        }
+        return nil
+    }
+
+    /// The assistant prose with the sentinel line removed — used as the summary
+    /// above the option buttons so the card shows the answer, not the marker.
+    static func stripSentinel(from message: String) -> String {
+        message.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains(sentinel) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func blockBody(for event: WebhookEvent, suggestOnStop: Bool) -> String? {
@@ -38,6 +65,14 @@ enum StopHookResponder {
         // Don't interrupt when Claude is asking the user a question — forcing a
         // suggestion call in that state causes the agent to repeat its question.
         if isAskingQuestion(event.data) { return nil }
+        // Cursor reports an aborted turn as a Stop with status "aborted" — the user
+        // interrupted, so it isn't a real end-of-turn and must not prompt suggestions.
+        if (event.data?["status"] as? String) == "aborted" { return nil }
+        // The agent already declared its options inline (the common path): the
+        // hook parses them from last_assistant_message, so there is nothing to
+        // prompt for and no need to block.
+        if let msg = event.data?["last_assistant_message"] as? String,
+           parseSuggestions(from: msg) != nil { return nil }
         let escaped = reason.replacingOccurrences(of: "\"", with: "\\\"")
         return "{\"decision\":\"block\",\"reason\":\"\(escaped)\"}"
     }

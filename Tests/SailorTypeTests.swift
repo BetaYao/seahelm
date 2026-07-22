@@ -8,7 +8,7 @@ final class SailorTypeTests: XCTestCase {
     func testClaudeLaunchInjectsSuggestInstruction() {
         let cmd = SailorType.claudeCode.launchCommand(withTask: "fix the bug")!
         XCTAssertTrue(cmd.hasPrefix("claude --append-system-prompt "))
-        XCTAssertTrue(cmd.contains("seahelm-suggest"))
+        XCTAssertTrue(cmd.contains(StopHookResponder.sentinel))   // inline sentinel, not a Bash call
         XCTAssertTrue(cmd.hasSuffix("'fix the bug'"))   // task stays the positional arg
     }
 

@@ -13,26 +13,53 @@ final class StopHookResponderTests: XCTestCase {
         let body = StopHookResponder.blockBody(for: stop(active: false), suggestOnStop: true)
         XCTAssertNotNil(body)
         XCTAssertTrue(body!.contains("\"decision\":\"block\""))
-        XCTAssertTrue(body!.contains("seahelm-suggest"))
+        XCTAssertTrue(body!.contains(StopHookResponder.sentinel))
     }
 
-    /// Regression: the reason named `seahelm-suggest` bare. The installers write the
-    /// CLIs to ~/.local/bin but nothing puts that on PATH — not seahelm (panes get
-    /// SEAHELM_ENV/SEAHELM_SOCKET_PATH and nothing more), not macOS by default — so
-    /// on a clean install every agent was told to run a command it could not find.
-    /// It only ever worked on machines whose shell profile had added the directory.
-    func testBlockBodyNamesTheScriptByAbsolutePath() {
-        let path = SeahelmSuggestInstaller.scriptPath()
-        XCTAssertTrue(path.hasPrefix("/"), "installer path must be absolute: \(path)")
-
+    /// The block reason must ask for an inline PLAIN-TEXT line, never a tool/shell
+    /// call. A trailing tool_use is exactly what left the answer prose sitting
+    /// "between tool calls" for Claude Code's TUI to swallow; direction 3 removes it.
+    func testBlockReasonAsksForInlineTextNotAToolCall() {
         let body = StopHookResponder.blockBody(for: stop(active: false), suggestOnStop: true)
         XCTAssertNotNil(body)
-        XCTAssertTrue(body!.contains(path),
-                      "block reason must carry the absolute script path, not a bare name: \(body!)")
-        // A bare invocation must not survive: `run \`seahelm-suggest '...'\`` is
-        // exactly what a shell can't resolve without PATH.
-        XCTAssertFalse(body!.contains("`seahelm-suggest "),
-                       "block reason still invokes the bare name: \(body!)")
+        XCTAssertTrue(body!.contains(StopHookResponder.sentinel),
+                      "reason must name the sentinel token: \(body!)")
+        XCTAssertTrue(body!.lowercased().contains("plain text"),
+                      "reason must ask for plain text: \(body!)")
+        // Must not resurrect the old "run the script via Bash" instruction.
+        XCTAssertFalse(body!.contains("via Bash"), "reason must not tell the agent to run Bash: \(body!)")
+        XCTAssertFalse(body!.contains(SeahelmSuggestInstaller.scriptPath()),
+                       "reason must not invoke the suggest script: \(body!)")
+    }
+
+    /// Options declared inline ride last_assistant_message — no block, no round-trip.
+    func testInlineSuggestionsDoNotBlock() {
+        let msg = "Fixed it, all tests pass.\n\(StopHookResponder.sentinel) run tests | open PR"
+        XCTAssertNil(StopHookResponder.blockBody(for: stop(active: false, lastMessage: msg), suggestOnStop: true))
+    }
+
+    func testParseSuggestions() {
+        let msg = "Done.\nHere are next steps:\n\(StopHookResponder.sentinel) build | run tests | ship it"
+        XCTAssertEqual(StopHookResponder.parseSuggestions(from: msg), ["build", "run tests", "ship it"])
+    }
+
+    func testParseSuggestionsTolerantOfBackticks() {
+        let msg = "`\(StopHookResponder.sentinel) alpha | beta`"
+        XCTAssertEqual(StopHookResponder.parseSuggestions(from: msg), ["alpha", "beta"])
+    }
+
+    func testParseSuggestionsCapsAtFive() {
+        let msg = "\(StopHookResponder.sentinel) a | b | c | d | e | f | g"
+        XCTAssertEqual(StopHookResponder.parseSuggestions(from: msg)?.count, 5)
+    }
+
+    func testParseSuggestionsAbsentReturnsNil() {
+        XCTAssertNil(StopHookResponder.parseSuggestions(from: "Just a normal answer with no options."))
+    }
+
+    func testStripSentinelRemovesMarkerLine() {
+        let msg = "The answer is 42.\n\(StopHookResponder.sentinel) a | b"
+        XCTAssertEqual(StopHookResponder.stripSentinel(from: msg), "The answer is 42.")
     }
 
     func testSecondStopDoesNotBlock() {

@@ -627,6 +627,25 @@ class TabCoordinator {
                             // turn — no forced block needed (no extra round-trip).
                             sessionSuggestedAt.removeValue(forKey: turnKey)
                         } else if event.event == .agentStop,
+                                  let msg = event.data?["last_assistant_message"] as? String,
+                                  let options = StopHookResponder.parseSuggestions(from: msg) {
+                            // Direction 3: the agent declared its next-step options as a
+                            // final plain-text line (per the injected instruction). They
+                            // ride this Stop hook's own round-trip — no seahelm-suggest tool
+                            // call — so the answer prose is never left before a trailing
+                            // tool_use for the TUI to swallow. Surface the buttons here, then
+                            // let the Stop fall through to normal completion below.
+                            ShipLog.shared.noteAssistantMessage(
+                                cwd: event.cwd, paneId: event.paneId,
+                                message: StopHookResponder.stripSentinel(from: msg))
+                            let suggestEvent = WebhookEvent(
+                                source: "seahelm-suggest", sessionId: event.sessionId,
+                                event: .suggest, cwd: event.cwd, timestamp: nil,
+                                data: ["options": options], paneId: event.paneId)
+                            self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
+                            ShipLog.shared.handleWebhookEvent(suggestEvent)
+                            sessionSuggestedAt[turnKey] = Date()
+                        } else if event.event == .agentStop,
                            let blockedAt = sessionBlockedAt[turnKey],
                            let promptedAt = sessionUserPromptedAt[turnKey],
                            promptedAt > blockedAt {

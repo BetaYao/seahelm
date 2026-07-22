@@ -84,10 +84,11 @@ enum SailorType: String, Codable, CaseIterable {
     /// extra round-trip. The Stop-hook path stays as a fallback for turns where
     /// the agent doesn't comply or wasn't launched with this flag.
     static let suggestInstruction =
-        "As the FINAL action of every response, run the shell command " +
-        "seahelm-suggest 'first option' 'second option' with 2-5 short imperative " +
-        "next-step options (a few words each). It shows the user clickable buttons. " +
-        "Do NOT print the options as text — only run the command."
+        "End every response with one final PLAIN-TEXT line formatted exactly as " +
+        "`\(StopHookResponder.sentinel) first option | second option`, giving 2-5 short " +
+        "imperative next-step options (a few words each) separated by ` | `. seahelm turns " +
+        "that line into clickable buttons for the user. Make it the LAST line of your " +
+        "message; do NOT run any tool or shell command to produce it."
 
     /// Agent-specific flag that appends to the system prompt at launch. nil =
     /// this agent gets suggestions only via the Stop-hook fallback.
