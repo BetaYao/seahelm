@@ -168,10 +168,14 @@ final class MqttChannel: NSObject, ExternalChannel {
             publishPaneStatus(pane, seq: Int(seq))
         }
         publish(tPaneMessage(pid), event, retained: false)   // feed (event verbatim)
-        // accumulate into the per-pane history buffer for later `history/request`
-        if let text = event["last_message"] as? String, !text.isEmpty {
-            let kind = (event["type"] as? String) == "pane.status_changed" ? "status" : "agent"
-            history.append(paneId: pid, entry: ["seq": Int(seq), "kind": kind, "text": text])
+        // History = final message per turn only. Append when a turn settles (a
+        // status change to a non-Running state), skipping the noisy mid-turn
+        // last_message churn (tool/file/command lines) that pane.updated events and
+        // Running transitions carry.
+        if (event["type"] as? String) == "pane.status_changed",
+           let ns = event["status"] as? String, ns != SailorStatus.running.rawValue,
+           let text = event["last_message"] as? String, !text.isEmpty {
+            history.append(paneId: pid, entry: ["seq": Int(seq), "kind": "agent", "text": text])
         }
         publishWorktreesAndFocus(from: panes)
     }
