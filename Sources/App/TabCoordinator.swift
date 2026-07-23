@@ -13,6 +13,9 @@ class TabCoordinator {
     var config: Config
     let workspaceManager = WorkspaceManager()
 
+    /// MQTT remote-client backend (Watch / web / ESP32), if `config.mqtt` enabled.
+    private var mqttChannel: MqttChannel?
+
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
     var worktreeRepoCache: [String: String] = [:]
@@ -699,10 +702,28 @@ class TabCoordinator {
                     if !DebugFlags.forceEmptyState {
                         control.start()
                         self.terminalCoordinator.controlSocketServer = control
+                        // Remote-client backend (MQTT). Shares the control
+                        // socket's dataSource; registered with ShipLog so it also
+                        // mirrors notifications. docs/remote-clients-design.md.
+                        self.setupMqttChannel(dataSource: controlDataSource)
                     }
                 }
             }
         }
+    }
+
+    /// Bring up the MQTT remote-client backend if `config.mqtt` is enabled.
+    /// One channel per app run; started here because this is where the shared
+    /// `controlDataSource` is fully wired.
+    private func setupMqttChannel(dataSource: ControlDataSource) {
+        guard let mqttConfig = config.mqtt, mqttConfig.resolvedEnabled else { return }
+        guard mqttChannel == nil else { return }
+        let channel = MqttChannel(config: mqttConfig)
+        channel.dataSource = dataSource
+        ShipLog.shared.registerChannel(channel)
+        channel.connect()
+        mqttChannel = channel
+        NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId))")
     }
 
     // MARK: - Shared Worktree Integration

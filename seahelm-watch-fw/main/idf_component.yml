@@ -1,0 +1,13 @@
+# Managed dependencies (pulled by the IDF component manager on first build).
+dependencies:
+  idf: ">=5.1"
+  # M5Unified pulls in M5GFX, which drives the StopWatch CO5300 QSPI AMOLED +
+  # CST820 touch + the M5IOE1 IO-expander power/reset sequencing, and exposes
+  # the three keys (BtnA=G2 / BtnB=G1 / BtnPWR). Autodetects the board.
+  m5stack/M5Unified: "^0.2.5"
+  # M5GFX is M5Unified's display backend. Pull with the lowercase slug so the
+  # managed folder is `m5stack__m5gfx`, registered as `m5gfx` — the exact name
+  # M5Unified's CMake REQUIRES (it uses lowercase for managed_components).
+  m5stack/m5gfx: "^0.2.5"
+  # LVGL 9 UI toolkit.
+  lvgl/lvgl: "^9.2.0"

@@ -1,0 +1,8 @@
+# ESP-IDF build output
+/build/
+# Pulled by IDF component manager (see main/idf_component.yml + dependencies.lock)
+/managed_components/
+# Local sdkconfig backups
+sdkconfig.old
+*.orig
+/.cache/

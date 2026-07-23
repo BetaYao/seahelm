@@ -53,6 +53,7 @@
 		214EF21A61FB0B70604BD208 /* OnboardingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87DE87C61D1D418F812C8795 /* OnboardingWindowController.swift */; };
 		216DCA58D600EA88B333A324 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CAD3E9929AC9E5E32EBA9F /* Station.swift */; };
 		2215E8F6A1F2571870A122F6 /* TabCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */; };
+		2313FC433D0111A77BB10B04 /* MqttChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78661A2AC2A8EFF154BA1FC2 /* MqttChannel.swift */; };
 		2342B54103FE7B8523E6F0FE /* KeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D903DD2BD63A00A9BBE71CD3 /* KeymapTests.swift */; };
 		242BFEB70069EF4739848192 /* FirstMateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */; };
 		26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DFD4558DAFB3276A91514A2 /* SwiftUI.framework */; };
@@ -219,6 +220,7 @@
 		A5B666A67B06796F7E431A77 /* WatchFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */; };
 		A5F8DD0A3B1785C4F7861188 /* StationRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */; };
 		A607EAC1ECC21293284C5CD4 /* OSC133Parser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */; };
+		A6CFE5CACA3D1493A8E309C0 /* MqttConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50591FAB1ABF2A23B82950E7 /* MqttConfig.swift */; };
 		A6ECE1CD32661EEAA08D012D /* FirstMateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96EE302F1479073676DB584 /* FirstMateTests.swift */; };
 		A6F77AC811D7338AAEB50A00 /* PendingCabinTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421A628841F0B8971AAA2D36 /* PendingCabinTransfer.swift */; };
 		A73F0810794BB00C54820E8B /* CabinSailorTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62DB0782EF1095A4DD1568C5 /* CabinSailorTypeStore.swift */; };
@@ -226,6 +228,7 @@
 		A81ACA3F64977A038883B973 /* CabinSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3AC45D3014930277A6323A0 /* CabinSidePanelViewControllerTests.swift */; };
 		A831B5F796896B48509F1F91 /* GatewayStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */; };
 		A8C7F6D5EE20B347D63B9947 /* XCUIElementExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DD3FFFF216C576CFDC7683 /* XCUIElementExtensions.swift */; };
+		A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */; };
 		A90FADB8FDAA218DAEA7D694 /* BridgeCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */; };
 		A9484F5D905FF14F920838C0 /* OSC133ParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826B5E1EB796AA82415B329F /* OSC133ParserTests.swift */; };
 		A9F68DDF088D5A32BFC14242 /* GhosttyConfigImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F749E954C706D5C69B5BCD0C /* GhosttyConfigImporter.swift */; };
@@ -337,6 +340,7 @@
 		EEF9D35496F94C190A4F90EA /* SeahelmHookInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */; };
 		EF25AD093968ED3CBC4A960B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C6B4297D134649B185BC65 /* DividerView.swift */; };
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
+		F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = 870337C5ED57007BB471E70D /* CocoaMQTT */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
 		F176CCFA365B9C079D3FE750 /* LeaderMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AF80AC91241DD0E34B964 /* LeaderMenuTests.swift */; };
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
@@ -486,6 +490,7 @@
 		4DA513259B19E55E2FB46C9F /* QuickSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSwitcherViewController.swift; sourceTree = "<group>"; };
 		4F0C5FB141D86ECC0B6D8E66 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		4F6248F858A60E04AAC76E22 /* OnboardingAgentDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAgentDetector.swift; sourceTree = "<group>"; };
+		50591FAB1ABF2A23B82950E7 /* MqttConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttConfig.swift; sourceTree = "<group>"; };
 		510FA8122ABEBFF0AAB1C539 /* DiffSyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffSyntaxHighlighter.swift; sourceTree = "<group>"; };
 		529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelCoordinatorTests.swift; sourceTree = "<group>"; };
 		52EF0C4896EE233186B21980 /* GatewayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayState.swift; sourceTree = "<group>"; };
@@ -545,6 +550,7 @@
 		7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogExternalTests.swift; sourceTree = "<group>"; };
 		777994FF5519110FAD559388 /* Region.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Region.swift; sourceTree = "<group>"; };
 		77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoStore.swift; sourceTree = "<group>"; };
+		78661A2AC2A8EFF154BA1FC2 /* MqttChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttChannel.swift; sourceTree = "<group>"; };
 		78D1BBB07A2822E90114369F /* OverviewFocusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewFocusModel.swift; sourceTree = "<group>"; };
 		798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMode.swift; sourceTree = "<group>"; };
 		79FF4E0C39BAB48A48179246 /* StatusBarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPage.swift; sourceTree = "<group>"; };
@@ -602,6 +608,7 @@
 		9E4048B5F3E4C7759600A8DD /* ChromeHeaderPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeHeaderPage.swift; sourceTree = "<group>"; };
 		9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducer.swift; sourceTree = "<group>"; };
 		9F66DA28CC57BFA18891872D /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
+		A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHistoryBuffer.swift; sourceTree = "<group>"; };
 		A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
 		A4307D4828267A1F187FE65E /* SailorTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorTypeTests.swift; sourceTree = "<group>"; };
 		A49DE692E146DF04DADA3B50 /* WeChatChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatChannel.swift; sourceTree = "<group>"; };
@@ -741,6 +748,7 @@
 				F9F0C36BE9EDF1F4B6D49AD8 /* CodeEditSourceEditor in Frameworks */,
 				4C4E27C9EB285988BAF4FE61 /* CodeEditLanguages in Frameworks */,
 				BBE067F3493F03DFD4EB56D5 /* Sparkle in Frameworks */,
+				F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */,
 				26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */,
 				619695CCD02199EC32866D47 /* AVKit.framework in Frameworks */,
 				8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */,
@@ -805,9 +813,12 @@
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */,
+				78661A2AC2A8EFF154BA1FC2 /* MqttChannel.swift */,
+				50591FAB1ABF2A23B82950E7 /* MqttConfig.swift */,
 				4F6248F858A60E04AAC76E22 /* OnboardingAgentDetector.swift */,
 				215354472FB165AA55E27D9C /* OnboardingHookInstaller.swift */,
 				E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */,
+				A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */,
 				6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */,
 				421A628841F0B8971AAA2D36 /* PendingCabinTransfer.swift */,
 				CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */,
@@ -1390,6 +1401,7 @@
 				D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */,
 				E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */,
 				105CE82C3D2CBF90259D60A2 /* Sparkle */,
+				870337C5ED57007BB471E70D /* CocoaMQTT */,
 			);
 			productName = seahelm;
 			productReference = 7C1D507BEBD483B978CC2DBC /* seahelm.app */;
@@ -1458,6 +1470,7 @@
 			mainGroup = CEA8ADE11886D7325B867734;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				37DD6A91337E3B7C31F65836 /* XCRemoteSwiftPackageReference "CocoaMQTT" */,
 				2F3EFE65E8440A84CD063ABD /* XCRemoteSwiftPackageReference "CodeEditLanguages" */,
 				AFC63521AAE2DCF8B01B885F /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
 				6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */,
@@ -1793,6 +1806,8 @@
 				A7D36122AEE48C5F72C89C87 /* MediaPreviewView.swift in Sources */,
 				EC13CCF117877683F85E52FA /* MenuBuilder.swift in Sources */,
 				4B8E890A2EF970F4967043B2 /* MenuRowButton.swift in Sources */,
+				2313FC433D0111A77BB10B04 /* MqttChannel.swift in Sources */,
+				A6CFE5CACA3D1493A8E309C0 /* MqttConfig.swift in Sources */,
 				0C553E03E27CDC10711D9EDD /* NewBranchDialog.swift in Sources */,
 				15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */,
 				708FA82605788117E6142639 /* NotificationHistory.swift in Sources */,
@@ -1809,6 +1824,7 @@
 				A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */,
 				132C344775FE1F50E1CD4C2B /* OpenedSurfaceView.swift in Sources */,
 				36A3C27B63B14CBA52BC3A4D /* OverviewFocusModel.swift in Sources */,
+				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,
 				CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */,
 				5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */,
@@ -2236,6 +2252,14 @@
 				version = 0.1.20;
 			};
 		};
+		37DD6A91337E3B7C31F65836 /* XCRemoteSwiftPackageReference "CocoaMQTT" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/emqx/CocoaMQTT";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.0;
+			};
+		};
 		6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -2259,6 +2283,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		870337C5ED57007BB471E70D /* CocoaMQTT */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 37DD6A91337E3B7C31F65836 /* XCRemoteSwiftPackageReference "CocoaMQTT" */;
+			productName = CocoaMQTT;
 		};
 		D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */ = {
 			isa = XCSwiftPackageProductDependency;

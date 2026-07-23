@@ -1,0 +1,18 @@
+{
+  "name": "seahelm-devbroker",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local MQTT+WS broker for Seahelm web-client debugging (aedes).",
+  "type": "commonjs",
+  "scripts": {
+    "broker": "node broker.js",
+    "mock": "node mock-seahelm.js",
+    "test": "node protocol-test.js"
+  },
+  "dependencies": {
+    "aedes": "^0.51.3",
+    "mqtt": "^5.15.2",
+    "websocket-stream": "^5.5.2",
+    "ws": "^8.18.0"
+  }
+}
