@@ -458,6 +458,7 @@ class MainWindowController: NSWindowController {
         tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")   // sync + reconnect E2EE
         let secret = MqttCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? MqttCrypto.newRootSecret()
         let wc = PairingWindowController(secret: secret, mqtt: mqtt)
+        wc.onShortCode = { [weak self] code, ttl in self?.tabCoordinator.setMqttPairingCode(code, ttl: ttl) }
         wc.showWindow(nil)
         wc.window?.center()
         NSApp.activate(ignoringOtherApps: true)

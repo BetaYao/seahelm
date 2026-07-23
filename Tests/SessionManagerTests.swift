@@ -102,6 +102,45 @@ class SessionManagerTests: XCTestCase {
                        "a session with a live client must never be reaped as orphan")
     }
 
+    func testOrphanZmxSessionNamesHandlesLegacyAmuxPrefix() {
+        let output = """
+        name=amux-repo-feature pid=123 clients=0 cwd=/tmp/repo
+        name=seahelm-repo-other pid=456 clients=0 cwd=/tmp/other
+        """
+
+        let orphaned = SessionManager.orphanZmxSessionNames(
+            activeSessionNames: ["seahelm-repo-feature"],
+            listOutput: output
+        )
+
+        XCTAssertEqual(orphaned, ["amux-repo-feature", "seahelm-repo-other"])
+    }
+
+    func testOrphanZmxSessionNamesDoesNotReapActiveAmuxSession() {
+        let output = """
+        name=amux-repo-feature pid=123 clients=1 cwd=/tmp/repo
+        name=amux-repo-detached pid=456 clients=0 cwd=/tmp/other
+        """
+
+        let orphaned = SessionManager.orphanZmxSessionNames(
+            activeSessionNames: [],
+            listOutput: output
+        )
+
+        XCTAssertEqual(orphaned, ["amux-repo-detached"],
+                       "amux- session with a live client must not be reaped")
+    }
+
+    func testExpectedSessionNamesIncludesLegacyAmuxVariants() {
+        let names = SessionManager.expectedSessionNames(
+            config: Config(),
+            discoveredWorktreePaths: ["/Users/test/repo/feature"]
+        )
+        XCTAssertTrue(names.contains("seahelm-repo-feature"))
+        XCTAssertTrue(names.contains("amux-repo-feature"),
+                      "expected session names must include legacy amux- variants")
+    }
+
     func testOrphanZmxSessionNamesNeverReapsUnreachableSessions() {
         // Regression: a busy daemon that misses the `zmx list` control-socket
         // probe reports `status=unreachable`/`err=…` with no `clients=` field.

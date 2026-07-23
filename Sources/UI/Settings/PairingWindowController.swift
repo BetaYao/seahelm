@@ -25,6 +25,9 @@ final class PairingWindowController: NSWindowController {
     private var shortCode: String?
     private var countdown = 0
     private var codeTimer: Timer?
+    /// Called when a short code is minted, so the app can arm the live
+    /// `MqttChannel` responder to honor a matching `pair/claim`.
+    var onShortCode: ((String, TimeInterval) -> Void)?
 
     /// View-only: the caller (`MainWindowController.showPairing`) owns minting +
     /// persisting the secret on the *live* config and reconnecting the channel;
@@ -135,6 +138,7 @@ final class PairingWindowController: NSWindowController {
         shortCode = String(format: "%08u", n)
         codeLabel.stringValue = shortCode.map { "\($0.prefix(4)) \($0.suffix(4))" } ?? "—"
         countdown = 60
+        onShortCode?(shortCode!, 60)     // arm the live MqttChannel responder
         updateCountdown()
         codeTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }

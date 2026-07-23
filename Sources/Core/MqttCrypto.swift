@@ -83,6 +83,28 @@ struct MqttCrypto {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    // MARK: - Short-code handshake (§7.5.4 weak channel)
+
+    /// Ephemeral transport key from an 8-digit pairing code + per-claim nonce.
+    /// Weak by design — safe only with single-use + short TTL + rate-limiting.
+    static func codeKey(_ code: String, nonce: Data) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: Data(code.utf8)),
+                               salt: Data("seahelm-paircode-v1".utf8),
+                               info: nonce, outputByteCount: 32)
+    }
+    static func seal(_ plaintext: String, topic: String, key: SymmetricKey) -> String {
+        guard !plaintext.isEmpty,
+              let box = try? AES.GCM.seal(Data(plaintext.utf8), using: key, authenticating: Data(topic.utf8)),
+              let combined = box.combined else { return "" }
+        var env = Data([Self.version]); env.append(combined); return env.base64EncodedString()
+    }
+    static func open(_ b64: String, topic: String, key: SymmetricKey) -> String? {
+        guard let env = Data(base64Encoded: b64), env.count > 13, env[env.startIndex] == Self.version,
+              let box = try? AES.GCM.SealedBox(combined: env.dropFirst()),
+              let pt = try? AES.GCM.open(box, using: key, authenticating: Data(topic.utf8)) else { return nil }
+        return String(data: pt, encoding: .utf8)
+    }
+
     static func rootSecret(fromBase64url s: String) -> Data? {
         var t = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while t.count % 4 != 0 { t += "=" }

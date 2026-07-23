@@ -54,6 +54,17 @@ final class MqttChannel: NSObject, ExternalChannel {
     private var pendingEvents: [String: [String]] = [:]
     private var dndState: [String: Any] = ["on": false, "minutes": 25, "blocked": 0]
     private let pendLock = NSLock()
+
+    /// Active short pairing code (§7.5.4): single-use, TTL-bounded. A `pair/claim`
+    /// matching this trades the code for the (code-key-encrypted) root secret.
+    private var pairCode: (code: String, expires: Date)?
+    private let pairLock = NSLock()
+
+    /// Register/clear the active pairing short code (called from the pairing UI).
+    func setPairingCode(_ code: String?, ttl: TimeInterval) {
+        pairLock.lock(); defer { pairLock.unlock() }
+        pairCode = code.map { ($0, Date().addingTimeInterval(ttl)) }
+    }
     private let macId: String
     /// E2EE + derived broker auth, present only when the Mac is paired
     /// (`config.rootSecret` set). Nil = plaintext/manual-credential mode.
@@ -184,6 +195,7 @@ final class MqttChannel: NSObject, ExternalChannel {
     private func tWorktreeStatus(_ id: String) -> String { "\(base)/worktree/\(id)/status" }
     private var tFocus: String { "\(base)/focus" }
     private var tDnd: String { "\(base)/dnd/state" }
+    private var tPairClaim: String { "\(base)/pair/claim" }
 
     private static let dangerRE = try? NSRegularExpression(
         pattern: "覆盖|删除|prod|生产|部署|deploy|drop|force", options: [.caseInsensitive])
@@ -430,6 +442,32 @@ final class MqttChannel: NSObject, ExternalChannel {
         reply(to: replyTo, corr: corr, result: .ok(["messages": messages, "has_more": hasMore]))
     }
 
+    /// Short-code pairing (§7.5.4): validate `{code, nonce}` against the active
+    /// single-use code, then deliver the root secret to `pair/grant/{nonce}`
+    /// encrypted with a key derived from the code (broker never sees it plaintext).
+    private func handlePairClaim(_ env: [String: Any]) {
+        guard let code = env["code"] as? String,
+              let nonceB64 = env["nonce"] as? String,
+              let nonce = Data(base64Encoded: nonceB64) else { return }
+        pairLock.lock()
+        let active = pairCode
+        let ok = active != nil && active!.code == code && active!.expires > Date()
+        if ok { pairCode = nil }                       // single-use: burn on first valid claim
+        pairLock.unlock()
+        guard ok, let secret = config.rootSecret, !secret.isEmpty else { return }
+        let grantTopic = "\(base)/pair/grant/\(MqttCrypto.base64url(nonce))"
+        let key = MqttCrypto.codeKey(code, nonce: nonce)
+        publishRaw(grantTopic, MqttCrypto.seal(secret, topic: grantTopic, key: key))
+        NSLog("[MqttChannel] pairing: root secret granted via short code")
+    }
+
+    /// Publish a pre-encoded string verbatim (no E2EE re-seal) — used for the
+    /// pairing grant, which is already sealed with the code-derived key.
+    private func publishRaw(_ topic: String, _ string: String) {
+        guard let mqtt, stateMachine.isConnected, !string.isEmpty else { return }
+        _ = mqtt.publish(topic, withString: string, qos: .qos1, retained: false)
+    }
+
     private func reply(to topic: String?, corr: String?, result: ControlResult) {
         guard let topic else { return }
         var obj: [String: Any]
@@ -503,6 +541,7 @@ extension MqttChannel: CocoaMQTTDelegate {
         // inbound channels
         mqtt.subscribe(tCommand, qos: .qos1)
         mqtt.subscribe(tHistoryRequest, qos: .qos1)
+        mqtt.subscribe(tPairClaim, qos: .qos1)   // short-code pairing (plaintext)
 
         // full retained snapshot so a client that connects while Mac is up (or
         // after) immediately has every pane/worktree + the single focus.
@@ -512,6 +551,12 @@ extension MqttChannel: CocoaMQTTDelegate {
     func mqtt(_ mqtt: CocoaMQTT, didReceiveMessage message: CocoaMQTTMessage, id: UInt16) {
         let topic = message.topic
         guard let payload = message.string else { return }
+        // Short-code pairing claims are PLAINTEXT (the client isn't paired yet), so
+        // handle them before the E2EE-open guard would drop them.
+        if topic == tPairClaim {
+            if let env = decode(payload) { handlePairClaim(env) }
+            return
+        }
         // Open the E2EE envelope when paired; drop anything that fails to decrypt.
         let plain: String
         if let crypto {

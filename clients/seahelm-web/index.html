@@ -141,7 +141,13 @@
   .ev .opt b{font-family:var(--mono);color:var(--ash);margin-right:8px;font-weight:500}
   /* ── log ────────────────────────────────────────────────── */
   #log{font-family:var(--mono);font-size:11px;line-height:1.5}
-  .logline{padding:4px 0;border-bottom:1px solid rgba(232,226,213,.04);white-space:pre-wrap;word-break:break-all}
+  .logline{padding:4px 0;border-bottom:1px solid rgba(232,226,213,.04)}
+  .ll-head{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
+  .ll-head:hover{opacity:1;color:var(--bone)}
+  .ll-head::before{content:'▸ ';color:var(--ash)}
+  .logline.open .ll-head::before{content:'▾ '}
+  .logline.open .ll-head{color:var(--bone);opacity:1}
+  .ll-body{white-space:pre-wrap;word-break:break-all;margin:3px 0 2px 12px;color:var(--ash)}
   .rx{color:#8FA6C4} .tx{color:var(--amber)} .sys{color:var(--ash)}
   .muted{color:var(--ash);font-size:13px;font-style:italic}
   .toolbar{display:flex;gap:7px;margin-bottom:10px}
@@ -262,8 +268,15 @@ function log(dir, topic, payload){
   const el = document.createElement('div');
   el.className = 'logline ' + dir;
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  el.textContent = `${dir.toUpperCase()} ${topic}\n${body}`;
-  $('log').prepend(el);
+  const ts = new Date().toLocaleTimeString('en-GB');   // HH:MM:SS
+  const head = document.createElement('div');
+  head.className = 'll-head';
+  head.textContent = `${ts} ${dir.toUpperCase()} ${topic}`;   // collapsed one-liner
+  const bd = document.createElement('div');
+  bd.className = 'll-body'; bd.textContent = body; bd.hidden = true;
+  head.onclick = () => { bd.hidden = !bd.hidden; el.classList.toggle('open', !bd.hidden); };
+  el.appendChild(head); el.appendChild(bd);
+  $('log').prepend(el);   // newest on top (reverse-chronological)
 }
 function setStatus(on, txt){ const s=$('status'); s.textContent=txt; s.className = on?'st-on':'st-off'; }
 

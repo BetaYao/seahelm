@@ -738,6 +738,11 @@ class TabCoordinator {
         reloadMqttChannel()
     }
 
+    /// Arm the live MQTT channel to honor a short pairing code (§7.5.4).
+    func setMqttPairingCode(_ code: String, ttl: TimeInterval) {
+        mqttChannel?.setPairingCode(code, ttl: ttl)
+    }
+
     /// Tear down the current MQTT channel and rebuild it from the current
     /// `config.mqtt` (picks up a newly-set `rootSecret` → E2EE).
     func reloadMqttChannel() {

@@ -5,6 +5,11 @@ enum SessionManager {
     /// Maximum session name length to keep backend session names bounded.
     private static let maxSessionNameLength = 40
 
+    /// Check whether a session name uses a prefix managed by Seahelm (current or legacy).
+    private static func isManagedSessionPrefix(_ name: String) -> Bool {
+        name.hasPrefix("seahelm-") || name.hasPrefix("amux-")
+    }
+
     /// Generate a stable persistent session name from a worktree path.
     /// Format: seahelm-<parent>-<name>, with dots and colons replaced by underscores.
     /// Names exceeding maxSessionNameLength are truncated with a hash suffix for uniqueness.
@@ -44,7 +49,12 @@ enum SessionManager {
         for layout in config.splitLayouts.values {
             names.formUnion(sessionNames(in: layout))
         }
-        return names.filter { $0.hasPrefix("seahelm-") }
+        // Include current seahelm-* names
+        let current = names.filter { $0.hasPrefix("seahelm-") }
+        // Also include legacy amux-* variants for backward compatibility
+        let legacy = Set(current.map { $0.replacingOccurrences(
+            of: "^seahelm-", with: "amux-", options: .regularExpression) })
+        return current.union(legacy)
     }
 
     static func parseZmxSessionNames(listOutput: String) -> [String] {
@@ -74,7 +84,7 @@ enum SessionManager {
             guard !trimmed.isEmpty else { return nil }
             let name = zmxListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
-            guard name.hasPrefix("seahelm-"), !activeSessionNames.contains(name) else { return nil }
+            guard isManagedSessionPrefix(name), !activeSessionNames.contains(name) else { return nil }
             // Only reap a session we can *positively* confirm is idle. A busy
             // daemon that misses the `zmx list` control-socket probe reports
             // `status=unreachable`/`err=…` with no `clients=` field — but a pane
