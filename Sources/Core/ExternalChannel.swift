@@ -55,6 +55,7 @@ struct OutboundMessage {
 enum ExternalChannelType: String {
     case wecom
     case wechat
+    case mqtt
 }
 
 protocol ExternalChannel: AnyObject {

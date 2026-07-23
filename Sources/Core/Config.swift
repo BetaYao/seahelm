@@ -27,6 +27,7 @@ struct Config: Codable {
     var agentSessions: [String: AgentSessionRef]
     var wecomBot: WeComBotConfig?
     var wechat: WeChatConfig?
+    var mqtt: MqttConfig?
     var firstMate: FirstMateConfig
     var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
@@ -66,6 +67,7 @@ struct Config: Codable {
         case agentSessions = "agent_sessions"
         case wecomBot = "wecom_bot"
         case wechat
+        case mqtt
         case firstMate
         case notifications
         case islandEnabled = "island_enabled"
@@ -98,6 +100,7 @@ struct Config: Codable {
         agentSessions = [:]
         wecomBot = nil
         wechat = nil
+        mqtt = nil
         firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
@@ -132,6 +135,7 @@ struct Config: Codable {
         agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
         wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
         wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
+        mqtt = try container.decodeIfPresent(MqttConfig.self, forKey: .mqtt)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true

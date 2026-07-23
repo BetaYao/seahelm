@@ -27,6 +27,12 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.0
+  # MQTT client for the remote-client backend (MqttChannel). EMQX-maintained,
+  # delegate-style API fits the app; TCP+TLS product only (WS clients are the
+  # Watch/web, not the Mac publisher). See docs/remote-clients-design.md §15.
+  CocoaMQTT:
+    url: https://github.com/emqx/CocoaMQTT
+    from: 2.1.0
 
 targets:
   seahelm:
@@ -58,6 +64,8 @@ targets:
         product: CodeEditLanguages
       - package: Sparkle
         product: Sparkle
+      - package: CocoaMQTT
+        product: CocoaMQTT
       # Media preview backends. AVKit auto-links SwiftUICore, which can only be
       # linked through SwiftUI — so SwiftUI must be explicit here or the link
       # fails with "not an allowed client of it".
