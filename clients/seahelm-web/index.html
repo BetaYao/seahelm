@@ -77,7 +77,6 @@
   .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pid{color:var(--ember);font-family:var(--mono);font-size:12.5px;font-weight:500}
   .agent{color:var(--ash);font-size:13px}
-  .ptitle{color:var(--bone);font-size:13px}
   .badge{font-family:var(--mono);font-size:11px;color:var(--ash)}
   /* ── detail / feed ──────────────────────────────────────── */
   .feed{display:flex;flex-direction:column;gap:9px}
@@ -228,7 +227,16 @@ function onMessage(topic, raw){
     if (!raw) S.worktrees.delete(seg[1]); else S.worktrees.set(seg[1], m); renderTree();
   } else if (seg[0]==='focus'){ S.focus = m; renderGlance();
   } else if (seg[0]==='dnd'){ S.dnd = m;
-  } else if (seg[0]==='reply'){ /* corr echoed; already logged */ }
+  } else if (seg[0]==='reply'){
+    // history reply → render into the pane feed
+    const corr = seg[seg.length-1];
+    const pid = histReq.get(corr);
+    if (pid && m && m.result && Array.isArray(m.result.messages)){
+      S.msgs.set(pid, m.result.messages);
+      histReq.delete(corr);
+      if (S.sel===pid) renderDetail();
+    }
+  }
 }
 function pushMsg(pid, m){
   if (!S.msgs.has(pid)) S.msgs.set(pid, []);
@@ -275,9 +283,8 @@ function renderTree(){
       wrap.appendChild(head);
       for (const [pid,p] of list){
         const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
-        const title = p.title || p.last_message || p.agent_type || 'idle';
         row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
-          <span class="pid">${shortId(pid)}</span><span class="grow ptitle">${title}</span>
+          <span class="pid">${shortId(pid)}</span><span class="grow agent">${p.agent_type||''}</span>
           ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;
         row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
         wrap.appendChild(row);
@@ -319,6 +326,7 @@ function renderDetail(){
 
 // ── outbound (commands) ─────────────────────────────────────────────────────
 let corrN=0;
+const histReq = new Map();   // corr → pane_id, to route history replies
 function sendCommand(method, params){
   if(!S.client){ alert('未连接'); return; }
   const corr = 'w'+(++corrN);
@@ -337,6 +345,7 @@ function sendText(){
 function pullHistory(){
   const pid=S.sel; if(!pid) return alert('先选 pane');
   const corr='h'+(++corrN); const reply_to=`${base()}/reply/web/${corr}`;
+  histReq.set(corr, pid);
   S.client.subscribe(reply_to,{qos:1});
   const payload={pane_id:pid, limit:50, reply_to, corr};
   S.client.publish(`${base()}/history/request`, JSON.stringify(payload), {qos:1});
