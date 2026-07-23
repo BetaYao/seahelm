@@ -115,9 +115,9 @@ final class MqttChannel: NSObject, ExternalChannel {
         }
 
         let clientId = config.clientId ?? "seahelm-\(macId)"
-        // EMQX Cloud (Serverless) rejects the native-TLS CocoaMQTT CONNECT; the WS
-        // transport (same the web/Watch use) authenticates fine — so connect over
-        // WebSocket(-TLS) when configured. Falls back to TCP for a local broker.
+        // Transport by config: native MQTT(-TLS) on TCP (the Mac/ESP/mobile path),
+        // or MQTT-over-WebSocket(-TLS) for parity with the web/Watch clients. The
+        // native-TLS path needs an explicit SNI peer name for EMQX Serverless (below).
         let m: CocoaMQTT
         if config.resolvedWebsocket {
             let ws = CocoaMQTTWebSocket(uri: config.resolvedWsPath)
@@ -125,6 +125,14 @@ final class MqttChannel: NSObject, ExternalChannel {
             m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort, socket: ws)
         } else {
             m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort)
+            // Native MQTT-TLS (8883). EMQX Cloud Serverless is multi-tenant behind a
+            // shared LB that routes by TLS SNI. GCDAsyncSocket (CocoaMQTT's TCP socket)
+            // only emits SNI when kCFStreamSSLPeerName is set in sslSettings — without
+            // it the handshake lands on the wrong tenant and CONNECT is rejected with
+            // notAuthorized (even with correct creds). Set the peer name explicitly.
+            if config.resolvedTLS {
+                m.sslSettings = [kCFStreamSSLPeerName as String: config.host as NSObject]
+            }
         }
         // Paired → HKDF-derived creds (username = mac_id); else manual/plaintext.
         m.username = crypto != nil ? macId : config.username
