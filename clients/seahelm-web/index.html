@@ -157,6 +157,21 @@ const S = {
 };
 const STC = { running:'#6B8E5A', waiting:'#C6993F', done:'#6B8E5A',
   failed:'#8E3A2C', idle:'#7A7166', unknown:'#7A7166' };
+// SailorStatus rawValue is capitalized (Running/Waiting/Error/Exited/Idle);
+// mock uses lowercase (running/waiting/failed/done). Normalize both → STC keys.
+function normStatus(s){
+  switch(String(s||'').toLowerCase()){
+    case 'running': return 'running';
+    case 'waiting': return 'waiting';
+    case 'error':
+    case 'failed':  return 'failed';
+    case 'exited':
+    case 'done':    return 'done';
+    case 'idle':    return 'idle';
+    default:        return 'unknown';
+  }
+}
+const stColor = s => STC[normStatus(s)] || STC.unknown;
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
@@ -241,7 +256,7 @@ function renderTree(){
     wrap.appendChild(head);
     for (const [pid,p] of list){
       const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
-      row.innerHTML=`<span class="dot" style="color:${STC[p.status]||STC.unknown};background:${STC[p.status]||STC.unknown}"></span>
+      row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
         <span class="pid">${pid}</span><span class="grow agent">${p.agent_type||''}</span>
         ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;
       row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
@@ -255,7 +270,7 @@ function renderDetail(){
   ev.innerHTML=''; feed.innerHTML='';
   if(!pid){ head.textContent='Pane 详情'; feed.innerHTML='<div class="muted">选择一个 pane</div>'; return; }
   const p=S.panes.get(pid)||{};
-  head.textContent=`${p.project||''} · ${pid} · ${p.status||''}`;
+  head.textContent=`${p.project||''} · ${pid} · ${normStatus(p.status)}`;
   const e=S.events.get(pid);
   if(e){
     const box=document.createElement('div'); box.className='ev';
