@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Seahelm · MQTT 调试台</title>
+<!-- 普通静态页(非 Artifact):可直连 WSS/WS broker。mqtt.js 本地 vendored,离线可用。 -->
+<script src="./mqtt.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* Sumi 墨 — Seahelm 设计语言(与 HaiTalk 手表/ESP32 同族) */
+  :root{
+    --night:#181513; --lamp:#221F1B; --lamp2:#2A2621; --stone:#3A352F; --ash:#7A7166;
+    --bone:#E8E2D5; --ember:#D86B53; --green:#6B8E5A; --amber:#C6993F; --red:#8E3A2C;
+    --serif:'EB Garamond',Georgia,serif;
+    --sans:'Inter',system-ui,-apple-system,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  ::selection{background:rgba(216,107,83,.3)}
+  body{
+    background:#0c0a09;color:var(--bone);font-family:var(--sans);height:100vh;
+    display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(130% 130% at 50% 0%, #121010 0%, #0c0a09 55%, #070605 100%);
+  }
+  /* ── header ─────────────────────────────────────────────── */
+  header{display:flex;gap:10px;align-items:center;padding:11px 18px;
+    background:rgba(24,21,19,.7);backdrop-filter:blur(8px);
+    border-bottom:1px solid rgba(232,226,213,.06);flex-wrap:wrap}
+  .wordmark{font-family:var(--serif);font-weight:600;font-size:22px;letter-spacing:.01em;
+    color:var(--bone);margin-right:6px}
+  .wordmark .sea{color:var(--ember)}
+  header input{background:var(--lamp);border:1px solid var(--stone);color:var(--bone);
+    border-radius:7px;padding:6px 9px;font-family:var(--mono);font-size:12px;outline:none}
+  header input:focus{border-color:var(--ash)}
+  header input.url{width:270px} header input.sm{width:92px}
+  header button{background:var(--ember);color:#1a1512;border:0;border-radius:7px;
+    padding:7px 15px;font-weight:600;cursor:pointer;font-size:13px;font-family:var(--sans);
+    transition:filter .15s} header button:hover{filter:brightness(1.08)}
+  header button.ghost{background:var(--lamp);color:var(--bone);border:1px solid var(--stone)}
+  #status{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:4px 10px;
+    border-radius:6px;margin-left:auto;text-transform:uppercase}
+  .st-off{background:rgba(142,58,44,.14);color:#c9755f}
+  .st-on{background:rgba(107,142,90,.14);color:var(--green)}
+  /* ── layout ─────────────────────────────────────────────── */
+  main{flex:1;display:grid;grid-template-columns:312px 1fr 392px;overflow:hidden}
+  .col{overflow-y:auto;padding:16px;border-right:1px solid rgba(232,226,213,.05)}
+  .col::-webkit-scrollbar{width:8px} .col::-webkit-scrollbar-thumb{background:var(--stone);border-radius:4px}
+  .col h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--ash);margin:2px 0 12px;font-weight:500}
+  .col h2:not(:first-child){margin-top:22px}
+  /* ── focus glance ───────────────────────────────────────── */
+  .glance{background:var(--lamp);border:1px solid rgba(232,226,213,.05);border-radius:16px;
+    padding:22px 16px;text-align:center;
+    box-shadow:inset 0 1px 0 rgba(232,226,213,.03), 0 8px 24px rgba(0,0,0,.28)}
+  .glance .big{font-family:var(--serif);font-weight:600;font-size:60px;line-height:.95;color:var(--bone)}
+  .glance .k{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ash);margin-top:6px}
+  .glance .line{font-size:14px;margin-top:12px;color:var(--bone);line-height:1.4}
+  .glance .head{font-family:var(--serif);font-size:19px;color:var(--bone)}
+  .counts{display:flex;gap:14px;justify-content:center;margin-top:12px;font-family:var(--mono);font-size:12px}
+  /* ── tree ───────────────────────────────────────────────── */
+  .wt{margin-bottom:4px}
+  .wt-head{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;
+    font-family:var(--serif);font-size:17px;color:var(--bone)}
+  .pane-row{display:flex;align-items:center;gap:9px;padding:8px 10px 8px 22px;border-radius:10px;
+    cursor:pointer;font-size:14px;transition:background .12s;border:1px solid transparent}
+  .pane-row:hover{background:var(--lamp)}
+  .pane-row.sel{background:var(--lamp2);border-color:rgba(216,107,83,.35)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 8px -1px currentColor}
+  .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pid{color:var(--ember);font-family:var(--mono);font-size:12.5px;font-weight:500}
+  .agent{color:var(--ash);font-size:13px}
+  .badge{font-family:var(--mono);font-size:11px;color:var(--ash)}
+  /* ── detail / feed ──────────────────────────────────────── */
+  .feed{display:flex;flex-direction:column;gap:9px}
+  .msg{max-width:82%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.45;word-break:break-word}
+  .msg.you{align-self:flex-end;background:var(--lamp2);border:1px solid rgba(216,107,83,.25)}
+  .msg.agent{align-self:flex-start;background:var(--lamp)}
+  .msg.ask{align-self:flex-start;background:rgba(198,153,63,.12);border:1px solid rgba(198,153,63,.3)}
+  .msg.status{align-self:center;color:var(--ash);font-family:var(--mono);font-size:12px;background:none;padding:2px}
+  .cmdbar{display:flex;gap:8px;padding:12px 0 2px;border-top:1px solid rgba(232,226,213,.06);margin-top:14px}
+  .cmdbar input{flex:1;background:var(--lamp);border:1px solid var(--stone);color:var(--bone);
+    border-radius:9px;padding:9px 12px;font-size:14px;font-family:var(--sans);outline:none}
+  .cmdbar input:focus{border-color:var(--ember)}
+  .cmdbar button{background:var(--ember);color:#1a1512;border:0;border-radius:9px;padding:9px 15px;
+    font-weight:600;cursor:pointer;font-family:var(--sans)}
+  .cmdbar button.ghost{background:var(--lamp);color:var(--bone);border:1px solid var(--stone)}
+  /* ── event overlay ──────────────────────────────────────── */
+  .ev{background:linear-gradient(180deg,rgba(216,107,83,.1),transparent),var(--lamp);
+    border:1px solid rgba(216,107,83,.4);border-radius:13px;padding:14px;margin-bottom:12px}
+  .ev .eb{font-family:var(--mono);font-size:11px;color:var(--ember);text-transform:uppercase;letter-spacing:.16em}
+  .ev .prompt{margin:8px 0 4px;font-size:15px;line-height:1.4}
+  .ev .opt{display:block;width:100%;text-align:left;background:var(--lamp2);border:1px solid var(--stone);
+    color:var(--bone);border-radius:9px;padding:9px 12px;margin-top:7px;cursor:pointer;font-size:14px;
+    font-family:var(--sans);transition:border-color .12s}
+  .ev .opt:hover{border-color:var(--ember)}
+  .ev .opt b{font-family:var(--mono);color:var(--ash);margin-right:8px;font-weight:500}
+  /* ── log ────────────────────────────────────────────────── */
+  #log{font-family:var(--mono);font-size:11px;line-height:1.5}
+  .logline{padding:4px 0;border-bottom:1px solid rgba(232,226,213,.04);white-space:pre-wrap;word-break:break-all}
+  .rx{color:#8FA6C4} .tx{color:var(--amber)} .sys{color:var(--ash)}
+  .muted{color:var(--ash);font-size:13px;font-style:italic}
+  .toolbar{display:flex;gap:7px;margin-bottom:10px}
+  .toolbar button{font-family:var(--mono);font-size:11px;padding:4px 9px;background:var(--lamp);
+    border:1px solid var(--stone);color:var(--ash);border-radius:6px;cursor:pointer}
+  .toolbar button:hover{color:var(--bone);border-color:var(--ash)}
+  #detailHead{color:var(--ash)}
+</style>
+</head>
+<body>
+  <header>
+    <span class="wordmark"><span class="sea">sea</span>helm</span>
+    <input class="url" id="broker" value="ws://localhost:8083/mqtt" />
+    <input class="sm" id="user" placeholder="user" value="" />
+    <input class="sm" id="pass" placeholder="pass" type="password" value="" />
+    <input class="sm" id="mac" value="testmac" title="mac_id" />
+    <button id="connectBtn">连接</button>
+    <button class="ghost" id="dndBtn" title="切换专注勿扰">DND</button>
+    <span id="status" class="st-off">离线</span>
+  </header>
+  <main>
+    <div class="col" id="leftcol">
+      <h2>Focus</h2>
+      <div id="glance" class="glance"><div class="muted">未连接</div></div>
+      <h2>Worktrees · Panes</h2>
+      <div id="tree"></div>
+    </div>
+    <div class="col" id="midcol">
+      <h2 id="detailHead">Pane 详情</h2>
+      <div id="events"></div>
+      <div id="feed" class="feed"><div class="muted">选择一个 pane</div></div>
+      <div class="cmdbar">
+        <input id="sendText" placeholder="pane.send_text …(回车发送)" />
+        <button id="sendBtn">发送</button>
+        <button id="histBtn" class="ghost" title="拉历史">历史</button>
+      </div>
+    </div>
+    <div class="col" id="rightcol" style="border-right:0">
+      <h2>报文日志</h2>
+      <div class="toolbar">
+        <button id="clearLog">清空</button>
+        <button id="pubMock">发 mock 快照</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </main>
+
+<script>
+// ── state ─────────────────────────────────────────────────────────────────
+const S = {
+  client:null, mac:'testmac',
+  panes:new Map(), worktrees:new Map(), msgs:new Map(),
+  focus:null, dnd:null, sel:null, events:new Map(),
+};
+const STC = { running:'#6B8E5A', waiting:'#C6993F', done:'#6B8E5A',
+  failed:'#8E3A2C', idle:'#7A7166', unknown:'#7A7166' };
+const $ = id => document.getElementById(id);
+const base = () => `seahelm/${S.mac}`;
+
+// ── logging ───────────────────────────────────────────────────────────────
+function log(dir, topic, payload){
+  const el = document.createElement('div');
+  el.className = 'logline ' + dir;
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  el.textContent = `${dir.toUpperCase()} ${topic}\n${body}`;
+  $('log').prepend(el);
+}
+function setStatus(on, txt){ const s=$('status'); s.textContent=txt; s.className = on?'st-on':'st-off'; }
+
+// ── connect ───────────────────────────────────────────────────────────────
+function connect(){
+  if (S.client) { S.client.end(true); S.client=null; }
+  S.mac = $('mac').value.trim() || 'testmac';
+  const url = $('broker').value.trim();
+  const opts = { clean:true, connectTimeout:6000, reconnectPeriod:2000,
+    username: $('user').value || undefined, password: $('pass').value || undefined };
+  log('sys', '(connect)', url);
+  const c = mqtt.connect(url, opts);
+  S.client = c;
+  c.on('connect', () => { setStatus(true,'已连接'); const t=`${base()}/#`; c.subscribe(t,{qos:1});
+    log('sys','(subscribe)', t); });
+  c.on('reconnect', () => setStatus(false,'重连中…'));
+  c.on('close', () => setStatus(false,'离线'));
+  c.on('error', e => { setStatus(false,'错误'); log('sys','(error)', String(e)); });
+  c.on('message', (topic, buf) => onMessage(topic, buf.toString()));
+}
+
+// ── inbound routing ────────────────────────────────────────────────────────
+function onMessage(topic, raw){
+  log('rx', topic, raw);
+  let m; try { m = raw ? JSON.parse(raw) : null; } catch { m = raw; }
+  const parts = topic.split('/');
+  const seg = parts.slice(2);
+  if (seg[0]==='pane' && seg[2]==='status'){
+    if (!raw) S.panes.delete(seg[1]); else S.panes.set(seg[1], m);
+    renderTree();
+  } else if (seg[0]==='pane' && seg[2]==='message'){
+    pushMsg(seg[1], m); if (S.sel===seg[1]) renderDetail();
+  } else if (seg[0]==='pane' && seg[2]==='event'){
+    if (!raw) S.events.delete(seg[1]); else S.events.set(seg[1], m);
+    if (S.sel===seg[1]) renderDetail(); renderTree();
+  } else if (seg[0]==='worktree' && seg[2]==='status'){
+    if (!raw) S.worktrees.delete(seg[1]); else S.worktrees.set(seg[1], m); renderTree();
+  } else if (seg[0]==='focus'){ S.focus = m; renderGlance();
+  } else if (seg[0]==='dnd'){ S.dnd = m;
+  } else if (seg[0]==='reply'){ /* corr echoed; already logged */ }
+}
+function pushMsg(pid, m){
+  if (!S.msgs.has(pid)) S.msgs.set(pid, []);
+  if (m && m.messages){ S.msgs.set(pid, m.messages); return; }
+  const kind = m.kind || (m.type==='pane.status_changed' ? 'status' : 'agent');
+  S.msgs.get(pid).push({ kind, text: m.last_message || m.text || JSON.stringify(m) });
+}
+
+// ── render ─────────────────────────────────────────────────────────────────
+function renderGlance(){
+  const f = S.focus; const g=$('glance');
+  if (!f){ g.innerHTML='<div class="muted">无 focus</div>'; return; }
+  const c = f.counts||{};
+  g.innerHTML = `<div class="big">${c.running??'·'}</div><div class="k">running</div>
+    <div class="line"><span class="head">${f.headline||''}</span>${f.line?('<br>'+f.line):''}</div>
+    <div class="counts">
+      ${c.waiting?`<span style="color:var(--amber)">${c.waiting} waiting</span>`:''}
+      ${c.failed?`<span style="color:var(--red)">${c.failed} failed</span>`:''}
+    </div>`;
+}
+function renderTree(){
+  const t = $('tree'); t.innerHTML='';
+  const byWt = new Map();
+  for (const [pid,p] of S.panes){ const k=p.worktree_path||p.branch||'—';
+    if(!byWt.has(k)) byWt.set(k,[]); byWt.get(k).push([pid,p]); }
+  if (!byWt.size){ t.innerHTML='<div class="muted">无 pane</div>'; return; }
+  for (const [wt,list] of byWt){
+    const wrap=document.createElement('div'); wrap.className='wt';
+    const head=document.createElement('div'); head.className='wt-head';
+    const label = list[0][1].branch || wt.split('/').pop();
+    head.innerHTML=`<span class="grow">${label}</span><span class="badge">${list.length}</span>`;
+    wrap.appendChild(head);
+    for (const [pid,p] of list){
+      const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
+      row.innerHTML=`<span class="dot" style="color:${STC[p.status]||STC.unknown};background:${STC[p.status]||STC.unknown}"></span>
+        <span class="pid">${pid}</span><span class="grow agent">${p.agent_type||''}</span>
+        ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;
+      row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
+      wrap.appendChild(row);
+    }
+    t.appendChild(wrap);
+  }
+}
+function renderDetail(){
+  const pid=S.sel; const head=$('detailHead'); const feed=$('feed'); const ev=$('events');
+  ev.innerHTML=''; feed.innerHTML='';
+  if(!pid){ head.textContent='Pane 详情'; feed.innerHTML='<div class="muted">选择一个 pane</div>'; return; }
+  const p=S.panes.get(pid)||{};
+  head.textContent=`${p.project||''} · ${pid} · ${p.status||''}`;
+  const e=S.events.get(pid);
+  if(e){
+    const box=document.createElement('div'); box.className='ev';
+    const rid = e.question_id || e.suggest_id || '';
+    const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
+    box.innerHTML=`<div class="eb">${e.type}</div><div class="prompt">${e.prompt||e.message||''}</div>`;
+    (e.options||[]).forEach((opt,i)=>{
+      const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${opt}`;
+      b.onclick=()=>sendCommand(method, e.type==='question'?{question_id:rid,index:i}:{suggest_id:rid,index:i});
+      box.appendChild(b);
+    });
+    ev.appendChild(box);
+  }
+  const ms=S.msgs.get(pid)||[];
+  if(!ms.length && !e) feed.innerHTML='<div class="muted">无消息(点“历史”拉取)</div>';
+  ms.forEach(m=>{
+    const d=document.createElement('div');
+    const k=m.kind||'agent';
+    d.className='msg '+(k==='you'?'you':k==='status'?'status':k==='ask'?'ask':'agent');
+    d.textContent=m.text||'';
+    feed.appendChild(d);
+  });
+  feed.scrollTop=feed.scrollHeight;
+}
+
+// ── outbound (commands) ─────────────────────────────────────────────────────
+let corrN=0;
+function sendCommand(method, params){
+  if(!S.client){ alert('未连接'); return; }
+  const corr = 'w'+(++corrN);
+  const reply_to = `${base()}/reply/web/${corr}`;
+  const payload = { method, params, reply_to, corr };
+  S.client.subscribe(reply_to,{qos:1});
+  S.client.publish(`${base()}/command`, JSON.stringify(payload), {qos:1});
+  log('tx', `${base()}/command`, payload);
+}
+function sendText(){
+  const pid=S.sel; if(!pid) return alert('先选 pane');
+  const v=$('sendText').value.trim(); if(!v) return;
+  sendCommand('pane.send_text', {pane_id:pid, text:v, enter:true});
+  $('sendText').value='';
+}
+function pullHistory(){
+  const pid=S.sel; if(!pid) return alert('先选 pane');
+  const corr='h'+(++corrN); const reply_to=`${base()}/reply/web/${corr}`;
+  S.client.subscribe(reply_to,{qos:1});
+  const payload={pane_id:pid, limit:50, reply_to, corr};
+  S.client.publish(`${base()}/history/request`, JSON.stringify(payload), {qos:1});
+  log('tx', `${base()}/history/request`, payload);
+}
+function toggleDnd(){
+  const on = !(S.dnd && S.dnd.on);
+  sendCommand('dnd.set', {on, minutes:25});
+}
+
+// ── mock publisher (drive UI without Seahelm) ────────────────────────────────
+function pubMock(){
+  if(!S.client) return alert('未连接');
+  const b=base();
+  const pub=(t,o,retain=true)=>{ S.client.publish(`${b}/${t}`, JSON.stringify(o), {qos:1, retain}); log('tx',`${b}/${t}`,o); };
+  pub('presence', {online:true, seq:1});
+  pub('pane/p1/status', {pane_id:'p1',session_name:'seahelm-main-p1',worktree_path:'/repo/seahelm',branch:'main',project:'seahelm',agent_type:'claude',status:'running',last_message:'重排灵动岛卡片间距',seq:2});
+  pub('pane/p3/status', {pane_id:'p3',session_name:'seahelm-feat-p3',worktree_path:'/repo/seahelm-feat',branch:'feat-island',project:'seahelm',agent_type:'claude',status:'waiting',last_message:'等你答:覆盖已有分支?',seq:3});
+  pub('pane/p8/status', {pane_id:'p8',session_name:'claw-p8',worktree_path:'/repo/claw',branch:'refactor-gateway',project:'claw-api',agent_type:'gemini',status:'failed',last_message:'npm test 3 处断言未过',seq:4});
+  pub('worktree/main/status', {worktree_id:'main',worktree_path:'/repo/seahelm',branch:'main',project:'seahelm',status:'running',pane_count:1,seq:5});
+  pub('focus', {pane_id:'p3',kind:'blocked',headline:'Claude',line:'覆盖已有分支?',worktree:'feat-island',counts:{running:1,waiting:1,failed:1,total:3},seq:6});
+  pub('pane/p3/event', {type:'question',question_id:'q-1',pane_id:'p3',prompt:'覆盖已有分支?会丢弃未提交改动',options:['批准','拒绝'],danger:true,seq:7}, false);
+  pub('pane/p1/message', {type:'pane.updated',pane_id:'p1',last_message:'已把卡片间距从 8 调到 12',seq:8}, false);
+}
+
+// ── wire ─────────────────────────────────────────────────────────────────────
+$('connectBtn').onclick=connect;
+$('sendBtn').onclick=sendText;
+$('sendText').addEventListener('keydown',e=>{ if(e.key==='Enter') sendText(); });
+$('histBtn').onclick=pullHistory;
+$('dndBtn').onclick=toggleDnd;
+$('clearLog').onclick=()=>$('log').innerHTML='';
+$('pubMock').onclick=pubMock;
+</script>
+</body>
+</html>
