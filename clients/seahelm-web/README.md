@@ -32,6 +32,15 @@ npm run mock           # 终端 B:起 Seahelm 替身(发快照 + 应答命令)
 - **历史** 按钮测 `history/request`;**DND** 按钮测 `dnd.set`
 - 右栏**报文日志**看所有收发 JSON
 
+## 协议一致性测试
+
+```bash
+cd clients/seahelm-web/devbroker
+npm run broker   # 终端 A
+npm run mock     # 终端 B
+node protocol-test.js   # 终端 C:22 项 §15 功能全绿则协议契约通过
+```
+
 ## 指向真 broker(EMQX Cloud)
 
 同一个网页,Broker 改成 `wss://a81fb6d3.ala.cn-hangzhou.emqxsl.cn:8084/mqtt` + 填 EMQX 用户名/密码即可。

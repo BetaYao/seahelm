@@ -1,8 +1,9 @@
 // mock-seahelm.js — stand-in for the Seahelm Mac publisher, over MQTT.
-// Executable spec of what the real Swift MqttChannel must do (§15 of the design):
-//   • publish retained pane/worktree/focus/presence snapshot on connect
+// Executable spec of what the real Swift MqttChannel does (§15 of the design):
+//   • publish retained pane/worktree/focus/presence/dnd snapshot on connect
 //   • subscribe `command` → run trivially, reply on payload `reply_to` with `corr`
-//   • subscribe `history/request` → reply from an in-memory buffer
+//   • subscribe `history/request` → reply from an in-memory buffer (honors paging)
+//   • events (question/suggest) are non-retained; emitted on demand via mock.emit.*
 // Run: node mock-seahelm.js   (after broker.js). Web client then fully interactive.
 const mqtt = require('mqtt');
 
@@ -18,26 +19,28 @@ const c = mqtt.connect(URL, {
   will: { topic: `${B}/presence`, payload: JSON.stringify({ online: false, seq: 0 }), qos: 1, retain: true },
 });
 
-// ── mock state (mirrors sh_data.c) ───────────────────────────────────────────
+// ── mock state (mirrors sh_data.c; status uses SailorStatus rawValue casing) ──
 const panes = {
   p1: { pane_id:'p1', session_name:'seahelm-main-p1', worktree_path:'/repo/seahelm', branch:'main',
-        project:'seahelm', agent_type:'claude', status:'running', last_message:'重排灵动岛卡片间距' },
+        project:'seahelm', agent_type:'claude', status:'Running', last_message:'重排灵动岛卡片间距' },
   p3: { pane_id:'p3', session_name:'seahelm-feat-p3', worktree_path:'/repo/seahelm-feat', branch:'feat-island',
-        project:'seahelm', agent_type:'claude', status:'waiting', last_message:'等你答:覆盖已有分支?' },
+        project:'seahelm', agent_type:'claude', status:'Waiting', last_message:'等你答:覆盖已有分支?' },
   p8: { pane_id:'p8', session_name:'claw-p8', worktree_path:'/repo/claw', branch:'refactor-gateway',
-        project:'claw-api', agent_type:'gemini', status:'failed', last_message:'npm test 3 处断言未过' },
+        project:'claw-api', agent_type:'gemini', status:'Error', last_message:'npm test 3 处断言未过' },
 };
 const history = {
   p1: [
-    { kind:'status', text:'● 开始运行 · 已读取 3 个文件' },
-    { kind:'you',    text:'灵动岛展开时卡片挤太紧,松一点' },
-    { kind:'agent',  text:'已把间距从 8 调到 12,顶部分隔线透明度降到 30%' },
+    { seq:1, kind:'status', text:'● 开始运行 · 已读取 3 个文件' },
+    { seq:2, kind:'you',    text:'灵动岛展开时卡片挤太紧,松一点' },
+    { seq:3, kind:'agent',  text:'已把间距从 8 调到 12,顶部分隔线透明度降到 30%' },
+    { seq:4, kind:'status', text:'● 运行中' },
+    { seq:5, kind:'agent',  text:'再给最外层加 2pt 安全边距' },
   ],
   p3: [
-    { kind:'you', text:'基于 main 开一个 feat-island 实验分支' },
-    { kind:'ask', text:'目标目录已存在 worktree,要覆盖重拉吗?' },
+    { seq:1, kind:'you', text:'基于 main 开一个 feat-island 实验分支' },
+    { seq:2, kind:'ask', text:'目标目录已存在 worktree,要覆盖重拉吗?' },
   ],
-  p8: [ { kind:'status', text:'✕ 失败 · npm test 退出码 1' } ],
+  p8: [ { seq:1, kind:'status', text:'✕ 失败 · npm test 退出码 1' } ],
 };
 const pub = (t, o, retain=false) => c.publish(`${B}/${t}`, JSON.stringify({ ...o, seq: nextSeq() }), { qos:1, retain });
 
@@ -45,22 +48,26 @@ function publishSnapshot() {
   pub('presence', { online:true }, true);
   for (const p of Object.values(panes)) pub(`pane/${p.pane_id}/status`, p, true);
   pub('worktree/main/status', { worktree_id:'main', worktree_path:'/repo/seahelm', branch:'main',
-    project:'seahelm', status:'running', pane_count:1 }, true);
+    project:'seahelm', status:'Running', pane_count:1 }, true);
+  pub('dnd/state', { on:false, ends_at_epoch:0, blocked_count:0 }, true);
   publishFocus();
-  // an open decision on p3 (question) — drives the 2FA/overlay path
+}
+function publishFocus() {
+  const by = (s) => Object.values(panes).filter(p=>p.status===s).length;
+  const focusP = Object.values(panes).find(p=>p.status==='Waiting')
+              || Object.values(panes).find(p=>p.status==='Running');
+  pub('focus', { pane_id: focusP?.pane_id, kind: focusP?.status==='Waiting'?'blocked':'working',
+    headline: focusP?.agent_type||'', line: focusP?.last_message||'',
+    counts: { running: by('Running'), waiting: by('Waiting'), failed: by('Error'),
+              total: Object.keys(panes).length } }, true);
+}
+function emitQuestion() {
   pub('pane/p3/event', { type:'question', question_id:'q-p3-1', pane_id:'p3',
     prompt:'覆盖已有分支?会丢弃未提交改动', options:['批准','拒绝'], danger:true });
 }
-function publishFocus() {
-  const running = Object.values(panes).filter(p=>p.status==='running').length;
-  const waiting = Object.values(panes).filter(p=>p.status==='waiting').length;
-  const failed  = Object.values(panes).filter(p=>p.status==='failed').length;
-  // single-focus selection: blocked(waiting) > running > idle
-  const focusP = Object.values(panes).find(p=>p.status==='waiting')
-              || Object.values(panes).find(p=>p.status==='running');
-  pub('focus', { pane_id: focusP?.pane_id, kind: focusP?.status==='waiting'?'blocked':'working',
-    headline: focusP?.agent_type||'', line: focusP?.last_message||'',
-    counts: { running, waiting, failed, total: Object.keys(panes).length } }, true);
+function emitSuggest() {
+  pub('pane/p1/event', { type:'suggest', suggest_id:'s-p1-1', pane_id:'p1',
+    options:['跑测试','提交并推送','开姊妹 pane'], message:'改好 3 处文案' });
 }
 
 // ── command / history handlers (= ControlRouter surface) ──────────────────────
@@ -73,36 +80,42 @@ function reply(req, ok, extra) {
 function onCommand(req) {
   const { method, params={} } = req;
   switch (method) {
-    case 'pane.send_text': {
+    case 'ping': return reply(req, true, { pong:true });
+    case 'pane.send_text': case 'pane.run': {
       const p = panes[params.pane_id];
       if (!p) return reply(req, false, { code:-32004, message:'pane not found' });
-      // echo user text into the feed, then a mock agent ack
       pub(`pane/${p.pane_id}/message`, { type:'pane.updated', pane_id:p.pane_id, kind:'you', text:params.text });
       setTimeout(()=> pub(`pane/${p.pane_id}/message`,
-        { type:'pane.updated', pane_id:p.pane_id, last_message:`收到:${params.text}` }), 600);
+        { type:'pane.updated', pane_id:p.pane_id, last_message:`收到:${params.text}` }), 200);
       return reply(req, true, { sent:true });
     }
     case 'question.answer': {
-      // clear the event, flip p3 running
-      pub('pane/p3/event', '');                        // (client treats non-json/empty as clear)
-      panes.p3.status = 'running'; panes.p3.last_message = `已${params.index===0?'批准':'拒绝'},继续`;
+      c.publish(`${B}/pane/p3/event`, '', {qos:1});                          // clear event (empty payload)
+      panes.p3.status = 'Running'; panes.p3.last_message = `已${params.index===0?'批准':'拒绝'},继续`;
       pub('pane/p3/status', panes.p3, true);
       publishFocus();
       return reply(req, true, { answered:true });
     }
     case 'suggest.pick':
+      c.publish(`${B}/pane/p1/event`, '', {qos:1});                          // clear suggest
       return reply(req, true, { picked:true });
     case 'dnd.set':
-      pub('dnd/state', { on:!!params.on, ends_at_epoch: Math.floor(Date.now()/1000)+ (params.minutes||25)*60,
+      pub('dnd/state', { on:!!params.on, ends_at_epoch: Math.floor(Date.now()/1000)+(params.minutes||25)*60,
         blocked_count:0 }, true);
       return reply(req, true, { on:!!params.on });
+    // test hooks to emit non-retained events on demand
+    case 'mock.emit_question': emitQuestion(); return reply(req, true, { emitted:'question' });
+    case 'mock.emit_suggest':  emitSuggest();  return reply(req, true, { emitted:'suggest' });
     default:
       return reply(req, false, { code:-32601, message:`unknown method: ${method}` });
   }
 }
 function onHistory(req) {
-  const msgs = history[req.pane_id] || [];
-  reply(req, true, { messages: msgs, has_more:false });
+  let msgs = history[req.pane_id] || [];
+  if (typeof req.before_seq === 'number') msgs = msgs.filter(m => m.seq < req.before_seq);
+  const limit = req.limit || 50;
+  const window = msgs.slice(Math.max(0, msgs.length - limit));
+  reply(req, true, { messages: window, has_more: msgs.length > window.length });
 }
 
 c.on('connect', () => {

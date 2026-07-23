@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "broker": "node broker.js",
-    "mock": "node mock-seahelm.js"
+    "mock": "node mock-seahelm.js",
+    "test": "node protocol-test.js"
   },
   "dependencies": {
     "aedes": "^0.51.3",
