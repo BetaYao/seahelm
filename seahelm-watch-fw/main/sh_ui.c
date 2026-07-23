@@ -128,7 +128,7 @@ static void build_home(void) {
     sh_counts_t ct = sh_counts();
     mk_label(c, "seahelm", SH_FONT_TITLE, SH_BONE);
     if (ct.running > 0) {
-        char buf[8]; snprintf(buf, sizeof buf, "%d", ct.running);
+        char buf[16]; snprintf(buf, sizeof buf, "%d", ct.running);
         lv_obj_t *n = mk_label(c, buf, SH_FONT_HERO, SH_BONE);
         lv_obj_set_style_text_color(n, SH_BONE, 0);
         mk_label(c, "running", SH_FONT_BODY, SH_ASH);   // M2: 个 Sailor 在跑
@@ -419,6 +419,15 @@ static void render(void) {
         default:          build_list();   break;
     }
     ring_refresh();
+}
+
+void sh_ui_refresh(void) {
+    // Re-render the current view from latest sh_data.
+    // Called from main when MQTT delivers new data.
+    if (g.booting) return;
+    // Don't re-render if an overlay is showing (keeps the decision visible)
+    if (g.overlay) return;
+    render();
 }
 
 // ── nav ───────────────────────────────────────────────────────────────────────

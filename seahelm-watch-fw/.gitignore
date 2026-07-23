@@ -6,3 +6,6 @@
 sdkconfig.old
 *.orig
 /.cache/
+
+# local WiFi credentials
+main/sh_secrets.h

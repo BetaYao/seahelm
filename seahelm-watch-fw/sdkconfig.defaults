@@ -28,6 +28,8 @@ CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_USE_OS_NONE=y
 CONFIG_LV_MEM_SIZE_KILOBYTES=64
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# HKDF for E2EE key derivation (sh_crypto.c uses mbedtls_hkdf)
+CONFIG_MBEDTLS_HKDF_C=y
 # Montserrat sizes used by sh_theme.h (default build only ships 14)
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_18=y

@@ -1,5 +1,7 @@
 // main.cpp — M5Unified (CO5300 AMOLED + CST820 touch + keys) ↔ LVGL 9 glue.
-// Board: M5Stack StopWatch (ESP32-S3-R8N8, 466x466). M5.begin() autodetects it.
+// M2: MQTT + E2EE integrated. Connects to EMQX Cloud (or dev broker), decodes
+// retained snapshots and live events into the sh_data slot store, and surfaces
+// decisions (question/suggest) via sh_ui_overlay.
 #include <M5Unified.h>
 #include "lvgl.h"
 #include "esp_timer.h"
@@ -7,9 +9,16 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
 
 extern "C" {
 #include "sh_ui.h"
+#include "sh_data.h"
+#include "sh_config.h"
+#include "sh_crypto.h"
+#include "sh_mqtt.h"
+#include "sh_wifi.h"
 }
 
 static const char *TAG = "seahelm-watch";
@@ -46,16 +55,132 @@ static void gesture_cb(lv_event_t *e) {
     if (d == LV_DIR_RIGHT) sh_ui_back();
 }
 
+// ── MQTT callbacks ────────────────────────────────────────────────────────────
+// These are called from MQTT task context. We queue state changes and trigger
+// LVGL refresh via a timer (since LVGL is not thread-safe).
+
+static void on_mqtt_state(sh_mqtt_state_t state) {
+    ESP_LOGI(TAG, "MQTT state: %d", state);
+    // Could update a status indicator in the UI
+}
+
+static void on_pane_status(const char *slot, const char *payload_json) {
+    ESP_LOGD(TAG, "pane/status %s: %s", slot, payload_json ? payload_json : "(tombstone)");
+    sh_data_m2_update_pane(slot, payload_json);
+    sh_ui_refresh();
+}
+
+static void on_pane_event(const char *slot, const char *payload_json) {
+    ESP_LOGD(TAG, "pane/event %s: %s", slot, payload_json ? payload_json : "(resolved)");
+    sh_data_m2_update_event(slot, payload_json);
+
+    // If a new question/suggest arrived, push an overlay
+    if (payload_json && payload_json[0]) {
+        cJSON *j = cJSON_Parse(payload_json);
+        if (j) {
+            cJSON *type_f = cJSON_GetObjectItem(j, "type");
+            if (type_f && cJSON_IsString(type_f)) {
+                const char *type = type_f->valuestring;
+                if (strcmp(type, "question") == 0) {
+                    cJSON *pr = cJSON_GetObjectItem(j, "prompt");
+                    cJSON *opts = cJSON_GetObjectItem(j, "options");
+                    const char *prompt = pr && cJSON_IsString(pr) ? pr->valuestring : "";
+                    int nopts = opts && cJSON_IsArray(opts) ? cJSON_GetArraySize(opts) : 0;
+                    const char *opt_ptrs[6];
+                    char opt_buf[6][64];
+                    if (nopts > 6) nopts = 6;
+                    for (int i = 0; i < nopts; i++) {
+                        cJSON *o = cJSON_GetArrayItem(opts, i);
+                        if (o && cJSON_IsString(o)) {
+                            strncpy(opt_buf[i], o->valuestring, sizeof(opt_buf[i]) - 1);
+                            opt_ptrs[i] = opt_buf[i];
+                        }
+                    }
+                    sh_ui_overlay(SH_OV_QUESTION, slot, "", prompt, nopts > 0 ? opt_ptrs : NULL, nopts);
+                } else if (strcmp(type, "suggest") == 0) {
+                    cJSON *msg = cJSON_GetObjectItem(j, "message");
+                    cJSON *opts = cJSON_GetObjectItem(j, "options");
+                    const char *message = msg && cJSON_IsString(msg) ? msg->valuestring : "";
+                    int nopts = opts && cJSON_IsArray(opts) ? cJSON_GetArraySize(opts) : 0;
+                    const char *opt_ptrs[6];
+                    char opt_buf[6][64];
+                    if (nopts > 6) nopts = 6;
+                    for (int i = 0; i < nopts; i++) {
+                        cJSON *o = cJSON_GetArrayItem(opts, i);
+                        if (o && cJSON_IsString(o)) {
+                            strncpy(opt_buf[i], o->valuestring, sizeof(opt_buf[i]) - 1);
+                            opt_ptrs[i] = opt_buf[i];
+                        }
+                    }
+                    sh_ui_overlay(SH_OV_SUGGEST, slot, "", message, nopts > 0 ? opt_ptrs : NULL, nopts);
+                }
+            }
+            cJSON_Delete(j);
+        }
+    }
+}
+
+static void on_worktree(const char *slot, const char *payload_json) {
+    // Worktree status is rolled up from panes; no direct action needed.
+    ESP_LOGD(TAG, "worktree/status %s", slot);
+}
+
+static void on_focus(const char *payload_json) {
+    sh_data_m2_set_focus(payload_json);
+    // The UI's glance reads from sh_repos counts; focus data can be stored for
+    // the glance view if needed.
+}
+
+static void on_presence(bool online) {
+    ESP_LOGI(TAG, "Mac presence: %s", online ? "online" : "offline");
+    sh_data_m2_set_presence(online);
+}
+
+static void on_dnd(const char *payload_json) {
+    sh_data_m2_set_dnd(payload_json);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// app_main
+// ══════════════════════════════════════════════════════════════════════════════
+
 extern "C" void app_main(void) {
-    // 1) board
-    auto cfg = M5.config();
-    M5.begin(cfg);
+    // 0) Init NVS (for config persistence)
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+
+    // 1) Load config
+    sh_config_t cfg;
+    if (sh_config_load(&cfg) != 0) {
+        cfg = SH_CONFIG_DEFAULT;
+        ESP_LOGI(TAG, "using default config (unpaired)");
+    } else {
+        ESP_LOGI(TAG, "config loaded: host=%s mac_id=%s paired=%d",
+                 cfg.host, cfg.mac_id, sh_config_is_paired(&cfg));
+    }
+
+    // 2) Init E2EE if paired
+    if (sh_config_is_paired(&cfg)) {
+        if (sh_config_derive_creds(&cfg) == 0) {
+            ESP_LOGI(TAG, "E2EE initialized");
+        } else {
+            ESP_LOGW(TAG, "E2EE init failed, falling back to plaintext");
+            cfg.root_secret[0] = '\0';
+        }
+    }
+
+    // 3) Board
+    auto board_cfg = M5.config();
+    M5.begin(board_cfg);
     ESP_LOGI(TAG, "display %dx%d", (int)M5.Display.width(), (int)M5.Display.height());
     M5.Display.setRotation(0);
     M5.Display.setBrightness(200);
     M5.Display.fillScreen(TFT_BLACK);
 
-    // 2) lvgl
+    // 4) LVGL
     lv_init();
     lv_tick_set_cb(tick_cb);
 
@@ -64,7 +189,7 @@ extern "C" void app_main(void) {
     lv_display_t *disp = lv_display_create(hor, ver);
     lv_display_set_flush_cb(disp, flush_cb);
 
-    // partial draw buffers in PSRAM (2 x ~1/10 screen)
+    // partial draw buffers in PSRAM (2 x 1/10 screen)
     const size_t buf_px = hor * 48;
     static lv_color_t *buf1, *buf2;
     buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
@@ -76,14 +201,33 @@ extern "C" void app_main(void) {
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch, touch_cb);
 
-    // 3) ui
+    // 5) UI init (boot screen)
     sh_ui_init();
     lv_obj_add_event_cb(lv_screen_active(), gesture_cb, LV_EVENT_GESTURE, NULL);
 
-    // 4) event + render loop
-    //   BtnA (G2, yellow) : scroll list  (crown surrogate)
-    //   BtnB (G1, blue)   : short = select/confirm; hold in detail = voice
-    //   BtnA hold         : back
+    // 5.5) WiFi — MUST be up before MQTT, else esp-mqtt asserts "Invalid mbox"
+    // (no TCP/IP netif). Wait up to 15s for an IP; reconnect continues after.
+    if (sh_wifi_start(15000)) {
+        ESP_LOGI(TAG, "WiFi connected");
+    } else {
+        ESP_LOGW(TAG, "WiFi not up yet — MQTT will connect once it reconnects");
+    }
+
+    // 6) MQTT init
+    sh_mqtt_callbacks_t cbs;
+    memset(&cbs, 0, sizeof(cbs));
+    cbs.on_state       = on_mqtt_state;
+    cbs.on_pane_status = on_pane_status;
+    cbs.on_pane_event  = on_pane_event;
+    cbs.on_worktree    = on_worktree;
+    cbs.on_focus       = on_focus;
+    cbs.on_presence    = on_presence;
+    cbs.on_dnd         = on_dnd;
+
+    sh_mqtt_init(&cfg, &cbs);
+    sh_mqtt_start();
+
+    // 7) Event + render loop
     bool voicing = false;
     while (true) {
         M5.update();

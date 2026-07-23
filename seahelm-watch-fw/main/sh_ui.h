@@ -23,6 +23,10 @@ typedef enum { SH_OV_NONE, SH_OV_SUGGEST, SH_OV_QUESTION, SH_OV_NOTIFY } sh_ov_t
 // Call once after LVGL + display are up. Builds the boot screen, then the UI.
 void sh_ui_init(void);
 
+// Re-render the current view from the latest sh_data state.
+// Call when MQTT delivers new retained snapshots or events.
+void sh_ui_refresh(void);
+
 // ── input actions (wired from buttons/touch in main.cpp) ──────────────────────
 void sh_ui_scroll(int delta);   // crown / BtnA: move list selection
 void sh_ui_select(void);        // BtnB / tap: drill in, or confirm overlay
