@@ -3,12 +3,15 @@ import AppKit
 /// Helm command line (`/ command · @ repo · # agent` placeholder).
 /// Pure input surface — it emits text changes and submit; the cockpit owns the
 /// autocomplete dropdown (so it can float over the Orders/Watch list unclipped).
-/// Keyboard navigation of the menu is deferred to WP-6; completion is mouse-driven.
+///
+/// The field is a multi-line text view that auto-grows with its content (up to
+/// `maxLineCount`, then scrolls). Return submits; Shift+Return inserts a newline.
 final class CommandInputView: NSView {
 
     // Appearance-aware text; accents stay fixed.
     private static let ink: NSColor = SemanticColors.text
-    private static let inkDim: NSColor = SemanticColors.muted
+    /// Placeholder base: brighter than `muted` so the prompt reads clearly.
+    private static let inkBright: NSColor = SemanticColors.text.withAlphaComponent(0.85)
 
     enum MenuKey { case up, down, accept }
 
@@ -31,36 +34,49 @@ final class CommandInputView: NSView {
     /// a temp PNG file the host can pass downstream.
     var onImagePasted: ((URL) -> Void)?
 
-    private let field = FocusReportingTextField()
+    private let field = GrowingTextView()
+    private let scroll = NSScrollView()
     private let box = FrostedPanelView()
     private let spinner = NSProgressIndicator()
     private let thumbnailStrip = NSStackView()
     private var savedPlaceholder: String?
     private var placeholder: String = "" {
-        didSet { refreshPlaceholder() }
+        didSet { field.placeholder = placeholder; refreshPlaceholder() }
     }
+
+    /// Vertical padding above/below the text inside the band.
+    private static let verticalInset: CGFloat = 11
+    /// One text row's height (min band content). Recomputed from the font.
+    private var lineHeight: CGFloat = 18
+    /// How many rows the field grows to before it starts scrolling.
+    private static let maxLineCount: CGFloat = 6
 
     /// Temp file URLs of pasted images, in paste order. Cleared on submit/cancel.
     private(set) var pendingImageURLs: [URL] = [] {
         didSet { rebuildThumbnails() }
     }
 
-    private var fieldLeadingConstraint: NSLayoutConstraint!
+    private var scrollLeadingConstraint: NSLayoutConstraint!
+    private var scrollHeightConstraint: NSLayoutConstraint!
     private var thumbnailStackLeadingConstraint: NSLayoutConstraint!
 
-    /// Anchors of the bordered input box, so the host can align the autocomplete
-    /// dropdown to the box's bottom edge.
+    /// Anchors of the input band, so the host can align the autocomplete
+    /// dropdown to the band's bottom edge.
     var boxBottomAnchor: NSLayoutYAxisAnchor { box.bottomAnchor }
     var boxLeadingAnchor: NSLayoutXAxisAnchor { box.leadingAnchor }
     var boxTrailingAnchor: NSLayoutXAxisAnchor { box.trailingAnchor }
 
     var text: String {
-        get { field.stringValue }
-        set { field.stringValue = newValue }
+        get { field.string }
+        set {
+            field.string = newValue
+            field.needsDisplay = true
+            recomputeHeight()
+        }
     }
 
-    /// Corner radius of the input box. Defaults to 8 (system menu glass).
-    var boxCornerRadius: CGFloat = 8 {
+    /// Corner radius of the input band. Defaults to 0 (flush / immersive band).
+    var boxCornerRadius: CGFloat = 0 {
         didSet { box.layer?.cornerRadius = boxCornerRadius }
     }
 
@@ -81,29 +97,41 @@ final class CommandInputView: NSView {
         box.kind = .input
         box.translatesAutoresizingMaskIntoConstraints = false
 
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = AppFont.mono(size: 12.5, weight: .regular)
+        let font = AppFont.mono(size: 12.5, weight: .regular)
+        lineHeight = ceil(font.ascender - font.descender + font.leading)
+
+        field.font = font
         field.textColor = Self.ink
-        placeholder = "Give an order — / command · @ repo · # agent"
-        refreshChromeColors()
+        field.placeholderColor = Self.inkBright
+        field.placeholderAccentColor = SemanticColors.accent
+        field.isRichText = false
+        field.drawsBackground = false
+        field.isVerticallyResizable = true
+        field.isHorizontallyResizable = false
+        field.autoresizingMask = [.width]
+        field.textContainerInset = NSSize(width: 0, height: 0)
+        field.textContainer?.lineFragmentPadding = 0
+        field.textContainer?.widthTracksTextView = true
         field.delegate = self
-        field.target = self
-        field.action = #selector(submit)
-        field.translatesAutoresizingMaskIntoConstraints = false
+        field.allowsUndo = true
         field.setAccessibilityIdentifier("helm.commandInput")
+        placeholder = "Give an order — / command · @ repo · # agent"
         field.onFocusChange = { [weak self] focused in
-            if focused {
-                self?.onFocused?()
-            } else {
-                self?.onUnfocused?()
-            }
+            if focused { self?.onFocused?() } else { self?.onUnfocused?() }
         }
-        field.onPasteImage = { [weak self] url in
-            self?.attachImage(url: url)
-        }
-        box.addSubview(field)
+        field.onPasteImage = { [weak self] url in self?.attachImage(url: url) }
+
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.verticalScrollElasticity = .none
+        scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = field
+        box.addSubview(scroll)
+
+        refreshChromeColors()
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -120,26 +148,28 @@ final class CommandInputView: NSView {
 
         addSubview(box)
 
-        fieldLeadingConstraint = field.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14)
+        scrollLeadingConstraint = scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14)
+        scrollHeightConstraint = scroll.heightAnchor.constraint(equalToConstant: lineHeight)
 
         NSLayoutConstraint.activate([
-            box.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            box.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            box.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            box.heightAnchor.constraint(equalToConstant: 40),
+            // Flush band: fills the composer bar edge-to-edge, no floating inset box.
+            box.topAnchor.constraint(equalTo: topAnchor),
+            box.leadingAnchor.constraint(equalTo: leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: trailingAnchor),
+            box.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            fieldLeadingConstraint,
-            field.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
-            field.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            scrollLeadingConstraint,
+            scroll.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+            scroll.topAnchor.constraint(equalTo: box.topAnchor, constant: Self.verticalInset),
+            scroll.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -Self.verticalInset),
+            scrollHeightConstraint,
 
             spinner.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
-            spinner.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            spinner.topAnchor.constraint(equalTo: box.topAnchor, constant: Self.verticalInset),
 
             thumbnailStackLeadingConstraint,
-            thumbnailStrip.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            thumbnailStrip.topAnchor.constraint(equalTo: box.topAnchor, constant: Self.verticalInset),
             thumbnailStrip.heightAnchor.constraint(equalToConstant: 28),
-
-            box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
     }
 
@@ -148,14 +178,30 @@ final class CommandInputView: NSView {
         refreshChromeColors()
     }
 
+    override func layout() {
+        super.layout()
+        recomputeHeight()
+    }
+
+    /// Resize the band to fit the text, clamped to [1, maxLineCount] rows, then
+    /// scroll. Idempotent — only mutates the constraint when the value changes.
+    private func recomputeHeight() {
+        guard let lm = field.layoutManager, let tc = field.textContainer else { return }
+        lm.ensureLayout(for: tc)
+        let content = field.string.isEmpty ? lineHeight : ceil(lm.usedRect(for: tc).height)
+        let minH = lineHeight
+        let maxH = lineHeight * Self.maxLineCount
+        let target = min(max(content, minH), maxH)
+        if abs(scrollHeightConstraint.constant - target) > 0.5 {
+            scrollHeightConstraint.constant = target
+        }
+        // Only scroll once the content overflows the cap.
+        scroll.hasVerticalScroller = content > maxH
+    }
+
     private func refreshPlaceholder() {
-        field.placeholderAttributedString = NSAttributedString(
-            string: placeholder,
-            attributes: [
-                .foregroundColor: Self.inkDim,
-                .font: field.font ?? AppFont.mono(size: 12.5, weight: .regular),
-            ]
-        )
+        field.placeholderFont = field.font ?? AppFont.mono(size: 12.5, weight: .regular)
+        field.needsDisplay = true
     }
 
     private func refreshChromeColors() {
@@ -169,6 +215,8 @@ final class CommandInputView: NSView {
             box.layer?.borderColor = nil
         }
         field.textColor = Self.ink
+        field.placeholderColor = Self.inkBright
+        field.placeholderAccentColor = SemanticColors.accent
         refreshPlaceholder()
     }
 
@@ -177,9 +225,7 @@ final class CommandInputView: NSView {
     /// Whether the command field (or its field editor) currently owns focus.
     var isFieldFocused: Bool {
         guard let window else { return false }
-        if window.firstResponder === field { return true }
-        if let editor = field.currentEditor(), window.firstResponder === editor { return true }
-        return false
+        return window.firstResponder === field
     }
 
     /// Show a busy state while an async command runs: disable editing, swap the
@@ -187,7 +233,7 @@ final class CommandInputView: NSView {
     func setLoading(_ loading: Bool, message: String = "Working…") {
         if loading {
             savedPlaceholder = placeholder
-            field.stringValue = ""
+            field.string = ""
             placeholder = message
             field.isEditable = false
             field.isSelectable = false
@@ -198,17 +244,17 @@ final class CommandInputView: NSView {
             field.isSelectable = true
             spinner.stopAnimation(nil)
         }
+        recomputeHeight()
     }
 
     /// Set the text, focus the field, and place the caret at the END (not a
     /// select-all, which would wipe the value on the next keystroke).
     func setTextAndFocusEnd(_ s: String) {
-        field.stringValue = s
+        field.string = s
         window?.makeFirstResponder(field)
-        // makeFirstResponder selects all; override to a collapsed caret at end.
-        if let editor = field.currentEditor() {
-            editor.selectedRange = NSRange(location: (s as NSString).length, length: 0)
-        }
+        field.setSelectedRange(NSRange(location: (s as NSString).length, length: 0))
+        field.needsDisplay = true
+        recomputeHeight()
         onTextChanged?(s)
     }
 
@@ -217,11 +263,13 @@ final class CommandInputView: NSView {
         pendingImageURLs = []
     }
 
-    @objc private func submit() {
-        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    fileprivate func submit() {
+        let value = field.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         onSubmit?(value)
-        field.stringValue = ""
+        field.string = ""
+        field.needsDisplay = true
+        recomputeHeight()
         onTextChanged?("")
         clearPendingImage()
     }
@@ -289,29 +337,37 @@ final class CommandInputView: NSView {
         // Each thumbnail is 28pt + 4pt spacing, plus 6pt leading margin.
         let stripWidth = hasImages ? CGFloat(count) * 28 + CGFloat(max(0, count - 1)) * 4 : 0
         thumbnailStackLeadingConstraint.constant = hasImages ? 6 : 0
-        fieldLeadingConstraint.constant = hasImages ? 14 + stripWidth + 6 : 14
+        scrollLeadingConstraint.constant = hasImages ? 14 + stripWidth + 6 : 14
     }
 }
 
-extension CommandInputView: NSTextFieldDelegate {
-    func controlTextDidChange(_ obj: Notification) {
-        onTextChanged?(field.stringValue)
+extension CommandInputView: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        field.needsDisplay = true
+        recomputeHeight()
+        onTextChanged?(field.string)
     }
 
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.cancelOperation(_:)):
             onCancel?()
             return true
         case #selector(NSResponder.moveUp(_:)):
             if onMenuKey?(.up) == true { return true }
-            if field.stringValue.isEmpty { return onArrowUpAtEmpty?() ?? false }
+            if field.string.isEmpty { return onArrowUpAtEmpty?() ?? false }
             return false
         case #selector(NSResponder.moveDown(_:)):
             return onMenuKey?(.down) ?? false
-        case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)):
-            // Accept the highlighted menu item if the menu is open; otherwise let
-            // the field submit (Enter) / change focus (Tab) as usual.
+        case #selector(NSResponder.insertNewline(_:)):
+            // Menu open → accept the highlighted item. Shift+Return → literal
+            // newline (let the text view handle it). Plain Return → submit.
+            if onMenuKey?(.accept) == true { return true }
+            let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+            if shift { return false }
+            submit()
+            return true
+        case #selector(NSResponder.insertTab(_:)):
             return onMenuKey?(.accept) ?? false
         default:
             return false
@@ -319,25 +375,59 @@ extension CommandInputView: NSTextFieldDelegate {
     }
 }
 
-/// NSTextField that reports focus changes (becomeFirstResponder fires on focus,
-/// unlike controlTextDidBeginEditing which only fires on the first edit).
+/// Multi-line text view that reports focus changes, draws a placeholder while
+/// empty, and intercepts image pastes.
 ///
-/// Unfocus is deferred one turn so we don't treat the handoff to the field
-/// editor as a blur — AppKit resigns the text field itself when the editor
-/// becomes first responder.
-final class FocusReportingTextField: NSTextField {
+/// Unfocus is deferred one turn so a handoff (e.g. to a menu row's mouseDown
+/// that re-focuses us) isn't mistaken for a blur.
+final class GrowingTextView: NSTextView {
     var onFocusChange: ((Bool) -> Void)?
     var onPasteImage: ((URL) -> Void)?
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == .command, event.charactersIgnoringModifiers == "v" {
-            if let url = Self.extractImageFromPasteboard() {
-                onPasteImage?(url)
-                return true
+    var placeholder: String = ""
+    var placeholderColor: NSColor = .secondaryLabelColor
+    var placeholderAccentColor: NSColor = .controlAccentColor
+    var placeholderFont: NSFont = .systemFont(ofSize: 12.5)
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholder.isEmpty else { return }
+        let pad = textContainer?.lineFragmentPadding ?? 0
+        let origin = NSPoint(x: textContainerInset.width + pad, y: textContainerInset.height)
+        attributedPlaceholder().draw(at: origin)
+    }
+
+    /// Base placeholder brightened and bolded, led by an accent `▸` marker,
+    /// with the `/ @ #` sigils punched up in the accent color so the command
+    /// grammar reads at a glance.
+    private func attributedPlaceholder() -> NSAttributedString {
+        let bold = NSFont(descriptor: placeholderFont.fontDescriptor.withSymbolicTraits(.bold),
+                          size: placeholderFont.pointSize) ?? placeholderFont
+        let str = NSMutableAttributedString(string: "▸ ", attributes: [
+            .foregroundColor: placeholderAccentColor,
+            .font: bold,
+        ])
+        let markerLen = str.length
+        str.append(NSAttributedString(string: placeholder, attributes: [
+            .foregroundColor: placeholderColor,
+            .font: bold,
+        ]))
+        let full = str.string as NSString
+        for sigil in ["/", "@", "#"] {
+            let r = full.range(of: sigil, options: [], range: NSRange(location: markerLen, length: full.length - markerLen))
+            if r.location != NSNotFound {
+                str.addAttribute(.foregroundColor, value: placeholderAccentColor, range: r)
             }
         }
-        return super.performKeyEquivalent(with: event)
+        return str
+    }
+
+    override func paste(_ sender: Any?) {
+        if let url = Self.extractImageFromPasteboard() {
+            onPasteImage?(url)
+            return
+        }
+        super.pasteAsPlainText(sender)
     }
 
     private static func extractImageFromPasteboard() -> URL? {
@@ -347,13 +437,12 @@ final class FocusReportingTextField: NSTextField {
         }) == true else { return nil }
 
         if let url = pb.readObjects(forClasses: [NSURL.self], options: nil)?.first as? URL,
-           let _ = NSImage(contentsOf: url) {
+           NSImage(contentsOf: url) != nil {
             return url
         }
 
         guard let image = NSImage(pasteboard: pb) else { return nil }
-        let tiffData = image.tiffRepresentation
-        guard let rep = tiffData.flatMap({ NSBitmapImageRep(data: $0) }),
+        guard let rep = image.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) }),
               let pngData = rep.representation(using: .png, properties: [:]) else { return nil }
 
         let tmpDir = FileManager.default.temporaryDirectory
@@ -372,17 +461,14 @@ final class FocusReportingTextField: NSTextField {
         if ok { onFocusChange?(true) }
         return ok
     }
+
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
         if ok {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                guard let window = self.window else {
-                    self.onFocusChange?(false)
-                    return
-                }
+                guard let window = self.window else { self.onFocusChange?(false); return }
                 if window.firstResponder === self { return }
-                if let editor = self.currentEditor(), window.firstResponder === editor { return }
                 self.onFocusChange?(false)
             }
         }

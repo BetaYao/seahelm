@@ -11,9 +11,9 @@ class StationManager {
             return existing
         }
         let station = Station()
-        let sessionName = backend != "local" ? SessionManager.persistentSessionName(for: info.path) : ""
+        let paneSessionKey = backend != "local" ? SessionManager.persistentSessionName(for: info.path) : ""
         if backend != "local" {
-            station.sessionName = sessionName
+            station.paneSessionKey = paneSessionKey
             station.backend = backend
         }
         StationRegistry.shared.register(station)
@@ -22,7 +22,7 @@ class StationManager {
             worktreePath: info.path,
             rootLeafId: leafId,
             stationId: station.id,
-            sessionName: sessionName
+            paneSessionKey: paneSessionKey
         )
         trees[info.path] = splitTree
         return splitTree

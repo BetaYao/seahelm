@@ -48,22 +48,22 @@ enum ZmxSessionRecovery {
 
     /// Kill a zmx session, force-killing the daemon process and removing the
     /// socket file if the graceful `zmx kill` fails (e.g. unreachable session).
-    static func forceKillSession(_ sessionName: String) {
+    static func forceKillSession(_ paneSessionKey: String) {
         // Try graceful kill first
-        ProcessRunner.runSync([ZmxLocator.executable(), "kill", sessionName])
+        ProcessRunner.runSync([ZmxLocator.executable(), "kill", paneSessionKey])
 
         // Check if session is still alive by parsing `zmx list`
         guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return }
         let stillAlive = listOutput
             .components(separatedBy: "\n")
-            .contains { $0.contains("name=\(sessionName)") }
+            .contains { $0.contains("name=\(paneSessionKey)") }
         guard stillAlive else { return }
 
-        NSLog("ZmxSessionRecovery: zmx session '%@' still alive after kill — force cleaning", sessionName)
+        NSLog("ZmxSessionRecovery: zmx session '%@' still alive after kill — force cleaning", paneSessionKey)
 
         // Find and kill the daemon process via its socket
         if let socketDir = socketDir() {
-            let socketPath = (socketDir as NSString).appendingPathComponent(sessionName)
+            let socketPath = (socketDir as NSString).appendingPathComponent(paneSessionKey)
             // Use lsof to find the PID holding the socket
             if let lsofOutput = ProcessRunner.output(["lsof", "-t", socketPath]),
                let pid = Int32(lsofOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {

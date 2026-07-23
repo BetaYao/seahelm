@@ -20,7 +20,7 @@ final class StationRegistryConcurrencyTests: XCTestCase {
         StationRegistry.shared.removeAll()
         let stations: [Station] = (0..<40).map { i in
             let s = Station()
-            s.sessionName = "seahelm-test-\(i)"
+            s.paneSessionKey = "seahelm-test-\(i)"
             return s
         }
 
@@ -38,7 +38,7 @@ final class StationRegistryConcurrencyTests: XCTestCase {
         // Hook role: resolve a pane by its session name.
         DispatchQueue.global().async {
             for _ in 0..<200 {
-                for s in stations { _ = StationRegistry.shared.station(forSessionName: s.sessionName ?? "") }
+                for s in stations { _ = StationRegistry.shared.station(forSessionName: s.paneSessionKey ?? "") }
             }
             done.fulfill()
         }

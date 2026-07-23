@@ -34,7 +34,7 @@ class TerminalCoordinator {
             // Backfill agent resume refs so a session recreated on attach (e.g.
             // after reboot) relaunches the agent instead of a bare shell.
             for leaf in restored.allLeaves {
-                if let ref = config.agentSessions[leaf.sessionName] {
+                if let ref = config.agentSessions[leaf.paneSessionKey] {
                     StationRegistry.shared.station(forId: leaf.stationId)?.agentSessionRef = ref
                 }
             }
@@ -70,7 +70,7 @@ class TerminalCoordinator {
     /// silently falls back to the worktree's *first* pane — every hook, and every
     /// suggestion chip tapped for this pane, lands in a sibling.
     /// Branch/project come from a sibling in the same worktree, which shares both.
-    private func registerSplitStation(_ station: Station, worktreePath: String, sessionName: String) {
+    private func registerSplitStation(_ station: Station, worktreePath: String, paneSessionKey: String) {
         let sibling = ShipLog.shared.sailor(forWorktree: worktreePath)
         ShipLog.shared.register(
             station: station,
@@ -78,7 +78,7 @@ class TerminalCoordinator {
             branch: sibling?.branch ?? "",
             project: sibling?.project ?? URL(fileURLWithPath: worktreePath).lastPathComponent,
             startedAt: Date(),
-            sessionName: runtimeBackend == "local" ? nil : sessionName,
+            paneSessionKey: runtimeBackend == "local" ? nil : paneSessionKey,
             backend: runtimeBackend
         )
     }
@@ -87,16 +87,16 @@ class TerminalCoordinator {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
 
-        let sessionName = tree.nextSessionName()
+        let paneSessionKey = tree.nextSessionName()
         let station = Station()
-        station.sessionName = sessionName
+        station.paneSessionKey = paneSessionKey
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
 
-        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
+        registerSplitStation(station, worktreePath: tree.worktreePath, paneSessionKey: paneSessionKey)
 
         let leafId = UUID().uuidString
-        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: paneSessionKey)
 
         performStructuralSplitLayout(
             container: container,
@@ -142,17 +142,17 @@ class TerminalCoordinator {
             targetLeafId = tree.focusedId
         }
 
-        let sessionName = tree.nextSessionName()
+        let paneSessionKey = tree.nextSessionName()
         let station = Station()
-        station.sessionName = sessionName
+        station.paneSessionKey = paneSessionKey
         station.backend = runtimeBackend
         StationRegistry.shared.register(station)
-        registerSplitStation(station, worktreePath: tree.worktreePath, sessionName: sessionName)
+        registerSplitStation(station, worktreePath: tree.worktreePath, paneSessionKey: paneSessionKey)
 
         let leafId = UUID().uuidString
         // splitFocusedLeaf splits `focusedId`, so point it at the target first.
         tree.focusedId = targetLeafId
-        let split = tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: sessionName)
+        let split = tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newStationId: station.id, newSessionName: paneSessionKey)
         // Restore an exact divider ratio (e.g. from a layout template) instead of
         // the 0.5 default. layoutTree below reads it.
         if let ratio { tree.updateRatio(splitId: split.splitId, newRatio: ratio) }
@@ -203,7 +203,7 @@ class TerminalCoordinator {
         _ = newStation.create(
             in: container,
             workingDirectory: tree.worktreePath,
-            sessionName: newStation.sessionName,
+            paneSessionKey: newStation.paneSessionKey,
             initialFrame: newFrame
         )
         container.surfaceViews[newStation.id] = newStation.view
@@ -256,10 +256,10 @@ class TerminalCoordinator {
 
     private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
         switch node {
-        case let .leaf(_, stationId, sessionName):
+        case let .leaf(_, stationId, paneSessionKey):
             let agent = ShipLog.shared.sailor(for: stationId)?.agentType
             let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
-            return .pane(label: sessionName, command: agent?.launchCommand, agent: named, cwd: nil)
+            return .pane(label: paneSessionKey, command: agent?.launchCommand, agent: named, cwd: nil)
         case let .split(_, axis, ratio, first, second):
             return .split(direction: axis == .vertical ? "down" : "right",
                           ratio: Double(ratio),
@@ -304,8 +304,8 @@ class TerminalCoordinator {
         guard let closed = tree.closeFocusedLeaf() else { return }
 
         // Kill zmx session
-        SessionManager.killSession(closed.sessionName, backend: runtimeBackend)
-        config.agentSessions.removeValue(forKey: closed.sessionName)
+        SessionManager.killSession(closed.paneSessionKey, backend: runtimeBackend)
+        config.agentSessions.removeValue(forKey: closed.paneSessionKey)
 
         // Remove station
         if let station = StationRegistry.shared.station(forId: closed.stationId) {
@@ -485,9 +485,9 @@ class TerminalCoordinator {
         // state has to go with it. (`performCloseRepo` already does this.)
         if let tree = stationManager.tree(forPath: info.path) {
             for leaf in tree.allLeaves {
-                config.agentSessions.removeValue(forKey: leaf.sessionName)
+                config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
                 if runtimeBackend != "local" {
-                    SessionManager.killSession(leaf.sessionName, backend: runtimeBackend)
+                    SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
                 }
             }
         }

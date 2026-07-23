@@ -107,7 +107,7 @@ enum SeahelmSkillInstaller {
         ## Notes
 
         - Pane ids from `pane list`/`snapshot` (`pane_id`) are per-session; your
-          own stable id is `$SEAHELM_PANE_ID` (shown as `session_name` in the
+          own stable id is `$SEAHELM_PANE_ID` (shown as `pane_session_key` in the
           snapshot). Either form works as a `<pane>` argument.
         - Re-read ids after closing panes; don't cache a `pane_id` across changes.
         """

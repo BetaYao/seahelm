@@ -23,8 +23,8 @@ final class ProcessProbeTests: XCTestCase {
           name=seahelm-repo-feat\tpid=4242\tclients=1\tstart_dir=/x
           name=other\tpid=99\tclients=0\tstart_dir=/y
         """
-        XCTAssertEqual(ProcessProbe.sessionPid(sessionName: "seahelm-repo-feat", zmxListOutput: out), 4242)
-        XCTAssertNil(ProcessProbe.sessionPid(sessionName: "missing", zmxListOutput: out))
+        XCTAssertEqual(ProcessProbe.sessionPid(paneSessionKey: "seahelm-repo-feat", zmxListOutput: out), 4242)
+        XCTAssertNil(ProcessProbe.sessionPid(paneSessionKey: "missing", zmxListOutput: out))
     }
 
     func testDirectExecMatch() {

@@ -209,7 +209,7 @@ final class PaneTitleResolverTests: XCTestCase {
     func testFocusedStationIdUsesFocusedLeafElseFirst() {
         let a = "station-a"
         let leafA = UUID().uuidString
-        let tree = SplitTree(worktreePath: "/wt", rootLeafId: leafA, stationId: a, sessionName: "")
+        let tree = SplitTree(worktreePath: "/wt", rootLeafId: leafA, stationId: a, paneSessionKey: "")
         XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), a)
         tree.focusedId = "missing"
         XCTAssertEqual(PaneTitleResolver.focusedStationId(in: tree), a)
@@ -276,7 +276,7 @@ final class PaneTitleResolverTests: XCTestCase {
         // The "current pane" the chrome header and First Mate both follow: with
         // several leaves it must be the focused one, not simply the first.
         let leafA = UUID().uuidString
-        let tree = SplitTree(worktreePath: "/wt", rootLeafId: leafA, stationId: "station-a", sessionName: "")
+        let tree = SplitTree(worktreePath: "/wt", rootLeafId: leafA, stationId: "station-a", paneSessionKey: "")
         let leafB = UUID().uuidString
         _ = tree.splitFocusedLeaf(
             axis: .vertical,

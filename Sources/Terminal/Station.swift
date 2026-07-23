@@ -37,7 +37,7 @@ class Station {
     private(set) var initialWorkingDirectory: String?
 
     /// Session name for persistence backend (nil = direct shell)
-    var sessionName: String?
+    var paneSessionKey: String?
     /// Last-known "strong" pane title (agent session / OSC title), persisted in
     /// the split layout so a restored pane shows its real title immediately —
     /// before a fresh OSC title or agent session ref lands after relaunch.
@@ -48,7 +48,7 @@ class Station {
     /// title can never resurface on a *later* session started in the same pane
     /// (e.g. after `/clear` or an agent restart), which read as a duplicate title.
     var titleBridgeActive: Bool = false
-    /// Persistence backend for the sessionName above.
+    /// Persistence backend for the paneSessionKey above.
     var backend: String = "zmx"
     /// Agent resume ref, if this pane runs a recognized agent. When a *fresh*
     /// backend session must be created (restore into a missing session, or zmx
@@ -76,14 +76,14 @@ class Station {
     let ghosttyLock = NSLock()
 
     /// Create the terminal surface and add it to the given container view.
-    /// If sessionName is provided, the surface runs inside a persistent backend session.
+    /// If paneSessionKey is provided, the surface runs inside a persistent backend session.
     /// - Parameter initialFrame: When set (split create), embed with frame layout at
     ///   this rect and size the PTY to it immediately — avoids Auto Layout fill of the
     ///   full container (which used to SIGWINCH the sibling pane mid-create).
     func create(
         in container: NSView,
         workingDirectory: String? = nil,
-        sessionName: String? = nil,
+        paneSessionKey: String? = nil,
         initialFrame: CGRect? = nil,
         completion: (() -> Void)? = nil
     ) -> Bool {
@@ -92,7 +92,7 @@ class Station {
             return false
         }
 
-        if let sessionName {
+        if let paneSessionKey {
             if backend == "zmx" {
                 // If this pane runs an agent and the backend session no longer
                 // exists (e.g. reboot lost the zmx daemon), seed a fresh session
@@ -102,14 +102,14 @@ class Station {
                 // main.
                 if let resumeCmd = agentSessionRef?.resumeCommandLine(), let cwd = workingDirectory {
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                        ZmxSessionRecovery.seedSessionIfMissing(name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+                        ZmxSessionRecovery.seedSessionIfMissing(name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
                         DispatchQueue.main.async {
                             guard let self else { return }
                             self.attachZmx(
                                 app: app,
                                 container: container,
                                 workingDirectory: workingDirectory,
-                                sessionName: sessionName,
+                                paneSessionKey: paneSessionKey,
                                 initialFrame: initialFrame
                             )
                             completion?()
@@ -121,7 +121,7 @@ class Station {
                     app: app,
                     container: container,
                     workingDirectory: workingDirectory,
-                    sessionName: sessionName,
+                    paneSessionKey: paneSessionKey,
                     initialFrame: initialFrame
                 )
                 return surface != nil
@@ -143,18 +143,18 @@ class Station {
     /// against a leaked ZMX_SESSION (e.g. app relaunched from inside a pane):
     /// zmx attach prefers $ZMX_SESSION over its argument, which would silently
     /// attach every pane to the wrong session.
-    static func zmxAttachCommand(sessionName: String) -> String {
-        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(sessionName)"
+    static func zmxAttachCommand(paneSessionKey: String) -> String {
+        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(paneSessionKey)"
     }
 
     private func attachZmx(
         app: ghostty_app_t,
         container: NSView,
         workingDirectory: String?,
-        sessionName: String,
+        paneSessionKey: String,
         initialFrame: CGRect? = nil
     ) {
-        let zmxCommand = Self.zmxAttachCommand(sessionName: sessionName)
+        let zmxCommand = Self.zmxAttachCommand(paneSessionKey: paneSessionKey)
         _createWithCommand(
             app: app,
             container: container,
@@ -163,7 +163,7 @@ class Station {
             initialFrame: initialFrame
         )
         if surface != nil {
-            scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+            scheduleZmxHealthCheck(paneSessionKey: paneSessionKey, container: container, workingDirectory: workingDirectory)
         }
     }
 
@@ -454,8 +454,8 @@ class Station {
     /// Runs a subprocess — call off the main thread only. Returns nil when there
     /// is a live surface (use `readViewportText()` instead) or no backend session.
     func readBackendText(lines: Int = 60) -> String? {
-        guard surface == nil, backend == "zmx", let sessionName else { return nil }
-        return ZmxChannel(sessionName: sessionName).readOutput(lines: lines)
+        guard surface == nil, backend == "zmx", let paneSessionKey else { return nil }
+        return ZmxChannel(paneSessionKey: paneSessionKey).readOutput(lines: lines)
     }
 
     /// Get the process status for status detection
@@ -474,16 +474,16 @@ class Station {
 
     /// Schedule a health check after zmx attach. If the attach client has
     /// exited, re-attach (and only recreate the daemon when it is truly gone).
-    private func scheduleZmxHealthCheck(sessionName: String, container: NSView, workingDirectory: String?) {
+    private func scheduleZmxHealthCheck(paneSessionKey: String, container: NSView, workingDirectory: String?) {
         recoveryTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.checkZmxHealth(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+            self?.checkZmxHealth(paneSessionKey: paneSessionKey, container: container, workingDirectory: workingDirectory)
         }
         recoveryTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.recoveryDelay, execute: work)
     }
 
-    private func checkZmxHealth(sessionName: String, container: NSView, workingDirectory: String?) {
+    private func checkZmxHealth(paneSessionKey: String, container: NSView, workingDirectory: String?) {
         // If the surface was already destroyed, nothing to do.
         guard surface != nil else { return }
         let exited = processStatus == .exited
@@ -492,13 +492,13 @@ class Station {
         // Session existence is a blocking `zmx list` — probe off the main thread,
         // then recover with a plan that never force-kills a still-living session.
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let exists = SessionManager.sessionExists(name: sessionName, backend: "zmx")
+            let exists = SessionManager.sessionExists(name: paneSessionKey, backend: "zmx")
             let plan = ZmxSessionRecovery.plan(processExited: exited, sessionExists: exists)
             guard plan != .none else { return }
-            NSLog("Station: zmx session '%@' attach exited — plan=%@", sessionName, String(describing: plan))
+            NSLog("Station: zmx session '%@' attach exited — plan=%@", paneSessionKey, String(describing: plan))
             DispatchQueue.main.async {
                 self?.recoverZmxSession(
-                    sessionName: sessionName,
+                    paneSessionKey: paneSessionKey,
                     container: container,
                     workingDirectory: workingDirectory,
                     plan: plan
@@ -508,7 +508,7 @@ class Station {
     }
 
     private func recoverZmxSession(
-        sessionName: String,
+        paneSessionKey: String,
         container: NSView,
         workingDirectory: String?,
         plan: ZmxSessionRecovery.Plan
@@ -524,10 +524,10 @@ class Station {
             case .recreate:
                 // Session is gone. Clear any stale socket, then optionally seed
                 // an agent resume so we don't land in an empty shell.
-                ZmxSessionRecovery.forceKillSession(sessionName)
+                ZmxSessionRecovery.forceKillSession(paneSessionKey)
                 if let resumeCmd, let cwd = workingDirectory {
                     ZmxSessionRecovery.seedSessionIfMissing(
-                        name: sessionName, cwd: cwd, agentCommandLine: resumeCmd)
+                        name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
                 }
             }
 
@@ -537,7 +537,7 @@ class Station {
 
                 self.destroy()
 
-                let zmxCommand = Self.zmxAttachCommand(sessionName: sessionName)
+                let zmxCommand = Self.zmxAttachCommand(paneSessionKey: paneSessionKey)
                 self._createWithCommand(
                     app: app,
                     container: container,

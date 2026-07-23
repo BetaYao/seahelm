@@ -77,7 +77,7 @@ class ShipLog {
 
     func register(station: Station, worktreePath: String, branch: String,
                   project: String, startedAt: Date?,
-                  sessionName: String? = nil, backend: String = "zmx") {
+                  paneSessionKey: String? = nil, backend: String = "zmx") {
         lock.lock()
         defer { lock.unlock() }
 
@@ -85,8 +85,8 @@ class ShipLog {
 
         // Create a default channel if we have a session name
         var channel: SailorChannel?
-        if let sessionName = sessionName {
-            channel = ZmxChannel(sessionName: sessionName)
+        if let paneSessionKey = paneSessionKey {
+            channel = ZmxChannel(paneSessionKey: paneSessionKey)
             channels[terminalID] = channel
         }
         backendsByPath[worktreePath] = backend
@@ -119,9 +119,9 @@ class ShipLog {
 
     func unregister(terminalID: String) {
         lock.lock()
-        defer { lock.unlock() }
 
-        if let info = agents[terminalID] {
+        let closed = agents[terminalID]
+        if let info = closed {
             worktreeIndex[info.worktreePath]?.removeAll { $0 == terminalID }
             if worktreeIndex[info.worktreePath]?.isEmpty == true {
                 worktreeIndex.removeValue(forKey: info.worktreePath)
@@ -135,6 +135,21 @@ class ShipLog {
         hookRunningSince.removeValue(forKey: terminalID)
         hookWaitingSince.removeValue(forKey: terminalID)
         eventLog.removeValue(forKey: terminalID)
+        globalSeq += 1
+        let seq = globalSeq
+        lock.unlock()
+
+        // Announce the close so remote mirrors (MqttChannel) can drop the pane's
+        // retained slot topic instead of leaving a ghost. Off the lock, on main.
+        guard let info = closed else { return }
+        let event: [String: Any] = [
+            "type": "pane.closed",
+            "seq": seq,
+            "pane_id": terminalID,
+            "pane_session_key": info.station?.paneSessionKey ?? "",
+            "worktree_path": info.worktreePath,
+        ]
+        DispatchQueue.main.async { EventHub.shared.publish(seq: seq, event: event) }
     }
 
     // MARK: - Worktree Index (1:N)
@@ -380,17 +395,32 @@ class ShipLog {
 
     /// Shape an ingest outcome into a control-API event dict for EventHub.
     static func event(from o: IngestOutcome) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "type": o.statusChanged ? "pane.status_changed" : "pane.updated",
             "seq": o.seq,
             "pane_id": o.info.id,
-            "session_name": o.info.station?.sessionName ?? "",
+            "pane_session_key": o.info.station?.paneSessionKey ?? "",
             "status": o.newStatus.rawValue,
             "old_status": o.oldStatus.rawValue,
             "agent_type": o.info.agentType.rawValue,
             "worktree_path": o.info.worktreePath,
             "last_message": o.info.lastMessage,
         ]
+        // Only a completion (`.agentStopped`) carries the agent's real final prose;
+        // gate emission on the outcome flag so unrelated events never re-send a stale
+        // `lastAssistantMessage` that lingers on the snapshot. Backs the MQTT history feed.
+        if o.isCompletionSignal {
+            dict["is_completion"] = true
+            let final = o.info.lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !final.isEmpty { dict["final_message"] = final }
+        }
+        // A user_prompt event carries what the user typed — surfaced so remote
+        // history can show both sides of the conversation (user + assistant).
+        if case .userPrompt(let text) = o.event.kind {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { dict["user_prompt"] = trimmed }
+        }
+        return dict
     }
 
     /// All observer delivery hops to main for ordering. Subscribers never run on the scan queue.
@@ -471,7 +501,7 @@ class ShipLog {
         if agentType == .claudeCode || agentType == .codex {
             let backend = backendsByPath[worktreePath] ?? "zmx"
             if let zmx = channels[terminalID] as? ZmxChannel {
-                let hooks = HooksChannel(sessionName: zmx.sessionName, backend: backend)
+                let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey, backend: backend)
                 channels[terminalID] = hooks
                 info.channel = hooks
             }
@@ -506,7 +536,7 @@ class ShipLog {
                 // Upgrade channel for supported hook-based agents.
                 if (agentType == .claudeCode || agentType == .codex),
                    let zmx = channels[terminalID] as? ZmxChannel {
-                    let hooks = HooksChannel(sessionName: zmx.sessionName)
+                    let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey)
                     channels[terminalID] = hooks
                     info.channel = hooks
                 }
@@ -722,6 +752,19 @@ class ShipLog {
 
         // cwd_changed only updates routing (handled above via worktreeIndex); no station event.
         guard let event2 = HookDecoder(terminalID: tid, event: event).decode() else { return }
+        // A Stop carries the agent's final prose in `last_assistant_message`. Stash it
+        // on the resolved agent (sentinel-stripped) *before* ingest so the completion
+        // IngestOutcome emits it — this is the only clean "final text" signal (screen
+        // scans leave `lastMessage` on a tool/file line). Covers every Stop path,
+        // including a plain stop that TabCoordinator's suggestion dance never notes.
+        if event.event == .agentStop,
+           let raw = event.data?["last_assistant_message"] as? String {
+            let text = StopHookResponder.stripSentinel(from: raw)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                lock.lock(); agents[tid]?.lastAssistantMessage = text; lock.unlock()
+            }
+        }
         ingest(event2)
         if let hooks = channel(for: tid) as? HooksChannel {
             hooks.handleWebhookEvent(event)
@@ -959,16 +1002,16 @@ class ShipLog {
 
             _Same as the desktop cockpit:_
             `<anything>` — Steer the current agent
-            `/task` — List tasks (worktrees), numbered
-            `/task [@repo] <description>` — Start a task and switch to it
-            `/task #<code|name>` — Switch to that task
-            `/agents` — List this task's agents, numbered
-            `/agents #<code|name>` — Steer that agent
-            `/order #<code|name> <task>` — Send to one agent without switching
-            `/broadcast <task>` — Send a task to every agent
+            `/worktree` — List worktrees, numbered
+            `/worktree [@repo] <description>` — Start a worktree and switch to it
+            `/worktree #<code|name>` — Switch to that worktree
+            `/pane` — List this worktree's panes, numbered
+            `/pane #<code|name>` — Steer that pane
+            `/order #<code|name> <task>` — Send to one pane without switching
+            `/broadcast <task>` — Send a task to every pane
             `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
             `/add` — Desktop only (needs a file picker)
-            `/flag <description>` — Open a GitHub issue for seahelm
+            `/feedback <description>` — Open a GitHub issue for seahelm
 
             _Chat only:_
             `/status` — Status of all agents

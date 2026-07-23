@@ -7,7 +7,7 @@ enum SplitAxis: String, Codable {
 
 /// Runtime split tree node. Leaves hold live Station references.
 indirect enum SplitNode {
-    case leaf(id: String, stationId: String, sessionName: String)
+    case leaf(id: String, stationId: String, paneSessionKey: String)
     case split(id: String, axis: SplitAxis, ratio: CGFloat, first: SplitNode, second: SplitNode)
 
     var id: String {
@@ -28,13 +28,13 @@ indirect enum SplitNode {
     struct LeafInfo {
         let id: String
         let stationId: String
-        let sessionName: String
+        let paneSessionKey: String
     }
 
     var allLeaves: [LeafInfo] {
         switch self {
-        case .leaf(let id, let stationId, let sessionName):
-            return [LeafInfo(id: id, stationId: stationId, sessionName: sessionName)]
+        case .leaf(let id, let stationId, let paneSessionKey):
+            return [LeafInfo(id: id, stationId: stationId, paneSessionKey: paneSessionKey)]
         case .split(_, _, _, let first, let second):
             return first.allLeaves + second.allLeaves
         }
@@ -49,7 +49,7 @@ indirect enum SplitNode {
         let leaves = allLeaves
         var maxIndex = 0
         for leaf in leaves {
-            let name = leaf.sessionName
+            let name = leaf.paneSessionKey
             if name == baseName {
                 continue
             }
@@ -147,20 +147,24 @@ indirect enum SplitNode {
 
 /// Serializable split layout (no live station references).
 indirect enum CodableSplitNode: Codable {
-    case leaf(sessionName: String, title: String?)
+    case leaf(paneSessionKey: String, title: String?)
     case split(axis: String, ratio: Double, first: CodableSplitNode, second: CodableSplitNode)
 
     private enum CodingKeys: String, CodingKey {
-        case type, sessionName, title, axis, ratio, first, second
+        // Persisted disk key stays "sessionName" for backward compat with existing
+        // ~/.config/seahelm/config.json split layouts — only the Swift identifier
+        // was renamed (paneSessionKey). Changing the wire key breaks decode of old
+        // configs, which cascades to a full Config reset (mqtt + layouts lost).
+        case type, paneSessionKey = "sessionName", title, axis, ratio, first, second
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(String.self, forKey: .type)
         if type == "leaf" {
-            let name = try container.decode(String.self, forKey: .sessionName)
+            let name = try container.decode(String.self, forKey: .paneSessionKey)
             let title = try container.decodeIfPresent(String.self, forKey: .title)
-            self = .leaf(sessionName: name, title: title)
+            self = .leaf(paneSessionKey: name, title: title)
         } else {
             let axis = try container.decode(String.self, forKey: .axis)
             let ratio = try container.decode(Double.self, forKey: .ratio)
@@ -173,9 +177,9 @@ indirect enum CodableSplitNode: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .leaf(let sessionName, let title):
+        case .leaf(let paneSessionKey, let title):
             try container.encode("leaf", forKey: .type)
-            try container.encode(sessionName, forKey: .sessionName)
+            try container.encode(paneSessionKey, forKey: .paneSessionKey)
             try container.encodeIfPresent(title, forKey: .title)
         case .split(let axis, let ratio, let first, let second):
             try container.encode("split", forKey: .type)
@@ -189,11 +193,11 @@ indirect enum CodableSplitNode: Codable {
     /// Convert runtime SplitNode to serializable form.
     static func from(_ node: SplitNode) -> CodableSplitNode {
         switch node {
-        case .leaf(_, let stationId, let sessionName):
+        case .leaf(_, let stationId, let paneSessionKey):
             // Capture the pane's last-known strong title so a restored layout can
             // show it before fresh OSC/agent-session data arrives.
             let title = StationRegistry.shared.station(forId: stationId)?.persistedTitle
-            return .leaf(sessionName: sessionName, title: title)
+            return .leaf(paneSessionKey: paneSessionKey, title: title)
         case .split(_, let axis, let ratio, let first, let second):
             return .split(axis: axis.rawValue, ratio: Double(ratio), first: from(first), second: from(second))
         }

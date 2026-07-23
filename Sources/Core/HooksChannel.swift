@@ -13,8 +13,8 @@ class HooksChannel: SailorChannel {
     /// Accumulated hook events for this agent session
     private(set) var events: [HookEvent] = []
 
-    init(sessionName: String, backend: String = "zmx") {
-        self.transport = ZmxChannel(sessionName: sessionName)
+    init(paneSessionKey: String, backend: String = "zmx") {
+        self.transport = ZmxChannel(paneSessionKey: paneSessionKey)
     }
 
     // MARK: - SailorChannel

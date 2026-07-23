@@ -31,91 +31,91 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(BridgeCommandParser.parse("   ", worktrees: wts), .failure(.emptyTask))
     }
 
-    // MARK: - /task
+    // MARK: - /worktree
 
-    func testBareTaskLists() {
-        XCTAssertEqual(parse("/task"), .success(.listWorktrees))
+    func testBareWorktreeLists() {
+        XCTAssertEqual(parse("/worktree"), .success(.listWorktrees))
     }
 
-    func testTaskWithDescriptionCreates() {
-        XCTAssertEqual(parse("/task build login"), .success(.newWorktree(task: "build login")))
+    func testWorktreeWithDescriptionCreates() {
+        XCTAssertEqual(parse("/worktree build login"), .success(.newWorktree(task: "build login")))
     }
 
-    func testTaskWithAtRepoExtractsHint() {
-        XCTAssertEqual(parse("/task @alpha build login"),
+    func testWorktreeWithAtRepoExtractsHint() {
+        XCTAssertEqual(parse("/worktree @alpha build login"),
                        .success(.newWorktree(task: "build login", repoHint: "/workspaces/alpha")))
     }
 
-    func testTaskAtRepoUnknownIgnored() {
-        XCTAssertEqual(parse("/task @nope build login"),
+    func testWorktreeAtRepoUnknownIgnored() {
+        XCTAssertEqual(parse("/worktree @nope build login"),
                        .success(.newWorktree(task: "build login", repoHint: nil)))
     }
 
-    func testTaskAtRepoCaseInsensitive() {
-        XCTAssertEqual(parse("/task @ALPHA x"),
+    func testWorktreeAtRepoCaseInsensitive() {
+        XCTAssertEqual(parse("/worktree @ALPHA x"),
                        .success(.newWorktree(task: "x", repoHint: "/workspaces/alpha")))
     }
 
-    func testTaskHashSelectsByCode() {
-        XCTAssertEqual(parse("/task #2"), .success(.selectWorktree(path: "/repo/fix-y")))
+    func testWorktreeHashSelectsByCode() {
+        XCTAssertEqual(parse("/worktree #2"), .success(.selectWorktree(path: "/repo/fix-y")))
     }
 
-    func testTaskHashSelectsByBranch() {
-        XCTAssertEqual(parse("/task #feat-x"), .success(.selectWorktree(path: "/repo/feat-x")))
+    func testWorktreeHashSelectsByBranch() {
+        XCTAssertEqual(parse("/worktree #feat-x"), .success(.selectWorktree(path: "/repo/feat-x")))
     }
 
-    func testTaskHashIsCaseInsensitive() {
-        XCTAssertEqual(parse("/task #FEAT-X"), .success(.selectWorktree(path: "/repo/feat-x")))
+    func testWorktreeHashIsCaseInsensitive() {
+        XCTAssertEqual(parse("/worktree #FEAT-X"), .success(.selectWorktree(path: "/repo/feat-x")))
     }
 
-    func testTaskHashOutOfRangeFails() {
-        XCTAssertEqual(parse("/task #9"), .failure(.unknownTarget("9")))
-        XCTAssertEqual(parse("/task #0"), .failure(.unknownTarget("0")))
+    func testWorktreeHashOutOfRangeFails() {
+        XCTAssertEqual(parse("/worktree #9"), .failure(.unknownTarget("9")))
+        XCTAssertEqual(parse("/worktree #0"), .failure(.unknownTarget("0")))
     }
 
-    func testTaskHashUnknownNameFails() {
-        XCTAssertEqual(parse("/task #nope"), .failure(.unknownTarget("nope")))
+    func testWorktreeHashUnknownNameFails() {
+        XCTAssertEqual(parse("/worktree #nope"), .failure(.unknownTarget("nope")))
     }
 
     /// The `#` is what separates selecting from creating — without it a
     /// description that happens to be a digit must still start work.
-    func testTaskWithoutHashIsAlwaysCreate() {
-        XCTAssertEqual(parse("/task 2"), .success(.newWorktree(task: "2")))
-        XCTAssertEqual(parse("/task feat-x"), .success(.newWorktree(task: "feat-x")))
+    func testWorktreeWithoutHashIsAlwaysCreate() {
+        XCTAssertEqual(parse("/worktree 2"), .success(.newWorktree(task: "2")))
+        XCTAssertEqual(parse("/worktree feat-x"), .success(.newWorktree(task: "feat-x")))
     }
 
-    func testTaskEmptyDescriptionAfterRepoFails() {
-        XCTAssertEqual(BridgeCommandParser.parse("/task @alpha", worktrees: wts, repoPaths: repos),
+    func testWorktreeEmptyDescriptionAfterRepoFails() {
+        XCTAssertEqual(BridgeCommandParser.parse("/worktree @alpha", worktrees: wts, repoPaths: repos),
                        .success(.newWorktree(task: "@alpha", repoHint: "/workspaces/alpha")))
     }
 
-    // MARK: - /agents
+    // MARK: - /pane
 
-    func testBareAgentsLists() {
-        XCTAssertEqual(parse("/agents"), .success(.listAgents))
-        XCTAssertEqual(parse("/agent"), .success(.listAgents))
+    func testBarePaneLists() {
+        XCTAssertEqual(parse("/pane"), .success(.listAgents))
+        XCTAssertEqual(parse("/panes"), .success(.listAgents))
     }
 
-    func testAgentsSelectsByCode() {
-        XCTAssertEqual(parse("/agents 2"), .success(.selectAgent(id: "t2")))
+    func testPaneSelectsByCode() {
+        XCTAssertEqual(parse("/pane 2"), .success(.selectAgent(id: "t2")))
     }
 
-    /// The `#` is optional here: `/agents` has no create form to disambiguate from.
-    func testAgentsAcceptsHashPrefix() {
-        XCTAssertEqual(parse("/agents #2"), .success(.selectAgent(id: "t2")))
+    /// The `#` is optional here: `/pane` has no create form to disambiguate from.
+    func testPaneAcceptsHashPrefix() {
+        XCTAssertEqual(parse("/pane #2"), .success(.selectAgent(id: "t2")))
     }
 
-    func testAgentsSelectsByBranch() {
-        XCTAssertEqual(parse("/agents feat-x"), .success(.selectAgent(id: "t1")))
+    func testPaneSelectsByBranch() {
+        XCTAssertEqual(parse("/pane feat-x"), .success(.selectAgent(id: "t1")))
     }
 
-    func testAgentsSelectsByProjectSlashBranch() {
-        XCTAssertEqual(parse("/agents alpha/feat-x"), .success(.selectAgent(id: "t1")))
+    func testPaneSelectsByProjectSlashBranch() {
+        XCTAssertEqual(parse("/pane alpha/feat-x"), .success(.selectAgent(id: "t1")))
     }
 
-    func testAgentsUnknownFails() {
-        XCTAssertEqual(parse("/agents nope"), .failure(.unknownTarget("nope")))
-        XCTAssertEqual(parse("/agents 9"), .failure(.unknownTarget("9")))
+    func testPaneUnknownFails() {
+        XCTAssertEqual(parse("/pane nope"), .failure(.unknownTarget("nope")))
+        XCTAssertEqual(parse("/pane 9"), .failure(.unknownTarget("9")))
     }
 
     // MARK: - /order
@@ -169,15 +169,15 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertEqual(parse("/add"), .success(.addRepo))
     }
 
-    // MARK: - /flag
+    // MARK: - /feedback
 
-    func testFlagWithDescription() {
-        XCTAssertEqual(parse("/flag dark mode is broken"),
+    func testFeedbackWithDescription() {
+        XCTAssertEqual(parse("/feedback dark mode is broken"),
                        .success(.flagIssue(title: "dark mode is broken")))
     }
 
-    func testFlagEmptyFails() {
-        XCTAssertEqual(parse("/flag"), .failure(.emptyTask))
+    func testFeedbackEmptyFails() {
+        XCTAssertEqual(parse("/feedback"), .failure(.emptyTask))
     }
 
     func testUnknownCommand() {
@@ -222,7 +222,7 @@ final class BridgeCommandParserTests: XCTestCase {
     // MARK: - Verb casing
 
     func testVerbIsCaseInsensitive() {
-        XCTAssertEqual(parse("/TASK"), .success(.listWorktrees))
+        XCTAssertEqual(parse("/WORKTREE"), .success(.listWorktrees))
         XCTAssertEqual(parse("/Return"), .success(.removeAll))
     }
 
@@ -233,13 +233,13 @@ final class BridgeCommandParserTests: XCTestCase {
         let taskList = BridgeCommandFormatter.worktreeList(wts, currentPath: nil)
         for (index, wt) in wts.enumerated() {
             XCTAssertTrue(taskList.contains("\(index + 1). \(wt.repo) / \(wt.branch)"))
-            XCTAssertEqual(parse("/task #\(index + 1)"), .success(.selectWorktree(path: wt.path)))
+            XCTAssertEqual(parse("/worktree #\(index + 1)"), .success(.selectWorktree(path: wt.path)))
         }
 
         let agentList = BridgeCommandFormatter.agentList(agents, currentId: nil)
         for (index, agent) in agents.enumerated() {
             XCTAssertTrue(agentList.contains("\(index + 1). \(agent.type) — \(agent.title)"))
-            XCTAssertEqual(parse("/agents \(index + 1)"), .success(.selectAgent(id: agent.id)))
+            XCTAssertEqual(parse("/pane \(index + 1)"), .success(.selectAgent(id: agent.id)))
         }
     }
 
@@ -254,12 +254,12 @@ final class BridgeCommandParserTests: XCTestCase {
     /// listing only ever covers one worktree's agents.
     func testAgentListHeadsWithRepoAndBranch() {
         let list = BridgeCommandFormatter.agentList(agents, currentId: nil)
-        XCTAssertTrue(list.contains("**Agents** - alpha - feat-x"), list)
+        XCTAssertTrue(list.contains("**Panes** - alpha - feat-x"), list)
         XCTAssertFalse(list.contains("1. alpha / feat-x"), "repo/branch should not repeat per row: \(list)")
     }
 
     func testFormatterEmptyStates() {
-        XCTAssertEqual(BridgeCommandFormatter.agentList([], currentId: nil), "No agents in this task.")
-        XCTAssertTrue(BridgeCommandFormatter.worktreeList([], currentPath: nil).contains("No tasks"))
+        XCTAssertEqual(BridgeCommandFormatter.agentList([], currentId: nil), "No panes in this worktree.")
+        XCTAssertTrue(BridgeCommandFormatter.worktreeList([], currentPath: nil).contains("No worktrees"))
     }
 }

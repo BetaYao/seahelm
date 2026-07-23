@@ -4,21 +4,21 @@ import Foundation
 /// Works with any CLI tool — no agent-side support needed.
 class ZmxChannel: SailorChannel {
     let channelType: SailorChannelType = .zmx
-    let sessionName: String
+    let paneSessionKey: String
 
-    init(sessionName: String) {
-        self.sessionName = sessionName
+    init(paneSessionKey: String) {
+        self.paneSessionKey = paneSessionKey
     }
 
     /// Send a text command via zmx run.
     func sendCommand(_ command: String) {
-        let args = [ZmxLocator.executable(), "run", sessionName, command]
+        let args = [ZmxLocator.executable(), "run", paneSessionKey, command]
         runZmx(args)
     }
 
     /// Read the last N lines of terminal output via zmx history.
     func readOutput(lines: Int = 50) -> String? {
-        let args = [ZmxLocator.executable(), "history", sessionName]
+        let args = [ZmxLocator.executable(), "history", paneSessionKey]
         guard let output = runZmxWithOutput(args) else {
             return nil
         }

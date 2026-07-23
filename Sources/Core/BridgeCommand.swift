@@ -28,23 +28,23 @@ struct AgentRef: Equatable {
 /// chat channel.
 ///
 /// Two sigils, and they are not interchangeable:
-///   - `@name` picks a **repo** (`/task @seahelm …`) or, for `/return`, a repo
+///   - `@name` picks a **repo** (`/worktree @seahelm …`) or, for `/return`, a repo
 ///     or a branch.
-///   - `#code|name` picks an existing **worktree** (`/task #2`) or **agent**
+///   - `#code|name` picks an existing **worktree** (`/worktree #2`) or **pane**
 ///     (`/order #1 …`). It is what disambiguates selecting from creating:
-///     `/task fix login` starts work, `/task #3` moves to it.
+///     `/worktree fix login` starts work, `/worktree #3` moves to it.
 enum BridgeCommand: Equatable {
-    /// `/task` — every worktree, numbered.
+    /// `/worktree` — every worktree, numbered.
     case listWorktrees
-    /// `/task [@repo] <description>` — start a worktree and make it current.
+    /// `/worktree [@repo] <description>` — start a worktree and make it current.
     case newWorktree(task: String, repoHint: String? = nil)
-    /// `/task #<code|branch>` — make an existing worktree current.
+    /// `/worktree #<code|branch>` — make an existing worktree current.
     case selectWorktree(path: String)
-    /// `/agents` — every agent in the current worktree, numbered.
+    /// `/pane` — every pane in the current worktree, numbered.
     case listAgents
-    /// `/agents #<code|name>` — make one of them current.
+    /// `/pane #<code|name>` — make one of them current.
     case selectAgent(id: String)
-    /// `/order #<code|name> <task>` — send to one agent without moving current.
+    /// `/order #<code|name> <task>` — send to one pane without moving current.
     case orderAgent(agentId: String, task: String)
     case broadcast(task: String)
     case addRepo
@@ -56,7 +56,7 @@ enum BridgeCommand: Equatable {
     /// `/return @branch` — delete one linked worktree (never the main one — that
     /// is `removeRepo`).
     case removeWorktree(worktreePath: String)
-    /// `/flag <description>` — open a GitHub issue pre-filled with the description.
+    /// `/feedback <description>` — open a GitHub issue pre-filled with the description.
     case flagIssue(title: String)
 }
 
@@ -153,7 +153,7 @@ enum BridgeCommandParser {
         let rest = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
 
         switch verb {
-        case "task":
+        case "worktree":
             if rest.isEmpty { return .success(.listWorktrees) }
             // `#` is what separates "go to that one" from "start this one", so a
             // description may never be mistaken for a selection.
@@ -167,7 +167,7 @@ enum BridgeCommandParser {
             let (hint, task) = extractRepoHint(rest, repoPaths: repoPaths)
             return task.isEmpty ? .failure(.emptyTask) : .success(.newWorktree(task: task, repoHint: hint))
 
-        case "agent", "agents":
+        case "pane", "panes":
             if rest.isEmpty { return .success(.listAgents) }
             guard let agent = resolveIndexed(rest, in: agents, names: agentNames) else {
                 return .failure(.unknownTarget(rest))
@@ -192,7 +192,7 @@ enum BridgeCommandParser {
         case "return":
             return Self.resolveRemoveTarget(rest, worktrees: worktrees, repoPaths: repoPaths)
 
-        case "flag":
+        case "feedback":
             return rest.isEmpty ? .failure(.emptyTask) : .success(.flagIssue(title: rest))
 
         default:
@@ -205,23 +205,23 @@ enum BridgeCommandParser {
 /// with `BridgeCommandParser.resolveIndexed`.
 enum BridgeCommandFormatter {
     static func worktreeList(_ worktrees: [CabinRef], currentPath: String?) -> String {
-        guard !worktrees.isEmpty else { return "No tasks. `/task <description>` to start one." }
+        guard !worktrees.isEmpty else { return "No worktrees. `/worktree <description>` to start one." }
         let lines = worktrees.enumerated().map { index, wt in
             "\(index + 1). \(wt.repo) / \(wt.branch)\(wt.path == currentPath ? "  ← current" : "")"
         }
-        return (["**Tasks**", ""] + lines + ["", "`/task #<code|name>` to switch."]).joined(separator: "\n")
+        return (["**Worktrees**", ""] + lines + ["", "`/worktree #<code|name>` to switch."]).joined(separator: "\n")
     }
 
     static func agentList(_ agents: [AgentRef], currentId: String?) -> String {
         // The header reads off the first row rather than taking its own repo and
         // branch parameters, so it cannot disagree with the rows beneath it.
-        guard let first = agents.first else { return "No agents in this task." }
+        guard let first = agents.first else { return "No panes in this worktree." }
         let lines = agents.enumerated().map { index, agent in
             "\(index + 1). \(agent.type) — \(agent.title)"
                 + (agent.id == currentId ? "  ← current" : "")
         }
-        return (["**Agents** - \(first.project) - \(first.branch)", ""]
+        return (["**Panes** - \(first.project) - \(first.branch)", ""]
                 + lines
-                + ["", "`/agents #<code>` to switch."]).joined(separator: "\n")
+                + ["", "`/pane #<code>` to switch."]).joined(separator: "\n")
     }
 }

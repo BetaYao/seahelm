@@ -319,7 +319,7 @@ class StationReparentTests: XCTestCase {
     func testCreateWithCommandGracefulFailure() {
         let station = Station()
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        let result = station.create(in: container, workingDirectory: "/tmp", sessionName: nil)
+        let result = station.create(in: container, workingDirectory: "/tmp", paneSessionKey: nil)
         // Without GhosttyBridge initialized, this should return false gracefully
         XCTAssertFalse(result)
     }

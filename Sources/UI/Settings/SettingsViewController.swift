@@ -123,7 +123,7 @@ class SettingsViewController: NSViewController {
         let view = NSView()
 
         // Workspace paths section
-        let pathsLabel = NSTextField(labelWithString: "Workspace Paths:")
+        let pathsLabel = NSTextField(labelWithString: "Project Paths:")
         pathsLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         pathsLabel.textColor = Theme.textPrimary
         pathsLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -595,7 +595,7 @@ class SettingsViewController: NSViewController {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.message = "Select workspace directories"
+        panel.message = "Select project directories"
 
         panel.beginSheetModal(for: view.window!) { [weak self] response in
             guard response == .OK, let self else { return }

@@ -47,6 +47,10 @@
   /* ── layout ─────────────────────────────────────────────── */
   main{flex:1;display:grid;grid-template-columns:312px 1fr 392px;overflow:hidden}
   .col{overflow-y:auto;padding:16px;border-right:1px solid rgba(232,226,213,.05)}
+  /* mid column: header/events fixed, feed scrolls, cmdbar pinned to the bottom */
+  #midcol{display:flex;flex-direction:column;overflow:hidden}
+  #midcol #feed{flex:1 1 auto;min-height:0;overflow-y:auto}
+  #midcol .cmdbar{flex:0 0 auto}
   .col::-webkit-scrollbar{width:8px} .col::-webkit-scrollbar-thumb{background:var(--stone);border-radius:4px}
   .col h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
     color:var(--ash);margin:2px 0 12px;font-weight:500}
@@ -67,8 +71,12 @@
     font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ash)}
   .repo-head:first-child{margin-top:0}
   .wt{margin-bottom:4px;padding-left:4px}
-  .wt-head{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;
-    font-family:var(--serif);font-size:17px;color:var(--bone)}
+  .wt-head{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px}
+  .wt-head .wt-label{flex:1;min-width:0}
+  .wt-head .wt-title{font-family:var(--serif);font-size:17px;color:var(--bone);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wt-head .wt-branch{font-family:var(--mono);font-size:11px;color:var(--ash);
+    letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
   .pane-row{display:flex;align-items:center;gap:9px;padding:8px 10px 8px 22px;border-radius:10px;
     cursor:pointer;font-size:14px;transition:background .12s;border:1px solid transparent}
   .pane-row:hover{background:var(--lamp)}
@@ -82,7 +90,19 @@
   .feed{display:flex;flex-direction:column;gap:9px}
   .msg{max-width:82%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.45;word-break:break-word}
   .msg.you{align-self:flex-end;background:var(--lamp2);border:1px solid rgba(216,107,83,.25)}
-  .msg.agent{align-self:flex-start;background:var(--lamp)}
+  .msg.agent{align-self:flex-start;background:var(--lamp);max-width:94%}
+  .msg.agent h4{font-family:var(--sans);font-size:14px;font-weight:600;color:var(--bone);margin:10px 0 4px;letter-spacing:.01em}
+  .msg.agent p{margin:6px 0}
+  .msg.agent ul,.msg.agent ol{margin:6px 0;padding-left:20px}
+  .msg.agent li{margin:3px 0}
+  .msg.agent strong{color:var(--bone);font-weight:600}
+  .msg.agent em{font-style:italic;color:var(--bone)}
+  .msg.agent code{font-family:var(--mono);font-size:12px;background:rgba(232,226,213,.09);
+    color:#E8C9A8;padding:1px 5px;border-radius:4px;word-break:break-word}
+  .msg.agent pre{background:rgba(0,0,0,.32);border:1px solid var(--stone);border-radius:8px;
+    padding:10px 12px;margin:8px 0;overflow-x:auto}
+  .msg.agent pre code{background:none;color:var(--bone);padding:0;font-size:12px;line-height:1.55;white-space:pre}
+  .msg.agent>:first-child{margin-top:0} .msg.agent>:last-child{margin-bottom:0}
   .msg.ask{align-self:flex-start;background:rgba(198,153,63,.12);border:1px solid rgba(198,153,63,.3)}
   .msg.status{align-self:center;color:var(--ash);font-family:var(--mono);font-size:12px;background:none;padding:2px}
   .cmdbar{display:flex;gap:8px;padding:12px 0 2px;border-top:1px solid rgba(232,226,213,.06);margin-top:14px}
@@ -178,6 +198,38 @@ function normStatus(s){
 const stColor = s => STC[normStatus(s)] || STC.unknown;
 // pane_id is a UUID (station id); show a short, stable prefix.
 const shortId = id => String(id||'').split('-')[0].slice(0,8) || '—';
+const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Minimal, self-contained, XSS-safe markdown → HTML (escape first, then structure).
+// Handles: ``` code fences, `inline code`, **bold**, *italic*, # headings,
+// - / * / 1. lists, blank-line paragraphs. No external lib (CSP/offline safe).
+function md(src){
+  const e = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const inline = s => e(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
+  let out = '', ul = false, ol = false, code = false, buf = '';
+  const closeLists = () => { if (ul) { out += '</ul>'; ul = false; } if (ol) { out += '</ol>'; ol = false; } };
+  for (const line of lines) {
+    if (/^```/.test(line)) {
+      if (code) { out += '<pre><code>' + e(buf) + '</code></pre>'; buf = ''; code = false; }
+      else { closeLists(); code = true; }
+      continue;
+    }
+    if (code) { buf += line + '\n'; continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)/);
+    if (h) { closeLists(); out += '<h4>' + inline(h[2]) + '</h4>'; continue; }
+    const uli = line.match(/^\s*[-*]\s+(.*)/);
+    if (uli) { if (ol) { out += '</ol>'; ol = false; } if (!ul) { out += '<ul>'; ul = true; } out += '<li>' + inline(uli[1]) + '</li>'; continue; }
+    const oli = line.match(/^\s*\d+\.\s+(.*)/);
+    if (oli) { if (ul) { out += '</ul>'; ul = false; } if (!ol) { out += '<ol>'; ol = true; } out += '<li>' + inline(oli[1]) + '</li>'; continue; }
+    if (line.trim() === '') { closeLists(); continue; }
+    closeLists(); out += '<p>' + inline(line) + '</p>';
+  }
+  closeLists(); if (code) out += '<pre><code>' + e(buf) + '</code></pre>';
+  return out;
+}
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
@@ -232,7 +284,8 @@ function onMessage(topic, raw){
     const corr = seg[seg.length-1];
     const pid = histReq.get(corr);
     if (pid && m && m.result && Array.isArray(m.result.messages)){
-      S.msgs.set(pid, m.result.messages);
+      // show the most recent conversation turns (user + assistant), newest last
+      S.msgs.set(pid, m.result.messages.slice(-10));
       histReq.delete(corr);
       if (S.sel===pid) renderDetail();
     }
@@ -241,8 +294,14 @@ function onMessage(topic, raw){
 function pushMsg(pid, m){
   if (!S.msgs.has(pid)) S.msgs.set(pid, []);
   if (m && m.messages){ S.msgs.set(pid, m.messages); return; }
-  const kind = m.kind || (m.type==='pane.status_changed' ? 'status' : 'agent');
-  S.msgs.get(pid).push({ kind, text: m.last_message || m.text || JSON.stringify(m) });
+  // Feed = final messages only. A live pane/message event carries EVERY agent
+  // event (tool/command lines, status churn) in `last_message`; only a completion
+  // event carries `final_message` (the Stop hook's last_assistant_message). Skip
+  // the rest so the feed doesn't fill with tool noise. User echoes (kind:'you')
+  // are kept so you can see what you sent.
+  const finalText = (m.final_message || '').trim();
+  if (finalText) { S.msgs.get(pid).push({ kind:'agent', text: finalText }); return; }
+  if (m.kind === 'you' && (m.text || '').trim()) { S.msgs.get(pid).push({ kind:'you', text: m.text }); }
 }
 
 // ── render ─────────────────────────────────────────────────────────────────
@@ -278,13 +337,20 @@ function renderTree(){
     for (const [wt,list] of wtMap){
       const wrap=document.createElement('div'); wrap.className='wt';
       const head=document.createElement('div'); head.className='wt-head';
-      const label = list[0][1].branch || wt.split('/').pop();
-      head.innerHTML=`<span class="grow">${label}</span><span class="badge">${list.length}</span>`;
+      const first = list[0][1];
+      // worktree title = worktree dir name (last path segment); branch = git branch
+      const wtTitle = (first.worktree_path||wt).split('/').pop() || wt;
+      const wtBranch = first.branch || '';
+      const branchLine = (wtBranch && wtBranch!==wtTitle)
+        ? `<div class="wt-branch">${esc(wtBranch)}</div>` : '';
+      head.innerHTML=`<span class="wt-label"><div class="wt-title">${esc(wtTitle)}</div>${branchLine}</span><span class="badge">${list.length}</span>`;
       wrap.appendChild(head);
       for (const [pid,p] of list){
         const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
+        // pane name = stable pane title, fall back to short pane id (payload UUID)
+        const name = (p.title||'').trim() || shortId(p.pane_id||pid);
         row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
-          <span class="pid">${shortId(pid)}</span><span class="grow agent">${p.agent_type||''}</span>
+          <span class="pid grow">${esc(name)}</span><span class="agent">${esc(p.agent_type||'')}</span>
           ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;
         row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
         wrap.appendChild(row);
@@ -298,7 +364,7 @@ function renderDetail(){
   ev.innerHTML=''; feed.innerHTML='';
   if(!pid){ head.textContent='Pane 详情'; feed.innerHTML='<div class="muted">选择一个 pane</div>'; return; }
   const p=S.panes.get(pid)||{};
-  head.textContent=`${p.project||''} · ${p.branch||''} · ${shortId(pid)} · ${normStatus(p.status)}`;
+  head.textContent=`${p.project||''} · ${p.branch||''} · ${shortId(p.pane_id||pid)} · ${normStatus(p.status)}`;
   const e=S.events.get(pid);
   if(e){
     const box=document.createElement('div'); box.className='ev';
@@ -318,7 +384,8 @@ function renderDetail(){
     const d=document.createElement('div');
     const k=m.kind||'agent';
     d.className='msg '+(k==='you'?'you':k==='status'?'status':k==='ask'?'ask':'agent');
-    d.textContent=m.text||'';
+    // agent/ask final messages are markdown → render; you/status stay plain text
+    if (k==='agent'||k==='ask') d.innerHTML=md(m.text||''); else d.textContent=m.text||'';
     feed.appendChild(d);
   });
   feed.scrollTop=feed.scrollHeight;
@@ -339,7 +406,8 @@ function sendCommand(method, params){
 function sendText(){
   const pid=S.sel; if(!pid) return alert('先选 pane');
   const v=$('sendText').value.trim(); if(!v) return;
-  sendCommand('pane.send_text', {pane_id:pid, text:v, enter:true});
+  // pid is the stable slot key (pane_session_key) — the remote addressing key (§15)
+  sendCommand('pane.send_text', {pane_session_key:pid, text:v, enter:true});
   $('sendText').value='';
 }
 function pullHistory(){
@@ -347,7 +415,7 @@ function pullHistory(){
   const corr='h'+(++corrN); const reply_to=`${base()}/reply/web/${corr}`;
   histReq.set(corr, pid);
   S.client.subscribe(reply_to,{qos:1});
-  const payload={pane_id:pid, limit:50, reply_to, corr};
+  const payload={pane_session_key:pid, limit:10, reply_to, corr};
   S.client.publish(`${base()}/history/request`, JSON.stringify(payload), {qos:1});
   log('tx', `${base()}/history/request`, payload);
 }
@@ -362,9 +430,9 @@ function pubMock(){
   const b=base();
   const pub=(t,o,retain=true)=>{ S.client.publish(`${b}/${t}`, JSON.stringify(o), {qos:1, retain}); log('tx',`${b}/${t}`,o); };
   pub('presence', {online:true, seq:1});
-  pub('pane/p1/status', {pane_id:'p1',session_name:'seahelm-main-p1',worktree_path:'/repo/seahelm',branch:'main',project:'seahelm',agent_type:'claude',status:'running',last_message:'重排灵动岛卡片间距',seq:2});
-  pub('pane/p3/status', {pane_id:'p3',session_name:'seahelm-feat-p3',worktree_path:'/repo/seahelm-feat',branch:'feat-island',project:'seahelm',agent_type:'claude',status:'waiting',last_message:'等你答:覆盖已有分支?',seq:3});
-  pub('pane/p8/status', {pane_id:'p8',session_name:'claw-p8',worktree_path:'/repo/claw',branch:'refactor-gateway',project:'claw-api',agent_type:'gemini',status:'failed',last_message:'npm test 3 处断言未过',seq:4});
+  pub('pane/p1/status', {pane_id:'p1',pane_session_key:'seahelm-main-p1',worktree_path:'/repo/seahelm',branch:'main',project:'seahelm',agent_type:'claude',status:'running',last_message:'重排灵动岛卡片间距',seq:2});
+  pub('pane/p3/status', {pane_id:'p3',pane_session_key:'seahelm-feat-p3',worktree_path:'/repo/seahelm-feat',branch:'feat-island',project:'seahelm',agent_type:'claude',status:'waiting',last_message:'等你答:覆盖已有分支?',seq:3});
+  pub('pane/p8/status', {pane_id:'p8',pane_session_key:'claw-p8',worktree_path:'/repo/claw',branch:'refactor-gateway',project:'claw-api',agent_type:'gemini',status:'failed',last_message:'npm test 3 处断言未过',seq:4});
   pub('worktree/main/status', {worktree_id:'main',worktree_path:'/repo/seahelm',branch:'main',project:'seahelm',status:'running',pane_count:1,seq:5});
   pub('focus', {pane_id:'p3',kind:'blocked',headline:'Claude',line:'覆盖已有分支?',worktree:'feat-island',counts:{running:1,waiting:1,failed:1,total:3},seq:6});
   pub('pane/p3/event', {type:'question',question_id:'q-1',pane_id:'p3',prompt:'覆盖已有分支?会丢弃未提交改动',options:['批准','拒绝'],danger:true,seq:7}, false);

@@ -747,7 +747,7 @@ class DashboardViewController: NSViewController {
         emptyStateView.addSubview(button)
 
         // Subtitle label
-        let label = NSTextField(labelWithString: "Add a workspace to get started")
+        let label = NSTextField(labelWithString: "Add a project to get started")
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 14)
         label.textColor = .secondaryLabelColor
@@ -756,7 +756,7 @@ class DashboardViewController: NSViewController {
 
         emptyStateGuideRows = [
             EmptyStateGuideRow(marker: "1.", command: "Add a deck", detail: "pick a folder above"),
-            EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a cabin"),
+            EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a project"),
             EmptyStateGuideRow(marker: "3.", command: "/order @branch", detail: "give the agent an order"),
             EmptyStateGuideRow(marker: "4.", command: "/remove", detail: "clean up finished work"),
         ]
@@ -991,7 +991,7 @@ class DashboardViewController: NSViewController {
                 // Ensure station is created
                 if station.surface == nil {
                     let stationId = leaf.stationId
-                    _ = station.create(in: container, workingDirectory: worktreePath, sessionName: station.sessionName) { [weak splitView] in
+                    _ = station.create(in: container, workingDirectory: worktreePath, paneSessionKey: station.paneSessionKey) { [weak splitView] in
                         // Async backend: register the view once creation finishes
                         guard let splitView, let termView = station.view else { return }
                         splitView.surfaceViews[stationId] = termView
@@ -1540,7 +1540,7 @@ class DashboardViewController: NSViewController {
         case .deleteFocused:
             guard let agent = focusedSailor else { return }
             guard !agent.isMainWorktree else {
-                windowKeyboardMode?.flashHint("The main cabin cannot be deleted")
+                windowKeyboardMode?.flashHint("The main project cannot be deleted")
                 return
             }
             windowKeyboardMode?.beginDelete(agentId: agent.id)
@@ -1934,7 +1934,7 @@ extension DashboardViewController {
             .first(where: { $0.id == leaf.stationId }) {
             return PaneTitleResolver.title(for: sailor)
         }
-        return leaf.sessionName
+        return leaf.paneSessionKey
     }
 
     /// Called by the status/title refresh path so edit-mode terminal tabs track
@@ -2270,10 +2270,10 @@ final class DashboardOverviewView: NSView {
         groupingButton.action = #selector(showGroupingMenu(_:))
 
         let entries: [(CabinGroupingMode, String)] = [
-            (.repository, "Group by Deck"),
+            (.repository, "Group by Project"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
-            (.sailor, "Expand All Sailors"),
+            (.sailor, "Expand All Panes"),
         ]
         for (mode, title) in entries {
             let item = NSMenuItem(title: title, action: #selector(selectGroupingMode(_:)), keyEquivalent: "")
@@ -2310,10 +2310,10 @@ final class DashboardOverviewView: NSView {
         }
         let description: String
         switch groupingMode {
-        case .repository: description = "Group cabins by deck"
-        case .status: description = "Group cabins by status"
-        case .activityTime: description = "Group cabins by time"
-        case .sailor: description = "Expand cabins into sailors"
+        case .repository: description = "Group projects by deck"
+        case .status: description = "Group projects by status"
+        case .activityTime: description = "Group projects by time"
+        case .sailor: description = "Expand projects into sailors"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2380,9 +2380,10 @@ final class DashboardOverviewView: NSView {
         bar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
 
-        // Immersive composer: filled bar, no border / top rule.
+        // Immersive composer: filled bar flush to the panel edges, no border /
+        // top rule / floating inner box.
         commandInput.showsChrome = false
-        commandInput.boxCornerRadius = 8
+        commandInput.boxCornerRadius = 0
         commandInput.translatesAutoresizingMaskIntoConstraints = false
         commandInput.onSubmit = { [weak self] text in
             let t = text.trimmingCharacters(in: .whitespaces)
@@ -2427,8 +2428,8 @@ final class DashboardOverviewView: NSView {
         addSubview(menuContainer)
         NSLayoutConstraint.activate([
             commandInput.topAnchor.constraint(equalTo: bar.topAnchor),
-            commandInput.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
-            commandInput.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            commandInput.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            commandInput.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
             commandInput.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
 
             menuContainer.leadingAnchor.constraint(equalTo: commandInput.boxLeadingAnchor),
@@ -2615,7 +2616,7 @@ final class DashboardOverviewView: NSView {
 
     private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
         let running = sailors.filter { SailorStatus.highestPriority($0.paneStatuses) == .running }.count
-        headerSub.stringValue = "\(sailors.count) cabins · \(running) running"
+        headerSub.stringValue = "\(sailors.count) projects · \(running) running"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
@@ -2655,6 +2656,7 @@ final class DashboardOverviewView: NSView {
                                   showsRepository: groupingMode != .repository)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
+                row.onDeleteWithBranch = { [weak self] path in self?.onDeleteWorktree?(path) }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((groupedItem.id, groupedItem.path))
@@ -2826,6 +2828,7 @@ final class DashboardOverviewView: NSView {
     private final class RowView: NSView {
         var onTap: ((String) -> Void)?
         var onDelete: ((String) -> Void)?
+        var onDeleteWithBranch: ((String) -> Void)?
         private let path: String
         private let selected: Bool
 
@@ -2992,9 +2995,12 @@ final class DashboardOverviewView: NSView {
                 menu.addItem(item)
             }
             menu.addItem(.separator())
-            let deleteItem = NSMenuItem(title: "Delete Cabin", action: #selector(deleteAction), keyEquivalent: "")
+            let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteAction), keyEquivalent: "")
             deleteItem.target = self
             menu.addItem(deleteItem)
+            let deleteBranchItem = NSMenuItem(title: "Delete + Branch", action: #selector(deleteWithBranchAction), keyEquivalent: "")
+            deleteBranchItem.target = self
+            menu.addItem(deleteBranchItem)
             return menu
         }
 
@@ -3012,6 +3018,8 @@ final class DashboardOverviewView: NSView {
         @objc private func copyPathAction() { CabinShellActions.copyPath(path) }
 
         @objc private func deleteAction() { onDelete?(path) }
+
+        @objc private func deleteWithBranchAction() { onDeleteWithBranch?(path) }
 
         private var tracking: NSTrackingArea?
         override func updateTrackingAreas() {

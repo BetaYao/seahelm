@@ -30,13 +30,13 @@ enum MenuBuilder {
         let firstMateMenuItem = NSMenuItem()
         let firstMateMenu = NSMenu(title: "First Mate")
         let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
-            ("Task (/task)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
-            ("Agents (/agents)", #selector(MainWindowController.helmAgentsCommand), "", []),
+            ("Worktree (/worktree)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
+            ("Pane (/pane)", #selector(MainWindowController.helmAgentsCommand), "", []),
             ("Order (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
             ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
-            ("Add Deck (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
-            ("Flag (/flag)", #selector(MainWindowController.helmFlagCommand), "f", [.command, .shift]),
+            ("Add Project (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
+            ("Feedback (/feedback)", #selector(MainWindowController.helmFlagCommand), "f", [.command, .shift]),
         ]
         for (title, action, key, mods) in commands {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)

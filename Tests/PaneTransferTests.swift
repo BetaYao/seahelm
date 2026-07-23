@@ -63,7 +63,7 @@ final class PaneTransferTests: XCTestCase {
 
         // Repo A — the source pane's repo. Its main worktree is what must survive.
         let aMain = WorktreeInfo(path: "/repo-a", branch: "main", commitHash: "aaaa1111", isMainWorktree: true)
-        let aTree = SplitTree(worktreePath: aMain.path, rootLeafId: "leaf-a", stationId: "surface-a", sessionName: "a")
+        let aTree = SplitTree(worktreePath: aMain.path, rootLeafId: "leaf-a", stationId: "surface-a", paneSessionKey: "a")
         _ = coordinator.workspaceManager.addTab(repoPath: "/repo-a", worktrees: [aMain])
         coordinator.allWorktrees.append((info: aMain, tree: aTree))
         coordinator.worktreeRepoCache[aMain.path] = "/repo-a"
@@ -71,7 +71,7 @@ final class PaneTransferTests: XCTestCase {
 
         // Repo B — where a worktree named "collide" is about to appear.
         let bMain = WorktreeInfo(path: "/repo-b", branch: "main", commitHash: "bbbb2222", isMainWorktree: true)
-        let bTree = SplitTree(worktreePath: bMain.path, rootLeafId: "leaf-b", stationId: "surface-b", sessionName: "b")
+        let bTree = SplitTree(worktreePath: bMain.path, rootLeafId: "leaf-b", stationId: "surface-b", paneSessionKey: "b")
         let bTab = coordinator.workspaceManager.addTab(repoPath: "/repo-b", worktrees: [bMain])
         coordinator.allWorktrees.append((info: bMain, tree: bTree))
         coordinator.worktreeRepoCache[bMain.path] = "/repo-b"
@@ -133,9 +133,9 @@ final class PaneTransferTests: XCTestCase {
         let manager = StationManager()
         let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
         let tree = manager.tree(for: info, backend: "zmx")
-        let originalNames = tree.allLeaves.map(\.sessionName)
+        let originalNames = tree.allLeaves.map(\.paneSessionKey)
         let transferred = manager.transferTree(fromPath: "/repo", toPath: "/worktrees/feature-x")
-        XCTAssertEqual(transferred?.allLeaves.map(\.sessionName), originalNames)
+        XCTAssertEqual(transferred?.allLeaves.map(\.paneSessionKey), originalNames)
     }
 
     func testTransferTreeReturnsNilForUnknownPath() {

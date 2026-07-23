@@ -67,7 +67,10 @@ struct HookDecoder: SignalDecoder {
         case .subagentStart:
             return .sessionStarted(label: "Subagent started")
         case .userPrompt:
-            return .userPrompt(event.data?["message"] as? String ?? "Processing prompt")
+            // Claude Code's UserPromptSubmit payload carries the text in `prompt`;
+            // other sources use `message`. Fall back to a placeholder only if neither.
+            return .userPrompt(event.data?["message"] as? String
+                ?? event.data?["prompt"] as? String ?? "Processing prompt")
         case .toolUseStart, .toolUseEnd, .toolUseFailed:
             // AskUserQuestion blocks the agent on a choice — surface it as a
             // First Mate question card instead of a generic tool-use activity.

@@ -238,7 +238,7 @@ class StatusPublisher {
             // Prefer process-tree identification over screen-text scraping; it is
             // robust to wrappers (node→codex) and to agents that clear their name
             // off screen. Falls back to text detection when the probe is unsure.
-            let probe = probedSession(terminalID: terminalID, sessionName: surface.sessionName, pollCycle: pollCycle)
+            let probe = probedSession(terminalID: terminalID, paneSessionKey: surface.paneSessionKey, pollCycle: pollCycle)
             let probedType = probe.agentType
             let commandLine = probe.commandLine
             let detectedSailorType = probedType != .unknown ? probedType : SailorType.detect(fromLowercased: lowerContent)
@@ -316,10 +316,10 @@ class StatusPublisher {
     /// `probeRefreshStride` cycles. Runs on the poll background queue.
     private func probedSession(
         terminalID: String,
-        sessionName: String?,
+        paneSessionKey: String?,
         pollCycle: Int
     ) -> (agentType: SailorType, commandLine: String?) {
-        guard let sessionName else { return (.unknown, nil) }
+        guard let paneSessionKey else { return (.unknown, nil) }
         lock.lock()
         let cachedType = probedTypes[terminalID]
         let cachedCmd = probedCommandLines[terminalID]
@@ -335,7 +335,7 @@ class StatusPublisher {
                 return (cachedType ?? .unknown, cachedCmd)
             }
         }
-        let probe = ProcessProbe.probeSession(sessionName: sessionName)
+        let probe = ProcessProbe.probeSession(paneSessionKey: paneSessionKey)
         let type = SailorType.fromManifestId(probe.agentId)
         lock.lock()
         // Never downgrade a known identity to unknown on a transient probe miss.

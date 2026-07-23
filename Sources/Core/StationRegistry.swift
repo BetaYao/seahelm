@@ -41,7 +41,7 @@ class StationRegistry {
     /// agents receive as SEAHELM_PANE_ID and use to reference their own pane.
     func station(forSessionName name: String) -> Station? {
         lock.lock(); defer { lock.unlock() }
-        return stations.values.first { $0.sessionName == name }
+        return stations.values.first { $0.paneSessionKey == name }
     }
 
     /// Snapshot of all live stations (for broadcast operations like

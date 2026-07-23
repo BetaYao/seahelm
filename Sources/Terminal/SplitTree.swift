@@ -16,10 +16,10 @@ class SplitTree {
     var allLeaves: [SplitNode.LeafInfo] { root.allLeaves }
     var allStationIds: [String] { root.allLeaves.map(\.stationId) }
 
-    init(worktreePath: String, rootLeafId: String, stationId: String, sessionName: String) {
+    init(worktreePath: String, rootLeafId: String, stationId: String, paneSessionKey: String) {
         self.worktreePath = worktreePath
-        self.baseSessionName = sessionName
-        self.root = .leaf(id: rootLeafId, stationId: stationId, sessionName: sessionName)
+        self.baseSessionName = paneSessionKey
+        self.root = .leaf(id: rootLeafId, stationId: stationId, paneSessionKey: paneSessionKey)
         self.focusedId = rootLeafId
     }
 
@@ -33,7 +33,7 @@ class SplitTree {
     @discardableResult
     func splitFocusedLeaf(axis: SplitAxis, newLeafId: String, newStationId: String, newSessionName: String)
         -> (leafId: String, splitId: String) {
-        let newLeaf = SplitNode.leaf(id: newLeafId, stationId: newStationId, sessionName: newSessionName)
+        let newLeaf = SplitNode.leaf(id: newLeafId, stationId: newStationId, paneSessionKey: newSessionName)
         let splitId = UUID().uuidString
         guard root.findLeaf(id: focusedId) != nil else { return (newLeafId, splitId) }
         let focusedNode = extractSubnode(id: focusedId)
@@ -87,9 +87,9 @@ class SplitTree {
 
     private static func restoreNode(from codable: CodableSplitNode, backend: String) -> (SplitNode?, String?) {
         switch codable {
-        case .leaf(let sessionName, let title):
+        case .leaf(let paneSessionKey, let title):
             let station = Station()
-            station.sessionName = sessionName
+            station.paneSessionKey = paneSessionKey
             station.backend = backend
             station.persistedTitle = title
             // Bridge the header with the persisted title only until this restored
@@ -97,7 +97,7 @@ class SplitTree {
             station.titleBridgeActive = (title?.isEmpty == false)
             StationRegistry.shared.register(station)
             let leafId = UUID().uuidString
-            return (.leaf(id: leafId, stationId: station.id, sessionName: sessionName), leafId)
+            return (.leaf(id: leafId, stationId: station.id, paneSessionKey: paneSessionKey), leafId)
 
         case .split(let axisStr, let ratio, let first, let second):
             guard let axis = SplitAxis(rawValue: axisStr) else { return (nil, nil) }
@@ -109,10 +109,10 @@ class SplitTree {
     }
 
     private func extractSubnode(id: String) -> SplitNode {
-        if case .leaf(let leafId, let stationId, let sessionName) = root, leafId == id {
-            return .leaf(id: leafId, stationId: stationId, sessionName: sessionName)
+        if case .leaf(let leafId, let stationId, let paneSessionKey) = root, leafId == id {
+            return .leaf(id: leafId, stationId: stationId, paneSessionKey: paneSessionKey)
         }
         guard let info = root.findLeaf(id: id) else { return root }
-        return .leaf(id: info.id, stationId: info.stationId, sessionName: info.sessionName)
+        return .leaf(id: info.id, stationId: info.stationId, paneSessionKey: info.paneSessionKey)
     }
 }

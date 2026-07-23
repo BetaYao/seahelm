@@ -31,7 +31,7 @@ final class EventHubTests: XCTestCase {
     }
 
     func testFilterByPaneMatchesIdOrSessionName() {
-        let e: [String: Any] = ["type": "x", "pane_id": "STATION-UUID", "session_name": "seahelm-repo-main"]
+        let e: [String: Any] = ["type": "x", "pane_id": "STATION-UUID", "pane_session_key": "seahelm-repo-main"]
         XCTAssertTrue(ControlRouter.eventPasses(e, types: nil, paneId: "STATION-UUID"))
         XCTAssertTrue(ControlRouter.eventPasses(e, types: nil, paneId: "seahelm-repo-main"))
         XCTAssertFalse(ControlRouter.eventPasses(e, types: nil, paneId: "other"))

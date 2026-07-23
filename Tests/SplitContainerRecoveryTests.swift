@@ -17,7 +17,7 @@ final class SplitContainerRecoveryTests: XCTestCase {
         defer { StationRegistry.shared.unregister(station.id) }
 
         let tree = SplitTree(worktreePath: "/wt", rootLeafId: "leaf1",
-                             stationId: station.id, sessionName: "")
+                             stationId: station.id, paneSessionKey: "")
         split.surfaceViews[station.id] = NSView()
         split.tree = tree   // didSet → layoutTree()
 
@@ -30,7 +30,7 @@ final class SplitContainerRecoveryTests: XCTestCase {
     func testReembedRecoveredViewReparentsAndReregisters() {
         let split = SplitContainerView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let tree = SplitTree(worktreePath: "/wt", rootLeafId: "leaf1",
-                             stationId: "s1", sessionName: "")
+                             stationId: "s1", paneSessionKey: "")
         let oldView = NSView()
         split.surfaceViews["s1"] = oldView
         split.tree = tree   // reparents oldView into split

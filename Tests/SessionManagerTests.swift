@@ -46,8 +46,8 @@ class SessionManagerTests: XCTestCase {
         let layout = CodableSplitNode.split(
             axis: "horizontal",
             ratio: 0.5,
-            first: .leaf(sessionName: "seahelm-repo-main", title: nil),
-            second: .leaf(sessionName: "seahelm-repo-main-1", title: nil)
+            first: .leaf(paneSessionKey: "seahelm-repo-main", title: nil),
+            second: .leaf(paneSessionKey: "seahelm-repo-main-1", title: nil)
         )
 
         XCTAssertEqual(

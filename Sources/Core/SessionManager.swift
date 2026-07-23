@@ -32,8 +32,8 @@ enum SessionManager {
 
     static func sessionNames(in layout: CodableSplitNode) -> [String] {
         switch layout {
-        case .leaf(let sessionName, _):
-            return [sessionName]
+        case .leaf(let paneSessionKey, _):
+            return [paneSessionKey]
         case .split(_, _, let first, let second):
             return sessionNames(in: first) + sessionNames(in: second)
         }
@@ -108,8 +108,8 @@ enum SessionManager {
     ) -> [String] {
         let output = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
         let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
-        for sessionName in orphaned {
-            ZmxSessionRecovery.forceKillSession(sessionName)
+        for paneSessionKey in orphaned {
+            ZmxSessionRecovery.forceKillSession(paneSessionKey)
         }
         return orphaned
     }

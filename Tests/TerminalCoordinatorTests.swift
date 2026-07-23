@@ -23,7 +23,7 @@ final class TerminalCoordinatorTests: XCTestCase {
 
     func testSaveSplitLayoutPersistsToConfig() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        let tree = SplitTree(worktreePath: "/tmp/test", rootLeafId: "leaf-1", stationId: "surface-1", sessionName: "test")
+        let tree = SplitTree(worktreePath: "/tmp/test", rootLeafId: "leaf-1", stationId: "surface-1", paneSessionKey: "test")
         coordinator.saveSplitLayout(tree)
         XCTAssertNotNil(coordinator.config.splitLayouts["/tmp/test"])
     }

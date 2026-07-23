@@ -66,10 +66,10 @@ c.on('connect', async () => {
   log(!!presence && presence.obj.online === true, 'presence retained online=true');
 
   const st = id => last(m => m.topic === `${B}/pane/${id}/status`);
-  const p1 = st('p1'), p3 = st('p3'), p8 = st('p8');
+  const p1 = st('seahelm-main-p1'), p3 = st('seahelm-feat-p3'), p8 = st('claw-p8');
   log(!!p1 && !!p3 && !!p8, 'pane/+/status retained (p1,p3,p8)',
       `statuses ${p1&&p1.obj.status}/${p3&&p3.obj.status}/${p8&&p8.obj.status}`);
-  log(!!p1 && ['pane_id','session_name','worktree_path','branch','project','agent_type','status','last_message','seq']
+  log(!!p1 && ['pane_id','pane_session_key','worktree_path','branch','project','agent_type','status','last_message','seq']
         .every(k => k in p1.obj), 'PaneSnapshot.dict full field set (§15.4)');
 
   const wt = last(m => m.topic === `${B}/worktree/main/status`);
@@ -92,28 +92,28 @@ c.on('connect', async () => {
   // question event + answer
   const eq = await command('mock.emit_question', {});
   log(!!eq && eq.ok, 'emit question event');
-  const qev = await waitFor(m => m.topic === `${B}/pane/p3/event` && m.obj && m.obj.type === 'question');
+  const qev = await waitFor(m => m.topic === `${B}/pane/seahelm-feat-p3/event` && m.obj && m.obj.type === 'question');
   log(!!qev && Array.isArray(qev.obj.options) && !!qev.obj.question_id, 'question event delivered (options+id)');
   const before = rx.length;
   const ans = await command('question.answer', { question_id: 'q-p3-1', index: 0 });
   log(!!ans && ans.ok && ans.result.answered === true, 'question.answer → {answered:true}');
-  const flip = await waitFor(m => m.topic === `${B}/pane/p3/status` && m.obj && m.obj.status === 'Running');
+  const flip = await waitFor(m => m.topic === `${B}/pane/seahelm-feat-p3/status` && m.obj && m.obj.status === 'Running');
   log(!!flip, 'question.answer flips p3 → Running (retained update)');
-  const cleared = found(m => m.topic === `${B}/pane/p3/event` && m.raw === '').length > 0;
+  const cleared = found(m => m.topic === `${B}/pane/seahelm-feat-p3/event` && m.raw === '').length > 0;
   log(cleared, 'question event cleared (empty payload)');
 
   // suggest event + pick
   const es = await command('mock.emit_suggest', {});
   log(!!es && es.ok, 'emit suggest event');
-  const sev = await waitFor(m => m.topic === `${B}/pane/p1/event` && m.obj && m.obj.type === 'suggest');
+  const sev = await waitFor(m => m.topic === `${B}/pane/seahelm-main-p1/event` && m.obj && m.obj.type === 'suggest');
   log(!!sev && !!sev.obj.suggest_id && Array.isArray(sev.obj.options), 'suggest event delivered (options+id)');
   const pick = await command('suggest.pick', { suggest_id: 's-p1-1', index: 0 });
   log(!!pick && pick.ok && pick.result.picked === true, 'suggest.pick → {picked:true}');
 
   // send_text → reply + echoed message
-  const sendt = await command('pane.send_text', { pane_id: 'p1', text: '跑测试', enter: true });
+  const sendt = await command('pane.send_text', { pane_session_key: 'seahelm-main-p1', text: '跑测试', enter: true });
   log(!!sendt && sendt.ok && sendt.result.sent === true, 'pane.send_text → {sent:true}');
-  const echoed = await waitFor(m => m.topic === `${B}/pane/p1/message` && m.obj && m.obj.text === '跑测试');
+  const echoed = await waitFor(m => m.topic === `${B}/pane/seahelm-main-p1/message` && m.obj && m.obj.text === '跑测试');
   log(!!echoed, 'pane/{id}/message echoed (feed)');
 
   // dnd.set → reply + dnd/state update
@@ -127,10 +127,10 @@ c.on('connect', async () => {
   log(!!bogus && bogus.ok === false && bogus.error.code === -32601, 'unknown method → error -32601');
 
   console.log('\n── History (JSONL buffer, paging) ──');
-  const hAll = await historyReq({ pane_id: 'p1', limit: 50 });
+  const hAll = await historyReq({ pane_session_key: 'seahelm-main-p1', limit: 50 });
   log(!!hAll && hAll.ok && hAll.result.messages.length === 5 && hAll.result.has_more === false,
       'history full (5 msgs, has_more=false)');
-  const hPage = await historyReq({ pane_id: 'p1', limit: 2, before_seq: 4 });
+  const hPage = await historyReq({ pane_session_key: 'seahelm-main-p1', limit: 2, before_seq: 4 });
   const seqs = hPage && hPage.result.messages.map(m => m.seq);
   log(!!hPage && JSON.stringify(seqs) === JSON.stringify([2, 3]) && hPage.result.has_more === true,
       'history paging (before_seq=4,limit=2 → [2,3], has_more=true)', seqs ? JSON.stringify(seqs) : '');

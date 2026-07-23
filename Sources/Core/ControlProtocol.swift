@@ -19,11 +19,11 @@ struct PaneSnapshot {
     let agentType: String
     let status: String
     let lastMessage: String
-    var sessionName: String = ""  // stable id agents get as SEAHELM_PANE_ID
+    var paneSessionKey: String = ""  // stable id agents get as SEAHELM_PANE_ID
     var title: String = ""        // stable pane title (OSC / persisted), for lists
 
     var dict: [String: Any] {
-        ["pane_id": paneId, "session_name": sessionName, "worktree_path": worktreePath,
+        ["pane_id": paneId, "pane_session_key": paneSessionKey, "worktree_path": worktreePath,
          "branch": branch, "project": project, "agent_type": agentType,
          "status": status, "last_message": lastMessage, "title": title]
     }
@@ -420,7 +420,7 @@ final class ControlRouter {
         }
         if let paneId {
             let pid = event["pane_id"] as? String
-            let sname = event["session_name"] as? String
+            let sname = event["pane_session_key"] as? String
             guard paneId == pid || paneId == sname else { return false }
         }
         return true

@@ -5,6 +5,7 @@ protocol SplitContainerDelegate: AnyObject {
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis)
     func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String)
     func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL)
+    func splitContainer(_ view: SplitContainerView, didRequestPRPreview owner: String, repo: String, number: Int)
     func splitContainerDidChangeLayout(_ view: SplitContainerView)
 }
 
@@ -152,6 +153,10 @@ class SplitContainerView: NSView, DividerDelegate {
                 ghosttyView.onRequestPreview = { [weak self] url in
                     guard let self else { return }
                     self.delegate?.splitContainer(self, didRequestPreview: url)
+                }
+                ghosttyView.onRequestPRPreview = { [weak self] owner, repo, number in
+                    guard let self else { return }
+                    self.delegate?.splitContainer(self, didRequestPRPreview: owner, repo: repo, number: number)
                 }
             }
 

@@ -141,6 +141,13 @@ final class MqttChannel: NSObject, ExternalChannel {
         return true
     }
 
+    /// Delete a retained topic by publishing a zero-length retained payload — the
+    /// MQTT idiom for "this topic no longer has a value" (used on pane close).
+    private func clearRetained(_ topic: String) {
+        guard let mqtt, stateMachine.isConnected else { return }
+        _ = mqtt.publish(topic, withString: "", qos: .qos1, retained: true)
+    }
+
     private func nextSeq() -> Int { lock.lock(); defer { lock.unlock() }; seq += 1; return seq }
 
     private func encode(_ obj: [String: Any]) -> String {
@@ -155,6 +162,18 @@ final class MqttChannel: NSObject, ExternalChannel {
     private func tWorktreeStatus(_ id: String) -> String { "\(base)/worktree/\(id)/status" }
     private var tFocus: String { "\(base)/focus" }
 
+    /// The stable per-pane slot key used as the pane topic segment and the remote
+    /// addressing key (§15). `pane_session_key` survives app restarts, so the same
+    /// pane republishes to the same topic (no orphaned retained ghosts); the
+    /// per-instance `pane_id` UUID rides in the payload for debugging only. Falls
+    /// back to `pane_id` for a session-less (local backend) pane.
+    private func slot(_ pane: PaneSnapshot) -> String {
+        pane.paneSessionKey.isEmpty ? pane.paneId : pane.paneSessionKey
+    }
+    private func slot(paneId: String, paneSessionKey: String) -> String {
+        paneSessionKey.isEmpty ? paneId : paneSessionKey
+    }
+
     // MARK: - Publishing
 
     /// EventHub → publish the changed pane's full retained status + the raw event
@@ -162,20 +181,34 @@ final class MqttChannel: NSObject, ExternalChannel {
     private func handleEvent(seq: UInt64, event: [String: Any]) {
         guard stateMachine.isConnected else { return }
         let pid = (event["pane_id"] as? String) ?? ""
-        let sname = (event["session_name"] as? String) ?? ""
+        let sname = (event["pane_session_key"] as? String) ?? ""
+        let key = slot(paneId: pid, paneSessionKey: sname)
         let panes = dataSource?.snapshotPanes() ?? []
-        if let pane = panes.first(where: { $0.paneId == pid || $0.sessionName == sname }) {
+
+        // A pane closed: clear its retained slot topics so remote clients drop the
+        // ghost immediately, then republish rollups (pane count changed).
+        if (event["type"] as? String) == "pane.closed" {
+            clearRetained(tPaneStatus(key))   // empty retained = delete the ghost
+            publishWorktreesAndFocus(from: panes)
+            return
+        }
+
+        if let pane = panes.first(where: { $0.paneId == pid || $0.paneSessionKey == sname }) {
             publishPaneStatus(pane, seq: Int(seq))
         }
-        publish(tPaneMessage(pid), event, retained: false)   // feed (event verbatim)
-        // History = final message per turn only. Append when a turn settles (a
-        // status change to a non-Running state), skipping the noisy mid-turn
-        // last_message churn (tool/file/command lines) that pane.updated events and
-        // Running transitions carry.
-        if (event["type"] as? String) == "pane.status_changed",
-           let ns = event["status"] as? String, ns != SailorStatus.running.rawValue,
-           let text = event["last_message"] as? String, !text.isEmpty {
-            history.append(paneId: pid, entry: ["seq": Int(seq), "kind": "agent", "text": text])
+        publish(tPaneMessage(key), event, retained: false)   // feed (event verbatim)
+        // History = the agent's real final message per turn. Only a completion event
+        // carries `final_message` (the Stop hook's last_assistant_message); status-
+        // settle `last_message` is often a scanned tool/file line, so we no longer
+        // key on it. See ShipLog.event(from:). Keyed by the stable slot.
+        if (event["is_completion"] as? Bool) == true,
+           let text = event["final_message"] as? String, !text.isEmpty {
+            history.append(paneId: key, entry: ["seq": Int(seq), "kind": "agent", "text": text])
+        }
+        // User side of the conversation: record what the user typed so history
+        // shows both turns (user prompt → assistant final), not just the answer.
+        if let prompt = event["user_prompt"] as? String, !prompt.isEmpty {
+            history.append(paneId: key, entry: ["seq": Int(seq), "kind": "you", "text": prompt])
         }
         publishWorktreesAndFocus(from: panes)
     }
@@ -191,7 +224,7 @@ final class MqttChannel: NSObject, ExternalChannel {
     private func publishPaneStatus(_ pane: PaneSnapshot, seq: Int) {
         var dict = pane.dict            // verbatim PaneSnapshot.dict (§3)
         dict["seq"] = seq
-        publish(tPaneStatus(pane.paneId), dict, retained: true)
+        publish(tPaneStatus(slot(pane)), dict, retained: true)   // topic keyed by stable slot
     }
 
     private func publishWorktreesAndFocus(from panes: [PaneSnapshot]) {
@@ -260,9 +293,18 @@ final class MqttChannel: NSObject, ExternalChannel {
     /// `allowRemoteWrite`.
     private func handleCommand(_ env: [String: Any]) {
         let method = env["method"] as? String ?? ""
-        let params = env["params"] as? [String: Any] ?? [:]
+        var params = env["params"] as? [String: Any] ?? [:]
         let replyTo = env["reply_to"] as? String
         let corr = env["corr"] as? String
+
+        // Remote clients address a pane by its stable `pane_session_key` (§15);
+        // resolve it to the internal per-instance `pane_id` (UUID) that
+        // `ControlRouter` works in. A caller that still sends `pane_id` is left
+        // untouched (backward compatible).
+        if params["pane_id"] == nil, let key = params["pane_session_key"] as? String,
+           let pane = dataSource?.snapshotPanes().first(where: { $0.paneSessionKey == key }) {
+            params["pane_id"] = pane.paneId
+        }
 
         if Self.gatedMethods.contains(method), !config.resolvedAllowRemoteWrite {
             reply(to: replyTo, corr: corr,
@@ -277,15 +319,17 @@ final class MqttChannel: NSObject, ExternalChannel {
         }
     }
 
-    /// `{pane_id, limit, before_seq, reply_to, corr}` → reply from the per-pane
-    /// JSONL buffer (`PaneHistoryBuffer`).
+    /// `{pane_session_key|pane_id, limit, before_seq, reply_to, corr}` → reply from
+    /// the per-pane JSONL buffer (`PaneHistoryBuffer`). History is keyed by the
+    /// stable slot (`pane_session_key`), so it survives restarts; `pane_id` is
+    /// accepted as a fallback for older clients.
     private func handleHistory(_ env: [String: Any]) {
         let replyTo = env["reply_to"] as? String
         let corr = env["corr"] as? String
-        let paneId = env["pane_id"] as? String ?? ""
+        let key = (env["pane_session_key"] as? String) ?? (env["pane_id"] as? String) ?? ""
         let limit = env["limit"] as? Int ?? 50
         let beforeSeq = env["before_seq"] as? Int
-        let (messages, hasMore) = history.messages(paneId: paneId, limit: limit, beforeSeq: beforeSeq)
+        let (messages, hasMore) = history.messages(paneId: key, limit: limit, beforeSeq: beforeSeq)
         reply(to: replyTo, corr: corr, result: .ok(["messages": messages, "has_more": hasMore]))
     }
 

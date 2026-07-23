@@ -10,11 +10,11 @@ enum ProcessProbe {
 
     // MARK: - Pure matching (unit-tested)
 
-    /// Extract `pid=<N>` for `sessionName` from `zmx list` output, or nil.
-    static func sessionPid(sessionName: String, zmxListOutput: String) -> Int32? {
+    /// Extract `pid=<N>` for `paneSessionKey` from `zmx list` output, or nil.
+    static func sessionPid(paneSessionKey: String, zmxListOutput: String) -> Int32? {
         for line in zmxListOutput.split(separator: "\n") {
             let s = String(line)
-            guard field(s, "name=") == sessionName else { continue }
+            guard field(s, "name=") == paneSessionKey else { continue }
             if let pidStr = field(s, "pid="), let pid = Int32(pidStr) { return pid }
         }
         return nil
@@ -69,14 +69,14 @@ enum ProcessProbe {
 
     /// Full identification for a live session: read the session pid from zmx,
     /// enumerate its descendants, and match against the manifest store.
-    static func identifyAgent(sessionName: String) -> String? {
-        probeSession(sessionName: sessionName).agentId
+    static func identifyAgent(paneSessionKey: String) -> String? {
+        probeSession(paneSessionKey: paneSessionKey).agentId
     }
 
     /// One sysctl walk: agent identity (if any) + foreground command line.
-    static func probeSession(sessionName: String) -> (agentId: String?, commandLine: String?) {
+    static func probeSession(paneSessionKey: String) -> (agentId: String?, commandLine: String?) {
         guard let out = ProcessRunner.output([ZmxLocator.executable(), "list"]),
-              let root = sessionPid(sessionName: sessionName, zmxListOutput: out) else {
+              let root = sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: out) else {
             return (nil, nil)
         }
         let descendants = descendants(of: root, in: allProcesses())

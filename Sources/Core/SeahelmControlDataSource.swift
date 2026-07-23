@@ -44,7 +44,7 @@ final class SeahelmControlDataSource: ControlDataSource {
                 agentType: s.agentType.rawValue,
                 status: s.status.rawValue,
                 lastMessage: s.lastMessage,
-                sessionName: station?.sessionName ?? "",
+                paneSessionKey: station?.paneSessionKey ?? "",
                 title: title
             )
         }
@@ -142,7 +142,7 @@ final class SeahelmControlDataSource: ControlDataSource {
 
         var result: [String: Any] = [
             "pane_id": station.id,
-            "session_name": station.sessionName ?? "",
+            "pane_session_key": station.paneSessionKey ?? "",
             "agent": agentType.rawValue,
             "manifest": manifest?.manifest.id ?? "",
             "manifest_version": manifest?.manifest.version ?? "",

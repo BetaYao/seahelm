@@ -117,7 +117,7 @@ class TabCoordinator {
             // Save session name (stable across launches) instead of leaf ID
             if let tree = self.terminalCoordinator.stationManager.tree(forPath: worktreePath),
                let leaf = tree.allLeaves.first(where: { $0.id == leafId }) {
-                self.config.focusedPaneIds[worktreePath] = leaf.sessionName
+                self.config.focusedPaneIds[worktreePath] = leaf.paneSessionKey
             }
             self.saveConfig()
         }
@@ -789,7 +789,7 @@ class TabCoordinator {
     /// shared ref, so the primary pane's resolved title flipped to whichever
     /// agent hooked last. Persisting under the pane's own session name also lets
     /// restore reapply it — `config.agentSessions` is read back keyed by
-    /// `leaf.sessionName`, which the old worktree-scoped key never matched.
+    /// `leaf.paneSessionKey`, which the old worktree-scoped key never matched.
     /// Falls back to the primary station / worktree name for legacy hooks that
     /// carry no paneId.
     private func recordAgentSession(worktreePath: String, paneId: String?, ref: AgentSessionRef) {
@@ -798,7 +798,7 @@ class TabCoordinator {
         station?.agentSessionRef = ref
         // Prefer the resolved pane's own session name (matches restore); fall back
         // to the raw paneId, then the worktree-scoped name.
-        let key = station?.sessionName ?? paneId
+        let key = station?.paneSessionKey ?? paneId
             ?? SessionManager.persistentSessionName(for: worktreePath)
         // Write to the authoritative (TerminalCoordinator) copy, then persist.
         guard terminalCoordinator.config.agentSessions[key] != ref else { return }
@@ -894,8 +894,8 @@ class TabCoordinator {
                 // name. Register with that real name — NOT persistentSessionName(for:
                 // newInfo.path), which would build a channel to a nonexistent session
                 // and let the orphan-reaper reap the live one.
-                let sessionName = runtimeBackend == "local" ? nil : leaf.sessionName
-                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
+                let paneSessionKey = runtimeBackend == "local" ? nil : leaf.paneSessionKey
+                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
             }
         }
 
@@ -923,9 +923,9 @@ class TabCoordinator {
             worktreeRepoCache[sourceInfo.path] = sourceRepo
             let sourceProject = workspaceManager.tabs.first(where: { $0.repoPath == sourceRepo })?.displayName
                 ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
-            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
+            let paneSessionKey = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
             if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
-                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), sessionName: sessionName, backend: runtimeBackend)
+                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }
@@ -981,8 +981,8 @@ class TabCoordinator {
             CabinTitleCache.shared.evict(worktreePath: worktree.path)
             WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)
             if runtimeBackend != "local" {
-                let sessionName = SessionManager.persistentSessionName(for: worktree.path)
-                SessionManager.killSession(sessionName, backend: runtimeBackend)
+                let paneSessionKey = SessionManager.persistentSessionName(for: worktree.path)
+                SessionManager.killSession(paneSessionKey, backend: runtimeBackend)
             }
         }
 
@@ -1273,7 +1273,7 @@ class TabCoordinator {
     /// so its events — and any suggestion chip tapped for it — silently fall back
     /// to the worktree's FIRST pane. Restored splits are the common case: every
     /// pane comes back through here on launch, not through the split path.
-    /// Each leaf registers under its own `sessionName`, which is exactly what that
+    /// Each leaf registers under its own `paneSessionKey`, which is exactly what that
     /// pane exports as SEAHELM_PANE_ID.
     private func registerPanes(of info: WorktreeInfo, project: String, startedAt: Date?) {
         guard let tree = terminalCoordinator.stationManager.tree(forPath: info.path) else { return }
@@ -1282,7 +1282,7 @@ class TabCoordinator {
             ShipLog.shared.register(
                 station: station, worktreePath: info.path, branch: info.branch,
                 project: project, startedAt: startedAt,
-                sessionName: runtimeBackend == "local" ? nil : leaf.sessionName,
+                paneSessionKey: runtimeBackend == "local" ? nil : leaf.paneSessionKey,
                 backend: runtimeBackend)
         }
     }

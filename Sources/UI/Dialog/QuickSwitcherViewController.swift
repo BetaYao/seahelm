@@ -74,7 +74,7 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
         magnifier.translatesAutoresizingMaskIntoConstraints = false
         searchBar.addSubview(magnifier)
 
-        searchField.placeholderString = "Search cabins..."
+        searchField.placeholderString = "Search projects..."
         searchField.font = NSFont.systemFont(ofSize: 15)
         searchField.isBordered = false
         searchField.drawsBackground = false

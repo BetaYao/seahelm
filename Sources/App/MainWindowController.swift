@@ -87,6 +87,163 @@ class MainWindowController: NSWindowController {
     private var islandKnownUnread = 0
 
     // Terminal management
+    /// GitHub token 解析，来源优先级：
+    /// 1. 环境变量 GITHUB_TOKEN / GH_TOKEN
+    /// 2. gh CLI (无需 project context)
+    /// 3. 系统钥匙串 (无需 project context)
+    /// 4. 项目根目录的 .env / .env.local（需要选中 worktree）
+    /// 5. 项目根目录的 git config --local github.token（需要选中 worktree）
+    private var resolvedGitHubToken: String {
+        // 1. 环境变量
+        if let env = ProcessInfo.processInfo.environment["GITHUB_TOKEN"] ??
+            ProcessInfo.processInfo.environment["GH_TOKEN"], !env.isEmpty {
+            return env
+        }
+
+        // 2. gh CLI — 不需要 project context，只要 gh 装好登录了就能拿到
+        if let ghToken = Self.ghAuthToken() {
+            return ghToken
+        }
+
+        // 3. 系统钥匙串 — 也不需要 project context
+        if let helperToken = Self.gitCredentialToken() {
+            return helperToken
+        }
+
+        // 4-5. 需要 project 目录的来源，有 worktree path 才尝试
+        guard let repoPath = tabCoordinator.config.selectedWorktreePath else { return "" }
+
+        for envFile in [".env", ".env.local"] {
+            let url = URL(fileURLWithPath: repoPath).appendingPathComponent(envFile)
+            if let token = Self.readEnvFileToken(at: url.path) {
+                return token
+            }
+        }
+
+        if let localToken = Self.gitLocalConfigToken(in: repoPath) {
+            return localToken
+        }
+
+        return ""
+    }
+
+    /// 解析 .env 文件的 GITHUB_TOKEN 或 GH_TOKEN 行。
+    private static func readEnvFileToken(at path: String) -> String? {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#") else { continue }          // 跳过注释
+            if trimmed.hasPrefix("GITHUB_TOKEN=") {
+                return String(trimmed.dropFirst("GITHUB_TOKEN=".count))
+            }
+            if trimmed.hasPrefix("GH_TOKEN=") {
+                return String(trimmed.dropFirst("GH_TOKEN=".count))
+            }
+        }
+        return nil
+    }
+
+    /// 从项目级 git config 读 github.token。
+    /// 用户只需在项目目录执行：`git config github.token ghp_xxx`
+    private static func gitLocalConfigToken(in repoPath: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["config", "--local", "github.token"]
+        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return token?.isEmpty == false ? token : nil
+        } catch {
+            return nil
+        }
+    }
+
+    /// 通过 `gh auth token` 拿 gh CLI 缓存的 token。
+    /// 先查 PATH，再查常见安装路径，兼容 Intel 和 Apple Silicon。
+    private static func ghAuthToken() -> String? {
+        let candidates: [String] = {
+            // 1. PATH 中找到的 gh
+            if let fromPath = Self.findInPATH("gh") { return [fromPath] }
+            // 2. 常见安装路径
+            return [
+                "/opt/homebrew/bin/gh",
+                "/usr/local/bin/gh",
+                "\(NSHomeDirectory())/.local/bin/gh",
+            ]
+        }()
+
+        for ghPath in candidates {
+            let url = URL(fileURLWithPath: ghPath)
+            guard FileManager.default.isExecutableFile(atPath: ghPath) else { continue }
+            let process = Process()
+            process.executableURL = url
+            process.arguments = ["auth", "token"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else { continue }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let token, !token.isEmpty { return token }
+            } catch {
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// 从 PATH 环境变量中找可执行文件。
+    private static func findInPATH(_ name: String) -> String? {
+        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for dir in pathEnv.components(separatedBy: ":") where !dir.isEmpty {
+            let full = (dir as NSString).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: full) {
+                return full
+            }
+        }
+        return nil
+    }
+
+    /// 通过 `git credential fill` 从系统钥匙串获取 github.com 的 token。
+    private static func gitCredentialToken() -> String? {
+        let input = "protocol=https\nhost=github.com\n\n"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["credential", "fill"]
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            stdinPipe.fileHandleForWriting.write(input.data(using: .utf8)!)
+            stdinPipe.fileHandleForWriting.closeFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            for line in output.components(separatedBy: .newlines) {
+                if line.hasPrefix("password=") {
+                    return String(line.dropFirst("password=".count)).trimmingCharacters(in: .whitespaces)
+                }
+            }
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
     private lazy var terminalCoordinator: TerminalCoordinator = {
         let tc = TerminalCoordinator(config: config, activeSplitContainer: { [weak self] in
             self?.tabCoordinator.dashboardVC?.activeSplitContainer
@@ -321,13 +478,13 @@ class MainWindowController: NSWindowController {
         dashboardVC?.startNewCommand(prefill: prefill)
     }
 
-    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/task ") }
-    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/agents") }
+    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/worktree ") }
+    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/pane") }
     @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
     @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
-    @objc func helmFlagCommand() { openHelmCockpit(prefill: "/flag ") }
+    @objc func helmFlagCommand() { openHelmCockpit(prefill: "/feedback ") }
 
     @objc func splitHorizontal() { splitFocusedPane(axis: .horizontal) }
     @objc func splitVertical() { splitFocusedPane(axis: .vertical) }
@@ -749,7 +906,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 CabinTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
-                    let sessionName = SessionManager.persistentSessionName(for: info.path)
+                    let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
                     let backend = self.runtimeBackend
                     // `zmx run` blocks until the (long-lived) agent exits, so spawn the
                     // session on a detached thread and wait only until it exists —
@@ -757,12 +914,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     // the cockpit would spin forever.
                     DispatchQueue.global(qos: .userInitiated).async {
                         SessionManager.createDetachedSession(
-                            name: sessionName, backend: backend,
+                            name: paneSessionKey, backend: backend,
                             cwd: info.path, agentCommandLine: agentCommandLine
                         )
                     }
                     _ = SessionManager.waitUntilSessionExists(
-                        name: sessionName, backend: backend, timeoutSeconds: 5.0)
+                        name: paneSessionKey, backend: backend, timeoutSeconds: 5.0)
                 }
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
@@ -798,15 +955,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
         switch trigger {
         case "/":
             pool = [
-                ("task", "bare lists tasks · <description> starts one · #code switches"),
-                ("agents", "bare lists this task's agents · #code steers one"),
-                ("order", "#code <task> — send to one agent without switching"),
+                ("worktree", "bare lists worktrees · <description> starts one · #code switches"),
+                ("pane", "bare lists this worktree's panes · #code steers one"),
+                ("order", "#code <task> — send to one pane without switching"),
                 ("broadcast", "Broadcast to everyone"),
-                ("add", "Add a repo to the workspace"),
+                ("add", "Add a project"),
                 // Both kinds of `@` name are valid — the kind picks the verb,
                 // and no name at all sweeps every worktree.
                 ("return", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
-                ("flag", "<description> — open a GitHub issue for seahelm"),
+                ("feedback", "<description> — open a GitHub issue for seahelm"),
             ]
         case "@":
             let repos = tabCoordinator.config.workspacePaths.map {
@@ -815,13 +972,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let worktrees = ShipLog.shared.allSailors().map { ($0.branch, "worktree · \($0.project)") }
             pool = repos + worktrees
         case "#":
-            // The codes `/task #x` and `/agents #x` take, in the order the
+            // The codes `/worktree #x` and `/pane #x` take, in the order the
             // listings print them, so the menu and the reply always agree.
             let tasks = currentWorktreeRefs().enumerated().map { index, wt in
-                ("\(index + 1)", "task · \(wt.repo) / \(wt.branch)")
+                ("\(index + 1)", "worktree · \(wt.repo) / \(wt.branch)")
             }
             let agents = currentWorktreeAgentRefs().enumerated().map { index, agent in
-                (agent.branch, "agent \(index + 1) · \(agent.project)")
+                (agent.branch, "pane \(index + 1) · \(agent.project)")
             }
             pool = tasks + agents
         default:
@@ -929,12 +1086,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
             if let s = ShipLog.shared.sailor(forWorktree: path) {
                 reply("Now on **\(s.project)** [\(branch)]")
             } else {
-                reply("Now on [\(branch)] — no agent there yet. `/task <description>` to start one.")
+                reply("Now on [\(branch)] — no agent there yet. `/worktree <description>` to start one.")
             }
 
         case .listAgents:
             guard dashboardVC?.lastCommittedWorktreePath != nil else {
-                reply("No current task. `/task` to pick one.")
+                reply("No current worktree. `/worktree` to pick one.")
                 return
             }
             reply(BridgeCommandFormatter.agentList(
@@ -944,7 +1101,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         case .selectAgent(let id):
             guard let s = ShipLog.shared.sailor(for: id) else {
-                reply("That agent is gone. `/agents` to see what's left.")
+                reply("That agent is gone. `/pane` to see what's left.")
                 return
             }
             dashboardVC?.commitWorktreeSelection(path: s.worktreePath)
@@ -1746,7 +1903,7 @@ private extension MainWindowController {
         let candidates = tabCoordinator.allWorktrees.map(\.info)
         let repoCache = tabCoordinator.worktreeRepoCache
         guard candidates.contains(where: { !$0.isMainWorktree }) else {
-            showWorktreeCleanupAlert(title: "No worktrees to clean", message: "There are no linked worktrees in the current workspace list.")
+            showWorktreeCleanupAlert(title: "No worktrees to clean", message: "There are no linked worktrees in the current project list.")
             return
         }
 
@@ -1877,6 +2034,28 @@ extension MainWindowController: SplitContainerDelegate {
 
     func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL) {
         dashboardVC?.openFile(path: url.path)
+    }
+
+    func splitContainer(_ view: SplitContainerView, didRequestPRPreview owner: String, repo: String, number: Int) {
+        guard let dashboardVC else { return }
+        let token = resolvedGitHubToken
+        if token.isEmpty {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "GitHub Token Required"
+            alert.informativeText = "No GitHub token found. Options:\n\n"
+                + "1. Add to project .env file:\n   GITHUB_TOKEN=ghp_xxx\n\n"
+                + "2. Set local git config:\n   cd <repo> && git config github.token ghp_xxx\n\n"
+                + "3. Install gh CLI and login:\n   brew install gh && gh auth login\n\n"
+                + "4. Store in system keychain:\n   git credential-store store <<EOF\n   protocol=https\n   host=github.com\n   username=token\n   password=ghp_xxx\n   EOF\n\n"
+                + "5. Set environment variable:\n   export GITHUB_TOKEN=ghp_xxx"
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        let service = GitHubPRService(token: token, owner: owner, repo: repo)
+        let coordinator = PRReviewCoordinator(service: service, dashboard: dashboardVC)
+        coordinator.show()
     }
 
     func splitContainerDidChangeLayout(_ view: SplitContainerView) {

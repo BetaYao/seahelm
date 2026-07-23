@@ -17,6 +17,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
     var onRequestClose: (() -> Void)?
     /// Wired by `SplitContainerView` to open a file in the app's file viewer.
     var onRequestPreview: ((URL) -> Void)?
+    /// Wired by `SplitContainerView` to open a GitHub PR review for a detected URL.
+    /// Tuple: (owner, repo, prNumber).
+    var onRequestPRPreview: ((String, String, Int) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -567,13 +570,23 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// building the context menu. Read *before* `makeFirstResponder`, which can
     /// clear the terminal selection out from under us.
     private var pendingPreviewURL: URL?
+    /// GitHub PR URL captured from the same row, checked after `pendingPreviewURL`
+    /// (a PR link is not a file so `filePathAtClick` won't return it).
+    private var pendingPRPreview: (owner: String, repo: String, number: Int)?
 
     override func rightMouseDown(with event: NSEvent) {
         // Resolve a previewable file for the menu. Prefer the path token under the
         // click point (works even in mouse-reporting TUIs like Claude Code, where
         // dragging never creates a ghostty selection); fall back to an explicit
         // text selection.
-        pendingPreviewURL = filePathAtClick(event) ?? selectedFilePath()
+        let fileURL = filePathAtClick(event)
+        self.pendingPreviewURL = fileURL ?? selectedFilePath()
+        // If the click didn't hit a file path, check for a GitHub PR URL on the row.
+        if fileURL == nil {
+            self.pendingPRPreview = prURLAtClick(event)
+        } else {
+            self.pendingPRPreview = nil
+        }
         // Focus the right-clicked pane so menu actions target it, then show
         // our pane context menu (split/close/copy/paste).
         if window?.firstResponder !== self {
@@ -606,6 +619,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
             previewItem.target = self
             previewItem.representedObject = path
             menu.addItem(previewItem)
+            menu.addItem(.separator())
+        } else if let pr = pendingPRPreview {
+            let prItem = NSMenuItem(
+                title: "Preview PR #\(pr.number) (\(pr.owner)/\(pr.repo))",
+                action: #selector(contextPRPreview),
+                keyEquivalent: ""
+            )
+            prItem.target = self
+            menu.addItem(prItem)
             menu.addItem(.separator())
         }
 
@@ -676,6 +698,73 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return nil
     }
 
+    /// Reads the same terminal row as `filePathAtClick` and checks each token
+    /// for a GitHub PR URL (`https://github.com/{owner}/{repo}/pull/{number}`).
+    /// Returns the parsed PR info or nil if none found.
+    private func prURLAtClick(_ event: NSEvent) -> (owner: String, repo: String, number: Int)? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
+        guard size.cell_height_px > 0, size.rows > 0, bounds.height > 0 else { return nil }
+
+        let pos = convert(event.locationInWindow, from: nil)
+        let scale = Double(size.height_px) / Double(bounds.height)
+        let yPx = (Double(bounds.height) - pos.y) * scale
+        let row = Int(yPx / Double(size.cell_height_px))
+        guard row >= 0, row < Int(size.rows) else { return nil }
+
+        var text = ghostty_text_s()
+        let sel = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                      x: 0, y: UInt32(row)),
+            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                          x: UInt32(max(0, Int(size.columns) - 1)), y: UInt32(row)),
+            rectangle: false
+        )
+        guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let cString = text.text else { return nil }
+        let line = String(cString: cString)
+
+        for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+            if let pr = Self.parsePRURL(String(token)) {
+                return pr
+            }
+        }
+        return nil
+    }
+
+    /// Parse a GitHub PR URL from a token, e.g.
+    /// `https://github.com/owner/repo/pull/123` or `github.com/owner/repo/pull/123`.
+    static func parsePRURL(_ token: String) -> (owner: String, repo: String, number: Int)? {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip common URL wrappers: markdown link syntax, trailing paren/bracket.
+        let cleaned = trimmed
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "]", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "<", with: "")
+            .replacingOccurrences(of: ">", with: "")
+            .trimmingCharacters(in: .punctuationCharacters)
+
+        // Match: https://github.com/owner/repo/pull/123
+        // Or:      github.com/owner/repo/pull/123
+        // Or:   www.github.com/owner/repo/pull/123
+        let pattern = #"^(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pull/(\d+)/?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned)),
+              match.numberOfRanges == 4 else { return nil }
+
+        guard let ownerRange = Range(match.range(at: 1), in: cleaned),
+              let repoRange = Range(match.range(at: 2), in: cleaned),
+              let numRange = Range(match.range(at: 3), in: cleaned),
+              let number = Int(cleaned[numRange]), number > 0 else { return nil }
+
+        return (owner: String(cleaned[ownerRange]),
+                repo: String(cleaned[repoRange]),
+                number: number)
+    }
+
     private func selectedFilePath() -> URL? {
         // Prefer the snapshot taken on mouseUp; fall back to the live selection
         // in case one exists that we didn't capture (e.g. keyboard selection).
@@ -722,6 +811,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
     @objc private func contextPreview(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
         onRequestPreview?(url)
+    }
+
+    @objc private func contextPRPreview(_ sender: NSMenuItem) {
+        guard let pr = pendingPRPreview else { return }
+        onRequestPRPreview?(pr.owner, pr.repo, pr.number)
     }
 
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }
