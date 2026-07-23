@@ -1,13 +1,14 @@
 {
   "id": "agent",
-  "version": "2026.07.08.1",
+  "version": "2026.07.22.1",
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
   "message_skip_patterns": [
     "shift+tab",
     "accept edits",
-    "to interrupt"
+    "to interrupt",
+    "ctrl+c to stop"
   ],
   "authority": "screen_only",
   "rules": [
@@ -26,8 +27,51 @@
       "state": "running",
       "priority": 400,
       "region": "bottom_lines:10",
-      "contains": [
-        "to interrupt"
+      "any": [
+        {
+          "contains": [
+            "ctrl+c to stop"
+          ]
+        },
+        {
+          "contains": [
+            "to interrupt"
+          ]
+        },
+        {
+          "contains": [
+            "esc to abort"
+          ]
+        }
+      ],
+      "visible_working": true
+    },
+    {
+      "id": "working_status_line",
+      "state": "running",
+      "priority": 390,
+      "region": "bottom_lines:12",
+      "any": [
+        {
+          "line_regex": [
+            "(?i)^\\s*working…?\\s*$"
+          ]
+        },
+        {
+          "line_regex": [
+            "(?i)^\\s*thinking\\s*$"
+          ]
+        },
+        {
+          "line_regex": [
+            "(?i)^\\s*generating\\b"
+          ]
+        },
+        {
+          "line_regex": [
+            "(?i)\\d+(\\.\\d+)?k tokens"
+          ]
+        }
       ],
       "visible_working": true
     },

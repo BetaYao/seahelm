@@ -284,10 +284,14 @@ struct SailorDetectConfig: Codable {
             SailorRule(status: "Error", patterns: ["error:"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["tip", "shortcuts", "switch layout"]),
         SailorDef(name: "agent", rules: [
-            SailorRule(status: "Running", patterns: ["to interrupt"]),
+            SailorRule(status: "Running", patterns: [
+                "ctrl+c to stop", "to interrupt", "esc to abort",
+            ]),
             SailorRule(status: "Error", patterns: ["error"]),
             SailorRule(status: "Waiting", patterns: ["?", "> "]),
-        ], defaultStatus: "Idle", messageSkipPatterns: ["shift+tab", "accept edits", "to interrupt"]),
+        ], defaultStatus: "Idle", messageSkipPatterns: [
+            "shift+tab", "accept edits", "to interrupt", "ctrl+c to stop",
+        ]),
     ])
 
     func includingMissingDefaultSailors() -> SailorDetectConfig {

@@ -72,6 +72,22 @@ final class ProcessProbeTests: XCTestCase {
         XCTAssertEqual(ProcessProbe.identify(procs: procs, manifests: ms), "opencode")
     }
 
+    /// Cursor's primary CLI entrypoint is now `agent` (cursor-agent remains an
+    /// alias). argv0 is `/…/bin/agent`; the install path still contains
+    /// `cursor-agent`, so either exec_names or argv_contains must identify it.
+    func testIdentifyCursorAgentCLIEntrypoint() {
+        let ms = ManifestStore.shared.all.map(\.manifest)
+        let viaAgent = [p(7, 1, [
+            "/Users/me/.local/bin/agent",
+            "--use-system-ca",
+            "/Users/me/.local/share/cursor-agent/versions/2026.07.17/index.js",
+        ])]
+        XCTAssertEqual(ProcessProbe.identify(procs: viaAgent, manifests: ms), "cursor")
+
+        let viaAlias = [p(8, 1, ["/Users/me/.local/bin/cursor-agent"])]
+        XCTAssertEqual(ProcessProbe.identify(procs: viaAlias, manifests: ms), "cursor")
+    }
+
     func testDescendantsWalk() {
         let all = [p(2, 1, ["zsh"]), p(3, 2, ["node"]), p(4, 3, ["codex"]), p(5, 1, ["unrelated"])]
         let d = ProcessProbe.descendants(of: 2, in: all).map(\.pid).sorted()
