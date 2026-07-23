@@ -20,11 +20,12 @@ struct PaneSnapshot {
     let status: String
     let lastMessage: String
     var sessionName: String = ""  // stable id agents get as SEAHELM_PANE_ID
+    var title: String = ""        // stable pane title (OSC / persisted), for lists
 
     var dict: [String: Any] {
         ["pane_id": paneId, "session_name": sessionName, "worktree_path": worktreePath,
          "branch": branch, "project": project, "agent_type": agentType,
-         "status": status, "last_message": lastMessage]
+         "status": status, "last_message": lastMessage, "title": title]
     }
 }
 

@@ -275,7 +275,7 @@ function renderTree(){
       wrap.appendChild(head);
       for (const [pid,p] of list){
         const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
-        const title = p.last_message || p.agent_type || 'idle';
+        const title = p.title || p.last_message || p.agent_type || 'idle';
         row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
           <span class="pid">${shortId(pid)}</span><span class="grow ptitle">${title}</span>
           ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;

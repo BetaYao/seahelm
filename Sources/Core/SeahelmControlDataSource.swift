@@ -33,7 +33,10 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func snapshotPanes() -> [PaneSnapshot] {
         ShipLog.shared.allSailors().map { s in
-            PaneSnapshot(
+            let station = StationRegistry.shared.station(forId: s.id)
+            let osc = station?.oscTitle ?? ""
+            let title = osc.isEmpty ? (station?.persistedTitle ?? "") : osc
+            return PaneSnapshot(
                 paneId: s.id,
                 worktreePath: s.worktreePath,
                 branch: s.branch,
@@ -41,7 +44,8 @@ final class SeahelmControlDataSource: ControlDataSource {
                 agentType: s.agentType.rawValue,
                 status: s.status.rawValue,
                 lastMessage: s.lastMessage,
-                sessionName: StationRegistry.shared.station(forId: s.id)?.sessionName ?? ""
+                sessionName: station?.sessionName ?? "",
+                title: title
             )
         }
     }
