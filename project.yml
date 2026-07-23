@@ -66,6 +66,8 @@ targets:
         product: Sparkle
       - package: CocoaMQTT
         product: CocoaMQTT
+      - package: CocoaMQTT
+        product: CocoaMQTTWebSocket
       # Media preview backends. AVKit auto-links SwiftUICore, which can only be
       # linked through SwiftUI — so SwiftUI must be explicit here or the link
       # fails with "not an allowed client of it".

@@ -1,5 +1,6 @@
 import Foundation
 import CocoaMQTT
+import CocoaMQTTWebSocket
 
 /// MQTT remote-client backend (CocoaMQTT). The Mac is the single publisher on the
 /// broker: it publishes retained pane/worktree/focus/presence state, and answers
@@ -113,14 +114,18 @@ final class MqttChannel: NSObject, ExternalChannel {
             }
         }
 
-        if config.resolvedWebsocket {
-            // The Mac publisher connects over TCP; WS is for browser/Watch clients
-            // (needs the CocoaMQTTWebSocket product, not linked here).
-            NSLog("[MqttChannel] config requests websocket; Mac publisher uses TCP — connecting TCP.")
-        }
-
         let clientId = config.clientId ?? "seahelm-\(macId)"
-        let m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort)
+        // EMQX Cloud (Serverless) rejects the native-TLS CocoaMQTT CONNECT; the WS
+        // transport (same the web/Watch use) authenticates fine — so connect over
+        // WebSocket(-TLS) when configured. Falls back to TCP for a local broker.
+        let m: CocoaMQTT
+        if config.resolvedWebsocket {
+            let ws = CocoaMQTTWebSocket(uri: config.resolvedWsPath)
+            ws.enableSSL = config.resolvedTLS      // wss:// — the WS socket has its own SSL flag
+            m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort, socket: ws)
+        } else {
+            m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort)
+        }
         // Paired → HKDF-derived creds (username = mac_id); else manual/plaintext.
         m.username = crypto != nil ? macId : config.username
         m.password = crypto?.authPassword ?? config.password
@@ -590,4 +595,14 @@ extension MqttChannel: CocoaMQTTDelegate {
     func mqtt(_ mqtt: CocoaMQTT, didUnsubscribeTopics topics: [String]) {}
     func mqttDidPing(_ mqtt: CocoaMQTT) {}
     func mqttDidReceivePong(_ mqtt: CocoaMQTT) {}
+
+    /// WebSocket(-TLS) server-trust challenge. CocoaMQTT only forwards this to this
+    /// (optional) delegate method — if unimplemented, the completion handler is
+    /// never called and the wss:// handshake hangs forever (the EMQX Cloud symptom).
+    /// EMQX Cloud uses a public CA (DigiCert), so default system trust is correct.
+    func mqttUrlSession(_ mqtt: CocoaMQTT, didReceiveTrust trust: SecTrust,
+                        didReceiveChallenge challenge: URLAuthenticationChallenge,
+                        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        completionHandler(.performDefaultHandling, nil)
+    }
 }

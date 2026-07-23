@@ -38,6 +38,7 @@
 		15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */; };
 		15E29843E4033EE873B94313 /* LeaderMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9254F14A8829CCB39D04E456 /* LeaderMenu.swift */; };
 		15E702C37FE649AE0B93C724 /* ShipLogExternalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */; };
+		16F8BAF43220432D8AEC04BD /* CocoaMQTTWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = 50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */; };
 		1749D64808F01AA881A0E0A6 /* CabinSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B14DBAEF361B8C595C7893 /* CabinSidePanelViewController.swift */; };
 		17510269B7716B9D30A4C1E4 /* CabinTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC309B7D3B5C4341F08309E /* CabinTaskStore.swift */; };
 		18FF3BD4B6093BD5B1E4552C /* RegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8F0A0F456C94284935BE32 /* RegressionTests.swift */; };
@@ -767,6 +768,7 @@
 				4C4E27C9EB285988BAF4FE61 /* CodeEditLanguages in Frameworks */,
 				BBE067F3493F03DFD4EB56D5 /* Sparkle in Frameworks */,
 				F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */,
+				16F8BAF43220432D8AEC04BD /* CocoaMQTTWebSocket in Frameworks */,
 				26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */,
 				619695CCD02199EC32866D47 /* AVKit.framework in Frameworks */,
 				8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */,
@@ -1437,6 +1439,7 @@
 				E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */,
 				105CE82C3D2CBF90259D60A2 /* Sparkle */,
 				870337C5ED57007BB471E70D /* CocoaMQTT */,
+				50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */,
 			);
 			productName = seahelm;
 			productReference = 7C1D507BEBD483B978CC2DBC /* seahelm.app */;
@@ -2327,6 +2330,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 37DD6A91337E3B7C31F65836 /* XCRemoteSwiftPackageReference "CocoaMQTT" */;
+			productName = CocoaMQTTWebSocket;
 		};
 		870337C5ED57007BB471E70D /* CocoaMQTT */ = {
 			isa = XCSwiftPackageProductDependency;
