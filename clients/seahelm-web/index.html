@@ -40,6 +40,23 @@
     padding:7px 15px;font-weight:600;cursor:pointer;font-size:13px;font-family:var(--sans);
     transition:filter .15s} header button:hover{filter:brightness(1.08)}
   header button.ghost{background:var(--lamp);color:var(--bone);border:1px solid var(--stone)}
+  header button.ghost.on{background:var(--lamp2);border-color:var(--ash)}
+  /* ── pairing-first header ───────────────────────────────── */
+  .pairzone{display:flex;align-items:center;gap:8px}
+  .spacer{flex:1}
+  header button.pair-primary{font-weight:600;padding-left:16px;padding-right:16px}
+  .chip{display:inline-flex;align-items:center;gap:9px;background:rgba(107,142,90,.12);
+    border:1px solid rgba(107,142,90,.38);border-radius:9px;padding:6px 8px 6px 12px;
+    font-size:14px;color:var(--bone)}
+  .chip .lock{font-size:13px;opacity:.9}
+  .chip b{font-family:var(--mono);font-weight:600;letter-spacing:.01em}
+  .chip .e2ee{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--green);
+    border:1px solid rgba(107,142,90,.4);border-radius:5px;padding:1px 5px}
+  .chip .chip-x{background:none;border:0;color:var(--ash);cursor:pointer;font-size:14px;
+    line-height:1;padding:2px 4px;border-radius:5px}
+  .chip .chip-x:hover{color:var(--ember);background:rgba(216,107,83,.12)}
+  .advrow{display:flex;align-items:center;gap:8px}
+  .advrow[hidden]{display:none}
   #status{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:4px 10px;
     border-radius:6px;margin-left:auto;text-transform:uppercase}
   .st-off{background:rgba(142,58,44,.14);color:#c9755f}
@@ -137,12 +154,17 @@
 <body>
   <header>
     <span class="wordmark"><span class="sea">sea</span>helm</span>
-    <input class="url" id="broker" value="ws://localhost:8083/mqtt" />
-    <input class="sm" id="user" placeholder="user" value="" />
-    <input class="sm" id="pass" placeholder="pass" type="password" value="" />
-    <input class="sm" id="mac" value="testmac" title="mac_id" />
+    <span class="spacer"></span>
+    <!-- hidden manual fields: connect() reads these; pairing overrides them -->
+    <span id="advRow" class="advrow" hidden>
+      <input class="url" id="broker" value="ws://localhost:8083/mqtt" />
+      <input class="sm" id="user" placeholder="user" value="" />
+      <input class="sm" id="pass" placeholder="pass" type="password" value="" />
+      <input class="sm" id="mac" value="live" title="mac_id" />
+    </span>
+    <span id="pairZone" class="pairzone"></span>
     <button id="connectBtn">连接</button>
-    <button class="ghost" id="dndBtn" title="切换专注勿扰">DND</button>
+    <button class="ghost" id="dndBtn" title="切换专注勿扰(Do Not Disturb)">DND</button>
     <span id="status" class="st-off">离线</span>
   </header>
   <main>
@@ -172,12 +194,14 @@
     </div>
   </main>
 
+<script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const S = {
   client:null, mac:'testmac',
   panes:new Map(), worktrees:new Map(), msgs:new Map(),
   focus:null, dnd:null, sel:null, events:new Map(),
+  encKey:null, authPass:null,   // set once a seahelm:// pair link is applied (E2EE on)
 };
 const STC = { running:'#6B8E5A', waiting:'#C6993F', done:'#6B8E5A',
   failed:'#8E3A2C', idle:'#7A7166', unknown:'#7A7166' };
@@ -248,17 +272,77 @@ function connect(){
   if (S.client) { S.client.end(true); S.client=null; }
   S.mac = $('mac').value.trim() || 'testmac';
   const url = $('broker').value.trim();
+  // Paired → broker creds are HKDF-derived (username = mac_id, password = hex).
   const opts = { clean:true, connectTimeout:6000, reconnectPeriod:2000,
-    username: $('user').value || undefined, password: $('pass').value || undefined };
-  log('sys', '(connect)', url);
-  const c = mqtt.connect(url, opts);
+    username: S.authPass ? S.mac : ($('user').value || undefined),
+    password: S.authPass ? S.authPass : ($('pass').value || undefined) };
+  log('sys', '(connect)', url + (S.encKey ? ' [E2EE]' : ''));
+  const c = wrapClient(mqtt.connect(url, opts));
   S.client = c;
   c.on('connect', () => { setStatus(true,'已连接'); const t=`${base()}/#`; c.subscribe(t,{qos:1});
     log('sys','(subscribe)', t); });
   c.on('reconnect', () => setStatus(false,'重连中…'));
   c.on('close', () => setStatus(false,'离线'));
   c.on('error', e => { setStatus(false,'错误'); log('sys','(error)', String(e)); });
-  c.on('message', (topic, buf) => onMessage(topic, buf.toString()));
+  // Inbound: decrypt before routing (topic = AES-GCM AAD). Empty = retained-delete.
+  c.on('message', async (topic, buf) => {
+    let raw = buf.toString();
+    if (S.encKey && raw) {
+      try { raw = await E2EE.open(S.encKey, topic, raw); }
+      catch { log('sys', '(decrypt-fail)', topic); return; }
+    }
+    onMessage(topic, raw);
+  });
+}
+
+// Transparently seal outbound string payloads (serialized so publish order holds).
+function wrapClient(c){
+  const rawPub = c.publish.bind(c);
+  let chain = Promise.resolve();
+  c.publish = (t, p, opts, cb) => {
+    if (!S.encKey || typeof p !== 'string') return rawPub(t, p, opts, cb);
+    chain = chain.then(async () => rawPub(t, await E2EE.seal(S.encKey, t, p), opts||{}, cb));
+    return c;
+  };
+  return c;
+}
+
+// ── pairing ─────────────────────────────────────────────────────────────────
+// Apply a `seahelm://pair?...` link: derive broker creds + E2EE key, fill fields,
+// persist for next load. This is the whole "login" — no account, no session.
+async function applyPair(link){
+  const p = E2EE.parsePairURI(link);
+  const { password, encKey } = await E2EE.deriveKeys(p.rootBytes);
+  S.encKey = encKey; S.authPass = password; S.mac = p.mac;
+  $('broker').value = p.broker; $('mac').value = p.mac;
+  $('user').value = p.mac; $('pass').value = '';
+  localStorage.setItem('seahelm_pair', link);
+  log('sys', '(paired)', `${p.mac} · E2EE on`);
+  renderPairZone();
+}
+function pairPrompt(){
+  const link = prompt('粘贴 macOS 配对界面的长链接(seahelm://pair?…):', '');
+  if (!link) return;
+  applyPair(link.trim()).catch(e => alert('配对失败:' + e.message));
+}
+function clearPair(){
+  S.encKey = null; S.authPass = null;
+  localStorage.removeItem('seahelm_pair');
+  log('sys', '(unpaired)', '回到明文/手填模式');
+  renderPairZone();
+}
+// Reflect pairing state in the header: chip when paired, 配对 button when not.
+function renderPairZone(){
+  const z = $('pairZone');
+  if (S.authPass){
+    z.innerHTML = `<span class="chip"><span class="lock">🔒</span><b>${esc(S.mac)}</b>`
+      + `<span class="e2ee">E2EE</span>`
+      + `<button class="chip-x" id="unpairBtn" title="解除配对">✕</button></span>`;
+    $('unpairBtn').onclick = clearPair;
+  } else {
+    z.innerHTML = `<button id="pairBtn" class="pair-primary" title="粘贴 seahelm:// 配对链接">配对</button>`;
+    $('pairBtn').onclick = pairPrompt;
+  }
 }
 
 // ── inbound routing ────────────────────────────────────────────────────────
@@ -440,7 +524,13 @@ function pubMock(){
 }
 
 // ── wire ─────────────────────────────────────────────────────────────────────
+renderPairZone();   // pairing-first: 配对 button (or paired chip) is the primary control
 $('connectBtn').onclick=connect;
+// Restore a saved pairing so a reload stays logged in (creds derived, not stored raw).
+(function restorePair(){
+  const saved = localStorage.getItem('seahelm_pair');
+  if (saved) applyPair(saved).catch(()=>localStorage.removeItem('seahelm_pair'));
+})();
 $('sendBtn').onclick=sendText;
 $('sendText').addEventListener('keydown',e=>{ if(e.key==='Enter') sendText(); });
 $('histBtn').onclick=pullHistory;

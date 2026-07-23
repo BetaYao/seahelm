@@ -15,6 +15,8 @@ class TabCoordinator {
 
     /// MQTT remote-client backend (Watch / web / ESP32), if `config.mqtt` enabled.
     private var mqttChannel: MqttChannel?
+    /// Retained so the channel can be torn down and rebuilt on pairing (E2EE).
+    private var mqttDataSource: ControlDataSource?
 
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
@@ -705,6 +707,7 @@ class TabCoordinator {
                         // Remote-client backend (MQTT). Shares the control
                         // socket's dataSource; registered with ShipLog so it also
                         // mirrors notifications. docs/remote-clients-design.md.
+                        self.mqttDataSource = controlDataSource
                         self.setupMqttChannel(dataSource: controlDataSource)
                     }
                 }
@@ -724,6 +727,26 @@ class TabCoordinator {
         channel.connect()
         mqttChannel = channel
         NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId))")
+    }
+
+    /// Apply a freshly-minted pairing secret to the *live* config and reconnect the
+    /// MQTT channel so it derives broker creds + the E2EE key — no app restart
+    /// needed. Called from `MainWindowController.showPairing`.
+    func applyMqttRootSecret(_ secret: String) {
+        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
+        config.mqtt?.rootSecret = secret
+        reloadMqttChannel()
+    }
+
+    /// Tear down the current MQTT channel and rebuild it from the current
+    /// `config.mqtt` (picks up a newly-set `rootSecret` → E2EE).
+    func reloadMqttChannel() {
+        if let old = mqttChannel {
+            old.disconnect()
+            ShipLog.shared.unregisterChannel(old.channelId)
+            mqttChannel = nil
+        }
+        if let ds = mqttDataSource { setupMqttChannel(dataSource: ds) }
     }
 
     // MARK: - Shared Worktree Integration

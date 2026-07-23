@@ -10,8 +10,6 @@ final class CommandInputView: NSView {
 
     // Appearance-aware text; accents stay fixed.
     private static let ink: NSColor = SemanticColors.text
-    /// Placeholder base: brighter than `muted` so the prompt reads clearly.
-    private static let inkBright: NSColor = SemanticColors.text.withAlphaComponent(0.85)
 
     enum MenuKey { case up, down, accept }
 
@@ -37,7 +35,28 @@ final class CommandInputView: NSView {
     private let field = GrowingTextView()
     private let scroll = NSScrollView()
     private let box = FrostedPanelView()
+    /// Solid color wash over the glass that gives the flush band a distinct
+    /// input-surface color — this is what separates it from the panel behind.
+    private let tint = NSView()
     private let spinner = NSProgressIndicator()
+
+    /// Deep input-surface fill. Darker than the panel in dark mode, so the band
+    /// reads as a recessed field rather than a decorative strip.
+    private static let bandFill: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(hex: 0x061a21).withAlphaComponent(0.90)
+            : NSColor(srgbRed: 0xff / 255.0, green: 0xff / 255.0, blue: 0xff / 255.0, alpha: 0.92)
+    }
+    private static let bandFillFocused: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(hex: 0x0a2530).withAlphaComponent(0.94)
+            : NSColor.white.withAlphaComponent(0.98)
+    }
+
+    /// Field (or its editor) currently owns focus — drives the lit state.
+    private var isFocused = false {
+        didSet { if oldValue != isFocused { updateFocusAppearance() } }
+    }
     private let thumbnailStrip = NSStackView()
     private var savedPlaceholder: String?
     private var placeholder: String = "" {
@@ -102,7 +121,7 @@ final class CommandInputView: NSView {
 
         field.font = font
         field.textColor = Self.ink
-        field.placeholderColor = Self.inkBright
+        field.placeholderColor = SemanticColors.muted
         field.placeholderAccentColor = SemanticColors.accent
         field.isRichText = false
         field.drawsBackground = false
@@ -117,6 +136,7 @@ final class CommandInputView: NSView {
         field.setAccessibilityIdentifier("helm.commandInput")
         placeholder = "Give an order — / command · @ repo · # agent"
         field.onFocusChange = { [weak self] focused in
+            self?.isFocused = focused
             if focused { self?.onFocused?() } else { self?.onUnfocused?() }
         }
         field.onPasteImage = { [weak self] url in self?.attachImage(url: url) }
@@ -129,6 +149,10 @@ final class CommandInputView: NSView {
         scroll.autohidesScrollers = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = field
+
+        tint.wantsLayer = true
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(tint)
         box.addSubview(scroll)
 
         refreshChromeColors()
@@ -148,7 +172,7 @@ final class CommandInputView: NSView {
 
         addSubview(box)
 
-        scrollLeadingConstraint = scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14)
+        scrollLeadingConstraint = scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16)
         scrollHeightConstraint = scroll.heightAnchor.constraint(equalToConstant: lineHeight)
 
         NSLayoutConstraint.activate([
@@ -157,6 +181,11 @@ final class CommandInputView: NSView {
             box.leadingAnchor.constraint(equalTo: leadingAnchor),
             box.trailingAnchor.constraint(equalTo: trailingAnchor),
             box.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            tint.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            tint.topAnchor.constraint(equalTo: box.topAnchor),
+            tint.bottomAnchor.constraint(equalTo: box.bottomAnchor),
 
             scrollLeadingConstraint,
             scroll.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
@@ -215,9 +244,16 @@ final class CommandInputView: NSView {
             box.layer?.borderColor = nil
         }
         field.textColor = Self.ink
-        field.placeholderColor = Self.inkBright
+        field.placeholderColor = SemanticColors.muted
         field.placeholderAccentColor = SemanticColors.accent
         refreshPlaceholder()
+        updateFocusAppearance()
+    }
+
+    /// The band's prominence is carried by color: a deep fill that deepens a
+    /// touch more when focused. No borders, bars, or rules.
+    private func updateFocusAppearance() {
+        tint.layer?.backgroundColor = resolvedCGColor(isFocused ? Self.bandFillFocused : Self.bandFill)
     }
 
     func focusInput() { window?.makeFirstResponder(field) }
@@ -337,7 +373,7 @@ final class CommandInputView: NSView {
         // Each thumbnail is 28pt + 4pt spacing, plus 6pt leading margin.
         let stripWidth = hasImages ? CGFloat(count) * 28 + CGFloat(max(0, count - 1)) * 4 : 0
         thumbnailStackLeadingConstraint.constant = hasImages ? 6 : 0
-        scrollLeadingConstraint.constant = hasImages ? 14 + stripWidth + 6 : 14
+        scrollLeadingConstraint.constant = hasImages ? 16 + stripWidth + 6 : 16
     }
 }
 
@@ -397,24 +433,16 @@ final class GrowingTextView: NSTextView {
         attributedPlaceholder().draw(at: origin)
     }
 
-    /// Base placeholder brightened and bolded, led by an accent `▸` marker,
-    /// with the `/ @ #` sigils punched up in the accent color so the command
-    /// grammar reads at a glance.
+    /// Plain placeholder in a calm color, with just the `/ @ #` sigils lifted
+    /// into the accent color so the command grammar reads at a glance.
     private func attributedPlaceholder() -> NSAttributedString {
-        let bold = NSFont(descriptor: placeholderFont.fontDescriptor.withSymbolicTraits(.bold),
-                          size: placeholderFont.pointSize) ?? placeholderFont
-        let str = NSMutableAttributedString(string: "▸ ", attributes: [
-            .foregroundColor: placeholderAccentColor,
-            .font: bold,
-        ])
-        let markerLen = str.length
-        str.append(NSAttributedString(string: placeholder, attributes: [
+        let str = NSMutableAttributedString(string: placeholder, attributes: [
             .foregroundColor: placeholderColor,
-            .font: bold,
-        ]))
+            .font: placeholderFont,
+        ])
         let full = str.string as NSString
         for sigil in ["/", "@", "#"] {
-            let r = full.range(of: sigil, options: [], range: NSRange(location: markerLen, length: full.length - markerLen))
+            let r = full.range(of: sigil)
             if r.location != NSNotFound {
                 str.addAttribute(.foregroundColor, value: placeholderAccentColor, range: r)
             }

@@ -113,6 +113,7 @@
 		53CB2A1C620681FD4477E378 /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29A07652F0DCD0488FA748B2 /* UpdateBanner.swift */; };
 		5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */; };
 		55837BD097FC8B76C4C8E3DB /* ActivityFeedRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A43BFEA80D85BEB85CE0125 /* ActivityFeedRendererTests.swift */; };
+		55C5B0B646137831DCA9D1E9 /* PairingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD049D511655E149E38EA48 /* PairingWindowController.swift */; };
 		56D7FA05EEF91495A4DCED81 /* WorktreeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C122F14B425BC7F3DF1FEB8B /* WorktreeDiscovery.swift */; };
 		5747907514A4563DCFCBD35A /* OnboardingAgentDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6248F858A60E04AAC76E22 /* OnboardingAgentDetector.swift */; };
 		576D38CAAD5415DA8864E501 /* IslandShapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AB034D22AB8AD81A9FA9DD /* IslandShapes.swift */; };
@@ -262,6 +263,7 @@
 		B75B1219050B0C1C0E3F19E2 /* DialogKeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D388764AD2E566CBAC633F5 /* DialogKeymapTests.swift */; };
 		B7A8FEFA89D2783828B0FA1B /* DashboardOverviewGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF03037A58F3583369D621C /* DashboardOverviewGroupingTests.swift */; };
 		B8C02C585F290AD6D6F19006 /* SailorStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCDDD8680C8FD209F2BB3CD1 /* SailorStatus.swift */; };
+		B8D8E85B19926B329266D071 /* MqttCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20427901C2E74CC423AE520B /* MqttCrypto.swift */; };
 		B9872FE3B3521117DCE17ADC /* WeChatChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49DE692E146DF04DADA3B50 /* WeChatChannel.swift */; };
 		B9B140426C5752800B0F3B22 /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D002748AEBEA4297919DC48 /* FocusPanelView.swift */; };
 		BA68398C1166613FC959FDCD /* QuickLookUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D8F411B82FDF917ED61460FC /* QuickLookUI.framework */; };
@@ -288,6 +290,7 @@
 		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
 		CA43EB5F470FF6E325C0934F /* SelectedFilePathResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */; };
 		CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */; };
+		CAD44C853DBF52D5E3A114D9 /* MqttCryptoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20388FC5D9797A091BADCF95 /* MqttCryptoTests.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
 		CDE025440DDC3A5CFE827DB1 /* WeChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
@@ -419,6 +422,8 @@
 		1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewController.swift; sourceTree = "<group>"; };
 		1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorDisplayHelpers.swift; sourceTree = "<group>"; };
 		201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSessionTitleLookupTests.swift; sourceTree = "<group>"; };
+		20388FC5D9797A091BADCF95 /* MqttCryptoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttCryptoTests.swift; sourceTree = "<group>"; };
+		20427901C2E74CC423AE520B /* MqttCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttCrypto.swift; sourceTree = "<group>"; };
 		20D815BD3789070197196037 /* CodexHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetupTests.swift; sourceTree = "<group>"; };
 		20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmUITestCase.swift; sourceTree = "<group>"; };
 		20E7934A548F91E1E9FB161C /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
@@ -469,6 +474,7 @@
 		3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGitStats.swift; sourceTree = "<group>"; };
 		3C22FD399E95F8A453F40C3A /* ghostty */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ghostty; path = Resources/ghostty; sourceTree = SOURCE_ROOT; };
 		3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutState.swift; sourceTree = "<group>"; };
+		3CD049D511655E149E38EA48 /* PairingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWindowController.swift; sourceTree = "<group>"; };
 		3D002748AEBEA4297919DC48 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
 		3F4CB69B94BFFAB30A5D430C /* ChromeHeaderDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeHeaderDelegate.swift; sourceTree = "<group>"; };
 		3F67CBC84404085C3483C910 /* TestViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestViewHelpers.swift; sourceTree = "<group>"; };
@@ -829,6 +835,7 @@
 				340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */,
 				78661A2AC2A8EFF154BA1FC2 /* MqttChannel.swift */,
 				50591FAB1ABF2A23B82950E7 /* MqttConfig.swift */,
+				20427901C2E74CC423AE520B /* MqttCrypto.swift */,
 				4F6248F858A60E04AAC76E22 /* OnboardingAgentDetector.swift */,
 				215354472FB165AA55E27D9C /* OnboardingHookInstaller.swift */,
 				E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */,
@@ -1008,6 +1015,7 @@
 		6BEB4103EC0AEDFA2D925807 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				3CD049D511655E149E38EA48 /* PairingWindowController.swift */,
 				C537B2B1B68C50EF9685736B /* SettingsViewController.swift */,
 			);
 			path = Settings;
@@ -1169,6 +1177,7 @@
 				744AF80AC91241DD0E34B964 /* LeaderMenuTests.swift */,
 				304981CB302BEC6B00289258 /* ManifestEngineTests.swift */,
 				A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */,
+				20388FC5D9797A091BADCF95 /* MqttCryptoTests.swift */,
 				ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */,
 				6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */,
 				C4D0B8A444B60E3445EC7977 /* NotificationManagerTests.swift */,
@@ -1628,6 +1637,7 @@
 				F176CCFA365B9C079D3FE750 /* LeaderMenuTests.swift in Sources */,
 				91AD0153C909A0DF726EE6A1 /* ManifestEngineTests.swift in Sources */,
 				7F9546C174F5D5E52457F7A8 /* MarkdownRendererTests.swift in Sources */,
+				CAD44C853DBF52D5E3A114D9 /* MqttCryptoTests.swift in Sources */,
 				EC97D5CB826CD5F1B3DEAAF5 /* NormalizedEventDecoderTests.swift in Sources */,
 				00F46EEC83808A01C3104099 /* NotificationHistoryTests.swift in Sources */,
 				13005279CEAF281DCBE08040 /* NotificationManagerTests.swift in Sources */,
@@ -1838,6 +1848,7 @@
 				4B8E890A2EF970F4967043B2 /* MenuRowButton.swift in Sources */,
 				2313FC433D0111A77BB10B04 /* MqttChannel.swift in Sources */,
 				A6CFE5CACA3D1493A8E309C0 /* MqttConfig.swift in Sources */,
+				B8D8E85B19926B329266D071 /* MqttCrypto.swift in Sources */,
 				0C553E03E27CDC10711D9EDD /* NewBranchDialog.swift in Sources */,
 				15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */,
 				708FA82605788117E6142639 /* NotificationHistory.swift in Sources */,
@@ -1856,6 +1867,7 @@
 				36A3C27B63B14CBA52BC3A4D /* OverviewFocusModel.swift in Sources */,
 				F822A1F30137CB7940F82296 /* PRListView.swift in Sources */,
 				DF7E8C735153B1DD42FFDC8C /* PRReviewCoordinator.swift in Sources */,
+				55C5B0B646137831DCA9D1E9 /* PairingWindowController.swift in Sources */,
 				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,
 				CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */,

@@ -420,6 +420,16 @@ class ShipLog {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { dict["user_prompt"] = trimmed }
         }
+        // Open decisions — surfaced so remote clients (Watch) can show/answer them
+        // (`pane/{slot}/event`). MqttChannel publishes these retained and clears
+        // them when the pane leaves `.waiting`.
+        switch o.event.kind {
+        case .question(let prompt, let options, _):
+            dict["question"] = ["prompt": prompt, "options": options]
+        case .suggest(let options):
+            dict["suggest"] = ["options": options]
+        default: break
+        }
         return dict
     }
 

@@ -72,6 +72,7 @@ class MainWindowController: NSWindowController {
 
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
+    private var pairingWindowController: PairingWindowController?
     private var runtimeBackend: String = "zmx"
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
@@ -439,6 +440,28 @@ class MainWindowController: NSWindowController {
     @objc func showSettings() {
         let settingsVC = dialogPresenter.makeSettings(config: config, settingsDelegate: self)
         dialogPresenter.presentSheetOnActiveVC(settingsVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
+    }
+
+    /// Remote-client pairing window (QR + long link + on-demand short code).
+    /// Held strongly so it survives past this call. See `PairingWindowController`.
+    @objc func showPairing() {
+        // Mint + persist the root secret on the LIVE config (a throwaway
+        // `Config.load()` copy is clobbered by the app's own config saves), then
+        // hot-reload the MQTT channel so it reconnects with E2EE + derived broker
+        // creds — no restart needed.
+        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
+        if config.mqtt?.rootSecret == nil {
+            config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
+        }
+        config.saveNow()
+        let mqtt = config.mqtt!
+        tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")   // sync + reconnect E2EE
+        let secret = MqttCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? MqttCrypto.newRootSecret()
+        let wc = PairingWindowController(secret: secret, mqtt: mqtt)
+        wc.showWindow(nil)
+        wc.window?.center()
+        NSApp.activate(ignoringOtherApps: true)
+        pairingWindowController = wc
     }
 
     /// The WeChat bot token stopped being accepted. Point the user at the QR

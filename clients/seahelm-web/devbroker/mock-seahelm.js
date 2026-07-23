@@ -6,6 +6,7 @@
 //   • events (question/suggest) are non-retained; emitted on demand via mock.emit.*
 // Run: node mock-seahelm.js   (after broker.js). Web client then fully interactive.
 const mqtt = require('mqtt');
+const crypto = require('crypto');
 
 const URL = process.env.BROKER || 'ws://localhost:8083/mqtt';
 const MAC = process.env.MAC || 'testmac';
@@ -13,11 +14,46 @@ const B = `seahelm/${MAC}`;
 let seq = 100;
 const nextSeq = () => ++seq;
 
+// ── E2EE (matches e2ee.js / MqttCrypto.swift) ─────────────────────────────────
+// ROOT_SECRET (base64url, 32B) → HKDF-SHA256 → hex password + AES-256-GCM key.
+// Absent → plaintext (back-compat with USER_MQTT/PASS_MQTT).
+const ROOT = process.env.ROOT_SECRET ? Buffer.from(process.env.ROOT_SECRET, 'base64url') : null;
+let ENC_KEY = null;
+let USER = process.env.USER_MQTT;
+let PASS = process.env.PASS_MQTT;
+if (ROOT) {
+  const salt = Buffer.from('seahelm-pair-v1');
+  PASS = Buffer.from(crypto.hkdfSync('sha256', ROOT, salt, Buffer.from('auth'), 32)).toString('hex');
+  ENC_KEY = Buffer.from(crypto.hkdfSync('sha256', ROOT, salt, Buffer.from('e2ee'), 32));
+  USER = MAC;
+  console.log('[mock-seahelm] E2EE on (mac_id auth + AES-256-GCM payloads)');
+}
+function sealSync(topic, str) {
+  if (!ENC_KEY || str === '' || str == null) return str;
+  const iv = crypto.randomBytes(12);
+  const ci = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  ci.setAAD(Buffer.from(topic));
+  const ct = Buffer.concat([ci.update(str, 'utf8'), ci.final()]);
+  return Buffer.concat([Buffer.from([1]), iv, ct, ci.getAuthTag()]).toString('base64');
+}
+function openSync(topic, b64) {
+  if (!ENC_KEY || b64 === '' || b64 == null) return b64;
+  const env = Buffer.from(b64, 'base64');
+  if (env[0] !== 1) throw new Error('bad envelope version');
+  const iv = env.subarray(1, 13), tag = env.subarray(env.length - 16), ct = env.subarray(13, env.length - 16);
+  const d = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, iv);
+  d.setAAD(Buffer.from(topic)); d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+}
+
 const c = mqtt.connect(URL, {
   clientId: 'seahelm-mock',
-  username: process.env.USER_MQTT, password: process.env.PASS_MQTT,
+  username: USER, password: PASS,
   will: { topic: `${B}/presence`, payload: JSON.stringify({ online: false, seq: 0 }), qos: 1, retain: true },
 });
+// Transparently seal every string payload on the way out (topic = AES-GCM AAD).
+const rawPublish = c.publish.bind(c);
+c.publish = (t, p, opts, cb) => rawPublish(t, typeof p === 'string' ? sealSync(t, p) : p, opts || {}, cb);
 
 // ── mock state (mirrors sh_data.c; status uses SailorStatus rawValue casing) ──
 const panes = {
@@ -126,7 +162,8 @@ c.on('connect', () => {
   console.log('[mock-seahelm] snapshot published (retained). Ready.');
 });
 c.on('message', (t, buf) => {
-  let m; try { m = JSON.parse(buf.toString()); } catch { return; }
+  let raw; try { raw = openSync(t, buf.toString()); } catch { return; }
+  let m; try { m = JSON.parse(raw); } catch { return; }
   if (t === `${B}/command`) { console.log('[mock-seahelm] cmd', m.method); onCommand(m); }
   else if (t === `${B}/history/request`) { console.log('[mock-seahelm] history', m.pane_id); onHistory(m); }
 });

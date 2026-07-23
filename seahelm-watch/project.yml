@@ -1,0 +1,32 @@
+name: seahelm-watch
+options:
+  bundleIdPrefix: com.seahelm
+  deploymentTarget:
+    watchOS: "11.0"
+  createIntermediateGroups: true
+
+# No third-party MQTT lib: CocoaMQTT's TCP socket dependency (MqttCocoaAsyncSocket)
+# uses CFNetwork and doesn't build for watchOS. We speak MQTT 3.1.1 over a native
+# URLSessionWebSocketTask instead (see Sources/MQTTClient.swift).
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.10"
+    GENERATE_INFOPLIST_FILE: NO
+
+targets:
+  SeahelmWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Sources
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.watch
+        TARGETED_DEVICE_FAMILY: "4"
+        SDKROOT: watchos
+        INFOPLIST_FILE: Sources/Info.plist

@@ -19,8 +19,15 @@ struct MqttConfig: Codable, Equatable {
     /// WebSocket path when `websocket` is true. Default `/mqtt`.
     var wsPath: String?
     /// Auth (EMQX built-in DB / external). Anonymous is refused on EMQX Cloud.
+    /// When `rootSecret` is set (paired), `MqttChannel` overrides `username` with
+    /// `macId` and `password` with the HKDF-derived hex — these become the manual
+    /// fallback for an un-paired/plaintext broker.
     var username: String?
     var password: String?
+    /// Pairing root secret (base64url, 32 bytes). Set once via the pairing window;
+    /// drives both broker auth (HKDF info="auth") and payload E2EE (info="e2ee").
+    /// Nil = un-paired (plaintext, manual username/password). See `MqttCrypto`.
+    var rootSecret: String?
     /// Optional CA path for pinning. Nil = rely on system trust (EMQX Cloud uses
     /// DigiCert Global Root G2, already trusted by macOS).
     var caCertPath: String?
@@ -68,6 +75,7 @@ struct MqttConfig: Codable, Equatable {
         case wsPath = "ws_path"
         case username
         case password
+        case rootSecret = "root_secret"
         case caCertPath = "ca_cert_path"
         case macId = "mac_id"
         case clientId = "client_id"

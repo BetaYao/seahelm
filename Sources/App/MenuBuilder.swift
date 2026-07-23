@@ -16,6 +16,9 @@ enum MenuBuilder {
         checkUpdateItem.keyEquivalentModifierMask = .command
         checkUpdateItem.target = target
         appMenu.addItem(checkUpdateItem)
+        let pairItem = NSMenuItem(title: "Pair Remote Clients...", action: #selector(MainWindowController.showPairing), keyEquivalent: "")
+        pairItem.target = target
+        appMenu.addItem(pairItem)
         let cleanOrphanSessionsItem = NSMenuItem(title: "Clean Orphan Sessions", action: #selector(MainWindowController.cleanOrphanSessions), keyEquivalent: "")
         cleanOrphanSessionsItem.target = target
         appMenu.addItem(cleanOrphanSessionsItem)

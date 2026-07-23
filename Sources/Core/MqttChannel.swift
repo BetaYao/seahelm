@@ -45,8 +45,19 @@ final class MqttChannel: NSObject, ExternalChannel {
         "pane.send_text", "pane.run", "pane.send_keys", "pane.split", "pane.zoom",
         "pane.close", "pane.focus", "layout.apply", "suggest",
         "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
+        "question.answer", "suggest.pick", "dnd.set",
     ]
+
+    /// Last published question/suggest per slot (options text), so `suggest.pick`
+    /// can map an index back to the chosen order. Touched from both the EventHub
+    /// (main) and MQTT command threads → guarded by `pendLock`.
+    private var pendingEvents: [String: [String]] = [:]
+    private var dndState: [String: Any] = ["on": false, "minutes": 25, "blocked": 0]
+    private let pendLock = NSLock()
     private let macId: String
+    /// E2EE + derived broker auth, present only when the Mac is paired
+    /// (`config.rootSecret` set). Nil = plaintext/manual-credential mode.
+    private let crypto: MqttCrypto?
     private var stateMachine = GatewayStateMachine()
     private(set) var gatewayState: GatewayState = .disconnected
 
@@ -66,6 +77,11 @@ final class MqttChannel: NSObject, ExternalChannel {
         self.config = config
         self.macId = config.macId ?? MqttChannel.deriveMacId()
         self.channelId = channelId ?? "mqtt-\(self.macId)"
+        if let rs = config.rootSecret, let bytes = MqttCrypto.rootSecret(fromBase64url: rs) {
+            self.crypto = MqttCrypto(rootSecret: bytes)
+        } else {
+            self.crypto = nil
+        }
         super.init()
     }
 
@@ -94,16 +110,18 @@ final class MqttChannel: NSObject, ExternalChannel {
 
         let clientId = config.clientId ?? "seahelm-\(macId)"
         let m = CocoaMQTT(clientID: clientId, host: config.host, port: config.resolvedPort)
-        m.username = config.username
-        m.password = config.password
+        // Paired → HKDF-derived creds (username = mac_id); else manual/plaintext.
+        m.username = crypto != nil ? macId : config.username
+        m.password = crypto?.authPassword ?? config.password
         m.keepAlive = 60
         m.enableSSL = config.resolvedTLS
         m.autoReconnect = false          // we manage exponential backoff ourselves
         m.cleanSession = true
 
         // LWT: broker publishes offline (retained) if we drop unexpectedly.
+        let willBody = encode(["online": false, "seq": 0])
         let will = CocoaMQTTMessage(topic: tPresence,
-                                    string: encode(["online": false, "seq": 0]),
+                                    string: crypto?.seal(willBody, topic: tPresence) ?? willBody,
                                     qos: .qos1, retained: true)
         m.willMessage = will
         m.delegate = self
@@ -137,7 +155,10 @@ final class MqttChannel: NSObject, ExternalChannel {
     @discardableResult
     private func publish(_ topic: String, _ obj: [String: Any], retained: Bool) -> Bool {
         guard let mqtt, stateMachine.isConnected else { return false }
-        _ = mqtt.publish(topic, withString: encode(obj), qos: .qos1, retained: retained)
+        let body = encode(obj)
+        // Seal per-topic (topic = AES-GCM AAD) when paired; else publish plaintext.
+        let wire = crypto?.seal(body, topic: topic) ?? body
+        _ = mqtt.publish(topic, withString: wire, qos: .qos1, retained: retained)
         return true
     }
 
@@ -159,8 +180,17 @@ final class MqttChannel: NSObject, ExternalChannel {
     // MARK: Topics (dynamic)
     private func tPaneStatus(_ id: String) -> String { "\(base)/pane/\(id)/status" }
     private func tPaneMessage(_ id: String) -> String { "\(base)/pane/\(id)/message" }
+    private func tPaneEvent(_ id: String) -> String { "\(base)/pane/\(id)/event" }
     private func tWorktreeStatus(_ id: String) -> String { "\(base)/worktree/\(id)/status" }
     private var tFocus: String { "\(base)/focus" }
+    private var tDnd: String { "\(base)/dnd/state" }
+
+    private static let dangerRE = try? NSRegularExpression(
+        pattern: "覆盖|删除|prod|生产|部署|deploy|drop|force", options: [.caseInsensitive])
+    private static func isDanger(_ s: String) -> Bool {
+        guard let re = dangerRE else { return false }
+        return re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
 
     /// The stable per-pane slot key used as the pane topic segment and the remote
     /// addressing key (§15). `pane_session_key` survives app restarts, so the same
@@ -210,7 +240,37 @@ final class MqttChannel: NSObject, ExternalChannel {
         if let prompt = event["user_prompt"] as? String, !prompt.isEmpty {
             history.append(paneId: key, entry: ["seq": Int(seq), "kind": "you", "text": prompt])
         }
+        publishDecision(slot: key, pid: pid, sname: sname, event: event, seq: Int(seq))
         publishWorktreesAndFocus(from: panes)
+    }
+
+    /// Surface an open decision (question / suggest) as a **retained** `pane/event`
+    /// so a client connecting any time sees the pending order; clear it (empty
+    /// retained) once the pane leaves `.waiting`. Backs the Watch Orders/Confirm.
+    private func publishDecision(slot key: String, pid: String, sname: String,
+                                 event: [String: Any], seq: Int) {
+        if let q = event["question"] as? [String: Any] {
+            let prompt = q["prompt"] as? String ?? ""
+            let options = q["options"] as? [String] ?? []
+            pendLock.lock(); pendingEvents[key] = options; pendLock.unlock()
+            publish(tPaneEvent(key), ["type": "question", "pane_id": pid, "pane_session_key": sname,
+                                      "prompt": prompt, "options": options,
+                                      "danger": Self.isDanger(prompt), "seq": seq], retained: true)
+        } else if let s = event["suggest"] as? [String: Any] {
+            let options = s["options"] as? [String] ?? []
+            pendLock.lock(); pendingEvents[key] = options; pendLock.unlock()
+            publish(tPaneEvent(key), ["type": "suggest", "pane_id": pid, "pane_session_key": sname,
+                                      "options": options, "seq": seq], retained: true)
+        } else if let st = event["status"] as? String, st != SailorStatus.waiting.rawValue {
+            clearDecision(key)
+        }
+    }
+
+    /// Drop a pane's retained decision (answered/resolved/moved on).
+    private func clearDecision(_ key: String?) {
+        guard let key, !key.isEmpty else { return }
+        pendLock.lock(); let had = pendingEvents.removeValue(forKey: key) != nil; pendLock.unlock()
+        if had { clearRetained(tPaneEvent(key)) }
     }
 
     /// Publish every pane (retained) + worktree rollups + focus — so a client that
@@ -219,6 +279,9 @@ final class MqttChannel: NSObject, ExternalChannel {
         let panes = dataSource?.snapshotPanes() ?? []
         for p in panes { publishPaneStatus(p, seq: nextSeq()) }
         publishWorktreesAndFocus(from: panes)
+        pendLock.lock(); var dnd = dndState; pendLock.unlock()
+        dnd["seq"] = nextSeq()
+        publish(tDnd, dnd, retained: true)      // so a fresh client gets DND state
     }
 
     private func publishPaneStatus(_ pane: PaneSnapshot, seq: Int) {
@@ -311,6 +374,40 @@ final class MqttChannel: NSObject, ExternalChannel {
                   result: .error(code: -32003, message: "capability_denied: remote write disabled"))
             return
         }
+
+        // Watch decision / DND methods are handled here (kept out of ControlRouter /
+        // the desktop UI). `question.answer` navigates the on-screen prompt by
+        // index; `suggest.pick` sends the chosen order text; `dnd.set` reflects
+        // state to a retained `dnd/state` topic.
+        switch method {
+        case "question.answer":
+            let idx = max(0, params["index"] as? Int ?? 0)
+            if let pid = params["pane_id"] as? String {
+                var keys = Array(repeating: "down", count: idx); keys.append("enter")
+                _ = dataSource?.sendKeys(paneId: pid, keys: keys)
+            }
+            clearDecision(params["pane_session_key"] as? String)
+            reply(to: replyTo, corr: corr, result: .ok(["answered": true])); return
+        case "suggest.pick":
+            let idx = max(0, params["index"] as? Int ?? 0)
+            let key = params["pane_session_key"] as? String ?? ""
+            pendLock.lock(); let opts = pendingEvents[key] ?? []; pendLock.unlock()
+            if let pid = params["pane_id"] as? String, idx < opts.count {
+                _ = dataSource?.sendText(paneId: pid, text: opts[idx], enter: true)
+            }
+            clearDecision(key)
+            reply(to: replyTo, corr: corr, result: .ok(["picked": true])); return
+        case "dnd.set":
+            let on = params["on"] as? Bool ?? false
+            let minutes = params["minutes"] as? Int ?? 25
+            pendLock.lock(); dndState = ["on": on, "minutes": minutes, "blocked": dndState["blocked"] ?? 0]
+            let snap = dndState; pendLock.unlock()
+            var out = snap; out["seq"] = nextSeq()
+            publish(tDnd, out, retained: true)
+            reply(to: replyTo, corr: corr, result: .ok(["on": on])); return
+        default: break
+        }
+
         let ds = dataSource
         cmdQueue.async { [weak self] in
             let router = ControlRouter(dataSource: ds)
@@ -414,7 +511,16 @@ extension MqttChannel: CocoaMQTTDelegate {
 
     func mqtt(_ mqtt: CocoaMQTT, didReceiveMessage message: CocoaMQTTMessage, id: UInt16) {
         let topic = message.topic
-        guard let payload = message.string, let env = decode(payload) else { return }
+        guard let payload = message.string else { return }
+        // Open the E2EE envelope when paired; drop anything that fails to decrypt.
+        let plain: String
+        if let crypto {
+            guard let opened = crypto.open(payload, topic: topic) else { return }
+            plain = opened
+        } else {
+            plain = payload
+        }
+        guard let env = decode(plain) else { return }
         if topic == tCommand {
             handleCommand(env)
         } else if topic == tHistoryRequest {
