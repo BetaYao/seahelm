@@ -73,8 +73,14 @@ final class PreviewWebView: NSView {
         }
     }
 
-    /// Render a raw HTML document as-is. `baseURL` (the file's directory) lets
-    /// relative resources and links resolve.
+    /// Render a raw HTML document as-is. `baseURL` is the file's directory.
+    ///
+    /// WKWebView refuses `file://` subresources (CSS/JS/images) for pages loaded
+    /// via `loadHTMLString`, even when `baseURL` is a file URL — the same
+    /// restriction that forced markdown images onto `seahelm-local://`. Point
+    /// the document base at that custom scheme so relative `href`/`src` (and
+    /// relative `url(...)` inside those CSS files) resolve through
+    /// `LocalResourceSchemeHandler`.
     func renderHTML(_ html: String, baseURL: URL?) {
         var hasher = Hasher()
         hasher.combine(html)
@@ -82,7 +88,18 @@ final class PreviewWebView: NSView {
         let key = hasher.finalize()
         guard key != lastRenderKey else { return }
         lastRenderKey = key
-        webView.loadHTMLString(html, baseURL: baseURL)
+        resourceHandler.rootDirectory = baseURL
+        let schemeBase = baseURL.flatMap { Self.localResourceBaseURL(forDirectory: $0) }
+        webView.loadHTMLString(html, baseURL: schemeBase)
+    }
+
+    /// `seahelm-local://local/<abs-dir>/` — trailing slash so RFC 3986 relative
+    /// resolution keeps the last path segment as a directory.
+    static func localResourceBaseURL(forDirectory directory: URL) -> URL? {
+        let path = directory.standardizedFileURL.path
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        let withSlash = encoded.hasSuffix("/") ? encoded : encoded + "/"
+        return URL(string: "\(localScheme)://local\(withSlash)")
     }
 
     private static func page(body: String, dark: Bool) -> String {
