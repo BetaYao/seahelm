@@ -24,6 +24,8 @@
 	<string>com.seahelm.app</string>
 	<key>WKRunsIndependentlyOfCompanionApp</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
