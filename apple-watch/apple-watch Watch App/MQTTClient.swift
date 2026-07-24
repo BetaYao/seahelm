@@ -100,6 +100,37 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
         scheduleReconnect()
     }
 
+    // MARK: - URLSessionDelegate (TLS trust)
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        // Try loading the bundled CA cert for pinning.
+        if let caPath = Bundle.main.path(forResource: "emqxsl-ca", ofType: "crt"),
+           let caData = try? Data(contentsOf: URL(fileURLWithPath: caPath)),
+           let caCert = SecCertificateCreateWithData(nil, caData as CFData) {
+            let policies = [SecPolicyCreateSSL(true, challenge.protectionSpace.host as CFString)]
+            var trust: SecTrust?
+            if SecTrustCreateWithCertificates([caCert] as CFArray, policies as CFArray, &trust) == errSecSuccess,
+               let trust {
+                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
+                SecTrustSetAnchorCertificatesOnly(trust, false)
+                var result = SecTrustResultType.invalid
+                if SecTrustEvaluate(trust, &result) == errSecSuccess,
+                   (result == .unspecified || result == .proceed) {
+                    completionHandler(.useCredential, URLCredential(trust: trust))
+                    return
+                }
+            }
+        }
+        // Fall back to system default trust.
+        completionHandler(.performDefaultHandling, nil)
+    }
+
     // MARK: - Receive + parse
 
     private func receiveLoop() {
