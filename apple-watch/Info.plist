@@ -22,6 +22,8 @@
 	<true/>
 	<key>WKWatchOnly</key>
 	<true/>
+	<key>SEAHELM_GATEWAY_API_KEY</key>
+	<string>$(SEAHELM_GATEWAY_API_KEY)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>

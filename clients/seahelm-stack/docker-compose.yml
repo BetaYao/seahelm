@@ -1,0 +1,55 @@
+services:
+  caddy:
+    image: caddy:2.9-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:-gw.seahelm.dev}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../seahelm-web:/srv/web:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+      - emqx
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      MQTT_URL: mqtt://emqx:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_SUBSCRIBE: ${MQTT_SUBSCRIBE:-seahelm/#}
+      WATCH_API_KEY: ${WATCH_API_KEY:?set WATCH_API_KEY in .env}
+    depends_on:
+      emqx:
+        condition: service_started
+
+  emqx:
+    image: emqx/emqx:5.8.6
+    restart: unless-stopped
+    environment:
+      EMQX_NAME: seahelm
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-changeme}
+      # Fresh image allows connections with no authenticator configured.
+      # After smoke-test: Dashboard → Authentication → add password_based + users,
+      # then set MQTT_USERNAME / MQTT_PASSWORD for gateway + Mac.
+    ports:
+      # Dashboard only on loopback — use SSH tunnel from your laptop.
+      - "127.0.0.1:18083:18083"
+      # Optional LAN MQTT for Mac (prefer wss://gw.seahelm.dev/mqtt in production).
+      - "1883:1883"
+    volumes:
+      - emqx_data:/opt/emqx/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  emqx_data:

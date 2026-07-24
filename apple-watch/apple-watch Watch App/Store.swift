@@ -14,6 +14,8 @@ final class Store: ObservableObject {
     @Published var online = false          // Mac presence (LWT)
     @Published var dnd = DndState()
     @Published var config = WatchConfig.current
+    /// Last transport error from the MQTT client (nil when healthy / connecting).
+    @Published var netError: String? = nil
 
     /// Mac offline OR socket down → read-only, dimmed.
     var offline: Bool { !online || conn != .connected }
@@ -24,7 +26,7 @@ final class Store: ObservableObject {
     private var client: MQTTClient
 
     init(config: WatchConfig? = nil) {
-        let cfg = config ?? Store.loadConfig()
+        let cfg = WatchConfig.resolved(config ?? Store.loadConfig())
         self.config = cfg
         self.client = MQTTClient(config: cfg)
         wire()
@@ -35,11 +37,12 @@ final class Store: ObservableObject {
 
     /// Apply a new broker config (from Settings): persist, tear down, reconnect.
     func reconnect(with cfg: WatchConfig) {
-        Store.saveConfig(cfg)
-        config = cfg
+        let resolved = WatchConfig.resolved(cfg)
+        Store.saveConfig(resolved)
+        config = resolved
         client.disconnect()
         panes.removeAll(); rebuild(); online = false
-        client = MQTTClient(config: cfg)
+        client = MQTTClient(config: resolved)
         wire()
         client.connect()
     }
@@ -49,15 +52,24 @@ final class Store: ObservableObject {
     private static let key = "seahelm.watch.config"
     static func loadConfig() -> WatchConfig {
         if let d = UserDefaults.standard.data(forKey: key),
-           let c = try? JSONDecoder().decode(WatchConfig.self, from: d) { return c }
-        return WatchConfig()
+           let c = try? JSONDecoder().decode(WatchConfig.self, from: d) {
+            return WatchConfig.resolved(c)
+        }
+        return WatchConfig.resolved()
     }
     static func saveConfig(_ c: WatchConfig) {
         if let d = try? JSONEncoder().encode(c) { UserDefaults.standard.set(d, forKey: key) }
     }
 
     private func wire() {
-        client.onState = { [weak self] s in self?.conn = s; if s == .connected { self?.everConnected = true } }
+        client.onState = { [weak self] s in
+            self?.conn = s
+            if s == .connected {
+                self?.everConnected = true
+                self?.netError = nil
+            }
+        }
+        client.onError = { [weak self] msg in self?.netError = msg }
         client.onPresence = { [weak self] on in self?.online = on }
         client.onDnd = { [weak self] o in
             self?.dnd = DndState(on: o["on"] as? Bool ?? false,
@@ -173,14 +185,16 @@ final class Store: ObservableObject {
     func pairWithCode(_ code: String, then: @escaping (Bool) -> Void) {
         client.pairWithCode(code) { [weak self] secret in
             guard let self, let secret, !secret.isEmpty else { then(false); return }
-            var c = self.config; c.rootSecret = secret
+            var c = self.config
+            c.rootSecret = secret
             self.reconnect(with: c)
             then(true)
         }
     }
 
     func unpair() {
-        var c = config; c.rootSecret = nil
+        var c = config
+        c.rootSecret = nil
         reconnect(with: c)
     }
 }

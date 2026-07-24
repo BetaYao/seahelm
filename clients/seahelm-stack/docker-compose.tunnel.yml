@@ -1,0 +1,14 @@
+# Override for local smoke-test via Cloudflare Tunnel.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#   cloudflared tunnel --config cloudflared.yml run
+
+services:
+  caddy:
+    ports: !override
+      - "80:80"
+    volumes: !override
+      - ./Caddyfile.tunnel:/etc/caddy/Caddyfile:ro
+      - ../seahelm-web:/srv/web:ro
+      - caddy_data:/data
+      - caddy_config:/config

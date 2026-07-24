@@ -9,8 +9,8 @@ function probe(name,url){
   });
 }
 (async()=>{
-  await probe('tcp','mqtt://localhost:1883');
-  await probe('ws','ws://localhost:8083/mqtt');
-  await probe('ws-nopath','ws://localhost:8083');
+  await probe('tcp','mqtt://localhost:2883');
+  await probe('ws','ws://localhost:28083/mqtt');
+  await probe('ws-nopath','ws://localhost:28083');
   process.exit(0);
 })();

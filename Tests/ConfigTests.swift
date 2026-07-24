@@ -294,10 +294,39 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.sidebarWidth, 300)
     }
 
+    func testSidebarLayoutDefaults() {
+        let config = Config()
+        XCTAssertFalse(config.sidebarCollapsed)
+        XCTAssertEqual(config.sidebarActivePane, ChromeLeftPane.firstMate.rawValue)
+    }
+
     func testDecodeSidebarWidth() throws {
         let json = #"{"sidebar_width": 280}"#.data(using: .utf8)!
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.sidebarWidth, 280)
+    }
+
+    func testDecodeSidebarLayout() throws {
+        let json = #"{"sidebar_collapsed": true, "sidebar_active_pane": "files"}"#.data(using: .utf8)!
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        XCTAssertTrue(config.sidebarCollapsed)
+        XCTAssertEqual(config.sidebarActivePane, ChromeLeftPane.files.rawValue)
+    }
+
+    func testDecodeMissingSidebarLayout_UsesDefaults() throws {
+        let config = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
+        XCTAssertFalse(config.sidebarCollapsed)
+        XCTAssertEqual(config.sidebarActivePane, ChromeLeftPane.firstMate.rawValue)
+    }
+
+    func testEncodeDecodeSidebarLayoutRoundtrip() throws {
+        var original = Config()
+        original.sidebarCollapsed = true
+        original.sidebarActivePane = ChromeLeftPane.changes.rawValue
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Config.self, from: data)
+        XCTAssertTrue(decoded.sidebarCollapsed)
+        XCTAssertEqual(decoded.sidebarActivePane, ChromeLeftPane.changes.rawValue)
     }
 
     func testDecodeMissingSidebarWidth_UsesDefault() throws {

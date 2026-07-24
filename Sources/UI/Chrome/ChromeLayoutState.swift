@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-enum ChromeLeftPane: Equatable {
+enum ChromeLeftPane: String, Equatable, Codable {
     case firstMate, files, changes
 }
 

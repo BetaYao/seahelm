@@ -1,0 +1,21 @@
+# Local / Cloudflare Tunnel origin — TLS is terminated at Cloudflare.
+# cloudflared forwards https://gw.seahelm.dev → http://127.0.0.1:80
+
+:80 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy gateway:3000
+	}
+
+	# Exact /mqtt only — /mqtt* would steal static mqtt.min.js.
+	handle /mqtt {
+		reverse_proxy emqx:8083
+	}
+
+	handle {
+		root * /srv/web
+		header Cache-Control "no-cache"
+		file_server
+	}
+}

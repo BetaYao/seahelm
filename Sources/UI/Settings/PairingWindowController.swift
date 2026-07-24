@@ -38,12 +38,10 @@ final class PairingWindowController: NSWindowController {
                   macId: mqtt.macId ?? MqttChannel.deriveMacId())
     }
 
-    /// The WS(S) endpoint clients dial — ws://…:8083 (dev) or wss://…:8084 (EMQX).
+    /// The WS(S) endpoint clients dial — prefers `mqtt.client_broker`, else
+    /// derives from host/port (e.g. `wss://gw.seahelm.dev/mqtt`).
     private static func clientBrokerURL(_ m: MqttConfig) -> String {
-        let tls = m.resolvedTLS
-        let scheme = tls ? "wss" : "ws"
-        let port = tls ? 8084 : 8083
-        return "\(scheme)://\(m.host):\(port)\(m.resolvedWsPath)"
+        m.resolvedClientBrokerURL
     }
 
     init(rootSecret: Data, brokerURL: String, macId: String) {

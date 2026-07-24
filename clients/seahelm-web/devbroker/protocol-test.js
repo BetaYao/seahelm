@@ -4,7 +4,7 @@
 // client does (payload reply_to/corr, MQTT 3.1.1). Exits 0 only if ALL pass.
 const mqtt = require('mqtt');
 const B = 'seahelm/testmac';
-const URL = process.env.BROKER || 'ws://localhost:8083/mqtt';
+const URL = process.env.BROKER || 'ws://localhost:28083/mqtt';
 
 const rx = [];                       // {topic, raw, obj}
 let corrN = 0, passed = 0, failed = 0;

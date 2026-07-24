@@ -7,8 +7,8 @@ import Foundation
 /// v1 target is EMQX Cloud over TLS (see `docs/remote-clients-design.md` §11).
 /// The Mac publisher connects outbound; clients connect to the same broker.
 struct MqttConfig: Codable, Equatable {
-    /// Broker host, e.g. `a81fb6d3.ala.cn-hangzhou.emqxsl.cn`.
-    let host: String
+    /// Broker host, e.g. `a81fb6d3.ala.cn-hangzhou.emqxsl.cn` or `127.0.0.1`.
+    var host: String
     /// Broker port. Defaults by transport (see `resolvedPort`).
     var port: UInt16?
     /// TLS/SSL. Default true (EMQX Cloud requires it).
@@ -34,6 +34,11 @@ struct MqttConfig: Codable, Equatable {
     /// Topic namespace `seahelm/{mac_id}/…` and multi-tenant ACL boundary.
     /// Nil = `MqttChannel` derives a stable, non-PII id.
     var macId: String?
+    /// Optional public WS(S) URL for remote clients (Watch / Web) embedded in
+    /// `seahelm://pair?b=…`. When set, pair links use this instead of deriving
+    /// from `host`/`port` — so the Mac can publish over LAN TCP (`127.0.0.1:1883`)
+    /// while clients dial the edge (`wss://gw.seahelm.dev/mqtt`).
+    var clientBroker: String?
     /// MQTT client id. Nil = derived from `macId`.
     var clientId: String?
     /// Master enable. Default false (feature off until configured).
@@ -67,6 +72,38 @@ struct MqttConfig: Codable, Equatable {
         }
     }
 
+    /// WS(S) URL for pair QR / long link. Prefers `clientBroker`; else builds from
+    /// host + resolved port (omitting :443 / :80).
+    var resolvedClientBrokerURL: String {
+        if let clientBroker, !clientBroker.isEmpty { return clientBroker }
+        let scheme = resolvedTLS ? "wss" : "ws"
+        let port = resolvedPort
+        let omitPort = (resolvedTLS && port == 443) || (!resolvedTLS && port == 80)
+        let authority = omitPort ? host : "\(host):\(port)"
+        return "\(scheme)://\(authority)\(resolvedWsPath)"
+    }
+
+    /// Retarget leftover EMQX Cloud hosts to local EMQX + public edge WSS for
+    /// pair links. Idempotent; preserves root_secret / mac_id / allow_remote_write.
+    static func normalizeForEdgeStack(_ mqtt: inout MqttConfig?) {
+        guard var m = mqtt else { return }
+        let host = m.host.lowercased()
+        let isCloud = host.contains("emqxsl") || host.contains("emqx.io")
+        let isLoopback = host == "127.0.0.1" || host == "localhost"
+        if isCloud {
+            m.host = "127.0.0.1"
+            m.port = 1883
+            m.tls = false
+            m.websocket = false
+            m.wsPath = "/mqtt"
+            m.enabled = true
+        }
+        if (m.clientBroker ?? "").isEmpty, isCloud || isLoopback {
+            m.clientBroker = "wss://gw.seahelm.dev/mqtt"
+        }
+        mqtt = m
+    }
+
     enum CodingKeys: String, CodingKey {
         case host
         case port
@@ -78,6 +115,7 @@ struct MqttConfig: Codable, Equatable {
         case rootSecret = "root_secret"
         case caCertPath = "ca_cert_path"
         case macId = "mac_id"
+        case clientBroker = "client_broker"
         case clientId = "client_id"
         case enabled
         case allowRemoteWrite = "allow_remote_write"

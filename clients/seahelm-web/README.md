@@ -12,7 +12,7 @@
 |---|---|
 | `index.html` | 网页客户端:连 broker、渲染 focus/worktree/pane/详情、发命令、报文日志 |
 | `mqtt.min.js` | vendored MQTT.js 浏览器包(离线可用) |
-| `devbroker/broker.js` | 本地 dev broker(aedes):MQTT `1883` + MQTT-over-WS `8083`,retained/LWT |
+| `devbroker/broker.js` | 本地 dev broker(aedes):MQTT `2883` + MQTT-over-WS `28083`（避开 seahelm-stack EMQX 的 1883/8083） |
 | `devbroker/mock-seahelm.js` | Seahelm 替身:发 retained 快照、处理 `command`/`history`,**= 真 MqttChannel 的可执行规格** |
 
 ## 跑起来(本地全链路,无需真 Seahelm / EMQX)
@@ -20,16 +20,16 @@
 ```bash
 cd clients/seahelm-web/devbroker
 npm install            # 首次:aedes + ws + websocket-stream + mqtt
-npm run broker         # 终端 A:起 broker(MQTT 1883 + WS 8083)
+npm run broker         # 终端 A:起 broker(MQTT 2883 + WS 28083)
 npm run mock           # 终端 B:起 Seahelm 替身(发快照 + 应答命令)
 ```
 
 然后浏览器打开 `clients/seahelm-web/index.html`(直接双击或 `open index.html`):
-- Broker 填 `ws://localhost:8083/mqtt`,user/pass 留空(本地 aedes 允许匿名),mac 填 `testmac`
+- Broker 填 `ws://localhost:28083/mqtt`,user/pass 留空(本地 aedes 允许匿名),mac 填 `testmac`
 - 点**连接** → 立即渲染 retained 快照(3 panes + focus)
 - 点某 pane → 看消息流;底部输入框发 `pane.send_text`(收 reply + 回显)
 - p3 有个待决策 `question` → 点选项测 `question.answer`(2FA 路径)
-- **历史** 按钮测 `history/request`;**DND** 按钮测 `dnd.set`
+- 右上角**同步历史**测 `history/request`（最新页）；顶部**继续加载**测 `before_seq` 分页；**DND** 测 `dnd.set`
 - 右栏**报文日志**看所有收发 JSON
 
 ## 协议一致性测试

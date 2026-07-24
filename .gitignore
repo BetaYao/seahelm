@@ -32,3 +32,9 @@ dist/
 
 # secrets
 .env
+clients/seahelm-stack/.env
+clients/seahelm-stack/cloudflared.yml
+clients/seahelm-stack/gateway/node_modules/
+
+# Local Watch gateway API key
+apple-watch/Secrets.xcconfig

@@ -72,6 +72,8 @@ class TabCoordinator {
             // coordinator's copy doesn't clobber it.
             config.agentSessions = tc.config.agentSessions
         }
+        // MainWindow owns chrome layout; when saving from here, those fields on
+        // `config` may be stale — leave them alone unless the caller updated them.
         config.save()
     }
 
@@ -719,14 +721,16 @@ class TabCoordinator {
     /// One channel per app run; started here because this is where the shared
     /// `controlDataSource` is fully wired.
     private func setupMqttChannel(dataSource: ControlDataSource) {
+        MqttConfig.normalizeForEdgeStack(&config.mqtt)
         guard let mqttConfig = config.mqtt, mqttConfig.resolvedEnabled else { return }
         guard mqttChannel == nil else { return }
+        config.save()   // persist retarget (e.g. emqxsl → 127.0.0.1 + client_broker)
         let channel = MqttChannel(config: mqttConfig)
         channel.dataSource = dataSource
         ShipLog.shared.registerChannel(channel)
         channel.connect()
         mqttChannel = channel
-        NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId))")
+        NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId)) broker=\(mqttConfig.host):\(mqttConfig.resolvedPort) pair=\(mqttConfig.resolvedClientBrokerURL)")
     }
 
     /// Apply a freshly-minted pairing secret to the *live* config and reconnect the
@@ -1167,6 +1171,7 @@ class TabCoordinator {
     func saveSelectedWorktree() {
         if let agent = selectedSailor {
             config.selectedWorktreePath = agent.worktreePath
+            saveConfig()
         }
     }
 

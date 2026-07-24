@@ -3,158 +3,195 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Seahelm · MQTT 调试台</title>
+<title>Seahelm · cockpit</title>
 <!-- 普通静态页(非 Artifact):可直连 WSS/WS broker。mqtt.js 本地 vendored,离线可用。 -->
-<script src="./mqtt.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="./mqtt.min.js?v=20260724"></script>
 <style>
-  /* Sumi 墨 — Seahelm 设计语言(与 HaiTalk 手表/ESP32 同族) */
+  /* Bare-TUI cockpit — matches Sources/UI/Shared/SemanticColors.swift (dark) */
   :root{
-    --night:#181513; --lamp:#221F1B; --lamp2:#2A2621; --stone:#3A352F; --ash:#7A7166;
-    --bone:#E8E2D5; --ember:#D86B53; --green:#6B8E5A; --amber:#C6993F; --red:#8E3A2C;
-    --serif:'EB Garamond',Georgia,serif;
-    --sans:'Inter',system-ui,-apple-system,sans-serif;
-    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --bg:#08222a;
+    --panel:#0e2d37;
+    --panel2:#103440;
+    --text:#cfe0e0;
+    --muted:#7fa0a3;
+    --line:#96d7e1;
+    --accent:#1fc8da;
+    --running:#1bb062;
+    --waiting:#5b93f0;
+    --idle:#557170;
+    --danger:#e84635;
+    --attention:#e0a458;
+    --line-12:rgba(150,215,225,.12);
+    --line-20:rgba(150,215,225,.20);
+    --line-38:rgba(150,215,225,.38);
+    --accent-12:rgba(31,200,218,.12);
+    --accent-20:rgba(31,200,218,.20);
+    --running-14:rgba(27,176,98,.14);
+    --danger-14:rgba(232,70,53,.14);
+    --attention-12:rgba(224,164,88,.12);
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+    --r:4px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  ::selection{background:rgba(216,107,83,.3)}
+  ::selection{background:var(--accent-20);color:var(--text)}
   body{
-    background:#0c0a09;color:var(--bone);font-family:var(--sans);height:100vh;
+    background:var(--bg);color:var(--text);font-family:var(--mono);height:100vh;
     display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;
-    background-image:radial-gradient(130% 130% at 50% 0%, #121010 0%, #0c0a09 55%, #070605 100%);
+    font-size:13px;line-height:1.4;
+    background-image:radial-gradient(120% 80% at 50% -10%, #0c303a 0%, var(--bg) 55%);
   }
   /* ── header ─────────────────────────────────────────────── */
-  header{display:flex;gap:10px;align-items:center;padding:11px 18px;
-    background:rgba(24,21,19,.7);backdrop-filter:blur(8px);
-    border-bottom:1px solid rgba(232,226,213,.06);flex-wrap:wrap}
-  .wordmark{font-family:var(--serif);font-weight:600;font-size:22px;letter-spacing:.01em;
-    color:var(--bone);margin-right:6px}
-  .wordmark .sea{color:var(--ember)}
-  header input{background:var(--lamp);border:1px solid var(--stone);color:var(--bone);
-    border-radius:7px;padding:6px 9px;font-family:var(--mono);font-size:12px;outline:none}
-  header input:focus{border-color:var(--ash)}
+  header{display:flex;gap:8px;align-items:center;padding:8px 12px;
+    background:rgba(8,34,42,.85);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line-12);flex-wrap:wrap;min-height:40px}
+  .wordmark{font-family:var(--mono);font-weight:600;font-size:14px;letter-spacing:.04em;
+    color:var(--text);margin-right:4px;text-transform:lowercase}
+  .wordmark .sea{color:var(--accent)}
+  header input{background:var(--panel);border:1px solid var(--line-20);color:var(--text);
+    border-radius:var(--r);padding:5px 8px;font-family:var(--mono);font-size:12px;outline:none}
+  header input:focus{border-color:var(--accent)}
   header input.url{width:270px} header input.sm{width:92px}
-  header button{background:var(--ember);color:#1a1512;border:0;border-radius:7px;
-    padding:7px 15px;font-weight:600;cursor:pointer;font-size:13px;font-family:var(--sans);
-    transition:filter .15s} header button:hover{filter:brightness(1.08)}
-  header button.ghost{background:var(--lamp);color:var(--bone);border:1px solid var(--stone)}
-  header button.ghost.on{background:var(--lamp2);border-color:var(--ash)}
-  /* ── pairing-first header ───────────────────────────────── */
+  header button{background:var(--accent);color:#042028;border:0;border-radius:var(--r);
+    padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px;font-family:var(--mono);
+    letter-spacing:.02em;transition:filter .12s}
+  header button:hover{filter:brightness(1.08)}
+  header button.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line-20)}
+  header button.ghost.on{background:var(--panel2);border-color:var(--accent);color:var(--accent)}
   .pairzone{display:flex;align-items:center;gap:8px}
   .spacer{flex:1}
-  header button.pair-primary{font-weight:600;padding-left:16px;padding-right:16px}
-  .chip{display:inline-flex;align-items:center;gap:9px;background:rgba(107,142,90,.12);
-    border:1px solid rgba(107,142,90,.38);border-radius:9px;padding:6px 8px 6px 12px;
-    font-size:14px;color:var(--bone)}
-  .chip .lock{font-size:13px;opacity:.9}
-  .chip b{font-family:var(--mono);font-weight:600;letter-spacing:.01em}
-  .chip .e2ee{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--green);
-    border:1px solid rgba(107,142,90,.4);border-radius:5px;padding:1px 5px}
-  .chip .chip-x{background:none;border:0;color:var(--ash);cursor:pointer;font-size:14px;
-    line-height:1;padding:2px 4px;border-radius:5px}
-  .chip .chip-x:hover{color:var(--ember);background:rgba(216,107,83,.12)}
+  header button.pair-primary{font-weight:600;padding-left:14px;padding-right:14px}
+  .chip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-12);
+    border:1px solid var(--line-38);border-radius:var(--r);padding:4px 6px 4px 10px;
+    font-size:12px;color:var(--text)}
+  .chip .lock{font-size:11px;opacity:.85}
+  .chip b{font-family:var(--mono);font-weight:600;letter-spacing:.02em}
+  .chip .e2ee{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--running);
+    border:1px solid rgba(27,176,98,.4);border-radius:3px;padding:1px 4px}
+  .chip .chip-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
+    line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
+  .chip .chip-x:hover{color:var(--danger);background:var(--danger-14)}
   .advrow{display:flex;align-items:center;gap:8px}
   .advrow[hidden]{display:none}
-  #status{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:4px 10px;
-    border-radius:6px;margin-left:auto;text-transform:uppercase}
-  .st-off{background:rgba(142,58,44,.14);color:#c9755f}
-  .st-on{background:rgba(107,142,90,.14);color:var(--green)}
+  #status{font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:3px 8px;
+    border-radius:var(--r);margin-left:auto;text-transform:uppercase}
+  .st-off{background:var(--danger-14);color:var(--danger)}
+  .st-on{background:var(--running-14);color:var(--running)}
   /* ── layout ─────────────────────────────────────────────── */
-  main{flex:1;display:grid;grid-template-columns:312px 1fr 392px;overflow:hidden}
-  .col{overflow-y:auto;padding:16px;border-right:1px solid rgba(232,226,213,.05)}
-  /* mid column: header/events fixed, feed scrolls, cmdbar pinned to the bottom */
+  main{flex:1;display:grid;grid-template-columns:300px 1fr 360px;overflow:hidden}
+  .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
   #midcol{display:flex;flex-direction:column;overflow:hidden}
   #midcol #feed{flex:1 1 auto;min-height:0;overflow-y:auto}
   #midcol .cmdbar{flex:0 0 auto}
-  .col::-webkit-scrollbar{width:8px} .col::-webkit-scrollbar-thumb{background:var(--stone);border-radius:4px}
-  .col h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
-    color:var(--ash);margin:2px 0 12px;font-weight:500}
-  .col h2:not(:first-child){margin-top:22px}
-  /* ── focus glance ───────────────────────────────────────── */
-  .glance{background:var(--lamp);border:1px solid rgba(232,226,213,.05);border-radius:16px;
-    padding:22px 16px;text-align:center;
-    box-shadow:inset 0 1px 0 rgba(232,226,213,.03), 0 8px 24px rgba(0,0,0,.28)}
-  .glance .big{font-family:var(--serif);font-weight:600;font-size:60px;line-height:.95;color:var(--bone)}
-  .glance .k{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
-    color:var(--ash);margin-top:6px}
-  .glance .line{font-size:14px;margin-top:12px;color:var(--bone);line-height:1.4}
-  .glance .head{font-family:var(--serif);font-size:19px;color:var(--bone)}
-  .counts{display:flex;gap:14px;justify-content:center;margin-top:12px;font-family:var(--mono);font-size:12px}
+  .col::-webkit-scrollbar{width:6px}
+  .col::-webkit-scrollbar-thumb{background:var(--line-20);border-radius:3px}
+  .col h2{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--muted);margin:2px 0 10px;font-weight:500}
+  .col h2:not(:first-child){margin-top:18px}
+  .detail-head{display:flex;align-items:center;gap:8px;margin:2px 0 10px;flex:none}
+  .detail-head h2{margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .detail-head button{flex:none;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
+    border-radius:var(--r);padding:5px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600}
+  .detail-head button:hover{border-color:var(--accent);color:var(--accent)}
+  .detail-head button:disabled{opacity:.45;cursor:default;border-color:var(--line-12);color:var(--muted)}
+  .feed-more{align-self:center;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
+    border-radius:var(--r);padding:6px 14px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600;
+    margin:2px 0 8px}
+  .feed-more:hover{border-color:var(--accent);color:var(--accent)}
+  .feed-more:disabled{opacity:.45;cursor:default;border-color:var(--line-12);color:var(--muted)}
+  /* ── First Mate header (matches Mac DashboardOverviewView) ─ */
+  #leftcol{display:flex;flex-direction:column;padding:0;overflow:hidden}
+  .fm-scroll{flex:1;min-height:0;overflow-y:auto;padding:8px 10px 12px}
+  .fm-header{display:flex;align-items:baseline;gap:10px;padding:10px 12px 8px;
+    border-bottom:1px solid var(--line-12);flex:none}
+  .fm-header .fm-glyph{color:var(--accent);font-size:13px;line-height:1}
+  .fm-header .fm-title{font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:.02em}
+  .fm-header .fm-sub{font-size:11px;color:var(--muted);margin-left:2px}
+  /* pinned bottom like Mac orders zone */
+  .fm-suggest{flex:none;max-height:42%;overflow-y:auto;padding:10px 10px 12px;
+    border-top:1px solid var(--line-12);background:rgba(8,34,42,.55)}
+  .fm-suggest:empty{display:none;padding:0;border:0}
+  .fm-suggest .fm-suggest-h{font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:8px}
   /* ── tree ───────────────────────────────────────────────── */
-  .repo-head{display:flex;align-items:center;gap:8px;margin:14px 0 4px;padding:2px 2px 6px;
-    border-bottom:1px solid rgba(232,226,213,.07);
-    font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ash)}
+  .repo-head{display:flex;align-items:center;gap:8px;margin:12px 0 4px;padding:2px 2px 6px 0;
+    border-bottom:1px solid var(--line-12);
+    font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
   .repo-head:first-child{margin-top:0}
-  .wt{margin-bottom:4px;padding-left:4px}
-  .wt-head{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px}
+  .repo-swatch{width:3px;height:12px;border-radius:1px;flex:none;background:var(--accent)}
+  .wt{margin-bottom:2px;padding-left:2px}
+  .wt-head{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:var(--r)}
   .wt-head .wt-label{flex:1;min-width:0}
-  .wt-head .wt-title{font-family:var(--serif);font-size:17px;color:var(--bone);
+  .wt-head .wt-title{font-family:var(--mono);font-size:13px;color:var(--text);font-weight:500;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .wt-head .wt-branch{font-family:var(--mono);font-size:11px;color:var(--ash);
+  .wt-head .wt-branch{font-family:var(--mono);font-size:10px;color:var(--muted);
     letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-  .pane-row{display:flex;align-items:center;gap:9px;padding:8px 10px 8px 22px;border-radius:10px;
-    cursor:pointer;font-size:14px;transition:background .12s;border:1px solid transparent}
-  .pane-row:hover{background:var(--lamp)}
-  .pane-row.sel{background:var(--lamp2);border-color:rgba(216,107,83,.35)}
-  .dot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 8px -1px currentColor}
+  .pane-row{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 18px;border-radius:var(--r);
+    cursor:pointer;font-size:12px;transition:background .1s;border:1px solid transparent}
+  .pane-row:hover{background:var(--panel)}
+  .pane-row.sel{background:var(--panel2);border-color:var(--accent-20)}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none}
   .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .pid{color:var(--ember);font-family:var(--mono);font-size:12.5px;font-weight:500}
-  .agent{color:var(--ash);font-size:13px}
-  .badge{font-family:var(--mono);font-size:11px;color:var(--ash)}
+  .pid{color:var(--accent);font-family:var(--mono);font-size:12px;font-weight:500}
+  .agent{color:var(--muted);font-size:11px}
+  .badge{font-family:var(--mono);font-size:10px;color:var(--muted)}
   /* ── detail / feed ──────────────────────────────────────── */
-  .feed{display:flex;flex-direction:column;gap:9px}
-  .msg{max-width:82%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.45;word-break:break-word}
-  .msg.you{align-self:flex-end;background:var(--lamp2);border:1px solid rgba(216,107,83,.25)}
-  .msg.agent{align-self:flex-start;background:var(--lamp);max-width:94%}
-  .msg.agent h4{font-family:var(--sans);font-size:14px;font-weight:600;color:var(--bone);margin:10px 0 4px;letter-spacing:.01em}
-  .msg.agent p{margin:6px 0}
-  .msg.agent ul,.msg.agent ol{margin:6px 0;padding-left:20px}
-  .msg.agent li{margin:3px 0}
-  .msg.agent strong{color:var(--bone);font-weight:600}
-  .msg.agent em{font-style:italic;color:var(--bone)}
-  .msg.agent code{font-family:var(--mono);font-size:12px;background:rgba(232,226,213,.09);
-    color:#E8C9A8;padding:1px 5px;border-radius:4px;word-break:break-word}
-  .msg.agent pre{background:rgba(0,0,0,.32);border:1px solid var(--stone);border-radius:8px;
-    padding:10px 12px;margin:8px 0;overflow-x:auto}
-  .msg.agent pre code{background:none;color:var(--bone);padding:0;font-size:12px;line-height:1.55;white-space:pre}
+  .feed{display:flex;flex-direction:column;gap:6px}
+  .msg{max-width:88%;padding:8px 10px;border-radius:var(--r);font-size:12px;line-height:1.45;
+    word-break:break-word;border:1px solid var(--line-12)}
+  .msg.you{align-self:flex-end;background:var(--panel2);border-color:var(--accent-20)}
+  .msg.agent{align-self:flex-start;background:var(--panel);max-width:96%}
+  .msg.agent h4{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);margin:8px 0 4px}
+  .msg.agent p{margin:5px 0}
+  .msg.agent ul,.msg.agent ol{margin:5px 0;padding-left:18px}
+  .msg.agent li{margin:2px 0}
+  .msg.agent strong{color:var(--text);font-weight:600}
+  .msg.agent em{font-style:italic;color:var(--muted)}
+  .msg.agent code{font-family:var(--mono);font-size:11px;background:var(--accent-12);
+    color:var(--accent);padding:1px 4px;border-radius:3px;word-break:break-word}
+  .msg.agent pre{background:rgba(0,0,0,.28);border:1px solid var(--line-12);border-radius:var(--r);
+    padding:8px 10px;margin:6px 0;overflow-x:auto}
+  .msg.agent pre code{background:none;color:var(--text);padding:0;font-size:11px;line-height:1.5;white-space:pre}
   .msg.agent>:first-child{margin-top:0} .msg.agent>:last-child{margin-bottom:0}
-  .msg.ask{align-self:flex-start;background:rgba(198,153,63,.12);border:1px solid rgba(198,153,63,.3)}
-  .msg.status{align-self:center;color:var(--ash);font-family:var(--mono);font-size:12px;background:none;padding:2px}
-  .cmdbar{display:flex;gap:8px;padding:12px 0 2px;border-top:1px solid rgba(232,226,213,.06);margin-top:14px}
-  .cmdbar input{flex:1;background:var(--lamp);border:1px solid var(--stone);color:var(--bone);
-    border-radius:9px;padding:9px 12px;font-size:14px;font-family:var(--sans);outline:none}
-  .cmdbar input:focus{border-color:var(--ember)}
-  .cmdbar button{background:var(--ember);color:#1a1512;border:0;border-radius:9px;padding:9px 15px;
-    font-weight:600;cursor:pointer;font-family:var(--sans)}
-  .cmdbar button.ghost{background:var(--lamp);color:var(--bone);border:1px solid var(--stone)}
-  /* ── event overlay ──────────────────────────────────────── */
-  .ev{background:linear-gradient(180deg,rgba(216,107,83,.1),transparent),var(--lamp);
-    border:1px solid rgba(216,107,83,.4);border-radius:13px;padding:14px;margin-bottom:12px}
-  .ev .eb{font-family:var(--mono);font-size:11px;color:var(--ember);text-transform:uppercase;letter-spacing:.16em}
-  .ev .prompt{margin:8px 0 4px;font-size:15px;line-height:1.4}
-  .ev .opt{display:block;width:100%;text-align:left;background:var(--lamp2);border:1px solid var(--stone);
-    color:var(--bone);border-radius:9px;padding:9px 12px;margin-top:7px;cursor:pointer;font-size:14px;
-    font-family:var(--sans);transition:border-color .12s}
-  .ev .opt:hover{border-color:var(--ember)}
-  .ev .opt b{font-family:var(--mono);color:var(--ash);margin-right:8px;font-weight:500}
+  .msg.ask{align-self:flex-start;background:var(--attention-12);border-color:rgba(224,164,88,.35)}
+  .msg.status{align-self:center;color:var(--muted);font-family:var(--mono);font-size:11px;
+    background:none;border:0;padding:2px}
+  .msg.term{align-self:stretch;max-width:100%;background:rgba(0,0,0,.28);border-color:var(--line-12);
+    font-family:var(--mono);font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+  .cmdbar{display:flex;gap:6px;padding:10px 0 0;border-top:1px solid var(--line-12);margin-top:10px}
+  .cmdbar input{flex:1;background:var(--panel);border:1px solid var(--line-20);color:var(--text);
+    border-radius:var(--r);padding:7px 10px;font-size:12px;font-family:var(--mono);outline:none}
+  .cmdbar input:focus{border-color:var(--accent)}
+  .cmdbar button{background:var(--accent);color:#042028;border:0;border-radius:var(--r);padding:7px 12px;
+    font-weight:600;cursor:pointer;font-family:var(--mono);font-size:12px}
+  .cmdbar button.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line-20)}
+  /* ── event / suggestion cards ───────────────────────────── */
+  .ev{background:var(--panel);border:1px solid var(--attention);
+    border-radius:var(--r);padding:10px;margin-bottom:8px}
+  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;letter-spacing:.16em}
+  .ev .ev-meta{font-size:10px;color:var(--muted);margin-top:2px}
+  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45}
+  .ev .opt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line-20);
+    color:var(--text);border-radius:var(--r);padding:7px 10px;margin-top:5px;cursor:pointer;font-size:12px;
+    font-family:var(--mono);transition:border-color .1s}
+  .ev .opt:hover{border-color:var(--accent)}
+  .ev .opt:first-of-type{background:var(--accent-12);border-color:var(--accent-20)}
+  .ev .opt b{font-family:var(--mono);color:var(--muted);margin-right:8px;font-weight:500}
   /* ── log ────────────────────────────────────────────────── */
-  #log{font-family:var(--mono);font-size:11px;line-height:1.5}
-  .logline{padding:4px 0;border-bottom:1px solid rgba(232,226,213,.04)}
+  #log{font-family:var(--mono);font-size:11px;line-height:1.45}
+  .logline{padding:3px 0;border-bottom:1px solid var(--line-12)}
   .ll-head{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
-  .ll-head:hover{opacity:1;color:var(--bone)}
-  .ll-head::before{content:'▸ ';color:var(--ash)}
+  .ll-head:hover{opacity:1;color:var(--text)}
+  .ll-head::before{content:'▸ ';color:var(--muted)}
   .logline.open .ll-head::before{content:'▾ '}
-  .logline.open .ll-head{color:var(--bone);opacity:1}
-  .ll-body{white-space:pre-wrap;word-break:break-all;margin:3px 0 2px 12px;color:var(--ash)}
-  .rx{color:#8FA6C4} .tx{color:var(--amber)} .sys{color:var(--ash)}
-  .muted{color:var(--ash);font-size:13px;font-style:italic}
-  .toolbar{display:flex;gap:7px;margin-bottom:10px}
-  .toolbar button{font-family:var(--mono);font-size:11px;padding:4px 9px;background:var(--lamp);
-    border:1px solid var(--stone);color:var(--ash);border-radius:6px;cursor:pointer}
-  .toolbar button:hover{color:var(--bone);border-color:var(--ash)}
-  #detailHead{color:var(--ash)}
+  .logline.open .ll-head{color:var(--text);opacity:1}
+  .ll-body{white-space:pre-wrap;word-break:break-all;margin:3px 0 2px 12px;color:var(--muted)}
+  .rx{color:var(--waiting)} .tx{color:var(--attention)} .sys{color:var(--muted)}
+  .muted{color:var(--muted);font-size:12px;font-style:normal}
+  .toolbar{display:flex;gap:6px;margin-bottom:8px}
+  .toolbar button{font-family:var(--mono);font-size:10px;padding:3px 8px;background:var(--panel);
+    border:1px solid var(--line-20);color:var(--muted);border-radius:var(--r);cursor:pointer;letter-spacing:.04em}
+  .toolbar button:hover{color:var(--text);border-color:var(--line-38)}
+  #detailHead{color:var(--muted);letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -163,7 +200,7 @@
     <span class="spacer"></span>
     <!-- hidden manual fields: connect() reads these; pairing overrides them -->
     <span id="advRow" class="advrow" hidden>
-      <input class="url" id="broker" value="ws://localhost:8083/mqtt" />
+      <input class="url" id="broker" value="ws://localhost:28083/mqtt" />
       <input class="sm" id="user" placeholder="user" value="" />
       <input class="sm" id="pass" placeholder="pass" type="password" value="" />
       <input class="sm" id="mac" value="live" title="mac_id" />
@@ -175,19 +212,25 @@
   </header>
   <main>
     <div class="col" id="leftcol">
-      <h2>Focus</h2>
-      <div id="glance" class="glance"><div class="muted">未连接</div></div>
-      <h2>Repos · Worktrees · Panes</h2>
-      <div id="tree"></div>
+      <div class="fm-header">
+        <span class="fm-glyph">◍</span>
+        <span class="fm-title">First mate</span>
+        <span class="fm-sub" id="fmSub">0 projects · 0 running</span>
+      </div>
+      <div class="fm-scroll">
+        <div id="tree"></div>
+      </div>
+      <div class="fm-suggest" id="fmSuggest"></div>
     </div>
     <div class="col" id="midcol">
-      <h2 id="detailHead">Pane 详情</h2>
-      <div id="events"></div>
+      <div class="detail-head">
+        <h2 id="detailHead">Pane 详情</h2>
+        <button id="syncHistBtn" title="同步最新历史到面板" disabled>同步历史</button>
+      </div>
       <div id="feed" class="feed"><div class="muted">选择一个 pane</div></div>
       <div class="cmdbar">
         <input id="sendText" placeholder="pane.send_text …(回车发送)" />
         <button id="sendBtn">发送</button>
-        <button id="histBtn" class="ghost" title="拉历史">历史</button>
       </div>
     </div>
     <div class="col" id="rightcol" style="border-right:0">
@@ -206,11 +249,27 @@
 const S = {
   client:null, mac:'testmac',
   panes:new Map(), worktrees:new Map(), msgs:new Map(),
+  // pid → { hasMore } — whether older history exists above the loaded window
+  histMeta:new Map(),
   focus:null, dnd:null, sel:null, events:new Map(),
   encKey:null, authPass:null,   // set once a seahelm:// pair link is applied (E2EE on)
 };
-const STC = { running:'#6B8E5A', waiting:'#C6993F', done:'#6B8E5A',
-  failed:'#8E3A2C', idle:'#7A7166', unknown:'#7A7166' };
+const HIST_PAGE = 20;
+const STC = {
+  running:'#1bb062', waiting:'#5b93f0', done:'#1bb062',
+  failed:'#e84635', idle:'#557170', unknown:'#557170',
+};
+// DeckColor — same 10-swatch djb2 hash as Sources/UI/Dashboard/DeckColor.swift
+const DECK = [0xd97757,0x10a37f,0x8b7fd9,0x4285f4,0x6aa84f,
+              0xb07ad9,0xe0a030,0x4aa3a3,0xd96f9a,0x7a9bd9];
+function deckColor(name){
+  let h = 5381n;
+  for (const b of new TextEncoder().encode(String(name||''))) {
+    h = (h * 33n + BigInt(b)) & 0xffffffffffffffffn;
+  }
+  const hex = DECK[Number(h % 10n)].toString(16).padStart(6,'0');
+  return '#' + hex;
+}
 // SailorStatus rawValue is capitalized (Running/Waiting/Error/Exited/Idle);
 // mock uses lowercase (running/waiting/failed/done). Normalize both → STC keys.
 function normStatus(s){
@@ -263,6 +322,17 @@ function md(src){
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
+// Edge stack (https://gw.seahelm.dev/): always use same-origin WSS.
+// Pair links still carry Mac's historical `b=` (often EMQX Cloud); ignore that
+// when we're already on the gateway host so Connect doesn't bounce to the old URL.
+function edgeBroker() {
+  if (location.protocol === 'https:' && /\.(seahelm\.dev|ucar\.cc)$/i.test(location.hostname)) {
+    return `wss://${location.host}/mqtt`;
+  }
+  return null;
+}
+if ($('broker') && edgeBroker()) $('broker').value = edgeBroker();
+
 // ── logging ───────────────────────────────────────────────────────────────
 function log(dir, topic, payload){
   const el = document.createElement('div');
@@ -284,8 +354,11 @@ function setStatus(on, txt){ const s=$('status'); s.textContent=txt; s.className
 function connect(){
   if (S.client) { S.client.end(true); S.client=null; }
   S.mac = $('mac').value.trim() || 'testmac';
+  const edge = edgeBroker();
+  if (edge) $('broker').value = edge;
   const url = $('broker').value.trim();
   // Paired → broker creds are HKDF-derived (username = mac_id, password = hex).
+  // Self-hosted EMQX currently allows any user/pass (no authenticator yet).
   const opts = { clean:true, connectTimeout:6000, reconnectPeriod:2000,
     username: S.authPass ? S.mac : ($('user').value || undefined),
     password: S.authPass ? S.authPass : ($('pass').value || undefined) };
@@ -293,9 +366,9 @@ function connect(){
   const c = wrapClient(mqtt.connect(url, opts));
   S.client = c;
   c.on('connect', () => { setStatus(true,'已连接'); const t=`${base()}/#`; c.subscribe(t,{qos:1});
-    log('sys','(subscribe)', t); });
+    log('sys','(subscribe)', t); if (S.sel) setSyncBusy(false); });
   c.on('reconnect', () => setStatus(false,'重连中…'));
-  c.on('close', () => setStatus(false,'离线'));
+  c.on('close', () => { setStatus(false,'离线'); setSyncBusy(false); $('syncHistBtn').disabled = true; });
   c.on('error', e => { setStatus(false,'错误'); log('sys','(error)', String(e)); });
   // Inbound: decrypt before routing (topic = AES-GCM AAD). Empty = retained-delete.
   c.on('message', async (topic, buf) => {
@@ -327,7 +400,7 @@ async function applyPair(link){
   const p = E2EE.parsePairURI(link);
   const { password, encKey } = await E2EE.deriveKeys(p.rootBytes);
   S.encKey = encKey; S.authPass = password; S.mac = p.mac;
-  $('broker').value = p.broker; $('mac').value = p.mac;
+  $('broker').value = edgeBroker() || p.broker; $('mac').value = p.mac;
   $('user').value = p.mac; $('pass').value = '';
   localStorage.setItem('seahelm_pair', link);
   log('sys', '(paired)', `${p.mac} · E2EE on`);
@@ -374,18 +447,59 @@ function onMessage(topic, raw){
     if (S.sel===seg[1]) renderDetail(); renderTree();
   } else if (seg[0]==='worktree' && seg[2]==='status'){
     if (!raw) S.worktrees.delete(seg[1]); else S.worktrees.set(seg[1], m); renderTree();
-  } else if (seg[0]==='focus'){ S.focus = m; renderGlance();
+  } else if (seg[0]==='focus'){ S.focus = m; // retained for MQTT sync; UI uses First Mate header
   } else if (seg[0]==='dnd'){ S.dnd = m;
   } else if (seg[0]==='reply'){
-    // history reply → render into the pane feed
+    // history reply → sync (replace latest page) or load-more (prepend older)
     const corr = seg[seg.length-1];
-    const pid = histReq.get(corr);
-    if (pid && m && m.result && Array.isArray(m.result.messages)){
-      // show the most recent conversation turns (user + assistant), newest last
-      S.msgs.set(pid, m.result.messages.slice(-10));
-      histReq.delete(corr);
-      if (S.sel===pid) renderDetail();
+    const req = histReq.get(corr);
+    if (!req || !m) return;
+    histReq.delete(corr);
+    if (m.ok === false || m.error || !m.result || !Array.isArray(m.result.messages)){
+      setSyncBusy(false);
+      const btn=document.querySelector('#feed .feed-more');
+      if (btn){ btn.disabled=false; btn.textContent='继续加载'; }
+      return;
     }
+    applyHistoryReply(req, m.result);
+  }
+}
+
+function msgKey(m){
+  if (typeof m.seq === 'number') return 's'+m.seq;
+  return 't'+(m.kind||'')+':'+(m.text||'');
+}
+function oldestSeq(ms){
+  let min = null;
+  for (const m of ms){
+    if (typeof m.seq === 'number' && (min === null || m.seq < min)) min = m.seq;
+  }
+  return min;
+}
+function applyHistoryReply(req, result){
+  const { pid, mode } = req;
+  const incoming = result.messages || [];
+  const hasMore = !!result.has_more;
+  const prev = S.msgs.get(pid) || [];
+  if (mode === 'more'){
+    const seen = new Set(prev.map(msgKey));
+    const older = incoming.filter(m => !seen.has(msgKey(m)));
+    S.msgs.set(pid, older.concat(prev));
+  } else {
+    // sync: take the latest page as the panel window
+    S.msgs.set(pid, incoming.slice());
+  }
+  S.histMeta.set(pid, { hasMore });
+  setSyncBusy(false);
+  if (S.sel !== pid) return;
+  if (mode === 'more'){
+    const feed = $('feed');
+    const prevH = feed.scrollHeight;
+    const prevTop = feed.scrollTop;
+    renderDetail({ stickBottom: false });
+    feed.scrollTop = prevTop + (feed.scrollHeight - prevH);
+  } else {
+    renderDetail({ stickBottom: true });
   }
 }
 function pushMsg(pid, m){
@@ -402,20 +516,67 @@ function pushMsg(pid, m){
 }
 
 // ── render ─────────────────────────────────────────────────────────────────
-function renderGlance(){
-  const f = S.focus; const g=$('glance');
-  if (!f){ g.innerHTML='<div class="muted">无 focus</div>'; return; }
-  const c = f.counts||{};
-  g.innerHTML = `<div class="big">${c.running??'·'}</div><div class="k">running</div>
-    <div class="line"><span class="head">${f.headline||''}</span>${f.line?('<br>'+f.line):''}</div>
-    <div class="counts">
-      ${c.waiting?`<span style="color:var(--amber)">${c.waiting} waiting</span>`:''}
-      ${c.failed?`<span style="color:var(--red)">${c.failed} failed</span>`:''}
-    </div>`;
+// Rollup priority mirrors SailorStatus.priority (waiting > error > exited > running > idle).
+const ST_PRI = {waiting:0, failed:1, done:2, running:3, idle:4, unknown:5};
+function highestStatus(statuses){
+  let best = 'unknown', bestPri = 99;
+  for (const s of statuses){
+    const n = normStatus(s);
+    const p = ST_PRI[n] ?? 4;
+    if (p < bestPri){ bestPri = p; best = n; }
+  }
+  return best;
+}
+function updateFirstMateHeader(){
+  // Mac: "N projects · M running" where projects = worktrees (sailors).
+  const byWt = new Map();
+  for (const [,p] of S.panes){
+    const wt = p.worktree_path || p.branch || p.project || '—';
+    if (!byWt.has(wt)) byWt.set(wt, []);
+    byWt.get(wt).push(p.status);
+  }
+  const projects = byWt.size;
+  let running = 0;
+  for (const statuses of byWt.values()){
+    if (highestStatus(statuses) === 'running') running++;
+  }
+  $('fmSub').textContent = `${projects} projects · ${running} running`;
+}
+function renderSuggestCard(pid, e){
+  const box=document.createElement('div'); box.className='ev';
+  const p = S.panes.get(pid)||{};
+  const label = (p.title||'').trim() || shortId(p.pane_id||pid);
+  const meta = [p.project, p.branch].filter(Boolean).join(' · ');
+  const rid = e.question_id || e.suggest_id || '';
+  const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
+  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}</div>`
+    + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
+    + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
+  box.onclick=(ev)=>{ if (ev.target.closest('button')) return; S.sel=pid; renderTree(); renderDetail(); };
+  (e.options||[]).forEach((opt,i)=>{
+    const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${esc(opt)}`;
+    b.onclick=(ev)=>{ ev.stopPropagation();
+      S.sel=pid;
+      sendCommand(method, e.type==='question'?{question_id:rid,index:i}:{suggest_id:rid,index:i});
+    };
+    box.appendChild(b);
+  });
+  return box;
+}
+function renderSuggestions(){
+  const host = $('fmSuggest'); host.innerHTML='';
+  if (!S.events.size) return;
+  const h=document.createElement('div'); h.className='fm-suggest-h'; h.textContent='Suggestions';
+  host.appendChild(h);
+  for (const [pid,e] of S.events){
+    if (!e) continue;
+    host.appendChild(renderSuggestCard(pid, e));
+  }
 }
 function renderTree(){
+  updateFirstMateHeader();
   const t = $('tree'); t.innerHTML='';
-  // group by repo (project) → worktree_path → panes
+  // group by repo (project) → worktree_path → panes  (fixed grouping, matches Mac repo mode)
   const repos = new Map();
   for (const [pid,p] of S.panes){
     const repo = p.project || '—';
@@ -425,11 +586,12 @@ function renderTree(){
     if(!wtMap.has(wt)) wtMap.set(wt, []);
     wtMap.get(wt).push([pid,p]);
   }
-  if (!repos.size){ t.innerHTML='<div class="muted">无 pane</div>'; return; }
+  if (!repos.size){ t.innerHTML='<div class="muted">无 pane</div>'; renderSuggestions(); return; }
   for (const [repo,wtMap] of repos){
     const paneCount = [...wtMap.values()].reduce((n,l)=>n+l.length,0);
     const rh=document.createElement('div'); rh.className='repo-head';
-    rh.innerHTML=`<span class="grow">${repo}</span><span class="badge">${paneCount}</span>`;
+    rh.innerHTML=`<span class="repo-swatch" style="background:${deckColor(repo)}"></span>`
+      + `<span class="grow">${esc(repo)}</span><span class="badge">${paneCount}</span>`;
     t.appendChild(rh);
     for (const [wt,list] of wtMap){
       const wrap=document.createElement('div'); wrap.className='wt';
@@ -448,49 +610,57 @@ function renderTree(){
         const name = (p.title||'').trim() || shortId(p.pane_id||pid);
         row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
           <span class="pid grow">${esc(name)}</span><span class="agent">${esc(p.agent_type||'')}</span>
-          ${S.events.get(pid)?'<span class="badge" style="color:var(--ember)">●</span>':''}`;
+          ${S.events.get(pid)?'<span class="badge" style="color:var(--attention)">●</span>':''}`;
         row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
         wrap.appendChild(row);
       }
       t.appendChild(wrap);
     }
   }
+  renderSuggestions();
 }
-function renderDetail(){
-  const pid=S.sel; const head=$('detailHead'); const feed=$('feed'); const ev=$('events');
-  ev.innerHTML=''; feed.innerHTML='';
-  if(!pid){ head.textContent='Pane 详情'; feed.innerHTML='<div class="muted">选择一个 pane</div>'; return; }
+function renderDetail(opts={}){
+  const stickBottom = opts.stickBottom !== false;
+  const pid=S.sel; const head=$('detailHead'); const feed=$('feed');
+  const syncBtn=$('syncHistBtn');
+  feed.innerHTML='';
+  if(!pid){
+    head.textContent='Pane 详情';
+    feed.innerHTML='<div class="muted">选择一个 pane</div>';
+    syncBtn.disabled = true;
+    return;
+  }
   const p=S.panes.get(pid)||{};
   head.textContent=`${p.project||''} · ${p.branch||''} · ${shortId(p.pane_id||pid)} · ${normStatus(p.status)}`;
-  const e=S.events.get(pid);
-  if(e){
-    const box=document.createElement('div'); box.className='ev';
-    const rid = e.question_id || e.suggest_id || '';
-    const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
-    box.innerHTML=`<div class="eb">${e.type}</div><div class="prompt">${e.prompt||e.message||''}</div>`;
-    (e.options||[]).forEach((opt,i)=>{
-      const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${opt}`;
-      b.onclick=()=>sendCommand(method, e.type==='question'?{question_id:rid,index:i}:{suggest_id:rid,index:i});
-      box.appendChild(b);
-    });
-    ev.appendChild(box);
-  }
+  syncBtn.disabled = !S.client;
   const ms=S.msgs.get(pid)||[];
-  if(!ms.length && !e) feed.innerHTML='<div class="muted">无消息(点“历史”拉取)</div>';
-  ms.forEach(m=>{
-    const d=document.createElement('div');
-    const k=m.kind||'agent';
-    d.className='msg '+(k==='you'?'you':k==='status'?'status':k==='ask'?'ask':'agent');
-    // agent/ask final messages are markdown → render; you/status stay plain text
-    if (k==='agent'||k==='ask') d.innerHTML=md(m.text||''); else d.textContent=m.text||'';
-    feed.appendChild(d);
-  });
-  feed.scrollTop=feed.scrollHeight;
+  const meta=S.histMeta.get(pid) || { hasMore:false };
+  // 往回滚到顶部：还有更早历史时，在最上面放「继续加载」
+  if (meta.hasMore && ms.length){
+    const more=document.createElement('button');
+    more.className='feed-more';
+    more.textContent='继续加载';
+    more.onclick=()=>loadMoreHistory();
+    feed.appendChild(more);
+  }
+  if(!ms.length){
+    feed.innerHTML='<div class="muted">无消息(点右上角「同步历史」拉取)</div>';
+  } else {
+    ms.forEach(m=>{
+      const d=document.createElement('div');
+      const k=m.kind||'agent';
+      d.className='msg '+(k==='you'?'you':k==='status'?'status':k==='ask'?'ask':k==='term'?'term':'agent');
+      // agent/ask = markdown; term = plain monospace dump; you/status = plain text
+      if (k==='agent'||k==='ask') d.innerHTML=md(m.text||''); else d.textContent=m.text||'';
+      feed.appendChild(d);
+    });
+  }
+  if (stickBottom) feed.scrollTop=feed.scrollHeight;
 }
 
 // ── outbound (commands) ─────────────────────────────────────────────────────
 let corrN=0;
-const histReq = new Map();   // corr → pane_id, to route history replies
+const histReq = new Map();   // corr → { pid, mode:'sync'|'more' }
 function sendCommand(method, params){
   if(!S.client){ alert('未连接'); return; }
   const corr = 'w'+(++corrN);
@@ -507,14 +677,39 @@ function sendText(){
   sendCommand('pane.send_text', {pane_session_key:pid, text:v, enter:true});
   $('sendText').value='';
 }
-function pullHistory(){
+function setSyncBusy(busy){
+  const btn=$('syncHistBtn');
+  if (!btn) return;
+  btn.disabled = busy || !S.sel || !S.client;
+  btn.textContent = busy ? '同步中…' : '同步历史';
+}
+function requestHistory(mode, beforeSeq){
   const pid=S.sel; if(!pid) return alert('先选 pane');
+  if(!S.client) return alert('未连接');
   const corr='h'+(++corrN); const reply_to=`${base()}/reply/web/${corr}`;
-  histReq.set(corr, pid);
+  histReq.set(corr, { pid, mode });
   S.client.subscribe(reply_to,{qos:1});
-  const payload={pane_session_key:pid, limit:10, reply_to, corr};
+  const payload={pane_session_key:pid, limit:HIST_PAGE, reply_to, corr};
+  if (typeof beforeSeq === 'number') payload.before_seq = beforeSeq;
+  setSyncBusy(mode === 'sync');
   S.client.publish(`${base()}/history/request`, JSON.stringify(payload), {qos:1});
   log('tx', `${base()}/history/request`, payload);
+}
+/** 右上角：拉最新一页写入面板 */
+function syncHistory(){ requestHistory('sync'); }
+/** 顶部：继续往前翻更早的历史 */
+function loadMoreHistory(){
+  const pid=S.sel; if(!pid) return;
+  const ms=S.msgs.get(pid)||[];
+  const before=oldestSeq(ms);
+  if (before === null){
+    // no seq yet — fall back to a fresh sync window
+    requestHistory('sync');
+    return;
+  }
+  const btn=document.querySelector('#feed .feed-more');
+  if (btn){ btn.disabled=true; btn.textContent='加载中…'; }
+  requestHistory('more', before);
 }
 function toggleDnd(){
   const on = !(S.dnd && S.dnd.on);
@@ -546,7 +741,7 @@ $('connectBtn').onclick=connect;
 })();
 $('sendBtn').onclick=sendText;
 $('sendText').addEventListener('keydown',e=>{ if(e.key==='Enter') sendText(); });
-$('histBtn').onclick=pullHistory;
+$('syncHistBtn').onclick=syncHistory;
 $('dndBtn').onclick=toggleDnd;
 $('clearLog').onclick=()=>$('log').innerHTML='';
 $('pubMock').onclick=pubMock;

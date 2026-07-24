@@ -459,10 +459,12 @@ class DashboardViewController: NSViewController {
 
     func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
+        let changed = agent.id != selectedSailorId
         selectedSailorId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: focusTerminal)
         syncSidePanelToSelection()
+        if changed { notifySelectionChanged() }
     }
 
     // MARK: - View mode (alias of chrome collapse)
@@ -584,11 +586,23 @@ class DashboardViewController: NSViewController {
     /// Open the fleet overview as the left column (⌘E / title-bar dashboard icon).
     func enterOverview() { onRequestSetChromeCollapsed?(false) }
 
-    /// Force the initial expanded First Mate state at launch.
+    /// Force the initial expanded First Mate state at launch when chrome has not
+    /// already restored a pane. Does not override a collapsed sidebar or a
+    /// restored files/changes selection.
     func activateInitialSplit() {
-        openFirstMateColumn()
-        currentSide = .firstMate
-        onRequestSetChromeCollapsed?(false)
+        if viewMode == .split, currentSide == .none || currentSide == .firstMate {
+            openFirstMateColumn()
+            currentSide = .firstMate
+        }
+        if activeSplitContainer == nil, !agents.isEmpty {
+            embedSplitContainerForSelectedSailor(focusTerminal: false)
+        }
+        notifyActiveTool()
+    }
+
+    /// Persist the current First Mate / terminal selection via the dashboard delegate.
+    private func notifySelectionChanged() {
+        dashboardDelegate?.dashboardDidChangeSelection(self)
     }
 
     /// Open the First Mate column and start a command in its composer.
@@ -1317,9 +1331,16 @@ class DashboardViewController: NSViewController {
         case .previewWorktree(let i):
             overviewView.setKeyboardCardSelected(nil)
             guard let row = overviewView.orderedRows[safeIndex: i] else { break }
+            let selectionChanged = row.id != overviewSelectedId
             overviewSelectedId = row.id
             overviewView.selectedId = row.id
             overviewView.update(agents)
+            // Persist the highlighted row immediately so a quit during the
+            // preview debounce still restores this worktree, not the previous one.
+            if selectionChanged || selectedSailorId != row.id {
+                selectedSailorId = row.id
+                notifySelectionChanged()
+            }
             if viewMode == .split { schedulePreview(path: row.path) }
         case .selectCard(let i):
             overviewView.setKeyboardCardSelected(i)
@@ -1462,6 +1483,12 @@ class DashboardViewController: NSViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.previewDebounce, execute: work)
     }
 
+    /// Flush a queued First Mate preview so quit/save sees the terminal that
+    /// matches the highlighted row.
+    func flushPendingPreviewForPersistence() {
+        flushPendingPreview()
+    }
+
     /// Apply a pending debounced preview now. Any path that hands the keyboard to
     /// the terminal must call this first — it assumes the embed already happened,
     /// so a still-queued preview would leave the user in the *previous*
@@ -1484,11 +1511,12 @@ class DashboardViewController: NSViewController {
     }
 
     /// Live-follow in mode 2: swap the right-hand terminal to `path` without
-    /// stealing keyboard focus from the nav ring.
+    /// stealing keyboard focus from the nav ring. Selection identity is already
+    /// updated (and persisted) by `applyOverviewEffect`; this only embeds.
     private func previewWorktree(path: String) {
-        guard let agent = agents.first(where: { $0.worktreePath == path }),
-              agent.id != selectedSailorId else { return }
+        guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
         selectedSailorId = agent.id
+        guard activeSplitWorktreePath != path else { return }
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: false)
         syncSidePanelToSelection()

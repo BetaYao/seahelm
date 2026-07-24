@@ -1,0 +1,20 @@
+# Cloudflare Tunnel → local Caddy (:80)
+#
+# One-time (on the machine that will run the tunnel):
+#   brew install cloudflared
+#   cloudflared tunnel login
+#   cloudflared tunnel create seahelm-gw
+#   cloudflared tunnel route dns seahelm-gw gw.seahelm.dev
+#   # copy the credentials file path printed by `tunnel create` into credentials-file below
+#
+# Then each test session:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#   cloudflared tunnel --config cloudflared.yml run
+
+tunnel: seahelm-gw
+credentials-file: /Users/REPLACE/Library/Application Support/cloudflare/REPLACE.json
+
+ingress:
+  - hostname: gw.seahelm.dev
+    service: http://127.0.0.1:80
+  - service: http_status:404

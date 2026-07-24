@@ -53,10 +53,13 @@ struct ConnectingView: View {
             Spirit(size: 96)
             Text(store.conn == .connecting ? "连接中…" : "未连接")
                 .font(.system(size: 17, weight: .semibold)).foregroundStyle(Ink.bone)
-            Text("\(store.config.tls ? "wss" : "ws")://\(store.config.host):\(store.config.port) · \(store.config.macId)")
+            Text("\(store.config.gatewayBaseURL) · \(store.config.macId)")
                 .font(.mono(11)).foregroundStyle(Ink.ash).multilineTextAlignment(.center)
+            if let err = store.netError {
+                Text(err).font(.system(size: 11)).foregroundStyle(Ink.red).multilineTextAlignment(.center)
+            }
             if store.conn == .connecting { ProgressView().tint(Ink.ember) }
-            OptButton(label: "设置 broker", style: .ghost) { path.append(.settings) }
+            OptButton(label: "设置", style: .ghost) { path.append(.settings) }
                 .padding(.top, 6)
         }
         .padding(.horizontal, 10)

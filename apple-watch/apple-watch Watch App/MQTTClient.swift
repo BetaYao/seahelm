@@ -2,30 +2,27 @@ import Foundation
 
 enum ConnState: Equatable { case disconnected, connecting, connected }
 
-/// Minimal MQTT 3.1.1 client over a native `URLSessionWebSocketTask` — no
-/// third-party dependency (CocoaMQTT's TCP socket doesn't build for watchOS).
-/// Implements just what the watch needs: CONNECT/SUBSCRIBE/PUBLISH/PING + inbound
-/// PUBLISH decode. QoS 0 throughout (retained state is still delivered on
-/// subscribe). Speaks the §15 contract: retained pane/worktree/focus/presence/dnd
-/// in, `command` / `history/request` out, replies via `reply/{clientId}/{corr}`.
-final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
+/// HTTPS client for the Seahelm edge gateway (`gw.seahelm.dev`).
+/// watchOS blocks `URLSessionWebSocketTask`; this polls `/api/v1/sync` and
+/// publishes via `/api/v1/publish`, keeping the same Store-facing callbacks
+/// as the old MQTT WebSocket client.
+final class MQTTClient: NSObject {
     private let config: WatchConfig
-    private var session: URLSession!
-    private var task: URLSessionWebSocketTask?
-    private var rxBuffer = Data()
-    private var pingTimer: Timer?
-    private var reconnectTimer: Timer?
+    private let session: URLSession
     private var closed = false
+    private var pollTimer: Timer?
     private var corrN = 0
     private var pending: [String: ([String: Any]) -> Void] = [:]
     private let crypto: WatchCrypto?
-    // Short-code pairing (§7.5.4): in-flight claim state.
+    private var cursor: Int = 0
+    private var seenTopics = Set<String>()   // for retained tombstone detection across syncs
+    // Short-code pairing (§7.5.4).
     private var pairNonce: Data?
     private var pairCode: String?
     private var onGrant: ((String?) -> Void)?
 
-    // Event sinks (set by Store).
     var onState:    ((ConnState) -> Void)?
+    var onError:    ((String?) -> Void)?
     var onPresence: ((Bool) -> Void)?
     var onDnd:      (([String: Any]) -> Void)?
     var onFocus:    (([String: Any]) -> Void)?
@@ -35,162 +32,134 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
 
     private var base: String { config.base }
     private var replyBase: String { "\(base)/reply/\(WatchConfig.clientId)" }
+    private var apiRoot: String {
+        config.gatewayBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
 
     init(config: WatchConfig) {
-        self.config = config
+        self.config = WatchConfig.resolved(config)
         self.crypto = WatchCrypto(rootSecretBase64url: config.rootSecret)
+        let cfg = URLSessionConfiguration.default
+        cfg.waitsForConnectivity = true
+        cfg.timeoutIntervalForRequest = 20
+        cfg.timeoutIntervalForResource = 30
+        self.session = URLSession(configuration: cfg)
         super.init()
-        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
     }
 
     // MARK: - Lifecycle
 
     func connect() {
         closed = false
-        guard let url = URL(string: "\(config.tls ? "wss" : "ws")://\(config.host):\(config.port)\(config.wsPath)") else {
-            deliver { self.onState?(.disconnected) }; return
+        guard !config.gatewayAPIKey.isEmpty else {
+            deliver {
+                self.onError?("未配置 Gateway API Key")
+                self.onState?(.disconnected)
+            }
+            return
         }
-        deliver { self.onState?(.connecting) }
-        let t = session.webSocketTask(with: url, protocols: ["mqtt"])
-        task = t
-        t.resume()
-        // CONNECT once the socket opens (urlSession didOpenWithProtocol).
+        deliver {
+            self.onError?(nil)
+            self.onState?(.connecting)
+        }
+        cursor = 0
+        seenTopics.removeAll()
+        pollOnce(isFirst: true)
+        DispatchQueue.main.async {
+            self.pollTimer?.invalidate()
+            self.pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+                self?.pollOnce(isFirst: false)
+            }
+        }
     }
 
     func disconnect() {
         closed = true
-        pingTimer?.invalidate(); pingTimer = nil
-        reconnectTimer?.invalidate(); reconnectTimer = nil
-        task?.cancel(with: .goingAway, reason: nil); task = nil
+        pollTimer?.invalidate(); pollTimer = nil
+        cancelPairing()
         deliver { self.onState?(.disconnected) }
     }
 
-    private func scheduleReconnect() {
+    func cancelPairing() {
+        guard onGrant != nil else { return }
+        pairNonce = nil; pairCode = nil
+        let cb = onGrant; onGrant = nil
+        deliver { cb?(nil) }
+    }
+
+    // MARK: - Poll
+
+    private func pollOnce(isFirst: Bool) {
         guard !closed else { return }
-        deliver { self.onState?(.disconnected) }
-        DispatchQueue.main.async {
-            self.reconnectTimer?.invalidate()
-            self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
-                self?.connect()
+        var comps = URLComponents(string: "\(apiRoot)/api/v1/sync")!
+        comps.queryItems = [
+            URLQueryItem(name: "mac_id", value: config.macId),
+            URLQueryItem(name: "after", value: String(cursor)),
+        ]
+        guard let url = comps.url else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(config.gatewayAPIKey)", forHTTPHeaderField: "Authorization")
+
+        session.dataTask(with: req) { [weak self] data, resp, err in
+            guard let self, !self.closed else { return }
+            if let err {
+                self.deliver {
+                    self.onError?(err.localizedDescription)
+                    self.onState?(.disconnected)
+                }
+                return
             }
-        }
-    }
-
-    // MARK: - URLSessionWebSocketDelegate
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didOpenWithProtocol protocol: String?) {
-        rxBuffer.removeAll()
-        // Paired → HKDF-derived creds (username = mac_id); else manual/anonymous.
-        let user = crypto != nil ? config.macId : config.username
-        let pass = crypto?.authPassword ?? config.password
-        sendPacket(MQTT.connect(clientId: WatchConfig.clientId, keepAlive: 45,
-                                username: user, password: pass))
-        receiveLoop()
-        DispatchQueue.main.async {
-            self.pingTimer?.invalidate()
-            self.pingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-                self?.sendPacket(MQTT.pingReq())
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code == 200, let data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  obj["ok"] as? Bool == true else {
+                let msg = String(data: data ?? Data(), encoding: .utf8) ?? "HTTP \(code)"
+                self.deliver {
+                    self.onError?(code == 401 ? "API Key 无效" : msg)
+                    self.onState?(.disconnected)
+                }
+                return
             }
-        }
-    }
 
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        scheduleReconnect()
-    }
+            if let cur = obj["cursor"] as? Int { self.cursor = cur }
+            else if let cur = obj["cursor"] as? Double { self.cursor = Int(cur) }
 
-    // MARK: - URLSessionDelegate (TLS trust)
+            self.deliver {
+                self.onError?(nil)
+                self.onState?(.connected)
+            }
 
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust else {
-            completionHandler(.performDefaultHandling, nil)
-            return
-        }
-        // Try loading the bundled CA cert for pinning.
-        if let caPath = Bundle.main.path(forResource: "emqxsl-ca", ofType: "crt"),
-           let caData = try? Data(contentsOf: URL(fileURLWithPath: caPath)),
-           let caCert = SecCertificateCreateWithData(nil, caData as CFData) {
-            let policies = [SecPolicyCreateSSL(true, challenge.protectionSpace.host as CFString)]
-            var trust: SecTrust?
-            if SecTrustCreateWithCertificates([caCert] as CFArray, policies as CFArray, &trust) == errSecSuccess,
-               let trust {
-                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
-                SecTrustSetAnchorCertificatesOnly(trust, false)
-                var result = SecTrustResultType.invalid
-                if SecTrustEvaluate(trust, &result) == errSecSuccess,
-                   (result == .unspecified || result == .proceed) {
-                    completionHandler(.useCredential, URLCredential(trust: trust))
-                    return
+            // Retained snapshot (full map each sync).
+            if let messages = obj["messages"] as? [String: String] {
+                let current = Set(messages.keys)
+                if isFirst || self.cursor > 0 {
+                    for topic in self.seenTopics.subtracting(current) {
+                        self.route(topic: topic, payload: Data())
+                    }
+                }
+                self.seenTopics = current
+                for (topic, payload) in messages {
+                    self.route(topic: topic, payload: Data(payload.utf8))
                 }
             }
-        }
-        // Fall back to system default trust.
-        completionHandler(.performDefaultHandling, nil)
-    }
 
-    // MARK: - Receive + parse
-
-    private func receiveLoop() {
-        task?.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .failure:
-                self.scheduleReconnect()
-            case .success(let msg):
-                switch msg {
-                case .data(let d): self.rxBuffer.append(d)
-                case .string(let s): self.rxBuffer.append(Data(s.utf8))
-                @unknown default: break
+            // Incremental events (pair grant, replies, live pane/event, …).
+            // Retained updates already applied from `messages`.
+            if let evs = obj["events"] as? [[String: Any]] {
+                for ev in evs {
+                    if (ev["retain"] as? Bool) == true { continue }
+                    guard let topic = ev["topic"] as? String else { continue }
+                    let payload = ev["payload"] as? String ?? ""
+                    self.route(topic: topic, payload: Data(payload.utf8))
                 }
-                self.drainPackets()
-                self.receiveLoop()
             }
-        }
+        }.resume()
     }
 
-    /// Extract complete MQTT packets from `rxBuffer` and dispatch them.
-    private func drainPackets() {
-        while true {
-            guard rxBuffer.count >= 2 else { return }
-            let bytes = [UInt8](rxBuffer)
-            let type = bytes[0] >> 4
-            // decode remaining length (varint) starting at byte 1
-            var mult = 1, value = 0, i = 1
-            while true {
-                guard i < bytes.count else { return }   // incomplete length
-                let b = bytes[i]; value += Int(b & 0x7F) * mult
-                i += 1
-                if b & 0x80 == 0 { break }
-                mult *= 128
-                if mult > 128 * 128 * 128 { rxBuffer.removeAll(); return }
-            }
-            let total = i + value
-            guard bytes.count >= total else { return }   // wait for more
-            let packet = Array(bytes[i..<total])
-            rxBuffer.removeSubrange(0..<total)
-            handlePacket(type: type, header0: bytes[0], body: packet)
-        }
-    }
-
-    private func handlePacket(type: UInt8, header0: UInt8, body: [UInt8]) {
-        switch type {
-        case 2:  // CONNACK
-            let accepted = body.count >= 2 && body[1] == 0
-            deliver { self.onState?(accepted ? .connected : .disconnected) }
-            if accepted { subscribe("\(base)/#") }
-        case 3:  // PUBLISH
-            guard let (topic, payload) = MQTT.decodePublish(header0: header0, body: body) else { return }
-            route(topic: topic, payload: payload)
-        default: break   // SUBACK / PINGRESP / etc. ignored
-        }
-    }
+    // MARK: - Route (same contract as the old MQTT client)
 
     private func route(topic: String, payload: Data) {
-        // Short-code pairing grant: sealed with the code-derived key (not the E2EE
-        // key), so handle it before the normal crypto-open.
         if let nonce = pairNonce, let code = pairCode,
            topic == "\(base)/pair/grant/\(WatchCrypto.base64url(nonce))" {
             let env = String(data: payload, encoding: .utf8) ?? ""
@@ -200,9 +169,8 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
             return
         }
         var raw = String(data: payload, encoding: .utf8) ?? ""
-        // E2EE: open the envelope (empty passes through as the retained-delete idiom).
         if let crypto, !raw.isEmpty {
-            guard let opened = crypto.open(raw, topic: topic) else { return }   // undecryptable → drop
+            guard let opened = crypto.open(raw, topic: topic) else { return }
             raw = opened
         }
         let obj = raw.data(using: .utf8).flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
@@ -245,17 +213,13 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
     }
     func setDnd(on: Bool, minutes: Int) { command("dnd.set", ["on": on, "minutes": minutes]) }
 
-    /// Short-code pairing: publish a `pair/claim`, await the code-encrypted grant
-    /// on `pair/grant/{nonce}`, hand back the root secret (nil on timeout/failure).
     func pairWithCode(_ code: String, then: @escaping (String?) -> Void) {
+        guard !closed else { then(nil); return }
         let nonce = WatchCrypto.randomNonce()
         pairNonce = nonce; pairCode = code; onGrant = then
-        corrN += 1
-        sendPacket(MQTT.subscribe(packetId: UInt16(truncatingIfNeeded: corrN),
-                                  topic: "\(base)/pair/grant/\(WatchCrypto.base64url(nonce))"))
         publishJSON("\(base)/pair/claim", ["code": code, "nonce": nonce.base64EncodedString()])
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
-            guard let self, self.pairNonce == nonce else { return }   // still pending → time out
+            guard let self, self.pairNonce == nonce else { return }
             self.pairNonce = nil; self.pairCode = nil
             let cb = self.onGrant; self.onGrant = nil; cb?(nil)
         }
@@ -278,66 +242,33 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
                     ["pane_session_key": paneSessionKey, "limit": limit, "reply_to": "\(replyBase)/\(corr)", "corr": corr])
     }
 
-    private func subscribe(_ topic: String) {
-        corrN += 1
-        sendPacket(MQTT.subscribe(packetId: UInt16(truncatingIfNeeded: corrN), topic: topic))
-    }
     private func publishJSON(_ topic: String, _ obj: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: obj),
               let json = String(data: data, encoding: .utf8) else { return }
-        let wire = crypto?.seal(json, topic: topic) ?? json   // seal per-topic when paired
-        sendPacket(MQTT.publish(topic: topic, payload: Data(wire.utf8)))
+        let wire = crypto?.seal(json, topic: topic) ?? json
+        publish(topic: topic, payload: wire, retain: false)
     }
-    private func sendPacket(_ data: Data) {
-        task?.send(.data(data)) { _ in }
+
+    private func publish(topic: String, payload: String, retain: Bool) {
+        guard let url = URL(string: "\(apiRoot)/api/v1/publish") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(config.gatewayAPIKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["topic": topic, "payload": payload, "qos": 1, "retain": retain]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        session.dataTask(with: req) { [weak self] _, resp, err in
+            guard let self else { return }
+            if let err {
+                self.deliver { self.onError?(err.localizedDescription) }
+                return
+            }
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code != 200 {
+                self.deliver { self.onError?("publish HTTP \(code)") }
+            }
+        }.resume()
     }
 
     private func deliver(_ block: @escaping () -> Void) { DispatchQueue.main.async(execute: block) }
-}
-
-// MARK: - MQTT 3.1.1 packet codec
-
-private enum MQTT {
-    static func varLen(_ n: Int) -> [UInt8] {
-        var x = n, out: [UInt8] = []
-        repeat { var b = UInt8(x % 128); x /= 128; if x > 0 { b |= 0x80 }; out.append(b) } while x > 0
-        return out
-    }
-    static func str(_ s: String) -> [UInt8] {
-        let b = Array(s.utf8); return [UInt8(b.count >> 8), UInt8(b.count & 0xFF)] + b
-    }
-    static func frame(_ type: UInt8, _ flags: UInt8, _ body: [UInt8]) -> Data {
-        Data([(type << 4) | flags] + varLen(body.count) + body)
-    }
-
-    static func connect(clientId: String, keepAlive: UInt16, username: String?, password: String?) -> Data {
-        var flags: UInt8 = 0x02   // clean session
-        if username != nil { flags |= 0x80 }
-        if password != nil { flags |= 0x40 }
-        var body = str("MQTT") + [0x04, flags, UInt8(keepAlive >> 8), UInt8(keepAlive & 0xFF)]
-        body += str(clientId)
-        if let u = username { body += str(u) }
-        if let p = password { body += str(p) }
-        return frame(1, 0, body)
-    }
-    static func subscribe(packetId: UInt16, topic: String) -> Data {
-        let body = [UInt8(packetId >> 8), UInt8(packetId & 0xFF)] + str(topic) + [0x00] // QoS0
-        return frame(8, 0x02, body)
-    }
-    static func publish(topic: String, payload: Data) -> Data {   // QoS0, no packet id
-        frame(3, 0x00, str(topic) + [UInt8](payload))
-    }
-    static func pingReq() -> Data { Data([0xC0, 0x00]) }
-
-    /// Decode an inbound PUBLISH → (topic, payload). QoS assumed 0 (no packet id).
-    static func decodePublish(header0: UInt8, body: [UInt8]) -> (String, Data)? {
-        guard body.count >= 2 else { return nil }
-        let tlen = Int(body[0]) << 8 | Int(body[1])
-        guard body.count >= 2 + tlen else { return nil }
-        let topic = String(bytes: body[2..<(2 + tlen)], encoding: .utf8) ?? ""
-        var idx = 2 + tlen
-        let qos = (header0 >> 1) & 0x03
-        if qos > 0, body.count >= idx + 2 { idx += 2 }   // skip packet id for QoS>0
-        return (topic, Data(body[idx...]))
-    }
 }

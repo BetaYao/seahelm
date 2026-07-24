@@ -1,0 +1,24 @@
+# Seahelm edge stack — Caddy terminates TLS for gw.seahelm.dev
+#
+#   /api/*  → gateway (Watch HTTP snapshot + publish)
+#   /mqtt   → EMQX WebSocket (exact path — do not use /mqtt* or mqtt.min.js 404s)
+#   /*      → seahelm-web static
+
+{$DOMAIN:gw.seahelm.dev} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy gateway:3000
+	}
+
+	# EMQX MQTT-over-WS path is exactly /mqtt (port 8083).
+	handle /mqtt {
+		reverse_proxy emqx:8083
+	}
+
+	handle {
+		root * /srv/web
+		header Cache-Control "no-cache"
+		file_server
+	}
+}

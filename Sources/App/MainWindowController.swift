@@ -394,6 +394,11 @@ class MainWindowController: NSWindowController {
         config.worktreeStartedAt = tabCoordinator.config.worktreeStartedAt
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         config.splitLayouts = terminalCoordinator.config.splitLayouts
+        // Chrome layout is owned here — push into TabCoordinator so its saves
+        // don't clobber sidebar_collapsed / sidebar_active_pane with defaults.
+        tabCoordinator.config.sidebarWidth = config.sidebarWidth
+        tabCoordinator.config.sidebarCollapsed = config.sidebarCollapsed
+        tabCoordinator.config.sidebarActivePane = config.sidebarActivePane
         config.save()
     }
 
@@ -450,6 +455,10 @@ class MainWindowController: NSWindowController {
         // hot-reload the MQTT channel so it reconnects with E2EE + derived broker
         // creds — no restart needed.
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
+        // Self-hosted edge stack: Mac publishes to local EMQX (TCP), but the
+        // pair QR/link must advertise the public WSS for Watch / web. Retarget
+        // leftover EMQX Cloud hosts and fill `client_broker` when missing.
+        MqttConfig.normalizeForEdgeStack(&config.mqtt)
         if config.mqtt?.rootSecret == nil {
             config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
         }
@@ -549,10 +558,30 @@ class MainWindowController: NSWindowController {
         syncKeyboardToChromeCollapse()
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
+        persistChromeLayout()
         // Collapse swaps which header owns `Region.titlebar` — re-apply if focused.
         if regionFocus.current == .titlebar {
             applyRegionFocus()
         }
+    }
+
+    /// Write sidebar width / collapse / active pane into config.
+    private func persistChromeLayout() {
+        var changed = false
+        if abs(chromeState.width - config.sidebarWidth) > 0.5 {
+            config.sidebarWidth = chromeState.width
+            changed = true
+        }
+        if config.sidebarCollapsed != chromeState.isCollapsed {
+            config.sidebarCollapsed = chromeState.isCollapsed
+            changed = true
+        }
+        if let pane = chromeState.activePane, config.sidebarActivePane != pane.rawValue {
+            config.sidebarActivePane = pane.rawValue
+            changed = true
+        }
+        guard changed else { return }
+        saveConfig()
     }
 
     private func syncKeyboardToChromeCollapse() {
@@ -905,10 +934,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
 
-        // Land in the First Mate split view. Deferred so the window/first-
-        // responder are settled before the cockpit opens.
+        // Land in the restored chrome layout (sidebar collapse + active pane).
+        // Deferred so hosts are mounted before First Mate / files / changes open.
         DispatchQueue.main.async { [weak self] in
-            self?.dashboardVC?.activateInitialSplit()
+            guard let self else { return }
+            self.applyChromeState(animated: false)
+            if !self.chromeState.isCollapsed,
+               self.chromeState.activePane == .firstMate || self.chromeState.activePane == nil {
+                self.dashboardVC?.activateInitialSplit()
+            }
         }
     }
 
@@ -1472,8 +1506,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
             chromeState = ChromeLayoutState(
                 width: config.sidebarWidth,
-                collapsed: false,
-                activePane: .firstMate
+                collapsed: config.sidebarCollapsed,
+                activePane: ChromeLeftPane(rawValue: config.sidebarActivePane) ?? .firstMate
             )
             chrome.applyState(chromeState, animated: false)
             chrome.headerDelegate = self
@@ -1505,19 +1539,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func handleChromeStateChange(_ state: ChromeLayoutState) {
-        let widthChanged = abs(state.width - config.sidebarWidth) > 0.5
         let collapseChanged = state.isCollapsed != chromeState.isCollapsed
+        let paneChanged = state.activePane != chromeState.activePane
         chromeState = state
-        if widthChanged {
-            // Persist width only — never write 0 for a collapsed sidebar.
-            config.sidebarWidth = state.width
-            tabCoordinator.config.sidebarWidth = state.width
-            saveConfig()
-        }
+        persistChromeLayout()
         positionStandardWindowButtons()
-        if collapseChanged {
+        if collapseChanged || paneChanged {
             dashboardVC?.adoptChromeCollapse(state.isCollapsed, activePane: state.activePane)
-            syncKeyboardToChromeCollapse()
+            if collapseChanged {
+                syncKeyboardToChromeCollapse()
+            }
         }
     }
 
@@ -1867,9 +1898,22 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
+        // Flush a debounced First Mate preview so the saved selection matches
+        // the highlighted row, then persist selection + chrome layout.
+        dashboardVC?.flushPendingPreviewForPersistence()
+        tabCoordinator.saveSelectedWorktree()
+        config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
+        config.sidebarCollapsed = chromeState.isCollapsed
+        config.sidebarWidth = chromeState.width
+        if let pane = chromeState.activePane {
+            config.sidebarActivePane = pane.rawValue
+        }
         // Capture the latest per-pane titles before tearing down the stations,
         // so restored panes show their real titles instead of the branch name.
         terminalCoordinator.saveAllSplitLayouts()
+        saveConfig()
+        // Debounced Config.save may not flush before process exit — force it.
+        config.saveNow()
         terminalCoordinator.cleanup()
     }
 }

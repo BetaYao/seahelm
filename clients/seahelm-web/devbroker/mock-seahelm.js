@@ -8,7 +8,7 @@
 const mqtt = require('mqtt');
 const crypto = require('crypto');
 
-const URL = process.env.BROKER || 'ws://localhost:8083/mqtt';
+const URL = process.env.BROKER || 'ws://localhost:28083/mqtt';
 const MAC = process.env.MAC || 'testmac';
 const B = `seahelm/${MAC}`;
 let seq = 100;

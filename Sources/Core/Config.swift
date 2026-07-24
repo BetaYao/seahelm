@@ -33,6 +33,11 @@ struct Config: Codable {
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
     var sidebarWidth: CGFloat
+    /// Whether the chrome left column is collapsed. Survives relaunch with
+    /// `sidebarActivePane` so First Mate / files / changes layout is restored.
+    var sidebarCollapsed: Bool
+    /// Last chrome left pane (`ChromeLeftPane.rawValue`). Default First Mate.
+    var sidebarActivePane: String
     /// First-launch wizard gate. New installs start `false`; legacy configs that
     /// omit the key decode as `true` so existing users never see the wizard.
     var onboardingCompleted: Bool
@@ -72,6 +77,8 @@ struct Config: Codable {
         case notifications
         case islandEnabled = "island_enabled"
         case sidebarWidth = "sidebar_width"
+        case sidebarCollapsed = "sidebar_collapsed"
+        case sidebarActivePane = "sidebar_active_pane"
         case onboardingCompleted = "onboarding_completed"
         case defaultAgent = "default_agent"
         case agentYolo = "agent_yolo"
@@ -105,6 +112,8 @@ struct Config: Codable {
         notifications = NotificationConfig()
         islandEnabled = true
         sidebarWidth = 300
+        sidebarCollapsed = false
+        sidebarActivePane = ChromeLeftPane.firstMate.rawValue
         onboardingCompleted = false
         defaultAgent = SailorType.claudeCode.rawValue
         agentYolo = false
@@ -140,6 +149,10 @@ struct Config: Codable {
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
+        sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
+        let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)
+        sidebarActivePane = ChromeLeftPane(rawValue: pane ?? "")?.rawValue
+            ?? ChromeLeftPane.firstMate.rawValue
         // Missing key = legacy install → skip wizard. Explicit false = unfinished.
         if container.contains(.onboardingCompleted) {
             onboardingCompleted = try container.decode(Bool.self, forKey: .onboardingCompleted)

@@ -58,6 +58,34 @@ final class DashboardViewControllerClickTests: XCTestCase {
         vc.handleWorktreeRowClickForTesting(path: "/repo/b")
         XCTAssertEqual(vc.selectedSailorId, "agent-b")
     }
+
+    func testRowClickNotifiesSelectionChange() {
+        let vc = DashboardViewController()
+        let spy = DashboardDelegateSpy()
+        vc.dashboardDelegate = spy
+        vc.loadViewIfNeeded()
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        vc.handleWorktreeRowClickForTesting(path: "/repo/b")
+        XCTAssertTrue(spy.didChangeSelectionCalled,
+                      "First Mate row selection must notify so the path can be persisted")
+        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+    }
+
+    func testCommitWorktreeSelectionRestoresOverviewHighlight() {
+        let vc = DashboardViewController()
+        vc.loadViewIfNeeded()
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        vc.commitWorktreeSelection(path: "/repo/b")
+        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+    }
 }
 
 // MARK: - Test helpers
@@ -92,6 +120,7 @@ private func makeSailor(id: String, worktreePath: String) -> SailorDisplayInfo {
 
 private class DashboardDelegateSpy: DashboardDelegate {
     var didSelectProjectCalled = false
+    var didChangeSelectionCalled = false
     var lastProject: String?
     var lastThread: String?
     var browsePath: String?
@@ -107,7 +136,9 @@ private class DashboardDelegateSpy: DashboardDelegate {
     func dashboardDidRequestDelete(_ terminalID: String) {}
     func dashboardDidRequestCloseRepo(_ project: String) {}
     func dashboardDidRequestAddProject() {}
-    func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {}
+    func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {
+        didChangeSelectionCalled = true
+    }
     func dashboardDidRequestBrowseFiles(worktreePath: String) { browsePath = worktreePath }
     func dashboardDidRequestShowChanges(worktreePath: String) { changesPath = worktreePath }
 }

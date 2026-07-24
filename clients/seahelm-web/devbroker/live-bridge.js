@@ -14,7 +14,7 @@ const mqtt = require('mqtt');
 
 const SOCK = (process.env.HOME || '') + '/.config/seahelm/seahelm.sock';
 const B = `seahelm/${process.env.MAC || 'testmac'}`;
-const URL = process.env.BROKER || 'ws://localhost:8083/mqtt';
+const URL = process.env.BROKER || 'ws://localhost:28083/mqtt';
 const ALLOW_WRITE = process.env.BRIDGE_ALLOW_WRITE === '1';
 
 let seq = 0;
