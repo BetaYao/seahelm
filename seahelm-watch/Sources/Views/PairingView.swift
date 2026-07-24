@@ -40,6 +40,9 @@ struct PairingView: View {
                           style: code.count == 8 ? .fill : .ghost) { submit() }
                     .disabled(code.count != 8 || pairing)
                     .padding(.top, 4)
+
+                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))")                    .font(.system(size: 8)).foregroundStyle(Ink.ash.opacity(0.4))
+                    .padding(.top, 6)
             }
             .padding(.horizontal, 6)
         }
