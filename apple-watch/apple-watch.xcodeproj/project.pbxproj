@@ -318,7 +318,7 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 43G5A6G9QV;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = "apple-watch Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -348,7 +348,7 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 43G5A6G9QV;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = "apple-watch Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
