@@ -57,18 +57,22 @@ static void gesture_cb(lv_event_t *e) {
 }
 
 // ── MQTT callbacks ────────────────────────────────────────────────────────────
-// These are called from MQTT task context. We queue state changes and trigger
-// LVGL refresh via a timer (since LVGL is not thread-safe).
+// These are called from MQTT task context. LVGL is NOT thread-safe and a full
+// sh_ui_refresh() is heavy, so callbacks must NOT touch LVGL directly — doing so
+// blocked the mqtt_task through the retained-pane burst and tripped the task
+// watchdog (task_wdt: mqtt_task) → reset loop. Instead set a dirty flag that the
+// LVGL main loop drains with a single coalesced refresh.
+static volatile bool s_ui_dirty = false;
 
 static void on_mqtt_state(sh_mqtt_state_t state) {
     ESP_LOGI(TAG, "MQTT state: %d", state);
-    sh_ui_refresh();   // update the connection-status screen (WiFi→MQTT→data)
+    s_ui_dirty = true;   // status screen (WiFi→MQTT→data) refreshed by main loop
 }
 
 static void on_pane_status(const char *slot, const char *payload_json) {
     ESP_LOGD(TAG, "pane/status %s: %s", slot, payload_json ? payload_json : "(tombstone)");
     sh_data_m2_update_pane(slot, payload_json);
-    sh_ui_refresh();
+    s_ui_dirty = true;
 }
 
 static void on_pane_event(const char *slot, const char *payload_json) {
@@ -247,6 +251,8 @@ extern "C" void app_main(void) {
         if (M5.BtnB.wasClicked())      sh_ui_select();
         if (M5.BtnB.isHolding() && !voicing) { voicing = true; sh_ui_voice_start(); }
         if (voicing && M5.BtnB.wasReleased()) { voicing = false; sh_ui_voice_end(); }
+
+        if (s_ui_dirty) { s_ui_dirty = false; sh_ui_refresh(); }  // coalesced, LVGL-task-safe
 
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));

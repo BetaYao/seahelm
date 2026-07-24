@@ -245,6 +245,13 @@ void sh_mqtt_start(void) {
         .broker.address.uri = uri,
         .credentials.client_id = sh_config_client_id(),
         .session.keepalive = 45,
+        // NOTE: do NOT enlarge .buffer.size here — internal RAM is at its limit
+        // (WiFi + LVGL + 8 KB TLS), and a bigger MQTT buffer starves the hardware
+        // SHA alloc during the TLS handshake ("esp-sha: Failed to allocate buf").
+        // Generous network timeouts are free (no extra RAM) and keep a slow link
+        // from being misread as dead.
+        .network.timeout_ms = 10000,
+        .network.reconnect_timeout_ms = 4000,
     };
 
     // Set credentials if available
