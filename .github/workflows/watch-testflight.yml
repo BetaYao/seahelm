@@ -96,8 +96,23 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          xcrun altool --upload-app \
+          # altool can exit 0 even when ASC rejects the package — capture output
+          # and fail the job explicitly so a green CI never means a failed upload.
+          set -o pipefail
+          LOG="$RUNNER_TEMP/altool-upload.log"
+          if ! xcrun altool --upload-app \
             -f "$RUNNER_TEMP/export/apple-watch.ipa" \
             -t ios \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID"
+            --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee "$LOG"; then
+            echo "::error::altool exited non-zero"
+            exit 1
+          fi
+          if grep -q "UPLOAD FAILED" "$LOG" || grep -q "Validation failed" "$LOG"; then
+            echo "::error::ASC rejected the upload (see altool log above)"
+            exit 1
+          fi
+          if ! grep -q "UPLOAD SUCCEEDED" "$LOG"; then
+            echo "::error::altool did not report UPLOAD SUCCEEDED"
+            exit 1
+          fi

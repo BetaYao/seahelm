@@ -20,10 +20,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>WKApplication</key>
 	<true/>
-	<key>WKCompanionAppBundleIdentifier</key>
-	<string>com.seahelm.app</string>
-	<key>WKRunsIndependentlyOfCompanionApp</key>
-	<true/>
 	<key>WKWatchOnly</key>
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
