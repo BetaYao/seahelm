@@ -223,7 +223,7 @@ final class MQTTClient: NSObject, URLSessionWebSocketDelegate {
         sendPacket(MQTT.subscribe(packetId: UInt16(truncatingIfNeeded: corrN),
                                   topic: "\(base)/pair/grant/\(WatchCrypto.base64url(nonce))"))
         publishJSON("\(base)/pair/claim", ["code": code, "nonce": nonce.base64EncodedString()])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
             guard let self, self.pairNonce == nonce else { return }   // still pending → time out
             self.pairNonce = nil; self.pairCode = nil
             let cb = self.onGrant; self.onGrant = nil; cb?(nil)
