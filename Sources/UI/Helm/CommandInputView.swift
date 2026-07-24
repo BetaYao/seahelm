@@ -34,6 +34,9 @@ final class CommandInputView: NSView {
 
     private let field = GrowingTextView()
     private let scroll = NSScrollView()
+    /// Fixed terminal-style prompt sigil pinned at the left edge — a persistent
+    /// affordance that this band accepts typed input (stays put while typing).
+    private let promptLabel = NSTextField(labelWithString: ">")
     private let box = FrostedPanelView()
     /// Solid color wash over the glass that gives the flush band a distinct
     /// input-surface color — this is what separates it from the panel behind.
@@ -65,6 +68,8 @@ final class CommandInputView: NSView {
 
     /// Vertical padding above/below the text inside the band.
     private static let verticalInset: CGFloat = 11
+    /// Where the text starts: leaves room for the fixed `>` prompt at x=16.
+    private static let promptInset: CGFloat = 30
     /// One text row's height (min band content). Recomputed from the font.
     private var lineHeight: CGFloat = 18
     /// How many rows the field grows to before it starts scrolling.
@@ -134,7 +139,15 @@ final class CommandInputView: NSView {
         field.delegate = self
         field.allowsUndo = true
         field.setAccessibilityIdentifier("helm.commandInput")
-        placeholder = "Give an order — / command · @ repo · # agent"
+        placeholder = "/ command · @ repo · # agent"
+
+        promptLabel.font = AppFont.mono(size: 12.5, weight: .semibold)
+        promptLabel.textColor = SemanticColors.accent
+        promptLabel.isBezeled = false
+        promptLabel.drawsBackground = false
+        promptLabel.isEditable = false
+        promptLabel.isSelectable = false
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
         field.onFocusChange = { [weak self] focused in
             self?.isFocused = focused
             if focused { self?.onFocused?() } else { self?.onUnfocused?() }
@@ -153,6 +166,7 @@ final class CommandInputView: NSView {
         tint.wantsLayer = true
         tint.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(tint)
+        box.addSubview(promptLabel)
         box.addSubview(scroll)
 
         refreshChromeColors()
@@ -172,7 +186,7 @@ final class CommandInputView: NSView {
 
         addSubview(box)
 
-        scrollLeadingConstraint = scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16)
+        scrollLeadingConstraint = scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: Self.promptInset)
         scrollHeightConstraint = scroll.heightAnchor.constraint(equalToConstant: lineHeight)
 
         NSLayoutConstraint.activate([
@@ -186,6 +200,9 @@ final class CommandInputView: NSView {
             tint.trailingAnchor.constraint(equalTo: box.trailingAnchor),
             tint.topAnchor.constraint(equalTo: box.topAnchor),
             tint.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+
+            promptLabel.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
+            promptLabel.topAnchor.constraint(equalTo: scroll.topAnchor),
 
             scrollLeadingConstraint,
             scroll.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
@@ -370,10 +387,12 @@ final class CommandInputView: NSView {
         let count = pendingImageURLs.count
         let hasImages = count > 0
         thumbnailStrip.isHidden = !hasImages
+        // The fixed `>` prompt gives way to the image strip when attachments exist.
+        promptLabel.isHidden = hasImages
         // Each thumbnail is 28pt + 4pt spacing, plus 6pt leading margin.
         let stripWidth = hasImages ? CGFloat(count) * 28 + CGFloat(max(0, count - 1)) * 4 : 0
         thumbnailStackLeadingConstraint.constant = hasImages ? 6 : 0
-        scrollLeadingConstraint.constant = hasImages ? 16 + stripWidth + 6 : 16
+        scrollLeadingConstraint.constant = hasImages ? 16 + stripWidth + 6 : Self.promptInset
     }
 }
 

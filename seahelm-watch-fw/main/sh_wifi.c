@@ -27,7 +27,10 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_connected = false;
         xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
-        ESP_LOGW(TAG, "disconnected, reconnecting…");
+        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        // reason 201=NO_AP_FOUND (wrong SSID / 5GHz-only AP the S3 can't see),
+        // 15=4WAY_HANDSHAKE_TIMEOUT / 205=CONNECTION_FAIL (wrong password), etc.
+        ESP_LOGW(TAG, "disconnected (reason=%d), reconnecting…", d ? d->reason : -1);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;

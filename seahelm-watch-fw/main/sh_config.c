@@ -24,8 +24,8 @@ const sh_config_t SH_CONFIG_DEFAULT = {
     .port        = 8883,
     .tls         = true,
     .mac_id      = "live",
-    .username    = "",
-    .password    = "",
+    .username    = "seahelm",   // fixed broker auth (decoupled from mac_id/E2EE)
+    .password    = "seahelm",
     .root_secret = "",
     .capability  = SH_CAP_CONTROL,
 };
@@ -216,10 +216,14 @@ int sh_config_derive_creds(sh_config_t *cfg) {
         return -1;
     }
 
-    // Derive: HKDF → auth (password hex) + enc_key (AES-256-GCM key)
+    // Derive: HKDF → auth (password hex) + enc_key (AES-256-GCM key).
+    // Broker auth is now fixed (seahelm/seahelm) so we DON'T overwrite
+    // cfg->password — the derived auth hex goes to a throwaway buffer; only the
+    // E2EE enc_key is kept (by sh_crypto).
     uint8_t enc_key[32];
+    char    auth_hex[128];
     int ret = sh_crypto_derive_credentials(root_raw, root_len,
-                                           cfg->password, sizeof(cfg->password),
+                                           auth_hex, sizeof(auth_hex),
                                            enc_key, sizeof(enc_key));
     if (ret != 0) {
         ESP_LOGE(TAG, "credential derivation failed");

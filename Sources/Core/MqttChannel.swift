@@ -134,9 +134,12 @@ final class MqttChannel: NSObject, ExternalChannel {
                 m.sslSettings = [kCFStreamSSLPeerName as String: config.host as NSObject]
             }
         }
-        // Paired → HKDF-derived creds (username = mac_id); else manual/plaintext.
-        m.username = crypto != nil ? macId : config.username
-        m.password = crypto?.authPassword ?? config.password
+        // Broker auth is fixed dev creds from config (e.g. seahelm/seahelm),
+        // decoupled from mac_id and the E2EE root secret — so mac_id can be a
+        // per-machine namespace without needing a per-id broker user. Crypto (if
+        // paired) still seals/opens payloads; it no longer supplies broker creds.
+        m.username = config.username
+        m.password = config.password
         m.keepAlive = 60
         m.enableSSL = config.resolvedTLS
         m.autoReconnect = false          // we manage exponential backoff ourselves
