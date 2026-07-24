@@ -26,7 +26,7 @@ targets:
           - Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.watch
+        PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.app.watch
         TARGETED_DEVICE_FAMILY: "4"
         SDKROOT: watchos
         INFOPLIST_FILE: Sources/Info.plist
