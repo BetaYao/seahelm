@@ -194,7 +194,9 @@ int sh_config_derive_creds(sh_config_t *cfg) {
     for (i = 0; i < slen; i++) {
         unsigned char c = (unsigned char)s[i];
         if (c == '=') { pad++; continue; }
-        unsigned char v = b64dec[c];
+        // base64URL: '-'/'_' replace '+'/'/'. Map explicitly — the table is
+        // standard-base64 only, so root_secret (base64url) would decode wrong.
+        unsigned char v = (c == '-') ? 62 : (c == '_') ? 63 : b64dec[c];
         if (v == 0 && c != 'A') continue;  // skip whitespace/invalid
         buf[buf_i++] = v;
         if (buf_i == 4) {
@@ -216,22 +218,18 @@ int sh_config_derive_creds(sh_config_t *cfg) {
         return -1;
     }
 
-    // Derive: HKDF → auth (password hex) + enc_key (AES-256-GCM key).
-    // Broker auth is now fixed (seahelm/seahelm) so we DON'T overwrite
-    // cfg->password — the derived auth hex goes to a throwaway buffer; only the
-    // E2EE enc_key is kept (by sh_crypto).
-    uint8_t enc_key[32];
-    char    auth_hex[128];
-    int ret = sh_crypto_derive_credentials(root_raw, root_len,
-                                           auth_hex, sizeof(auth_hex),
-                                           enc_key, sizeof(enc_key));
+    // Init the E2EE crypto module: sh_crypto_init derives + STORES the enc_key
+    // and sets initialized=true (sh_crypto_derive_credentials alone only returns
+    // the key — it does NOT store it, so calling that left sh_crypto_active()
+    // false and every encrypted payload was dropped → stuck on M1 mock).
+    // Broker auth is fixed (seahelm/seahelm) so the derived auth hex is a
+    // throwaway; we don't overwrite cfg->password.
+    char auth_hex[128];
+    int ret = sh_crypto_init(root_raw, auth_hex, sizeof(auth_hex));
     if (ret != 0) {
         ESP_LOGE(TAG, "credential derivation failed");
         return -1;
     }
-
-    // enc_key is only needed in-memory by sh_crypto; we don't store it in NVS.
-    // The crypto module keeps its own copy.
     return 0;
 }
 

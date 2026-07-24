@@ -21,6 +21,7 @@ idf_component_register(
         esp_netif
         esp_event
         mqtt
+        esp-tls
         mbedtls
         json
 )

@@ -2,6 +2,10 @@
 // Boot → Home(glance) → repos → worktrees → panes → detail(feed), with a
 // status ring and suggest/question/notify overlays. M1 renders mock data.
 #include "sh_ui.h"
+#include "sh_wifi.h"
+#include "sh_mqtt.h"
+#include "sh_crypto.h"
+#include "sh_data.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -123,7 +127,41 @@ static lv_obj_t *center_reset(lv_flex_align_t main) {
 }
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
+// Connection pipeline status — shown instead of falling back to M1 mock data
+// when no live MQTT panes have arrived yet. Surfaces exactly which stage the
+// device is stuck at (WiFi → MQTT → E2EE → data) so failures are visible.
+static void build_status(void) {
+    lv_obj_t *c = center_reset(LV_FLEX_ALIGN_CENTER);
+    mk_label(c, "seahelm", SH_FONT_TITLE, SH_BONE);
+
+    const char *stage;
+    lv_color_t  col = SH_AMBER;
+    sh_mqtt_state_t ms = sh_mqtt_state();
+    if (!sh_wifi_is_connected()) {
+        stage = "WiFi 连接中…";
+    } else if (ms == SH_MQTT_CONNECTING) {
+        stage = "连接 broker…";
+    } else if (ms != SH_MQTT_CONNECTED) {
+        stage = "broker 连接失败"; col = SH_RED;
+    } else if (!sh_crypto_active()) {
+        stage = "E2EE 未初始化"; col = SH_RED;
+    } else {
+        stage = "已连接 · 等待数据";
+    }
+    mk_label(c, stage, SH_FONT_BODY, col);
+
+    // tiny checklist of the three gates
+    char line[48];
+    snprintf(line, sizeof line, "WiFi %s  MQTT %s  E2EE %s",
+             sh_wifi_is_connected() ? "OK" : "…",
+             ms == SH_MQTT_CONNECTED ? "OK" : (ms == SH_MQTT_CONNECTING ? "…" : "X"),
+             sh_crypto_active() ? "OK" : "X");
+    mk_label(c, line, SH_FONT_BODY, SH_ASH);
+}
+
 static void build_home(void) {
+    if (!sh_data_m2_active()) { build_status(); return; }
+
     lv_obj_t *c = center_reset(LV_FLEX_ALIGN_CENTER);
     sh_counts_t ct = sh_counts();
     mk_label(c, "seahelm", SH_FONT_TITLE, SH_BONE);
@@ -510,12 +548,6 @@ static void boot_done_cb(lv_timer_t *t) {
     render();
     lv_timer_delete(t);
 }
-static void demo_suggest_cb(lv_timer_t *t) {
-    static const char *opts[] = { "run tests", "commit & push", "open sibling pane" };
-    sh_ui_overlay(SH_OV_SUGGEST, "p4", "s-88", NULL, opts, 3);
-    lv_timer_delete(t);
-}
-
 void sh_ui_init(void) {
     memset(&g, 0, sizeof g);
     g.scr = lv_screen_active();
@@ -555,5 +587,4 @@ void sh_ui_init(void) {
     ring_set(SH_ASH, false, true);
 
     lv_timer_create(boot_done_cb, 2100, NULL);
-    lv_timer_create(demo_suggest_cb, 5200, NULL);
 }

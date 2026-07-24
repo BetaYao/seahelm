@@ -12,81 +12,6 @@
 static const char *TAG = "sh_data";
 
 // ══════════════════════════════════════════════════════════════════════════════
-// M1: STATIC MOCK DATA
-// ══════════════════════════════════════════════════════════════════════════════
-
-static const sh_msg_t p1_hist[] = {
-    { "now", SH_MSG_RUN,    "正在编辑 IslandView.swift,调整展开态卡片的堆叠约束与阴影层级。", false },
-    { "40s", SH_MSG_AGENT,  "已把展开态卡片间距从 8 调到 12,并给最外层加了 2pt 安全边距;顶部分隔线透明度降到 30%,更透气。要不要连收起态也一起调。", false },
-    { "1m",  SH_MSG_YOU,    "灵动岛展开时几张卡片挤太紧,帮我展开时松一点,收起态先别动。", false },
-    { "2m",  SH_MSG_STATUS, "● 开始运行 · 已读取 IslandView 相关 3 个文件", false },
-};
-static const sh_msg_t p2_hist[] = {
-    { "5m", SH_MSG_STATUS, "○ 空闲 · 上一轮已结束,等待下一步指令", false },
-    { "6m", SH_MSG_AGENT,  "已为 WorkspaceManager 生成单测骨架,覆盖 tab 增删与去重命名,留了 TODO 占位。", false },
-};
-static const sh_pane_t main_panes[] = {
-    { .id="p1", .agent="claude", .status=SH_ST_RUNNING, .brief="重排灵动岛展开态的卡片间距与阴影层级", .has_suggest=false, .has_question=false, .history=p1_hist, .history_len=4 },
-    { .id="p2", .agent="codex",  .status=SH_ST_IDLE,    .brief="空闲 · 等待指令",                     .has_suggest=false, .has_question=false, .history=p2_hist, .history_len=2 },
-};
-
-static const sh_msg_t p3_hist[] = {
-    { "now", SH_MSG_ASK, "目标目录已存在 feat-island 的 worktree。要覆盖重新从 main 拉一份吗?覆盖会丢弃那边未提交改动。", false },
-    { "30s", SH_MSG_RUN, "执行 git worktree add -b feat-island,检测到路径冲突。", false },
-    { "1m",  SH_MSG_YOU, "基于 main 开一个 feat-island 实验分支,拿来试灵动岛新交互。", false },
-};
-static const sh_pane_t island_panes[] = {
-    { .id="p3", .agent="claude", .status=SH_ST_WAITING, .brief="等你答:覆盖已有分支?", .has_suggest=false, .has_question=true, .history=p3_hist, .history_len=3 },
-};
-
-static const sh_msg_t p4_hist[] = {
-    { "now", SH_MSG_RUN,   "给 ControlSocketServer 重连加指数退避,初始 200ms、上限 5s,每次重试打印退避间隔。", false },
-    { "3m",  SH_MSG_AGENT, "定位到了:socket 掉线后旧 fd 没关,重连每次新建,断几次就把 fd 耗光,之后全部失败。先补关闭再加退避。", false },
-    { "12m", SH_MSG_YOU,   "控制 socket 掉线后一直不自动重连,得手动重启 app,排查下原因。", false },
-};
-static const sh_msg_t p5_hist[] = {
-    { "8m",  SH_MSG_STATUS, "✓ 已完成 · 全部测试通过,工作区干净", false },
-    { "10m", SH_MSG_AGENT,  "新增 SocketReconnectTests 共 4 例:正常重连、连续掉线、fd 不泄漏、退避封顶,跑三遍稳定通过。要提 PR 吗?", false },
-};
-static const sh_pane_t socket_panes[] = {
-    { .id="p4", .agent="claude", .status=SH_ST_RUNNING, .brief="修复控制 socket 断线后不自动重连", .has_suggest=true,  .has_question=false, .history=p4_hist, .history_len=3 },
-    { .id="p5", .agent="aider",  .status=SH_ST_DONE,    .brief="已完成 · 补了回归测试",             .has_suggest=false, .has_question=false, .history=p5_hist, .history_len=2 },
-};
-
-static const sh_pane_t claw_main_panes[] = {
-    { .id="p6", .agent="claude", .status=SH_ST_IDLE, .brief="空闲", .history=NULL, .history_len=0 },
-};
-static const sh_msg_t p7_hist[] = {
-    { "now", SH_MSG_RUN, "把 GatewayRouter 按协议拆成 OpenAIRoute / ClaudeRoute / GeminiRoute,共用一层参数归一化中间件。", false },
-    { "4m",  SH_MSG_YOU, "网关把三家转换全塞在一个大 switch,太难维护,帮我各自拆开。", false },
-};
-static const sh_msg_t p8_hist[] = {
-    { "1m", SH_MSG_STATUS, "✕ 失败 · npm test 退出码 1", false },
-    { "1m", SH_MSG_RUN,    "npm test 跑完,3 个断言未过,集中在流式响应拼接:分片边界偶尔吞掉最后一个 token。", false },
-    { "5m", SH_MSG_YOU,    "拆完先跑完整测试,确认没改坏原行为。", false },
-};
-static const sh_pane_t gateway_panes[] = {
-    { .id="p7", .agent="codex",  .status=SH_ST_RUNNING, .brief="重构统一网关 · 按协议拆分路由",       .history=p7_hist, .history_len=2 },
-    { .id="p8", .agent="gemini", .status=SH_ST_FAILED,  .brief="失败 · npm test 3 处断言未过",         .history=p8_hist, .history_len=3 },
-};
-
-// M1 mock repos — shown as a placeholder until live MQTT (M2) slots arrive.
-// worktrees is an inline array field (sh_repo_t.worktrees[SH_MAX_WORKTREES]),
-// so the worktree literals are brace-initialized directly here; array names
-// (main_panes, …) decay to the const sh_pane_t * that .panes expects.
-static const sh_repo_t g_m1_repos[] = {
-    { "seahelm", "seahelm", {
-        { "main",        "main",        "2m",  "改 island 布局 · 提交并推送", main_panes,   2 },
-        { "feat-island", "feat-island", "刚刚", "覆盖已有分支?",              island_panes, 1 },
-        { "fix-socket",  "fix-socket",  "12m", "控制 socket 重连逻辑",       socket_panes, 2 },
-    }, 3 },
-    { "claw-api", "claw-api", {
-        { "main",             "main",             "20m", "模型路由聚合",           claw_main_panes, 1 },
-        { "refactor-gateway", "refactor-gateway", "1m",  "npm test 失败 · 3 处断言", gateway_panes,   2 },
-    }, 2 },
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
 // M2: DYNAMIC SLOT STORE
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -316,9 +241,11 @@ void sh_data_m2_set_dnd(const char *payload_json) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const sh_repo_t *sh_repos(int *out_count) {
+    // No M1 mock fallback: before live MQTT data arrives, return empty so the UI
+    // shows the connection-status screen instead of fake panes.
     if (!sh_data_m2_active()) {
-        if (out_count) *out_count = sizeof(g_m1_repos) / sizeof(g_m1_repos[0]);
-        return g_m1_repos;
+        if (out_count) *out_count = 0;
+        return NULL;
     }
 
     // Build tree from M2 slots

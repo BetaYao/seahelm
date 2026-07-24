@@ -100,7 +100,9 @@ int sh_crypto_base64url_decode(const char *in, uint8_t *out, size_t out_sz, size
     for (size_t i = 0; i < slen; i++) {
         unsigned char c = (unsigned char)in[i];
         if (c == '=') continue;
-        unsigned char v = b64dec[c];
+        // base64URL: '-'/'_' replace '+'/'/'. The table is standard-base64 only,
+        // so map the URL chars explicitly or root_secret (base64url) decodes wrong.
+        unsigned char v = (c == '-') ? 62 : (c == '_') ? 63 : b64dec[c];
         if (v == 0 && c != 'A') continue;
         buf[buf_i++] = v;
         if (buf_i == 4) {

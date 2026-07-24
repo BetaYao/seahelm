@@ -26,7 +26,7 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # --- LVGL 9 (via Kconfig from the managed component) ---
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_USE_OS_NONE=y
-CONFIG_LV_MEM_SIZE_KILOBYTES=64
+CONFIG_LV_MEM_SIZE_KILOBYTES=32
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # HKDF for E2EE key derivation (sh_crypto.c uses mbedtls_hkdf)
 CONFIG_MBEDTLS_HKDF_C=y
@@ -35,3 +35,8 @@ CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# mbedtls: dynamic TLS buffers (internal RAM too small; HW crypto needs internal alloc, cannot use PSRAM)
+# fixed 8KB TLS in-buffer (dynamic realloc failed reading retained burst)
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=n
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192

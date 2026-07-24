@@ -62,7 +62,7 @@ static void gesture_cb(lv_event_t *e) {
 
 static void on_mqtt_state(sh_mqtt_state_t state) {
     ESP_LOGI(TAG, "MQTT state: %d", state);
-    // Could update a status indicator in the UI
+    sh_ui_refresh();   // update the connection-status screen (WiFi→MQTT→data)
 }
 
 static void on_pane_status(const char *slot, const char *payload_json) {

@@ -1,11 +1,13 @@
 // sh_mqtt.c — MQTT client implementation using ESP-IDF esp-mqtt.
 #include "sh_mqtt.h"
 #include "sh_crypto.h"
+#include "sh_data.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "esp_log.h"
 #include "mqtt_client.h"
+#include "esp_crt_bundle.h"   // esp_crt_bundle_attach (built-in CA bundle)
 #include "cJSON.h"
 #include "mbedtls/base64.h"
 
@@ -136,7 +138,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         char sub[128];
         snprintf(sub, sizeof(sub), "%s/#", s_mqtt.base);
         esp_mqtt_client_subscribe(s_mqtt.client, sub, 1);
-        ESP_LOGI(TAG, "subscribed to %s", sub);
+        ESP_LOGI(TAG, "subscribed to %s (crypto_active=%d)", sub, sh_crypto_active());
         break;
     }
     case MQTT_EVENT_DISCONNECTED: {
@@ -188,6 +190,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         }
 
         const char *msg = decrypted ? decrypted : payload;
+        ESP_LOGI(TAG, "RX %s dec=%d m2=%d", topic, decrypted ? 1 : 0, sh_data_m2_active());
         route_message(topic, msg);
 
         if (decrypted) sh_crypto_free(decrypted);
@@ -261,15 +264,12 @@ void sh_mqtt_start(void) {
     mqtt_cfg.session.last_will.qos = 1;
     mqtt_cfg.session.last_will.retain = true;
 
-    // TLS config
+    // TLS config: verify EMQX's server cert against ESP-IDF's built-in CA bundle
+    // (CONFIG_MBEDTLS_CERTIFICATE_BUNDLE, which includes DigiCert Global Root G2 —
+    // EMQX Serverless's CA). Without a CA source esp-tls can't verify the server
+    // and the handshake fails with "Error transport connect".
     if (cfg->tls) {
-        // Use the built-in CA cert (emqxsl-ca.crt or system roots)
-        // ESP-MQTT with TLS uses esp-tls; we can set a CA cert or use
-        // the global CA store. For simplicity, we skip cert verification
-        // in development; production should bundle emqxsl-ca.crt
-        // mqtt_cfg.broker.verification.certificate = ...;
-        // For now: use known root (DigiCert Global Root G2 is trusted by default)
-        mqtt_cfg.broker.verification.skip_cert_common_name_check = false;
+        mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
     }
 
     s_mqtt.client = esp_mqtt_client_init(&mqtt_cfg);
