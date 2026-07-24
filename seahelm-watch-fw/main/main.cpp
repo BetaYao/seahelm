@@ -19,6 +19,7 @@ extern "C" {
 #include "sh_crypto.h"
 #include "sh_mqtt.h"
 #include "sh_wifi.h"
+#include "sh_secrets.h"
 }
 
 static const char *TAG = "seahelm-watch";
@@ -160,6 +161,14 @@ extern "C" void app_main(void) {
     } else {
         ESP_LOGI(TAG, "config loaded: host=%s mac_id=%s paired=%d",
                  cfg.host, cfg.mac_id, sh_config_is_paired(&cfg));
+    }
+
+    // 1.5) Dev pre-pair: if no root secret yet, bake in the one from sh_secrets.h
+    // so the device connects to EMQX as the paired identity and shows real data
+    // (instead of the M1 mock fallback) without the short-code flow.
+    if (!sh_config_is_paired(&cfg) && SH_ROOT_SECRET[0] != '\0') {
+        strncpy(cfg.root_secret, SH_ROOT_SECRET, sizeof(cfg.root_secret) - 1);
+        ESP_LOGI(TAG, "pre-paired from sh_secrets.h");
     }
 
     // 2) Init E2EE if paired
