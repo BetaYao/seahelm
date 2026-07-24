@@ -15,8 +15,8 @@ struct WatchConfig: Codable, Equatable {
     var wsPath: String = "/mqtt"
     var tls: Bool = true                // wss:// (emqx cloud); false for local dev
     var macId: String = "live"          // must match the Mac's mqtt.mac_id
-    var username: String? = nil
-    var password: String? = nil
+    var username: String? = "seahelm"
+    var password: String? = "seahelm"
     /// Pairing root secret (base64url, from a `seahelm://pair` link). When set, the
     /// client derives broker creds + the E2EE key and seals/opens all payloads —
     /// must match the Mac's `mqtt.root_secret`. nil = plaintext/manual (unpaired).
