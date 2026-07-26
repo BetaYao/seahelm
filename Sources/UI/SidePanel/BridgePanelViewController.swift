@@ -48,7 +48,10 @@ final class BridgePanelViewController: NSViewController {
     /// Bare-TUI card: top(11) + title row(18) + message(measured) + chip stack + bottom(11).
     /// The question is measured at a deliberately-narrow width so the predicted height is
     /// never short of what the real (wider) layout needs — avoids bottom clipping.
-    static func cardHeight(for order: PendingOrder) -> CGFloat {
+    /// Height a card needs at `width`. The message wraps, so the width the card
+    /// will actually be laid out at has to go in — measuring a narrow carousel
+    /// card against the 500pt side panel clipped the last lines off.
+    static func cardHeight(for order: PendingOrder, width: CGFloat = 500) -> CGFloat {
         let titleRow: CGFloat = 18
         // Options stack vertically, one chip (28) per row with 7 between, so the
         // card grows with the option count. Side-by-side chips shared one row's
@@ -58,8 +61,9 @@ final class BridgePanelViewController: NSViewController {
         let msg = order.action.message
         var messageBlock: CGFloat = 0
         if !msg.isEmpty {
+            // 14pt leading + 14pt trailing inset on the message label.
             let bounds = (msg as NSString).boundingRect(
-                with: CGSize(width: 500, height: CGFloat.greatestFiniteMagnitude),
+                with: CGSize(width: max(80, width - 28), height: CGFloat.greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading],
                 attributes: [.font: AppFont.mono(size: 12.5)])
             messageBlock = ceil(bounds.height) + 9 // + gap above
@@ -429,7 +433,8 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         if tableView.tag == 1, row < pendingOrders.count {
-            return Self.cardHeight(for: pendingOrders[row])
+            let w = tableView.bounds.width > 0 ? tableView.bounds.width : 500
+            return Self.cardHeight(for: pendingOrders[row], width: w)
         }
         if tableView.tag == 2, row < watchItems.count {
             return WatchCardView.height(for: watchItems[row])
@@ -468,18 +473,58 @@ extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate 
 /// First Mate "Bare-TUI" palette (prototype THEME.A). Internal so the Dashboard
 /// overview can reuse the exact same colours/cards 1:1.
 enum Bare {
-    static let cardBg     = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
-    static let panelAlt   = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
-    static let line       = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
-    static let lineStrong = NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
-    static let ink        = NSColor(srgbRed: 0xcf/255, green: 0xe0/255, blue: 0xe0/255, alpha: 1)
-    static let inkDim     = NSColor(srgbRed: 0x7f/255, green: 0xa0/255, blue: 0xa3/255, alpha: 1)
-    static let inkFaint   = NSColor(srgbRed: 0x55/255, green: 0x71/255, blue: 0x70/255, alpha: 1)
-    static let accent     = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
-    static let orange     = NSColor(srgbRed: 0xff/255, green: 0x8a/255, blue: 0x3d/255, alpha: 1)
-    static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
-    static let red        = NSColor(srgbRed: 0xe8/255, green: 0x46/255, blue: 0x35/255, alpha: 1)
-    static let onAccent   = NSColor(srgbRed: 0x06/255, green: 0x20/255, blue: 0x28/255, alpha: 1)
+    /// Every token is a dynamic NSColor: the dark values are the original
+    /// Bare-TUI palette, the light ones keep the same role (card fill, ink,
+    /// hairline) against a bright panel. Layer-backed callers must resolve
+    /// these through `resolvedCGColor(_:)`, never bare `.cgColor`.
+    static let cardBg = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x0e2d37) : NSColor(hex: 0xe4f7fa)
+    }
+    static let panelAlt = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
+            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.72)
+    }
+    static let line = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
+            : NSColor(hex: 0xc6cfdb).withAlphaComponent(0.45)
+    }
+    static let lineStrong = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
+            : NSColor(hex: 0xc6cfdb).withAlphaComponent(0.85)
+    }
+    static let ink = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0xcfe0e0) : NSColor(hex: 0x1f232b)
+    }
+    static let inkDim = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x7fa0a3) : NSColor(hex: 0x636b78)
+    }
+    static let inkFaint = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x557170) : NSColor(hex: 0x8a93a1)
+    }
+    static let accent = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x1fc8da) : NSColor(hex: 0x0e9bb5)
+    }
+    static let orange = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0xff8a3d) : NSColor(hex: 0xc2410c)
+    }
+    static let cornflower = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x5b93f0) : NSColor(hex: 0x2563eb)
+    }
+    static let red = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0xe84635) : NSColor(hex: 0xdc2626)
+    }
+    /// Text on an accent fill — dark ink in both modes; the light accent
+    /// (#0e9bb5) is still mid-dark, so white would wash out.
+    static let onAccent = NSColor(hex: 0x062028)
+    /// Numbered badge behind a non-primary option chip.
+    static let badgeBg = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.13)
+            : NSColor(hex: 0x0e9bb5).withAlphaComponent(0.16)
+    }
 
     /// (glyph, short name, colour) for the agent owning a worktree.
     static func agent(worktreePath: String) -> (glyph: String, name: String, color: NSColor) {
@@ -554,7 +599,7 @@ private final class OptionChipButton: NSView {
     func setKeyboardFocused(_ focused: Bool) {
         if focused {
             layer?.borderWidth = 2
-            layer?.borderColor = Bare.ink.cgColor
+            layer?.borderColor = resolvedCGColor(Bare.ink)
         } else {
             applyStyle()
         }
@@ -563,7 +608,7 @@ private final class OptionChipButton: NSView {
     private func applyStyle() {
         layer?.borderColor = nil
         if primary {
-            layer?.backgroundColor = Bare.accent.cgColor
+            layer?.backgroundColor = resolvedCGColor(Bare.accent)
             layer?.borderWidth = 0
             labelField.textColor = Bare.onAccent
             badge.textColor = Bare.onAccent
@@ -571,11 +616,18 @@ private final class OptionChipButton: NSView {
         } else {
             layer?.backgroundColor = NSColor.clear.cgColor
             layer?.borderWidth = 1
-            layer?.borderColor = Bare.lineStrong.cgColor
+            layer?.borderColor = resolvedCGColor(Bare.lineStrong)
             labelField.textColor = Bare.ink
             badge.textColor = Bare.ink
-            badge.layer?.backgroundColor = NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.13).cgColor
+            badge.layer?.backgroundColor = resolvedCGColor(Bare.badgeBg)
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // Keyboard focus repaints itself on the next focus change; the
+        // resting style must follow the theme immediately.
+        if layer?.borderWidth != 2 { applyStyle() }
     }
 
     @objc private func tapped() { onPick?() }
@@ -609,7 +661,7 @@ final class OrderCardView: NSTableCellView {
     private func setup() {
         wantsLayer = true
         layer?.cornerRadius = 0
-        layer?.backgroundColor = Bare.panelAlt.cgColor
+        layer?.backgroundColor = resolvedCGColor(Bare.panelAlt)
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(cardClicked(_:)))
         addGestureRecognizer(click)
@@ -700,9 +752,18 @@ final class OrderCardView: NSTableCellView {
 
     /// Show a left accent bar when this card is the keyboard-selected row.
     func setSelected(_ selected: Bool) {
-        accentBar.layer?.backgroundColor = (selected ? Bare.accent : NSColor.clear).cgColor
-        layer?.backgroundColor = (selected ? Bare.cardBg : Bare.panelAlt).cgColor
+        isSelected = selected
+        accentBar.layer?.backgroundColor = resolvedCGColor(selected ? Bare.accent : .clear)
+        layer?.backgroundColor = resolvedCGColor(selected ? Bare.cardBg : Bare.panelAlt)
         if !selected { clearChipFocus() }
+    }
+
+    private var isSelected = false
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        accentBar.layer?.backgroundColor = resolvedCGColor(isSelected ? Bare.accent : .clear)
+        layer?.backgroundColor = resolvedCGColor(isSelected ? Bare.cardBg : Bare.panelAlt)
     }
 
     /// Index of the option chip highlighted by keyboard Tab-cycling, if any.
@@ -822,7 +883,7 @@ private final class WatchCardView: NSTableCellView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = Bare.panelAlt.cgColor
+        layer?.backgroundColor = resolvedCGColor(Bare.panelAlt)
 
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 3.5
@@ -866,9 +927,18 @@ private final class WatchCardView: NSTableCellView {
 
     func configure(item: WatchItem) {
         let meta = Bare.agent(worktreePath: item.worktreePath)
-        dot.layer?.backgroundColor = (item.kind == .watchError ? Bare.red : meta.color).cgColor
+        dotColor = item.kind == .watchError ? Bare.red : meta.color
+        dot.layer?.backgroundColor = resolvedCGColor(dotColor)
         agentLabel.stringValue = meta.name
         taskLabel.stringValue = item.branch
         msgLabel.stringValue = item.message
+    }
+
+    private var dotColor: NSColor = .clear
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = resolvedCGColor(Bare.panelAlt)
+        dot.layer?.backgroundColor = resolvedCGColor(dotColor)
     }
 }

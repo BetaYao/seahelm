@@ -2123,7 +2123,9 @@ final class DashboardOverviewView: NSView {
             ? NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 0.55)
             : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55)
     }
-    private static let sea        = NSColor(srgbRed: 0x1f/255, green: 0xc8/255, blue: 0xda/255, alpha: 1)
+    // Dynamic: the raw #1fc8da cyan is unreadable as label ink on the light
+    // panel (ORDERS header, `/` trigger glyph).
+    private static let sea: NSColor = SemanticColors.accent
     private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
     fileprivate static let ink: NSColor = SemanticColors.text
     fileprivate static let inkDim: NSColor = SemanticColors.muted
@@ -2766,13 +2768,32 @@ final class DashboardOverviewView: NSView {
         orderCards[safeIndex: index]?.cycleFocusedChip()
     }
 
+    /// Carousel card sizing. Cards fill the available width so a small number of
+    /// orders never scrolls horizontally; past `minOrderCardWidth` they stop
+    /// shrinking and the carousel scrolls instead.
+    private static let minOrderCardWidth: CGFloat = 300
+    private static let maxOrderCardWidth: CGFloat = 720
+    private static let orderCardSpacing: CGFloat = 12
+    /// Horizontal inset of the carousel scroll view inside `ordersZone`.
+    private static let ordersZoneInset: CGFloat = 22
+
+    private var orderModels: [PendingOrder] = []
+    private var orderWidthConstraints: [NSLayoutConstraint] = []
+    private var orderHeightConstraints: [NSLayoutConstraint] = []
+    /// Width the cards were last sized for, so `layout()` is a no-op on the
+    /// (many) passes where nothing about the carousel changed.
+    private var lastOrderLayoutWidth: CGFloat = 0
+
     private func refreshOrders() {
         let orders = pendingOrders?.all() ?? []
         ordersCarousel.arrangedSubviews.forEach { $0.removeFromSuperview() }
         ordersCountLabel.stringValue = "\(orders.count)"
         orderCards = []
         orderCardPaths = []
-        var maxCard: CGFloat = 0
+        orderModels = orders
+        orderWidthConstraints = []
+        orderHeightConstraints = []
+        lastOrderLayoutWidth = 0
         for order in orders {
             // The real First Mate order card, laid out horizontally.
             let card = OrderCardView()
@@ -2784,21 +2805,55 @@ final class DashboardOverviewView: NSView {
             }
             card.onNavigate = { [weak self] in self?.onSelectWorktree?(order.action.worktreePath) }
             card.onDismiss = { [weak self] in self?.pendingOrders?.resolve(id: order.id) }
-            let h = BridgePanelViewController.cardHeight(for: order)
-            maxCard = max(maxCard, h)
             ordersCarousel.addArrangedSubview(card)
             card.translatesAutoresizingMaskIntoConstraints = false
-            card.widthAnchor.constraint(equalToConstant: 340).isActive = true
-            card.heightAnchor.constraint(equalToConstant: h).isActive = true
+            let w = card.widthAnchor.constraint(equalToConstant: Self.minOrderCardWidth)
+            let h = card.heightAnchor.constraint(
+                equalToConstant: BridgePanelViewController.cardHeight(for: order,
+                                                                     width: Self.minOrderCardWidth))
+            w.isActive = true
+            h.isActive = true
+            orderWidthConstraints.append(w)
+            orderHeightConstraints.append(h)
             orderCards.append(card)
             orderCardPaths.append(order.action.worktreePath)
         }
-        // Collapse the whole zone when there's nothing pending; otherwise size it
-        // to the tallest card + the "ORDERS" header + padding.
-        let show = !orders.isEmpty
-        ordersZone.isHidden = !show
-        ordersZoneHeight?.constant = show ? (maxCard + 12 + 20 + 10 + 14) : 0
+        // Collapse the whole zone when there's nothing pending.
+        ordersZone.isHidden = orders.isEmpty
+        layoutOrderCards()
         onOrdersChanged?()
+    }
+
+    override func layout() {
+        super.layout()
+        layoutOrderCards()
+    }
+
+    /// Size the carousel cards to the width actually on offer: divide it evenly
+    /// when they all fit, otherwise pin them at the minimum and let the carousel
+    /// scroll. Card height follows, since the message block wraps at that width.
+    private func layoutOrderCards() {
+        guard !orderModels.isEmpty else {
+            ordersZoneHeight?.constant = 0
+            return
+        }
+        let available = bounds.width - Self.ordersZoneInset * 2
+        guard available > 0 else { return }
+        let n = CGFloat(orderModels.count)
+        let fitted = (available - Self.orderCardSpacing * (n - 1)) / n
+        let width = min(Self.maxOrderCardWidth, max(Self.minOrderCardWidth, floor(fitted)))
+        guard width != lastOrderLayoutWidth else { return }
+        lastOrderLayoutWidth = width
+
+        var maxCard: CGFloat = 0
+        for (i, order) in orderModels.enumerated() {
+            let h = BridgePanelViewController.cardHeight(for: order, width: width)
+            maxCard = max(maxCard, h)
+            orderWidthConstraints[safeIndex: i]?.constant = width
+            orderHeightConstraints[safeIndex: i]?.constant = h
+        }
+        // Size the zone to the tallest card + the "ORDERS" header + padding.
+        ordersZoneHeight?.constant = maxCard + 12 + 20 + 10 + 14
     }
 
     private func pin(_ v: NSView) {
