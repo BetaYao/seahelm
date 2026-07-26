@@ -897,6 +897,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onEditModeStateChange = { [weak self] available, isOn in
             self?.windowChrome?.setEditMode(available: available, isOn: isOn)
         }
+        // Edit mode's column tab strips move onto the chrome header row: the two
+        // columns then cost one row of chrome instead of two.
+        dashboard.onHoistEditStrips = { [weak self] terminal, preview, ratio in
+            self?.windowChrome?.installEditStrips(terminal: terminal, preview: preview, ratio: ratio)
+        }
+        dashboard.onReleaseEditStrips = { [weak self] in
+            self?.windowChrome?.removeEditStrips()
+        }
+        dashboard.onEditStripRatioChange = { [weak self] ratio in
+            self?.windowChrome?.setEditStripRatio(ratio)
+        }
         // Keep chrome header icon tint in sync when dashboard changes side.
         dashboard.onActiveToolChanged = { [weak self] pane in
             guard let self else { return }

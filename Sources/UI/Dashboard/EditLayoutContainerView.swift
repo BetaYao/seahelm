@@ -23,6 +23,14 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
     private let rightColumn = NSView()
     private let divider = DividerView(splitNodeId: "editmode.column", axis: .horizontal)
 
+    /// Each column's strip sits in a host whose height collapses to zero when the
+    /// strips are hoisted into the window chrome — the hosts stay so the content
+    /// below keeps one stable set of constraints either way.
+    private let leftStripHost = NSView()
+    private let rightStripHost = NSView()
+    private var stripHostHeights: [NSLayoutConstraint] = []
+    private(set) var stripsAreHoisted = false
+
     init(ratio: CGFloat) {
         self.ratio = ratio
         super.init(frame: .zero)
@@ -42,27 +50,76 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
         divider.delegate = self
         addSubview(divider)
 
-        configureColumn(leftColumn, strip: terminalTabStrip, host: terminalHost)
-        configureColumn(rightColumn, strip: previewTabStrip, host: previewHost)
+        configureColumn(leftColumn, stripHost: leftStripHost, strip: terminalTabStrip, host: terminalHost)
+        configureColumn(rightColumn, stripHost: rightStripHost, strip: previewTabStrip, host: previewHost)
     }
 
-    private func configureColumn(_ column: NSView, strip: EditTabStripView, host: NSView) {
-        strip.translatesAutoresizingMaskIntoConstraints = false
+    private func configureColumn(_ column: NSView, stripHost: NSView, strip: EditTabStripView, host: NSView) {
+        stripHost.translatesAutoresizingMaskIntoConstraints = false
+        // The host clips so the strip's own 30pt height can't spill out of a
+        // collapsed (zero-height) host during the hoist transition.
+        stripHost.wantsLayer = true
+        stripHost.layer?.masksToBounds = true
         host.translatesAutoresizingMaskIntoConstraints = false
         host.wantsLayer = true
-        column.addSubview(strip)
+        column.addSubview(stripHost)
         column.addSubview(host)
-        NSLayoutConstraint.activate([
-            strip.topAnchor.constraint(equalTo: column.topAnchor),
-            strip.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            strip.trailingAnchor.constraint(equalTo: column.trailingAnchor),
 
-            host.topAnchor.constraint(equalTo: strip.bottomAnchor),
+        let stripHostHeight = stripHost.heightAnchor.constraint(
+            equalToConstant: EditTabStripView.stripHeight)
+        stripHostHeights.append(stripHostHeight)
+
+        NSLayoutConstraint.activate([
+            stripHost.topAnchor.constraint(equalTo: column.topAnchor),
+            stripHost.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stripHost.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            stripHostHeight,
+
+            host.topAnchor.constraint(equalTo: stripHost.bottomAnchor),
             host.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             host.bottomAnchor.constraint(equalTo: column.bottomAnchor),
         ])
+        embedStrip(strip, in: stripHost)
     }
+
+    private func embedStrip(_ strip: EditTabStripView, in stripHost: NSView) {
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        stripHost.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.topAnchor.constraint(equalTo: stripHost.topAnchor),
+            strip.leadingAnchor.constraint(equalTo: stripHost.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: stripHost.trailingAnchor),
+        ])
+    }
+
+    // MARK: - Hoisting the strips into the window chrome
+
+    /// Give up both strips so the chrome header can show them on its own row,
+    /// collapsing the in-column strip rows to reclaim their height.
+    func hoistStrips() -> (terminal: EditTabStripView, preview: EditTabStripView) {
+        stripsAreHoisted = true
+        terminalTabStrip.removeFromSuperview()
+        previewTabStrip.removeFromSuperview()
+        stripHostHeights.forEach { $0.constant = 0 }
+        needsLayout = true
+        return (terminalTabStrip, previewTabStrip)
+    }
+
+    /// Take the strips back into the columns (chrome can't host them right now).
+    func restoreStrips() {
+        guard stripsAreHoisted else { return }
+        stripsAreHoisted = false
+        terminalTabStrip.removeFromSuperview()
+        previewTabStrip.removeFromSuperview()
+        embedStrip(terminalTabStrip, in: leftStripHost)
+        embedStrip(previewTabStrip, in: rightStripHost)
+        stripHostHeights.forEach { $0.constant = EditTabStripView.stripHeight }
+        needsLayout = true
+    }
+
+    /// The divider fraction, so a hoisted strip row can split at the same seam.
+    var currentRatio: CGFloat { ratio }
 
     /// Apply a stored per-worktree ratio (e.g. when switching worktrees while the
     /// container is reused). No-op if unchanged.

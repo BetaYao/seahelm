@@ -138,6 +138,20 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setCabinContext(context)
     }
 
+    /// Adopt edit mode's column tab strips onto the header row, so the two-column
+    /// layout costs one row of chrome instead of two.
+    func installEditStrips(terminal: NSView, preview: NSView, ratio: CGFloat) {
+        terminalHeader.installEditStrips(terminal: terminal, preview: preview, ratio: ratio)
+    }
+
+    func removeEditStrips() {
+        terminalHeader.removeEditStrips()
+    }
+
+    func setEditStripRatio(_ ratio: CGFloat) {
+        terminalHeader.setEditStripRatio(ratio)
+    }
+
     /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
     func titlebarRegionFocusTarget() -> NSView {
         state.isCollapsed ? terminalHeader : sidebarHeader

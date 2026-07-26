@@ -60,4 +60,64 @@ final class TerminalHeaderViewTests: XCTestCase {
         header.setCabinContext("teamclaw · fix/thing")
         XCTAssertEqual(header.titleTextForTesting, "teamclaw · fix/thing")
     }
+
+    // MARK: - Hoisted tab strips
+
+    private func hoist(_ header: TerminalHeaderView, ratio: CGFloat)
+        -> (terminal: NSView, preview: NSView) {
+        let terminal = NSView()
+        let preview = NSView()
+        header.installEditStrips(terminal: terminal, preview: preview, ratio: ratio)
+        header.layoutSubtreeIfNeeded()
+        return (terminal, preview)
+    }
+
+    /// Hoisted strips take the whole row, so the label has nothing to say.
+    func testHoistedStripsHideTheLabel() {
+        let header = makeHeader()
+        header.setPaneTitle("AGENTS.md")
+        XCTAssertFalse(header.titleTextForTesting.isEmpty)
+
+        let strips = hoist(header, ratio: 0.5)
+        XCTAssertTrue(header.isTitleHiddenForTesting)
+        XCTAssertTrue(strips.terminal.superview === header)
+
+        header.removeEditStrips()
+        XCTAssertFalse(header.isTitleHiddenForTesting, "releasing the strips gives the row back")
+        XCTAssertNil(strips.terminal.superview)
+    }
+
+    /// The seam has to land on the column divider, computed from the same width.
+    func testSeamTracksTheDividerRatio() {
+        let header = makeHeader()
+        let strips = hoist(header, ratio: 0.5)
+        let midSeam = strips.preview.frame.minX
+
+        header.setEditStripRatio(0.75)
+        header.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(strips.preview.frame.minX, midSeam,
+                             "a wider terminal column pushes the seam right")
+    }
+
+    /// A divider dragged to the far edge must not drive a strip negative.
+    func testExtremeRatiosKeepBothStripsPositive() {
+        let header = makeHeader()
+        let strips = hoist(header, ratio: 0.5)
+
+        for ratio in [0.0, 0.02, 0.98, 1.0] as [CGFloat] {
+            header.setEditStripRatio(ratio)
+            header.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(strips.terminal.frame.width, 0, "terminal strip at ratio \(ratio)")
+            XCTAssertGreaterThan(strips.preview.frame.width, 0, "preview strip at ratio \(ratio)")
+        }
+    }
+
+    /// Re-installing must not leave the previous pair parented to the header.
+    func testReinstallReleasesThePreviousStrips() {
+        let header = makeHeader()
+        let first = hoist(header, ratio: 0.5)
+        let second = hoist(header, ratio: 0.5)
+        XCTAssertNil(first.terminal.superview)
+        XCTAssertTrue(second.terminal.superview === header)
+    }
 }

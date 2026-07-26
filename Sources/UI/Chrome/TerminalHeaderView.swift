@@ -22,6 +22,14 @@ final class TerminalHeaderView: NSView {
     private var paneTitle = ""
     private var cabinContext = ""
 
+    /// Edit-mode strips adopted from the columns, and the constraints holding them.
+    private var hoistedTerminalStrip: NSView?
+    private var hoistedPreviewStrip: NSView?
+    private var stripConstraints: [NSLayoutConstraint] = []
+    /// The two constants that track the column divider (terminal trailing, preview leading).
+    private var stripSeamConstraints: [NSLayoutConstraint] = []
+    private var stripRatio: CGFloat = 0.5
+
     private var isCollapsed = false
     private var collapsedConstraints: [NSLayoutConstraint] = []
     private var expandedConstraints: [NSLayoutConstraint] = []
@@ -190,6 +198,11 @@ final class TerminalHeaderView: NSView {
         ])
     }
 
+    override func layout() {
+        super.layout()
+        applyStripSeam()
+    }
+
     private func applyCollapsedState() {
         if isCollapsed {
             NSLayoutConstraint.deactivate(expandedConstraints)
@@ -247,12 +260,109 @@ final class TerminalHeaderView: NSView {
         applyTitleText()
     }
 
+    // MARK: - Hoisted edit-mode tab strips
+
+    /// Adopt edit mode's two column tab strips onto this row, so the columns don't
+    /// need a second strip row below an otherwise near-empty header.
+    ///
+    /// The header and the edit container both fill the terminal column, so they
+    /// share a width — the seam is computed with the same formula rather than
+    /// converting coordinates. The left strip still starts after the traffic
+    /// lights and icons (that space is not ours to take), but the seam between
+    /// the two strips lands exactly on the column divider.
+    func installEditStrips(terminal: NSView, preview: NSView, ratio: CGFloat) {
+        removeEditStrips()
+        stripRatio = ratio
+        for strip in [terminal, preview] {
+            strip.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(strip)
+        }
+        hoistedTerminalStrip = terminal
+        hoistedPreviewStrip = preview
+
+        // Leading edge mirrors the title's, so tabs never sit under the lights.
+        let leadingAnchorForStrips = isCollapsed
+            ? collapsedLeadingStack.trailingAnchor
+            : leadingAnchor
+        let leadingInset: CGFloat = isCollapsed ? 10 : 12
+
+        let terminalTrailing = terminal.trailingAnchor.constraint(equalTo: leadingAnchor)
+        let previewLeading = preview.leadingAnchor.constraint(equalTo: leadingAnchor)
+        stripSeamConstraints = [terminalTrailing, previewLeading]
+
+        stripConstraints = [
+            terminal.leadingAnchor.constraint(
+                equalTo: leadingAnchorForStrips, constant: leadingInset),
+            terminal.centerYAnchor.constraint(equalTo: centerYAnchor),
+            terminalTrailing,
+
+            previewLeading,
+            preview.centerYAnchor.constraint(equalTo: centerYAnchor),
+            preview.trailingAnchor.constraint(
+                equalTo: editModeButton.leadingAnchor, constant: -8),
+        ]
+        NSLayoutConstraint.activate(stripConstraints)
+        applyStripSeam()
+        applyTitleText()
+    }
+
+    /// Hand the strips back (edit mode ended). Callers re-embed them themselves.
+    func removeEditStrips() {
+        guard hoistedTerminalStrip != nil || hoistedPreviewStrip != nil else { return }
+        NSLayoutConstraint.deactivate(stripConstraints)
+        stripConstraints = []
+        stripSeamConstraints = []
+        hoistedTerminalStrip?.removeFromSuperview()
+        hoistedPreviewStrip?.removeFromSuperview()
+        hoistedTerminalStrip = nil
+        hoistedPreviewStrip = nil
+        applyTitleText()
+    }
+
+    /// Follow the column divider while it is dragged.
+    func setEditStripRatio(_ ratio: CGFloat) {
+        guard hoistedTerminalStrip != nil else { return }
+        stripRatio = ratio
+        applyStripSeam()
+    }
+
+    private var hasHoistedStrips: Bool { hoistedTerminalStrip != nil }
+
+    /// Minimum width a hoisted strip keeps before the seam stops tracking the
+    /// divider — enough for a truncated tab, never a negative width.
+    private static let minHoistedStripWidth: CGFloat = 40
+
+    /// Same seam math as `EditLayoutContainerView.layout()`, against the same width
+    /// — the header and the edit container both fill the terminal column, so the
+    /// seam lands on the divider without converting coordinates.
+    ///
+    /// The header's usable span is narrower than the column's (traffic lights and
+    /// icons on one end, buttons on the other), so a divider dragged near either
+    /// edge is clamped: the seam stops following rather than driving a strip to a
+    /// negative width and breaking the whole row's layout.
+    private func applyStripSeam() {
+        guard stripSeamConstraints.count == 2 else { return }
+        let seam = DividerView.thickness
+        let raw = floor((bounds.width - seam) * stripRatio)
+
+        let leadingEdge = isCollapsed ? collapsedLeadingStack.frame.maxX + 10 : 12
+        let trailingEdge = editModeButton.frame.minX - 8
+        let minLeft = leadingEdge + Self.minHoistedStripWidth
+        let maxLeft = trailingEdge - seam - Self.minHoistedStripWidth
+
+        let leftWidth = maxLeft > minLeft ? min(max(raw, minLeft), maxLeft) : raw
+        stripSeamConstraints[0].constant = leftWidth           // terminal strip trailing
+        stripSeamConstraints[1].constant = leftWidth + seam     // preview strip leading
+    }
+
     /// Edit mode puts a tab strip above each column and every strip labels its own
     /// panes, so a single centered pane title is redundant at best and names the
     /// wrong column at worst. The band itself has to stay — it carries the traffic
     /// lights — so rather than leaving it blank, it shows the one thing no strip
     /// says: which cabin you are in.
     private func applyTitleText() {
+        // The strips occupy the whole row when hoisted; nothing else fits.
+        titleLabel.isHidden = hasHoistedStrips
         titleLabel.stringValue = editModeOn ? cabinContext : paneTitle
         applyTitleEmphasis()
     }
@@ -266,6 +376,7 @@ final class TerminalHeaderView: NSView {
     }
 
     var titleTextForTesting: String { titleLabel.stringValue }
+    var isTitleHiddenForTesting: Bool { titleLabel.isHidden }
 
     @objc private func expandClicked() {
         delegate?.chromeDidToggleSidebar()

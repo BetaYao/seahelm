@@ -196,6 +196,12 @@ class DashboardViewController: NSViewController {
     let previewSets = PreviewSetController()
     /// The two-column edit container, created lazily and reused across worktrees.
     private var editLayoutContainer: EditLayoutContainerView?
+
+    /// Host hooks for hoisting edit mode's tab strips onto the window chrome row.
+    /// The dashboard owns the strips but not the chrome, so the host wires them.
+    var onHoistEditStrips: ((_ terminal: NSView, _ preview: NSView, _ ratio: CGFloat) -> Void)?
+    var onReleaseEditStrips: (() -> Void)?
+    var onEditStripRatioChange: ((CGFloat) -> Void)?
     /// Built preview content views keyed by file path (preserves editor state
     /// across tab switches). Torn down on explicit tab close / worktree deletion.
     private var previewContentCache: [String: NSView] = [:]
@@ -1735,17 +1741,32 @@ extension DashboardViewController {
                 edit.autoresizingMask = [.width, .height]
                 container.addSubview(edit)
             }
+            if let onHoistEditStrips, !edit.stripsAreHoisted {
+                let strips = edit.hoistStrips()
+                onHoistEditStrips(strips.terminal, strips.preview, edit.currentRatio)
+            }
         } else if let edit = editLayoutContainer {
+            releaseHoistedStrips(from: edit)
             edit.removeFromSuperview()
             editLayoutContainer = nil
         }
+    }
+
+    /// Pull the strips back out of the chrome before the container goes away, so
+    /// they are never left parented to a header that no longer describes anything.
+    private func releaseHoistedStrips(from edit: EditLayoutContainerView) {
+        guard edit.stripsAreHoisted else { return }
+        onReleaseEditStrips?()
+        edit.restoreStrips()
     }
 
     private func makeEditContainer() -> EditLayoutContainerView {
         let ratio = currentWorktreePath.map { previewSets.splitRatio(for: $0) } ?? 0.5
         let edit = EditLayoutContainerView(ratio: ratio)
         edit.onRatioChange = { [weak self] r in
-            guard let self, let wt = self.currentWorktreePath else { return }
+            guard let self else { return }
+            self.onEditStripRatioChange?(r)
+            guard let wt = self.currentWorktreePath else { return }
             self.previewSets.setSplitRatio(r, for: wt)
         }
         edit.terminalTabStrip.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
