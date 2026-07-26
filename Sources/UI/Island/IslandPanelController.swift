@@ -96,9 +96,23 @@ final class IslandPanelController {
     }
 
     /// Open the island and focus the command field without changing its text
-    /// (global double-Ctrl summon).
+    /// (global double-Ctrl summon, Cmd+P).
     func openCommandBarFocused() {
         presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    /// True while the island is expanded — i.e. Cmd+P would toggle it shut.
+    var isCommandBarOpen: Bool { model.isOpened }
+
+    /// Close the expanded island and hand key status back to the main window, so
+    /// dismissing the palette returns focus to whatever the user was typing into.
+    func closeCommandBar() {
+        guard model.isOpened else { return }
+        model.close()
+        if panel?.isKeyWindow == true {
+            panel?.resignKey()
+            NSApp.mainWindow?.makeKey()
+        }
     }
 
     private func presentCommandBar(_ prepare: () -> Void) {

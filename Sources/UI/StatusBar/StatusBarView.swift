@@ -5,7 +5,8 @@ import AppKit
 final class StatusBarView: NSView {
     static let height: CGFloat = 26
 
-    private let modeLabel = NSTextField(labelWithString: "NORMAL")
+    /// Leading chip. No longer a NORMAL/INSERT indicator — those modes are gone.
+    private let modeLabel = NSTextField(labelWithString: "")
     private let usageLabel = NSTextField(labelWithString: "")
     private let notificationLabel = NSTextField(labelWithString: "")
     private let shortcutsLabel = NSTextField(labelWithString: "")
@@ -25,17 +26,6 @@ final class StatusBarView: NSView {
     func updateUsage(text: String) { usageLabel.stringValue = text }
     func updateNotification(text: String) { notificationLabel.stringValue = text }
     func updateShortcuts(text: String) { shortcutsLabel.stringValue = text }
-
-    func updateMode(_ mode: KeyboardMode, hint: String) {
-        modeLabel.stringValue = (mode == .insert) ? "INSERT" : "NORMAL"
-        // strip the leading "NORMAL/INSERT  ·  " prefix so the chip isn't duplicated in the hint
-        if let range = hint.range(of: "·") {
-            shortcutsLabel.stringValue = String(hint[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-        } else {
-            shortcutsLabel.stringValue = hint
-        }
-        modeLabel.textColor = (mode == .insert) ? SemanticColors.accent : SemanticColors.muted
-    }
 
     private func setup() {
         wantsLayer = true

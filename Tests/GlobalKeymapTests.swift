@@ -63,8 +63,24 @@ final class GlobalKeymapTests: XCTestCase {
         XCTAssertEqual(r("b", 11, .command, split: false), .toggleSidebar)
     }
 
-    func testCmdEscExitsInsert() {
-        XCTAssertEqual(r(nil, 53, .command), .exitInsert)
+    func testCmdEscNavigatesBack() {
+        XCTAssertEqual(r(nil, 53, .command), .navigateBack)
+    }
+
+    // MARK: - Command palette (Cmd+P)
+
+    func testCmdPOpensCommandPalette() {
+        XCTAssertEqual(r("p", 35, .command), .commandPalette)
+    }
+
+    /// Only the bare Cmd chord opens the palette — Shift+Cmd+P stays free for
+    /// a future binding rather than aliasing onto it.
+    func testCmdShiftPDoesNotResolve() {
+        XCTAssertNil(r("P", 35, [.command, .shift]))
+    }
+
+    func testBarePDoesNotResolve() {
+        XCTAssertNil(r("p", 35, []))
     }
 
     // MARK: - Non-matches

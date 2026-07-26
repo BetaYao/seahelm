@@ -1,8 +1,10 @@
 import Foundation
 
 enum Keymap {
-    static func action(mode: KeyboardMode, chord: KeyChord) -> KeyboardAction? {
-        guard mode == .normal else { return nil }   // Insert mode: keys go to terminal
+    /// Bare-key chords for the dashboard nav ring. Callers reach this only when the
+    /// dashboard owns the keyboard, so there is no mode to check — a pane with focus
+    /// never routes its keys here in the first place.
+    static func action(chord: KeyChord) -> KeyboardAction? {
         if let c = chord.char {
             switch c {
             case "h": return .moveFocus(.left)

@@ -1,11 +1,11 @@
 import Foundation
 
-enum KeyboardMode: Equatable {
-    case normal
-    case insert
-}
-
-/// Transient state within Normal mode.
+/// A transient interaction that changes what bare keys mean for as long as it lasts.
+///
+/// There is deliberately no NORMAL/INSERT mode. Whether bare keys navigate is decided
+/// by who owns keyboard focus — the dashboard's `keyDown` only runs when the dashboard
+/// is first responder, and `RegionFocusController` tracks the region. A separate mode
+/// flag was a second name for `chromeState.isCollapsed` and could only drift from it.
 enum KeyboardSubstate: Equatable {
     case none
     case deletePending(agentId: String)   // first `d` pressed, awaiting confirm
