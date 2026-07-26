@@ -231,8 +231,18 @@ final class TerminalHeaderView: NSView {
     func setEditMode(available: Bool, isOn: Bool) {
         editModeOn = isOn
         editModeButton.isEnabled = available
+        applyTitleVisibility()
         refreshImmersion()
     }
+
+    /// Edit mode puts a tab strip above each column, and every strip labels its own
+    /// panes. A single centered title can only name one of them, so it is redundant
+    /// at best and describes the wrong column at worst — hide it while they are up.
+    private func applyTitleVisibility() {
+        titleLabel.isHidden = editModeOn
+    }
+
+    var isTitleVisibleForTesting: Bool { !titleLabel.isHidden }
 
     @objc private func expandClicked() {
         delegate?.chromeDidToggleSidebar()
