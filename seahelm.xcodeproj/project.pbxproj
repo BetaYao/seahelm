@@ -86,6 +86,7 @@
 		3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */; };
 		3C498141117B2348743A7A3E /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */; };
 		3D646290FE05FFC7FE24794B /* StatusBarViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */; };
+		40A381BEFFBC2C3848BF59F5 /* PaneProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */; };
 		426F95A44B1C856837684FCF /* IslandPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2761438177A32EEF5CCFE031 /* IslandPanelController.swift */; };
 		4308B5506F38615FF9EBED2A /* KeyboardModeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C503BF300C7305DE3D68B844 /* KeyboardModeController.swift */; };
 		4344E9AEB5D00D092883F299 /* KeyboardMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */; };
@@ -300,6 +301,7 @@
 		CFFEF276334CF4B83A45E9CE /* CabinTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A11AC52E99E2C20E40544 /* CabinTitleResolver.swift */; };
 		D001B4255A3A312583AF966C /* SessionTitleLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */; };
 		D167E1E554F3BA094107F39D /* TabCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A4DC3FC06EC4D5EFE6BFA7F /* TabCoordinator.swift */; };
+		D17CFFDB9201315429C7F4C0 /* OSCProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF285507461CAA5C36AF8D90 /* OSCProgress.swift */; };
 		D26DD53B691AB5624AEECDBB /* FirstMateConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BD97D45539400A4E3160E2 /* FirstMateConfig.swift */; };
 		D27F424356DE8B506B1C7C05 /* WorktreeDeleter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F2C37E0232BF78E7DCFAAC4 /* WorktreeDeleter.swift */; };
 		D41BF448B2DB04958D4C1B01 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F65EEAACEE71D08FEF9313 /* MainWindowController.swift */; };
@@ -353,6 +355,7 @@
 		F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = 870337C5ED57007BB471E70D /* CocoaMQTT */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
 		F176CCFA365B9C079D3FE750 /* LeaderMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AF80AC91241DD0E34B964 /* LeaderMenuTests.swift */; };
+		F18B943680E61083D1FD04D8 /* OSCProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */; };
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
 		F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */; };
 		F4980A324663FD9EF612E785 /* SailorChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A953BA5BA82E18C03F5294 /* SailorChannel.swift */; };
@@ -614,6 +617,7 @@
 		977EBF9499499F3C4E6C2891 /* ShipLogWebhookPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLogWebhookPathTests.swift; sourceTree = "<group>"; };
 		97A7E8E322E5A353D4457DBC /* HooksChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HooksChannel.swift; sourceTree = "<group>"; };
 		97C4FA6FDE7FEC53DDB662BD /* PtyGridAbsorbTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PtyGridAbsorbTests.swift; sourceTree = "<group>"; };
+		9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneProgressBar.swift; sourceTree = "<group>"; };
 		98B43315E436E0794D28C474 /* CommandParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandParser.swift; sourceTree = "<group>"; };
 		99EAA5845DC0E1B3FD6DD1E8 /* CodexUsageSummaryProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProviderTests.swift; sourceTree = "<group>"; };
 		9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSC133Parser.swift; sourceTree = "<group>"; };
@@ -688,6 +692,7 @@
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 		CD8F0A0F456C94284935BE32 /* RegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegressionTests.swift; sourceTree = "<group>"; };
 		CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProvider.swift; sourceTree = "<group>"; };
+		CF285507461CAA5C36AF8D90 /* OSCProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSCProgress.swift; sourceTree = "<group>"; };
 		CF6E8352A4B0C1AE47D7B49A /* FileSystemProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSystemProbe.swift; sourceTree = "<group>"; };
 		CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
 		D18A2E8441934257374C57B2 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
@@ -757,6 +762,7 @@
 		FC981A1D0F39B20BE16B2F93 /* OnboardingPermissionsStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingPermissionsStepView.swift; sourceTree = "<group>"; };
 		FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedFilePathResolutionTests.swift; sourceTree = "<group>"; };
 		FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderView.swift; sourceTree = "<group>"; };
+		FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSCProgressTests.swift; sourceTree = "<group>"; };
 		FFC0FECE767CFF505D059C33 /* GitHubPR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPR.swift; sourceTree = "<group>"; };
 		FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceOptionParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1038,6 +1044,7 @@
 				9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */,
 				C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */,
 				9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */,
+				CF285507461CAA5C36AF8D90 /* OSCProgress.swift */,
 				0D19639EE57241F8A021EBD2 /* PaneStatus.swift */,
 				16F923AC4CC69AE72ABE17C5 /* ProcessProbe.swift */,
 				A5943C79014C5FE35819487C /* ScanDecoder.swift */,
@@ -1189,6 +1196,7 @@
 				DF1E9300BD737DC3B94C1AF3 /* OnboardingTests.swift */,
 				2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */,
 				826B5E1EB796AA82415B329F /* OSC133ParserTests.swift */,
+				FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */,
 				376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
 				63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */,
@@ -1301,6 +1309,7 @@
 				5A12EC1A8AE8D2CC60BA5732 /* GhosttyBridge.swift */,
 				05F3C2A8D8BBDA9181C858E4 /* GhosttyNSView.swift */,
 				BB9854E3679A7AF9524F5077 /* LayoutNode.swift */,
+				9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */,
 				5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */,
 				849C6707188E7E90997D691A /* SplitTree.swift */,
 				40CAD3E9929AC9E5E32EBA9F /* Station.swift */,
@@ -1649,6 +1658,7 @@
 				00F46EEC83808A01C3104099 /* NotificationHistoryTests.swift in Sources */,
 				13005279CEAF281DCBE08040 /* NotificationManagerTests.swift in Sources */,
 				A9484F5D905FF14F920838C0 /* OSC133ParserTests.swift in Sources */,
+				F18B943680E61083D1FD04D8 /* OSCProgressTests.swift in Sources */,
 				09951F094DE67BE6FBB9DF05 /* OnboardingTests.swift in Sources */,
 				C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */,
 				E7AB85089D6CD9A1AF14B3CF /* OverviewFocusModelTests.swift in Sources */,
@@ -1862,6 +1872,7 @@
 				D892E79198E0768A6A8959EF /* NotificationHistoryViewController.swift in Sources */,
 				8579DC09CEA0D01A125D5273 /* NotificationManager.swift in Sources */,
 				A607EAC1ECC21293284C5CD4 /* OSC133Parser.swift in Sources */,
+				D17CFFDB9201315429C7F4C0 /* OSCProgress.swift in Sources */,
 				5747907514A4563DCFCBD35A /* OnboardingAgentDetector.swift in Sources */,
 				D843B81E4F0FBE92865D80E4 /* OnboardingAgentStepView.swift in Sources */,
 				EB400F540493BC731898F7C5 /* OnboardingHookInstaller.swift in Sources */,
@@ -1876,6 +1887,7 @@
 				DF7E8C735153B1DD42FFDC8C /* PRReviewCoordinator.swift in Sources */,
 				55C5B0B646137831DCA9D1E9 /* PairingWindowController.swift in Sources */,
 				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
+				40A381BEFFBC2C3848BF59F5 /* PaneProgressBar.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,
 				CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */,
 				5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */,
@@ -1993,7 +2005,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.29;
+				MARKETING_VERSION = 2.0.30;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",
@@ -2226,7 +2238,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.29;
+				MARKETING_VERSION = 2.0.30;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-lc++",

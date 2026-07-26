@@ -92,8 +92,34 @@ class GhosttyNSView: NSView, NSTextInputClient {
         pendingPtyGridSync = false
     }
 
+    // MARK: - OSC 9;4 progress
+
+    /// Thin progress bar pinned to the pane's top edge, created on first report so
+    /// panes that never emit OSC 9;4 (most of them) carry no extra layer.
+    private var progressBar: PaneProgressBar?
+
+    /// Show/update the pane's progress bar. Main thread only.
+    func updateProgress(_ progress: OSCProgress?) {
+        if progressBar == nil {
+            guard let progress, progress.isActive else { return }   // nothing to show yet
+            let bar = PaneProgressBar(frame: progressBarFrame())
+            bar.autoresizingMask = [.width, .minYMargin]
+            addSubview(bar)
+            progressBar = bar
+        }
+        progressBar?.frame = progressBarFrame()
+        progressBar?.update(progress)
+    }
+
+    private func progressBarFrame() -> NSRect {
+        NSRect(x: 0, y: bounds.height - PaneProgressBar.barHeight,
+               width: bounds.width, height: PaneProgressBar.barHeight)
+    }
+
     /// Test accessor for lastSyncedSize
     var lastSyncedSizeForTesting: NSSize { lastSyncedSize }
+    /// Test accessor: the progress bar, if one has been created.
+    var progressBarForTesting: NSView? { progressBar }
     var freezePtyGridResizeForTesting: Bool { freezePtyGridResize }
     var pendingPtyGridSyncForTesting: Bool { pendingPtyGridSync }
 
