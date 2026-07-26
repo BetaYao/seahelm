@@ -132,6 +132,12 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setEditMode(available: available, isOn: isOn)
     }
 
+    /// `repo · branch` for the columns on screen. Only surfaces in edit mode, where
+    /// the per-column tab strips already name the panes but nothing names the cabin.
+    func updateCabinContext(_ context: String) {
+        terminalHeader.setCabinContext(context)
+    }
+
     /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
     func titlebarRegionFocusTarget() -> NSView {
         state.isCollapsed ? terminalHeader : sidebarHeader

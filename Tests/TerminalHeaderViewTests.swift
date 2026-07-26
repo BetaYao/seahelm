@@ -15,31 +15,49 @@ final class TerminalHeaderViewTests: XCTestCase {
 
     // MARK: - Title vs. the edit-mode tab strips
 
-    /// Edit mode gives each column its own tab strip, so the single centered title
-    /// duplicates one strip's selected tab and mislabels the other.
-    func testTitleHidesWhileEditModeIsOn() {
-        let header = TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
-        XCTAssertTrue(header.isTitleVisibleForTesting, "title shows in the normal layout")
+    private func makeHeader() -> TerminalHeaderView {
+        TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
+    }
+
+    /// Edit mode gives each column its own tab strip, so the pane title duplicates
+    /// one strip's selected tab and mislabels the other. The band still has to hold
+    /// the traffic lights, so it shows the cabin instead of going blank.
+    func testEditModeSwapsPaneTitleForCabinContext() {
+        let header = makeHeader()
+        header.setPaneTitle("AGENTS.md")
+        header.setCabinContext("seahelm · feat/palette")
+        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md")
 
         header.setEditMode(available: true, isOn: true)
-        XCTAssertFalse(header.isTitleVisibleForTesting)
+        XCTAssertEqual(header.titleTextForTesting, "seahelm · feat/palette")
 
         header.setEditMode(available: true, isOn: false)
-        XCTAssertTrue(header.isTitleVisibleForTesting, "leaving edit mode restores it")
+        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md", "leaving edit mode restores the pane title")
     }
 
-    /// Merely *offering* edit mode must not hide the title — only entering it does.
-    func testAvailableButOffKeepsTitle() {
-        let header = TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
+    /// Merely *offering* edit mode must not swap the title — only entering it does.
+    func testAvailableButOffKeepsPaneTitle() {
+        let header = makeHeader()
+        header.setPaneTitle("AGENTS.md")
         header.setEditMode(available: true, isOn: false)
-        XCTAssertTrue(header.isTitleVisibleForTesting)
+        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md")
     }
 
-    /// A title arriving while edit mode is on must not un-hide the label.
-    func testPaneTitleUpdateDoesNotResurrectTheLabel() {
-        let header = TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
+    /// A pane title arriving mid-edit-mode must not displace the context.
+    func testPaneTitleUpdateDoesNotOverrideContext() {
+        let header = makeHeader()
+        header.setCabinContext("seahelm · main")
         header.setEditMode(available: true, isOn: true)
         header.setPaneTitle("AGENTS.md")
-        XCTAssertFalse(header.isTitleVisibleForTesting)
+        XCTAssertEqual(header.titleTextForTesting, "seahelm · main")
+    }
+
+    /// …and a context arriving while edit mode is on must land immediately, since
+    /// the cabin can change under an open edit layout.
+    func testContextUpdateAppliesWhileEditModeIsOn() {
+        let header = makeHeader()
+        header.setEditMode(available: true, isOn: true)
+        header.setCabinContext("teamclaw · fix/thing")
+        XCTAssertEqual(header.titleTextForTesting, "teamclaw · fix/thing")
     }
 }

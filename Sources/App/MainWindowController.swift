@@ -1652,6 +1652,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
+        windowChrome?.updateCabinContext(Self.cabinContext(repo: repo, sailor: agent))
+    }
+
+    /// `repo · branch`, skipping either half when it is missing or would repeat the
+    /// other — the fleet row builds its branch label the same way.
+    static func cabinContext(repo: String, sailor: SailorDisplayInfo) -> String {
+        let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+        let parts = [repo, branch]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(NSOrderedSet(array: parts)).compactMap { $0 as? String }.joined(separator: " · ")
     }
 
 

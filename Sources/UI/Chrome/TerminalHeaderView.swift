@@ -17,6 +17,10 @@ final class TerminalHeaderView: NSView {
 
     /// Whether edit mode is currently on (drives the icon's active tint).
     private var editModeOn = false
+    /// Latest pane title and cabin context; which one the label shows depends on
+    /// edit mode, so both are kept rather than read back off the label.
+    private var paneTitle = ""
+    private var cabinContext = ""
 
     private var isCollapsed = false
     private var collapsedConstraints: [NSLayoutConstraint] = []
@@ -51,11 +55,13 @@ final class TerminalHeaderView: NSView {
     // MARK: - Public API
 
     func setTitle(repo: String, pane: String) {
-        titleLabel.stringValue = Self.formatTitle(repo: repo, pane: pane)
+        paneTitle = Self.formatTitle(repo: repo, pane: pane)
+        applyTitleText()
     }
 
     func setPaneTitle(_ pane: String) {
-        titleLabel.stringValue = pane.trimmingCharacters(in: .whitespacesAndNewlines)
+        paneTitle = pane.trimmingCharacters(in: .whitespacesAndNewlines)
+        applyTitleText()
     }
 
     func setCollapsed(_ collapsed: Bool) {
@@ -231,18 +237,35 @@ final class TerminalHeaderView: NSView {
     func setEditMode(available: Bool, isOn: Bool) {
         editModeOn = isOn
         editModeButton.isEnabled = available
-        applyTitleVisibility()
+        applyTitleText()
         refreshImmersion()
     }
 
-    /// Edit mode puts a tab strip above each column, and every strip labels its own
-    /// panes. A single centered title can only name one of them, so it is redundant
-    /// at best and describes the wrong column at worst — hide it while they are up.
-    private func applyTitleVisibility() {
-        titleLabel.isHidden = editModeOn
+    /// Which cabin the columns belong to (`repo · branch`). Shown only in edit mode.
+    func setCabinContext(_ context: String) {
+        cabinContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        applyTitleText()
     }
 
-    var isTitleVisibleForTesting: Bool { !titleLabel.isHidden }
+    /// Edit mode puts a tab strip above each column and every strip labels its own
+    /// panes, so a single centered pane title is redundant at best and names the
+    /// wrong column at worst. The band itself has to stay — it carries the traffic
+    /// lights — so rather than leaving it blank, it shows the one thing no strip
+    /// says: which cabin you are in.
+    private func applyTitleText() {
+        titleLabel.stringValue = editModeOn ? cabinContext : paneTitle
+        applyTitleEmphasis()
+    }
+
+    /// Context reads as a quieter label than a title, so it doesn't compete with
+    /// the tab strips directly below it.
+    private func applyTitleEmphasis() {
+        titleLabel.font = editModeOn
+            ? NSFont.systemFont(ofSize: 11, weight: .regular)
+            : NSFont.systemFont(ofSize: 12, weight: .semibold)
+    }
+
+    var titleTextForTesting: String { titleLabel.stringValue }
 
     @objc private func expandClicked() {
         delegate?.chromeDidToggleSidebar()
@@ -283,7 +306,9 @@ final class TerminalHeaderView: NSView {
     func refreshImmersion() {
         let bridge = GhosttyBridge.shared
         layer?.backgroundColor = bridge.terminalChromeBackground.cgColor
-        titleLabel.textColor = bridge.terminalChromeForeground
+        titleLabel.textColor = editModeOn
+            ? bridge.terminalChromeForeground.withAlphaComponent(0.55)
+            : bridge.terminalChromeForeground
         expandButton.contentTintColor = bridge.terminalChromeForeground.withAlphaComponent(0.55)
         let editTint = editModeButton.isEnabled
             ? (editModeOn
