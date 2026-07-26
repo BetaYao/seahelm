@@ -5,7 +5,7 @@ import Foundation
 /// decision back to the agent via stdout. Prefers the Unix socket; falls back to
 /// the HTTP webhook so a socket hiccup never breaks the Stop-hook UX.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v4"
+    static let versionMarker = "# seahelm-hook v5"
 
     static func scriptContents() -> String {
         return """
@@ -14,11 +14,19 @@ enum SeahelmHookInstaller {
         # Command hook for Claude/Codex: reads the hook JSON on stdin, reports it to
         # seahelm, and prints any Stop-hook block decision ({"decision":"block",...})
         # to stdout so the agent continues and calls seahelm-suggest.
+        #
+        # Usage: seahelm-hook [<source>]   e.g. `seahelm-hook claude-code`
         set -u
         sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
 
         payload="$(cat)"
         [ -n "$payload" ] || exit 0
+
+        # Which agent invoked us, declared by the installer that wired this hook.
+        # It has to be declared rather than sniffed: Claude Code's common payload
+        # base now carries agent_id/agent_type/duration_ms, the very keys that used
+        # to read as Codex-only, so every Claude tool hook was being typed as Codex.
+        src="${1:-}"
 
         # Tag the event with our stable pane id so seahelm can attribute it to the
         # exact pane (e.g. to transfer only that pane when it creates a worktree).
@@ -28,8 +36,11 @@ enum SeahelmHookInstaller {
         # identical to seahelm-suggest's, or the two sides key the turn differently
         # and every Stop blocks for a suggestion that already arrived.
         pid="${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
+        prefix=""
+        [ -n "$pid" ] && prefix="$prefix"'"seahelm_pane_id":"'"$pid"'",'
+        [ -n "$src" ] && prefix="$prefix"'"seahelm_source":"'"$src"'",'
         case "$payload" in
-          '{'*) [ -n "$pid" ] && payload='{"seahelm_pane_id":"'"$pid"'",'"${payload#\\{}" ;;
+          '{'*) [ -n "$prefix" ] && payload='{'"$prefix""${payload#\\{}" ;;
         esac
 
         # Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor -w):

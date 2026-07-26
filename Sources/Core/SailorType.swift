@@ -188,6 +188,13 @@ enum SailorType: String, Codable, CaseIterable {
         }
     }
 
+    /// Agent identity carried by a hook event's `source`. Sources are manifest ids
+    /// (`OpenCodePluginInstaller` sends "opencode", `PiExtensionInstaller` "pi",
+    /// the bridge "codex") except Claude, which identifies itself as "claude-code".
+    static func fromHookSource(_ source: String) -> SailorType {
+        source == "claude-code" ? .claudeCode : fromManifestId(source)
+    }
+
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,

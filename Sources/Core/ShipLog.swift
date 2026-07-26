@@ -751,13 +751,11 @@ class ShipLog {
             NSLog("[suggest] pass gate2 (cwd→tid=\(tid)) — cwd=\(event.cwd)")
         }
 
-        switch event.source {
-        case "claude-code":
-            updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
-        case "codex":
-            updateDetection(terminalID: tid, commandLine: nil, agentType: .codex)
-        default:
-            break
+        // Every hook source that names a known agent types the pane — previously
+        // only claude-code/codex did, so opencode and pi hooks set nothing.
+        let hookAgentType = SailorType.fromHookSource(event.source)
+        if hookAgentType != .unknown {
+            updateDetection(terminalID: tid, commandLine: nil, agentType: hookAgentType)
         }
 
         // cwd_changed only updates routing (handled above via worktreeIndex); no station event.

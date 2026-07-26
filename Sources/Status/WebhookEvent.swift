@@ -145,11 +145,14 @@ struct WebhookEvent {
         guard let event = WebhookEventType.fromClaudeCode(hookEventName) else {
             throw WebhookEventError.unknownEventType(hookEventName)
         }
-        let source = inferNativeHookSource(from: json, hookEventName: hookEventName)
+        // The bridge declares who invoked it; only fall back to guessing for hook
+        // configs written by an older seahelm that passed no source argument.
+        let source = (json["seahelm_source"] as? String)
+            ?? inferNativeHookSource(from: json, hookEventName: hookEventName)
 
         // Collect remaining fields as data
         var data: [String: Any] = [:]
-        let reservedKeys: Set<String> = ["hook_event_name", "session_id", "cwd", "transcript_path", "permission_mode", "seahelm_pane_id"]
+        let reservedKeys: Set<String> = ["hook_event_name", "session_id", "cwd", "transcript_path", "permission_mode", "seahelm_pane_id", "seahelm_source"]
         for (key, value) in json where !reservedKeys.contains(key) {
             data[key] = value
         }
@@ -167,9 +170,12 @@ struct WebhookEvent {
         )
     }
 
-    /// Inference based on observed payload differences:
-    /// Codex hook payloads commonly include extra execution metadata such as turn_id/call_id/tool_kind/model.
-    /// Claude Code-only hook events are treated as Claude immediately.
+    /// Legacy fallback for payloads with no `seahelm_source` — a hook config that
+    /// predates the bridge declaring its caller. Key-sniffing is inherently fragile
+    /// and must stay conservative: `duration_ms`, `model`, `agent_id` and
+    /// `agent_type` were removed from this set because Claude Code sends them too
+    /// (`agent_id`/`agent_type` on every event, `duration_ms` on PostToolUse), so
+    /// keeping them typed every Claude tool hook as Codex.
     private static func inferNativeHookSource(from json: [String: Any], hookEventName: String) -> String {
         switch hookEventName {
         case "Notification", "WorktreeCreate", "PostToolUseFailure", "StopFailure", "SubagentStart", "SubagentStop", "CwdChanged":
@@ -182,11 +188,7 @@ struct WebhookEvent {
             "turn_id",
             "call_id",
             "tool_kind",
-            "duration_ms",
             "output_preview",
-            "model",
-            "agent_id",
-            "agent_type",
         ]
 
         if !codexSpecificKeys.isDisjoint(with: Set(json.keys)) {

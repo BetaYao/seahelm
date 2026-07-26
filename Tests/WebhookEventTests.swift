@@ -106,6 +106,52 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.event, .toolUseEnd)
     }
 
+    /// Regression: Claude Code's common payload base carries `agent_id`/`agent_type`
+    /// and PostToolUse adds `duration_ms`. Those used to be treated as Codex-only,
+    /// so every Claude tool hook retyped the pane to Codex.
+    func testClaudeToolHookWithExecutionMetadataIsNotCodex() throws {
+        let json = """
+        {"hook_event_name":"PostToolUse","session_id":"sess_abc","cwd":"/tmp/project",
+         "tool_name":"Bash","agent_id":"a1","agent_type":"general-purpose","duration_ms":42,
+         "model":"claude-opus-5"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.source, "claude-code")
+    }
+
+    /// An explicit tag from the bridge beats any key sniffing.
+    func testExplicitSeahelmSourceWins() throws {
+        let codexShaped = """
+        {"seahelm_source":"claude-code","hook_event_name":"PostToolUse","session_id":"s",
+         "cwd":"/p","turn_id":"t1","call_id":"c1"}
+        """.data(using: .utf8)!
+        XCTAssertEqual(try WebhookEvent.parse(from: codexShaped).source, "claude-code")
+
+        let claudeShaped = """
+        {"seahelm_source":"codex","hook_event_name":"SubagentStop","session_id":"s","cwd":"/p"}
+        """.data(using: .utf8)!
+        XCTAssertEqual(try WebhookEvent.parse(from: claudeShaped).source, "codex")
+    }
+
+    /// The tag is routing metadata, not agent data.
+    func testSeahelmSourceIsNotLeakedIntoData() throws {
+        let json = """
+        {"seahelm_source":"codex","hook_event_name":"PostToolUse","session_id":"s","cwd":"/p","tool_name":"Bash"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertNil(event.data?["seahelm_source"])
+        XCTAssertEqual(event.data?["tool_name"] as? String, "Bash")
+    }
+
+    func testHookSourceMapsToSailorType() {
+        XCTAssertEqual(SailorType.fromHookSource("claude-code"), .claudeCode)
+        XCTAssertEqual(SailorType.fromHookSource("codex"), .codex)
+        XCTAssertEqual(SailorType.fromHookSource("opencode"), .openCode)
+        XCTAssertEqual(SailorType.fromHookSource("pi"), .pi)
+        XCTAssertEqual(SailorType.fromHookSource("cursor"), .cursor)
+        XCTAssertEqual(SailorType.fromHookSource("nope"), .unknown)
+    }
+
     func testParseCodexNativeSessionStart() throws {
         let json = """
         {"hook_event_name":"SessionStart","session_id":"sess_codex","cwd":"/tmp/project","model":"gpt-5.4","turn_id":"turn_123"}
