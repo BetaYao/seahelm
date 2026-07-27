@@ -1,21 +1,33 @@
 import AppKit
 
-/// Step 2: theme cards + optional Ghostty font import.
+/// Step 3: appearance + optional Ghostty font import.
+///
+/// Picking a card re-themes the wizard itself (the whole window follows
+/// `NSApp.appearance`), so the choice is previewed at full size rather than only
+/// inside a 118pt thumbnail.
 final class OnboardingThemeStepView: NSView {
+    /// Fired when the user picks a mode, so the wizard can restyle its chrome.
+    var onThemeChanged: ((ThemeMode) -> Void)?
+
     private var selected: ThemeMode = .system
     private var ghosttySource: URL?
+    private var didImport = false
 
     private let cardsStack = NSStackView()
-    private let importBanner = NSView()
+    private let importBanner = OnboardingPanel()
+    private let importIcon = OnboardingIconTile(symbol: "textformat", side: 32, pointSize: 14)
     private let importTitle = NSTextField(labelWithString: "")
     private let importPath = NSTextField(labelWithString: "")
-    private let importButton = OnboardingPrimaryButton(frame: .zero)
+    private let importStatus = OnboardingStatusPill()
+    private let importButton = OnboardingSecondaryButton(text: "Import fonts", symbol: "arrow.down.circle")
     private let hintLabel = OnboardingStyle.wrappingLabel(
-        "More terminal options (fonts, cursor, colors) are in Settings → Terminal.",
-        size: 12.5, color: OnboardingStyle.textFaint
+        "Fonts, cursor style and terminal colors all live in Settings → Terminal. "
+            + "Nothing here is permanent.",
+        size: 12, color: OnboardingStyle.textFaint
     )
 
     private var cards: [ThemeMode: ThemePreviewCard] = [:]
+    private var importBannerHeight: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -37,7 +49,7 @@ final class OnboardingThemeStepView: NSView {
 
     private func setup() {
         cardsStack.orientation = .horizontal
-        cardsStack.spacing = 14
+        cardsStack.spacing = 12
         cardsStack.distribution = .fillEqually
         cardsStack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -48,32 +60,26 @@ final class OnboardingThemeStepView: NSView {
                 self.selected = picked
                 ThemeMode.applyAppearance(picked)
                 self.refreshCards()
+                self.onThemeChanged?(picked)
             }
             cards[mode] = card
             cardsStack.addArrangedSubview(card)
         }
 
-        importBanner.wantsLayer = true
-        importBanner.layer?.cornerRadius = 12
-        importBanner.layer?.backgroundColor = OnboardingStyle.accentTint.cgColor
-        importBanner.layer?.borderWidth = 1
-        importBanner.layer?.borderColor = OnboardingStyle.accent.withAlphaComponent(0.25).cgColor
-        importBanner.translatesAutoresizingMaskIntoConstraints = false
-
+        importBanner.showsSelectionGlow = false
         importTitle.translatesAutoresizingMaskIntoConstraints = false
-        importPath.font = AppFont.mono(size: 11.5)
-        importPath.textColor = OnboardingStyle.textSecondary
+        importPath.font = AppFont.mono(size: 11)
+        importPath.textColor = OnboardingStyle.textFaint
         importPath.lineBreakMode = .byTruncatingMiddle
         importPath.translatesAutoresizingMaskIntoConstraints = false
+        importStatus.isHidden = true
 
-        importButton.text = "Import"
-        importButton.showsShortcut = false
         importButton.target = self
         importButton.action = #selector(importFonts)
 
-        importBanner.addSubview(importTitle)
-        importBanner.addSubview(importPath)
-        importBanner.addSubview(importButton)
+        for v in [importIcon, importTitle, importPath, importStatus, importButton] as [NSView] {
+            importBanner.addSubview(v)
+        }
 
         addSubview(cardsStack)
         addSubview(importBanner)
@@ -83,26 +89,29 @@ final class OnboardingThemeStepView: NSView {
             cardsStack.topAnchor.constraint(equalTo: topAnchor),
             cardsStack.leadingAnchor.constraint(equalTo: leadingAnchor),
             cardsStack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            cardsStack.heightAnchor.constraint(equalToConstant: 190),
+            cardsStack.heightAnchor.constraint(equalToConstant: 196),
 
             importBanner.topAnchor.constraint(equalTo: cardsStack.bottomAnchor, constant: 22),
             importBanner.leadingAnchor.constraint(equalTo: leadingAnchor),
             importBanner.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            importTitle.leadingAnchor.constraint(equalTo: importBanner.leadingAnchor, constant: 16),
-            importTitle.topAnchor.constraint(equalTo: importBanner.topAnchor, constant: 14),
-            importTitle.trailingAnchor.constraint(lessThanOrEqualTo: importButton.leadingAnchor, constant: -12),
-            importPath.leadingAnchor.constraint(equalTo: importTitle.leadingAnchor),
-            importPath.topAnchor.constraint(equalTo: importTitle.bottomAnchor, constant: 3),
-            importPath.trailingAnchor.constraint(lessThanOrEqualTo: importButton.leadingAnchor, constant: -12),
-            importBanner.bottomAnchor.constraint(equalTo: importPath.bottomAnchor, constant: 14),
+            importIcon.leadingAnchor.constraint(equalTo: importBanner.leadingAnchor, constant: 14),
+            importIcon.centerYAnchor.constraint(equalTo: importBanner.centerYAnchor),
 
+            importTitle.leadingAnchor.constraint(equalTo: importIcon.trailingAnchor, constant: 12),
+            importTitle.topAnchor.constraint(equalTo: importBanner.topAnchor, constant: 13),
+            importTitle.trailingAnchor.constraint(lessThanOrEqualTo: importStatus.leadingAnchor, constant: -10),
+            importPath.leadingAnchor.constraint(equalTo: importTitle.leadingAnchor),
+            importPath.topAnchor.constraint(equalTo: importTitle.bottomAnchor, constant: 2),
+            importPath.trailingAnchor.constraint(lessThanOrEqualTo: importButton.leadingAnchor, constant: -12),
+            importBanner.bottomAnchor.constraint(equalTo: importPath.bottomAnchor, constant: 13),
+
+            importStatus.trailingAnchor.constraint(equalTo: importButton.leadingAnchor, constant: -10),
+            importStatus.centerYAnchor.constraint(equalTo: importBanner.centerYAnchor),
             importButton.trailingAnchor.constraint(equalTo: importBanner.trailingAnchor, constant: -14),
             importButton.centerYAnchor.constraint(equalTo: importBanner.centerYAnchor),
-            importButton.heightAnchor.constraint(equalToConstant: 32),
-            importButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 84),
 
-            hintLabel.topAnchor.constraint(equalTo: importBanner.bottomAnchor, constant: 14),
+            hintLabel.topAnchor.constraint(equalTo: importBanner.bottomAnchor, constant: 16),
             hintLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
             hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
             hintLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
@@ -116,32 +125,40 @@ final class OnboardingThemeStepView: NSView {
     }
 
     private func refreshImportBanner() {
-        if let source = ghosttySource {
-            importBanner.isHidden = false
-            let title = NSMutableAttributedString(string: "Ghostty config detected. ", attributes: [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-                .foregroundColor: OnboardingStyle.textPrimary,
-            ])
-            title.append(NSAttributedString(string: "Import fonts?", attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: OnboardingStyle.textSecondary,
-            ]))
-            importTitle.attributedStringValue = title
-            importPath.stringValue = source.path
-        } else {
+        guard let source = ghosttySource else {
+            // Collapse rather than hide: a hidden view still owns its height
+            // constraints, which would leave a gap above the hint.
             importBanner.isHidden = true
+            importBannerHeight = importBannerHeight ?? importBanner.heightAnchor.constraint(equalToConstant: 0)
+            importBannerHeight?.isActive = true
+            return
         }
+        importBanner.isHidden = false
+        importBannerHeight?.isActive = false
+
+        let title = NSMutableAttributedString(string: "Ghostty config found. ", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: OnboardingStyle.textPrimary,
+        ])
+        title.append(NSAttributedString(string: "Reuse its font settings?", attributes: [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: OnboardingStyle.textSecondary,
+        ]))
+        importTitle.attributedStringValue = title
+        importPath.stringValue = source.path
     }
 
     @objc private func importFonts() {
-        guard let source = ghosttySource else { return }
+        guard let source = ghosttySource, !didImport else { return }
         let ok = GhosttyConfigImporter.importFonts(from: source)
-        importButton.text = ok ? "Imported ✓" : "Import failed"
+        didImport = ok
+        importStatus.isHidden = false
+        importStatus.state = ok ? .ok("Imported") : .failed("Couldn't read that config")
         importButton.isEnabled = !ok
     }
 }
 
-/// A theme choice card with a hand-drawn mini terminal preview.
+/// A theme choice card with a mini terminal preview drawn in that theme's colors.
 private final class ThemePreviewCard: NSView {
     let mode: ThemeMode
     var onPick: ((ThemeMode) -> Void)?
@@ -158,12 +175,12 @@ private final class ThemePreviewCard: NSView {
         self.mode = mode
         let (name, sub, symbol): (String, String, String)
         switch mode {
-        case .system: (name, sub, symbol) = ("System", "Match OS", "display")
-        case .dark: (name, sub, symbol) = ("Dark", "Easy on the eyes", "moon")
-        case .light: (name, sub, symbol) = ("Light", "Bright & crisp", "sun.max")
+        case .system: (name, sub, symbol) = ("System", "Follows macOS", "circle.lefthalf.filled")
+        case .dark: (name, sub, symbol) = ("Dark", "The default", "moon.fill")
+        case .light: (name, sub, symbol) = ("Light", "Bright rooms", "sun.max.fill")
         }
-        nameLabel = OnboardingStyle.label(name, size: 14, weight: .semibold)
-        subLabel = OnboardingStyle.label(sub, size: 12, color: OnboardingStyle.textFaint)
+        nameLabel = OnboardingStyle.label(name, size: 13.5, weight: .semibold)
+        subLabel = OnboardingStyle.label(sub, size: 11.5, color: OnboardingStyle.textFaint)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -178,7 +195,7 @@ private final class ThemePreviewCard: NSView {
 
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold))
         icon.contentTintColor = OnboardingStyle.textSecondary
         icon.translatesAutoresizingMaskIntoConstraints = false
 
@@ -197,14 +214,14 @@ private final class ThemePreviewCard: NSView {
             preview.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
             preview.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
             preview.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12),
-            preview.heightAnchor.constraint(equalToConstant: 118),
+            preview.heightAnchor.constraint(equalToConstant: 122),
 
-            icon.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
+            icon.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 13),
             icon.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
             nameLabel.topAnchor.constraint(equalTo: preview.bottomAnchor, constant: 14),
             nameLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 7),
 
-            subLabel.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+            subLabel.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -13),
             subLabel.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
         ])
     }
@@ -213,75 +230,102 @@ private final class ThemePreviewCard: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-/// Draws a tiny fake terminal window: traffic lights, an accent prompt line
-/// and dim output bars, in dark / light / half-and-half (system) flavors.
+/// A tiny fake Seahelm window: sidebar rail, prompt line, output, status island.
+/// Colors come from `SemanticColors` resolved against the previewed appearance,
+/// so the thumbnail is the app's real palette rather than an approximation.
 private final class MiniTerminalPreview: NSView {
     var mode: ThemeMode = .system { didSet { needsDisplay = true } }
 
-    private let darkBG = NSColor(red: 0.09, green: 0.10, blue: 0.11, alpha: 1)
-    private let lightBG = NSColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1)
+    private static let darkAppearance = NSAppearance(named: .darkAqua)!
+    private static let lightAppearance = NSAppearance(named: .aqua)!
 
     override func draw(_ dirtyRect: NSRect) {
-        let radius: CGFloat = 8
-        let clip = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
-        clip.addClip()
+        let radius: CGFloat = 7
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).addClip()
 
         switch mode {
         case .dark:
-            darkBG.setFill()
-            bounds.fill()
-            drawTerminal(dark: true, in: bounds)
+            drawWindow(appearance: Self.darkAppearance, in: bounds)
         case .light:
-            lightBG.setFill()
-            bounds.fill()
-            drawTerminal(dark: false, in: bounds)
+            drawWindow(appearance: Self.lightAppearance, in: bounds)
         case .system:
-            // Vertical split: dark left, light right.
-            darkBG.setFill()
-            bounds.fill()
-            lightBG.setFill()
-            NSRect(x: bounds.midX, y: bounds.minY, width: bounds.width / 2, height: bounds.height).fill()
-            drawTerminal(dark: true, in: bounds)
+            // Two half-width windows side by side. Clipping one full-width window
+            // to its right half would hide all of that half's content, which just
+            // read as an empty panel.
+            let left = NSRect(x: bounds.minX, y: bounds.minY,
+                              width: bounds.width / 2, height: bounds.height)
+            let right = NSRect(x: bounds.midX, y: bounds.minY,
+                               width: bounds.width / 2, height: bounds.height)
+            drawWindow(appearance: Self.darkAppearance, in: left)
+            drawWindow(appearance: Self.lightAppearance, in: right)
+            // Hairline seam so the two halves read as a deliberate split.
+            resolve(SemanticColors.lineAlpha40, in: Self.darkAppearance).setStroke()
+            let seam = NSBezierPath()
+            seam.move(to: NSPoint(x: bounds.midX, y: bounds.minY))
+            seam.line(to: NSPoint(x: bounds.midX, y: bounds.maxY))
+            seam.lineWidth = 1
+            seam.stroke()
         }
 
-        NSColor.black.withAlphaComponent(0.1).setStroke()
-        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+        resolve(SemanticColors.lineAlpha22, in: Self.darkAppearance).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                  xRadius: radius, yRadius: radius)
         border.lineWidth = 1
         border.stroke()
     }
 
-    private func drawTerminal(dark: Bool, in rect: NSRect) {
-        let dim = dark ? NSColor.white.withAlphaComponent(0.25) : NSColor.black.withAlphaComponent(0.2)
-
-        // Traffic lights.
-        let dotColors: [NSColor] = [
-            NSColor(red: 1.0, green: 0.37, blue: 0.34, alpha: 1),
-            NSColor(red: 1.0, green: 0.75, blue: 0.18, alpha: 1),
-            NSColor(red: 0.2, green: 0.8, blue: 0.35, alpha: 1),
-        ]
-        for (i, color) in dotColors.enumerated() {
-            color.setFill()
-            NSBezierPath(ovalIn: NSRect(
-                x: rect.minX + 11, y: rect.maxY - 16, width: 6, height: 6
-            ).offsetBy(dx: CGFloat(i) * 11, dy: 0)).fill()
+    /// Resolve a dynamic color against an explicit appearance — `NSColor.cgColor`
+    /// otherwise picks up whatever `NSAppearance.current` happens to be.
+    private func resolve(_ color: NSColor, in appearance: NSAppearance) -> NSColor {
+        var out = color
+        appearance.performAsCurrentDrawingAppearance {
+            out = color.usingColorSpace(.sRGB) ?? color
         }
+        return out
+    }
 
-        // Prompt line: accent ❯ + command bar.
-        OnboardingStyle.accent.setFill()
-        NSRect(x: rect.minX + 11, y: rect.maxY - 36, width: 7, height: 4).fill(using: .sourceOver)
-        (dark ? NSColor.white.withAlphaComponent(0.55) : NSColor.black.withAlphaComponent(0.5)).setFill()
-        NSRect(x: rect.minX + 23, y: rect.maxY - 36, width: 52, height: 4).fill(using: .sourceOver)
+    private func drawWindow(appearance: NSAppearance, in rect: NSRect) {
+        let bg = resolve(SemanticColors.bg, in: appearance).withAlphaComponent(1)
+        let panel = resolve(SemanticColors.panel, in: appearance).withAlphaComponent(1)
+        let accent = resolve(SemanticColors.accent, in: appearance)
+        let text = resolve(SemanticColors.text, in: appearance)
+        let muted = resolve(SemanticColors.muted, in: appearance)
 
-        // Output bars.
-        let widths: [CGFloat] = [82, 64, 94, 44]
-        for (i, w) in widths.enumerated() {
-            dim.setFill()
-            NSRect(x: rect.minX + 11, y: rect.maxY - 50 - CGFloat(i) * 11, width: w, height: 4)
+        bg.setFill()
+        rect.fill()
+
+        // Sidebar rail.
+        panel.setFill()
+        NSRect(x: rect.minX, y: rect.minY, width: 26, height: rect.height).fill()
+        for i in 0..<3 {
+            (i == 0 ? accent : muted.withAlphaComponent(0.45)).setFill()
+            NSRect(x: rect.minX + 7, y: rect.maxY - 16 - CGFloat(i) * 12, width: 12, height: 4)
                 .fill(using: .sourceOver)
         }
 
-        // Status chip, island-style.
-        OnboardingStyle.accent.withAlphaComponent(0.5).setFill()
-        NSRect(x: rect.minX + 11, y: rect.minY + 9, width: 24, height: 5).fill(using: .sourceOver)
+        let contentX = rect.minX + 36
+
+        // Prompt line: accent ❯ then a command bar.
+        accent.setFill()
+        NSRect(x: contentX, y: rect.maxY - 20, width: 6, height: 4).fill(using: .sourceOver)
+        text.withAlphaComponent(0.7).setFill()
+        NSRect(x: contentX + 11, y: rect.maxY - 20, width: 46, height: 4).fill(using: .sourceOver)
+
+        // Output bars.
+        let widths: [CGFloat] = [72, 54, 84, 40]
+        for (i, w) in widths.enumerated() {
+            muted.withAlphaComponent(0.42).setFill()
+            NSRect(x: contentX, y: rect.maxY - 34 - CGFloat(i) * 10,
+                   width: min(w, rect.maxX - contentX - 10), height: 4).fill(using: .sourceOver)
+        }
+
+        // Status island pill along the bottom.
+        panel.setFill()
+        let island = NSRect(x: contentX, y: rect.minY + 9, width: 62, height: 12)
+        NSBezierPath(roundedRect: island, xRadius: 6, yRadius: 6).fill()
+        accent.setFill()
+        NSBezierPath(ovalIn: NSRect(x: island.minX + 5, y: island.midY - 2.5, width: 5, height: 5)).fill()
+        muted.withAlphaComponent(0.6).setFill()
+        NSRect(x: island.minX + 14, y: island.midY - 1.5, width: 38, height: 3).fill(using: .sourceOver)
     }
 }

@@ -3,16 +3,24 @@ set -euo pipefail
 
 BUILD_DIR="$(pwd)/.build"
 CLEAN_RESTART=0
+APP_ARGS=()
 
 usage() {
-  echo "Usage: $0 [--clean-restart]"
+  echo "Usage: $0 [--clean-restart] [--onboarding]"
   echo "  --clean-restart    Remove local build cache before rebuilding"
+  echo "  --onboarding       Force the first-launch wizard, even once it's been completed"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean-restart)
       CLEAN_RESTART=1
+      shift
+      ;;
+    --onboarding)
+      # Does NOT reset onboardingCompleted — the wizard runs over the live
+      # config and writes back to it, so this is safe to use on a real setup.
+      APP_ARGS+=(--show-onboarding)
       shift
       ;;
     -h|--help)
@@ -57,7 +65,7 @@ echo "==> Launching Seahelm (Ctrl+C to quit)..."
 # Executable follows PRODUCT_NAME (Seahelm); keep the historical `seahelm`
 # path working on case-insensitive APFS via the same bundle.
 if [[ -x "$APP/Contents/MacOS/Seahelm" ]]; then
-  "$APP/Contents/MacOS/Seahelm"
+  "$APP/Contents/MacOS/Seahelm" "${APP_ARGS[@]+"${APP_ARGS[@]}"}"
 else
-  "$APP/Contents/MacOS/seahelm"
+  "$APP/Contents/MacOS/seahelm" "${APP_ARGS[@]+"${APP_ARGS[@]}"}"
 fi
