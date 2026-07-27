@@ -173,6 +173,18 @@ class TerminalCoordinator {
         return station.id
     }
 
+    /// Whether an existing pane should adopt the new frame *without* a PTY
+    /// resize when the layout changes structurally (split / close).
+    ///
+    /// Plain shells do: starship / oh-my-zsh reprint a blank prompt line per
+    /// SIGWINCH, so we defer the grid sync to the next keypress. Agent TUIs
+    /// (Claude Code, Codex, …) redraw their whole frame *from* SIGWINCH — defer
+    /// it and the pane keeps painting at the old width until the user focuses
+    /// it and hits Enter. They take the resize immediately.
+    private static func defersPtyResize(_ stationId: String) -> Bool {
+        !(ShipLog.shared.sailor(for: stationId)?.agentType.isAIAgent ?? false)
+    }
+
     /// Create the new leaf and relayout without mid-create SIGWINCH storms on
     /// the existing pane (Auto Layout fill + partial `layoutTree` used to shrink
     /// the old surface before final frames existed — starship reprints a blank
@@ -196,7 +208,8 @@ class TerminalCoordinator {
         // Freeze existing panes *before* create/layout so any incidental
         // setFrame / viewDidMoveToWindow during addSubview cannot SIGWINCH.
         let newId = newStation.id
-        for leaf in tree.allLeaves where leaf.stationId != newId {
+        for leaf in tree.allLeaves
+        where leaf.stationId != newId && Self.defersPtyResize(leaf.stationId) {
             StationRegistry.shared.station(forId: leaf.stationId)?
                 .view?.absorbBoundsWithoutPtyResize()
         }
@@ -210,10 +223,12 @@ class TerminalCoordinator {
         container.suppressStructuralLayout = false
         container.layoutTree()
 
-        for leaf in tree.allLeaves where leaf.stationId != newId {
+        for leaf in tree.allLeaves
+        where leaf.stationId != newId && Self.defersPtyResize(leaf.stationId) {
             StationRegistry.shared.station(forId: leaf.stationId)?
                 .view?.absorbBoundsWithoutPtyResize()
         }
+        // Agent panes were left unfrozen, so this flush delivers their SIGWINCH.
         GhosttyBridge.shared.endLiveResize()
 
         let focusLeafId = focusNew ? newLeafId : (restoreFocusLeafId ?? tree.focusedId)
@@ -320,7 +335,7 @@ class TerminalCoordinator {
         // AppKit frame without TIOCSWINSZ until the user types in it.
         GhosttyBridge.shared.beginLiveResize(pinHeight: false)
         container.layoutTree()
-        for leaf in tree.allLeaves {
+        for leaf in tree.allLeaves where Self.defersPtyResize(leaf.stationId) {
             StationRegistry.shared.station(forId: leaf.stationId)?
                 .view?.absorbBoundsWithoutPtyResize()
         }

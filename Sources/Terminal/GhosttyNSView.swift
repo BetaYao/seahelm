@@ -385,10 +385,6 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if let surface {
             ghostty_surface_set_focus(surface, false)
         }
-        #if DEBUG
-        let symbols = Thread.callStackSymbols.prefix(12).joined(separator: "\n")
-        NSLog("GhosttyNSView.resignFirstResponder — stack:\n%@", symbols)
-        #endif
         return super.resignFirstResponder()
     }
 
@@ -676,16 +672,64 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return menu
     }
 
-    /// If the current selection is a path pointing at an existing file (relative
-    /// paths resolved against the pane's working directory), return that file's
-    /// URL. Returns nil for no selection, directories, or non-existent paths so
-    /// the Preview menu item is only offered when it will actually work.
-    /// Resolve a previewable file from the terminal cell under the right-click.
-    /// Reads the whole clicked row, splits it into whitespace-delimited tokens,
-    /// and returns the first token that resolves to an existing file. This works
-    /// regardless of text selection — important in mouse-reporting TUIs where a
-    /// drag is consumed by the app and never becomes a ghostty selection.
-    private func filePathAtClick(_ event: NSEvent) -> URL? {
+    /// Which logical line of a multi-row read to search. Ghostty joins soft-wrapped
+    /// rows when reading a selection (`Screen.selectionString` hardcodes
+    /// `unwrap = true`) and emits `\n` only at hard line breaks, so a multi-row read
+    /// split on `\n` hands back whole logical lines.
+    enum LogicalLinePick {
+        /// The read covers one row; use all of it.
+        case only
+        /// The read starts at the clicked row; the logical line beginning there is first.
+        case first
+        /// The read ends at the clicked row; the logical line reaching it is last.
+        case last
+    }
+
+    /// One read to try when hunting for the token under a click.
+    struct WrapSearchStep: Equatable {
+        let range: ClosedRange<Int>
+        let pick: LogicalLinePick
+    }
+
+    /// How many rows above/below the click to search for the rest of a wrapped token.
+    static let wrapSearchRows = 3
+
+    /// Row ranges to read for a click on `row`, in priority order.
+    ///
+    /// The clicked row alone comes first: it is the cheapest read and cannot pull in a
+    /// token from a neighbouring line. A token longer than the remaining width soft-wraps
+    /// though, and a single-row read truncates it — `…/2026_sessions_source_read_pa` for a
+    /// path whose `th.sql` tail sits on the next row — which then fails to resolve. So fall
+    /// back to reading downward (the token started on the clicked row) and then upward (the
+    /// click landed on a continuation row), taking only the logical line that touches the
+    /// clicked row so neighbouring lines can never be mistaken for the clicked one.
+    static func wrapSearchPlan(row: Int, rowCount: Int, span: Int = wrapSearchRows) -> [WrapSearchStep] {
+        guard rowCount > 0, row >= 0, row < rowCount else { return [] }
+        var plan = [WrapSearchStep(range: row...row, pick: .only)]
+        let lastRow = rowCount - 1
+        if row < lastRow {
+            plan.append(WrapSearchStep(range: row...min(row + span, lastRow), pick: .first))
+        }
+        if row > 0 {
+            plan.append(WrapSearchStep(range: max(0, row - span)...row, pick: .last))
+        }
+        return plan
+    }
+
+    /// Pull the logical line named by `pick` out of a multi-row read.
+    static func logicalLine(from text: String, pick: LogicalLinePick) -> String {
+        switch pick {
+        case .only:
+            return text
+        case .first:
+            return String(text.split(separator: "\n", omittingEmptySubsequences: false).first ?? "")
+        case .last:
+            return String(text.split(separator: "\n", omittingEmptySubsequences: false).last ?? "")
+        }
+    }
+
+    /// The viewport row the event landed on, or nil if it fell outside the grid.
+    private func viewportRow(for event: NSEvent) -> Int? {
         guard let surface else { return nil }
         let size = ghostty_surface_size(surface)
         guard size.cell_height_px > 0, size.rows > 0, bounds.height > 0 else { return nil }
@@ -697,66 +741,65 @@ class GhosttyNSView: NSView, NSTextInputClient {
         let yPx = (Double(bounds.height) - pos.y) * scale
         let row = Int(yPx / Double(size.cell_height_px))
         guard row >= 0, row < Int(size.rows) else { return nil }
+        return row
+    }
 
+    /// Read a span of viewport rows as text, full width.
+    private func readViewportRows(_ rows: ClosedRange<Int>) -> String? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
         var text = ghostty_text_s()
         let sel = ghostty_selection_s(
             top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
-                                      x: 0, y: UInt32(row)),
+                                      x: 0, y: UInt32(rows.lowerBound)),
             bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
-                                          x: UInt32(max(0, Int(size.columns) - 1)), y: UInt32(row)),
+                                          x: UInt32(max(0, Int(size.columns) - 1)), y: UInt32(rows.upperBound)),
             rectangle: false
         )
         guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
         guard let cString = text.text else { return nil }
-        let line = String(cString: cString)
+        return String(cString: cString)
+    }
 
-        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
-        let bases: [String?] = [station?.pwd, worktreePath, station?.initialWorkingDirectory]
-        // First whitespace-delimited token that is an existing file wins. Multiple
-        // file-like tokens on one line are rare, so this reliably picks the path
-        // without needing exact column-to-character mapping (which CJK breaks).
-        for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
-            if let url = Self.resolveSelectedPath(raw: String(token), bases: bases) {
-                return url
+    /// Run `match` over the whitespace-delimited tokens of every logical line that
+    /// touches the clicked row, stopping at the first hit.
+    ///
+    /// Working in tokens means we never need an exact column-to-character mapping,
+    /// which CJK width breaks. Multiple matching tokens on one line are rare enough
+    /// that first-hit-wins is reliable.
+    private func firstTokenAtClick<T>(_ event: NSEvent, match: (String) -> T?) -> T? {
+        guard let surface, let row = viewportRow(for: event) else { return nil }
+        let rowCount = Int(ghostty_surface_size(surface).rows)
+
+        for step in Self.wrapSearchPlan(row: row, rowCount: rowCount) {
+            guard let text = readViewportRows(step.range) else { continue }
+            let line = Self.logicalLine(from: text, pick: step.pick)
+            for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+                if let hit = match(String(token)) { return hit }
             }
         }
         return nil
     }
 
-    /// Reads the same terminal row as `filePathAtClick` and checks each token
-    /// for a GitHub PR URL (`https://github.com/{owner}/{repo}/pull/{number}`).
-    /// Returns the parsed PR info or nil if none found.
+    /// Resolve a previewable file from the terminal cell under the right-click.
+    /// Works regardless of text selection — important in mouse-reporting TUIs where
+    /// a drag is consumed by the app and never becomes a ghostty selection.
+    private func filePathAtClick(_ event: NSEvent) -> URL? {
+        let bases = pathResolutionBases()
+        return firstTokenAtClick(event) { Self.resolveSelectedPath(raw: $0, bases: bases) }
+    }
+
+    /// Checks the tokens around the click for a GitHub PR URL
+    /// (`https://github.com/{owner}/{repo}/pull/{number}`).
     private func prURLAtClick(_ event: NSEvent) -> (owner: String, repo: String, number: Int)? {
-        guard let surface else { return nil }
-        let size = ghostty_surface_size(surface)
-        guard size.cell_height_px > 0, size.rows > 0, bounds.height > 0 else { return nil }
+        firstTokenAtClick(event) { Self.parsePRURL($0) }
+    }
 
-        let pos = convert(event.locationInWindow, from: nil)
-        let scale = Double(size.height_px) / Double(bounds.height)
-        let yPx = (Double(bounds.height) - pos.y) * scale
-        let row = Int(yPx / Double(size.cell_height_px))
-        guard row >= 0, row < Int(size.rows) else { return nil }
-
-        var text = ghostty_text_s()
-        let sel = ghostty_selection_s(
-            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
-                                      x: 0, y: UInt32(row)),
-            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
-                                          x: UInt32(max(0, Int(size.columns) - 1)), y: UInt32(row)),
-            rectangle: false
-        )
-        guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let cString = text.text else { return nil }
-        let line = String(cString: cString)
-
-        for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
-            if let pr = Self.parsePRURL(String(token)) {
-                return pr
-            }
-        }
-        return nil
+    /// Directories a relative path is resolved against, most specific first.
+    private func pathResolutionBases() -> [String?] {
+        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
+        return [station?.pwd, worktreePath, station?.initialWorkingDirectory]
     }
 
     /// Parse a GitHub PR URL from a token, e.g.
@@ -791,15 +834,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 number: number)
     }
 
+    /// If the current selection is a path pointing at an existing file (relative
+    /// paths resolved against the pane's working directory), return that file's
+    /// URL. Returns nil for no selection, directories, or non-existent paths so
+    /// the Preview menu item is only offered when it will actually work.
     private func selectedFilePath() -> URL? {
         // Prefer the snapshot taken on mouseUp; fall back to the live selection
         // in case one exists that we didn't capture (e.g. keyboard selection).
         guard let raw = cachedSelectionText ?? readSelectionText() else { return nil }
-        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
-        return Self.resolveSelectedPath(
-            raw: raw,
-            bases: [station?.pwd, worktreePath, station?.initialWorkingDirectory]
-        )
+        return Self.resolveSelectedPath(raw: raw, bases: pathResolutionBases())
     }
 
     /// Pure resolver (unit-testable): trims `raw`, rejects multi-token/multi-line

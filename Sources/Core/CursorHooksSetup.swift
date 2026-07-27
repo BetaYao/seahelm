@@ -22,7 +22,10 @@ enum CursorHooksSetup {
     private static let stopLoopLimit = 5
 
     private static func requiredEntry(event: String) -> [String: Any] {
-        var entry: [String: Any] = ["command": SeahelmHookInstaller.scriptPath()]
+        // Declare the caller — Cursor's payload carries no key that identifies it
+        // (see WebhookEvent.inferNativeHookSource), and without a source the
+        // event can't be attributed to a Cursor sailor or resume ref.
+        var entry: [String: Any] = ["command": "\(SeahelmHookInstaller.scriptPath()) cursor"]
         if event == "stop" {
             entry["loop_limit"] = stopLoopLimit
         }

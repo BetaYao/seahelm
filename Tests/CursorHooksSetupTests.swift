@@ -16,7 +16,7 @@ final class CursorHooksSetupTests: XCTestCase {
         for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "stop"] {
             let list = try XCTUnwrap(hooks[event] as? [[String: Any]], "missing \(event)")
             let command = try XCTUnwrap(list.first?["command"] as? String)
-            XCTAssertEqual(command, SeahelmHookInstaller.scriptPath())
+            XCTAssertEqual(command, "\(SeahelmHookInstaller.scriptPath()) cursor")
         }
         let stop = try XCTUnwrap(hooks["stop"] as? [[String: Any]])
         XCTAssertEqual(stop.first?["loop_limit"] as? Int, 5)
@@ -59,7 +59,7 @@ final class CursorHooksSetupTests: XCTestCase {
             try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         let stop = try XCTUnwrap((root["hooks"] as? [String: Any])?["stop"] as? [[String: Any]])
         XCTAssertEqual(stop.count, 1)
-        XCTAssertEqual(stop.first?["command"] as? String, SeahelmHookInstaller.scriptPath())
+        XCTAssertEqual(stop.first?["command"] as? String, "\(SeahelmHookInstaller.scriptPath()) cursor")
     }
 
     private func makeTempDir() throws -> URL {
