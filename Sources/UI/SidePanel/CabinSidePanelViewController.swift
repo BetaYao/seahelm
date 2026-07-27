@@ -244,8 +244,11 @@ final class CabinSidePanelViewController: NSViewController {
     }
 
     /// Remember the current worktree's folder expansion before tearing the tree down.
+    /// Skip while filtering — search expands many rows that must not pollute the
+    /// per-worktree expansion memory (or stall worktree switches scanning them).
     private func captureExpansion() {
         guard let path = worktreePath, let controller = fileTreeController else { return }
+        guard !controller.isFiltering else { return }
         expandedByWorktree[path] = controller.currentExpandedPaths()
     }
 
