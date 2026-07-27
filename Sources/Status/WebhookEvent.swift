@@ -109,6 +109,9 @@ struct WebhookEvent {
 
         // Detect format: native hook payloads have "hook_event_name", generic payloads have "event"
         if let hookEventName = json["hook_event_name"] as? String {
+            if isCursorHook(json: json, hookEventName: hookEventName) {
+                return try parseCursorHook(json: json, hookEventName: hookEventName)
+            }
             return try parseNativeHook(json: json, hookEventName: hookEventName)
         } else {
             return try parseGeneric(json: json)
@@ -168,6 +171,85 @@ struct WebhookEvent {
             data: data.isEmpty ? nil : data,
             paneId: json["seahelm_pane_id"] as? String
         )
+    }
+
+    // MARK: - Cursor
+
+    /// Cursor's hook payloads are shaped nothing like Claude's: camelCase event
+    /// names, `conversation_id` instead of `session_id`, and `workspace_roots`
+    /// instead of `cwd`. Run through `parseNativeHook` they throw on the missing
+    /// fields, so every Cursor event was dropped — no status, and (because the
+    /// resume ref is built from the event) no `agentSessionRef`, which is what
+    /// unlocks the per-session Cursor title lookup.
+    private static let cursorEvents: [String: WebhookEventType] = [
+        "sessionStart": .sessionStart,
+        "beforeSubmitPrompt": .userPrompt,
+        "preToolUse": .toolUseStart,
+        "beforeShellExecution": .toolUseStart,
+        "beforeMCPExecution": .toolUseStart,
+        "beforeReadFile": .toolUseStart,
+        "postToolUse": .toolUseEnd,
+        "afterAgentResponse": .toolUseEnd,
+        "postToolUseFailure": .toolUseFailed,
+        "stop": .agentStop,
+    ]
+
+    /// The event names are case-disjoint from Claude's PascalCase set, so a name
+    /// match is already unambiguous; `cursor_version` and the declared source
+    /// cover payloads whose event we don't map.
+    private static func isCursorHook(json: [String: Any], hookEventName: String) -> Bool {
+        if json["seahelm_source"] as? String == "cursor" { return true }
+        if json["cursor_version"] != nil { return true }
+        return cursorEvents[hookEventName] != nil && json["session_id"] == nil
+    }
+
+    private static func parseCursorHook(json: [String: Any], hookEventName: String) throws -> WebhookEvent {
+        guard let event = cursorEvents[hookEventName] else {
+            throw WebhookEventError.unknownEventType(hookEventName)
+        }
+        // The conversation id is also the chat directory name under
+        // `~/.cursor/chats/<md5(cwd)>/`, so it doubles as the title lookup key.
+        guard let sessionId = (json["conversation_id"] as? String)
+                ?? (json["session_id"] as? String), !sessionId.isEmpty else {
+            throw WebhookEventError.missingRequiredField
+        }
+        guard let cwd = cursorCwd(json: json) else {
+            throw WebhookEventError.missingRequiredField
+        }
+
+        var data: [String: Any] = [:]
+        let reservedKeys: Set<String> = [
+            "hook_event_name", "conversation_id", "session_id", "workspace_roots", "cwd",
+            "seahelm_pane_id", "seahelm_source",
+        ]
+        for (key, value) in json where !reservedKeys.contains(key) {
+            data[key] = value
+        }
+        // Cursor counts stop-hook re-entries itself; expose it under the name the
+        // rest of seahelm already understands from Claude.
+        if event == .agentStop, let loopCount = json["loop_count"] as? Int {
+            data["stop_hook_active"] = loopCount > 0
+        }
+
+        return WebhookEvent(
+            source: "cursor",
+            sessionId: sessionId,
+            sessionPath: json["session_path"] as? String,
+            event: event,
+            cwd: cwd,
+            timestamp: nil,
+            data: data.isEmpty ? nil : data,
+            paneId: json["seahelm_pane_id"] as? String
+        )
+    }
+
+    private static func cursorCwd(json: [String: Any]) -> String? {
+        if let roots = json["workspace_roots"] as? [String],
+           let first = roots.first, !first.isEmpty {
+            return first
+        }
+        if let cwd = json["cwd"] as? String, !cwd.isEmpty { return cwd }
+        return nil
     }
 
     /// Legacy fallback for payloads with no `seahelm_source` — a hook config that

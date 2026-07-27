@@ -196,6 +196,26 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.cwd, "/repo")
     }
 
+    func testParseCursorSessionStartYieldsResumableSessionRef() throws {
+        // Shape the seahelm-hook bridge actually delivers for Cursor: declared
+        // source, pane id, camelCase event, conversation_id + workspace_roots.
+        let json = """
+        {"seahelm_pane_id":"pane-7","seahelm_source":"cursor","hook_event_name":"sessionStart",
+         "conversation_id":"15264009-b835-46b6-90fe-6ec5c818da81","workspace_roots":["/repo"]}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.source, "cursor")
+        XCTAssertEqual(event.event, .sessionStart)
+        XCTAssertEqual(event.paneId, "pane-7")
+
+        // The conversation id doubles as the Cursor chat directory name, so the
+        // ref built here is what unlocks the per-session title lookup.
+        let ref = try XCTUnwrap(AgentSessionRef(source: event.source, sessionId: event.sessionId))
+        XCTAssertEqual(ref.agent, "cursor")
+        XCTAssertEqual(ref.kind, .id)
+        XCTAssertEqual(ref.sessionId, "15264009-b835-46b6-90fe-6ec5c818da81")
+    }
+
     // MARK: - Event → SailorStatus mapping
 
     func testEventToSailorStatus() {
