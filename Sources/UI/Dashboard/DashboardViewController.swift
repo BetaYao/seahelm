@@ -197,11 +197,27 @@ class DashboardViewController: NSViewController {
     /// The two-column edit container, created lazily and reused across worktrees.
     private var editLayoutContainer: EditLayoutContainerView?
 
-    /// Host hooks for hoisting edit mode's tab strips onto the window chrome row.
-    /// The dashboard owns the strips but not the chrome, so the host wires them.
-    var onHoistEditStrips: ((_ terminal: NSView, _ preview: NSView, _ ratio: CGFloat) -> Void)?
-    var onReleaseEditStrips: (() -> Void)?
+    /// Edit mode's tab strips are owned by the window chrome header (one row of
+    /// chrome instead of two). The dashboard drives their contents and selection
+    /// but does not own the views.
+    var editStripsProvider: (() -> (terminal: EditTabStripView, preview: EditTabStripView)?)?
+    var onEditModeStripsActive: ((_ active: Bool, _ ratio: CGFloat) -> Void)?
     var onEditStripRatioChange: ((CGFloat) -> Void)?
+
+    /// True once the chrome's strips have had their callbacks wired to this VC.
+    private var editStripCallbacksWired = false
+
+    /// The chrome-owned strips, with their callbacks wired on first use.
+    private func chromeEditStrips() -> (terminal: EditTabStripView, preview: EditTabStripView)? {
+        guard let strips = editStripsProvider?() else { return nil }
+        if !editStripCallbacksWired {
+            editStripCallbacksWired = true
+            strips.terminal.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
+            strips.preview.onSelect = { [weak self] id in self?.selectPreviewTab(id) }
+            strips.preview.onClose = { [weak self] id in self?.closePreviewTab(id) }
+        }
+        return strips
+    }
     /// Built preview content views keyed by file path (preserves editor state
     /// across tab switches). Torn down on explicit tab close / worktree deletion.
     private var previewContentCache: [String: NSView] = [:]
@@ -1741,23 +1757,12 @@ extension DashboardViewController {
                 edit.autoresizingMask = [.width, .height]
                 container.addSubview(edit)
             }
-            if let onHoistEditStrips, !edit.stripsAreHoisted {
-                let strips = edit.hoistStrips()
-                onHoistEditStrips(strips.terminal, strips.preview, edit.currentRatio)
-            }
+            onEditModeStripsActive?(true, edit.currentRatio)
         } else if let edit = editLayoutContainer {
-            releaseHoistedStrips(from: edit)
+            onEditModeStripsActive?(false, edit.currentRatio)
             edit.removeFromSuperview()
             editLayoutContainer = nil
         }
-    }
-
-    /// Pull the strips back out of the chrome before the container goes away, so
-    /// they are never left parented to a header that no longer describes anything.
-    private func releaseHoistedStrips(from edit: EditLayoutContainerView) {
-        guard edit.stripsAreHoisted else { return }
-        onReleaseEditStrips?()
-        edit.restoreStrips()
     }
 
     private func makeEditContainer() -> EditLayoutContainerView {
@@ -1769,9 +1774,6 @@ extension DashboardViewController {
             guard let wt = self.currentWorktreePath else { return }
             self.previewSets.setSplitRatio(r, for: wt)
         }
-        edit.terminalTabStrip.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
-        edit.previewTabStrip.onSelect = { [weak self] id in self?.selectPreviewTab(id) }
-        edit.previewTabStrip.onClose = { [weak self] id in self?.closePreviewTab(id) }
         editLayoutContainer = edit
         return edit
     }
@@ -1952,7 +1954,7 @@ extension DashboardViewController {
                 closable: false
             )
         }
-        edit.terminalTabStrip.apply(items: termItems, selectedId: selectedLeaf)
+        chromeEditStrips()?.terminal.apply(items: termItems, selectedId: selectedLeaf)
 
         let files = previewSets.files(for: wt)
         let previewItems = files.map { path in
@@ -1962,7 +1964,7 @@ extension DashboardViewController {
                 closable: true
             )
         }
-        edit.previewTabStrip.apply(items: previewItems, selectedId: previewSets.activeFile(for: wt))
+        chromeEditStrips()?.preview.apply(items: previewItems, selectedId: previewSets.activeFile(for: wt))
     }
 
     private func terminalTabTitle(leaf: SplitNode.LeafInfo, worktree: String) -> String {

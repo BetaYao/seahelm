@@ -61,63 +61,63 @@ final class TerminalHeaderViewTests: XCTestCase {
         XCTAssertEqual(header.titleTextForTesting, "teamclaw · fix/thing")
     }
 
-    // MARK: - Hoisted tab strips
+    // MARK: - Edit-mode tab strips (owned by the header)
 
-    private func hoist(_ header: TerminalHeaderView, ratio: CGFloat)
-        -> (terminal: NSView, preview: NSView) {
-        let terminal = NSView()
-        let preview = NSView()
-        header.installEditStrips(terminal: terminal, preview: preview, ratio: ratio)
-        header.layoutSubtreeIfNeeded()
-        return (terminal, preview)
-    }
-
-    /// Hoisted strips take the whole row, so the label has nothing to say.
-    func testHoistedStripsHideTheLabel() {
+    /// The header owns the strips outright. They were previously moved up from the
+    /// columns, which left the moved strip's clip view seated at a non-zero vertical
+    /// origin — every frame stayed correct while the tabs sat outside the visible
+    /// rect, painting an empty row. Owning them removes that failure mode.
+    func testStripsAreOwnedAndHiddenUntilEditMode() {
         let header = makeHeader()
-        header.setPaneTitle("AGENTS.md")
-        XCTAssertFalse(header.titleTextForTesting.isEmpty)
+        XCTAssertTrue(header.editTerminalStrip.superview === header)
+        XCTAssertTrue(header.editPreviewStrip.superview === header)
+        XCTAssertTrue(header.editTerminalStrip.isHidden)
 
-        let strips = hoist(header, ratio: 0.5)
-        XCTAssertTrue(header.isTitleHiddenForTesting)
-        XCTAssertTrue(strips.terminal.superview === header)
+        header.setEditStripsActive(true, ratio: 0.5)
+        XCTAssertFalse(header.editTerminalStrip.isHidden)
+        XCTAssertFalse(header.editPreviewStrip.isHidden)
+        XCTAssertTrue(header.isTitleHiddenForTesting, "the strips take the whole row")
 
-        header.removeEditStrips()
-        XCTAssertFalse(header.isTitleHiddenForTesting, "releasing the strips gives the row back")
-        XCTAssertNil(strips.terminal.superview)
+        header.setEditStripsActive(false, ratio: 0.5)
+        XCTAssertTrue(header.editTerminalStrip.isHidden)
+        XCTAssertFalse(header.isTitleHiddenForTesting, "the row goes back to the title")
     }
 
     /// The seam has to land on the column divider, computed from the same width.
     func testSeamTracksTheDividerRatio() {
         let header = makeHeader()
-        let strips = hoist(header, ratio: 0.5)
-        let midSeam = strips.preview.frame.minX
+        header.setEditStripsActive(true, ratio: 0.5)
+        header.layoutSubtreeIfNeeded()
+        let midSeam = header.editPreviewStrip.frame.minX
 
         header.setEditStripRatio(0.75)
         header.layoutSubtreeIfNeeded()
-        XCTAssertGreaterThan(strips.preview.frame.minX, midSeam,
+        XCTAssertGreaterThan(header.editPreviewStrip.frame.minX, midSeam,
                              "a wider terminal column pushes the seam right")
     }
 
     /// A divider dragged to the far edge must not drive a strip negative.
     func testExtremeRatiosKeepBothStripsPositive() {
         let header = makeHeader()
-        let strips = hoist(header, ratio: 0.5)
+        header.setEditStripsActive(true, ratio: 0.5)
 
         for ratio in [0.0, 0.02, 0.98, 1.0] as [CGFloat] {
             header.setEditStripRatio(ratio)
             header.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(strips.terminal.frame.width, 0, "terminal strip at ratio \(ratio)")
-            XCTAssertGreaterThan(strips.preview.frame.width, 0, "preview strip at ratio \(ratio)")
+            XCTAssertGreaterThan(header.editTerminalStrip.frame.width, 0, "terminal strip at ratio \(ratio)")
+            XCTAssertGreaterThan(header.editPreviewStrip.frame.width, 0, "preview strip at ratio \(ratio)")
         }
     }
 
-    /// Re-installing must not leave the previous pair parented to the header.
-    func testReinstallReleasesThePreviousStrips() {
+    /// Tabs must be inside the scroll view's visible rect, not merely well-framed.
+    func testStripTabsAreVisibleOnTheHeaderRow() {
         let header = makeHeader()
-        let first = hoist(header, ratio: 0.5)
-        let second = hoist(header, ratio: 0.5)
-        XCTAssertNil(first.terminal.superview)
-        XCTAssertTrue(second.terminal.superview === header)
+        header.setEditStripsActive(true, ratio: 0.5)
+        header.editTerminalStrip.apply(items: [
+            .init(id: "a", title: "First", closable: false),
+        ], selectedId: "a")
+        header.layoutSubtreeIfNeeded()
+        XCTAssertEqual(header.editTerminalStrip.clipOriginYForTesting, 0)
+        XCTAssertTrue(header.editTerminalStrip.firstTabIsVisibleForTesting)
     }
 }

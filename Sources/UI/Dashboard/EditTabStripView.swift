@@ -67,6 +67,71 @@ final class EditTabStripView: NSView {
         ])
     }
 
+    /// The strip scrolls horizontally only — its content height always equals the
+    /// clip height, so the vertical clip origin must be zero.
+    ///
+    /// Moving the strip between view hierarchies (the columns ⇄ the chrome header)
+    /// makes AppKit re-seat the clip view at a non-zero vertical origin. Nothing
+    /// looks wrong from the outside — the strip, its scroll view, the document view
+    /// and every tab keep correct frames — but the visible rect slides off the tabs
+    /// and the row paints empty. Pin it on every layout pass.
+    override func layout() {
+        super.layout()
+        pinVerticalScroll()
+    }
+
+    /// Sitting in the chrome header puts the strip in window-drag territory: with
+    /// the default behaviour AppKit turns a press into a window move and never
+    /// delivers `mouseDown`, so hit testing alone is not enough to make tabs click.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Only the tabs themselves are interactive; the leftover space stays
+    /// transparent so the chrome header underneath keeps dragging the window.
+    ///
+    /// The lookup is geometric rather than a `super.hitTest` walk: the tabs sit
+    /// under a scroll view whose clip/flipped-document chain does not forward hit
+    /// tests here (it answers as the scroll view even for points that are inside
+    /// the document), which left every tab click falling through to the header's
+    /// window drag. Matching each tab's frame in this view's own space sidesteps
+    /// that chain entirely and is exactly as precise.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        for case let tab as TabButton in stack.arrangedSubviews {
+            guard tab.convert(tab.bounds, to: self).contains(local) else { continue }
+            guard let tabSuper = tab.superview else { return tab }
+            // Let the tab resolve its own close button; it answers as itself otherwise.
+            return tab.hitTest(convert(local, to: tabSuper)) ?? tab
+        }
+        return nil
+    }
+
+    /// Called from `layout()` and from `apply()`: the bad origin is left behind by a
+    /// transient during the move (the scroll view is briefly a different height, which
+    /// widens the clip's allowed range), and a single layout pass can run before the
+    /// frame settles. Re-asserting it on every model update bounds the damage to one
+    /// status-poll tick even if the layout pass misses.
+    private func pinVerticalScroll() {
+        let origin = scroll.contentView.bounds.origin
+        guard origin.y != 0 else { return }
+        scroll.contentView.setBoundsOrigin(NSPoint(x: origin.x, y: 0))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    var clipOriginYForTesting: CGFloat { scroll.contentView.bounds.origin.y }
+    /// First tab's frame in the strip's own coordinates.
+    var firstTabFrameForTesting: NSRect {
+        guard let tab = stack.arrangedSubviews.first else { return .zero }
+        return tab.convert(tab.bounds, to: self)
+    }
+
+    /// The property that actually broke: a tab can have a perfect frame and still
+    /// be outside the scroll view's visible rect, which paints an empty row.
+    var firstTabIsVisibleForTesting: Bool {
+        guard let tab = stack.arrangedSubviews.first, let doc = scroll.documentView else { return false }
+        return scroll.documentVisibleRect.intersects(tab.convert(tab.bounds, to: doc))
+    }
+
     // MARK: - Model application
 
     /// Update the strip. Rebuilds the tab views only when the id set changes;
@@ -78,6 +143,7 @@ final class EditTabStripView: NSView {
         self.items = newItems
         self.selectedId = selectedId
 
+        pinVerticalScroll()
         if idsChanged {
             rebuild()
         } else {
@@ -168,6 +234,18 @@ private final class TabButton: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// See `EditTabStripView.mouseDownCanMoveWindow` — without this the header's
+    /// window drag swallows the press before it reaches here.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Answer as the tab for everything except the close button: otherwise the
+    /// title label is the hit view, and it neither handles the press nor opts out
+    /// of the window drag.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit is NSButton ? hit : self
+    }
 
     override func mouseDown(with event: NSEvent) {
         onSelect?(itemId)

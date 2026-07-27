@@ -138,14 +138,15 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setCabinContext(context)
     }
 
-    /// Adopt edit mode's column tab strips onto the header row, so the two-column
-    /// layout costs one row of chrome instead of two.
-    func installEditStrips(terminal: NSView, preview: NSView, ratio: CGFloat) {
-        terminalHeader.installEditStrips(terminal: terminal, preview: preview, ratio: ratio)
+    /// Edit mode's column tab strips live on the header row, so the two-column
+    /// layout costs one row of chrome instead of two. The header owns the strips;
+    /// the dashboard populates them through `editStrips`.
+    var editStrips: (terminal: EditTabStripView, preview: EditTabStripView) {
+        (terminalHeader.editTerminalStrip, terminalHeader.editPreviewStrip)
     }
 
-    func removeEditStrips() {
-        terminalHeader.removeEditStrips()
+    func setEditStripsActive(_ active: Bool, ratio: CGFloat) {
+        terminalHeader.setEditStripsActive(active, ratio: ratio)
     }
 
     func setEditStripRatio(_ ratio: CGFloat) {
