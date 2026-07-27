@@ -125,7 +125,7 @@ jobs:
         # Restore-only: the arch jobs must never race to write it. Artifacts
         # would be the obvious alternative, but upload-artifact flattens the
         # symlinks inside an xcframework.
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/seahelm/ghosttykit
           key: ghosttykit-${{ needs.ghostty.outputs.sha }}
@@ -160,7 +160,7 @@ jobs:
         run: ./scripts/package_release.sh
 
       - name: Upload packaged app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.arch }}
           path: |
@@ -180,14 +180,14 @@ jobs:
 
     steps:
       - name: Download packaged apps
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist
           pattern: release-*
           merge-multiple: true
 
       - name: Create or update GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/seahelm-macos-arm64.zip
