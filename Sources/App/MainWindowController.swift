@@ -2193,6 +2193,9 @@ extension MainWindowController {
         model.onOptionTapped = { [weak self] order, optionText in
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
+        model.onRevealSuggestion = { [weak self] order in
+            self?.revealSuggestionPane(order)
+        }
         model.onDismissOrder = { [weak self] order in
             self?.tabCoordinator.pendingOrders.resolve(id: order.id)
         }
@@ -2215,6 +2218,22 @@ extension MainWindowController {
             self?.refreshIsland()
         }
         refreshIsland()
+    }
+
+    /// Jump to the pane that raised `order` without resolving the suggestion.
+    /// Used when the user taps blank area on an Island suggestion card.
+    private func revealSuggestionPane(_ order: PendingOrder) {
+        let path = order.action.worktreePath
+        tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: nil)
+        let terminalID = order.action.terminalID
+        // Embed/layout of the split container is deferred; focus after it lands.
+        if !terminalID.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.terminalCoordinator.focusPane(targetStationId: terminalID)
+            }
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Surface new suggestions in the First Mate sidebar while Seahelm is frontmost.
