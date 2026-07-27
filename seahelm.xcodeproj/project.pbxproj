@@ -37,7 +37,7 @@
 		132C344775FE1F50E1CD4C2B /* OpenedSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBEC0B8D9CEC4A93075C660 /* OpenedSurfaceView.swift */; };
 		15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */; };
 		15E702C37FE649AE0B93C724 /* ShipLogExternalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7660946C59FAE20F3B054C8D /* ShipLogExternalTests.swift */; };
-		16F8BAF43220432D8AEC04BD /* CocoaMQTTWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = 50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */; };
+		16F8BAF43220432D8AEC04BD /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = 870337C5ED57007BB471E70D /* CocoaMQTT */; };
 		1749D64808F01AA881A0E0A6 /* CabinSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B14DBAEF361B8C595C7893 /* CabinSidePanelViewController.swift */; };
 		17510269B7716B9D30A4C1E4 /* CabinTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC309B7D3B5C4341F08309E /* CabinTaskStore.swift */; };
 		18FF3BD4B6093BD5B1E4552C /* RegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8F0A0F456C94284935BE32 /* RegressionTests.swift */; };
@@ -100,7 +100,7 @@
 		4B8E890A2EF970F4967043B2 /* MenuRowButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1079E906A5CC63135C2DD5 /* MenuRowButton.swift */; };
 		4BABED7139C987D39C7BBE38 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968213FDE4B08CF2A98DB961 /* SessionManager.swift */; };
 		4BBA37E55963FD4DBDC549E4 /* WorkspaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07FF7C768D8C4871A88AA48 /* WorkspaceManager.swift */; };
-		4C4E27C9EB285988BAF4FE61 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */; };
+		4C4E27C9EB285988BAF4FE61 /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */; };
 		4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */; };
 		4DE34773F233CE9EB7C2B854 /* GlobalKeymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */; };
 		506F03CBC8DB229C2F20E98F /* EventHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA02A8188B616E0F6F413FC1 /* EventHub.swift */; };
@@ -183,6 +183,7 @@
 		8BB5F6D554A6F5BE68613FBA /* ProcessRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */; };
 		8BBCB395DA0D4E99A6407A59 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = D56E02C4A6D726C18E655451 /* main.swift */; };
 		8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E1906E0816DDA737033BBF1 /* AVFoundation.framework */; };
+		8E1E61817A3BCDCED663DAF6 /* CocoaMQTTWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = 50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */; };
 		8EABBB670FE78F05B40F735B /* IslandModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8704C54160BF8CD4FE29B9D6 /* IslandModel.swift */; };
 		8EAE24B6C81EA826474EEC90 /* StatusDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED6A0AE5886DB08F5B0D024C /* StatusDetector.swift */; };
 		8F0624099E494AEDE963E0CC /* FirstMateEvaluateOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4089897C96C2E4E3E151DDD2 /* FirstMateEvaluateOutcomeTests.swift */; };
@@ -271,7 +272,7 @@
 		BA68398C1166613FC959FDCD /* QuickLookUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D8F411B82FDF917ED61460FC /* QuickLookUI.framework */; };
 		BAC8750B961A40953BC4841F /* WorktreeDeleterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 810968D6A752BC9C5B9C5F27 /* WorktreeDeleterTests.swift */; };
 		BB5E223E00A8D668BDC9391C /* ChromeLayoutMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11134E3FD389088A2D35EEE /* ChromeLayoutMetrics.swift */; };
-		BBE067F3493F03DFD4EB56D5 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 105CE82C3D2CBF90259D60A2 /* Sparkle */; };
+		BBE067F3493F03DFD4EB56D5 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */; };
 		BC59B36704952688AFE19EDC /* SplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 849C6707188E7E90997D691A /* SplitTree.swift */; };
 		BC68C2573F261A3777F97617 /* ManifestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424F903BA02536FB4F76731C /* ManifestStore.swift */; };
 		BCEFB12FC9264290C08C5D51 /* ShellEscapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36FC6278CE9A15F68E6FAE89 /* ShellEscapeTests.swift */; };
@@ -349,7 +350,7 @@
 		EEF9D35496F94C190A4F90EA /* SeahelmHookInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */; };
 		EF25AD093968ED3CBC4A960B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95C6B4297D134649B185BC65 /* DividerView.swift */; };
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
-		F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = 870337C5ED57007BB471E70D /* CocoaMQTT */; };
+		F0A5FE9C41E1E500E1B441E5 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 105CE82C3D2CBF90259D60A2 /* Sparkle */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
 		F18B943680E61083D1FD04D8 /* OSCProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */; };
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
@@ -765,10 +766,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9F0C36BE9EDF1F4B6D49AD8 /* CodeEditSourceEditor in Frameworks */,
-				4C4E27C9EB285988BAF4FE61 /* CodeEditLanguages in Frameworks */,
-				BBE067F3493F03DFD4EB56D5 /* Sparkle in Frameworks */,
-				F0A5FE9C41E1E500E1B441E5 /* CocoaMQTT in Frameworks */,
-				16F8BAF43220432D8AEC04BD /* CocoaMQTTWebSocket in Frameworks */,
+				4C4E27C9EB285988BAF4FE61 /* CodeEditTextView in Frameworks */,
+				BBE067F3493F03DFD4EB56D5 /* CodeEditLanguages in Frameworks */,
+				F0A5FE9C41E1E500E1B441E5 /* Sparkle in Frameworks */,
+				16F8BAF43220432D8AEC04BD /* CocoaMQTT in Frameworks */,
+				8E1E61817A3BCDCED663DAF6 /* CocoaMQTTWebSocket in Frameworks */,
 				26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */,
 				619695CCD02199EC32866D47 /* AVKit.framework in Frameworks */,
 				8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */,
@@ -1436,6 +1438,7 @@
 			name = seahelm;
 			packageProductDependencies = (
 				D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */,
+				4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */,
 				E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */,
 				105CE82C3D2CBF90259D60A2 /* Sparkle */,
 				870337C5ED57007BB471E70D /* CocoaMQTT */,
@@ -1511,6 +1514,7 @@
 				37DD6A91337E3B7C31F65836 /* XCRemoteSwiftPackageReference "CocoaMQTT" */,
 				2F3EFE65E8440A84CD063ABD /* XCRemoteSwiftPackageReference "CodeEditLanguages" */,
 				AFC63521AAE2DCF8B01B885F /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
+				9F58A30C40AB456F590C96E0 /* XCRemoteSwiftPackageReference "CodeEditTextView" */,
 				6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -2315,6 +2319,14 @@
 				minimumVersion = 2.9.0;
 			};
 		};
+		9F58A30C40AB456F590C96E0 /* XCRemoteSwiftPackageReference "CodeEditTextView" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/BetaYao/CodeEditTextView";
+			requirement = {
+				kind = exactVersion;
+				version = 0.12.2;
+			};
+		};
 		AFC63521AAE2DCF8B01B885F /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/CodeEditApp/CodeEditSourceEditor";
@@ -2330,6 +2342,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9F58A30C40AB456F590C96E0 /* XCRemoteSwiftPackageReference "CodeEditTextView" */;
+			productName = CodeEditTextView;
 		};
 		50D767079D3D85012BEB2336 /* CocoaMQTTWebSocket */ = {
 			isa = XCSwiftPackageProductDependency;
