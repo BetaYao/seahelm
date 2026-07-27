@@ -64,6 +64,8 @@ final class IslandModel {
     // Wired by MainWindowController.
     var onNavigate: ((_ worktreePath: String, _ paneIndex: Int?) -> Void)?
     var onOptionTapped: ((_ order: PendingOrder, _ optionText: String) -> Void)?
+    /// Jump to the pane that raised a suggestion without resolving the card.
+    var onRevealSuggestion: ((_ order: PendingOrder) -> Void)?
     /// Dismiss a suggestion card without acting on it.
     var onDismissOrder: ((_ order: PendingOrder) -> Void)?
     /// Bridge command submit (same handler as the First Mate composer).

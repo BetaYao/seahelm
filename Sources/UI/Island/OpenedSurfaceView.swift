@@ -51,7 +51,11 @@ struct OpenedSurfaceView: View {
                                        onOption: { optionText in
                                            model.onOptionTapped?(order, optionText)
                                        },
-                                       onDismiss: { model.onDismissOrder?(order) })
+                                       onDismiss: { model.onDismissOrder?(order) },
+                                       onReveal: {
+                                           model.onRevealSuggestion?(order)
+                                           model.close()
+                                       })
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 } else {
@@ -325,6 +329,8 @@ private struct SuggestionCard: View {
     let order: PendingOrder
     let onOption: (String) -> Void
     let onDismiss: () -> Void
+    /// Blank-area tap: jump to the raising pane without resolving the card.
+    let onReveal: () -> Void
 
     private var isQuestion: Bool {
         FirstMateAction.isQuestionPayload(order.action.payload)
@@ -361,6 +367,7 @@ private struct SuggestionCard: View {
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Options keep their own taps so they don't bubble to onReveal.
             OptionList(options: order.action.options ?? [], onTap: onOption)
         }
         .padding(12)
@@ -372,6 +379,8 @@ private struct SuggestionCard: View {
                         .stroke(IslandStyle.accent.opacity(0.3), lineWidth: 1)
                 )
         )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture { onReveal() }
     }
 }
 
