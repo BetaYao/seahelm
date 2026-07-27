@@ -7,9 +7,6 @@ import SwiftUI
 struct IslandRootView: View {
     @Bindable var model: IslandModel
     @State private var hoveringPill = false
-    /// Shared namespace so elements that exist in both states (the unread
-    /// badge) slide between their closed and opened positions.
-    @Namespace private var islandNamespace
 
     private static let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8)
     /// Critically damped: closing snaps shut with no wobble.
@@ -23,7 +20,7 @@ struct IslandRootView: View {
         VStack(spacing: 0) {
             headerBand
             if model.isOpened {
-                OpenedSurfaceView(model: model, namespace: islandNamespace)
+                OpenedSurfaceView(model: model)
                     .background(
                         GeometryReader { geo in
                             Color.clear.preference(
@@ -59,7 +56,6 @@ struct IslandRootView: View {
         )
         .scaleEffect(pillScale, anchor: .top)
         .animation(transitionAnimation, value: model.state)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: model.transientText)
         .onHover { inside in
             withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                 hoveringPill = inside
@@ -77,7 +73,7 @@ struct IslandRootView: View {
     private var headerBand: some View {
         ZStack {
             if !model.isOpened {
-                ClosedPillView(model: model, namespace: islandNamespace)
+                ClosedPillView(model: model)
                     .transition(.opacity.animation(.easeOut(duration: 0.15)))
             }
         }

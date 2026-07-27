@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// Expanded island: suggestion/question cards with tappable option chips,
-/// then per-worktree agent rows, then recent notifications.
+/// then per-worktree agent rows. Status notifications are not mirrored here —
+/// they go to Notification Center.
 struct OpenedSurfaceView: View {
     let model: IslandModel
-    let namespace: Namespace.ID
     @State private var hoveredRowID: String?
     @State private var commandText = ""
     @FocusState private var commandFocused: Bool
@@ -32,7 +32,6 @@ struct OpenedSurfaceView: View {
         // animates instead of hard-swapping.
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.unreadCount)
     }
 
     /// Auto-height list area: renders at natural height, and past the cap it
@@ -65,15 +64,6 @@ struct OpenedSurfaceView: View {
                         }
                     }
 
-                    if !model.recentNotifications.isEmpty {
-                        Divider().overlay(IslandStyle.accent.opacity(0.14))
-                        VStack(spacing: 2) {
-                            ForEach(model.recentNotifications) { entry in
-                                notificationRow(entry)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-                        }
-                    }
                 }
             }
             .background(
@@ -264,27 +254,7 @@ struct OpenedSurfaceView: View {
             Text("Seahelm")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
-            if model.unreadCount > 0 {
-                Text("\(model.unreadCount) unread")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .contentTransition(.numericText(value: Double(model.unreadCount)))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(IslandStyle.accent.opacity(0.22)))
-                    .matchedGeometryEffect(id: "unread-badge", in: namespace, isSource: model.isOpened)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-            }
             Spacer()
-            if model.unreadCount > 0 {
-                // onTapGesture, not Button: SwiftUI Buttons in a
-                // non-activating panel swallow the click for key acquisition.
-                Text("Read all")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.onMarkAllRead?() }
-            }
         }
     }
 
@@ -348,38 +318,6 @@ struct OpenedSurfaceView: View {
             }
     }
 
-    private func notificationRow(_ entry: NotificationEntry) -> some View {
-        HStack(spacing: 8) {
-                Text(entry.status.icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color(nsColor: entry.status.color))
-                if !entry.workspaceName.isEmpty {
-                    Text(entry.workspaceName)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(1)
-                }
-                Text(entry.branch)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .lineLimit(1)
-                Text(entry.message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Text(entry.timestamp, style: .relative)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                model.onNavigate?(entry.worktreePath, entry.paneIndex)
-                model.close()
-            }
-    }
 }
 
 /// A pending suggest/question order rendered as a card with option chips.

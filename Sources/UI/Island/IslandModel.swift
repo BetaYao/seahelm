@@ -30,7 +30,7 @@ enum IslandState: Equatable {
 enum IslandOpenReason: Equatable {
     case hover
     case click
-    case event // a suggestion/notification forced the island open
+    case event // a suggestion forced the island open
 }
 
 /// Observable state driving the island's SwiftUI content. All mutation on main.
@@ -43,14 +43,10 @@ final class IslandModel {
     var openReason: IslandOpenReason?
 
     var rows: [IslandAgentRow] = []
-    var primaryEntry: NotificationEntry?
-    var unreadCount: Int = 0
+    /// Suggestions waiting on the user to pick an option. This is the island's
+    /// only attention signal — status notifications go to Notification Center
+    /// and are not mirrored here.
     var orders: [PendingOrder] = []
-    /// Snapshot of the newest unread notifications, refreshed by
-    /// MainWindowController.refreshIsland. Stored (not computed in the view)
-    /// so opening the island doesn't re-filter the full history per body eval.
-    var recentNotifications: [NotificationEntry] = []
-    static let maxRecentNotifications = 5
 
     /// Screen geometry, set by the panel controller.
     var notchWidth: CGFloat = 190
@@ -70,7 +66,6 @@ final class IslandModel {
     var onOptionTapped: ((_ order: PendingOrder, _ optionText: String) -> Void)?
     /// Dismiss a suggestion card without acting on it.
     var onDismissOrder: ((_ order: PendingOrder) -> Void)?
-    var onMarkAllRead: (() -> Void)?
     /// Bridge command submit (same handler as the First Mate composer).
     var onSubmitCommand: ((String) -> Void)?
     /// `/ @ #` autocomplete source — same provider as the cockpit composer.
@@ -81,12 +76,7 @@ final class IslandModel {
     /// One-shot: focus the command field without changing its text (double-Ctrl).
     var pendingCommandFocus: Bool = false
 
-    /// Transient one-line text shown in the closed pill's left wing when a
-    /// notification arrives (cleared automatically).
-    var transientText: String?
-
     private var popRevertWork: DispatchWorkItem?
-    private var transientClearWork: DispatchWorkItem?
 
     var isOpened: Bool { state == .opened }
 
@@ -117,31 +107,15 @@ final class IslandModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.popDuration, execute: work)
     }
 
-    /// Show `text` in the pill for a few seconds alongside a pop.
-    func flashTransient(_ text: String) {
-        transientText = text
-        transientClearWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.transientText = nil
-        }
-        transientClearWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
-        pop()
-    }
-
     /// Width of the closed pill. On a notched display it is locked to the
     /// physical notch plus symmetric wings so it merges with the hardware
     /// notch; on external displays it is a fixed simulated-notch width.
-    /// A transient label widens both wings symmetrically so the notch stays
-    /// centered on the screen.
     var closedWidth: CGFloat {
         let popBonus: CGFloat = state == .popping ? 18 : 0
-        let transientBonus: CGFloat = transientText != nil ? 260 : 0
         if isNotchedDisplay {
-            return notchWidth + 88 + popBonus + transientBonus
+            return notchWidth + 88 + popBonus
         }
-        return min(360, notchWidth + 170) + popBonus + transientBonus
+        return min(360, notchWidth + 170) + popBonus
     }
 
     /// Sessions needing attention first, then the rest — pill tile order.
@@ -157,9 +131,5 @@ final class IslandModel {
         case .idle: return 1
         case .unknown: return 0
         }
-    }
-
-    var hasAttention: Bool {
-        unreadCount > 0 || !orders.isEmpty
     }
 }

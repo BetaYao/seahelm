@@ -83,9 +83,11 @@ class MainWindowController: NSWindowController {
     // Vibe-island notch overlay
     private let islandController = IslandPanelController()
     private var islandRefreshTimer: Timer?
-    private var historyChangeObserver: NSObjectProtocol?
     private var islandKnownOrderIDs: Set<String> = []
-    private var islandKnownUnread = 0
+    /// Suggestion orders already surfaced through the First Mate sidebar. Tracked
+    /// separately from `islandKnownOrderIDs`: the island's set is also advanced by
+    /// its 10s fallback timer, which would eat the "new order" edge this needs.
+    private var revealedSuggestionOrderIDs: Set<String> = []
 
     // Terminal management
     /// GitHub token 解析，来源优先级：
@@ -380,6 +382,7 @@ class MainWindowController: NSWindowController {
         )
         handleNotificationHistoryDidChange(nil)
         setupIsland()
+        setupSuggestionReveal()
         usageSummaryStore.onUpdate = { _ in }
         usageSummaryStore.start()
     }
@@ -1694,9 +1697,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         primaryCapsuleDismissWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
         NotificationCenter.default.removeObserver(self, name: .notificationHistoryDidChange, object: nil)
-        if let historyChangeObserver {
-            NotificationCenter.default.removeObserver(historyChangeObserver)
-        }
     }
 
     // MARK: - Split Pane Actions (forwarded to TerminalCoordinator)
@@ -2196,9 +2196,6 @@ extension MainWindowController {
         model.onDismissOrder = { [weak self] order in
             self?.tabCoordinator.pendingOrders.resolve(id: order.id)
         }
-        model.onMarkAllRead = {
-            NotificationHistory.shared.markAllRead()
-        }
         model.onSubmitCommand = { [weak self] text in
             _ = self?.submitBridgeCommand(text)
         }
@@ -2211,19 +2208,45 @@ extension MainWindowController {
             self?.refreshIsland()
         }
         // Push-driven: worktree status changes arrive via
-        // tabCoordinatorRequestUpdateTitleBar, notification changes via the
-        // history's NotificationCenter post. The timer is only a slow fallback
-        // for async stragglers (e.g. title resolution finishing later).
-        historyChangeObserver = NotificationCenter.default.addObserver(
-            forName: .notificationHistoryDidChange,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.refreshIsland()
-        }
+        // tabCoordinatorRequestUpdateTitleBar. The timer is only a slow
+        // fallback for async stragglers (e.g. title resolution finishing
+        // later). Notification history no longer feeds the island.
         islandRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.refreshIsland()
         }
         refreshIsland()
+    }
+
+    /// Surface new suggestions in the First Mate sidebar while Seahelm is frontmost.
+    /// The island deliberately stays collapsed then (`openForEvent` bails on an
+    /// active app) — dropping a panel over the notch you are already looking at
+    /// reads as a glitch, and the sidebar is where the card lives anyway.
+    /// Registered independently of the island so it still works with it disabled.
+    private func setupSuggestionReveal() {
+        guard NSClassFromString("XCTestCase") == nil else { return }
+        tabCoordinator.pendingOrders.addObserver { [weak self] in
+            self?.revealFirstMateForNewSuggestions()
+        }
+        revealFirstMateForNewSuggestions()
+    }
+
+    private func revealFirstMateForNewSuggestions() {
+        let orderIDs = Set(
+            tabCoordinator.pendingOrders.all()
+                .filter { $0.action.kind == .suggestNextOrder }
+                .map(\.id)
+        )
+        let hasNewOrder = !orderIDs.subtracting(revealedSuggestionOrderIDs).isEmpty
+        revealedSuggestionOrderIDs = orderIDs
+        // Only while frontmost: in the background the island already pops, and
+        // re-opening the sidebar on a suggestion the user never saw arrive would
+        // rearrange the window behind their back.
+        guard hasNewOrder, NSApp.isActive else { return }
+        guard chromeState.isCollapsed || chromeState.activePane != .firstMate else { return }
+        // Layout only — first responder stays in the terminal so the reveal never
+        // eats a keystroke mid-sentence.
+        chromeState.setActivePane(.firstMate)
+        applyChromeState(animated: true)
     }
 
     fileprivate func refreshIsland() {
@@ -2277,38 +2300,20 @@ extension MainWindowController {
         // Equality-gate every assignment: this runs on a 2s timer, and an
         // ungated @Observable set re-evaluates the SwiftUI island every tick
         // even when nothing changed.
-        let primary = primaryCapsuleNotification
-        if model.primaryEntry != primary { model.primaryEntry = primary }
-        let unread = NotificationHistory.shared.unreadCount
-        if model.unreadCount != unread { model.unreadCount = unread }
-        let recent = Array(
-            NotificationHistory.shared.entries
-                .filter { !$0.isRead }
-                .prefix(IslandModel.maxRecentNotifications)
-        )
-        if model.recentNotifications != recent { model.recentNotifications = recent }
-
         let orders = tabCoordinator.pendingOrders.all()
             .filter { $0.action.kind == .suggestNextOrder }
         if model.orders != orders { model.orders = orders }
 
-        // Pop the pill when something new needs attention while closed.
+        // A new suggestion is actionable — expand so the card is visible
+        // without hovering. Nothing else opens the island: status changes are
+        // Notification Center's job. This only lands while Seahelm is in the
+        // background (`openForEvent` bails on an active app); frontmost, the
+        // First Mate sidebar carries the suggestion instead.
         let orderIDs = Set(orders.map(\.id))
         let hasNewOrder = !orderIDs.subtracting(islandKnownOrderIDs).isEmpty
-        let hasNewUnread = model.unreadCount > islandKnownUnread
         islandKnownOrderIDs = orderIDs
-        islandKnownUnread = model.unreadCount
         if hasNewOrder && !model.isOpened {
-            // A suggestion is actionable — expand so the card is visible
-            // without hovering. Plain notifications just pop the pill.
             islandController.openForEvent()
-        } else if hasNewUnread && !model.isOpened {
-            if let entry = primaryCapsuleNotification ?? NotificationHistory.shared.entries.first {
-                let name = entry.workspaceName.isEmpty ? entry.branch : entry.workspaceName
-                model.flashTransient("\(name) · \(entry.message)")
-            } else {
-                model.pop()
-            }
         }
         islandController.updateVisibility()
     }
@@ -2335,7 +2340,6 @@ extension MainWindowController {
 
     @objc private func handleNotificationHistoryDidChange(_ notification: Notification?) {
         updatePrimaryCapsuleNotification()
-        refreshIsland()
     }
 
     private func updatePrimaryCapsuleNotification() {
