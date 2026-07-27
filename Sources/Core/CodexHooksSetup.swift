@@ -26,8 +26,12 @@ enum CodexHooksSetup {
     ///
     /// stderr stays discarded, and separately: merging it into stdout (`2>&1`)
     /// would splice diagnostics into the JSON Codex parses.
+    ///
+    /// The `codex` argument tags the payload with its source, so the receiving
+    /// side never has to infer Claude vs Codex from payload keys — an inference
+    /// the two tools' converging schemas have made unreliable.
     private static func hookCommand() -> String {
-        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) 2>/dev/null || true'"
+        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) codex 2>/dev/null || true'"
     }
 
     private static func hookConfig() -> [[String: Any]] {

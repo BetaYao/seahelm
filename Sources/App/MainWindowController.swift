@@ -48,7 +48,7 @@ class MainWindowController: NSWindowController {
 
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
-    let keyboardMode = KeyboardModeController()
+    let keyboardSubstate = KeyboardSubstateController()
     /// Outer Tab-cycle focus among panes / sidebar / chrome header / helm.
     let regionFocus = RegionFocusController()
     private var windowTrackingArea: NSTrackingArea?
@@ -538,7 +538,6 @@ class MainWindowController: NSWindowController {
         guard chromeState.isCollapsed != collapsed else {
             // Still refresh dashboard content / keyboard when already in sync.
             dashboardVC?.adoptChromeCollapse(collapsed, activePane: chromeState.activePane)
-            syncKeyboardToChromeCollapse()
             return
         }
         chromeState.setCollapsed(collapsed)
@@ -555,7 +554,6 @@ class MainWindowController: NSWindowController {
         windowChrome?.applyState(chromeState, animated: animated)
         positionStandardWindowButtons()
         dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed, activePane: chromeState.activePane)
-        syncKeyboardToChromeCollapse()
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
         persistChromeLayout()
@@ -582,14 +580,6 @@ class MainWindowController: NSWindowController {
         }
         guard changed else { return }
         saveConfig()
-    }
-
-    private func syncKeyboardToChromeCollapse() {
-        if chromeState.isCollapsed {
-            keyboardMode.enterInsert()
-        } else {
-            keyboardMode.enterNormal()
-        }
     }
 
     private func refreshChromeWorktreeContextEnabled() {
@@ -696,6 +686,24 @@ class MainWindowController: NSWindowController {
     private func openIslandCommandFromHotkey() {
         guard config.islandEnabled else { return }
         islandController.openCommandBarFocused()
+    }
+
+    /// Cmd+P — the command palette. The island already *is* a focusable overlay
+    /// panel with a command field, so this opens that rather than introducing a
+    /// second floating surface. Pressing it again closes it.
+    func toggleCommandPalette() {
+        guard config.islandEnabled else {
+            // No island: fall back to the dashboard composer, same as Cmd+N does,
+            // but with no prefill — the palette is for picking, not for `/new`.
+            tabCoordinator.switchToTab(0)
+            dashboardVC?.startNewCommand(prefill: "")
+            return
+        }
+        if islandController.isCommandBarOpen {
+            islandController.closeCommandBar()
+        } else {
+            islandController.openCommandBarFocused()
+        }
     }
 
     /// Global key monitors require Accessibility trust; prompt once if missing.
@@ -813,8 +821,6 @@ class MainWindowController: NSWindowController {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(contentContainer)
 
-        keyboardMode.delegate = self
-
         NSLayoutConstraint.activate([
             backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
             backgroundEffectView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -874,16 +880,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
             // Drilling into a terminal collapses the chrome sidebar (INSERT).
             self?.setChromeCollapsed(true)
         }
-        // ViewMode is a deprecated alias of chrome collapse; keyboard follows chrome.
-        dashboard.onViewModeChanged = { [weak self] mode in
-            guard let self else { return }
-            // Prefer chrome SSOT; ViewMode should already match after adoptChromeCollapse.
-            if mode == .terminal || self.chromeState.isCollapsed {
-                self.keyboardMode.enterInsert()
-            } else {
-                self.keyboardMode.enterNormal()
-            }
-        }
         dashboard.onRequestToggleChromeCollapse = { [weak self] in
             self?.toggleChromeCollapsed()
         }
@@ -901,6 +897,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onEditModeStateChange = { [weak self] available, isOn in
             self?.windowChrome?.setEditMode(available: available, isOn: isOn)
         }
+        // Edit mode's column tab strips live on the chrome header row: the two
+        // columns then cost one row of chrome instead of two.
+        dashboard.editStripsProvider = { [weak self] in self?.windowChrome?.editStrips }
+        dashboard.onEditModeStripsActive = { [weak self] active, ratio in
+            self?.windowChrome?.setEditStripsActive(active, ratio: ratio)
+        }
+        dashboard.onEditStripRatioChange = { [weak self] ratio in
+            self?.windowChrome?.setEditStripRatio(ratio)
+        }
         // Keep chrome header icon tint in sync when dashboard changes side.
         dashboard.onActiveToolChanged = { [weak self] pane in
             guard let self else { return }
@@ -915,7 +920,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
         }
         dashboard.onInlineCreateFormEnd = { [weak self] in
-            self?.keyboardMode.endCreateForm()
+            self?.keyboardSubstate.endCreateForm()
             self?.tabCoordinator.dashboardVC?.enterDashboardNavigation()
         }
 
@@ -1547,8 +1552,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         if collapseChanged || paneChanged {
             dashboardVC?.adoptChromeCollapse(state.isCollapsed, activePane: state.activePane)
             if collapseChanged {
-                syncKeyboardToChromeCollapse()
-            }
+                }
         }
     }
 
@@ -1657,6 +1661,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
+        windowChrome?.updateCabinContext(Self.cabinContext(repo: repo, sailor: agent))
+    }
+
+    /// `repo · branch`, skipping either half when it is missing or would repeat the
+    /// other — the fleet row builds its branch label the same way.
+    static func cabinContext(repo: String, sailor: SailorDisplayInfo) -> String {
+        let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+        let parts = [repo, branch]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(NSOrderedSet(array: parts)).compactMap { $0 as? String }.joined(separator: " · ")
     }
 
 
@@ -1772,8 +1787,10 @@ class SeahelmWindow: NSWindow {
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
             mwc.toggleChromeCollapsed(); return true
-        case .exitInsert:
+        case .navigateBack:
             mwc.navigateBack(); return true
+        case .commandPalette:
+            mwc.toggleCommandPalette(); return true
         case .toggleOverview:
             mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
         case .firstMatePane:
@@ -1826,8 +1843,7 @@ class SeahelmWindow: NSWindow {
             // regions (dashboard's keyDown won't see these — icons are first responder).
             if event.keyCode == 48,
                let mwc = windowController as? MainWindowController,
-               mwc.keyboardMode.mode == .normal,
-               mwc.keyboardMode.substate == .none,
+               mwc.keyboardSubstate.isIdle,
                mwc.regionFocus.current == .titlebar {
                 let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 if flags.isDisjoint(with: [.command, .control, .option]) {
@@ -2501,17 +2517,6 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
         worktreeDidDelete(info)
-    }
-}
-
-// MARK: - KeyboardModeDelegate
-
-extension MainWindowController: KeyboardModeDelegate {
-    func keyboardModeDidChange(_ mode: KeyboardMode, substate: KeyboardSubstate) {
-        // Status bar removed — mode still drives keyboard routing.
-    }
-    func keyboardHintDidChange(_ hint: String) {
-        // Status bar removed — hints unused in chrome.
     }
 }
 

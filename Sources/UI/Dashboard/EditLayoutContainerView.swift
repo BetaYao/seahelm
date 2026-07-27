@@ -11,8 +11,6 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
     let terminalHost = NSView()
     /// Host for the active preview file's content view.
     let previewHost = NSView()
-    let terminalTabStrip = EditTabStripView()
-    let previewTabStrip = EditTabStripView()
 
     /// Fraction of width given to the LEFT (terminal) column.
     private var ratio: CGFloat
@@ -22,6 +20,7 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
     private let leftColumn = NSView()
     private let rightColumn = NSView()
     private let divider = DividerView(splitNodeId: "editmode.column", axis: .horizontal)
+
 
     init(ratio: CGFloat) {
         self.ratio = ratio
@@ -42,27 +41,26 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
         divider.delegate = self
         addSubview(divider)
 
-        configureColumn(leftColumn, strip: terminalTabStrip, host: terminalHost)
-        configureColumn(rightColumn, strip: previewTabStrip, host: previewHost)
+        configureColumn(leftColumn, host: terminalHost)
+        configureColumn(rightColumn, host: previewHost)
     }
 
-    private func configureColumn(_ column: NSView, strip: EditTabStripView, host: NSView) {
-        strip.translatesAutoresizingMaskIntoConstraints = false
+    /// The columns are pure hosts: edit mode's tab strips live on the chrome
+    /// header row, so a column never carries a strip row of its own.
+    private func configureColumn(_ column: NSView, host: NSView) {
         host.translatesAutoresizingMaskIntoConstraints = false
         host.wantsLayer = true
-        column.addSubview(strip)
         column.addSubview(host)
         NSLayoutConstraint.activate([
-            strip.topAnchor.constraint(equalTo: column.topAnchor),
-            strip.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            strip.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-
-            host.topAnchor.constraint(equalTo: strip.bottomAnchor),
+            host.topAnchor.constraint(equalTo: column.topAnchor),
             host.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             host.bottomAnchor.constraint(equalTo: column.bottomAnchor),
         ])
     }
+
+    /// The divider fraction, so the hoisted strip row splits at the same seam.
+    var currentRatio: CGFloat { ratio }
 
     /// Apply a stored per-worktree ratio (e.g. when switching worktrees while the
     /// container is reused). No-op if unchanged.

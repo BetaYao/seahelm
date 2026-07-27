@@ -10,28 +10,55 @@ enum OnboardingHookInstaller {
         SeahelmCliInstaller.ensureInstalled()
     }
 
-    /// Install hooks for the given agent manifest ids (`claude`, `codex`, …).
-    static func install(agents: [String]) {
-        guard !agents.isEmpty else { return }
-        installSharedBridge()
+    /// One installed component and whether it landed. The onboarding wizard shows
+    /// these on its final step — hook installation used to be entirely silent, so
+    /// a failure (unwritable `~/.claude/settings.json`, say) looked identical to
+    /// success right up until status detection quietly didn't work.
+    struct InstallStep {
+        let name: String
+        let detail: String
+        let ok: Bool
+    }
+
+    /// Install hooks for the given agent manifest ids (`claude`, `codex`, …),
+    /// reporting what happened. `install(agents:)` is the fire-and-forget form.
+    @discardableResult
+    static func install(agents: [String]) -> [InstallStep] {
+        guard !agents.isEmpty else { return [] }
+        var steps: [InstallStep] = [
+            InstallStep(name: "Hook bridge", detail: "~/.local/bin/seahelm-hook",
+                        ok: SeahelmHookInstaller.ensureInstalled()),
+            InstallStep(name: "Suggestion bridge", detail: "~/.local/bin/seahelm-suggest",
+                        ok: SeahelmSuggestInstaller.ensureInstalled()),
+            InstallStep(name: "seahelm CLI", detail: "~/.local/bin/seahelm",
+                        ok: SeahelmCliInstaller.ensureInstalled()),
+        ]
         let set = Set(agents.map { $0.lowercased() })
         if set.contains("claude") {
-            ClaudeHooksSetup.ensureHooksConfigured()
-            ClaudeStatuslineBridgeInstaller.ensureInstalled()
-            SeahelmSkillInstaller.ensureInstalled()
+            steps.append(InstallStep(name: "Claude Code hooks", detail: "~/.claude/settings.json",
+                                     ok: ClaudeHooksSetup.ensureHooksConfigured()))
+            steps.append(InstallStep(name: "Claude statusline", detail: "~/.claude/settings.json",
+                                     ok: ClaudeStatuslineBridgeInstaller.ensureInstalled()))
+            steps.append(InstallStep(name: "seahelm skill", detail: "~/.claude/skills/seahelm",
+                                     ok: SeahelmSkillInstaller.ensureInstalled()))
         }
         if set.contains("codex") {
-            CodexHooksSetup.ensureHooksConfigured()
+            steps.append(InstallStep(name: "Codex hooks", detail: "~/.codex/hooks.json",
+                                     ok: CodexHooksSetup.ensureHooksConfigured()))
         }
         if set.contains("cursor") {
-            CursorHooksSetup.ensureHooksConfigured()
+            steps.append(InstallStep(name: "Cursor hooks", detail: "~/.cursor/hooks.json",
+                                     ok: CursorHooksSetup.ensureHooksConfigured()))
         }
         if set.contains("opencode") {
-            OpenCodePluginInstaller.ensureInstalled()
+            steps.append(InstallStep(name: "OpenCode plugin", detail: "~/.config/opencode/plugin",
+                                     ok: OpenCodePluginInstaller.ensureInstalled()))
         }
         if set.contains("pi") {
-            PiExtensionInstaller.ensureInstalled()
+            steps.append(InstallStep(name: "Pi extension", detail: "~/.pi/agent",
+                                     ok: PiExtensionInstaller.ensureInstalled()))
         }
+        return steps
     }
 
     /// Launch-time install: use `enabledHookAgents` when non-empty, otherwise

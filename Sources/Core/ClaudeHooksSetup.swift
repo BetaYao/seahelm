@@ -7,8 +7,16 @@ enum ClaudeHooksSetup {
     /// Hook events seahelm requires. Now uses a `command` hook running the
     /// seahelm-hook bridge (socket-primary, HTTP fallback) instead of a direct
     /// `type:"http"` hook — moves reporting onto the fs-scoped control socket.
+    ///
+    /// The `claude-code` argument tags every payload with its source. Without it
+    /// the receiving side has to guess Claude vs Codex from payload keys, and
+    /// Claude's own `agent_id`/`agent_type`/`duration_ms` fields make that guess
+    /// land on Codex — retyping the pane on every tool call.
     private static func requiredHooks() -> [String: [[String: Any]]] {
-        let hookEntry: [String: Any] = ["type": "command", "command": SeahelmHookInstaller.scriptPath()]
+        let hookEntry: [String: Any] = [
+            "type": "command",
+            "command": "\(SeahelmHookInstaller.scriptPath()) claude-code",
+        ]
         let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]
         return [
             "SessionStart": hookGroup,

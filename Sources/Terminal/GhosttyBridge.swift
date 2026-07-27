@@ -400,7 +400,13 @@ class GhosttyBridge {
                 // Encode as ConEmu-style "state;percent" so manifest osc_progress
                 // rules can match (e.g. "^4;0" = done). state 0=remove,1=set,2=error…
                 let percent = r.progress < 0 ? "" : String(r.progress)
-                station.setOscProgress("\(r.state.rawValue);\(percent)")
+                let wire = "\(r.state.rawValue);\(percent)"
+                station.setOscProgress(wire)
+                // Drive the pane's progress bar directly: the 2s status poll is far
+                // too coarse to track a command's progress, and actions can arrive
+                // off the main thread.
+                let decoded = OSCProgress(wire: wire)
+                DispatchQueue.main.async { station.view?.updateProgress(decoded) }
             }
             return true
         case GHOSTTY_ACTION_RELOAD_CONFIG:

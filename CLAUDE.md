@@ -14,6 +14,7 @@ scripts/setup.sh
 
 # Build into .build/, kill any running Seahelm, and launch the debug app
 ./run.sh                 # add --clean-restart to wipe .build first
+./run.sh --onboarding    # force the first-launch wizard (passes --show-onboarding)
 
 # Run UI tests (regenerates the project, optionally filtered to one class)
 ./run_ui_tests.sh [TestClass]

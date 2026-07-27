@@ -8,9 +8,30 @@ options:
   defaultConfig: Debug
 
 packages:
+  # NOTE: upstream CodeEditApp appears to have stopped work on both of the packages
+  # below — no commits since ~April 2026, and the last releases are 0.15.2 (Sep 2025)
+  # for CodeEditSourceEditor and 0.12.1 (Jul 2025) for CodeEditTextView. Don't go
+  # looking for a newer version to pick up a fix; there won't be one. See the fork
+  # note on CodeEditTextView. We keep it anyway because it is the only MIT-licensed,
+  # AppKit-native, tree-sitter-backed editor component that exists — the one actively
+  # maintained alternative (krzyzanowskim/STTextView) is GPLv3-or-paid, which a
+  # closed-source notarized app can't take.
   CodeEditSourceEditor:
     url: https://github.com/CodeEditApp/CodeEditSourceEditor
     exactVersion: 0.15.2
+  # Fork of CodeEditApp/CodeEditTextView, the text engine CodeEditSourceEditor sits on.
+  # Upstream clamps the drag pointer to x >= 0, but the layout manager can only resolve
+  # offsets at x >= edgeInsets.left — the strip the gutter is drawn over. Positions
+  # further left returned nil, which made mouseDragged bail early and drop the whole
+  # event, so a drag toward the top-left froze the selection a few characters into the
+  # top line. Fixed in BetaYao@543f214 by clamping into the inset region instead.
+  #
+  # Declared here purely to override the transitive dependency: CodeEditSourceEditor
+  # asks for `from: "0.12.1"`, and SPM resolves both to the same package identity, so
+  # our 0.12.2 wins. Rebase the fork on upstream if it ever ships again.
+  CodeEditTextView:
+    url: https://github.com/BetaYao/CodeEditTextView
+    exactVersion: 0.12.2
   # Fork of CodeEditApp/CodeEditLanguages that links only the tree-sitter grammars
   # this app needs. Upstream's CodeLanguage.tsLanguage switch names all ~50, which
   # pulls every member of the static grammar archive into the binary — 95.7 MB of a
@@ -60,6 +81,10 @@ targets:
     dependencies:
       - package: CodeEditSourceEditor
         product: CodeEditSourceEditor
+      # Listed so XcodeGen emits the package reference that overrides the transitive
+      # pin. Already linked via CodeEditSourceEditor; naming it here adds no code.
+      - package: CodeEditTextView
+        product: CodeEditTextView
       - package: CodeEditLanguages
         product: CodeEditLanguages
       - package: Sparkle

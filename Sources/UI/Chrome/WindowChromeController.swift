@@ -132,6 +132,27 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setEditMode(available: available, isOn: isOn)
     }
 
+    /// `repo · branch` for the columns on screen. Only surfaces in edit mode, where
+    /// the per-column tab strips already name the panes but nothing names the cabin.
+    func updateCabinContext(_ context: String) {
+        terminalHeader.setCabinContext(context)
+    }
+
+    /// Edit mode's column tab strips live on the header row, so the two-column
+    /// layout costs one row of chrome instead of two. The header owns the strips;
+    /// the dashboard populates them through `editStrips`.
+    var editStrips: (terminal: EditTabStripView, preview: EditTabStripView) {
+        (terminalHeader.editTerminalStrip, terminalHeader.editPreviewStrip)
+    }
+
+    func setEditStripsActive(_ active: Bool, ratio: CGFloat) {
+        terminalHeader.setEditStripsActive(active, ratio: ratio)
+    }
+
+    func setEditStripRatio(_ ratio: CGFloat) {
+        terminalHeader.setEditStripRatio(ratio)
+    }
+
     /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
     func titlebarRegionFocusTarget() -> NSView {
         state.isCollapsed ? terminalHeader : sidebarHeader

@@ -104,7 +104,6 @@ class DashboardViewController: NSViewController {
     enum ViewMode: Equatable { case split, terminal }
     private(set) var viewMode: ViewMode = .split
     /// Fired after view-mode mirrors chrome collapse (keyboard NORMAL/INSERT).
-    var onViewModeChanged: ((ViewMode) -> Void)?
     /// Ask MainWindow to toggle chrome sidebar collapse (⌘B / legacy shims).
     var onRequestToggleChromeCollapse: (() -> Void)?
     /// Ask MainWindow to set chrome collapse (ViewMode / enter-terminal paths).
@@ -197,6 +196,28 @@ class DashboardViewController: NSViewController {
     let previewSets = PreviewSetController()
     /// The two-column edit container, created lazily and reused across worktrees.
     private var editLayoutContainer: EditLayoutContainerView?
+
+    /// Edit mode's tab strips are owned by the window chrome header (one row of
+    /// chrome instead of two). The dashboard drives their contents and selection
+    /// but does not own the views.
+    var editStripsProvider: (() -> (terminal: EditTabStripView, preview: EditTabStripView)?)?
+    var onEditModeStripsActive: ((_ active: Bool, _ ratio: CGFloat) -> Void)?
+    var onEditStripRatioChange: ((CGFloat) -> Void)?
+
+    /// True once the chrome's strips have had their callbacks wired to this VC.
+    private var editStripCallbacksWired = false
+
+    /// The chrome-owned strips, with their callbacks wired on first use.
+    private func chromeEditStrips() -> (terminal: EditTabStripView, preview: EditTabStripView)? {
+        guard let strips = editStripsProvider?() else { return nil }
+        if !editStripCallbacksWired {
+            editStripCallbacksWired = true
+            strips.terminal.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
+            strips.preview.onSelect = { [weak self] id in self?.selectPreviewTab(id) }
+            strips.preview.onClose = { [weak self] id in self?.closePreviewTab(id) }
+        }
+        return strips
+    }
     /// Built preview content views keyed by file path (preserves editor state
     /// across tab switches). Torn down on explicit tab close / worktree deletion.
     private var previewContentCache: [String: NSView] = [:]
@@ -515,9 +536,6 @@ class DashboardViewController: NSViewController {
             }
         }
         notifyActiveTool()
-        if modeChanged {
-            onViewModeChanged?(mode)
-        }
     }
 
     /// Compute + publish the single lit chrome header tool from the current state.
@@ -1067,13 +1085,6 @@ class DashboardViewController: NSViewController {
         // Skipped during nav preview so the dashboard VC keeps first responder.
         guard focusTerminal else { return }
 
-        // A terminal is becoming the active surface outside the nav ring (e.g. initial
-        // launch embed): the controller must be in .insert so Cmd+Esc can switch back
-        // to NORMAL. In-nav commits leave this to exitDashboardNavigation().
-        if !isInDState {
-            windowKeyboardMode?.enterInsert()
-        }
-
         if editMode {
             focusZoomedLeaf()
         } else {
@@ -1122,8 +1133,8 @@ class DashboardViewController: NSViewController {
     func enterDashboardNavigation() {
         guard !isInDState else { return }
 
-        // Nav ring active ⇔ keyboardMode .normal. Idempotent; also clears any stale substate.
-        windowKeyboardMode?.enterNormal()
+        // Entering the ring drops any substate left over from a previous visit.
+        windowKeyboardSubstate?.reset()
 
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
@@ -1145,10 +1156,9 @@ class DashboardViewController: NSViewController {
     func exitDashboardNavigation(restoreSnapshot: Bool) {
         guard isInDState else { return }
 
-        // Ring is going away: clear any pending delete (guarded no-op otherwise), then
-        // assert insert since focus lands on a terminal. Do NOT clear .createForm here.
-        windowKeyboardMode?.cancelDelete()
-        windowKeyboardMode?.enterInsert()
+        // Ring is going away: clear any pending delete (guarded no-op otherwise).
+        // Do NOT clear .createForm here — the form outlives the ring.
+        windowKeyboardSubstate?.cancelDelete()
 
         let snapshot = focusController.snapshot
         tearDownNavVisuals()
@@ -1177,7 +1187,7 @@ class DashboardViewController: NSViewController {
         }
     }
 
-    /// Leave the nav focus ring WITHOUT touching `windowKeyboardMode`: opens the inline
+    /// Leave the nav focus ring WITHOUT touching `windowKeyboardSubstate`: opens the inline
     /// create form. `beginCreateForm()` has already set `.normal` + `.createForm`; we only
     /// drop the D-state focus ring so a stray key in the form can't be read as a nav chord
     /// (e.g. `d` starting a delete). On form end, `enterDashboardNavigation()` re-enters.
@@ -1188,7 +1198,7 @@ class DashboardViewController: NSViewController {
 
     /// Visual/state teardown shared by `exitDashboardNavigation` and `exitNavForCreateForm`.
     /// Drops the focus ring, dim overlays, and exits the focus controller. Deliberately does
-    /// NOT touch `windowKeyboardMode` or restore the first responder — callers own those decisions.
+    /// NOT touch `windowKeyboardSubstate` or restore the first responder — callers own those decisions.
     private func tearDownNavVisuals() {
         focusController.exit()
         clearKeyboardFocusVisuals()
@@ -1227,20 +1237,20 @@ class DashboardViewController: NSViewController {
             handleNavKey(event); return
         }
         guard isInDState else { super.keyDown(with: event); return }
-        let mode = windowKeyboardMode
+        let substateController = windowKeyboardSubstate
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         // deletePending: d/y confirm, esc/other cancel
-        if case .deletePending(let agentId) = mode?.substate {
-            if event.keyCode == 53 { mode?.cancelDelete(); applyKeyboardFocusVisuals(); return }
+        if case .deletePending(let agentId) = substateController?.substate {
+            if event.keyCode == 53 { substateController?.cancelDelete(); applyKeyboardFocusVisuals(); return }
             if let ch = event.charactersIgnoringModifiers, ch == "d" || ch == "y" {
-                if mode?.confirmDelete() == agentId { performDelete(agentId: agentId) }
+                if substateController?.confirmDelete() == agentId { performDelete(agentId: agentId) }
                 return
             }
-            mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
+            substateController?.cancelDelete(); applyKeyboardFocusVisuals(); return
         }
 
-        // NORMAL mode: ? toggles the keyboard help overlay; Esc closes it first
+        // Nav ring: ? toggles the keyboard help overlay; Esc closes it first
         // before falling back to the legacy "exit nav" behavior.
         if event.keyCode == 53 {  // Esc
             if closeTopmostOverlay() { return }
@@ -1266,14 +1276,14 @@ class DashboardViewController: NSViewController {
             chord = KeyChord(keyCode: event.keyCode)
         }
 
-        guard let action = Keymap.action(mode: .normal, chord: chord) else {
+        guard let action = Keymap.action(chord: chord) else {
             super.keyDown(with: event); return
         }
         dispatch(action)
     }
 
-    private var windowKeyboardMode: KeyboardModeController? {
-        (view.window?.windowController as? MainWindowController)?.keyboardMode
+    private var windowKeyboardSubstate: KeyboardSubstateController? {
+        (view.window?.windowController as? MainWindowController)?.keyboardSubstate
     }
 
     /// The agent currently focused by the nav ring, if a card is focused.
@@ -1567,11 +1577,10 @@ class DashboardViewController: NSViewController {
             handleReturnInDState()
         case .deleteFocused:
             guard let agent = focusedSailor else { return }
-            guard !agent.isMainWorktree else {
-                windowKeyboardMode?.flashHint("The main project cannot be deleted")
-                return
-            }
-            windowKeyboardMode?.beginDelete(agentId: agent.id)
+            // The main worktree cannot be deleted. There is no surface for a
+            // transient hint since the status bar was removed, so this is silent.
+            guard !agent.isMainWorktree else { return }
+            windowKeyboardSubstate?.beginDelete(agentId: agent.id)
         case .showChanges:
             guard let agent = focusedSailor else { return }
             dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
@@ -1581,7 +1590,7 @@ class DashboardViewController: NSViewController {
         case .newWorktree:
             // Leave the D-state focus ring before opening the form so no stale card
             // visuals remain and a stray key in the form isn't read as a nav chord.
-            // keyboardMode stays .normal + .createForm (set by beginCreateForm()).
+            // The .createForm substate is set by beginCreateForm() and survives this.
             exitNavForCreateForm()
             onRequestNewWorktree?()
         case .toggleFiles:      selectLeftPane(.file)
@@ -1748,7 +1757,9 @@ extension DashboardViewController {
                 edit.autoresizingMask = [.width, .height]
                 container.addSubview(edit)
             }
+            onEditModeStripsActive?(true, edit.currentRatio)
         } else if let edit = editLayoutContainer {
+            onEditModeStripsActive?(false, edit.currentRatio)
             edit.removeFromSuperview()
             editLayoutContainer = nil
         }
@@ -1758,12 +1769,11 @@ extension DashboardViewController {
         let ratio = currentWorktreePath.map { previewSets.splitRatio(for: $0) } ?? 0.5
         let edit = EditLayoutContainerView(ratio: ratio)
         edit.onRatioChange = { [weak self] r in
-            guard let self, let wt = self.currentWorktreePath else { return }
+            guard let self else { return }
+            self.onEditStripRatioChange?(r)
+            guard let wt = self.currentWorktreePath else { return }
             self.previewSets.setSplitRatio(r, for: wt)
         }
-        edit.terminalTabStrip.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
-        edit.previewTabStrip.onSelect = { [weak self] id in self?.selectPreviewTab(id) }
-        edit.previewTabStrip.onClose = { [weak self] id in self?.closePreviewTab(id) }
         editLayoutContainer = edit
         return edit
     }
@@ -1944,7 +1954,7 @@ extension DashboardViewController {
                 closable: false
             )
         }
-        edit.terminalTabStrip.apply(items: termItems, selectedId: selectedLeaf)
+        chromeEditStrips()?.terminal.apply(items: termItems, selectedId: selectedLeaf)
 
         let files = previewSets.files(for: wt)
         let previewItems = files.map { path in
@@ -1954,7 +1964,7 @@ extension DashboardViewController {
                 closable: true
             )
         }
-        edit.previewTabStrip.apply(items: previewItems, selectedId: previewSets.activeFile(for: wt))
+        chromeEditStrips()?.preview.apply(items: previewItems, selectedId: previewSets.activeFile(for: wt))
     }
 
     private func terminalTabTitle(leaf: SplitNode.LeafInfo, worktree: String) -> String {

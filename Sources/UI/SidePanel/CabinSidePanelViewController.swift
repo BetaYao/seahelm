@@ -21,7 +21,34 @@ final class CabinSidePanelViewController: NSViewController {
     var currentPaneTitleProvider: ((String) -> String?)?
 
     private let tabBar = NSStackView()
-    private let contentView = NSView()
+
+    /// Fixed host holding one container per tab. Containers stay mounted across
+    /// tab switches (only `isHidden` changes) so each tab keeps its scroll
+    /// position, selection and — for Files — its live FSEvents watcher. Rebuilt
+    /// only when the worktree changes, since that state belongs to a worktree.
+    private let contentHost = NSView()
+    private var tabContainers: [SidePanelTab: NSView] = [:]
+    private var builtTabs: Set<SidePanelTab> = []
+
+    /// The container the selected tab's builders populate. Named `contentView`
+    /// so every builder's constraint block reads against the tab it is building.
+    private var contentView: NSView { container(for: selectedTab) }
+
+    private func container(for tab: SidePanelTab) -> NSView {
+        if let existing = tabContainers[tab] { return existing }
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.isHidden = tab != selectedTab
+        contentHost.addSubview(container)
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: contentHost.topAnchor),
+            container.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
+        ])
+        tabContainers[tab] = container
+        return container
+    }
 
     /// Host-provided view (the cross-project worktree card list) shown for the
 
@@ -55,6 +82,10 @@ final class CabinSidePanelViewController: NSViewController {
 
     var selectedTabForTesting: SidePanelTab { selectedTab }
     var worktreePathForTesting: String? { worktreePath }
+    /// Tabs whose content is currently mounted (built and still in the hierarchy).
+    var mountedTabsForTesting: Set<SidePanelTab> { Set(tabContainers.keys) }
+    /// Identity of a tab's container, so a test can prove it was reused not rebuilt.
+    func containerForTesting(_ tab: SidePanelTab) -> NSView? { tabContainers[tab] }
 
     init(worktreePath: String?, initialTab: SidePanelTab = .firstMate) {
         self.worktreePath = worktreePath
@@ -100,18 +131,18 @@ final class CabinSidePanelViewController: NSViewController {
         // chrome header icons. tabBar stays for updateTabBarHighlight().
         tabBar.isHidden = true
 
-        contentView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(contentView)
+        contentHost.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(contentHost)
 
         NSLayoutConstraint.activate([
-            contentView.topAnchor.constraint(equalTo: root.topAnchor),
-            contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            contentHost.topAnchor.constraint(equalTo: root.topAnchor),
+            contentHost.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            contentHost.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentHost.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
 
         view = root
-        rebuildContent()
+        showSelectedTab()
     }
 
     // MARK: - Shared chrome (matches DashboardOverviewView)
@@ -186,7 +217,30 @@ final class CabinSidePanelViewController: NSViewController {
         guard path != worktreePath else { return }
         captureExpansion()
         worktreePath = path
-        if isViewLoaded { rebuildContent() }
+        // Mounted content belongs to the previous worktree — discard all of it.
+        discardAllTabs()
+        if isViewLoaded { showSelectedTab() }
+    }
+
+    /// Tear down every mounted tab. Only a worktree change warrants this; a tab
+    /// switch must not, or the state this mounting exists to preserve is lost.
+    private func discardAllTabs() {
+        bridgeVC?.view.removeFromSuperview()
+        bridgeVC?.removeFromParent()
+        bridgeVC = nil
+        for container in tabContainers.values { container.removeFromSuperview() }
+        tabContainers.removeAll()
+        builtTabs.removeAll()
+        clearTabReferences()
+    }
+
+    /// Drop per-tab view references so a stale outlet can never outlive its view.
+    private func clearTabReferences() {
+        fileTreeController = nil
+        fileSearchField = nil
+        hiddenToggleButton = nil
+        changesTableView = nil
+        changesScrollView = nil
     }
 
     /// Remember the current worktree's folder expansion before tearing the tree down.
@@ -212,23 +266,26 @@ final class CabinSidePanelViewController: NSViewController {
         selectedTab = tab
         if isViewLoaded {
             updateTabBarHighlight()
-            rebuildContent()
+            showSelectedTab()
         }
     }
 
-    private func rebuildContent() {
-        // Remove any existing child VC
-        bridgeVC?.view.removeFromSuperview()
-        bridgeVC?.removeFromParent()
-        bridgeVC = nil
+    /// Reveal the selected tab, building its content the first time only.
+    private func showSelectedTab() {
+        _ = container(for: selectedTab)      // ensure it exists before hiding siblings
+        if !builtTabs.contains(selectedTab) {
+            builtTabs.insert(selectedTab)
+            buildSelectedTab()
+        } else if selectedTab == .changes, let path = worktreePath {
+            // Files self-refreshes through its FSEvents watcher and First Mate is
+            // pushed from the queue, but `git status` has no such signal — re-scan
+            // on entry, restoring scroll so the refresh isn't felt as a reset.
+            showChangesTab(path)
+        }
+        for (tab, view) in tabContainers { view.isHidden = tab != selectedTab }
+    }
 
-        contentView.subviews.forEach { $0.removeFromSuperview() }
-        fileTreeController = nil
-        fileSearchField = nil
-        hiddenToggleButton = nil
-        changesTableView = nil
-        changesScrollView = nil
-
+    private func buildSelectedTab() {
         switch selectedTab {
         case .firstMate:
             showFirstMateTab()
@@ -414,7 +471,12 @@ final class CabinSidePanelViewController: NSViewController {
     private func presentChanges(_ entries: [GitChangedFile]) {
         changedFiles = entries
 
+        // This rebuilds the tab's subtree, so carry the scroll offset across —
+        // re-entering Changes should not silently jump the list back to the top.
+        let restoredScrollOrigin = changesScrollView?.contentView.bounds.origin
         contentView.subviews.forEach { $0.removeFromSuperview() }
+        changesTableView = nil
+        changesScrollView = nil
 
         let header = makePaneHeader(
             title: "Changes",
@@ -467,6 +529,16 @@ final class CabinSidePanelViewController: NSViewController {
 
         changesTableView = tableView
         changesScrollView = scrollView
+
+        // Restore after layout — the document view has no height until then, so
+        // scrolling now would be clamped to zero.
+        if let origin = restoredScrollOrigin, origin.y > 0 {
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let scrollView else { return }
+                scrollView.contentView.scroll(to: origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
     }
 
     @objc private func changeRowClicked() {
