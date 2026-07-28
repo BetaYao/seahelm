@@ -56,6 +56,12 @@ enum StopHookResponder {
         // Only the MAIN agent's Stop drives suggestions. SubagentStop (now a distinct
         // event) must never block — the main turn isn't over.
         guard event.event == .agentStop else { return nil }
+        // Cursor maps decision:block+reason onto a user-visible followup_message
+        // (the grey instruction box). Its stop payload also lacks
+        // last_assistant_message, so we would always re-prompt even when the
+        // agent already wrote ::seahelm-suggest::. Suggestions for Cursor ride
+        // afterAgentResponse instead — never force a followup here.
+        guard event.source != "cursor" else { return nil }
         let active = event.data?["stop_hook_active"] as? Bool ?? false
         guard !active else { return nil }
         // Don't suggest while background work is still running — the main agent will

@@ -185,6 +185,23 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(e2.data?["stop_hook_active"] as? Bool, true)
     }
 
+    func testParseCursorAfterAgentResponseHarvestsText() throws {
+        let json = """
+        {"hook_event_name":"afterAgentResponse","conversation_id":"conv_9",
+         "cursor_version":"1.7.2","workspace_roots":["/tmp/wt"],
+         "text":"Done.\\n::seahelm-suggest:: run tests | open PR"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.source, "cursor")
+        XCTAssertEqual(event.event, .assistantResponse)
+        XCTAssertEqual(event.sessionId, "conv_9")
+        XCTAssertEqual(event.cwd, "/tmp/wt")
+        XCTAssertEqual(
+            event.data?["text"] as? String,
+            "Done.\n::seahelm-suggest:: run tests | open PR")
+        XCTAssertEqual(WebhookEventType.assistantResponse.agentStatus(data: nil), .unknown)
+    }
+
     func testParseCursorBeforeSubmitPrompt() throws {
         let json = """
         {"hook_event_name":"beforeSubmitPrompt","conversation_id":"c","cursor_version":"1.7.2",

@@ -13,7 +13,8 @@ final class CursorHooksSetupTests: XCTestCase {
             try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         XCTAssertEqual(root["version"] as? Int, 1)
         let hooks = try XCTUnwrap(root["hooks"] as? [String: Any])
-        for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "stop"] {
+        for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse",
+                      "afterAgentResponse", "stop"] {
             let list = try XCTUnwrap(hooks[event] as? [[String: Any]], "missing \(event)")
             let command = try XCTUnwrap(list.first?["command"] as? String)
             XCTAssertEqual(command, "\(SeahelmHookInstaller.scriptPath()) cursor")

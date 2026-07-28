@@ -4,6 +4,19 @@ How next-step suggestion buttons are produced and rendered on a pane's
 First Mate card. Design is **instruction-primary, Stop-hook fallback**: in the
 normal case the agent emits its own suggestions and the Stop hook does nothing.
 
+## Cursor Agent
+
+Cursor's `stop` payload has no `last_assistant_message`, and a Claude-style
+`decision:block`+`reason` is shown as a **user-visible** `followup_message`
+(grey instruction box). So for `source == "cursor"`:
+
+- Suggestions are harvested from `afterAgentResponse` (`text` field) when the
+  reply already contains `::seahelm-suggest::`.
+- Stop never forces a followup. If the agent forgets the sentinel line, no
+  buttons appear that turn (guidance in `AGENTS.md` still asks for it).
+
+Claude Code / Codex keep the Stop-hook reverse-trigger below.
+
 ## Correlation key
 
 The suppression state that ties "agent already suggested this turn" to "the
@@ -17,15 +30,15 @@ made them never match, so the fallback block fired every turn. See
 
 ```mermaid
 flowchart TD
-    A["Agent, as its last action,\ncalls: seahelm-suggest 'opt1' 'opt2' ..."] --> B["seahelm-suggest CLI\n→ unix socket\nmethod:suggest {pane_id, cwd, options}"]
-    B --> C["ControlProtocol case \"suggest\"\nsynthesize .suggest WebhookEvent\n(carries seahelm_pane_id)"]
-    C --> D["TabCoordinator.handleEvent\nturnKey = paneId ?? sessionId"]
-    D --> E{"background busy?\n(subagent / shell / cron)"}
-    E -- yes --> F["DROP suggest\n(agent will auto-resume,\nnot really end-of-turn)"]
-    E -- no --> G["sessionSuggestedAt[turnKey] = now\n(mark: suggested this turn)"]
-    G --> H["ShipLog.handleWebhookEvent\nresolve terminal by cwd → worktree"]
-    H --> I["FirstMate rule engine\n→ red-zone suggestNextOrder card\n(options + last assistant msg summary)"]
-    I --> J["UI renders clickable buttons"]
+  A["Agent, as its last action,\ncalls: seahelm-suggest 'opt1' 'opt2' ..."] --> B["seahelm-suggest CLI\n→ unix socket\nmethod:suggest {pane_id, cwd, options}"]
+  B --> C["ControlProtocol case \"suggest\"\nsynthesize .suggest WebhookEvent\n(carries seahelm_pane_id)"]
+  C --> D["TabCoordinator.handleEvent\nturnKey = paneId ?? sessionId"]
+  D --> E{"background busy?\n(subagent / shell / cron)"}
+  E -- yes --> F["DROP suggest\n(agent will auto-resume,\nnot really end-of-turn)"]
+  E -- no --> G["sessionSuggestedAt[turnKey] = now\n(mark: suggested this turn)"]
+  G --> H["ShipLog.handleWebhookEvent\nresolve terminal by cwd → worktree"]
+  H --> I["FirstMate rule engine\n→ red-zone suggestNextOrder card\n(options + last assistant msg summary)"]
+  I --> J["UI renders clickable buttons"]
 ```
 
 ## Fallback path — Stop hook
@@ -34,13 +47,13 @@ Fires when the agent's turn ends. Decision order inside `handleEvent`:
 
 ```mermaid
 flowchart TD
-    S["Stop hook fires\n(native payload, real session UUID + seahelm_pane_id)"] --> T{"sessionSuggestedAt[turnKey] != nil?"}
-    T -- yes --> U["clear flag, DO NOT block\n(agent already emitted buttons —\nno extra round-trip)"]
-    T -- no --> V{"user prompted after our last block?\n(promptedAt > blockedAt)"}
-    V -- yes --> W["suppress block\n(responding to explicit user direction)"]
-    V -- no --> X{"StopHookResponder.blockBody gate:\nsuggestOnStop ON · main-agent Stop ·\nnot stop_hook_active · no background tasks ·\nlast msg not a question"}
-    X -- passes --> Y["return {decision:block}\n→ agent continues, calls seahelm-suggest\n(the extra round-trip)"]
-    X -- fails --> Z["no block — normal completion"]
+  S["Stop hook fires\n(native payload, real session UUID + seahelm_pane_id)"] --> T{"sessionSuggestedAt[turnKey] != nil?"}
+  T -- yes --> U["clear flag, DO NOT block\n(agent already emitted buttons —\nno extra round-trip)"]
+  T -- no --> V{"user prompted after our last block?\n(promptedAt > blockedAt)"}
+  V -- yes --> W["suppress block\n(responding to explicit user direction)"]
+  V -- no --> X{"StopHookResponder.blockBody gate:\nsuggestOnStop ON · main-agent Stop ·\nnot stop_hook_active · no background tasks ·\nlast msg not a question · source != cursor"}
+  X -- passes --> Y["return {decision:block}\n→ agent continues, calls seahelm-suggest\n(the extra round-trip)"]
+  X -- fails --> Z["no block — normal completion"]
 ```
 
 Before the pane-id fix, branch `T` never matched, so essentially every real

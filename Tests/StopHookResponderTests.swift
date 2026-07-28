@@ -148,10 +148,12 @@ final class StopHookResponderTests: XCTestCase {
         XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
     }
 
-    func testCursorCompletedStopBlocks() {
+    /// Cursor treats decision:block+reason as a user-visible followup_message, so
+    /// we never force a stop continuation there — suggestions ride afterAgentResponse.
+    func testCursorCompletedStopDoesNotBlock() {
         let e = WebhookEvent(
             source: "cursor", sessionId: "c", event: .agentStop, cwd: "/wt", timestamp: nil,
             data: ["stop_hook_active": false, "status": "completed"])
-        XCTAssertNotNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
+        XCTAssertNil(StopHookResponder.blockBody(for: e, suggestOnStop: true))
     }
 }

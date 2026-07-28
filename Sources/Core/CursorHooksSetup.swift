@@ -13,6 +13,9 @@ enum CursorHooksSetup {
         "beforeSubmitPrompt",
         "preToolUse",
         "postToolUse",
+        // Final assistant prose for the turn — Cursor's stop payload has no
+        // last_assistant_message, so this is how we harvest ::seahelm-suggest::.
+        "afterAgentResponse",
         "stop",
     ]
 

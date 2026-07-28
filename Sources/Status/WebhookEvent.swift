@@ -16,6 +16,9 @@ enum WebhookEventType: String {
     case subagentStop = "subagent_stop"
     case cwdChanged = "cwd_changed"
     case suggest = "suggest"
+    /// Cursor `afterAgentResponse` — final assistant prose for the turn (carries
+    /// `text`). Not a status signal; used to harvest inline `::seahelm-suggest::`.
+    case assistantResponse = "assistant_response"
 
     func agentStatus(data: [String: Any]?) -> SailorStatus {
         switch self {
@@ -30,7 +33,7 @@ enum WebhookEventType: String {
             return .waiting
         case .worktreeCreate, .cwdChanged:
             return .running
-        case .suggest:
+        case .suggest, .assistantResponse:
             return .unknown
         case .notification:
             let level = data?["level"] as? String
@@ -189,7 +192,7 @@ struct WebhookEvent {
         "beforeMCPExecution": .toolUseStart,
         "beforeReadFile": .toolUseStart,
         "postToolUse": .toolUseEnd,
-        "afterAgentResponse": .toolUseEnd,
+        "afterAgentResponse": .assistantResponse,
         "postToolUseFailure": .toolUseFailed,
         "stop": .agentStop,
     ]

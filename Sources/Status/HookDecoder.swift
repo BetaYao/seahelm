@@ -51,7 +51,7 @@ struct HookDecoder: SignalDecoder {
             return nil
         case .cwdChanged:
             return nil
-        case .suggest:
+        case .suggest, .assistantResponse:
             return nil
         }
         return nil
@@ -96,8 +96,9 @@ struct HookDecoder: SignalDecoder {
         case .suggest:
             let options = (event.data?["options"] as? [String]) ?? []
             return .suggest(options: options)
-        case .subagentStop, .cwdChanged:
+        case .subagentStop, .cwdChanged, .assistantResponse:
             // A subagent finishing must not drive the main station's status.
+            // assistantResponse is observational (Cursor prose harvest only).
             return nil
         }
     }

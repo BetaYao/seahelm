@@ -265,7 +265,7 @@ class WebhookStatusProvider {
             return nil
         case .cwdChanged:
             return nil
-        case .suggest:
+        case .suggest, .assistantResponse:
             return nil
         }
     }

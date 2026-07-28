@@ -634,6 +634,22 @@ class TabCoordinator {
                         if event.event == .suggest {
                             sessionSuggestedAt[turnKey] = Date()
                         }
+                        // Cursor has no last_assistant_message on stop; harvest the
+                        // inline sentinel from afterAgentResponse's `text` instead.
+                        if event.event == .assistantResponse,
+                           let text = event.data?["text"] as? String,
+                           let options = StopHookResponder.parseSuggestions(from: text) {
+                            ShipLog.shared.noteAssistantMessage(
+                                cwd: event.cwd, paneId: event.paneId,
+                                message: StopHookResponder.stripSentinel(from: text))
+                            let suggestEvent = WebhookEvent(
+                                source: "seahelm-suggest", sessionId: event.sessionId,
+                                event: .suggest, cwd: event.cwd, timestamp: nil,
+                                data: ["options": options], paneId: event.paneId)
+                            self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
+                            ShipLog.shared.handleWebhookEvent(suggestEvent)
+                            sessionSuggestedAt[turnKey] = Date()
+                        }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't
                         // need suggestion overhead layered on top of the user-directed response.
