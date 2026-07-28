@@ -1871,18 +1871,8 @@ class SeahelmWindow: NSWindow {
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
             mwc.toggleChromeCollapsed(); return true
-        case .navigateBack:
-            mwc.navigateBack(); return true
         case .commandPalette:
             mwc.toggleCommandPalette(); return true
-        case .toggleOverview:
-            mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
-        case .firstMatePane:
-            mwc.selectChromePane(.firstMate); return true
-        case .filesPane:
-            mwc.selectChromePane(.files); return true
-        case .changesPane:
-            mwc.selectChromePane(.changes); return true
         }
     }
 

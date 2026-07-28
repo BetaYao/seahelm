@@ -670,10 +670,6 @@ class DashboardViewController: NSViewController {
         }
     }
 
-    /// Worktree paths in the order the fleet list is currently rendering them
-    /// (respects `CabinGroupingMode`). Empty before the overview has laid out.
-    var cruiseOrderPaths: [String] { overviewView.orderedRows.map(\.path) }
-
     var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
 
     @discardableResult
