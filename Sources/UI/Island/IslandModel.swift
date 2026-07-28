@@ -43,6 +43,12 @@ final class IslandModel {
     var openReason: IslandOpenReason?
 
     var rows: [IslandAgentRow] = []
+    /// Claude/Codex rate-limit readouts, refreshed by `UsageSummaryStore`.
+    /// Rendered in full in the opened header; the closed pill rotates through
+    /// them one window at a time.
+    private(set) var usageReadouts: [UsageReadout] = []
+    /// Index into `pillFrames` — advanced by the rotation timer.
+    private(set) var pillUsageIndex = 0
     /// Suggestions waiting on the user to pick an option. This is the island's
     /// only attention signal — status notifications go to Notification Center
     /// and are not mirrored here.
@@ -79,8 +85,13 @@ final class IslandModel {
     var pendingCommandFocus: Bool = false
 
     private var popRevertWork: DispatchWorkItem?
+    private var usageRotationTimer: Timer?
 
     var isOpened: Bool { state == .opened }
+
+    deinit {
+        usageRotationTimer?.invalidate()
+    }
 
     func open(reason: IslandOpenReason) {
         popRevertWork?.cancel()
@@ -109,15 +120,71 @@ final class IslandModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.popDuration, execute: work)
     }
 
+    // MARK: - Usage readouts
+
+    static let usageRotationInterval: TimeInterval = 6
+    /// Width one rotated window ("✦ 5h 11% 4h1m") needs in the pill's wing.
+    static let pillUsageWidth: CGFloat = 118
+
+    /// One rotated frame of the closed pill: a single window plus its
+    /// provider's icon.
+    struct PillUsageFrame: Equatable {
+        let logoName: String
+        let segment: UsageReadoutSegment
+    }
+
+    /// Every known window, flattened across providers — Claude 5h, Claude 7d,
+    /// Codex 5h — so the pill rotates one window at a time instead of trying
+    /// to fit a whole provider into a wing.
+    var pillFrames: [PillUsageFrame] {
+        usageReadouts.flatMap { readout in
+            readout.segments.map { PillUsageFrame(logoName: readout.logoName, segment: $0) }
+        }
+    }
+
+    /// The window currently on show. Pending orders own the left wing, so
+    /// usage steps aside while one is waiting.
+    var pillUsage: PillUsageFrame? {
+        guard orders.isEmpty else { return nil }
+        let frames = pillFrames
+        guard !frames.isEmpty else { return nil }
+        return frames[min(pillUsageIndex, frames.count - 1)]
+    }
+
+    func setUsageReadouts(_ readouts: [UsageReadout]) {
+        guard readouts != usageReadouts else { return }
+        usageReadouts = readouts
+        if pillUsageIndex >= pillFrames.count { pillUsageIndex = 0 }
+        updateUsageRotation()
+    }
+
+    private func updateUsageRotation() {
+        usageRotationTimer?.invalidate()
+        usageRotationTimer = nil
+        guard pillFrames.count > 1 else { return }
+        let timer = Timer(timeInterval: Self.usageRotationInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let count = self.pillFrames.count
+            guard count > 0 else { return }
+            self.pillUsageIndex = (self.pillUsageIndex + 1) % count
+        }
+        // .common so the rotation keeps ticking while a menu or drag has the
+        // main run loop in tracking mode.
+        RunLoop.main.add(timer, forMode: .common)
+        usageRotationTimer = timer
+    }
+
+    /// Extra width each wing takes on while a usage window is showing. Applied
+    /// to both wings so the centre spacer stays locked to the hardware notch.
+    var wingUsageWidth: CGFloat { pillUsage == nil ? 0 : Self.pillUsageWidth }
+
     /// Width of the closed pill. On a notched display it is locked to the
     /// physical notch plus symmetric wings so it merges with the hardware
     /// notch; on external displays it is a fixed simulated-notch width.
     var closedWidth: CGFloat {
         let popBonus: CGFloat = state == .popping ? 18 : 0
-        if isNotchedDisplay {
-            return notchWidth + 88 + popBonus
-        }
-        return min(360, notchWidth + 170) + popBonus
+        let base = isNotchedDisplay ? notchWidth + 88 : min(360, notchWidth + 170)
+        return base + wingUsageWidth * 2 + popBonus
     }
 
     /// Sessions needing attention first, then the rest — pill tile order.

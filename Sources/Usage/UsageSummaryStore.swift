@@ -1,7 +1,7 @@
 import Foundation
 
 final class UsageSummaryStore {
-    typealias UpdateHandler = ([PrimaryCapsuleFrame]) -> Void
+    typealias UpdateHandler = (_ claude: UsageSnapshot, _ codex: UsageSnapshot) -> Void
     private static let defaultCacheFallbackMaxAge: TimeInterval = 10 * 60
 
     private let claudeProvider: ClaudeUsageSummaryProvider
@@ -116,9 +116,8 @@ final class UsageSummaryStore {
         isRefreshing = false
         lock.unlock()
 
-        let frames = UsageSummaryFormatter.rotationFrames(claude: claudeResult.snapshot, codex: codexResult.snapshot)
         DispatchQueue.main.async { [weak self] in
-            self?.onUpdate?(frames)
+            self?.onUpdate?(claudeResult.snapshot, codexResult.snapshot)
         }
     }
 

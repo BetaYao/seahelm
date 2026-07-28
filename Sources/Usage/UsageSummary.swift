@@ -15,6 +15,16 @@ enum UsageProvider: String, Codable, Equatable {
 struct UsageRateLimitWindow: Codable, Equatable {
     let usedPercent: Int
     let resetsAt: Date?
+    /// What the window covers ("5h", "7d", "quota"). Nil falls back to the
+    /// caller's default — Codex reports window lengths that vary by plan, so
+    /// it names its own; Claude's two windows are fixed.
+    var label: String?
+
+    init(usedPercent: Int, resetsAt: Date?, label: String? = nil) {
+        self.usedPercent = usedPercent
+        self.resetsAt = resetsAt
+        self.label = label
+    }
 
     var remainingPercent: Int {
         max(0, min(100, 100 - usedPercent))
@@ -48,6 +58,41 @@ struct UsageSnapshot: Equatable {
         self.updatedAt = updatedAt
         self.isStale = isStale
     }
+}
+
+/// One rate-limit window as the island renders it — "5h 11% 4h1m".
+struct UsageReadoutSegment: Equatable {
+    /// Coarse bucket for the percentage's tint. Keyed to how much is *used*,
+    /// so a fresh window reads green and an almost-spent one reads red.
+    enum Severity: Equatable {
+        case ok
+        case warn
+        case critical
+
+        init(usedPercent: Int) {
+            switch usedPercent {
+            case ..<60: self = .ok
+            case ..<85: self = .warn
+            default: self = .critical
+            }
+        }
+    }
+
+    let label: String
+    let percentText: String
+    let severity: Severity
+    let resetText: String?
+}
+
+/// A provider's rate-limit windows. Shown in full in the opened island header;
+/// the closed pill rotates through `pillSegments` one window at a time.
+struct UsageReadout: Equatable, Identifiable {
+    let provider: UsageProvider
+    /// Asset-catalog name of the vendor's own mark (vector, template-rendered).
+    let logoName: String
+    let segments: [UsageReadoutSegment]
+
+    var id: String { provider.rawValue }
 }
 
 enum PrimaryCapsuleFrameKind: Equatable {
@@ -121,6 +166,38 @@ enum UsageSummaryFormatter {
     static func rotationFrames(claude: UsageSnapshot, codex: UsageSnapshot, now: Date = Date()) -> [PrimaryCapsuleFrame] {
         shortcutTips.map { PrimaryCapsuleFrame.shortcut(leading: $0.leading, body: $0.body) }
             + [formatUsageFrame(claude, now: now), formatUsageFrame(codex, now: now)]
+    }
+
+    /// Readouts for every provider that currently has rate-limit data. A
+    /// provider with nothing to report is dropped rather than rendered as
+    /// "--" — the island only shows quota it actually knows.
+    static func readouts(claude: UsageSnapshot, codex: UsageSnapshot, now: Date = Date()) -> [UsageReadout] {
+        [readout(for: claude, now: now), readout(for: codex, now: now)].compactMap { $0 }
+    }
+
+    static func readout(for snapshot: UsageSnapshot, now: Date = Date()) -> UsageReadout? {
+        var segments: [UsageReadoutSegment] = []
+        if let window = snapshot.rateLimit {
+            segments.append(segment(label: window.label ?? "5h", window: window, now: now))
+        }
+        if let window = snapshot.weeklyRateLimit {
+            segments.append(segment(label: window.label ?? "7d", window: window, now: now))
+        }
+        guard !segments.isEmpty else { return nil }
+        return UsageReadout(
+            provider: snapshot.provider,
+            logoName: snapshot.provider == .claude ? "ClaudeLogo" : "OpenAILogo",
+            segments: segments
+        )
+    }
+
+    private static func segment(label: String, window: UsageRateLimitWindow, now: Date) -> UsageReadoutSegment {
+        UsageReadoutSegment(
+            label: label,
+            percentText: "\(window.usedPercent)%",
+            severity: .init(usedPercent: window.usedPercent),
+            resetText: window.resetsAt.flatMap { compactResetText(until: $0, now: now) }
+        )
     }
 
     static func formatUsageFrame(_ snapshot: UsageSnapshot, now: Date = Date()) -> PrimaryCapsuleFrame {

@@ -9,8 +9,47 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
 
         let parsed = try CodexRateLimitParser.parseResponse(data)
 
-        XCTAssertEqual(parsed?.usedPercent, 28)
-        XCTAssertEqual(parsed?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
+        XCTAssertEqual(parsed?.primary?.usedPercent, 28)
+        XCTAssertEqual(parsed?.primary?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
+    }
+
+    /// Live shape from a business seat: rolling windows are null and the real
+    /// figure sits in individualLimit.
+    func testFallsBackToIndividualLimitWhenRollingWindowsAreNull() throws {
+        let data = """
+        {"id":2,"result":{"rateLimitsByLimitId":{"codex":{"primary":null,"secondary":null,\
+        "individualLimit":{"limit":"7500","used":"7505.552985548973","remainingPercent":0,"resetsAt":1785542400},\
+        "planType":"business"}}}}
+        """.data(using: .utf8)!
+
+        let parsed = try CodexRateLimitParser.parseResponse(data)
+
+        XCTAssertEqual(parsed?.primary?.usedPercent, 100)
+        XCTAssertEqual(parsed?.primary?.label, "quota")
+        XCTAssertEqual(parsed?.primary?.resetsAt, Date(timeIntervalSince1970: 1_785_542_400))
+        XCTAssertNil(parsed?.secondary)
+    }
+
+    func testDerivesIndividualLimitPercentFromUsedOverLimitWhenRemainingIsAbsent() throws {
+        let data = """
+        {"id":2,"result":{"rateLimits":{"individualLimit":{"limit":"400","used":"100"}}}}
+        """.data(using: .utf8)!
+
+        XCTAssertEqual(try CodexRateLimitParser.parseResponse(data)?.primary?.usedPercent, 25)
+    }
+
+    func testParsesSecondaryWindowAndLabelsWindowsByDuration() throws {
+        let data = """
+        {"id":2,"result":{"rateLimitsByLimitId":{"codex":{\
+        "primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1785171759},\
+        "secondary":{"usedPercent":3,"windowDurationMins":10080,"resetsAt":1785758559}}}}}
+        """.data(using: .utf8)!
+
+        let parsed = try CodexRateLimitParser.parseResponse(data)
+
+        XCTAssertEqual(parsed?.primary?.label, "5h")
+        XCTAssertEqual(parsed?.secondary?.label, "7d")
+        XCTAssertEqual(parsed?.secondary?.usedPercent, 3)
     }
 
     func testParsesWhitespaceJSONRPCResponseLineByID() throws {
@@ -20,8 +59,8 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
 
         let parsed = try CodexRateLimitParser.parseResponseLine(line, expectedID: 2)
 
-        XCTAssertEqual(parsed?.usedPercent, 31)
-        XCTAssertEqual(parsed?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
+        XCTAssertEqual(parsed?.primary?.usedPercent, 31)
+        XCTAssertEqual(parsed?.primary?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
     }
 
     func testIgnoresUnexpectedJSONRPCResponseLineID() throws {
@@ -41,8 +80,8 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
 
         let parsed = try CodexRateLimitParser.parseResponse(data)
 
-        XCTAssertEqual(parsed?.usedPercent, 80)
-        XCTAssertEqual(parsed?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
+        XCTAssertEqual(parsed?.primary?.usedPercent, 80)
+        XCTAssertEqual(parsed?.primary?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
     }
 
     func testAggregatesSessionTokenDeltasForLocalDay() throws {
@@ -111,8 +150,8 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
         let script = dir.appendingPathComponent("codex")
         try """
         #!/bin/sh
-        cat >/dev/null
         printf '%s\\n' '{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":42}}}}'
+        cat >/dev/null
         """.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
         var calendar = Calendar(identifier: .gregorian)
@@ -162,6 +201,51 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
         let tokens = try aggregator.todayTokens(now: ISO8601DateFormatter().date(from: "2026-04-27T08:00:00Z")!)
 
         XCTAssertEqual(tokens, 25)
+    }
+
+    /// app-server answers `account/rateLimits/read` over the network but exits
+    /// the moment stdin hits EOF — closing stdin right after the write meant
+    /// the answer never arrived. The fake dies on EOF the same way.
+    func testKeepsStdinOpenUntilTheAnswerArrives() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let script = dir.appendingPathComponent("codex")
+        let marker = dir.appendingPathComponent("stdin-closed")
+        // `exec 3<&0` because a background job's stdin defaults to /dev/null —
+        // without it the drain would see EOF immediately and always fire.
+        try """
+        #!/bin/sh
+        exec 3<&0
+        ( cat <&3 >/dev/null; : > '\(marker.path)' ) &
+        sleep 0.5
+        printf '%s\\n' '{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":42}}}}'
+        sleep 5
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let parsed = CodexAppServerRateLimitClient(codexExecutable: script.path).readRateLimit(timeout: 5)
+
+        XCTAssertEqual(parsed?.primary?.usedPercent, 42)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path),
+                       "stdin was closed before the answer arrived — app-server would have exited first")
+    }
+
+    /// LaunchServices hands a GUI app PATH=/usr/bin:/bin:/usr/sbin:/sbin, so a
+    /// Homebrew codex is only reachable through the fallback directories.
+    func testResolvesExecutableOutsideOfPATH() throws {
+        XCTAssertNil(CodexAppServerRateLimitClient.resolveExecutable("/nonexistent/codex"))
+        XCTAssertNil(CodexAppServerRateLimitClient.resolveExecutable("definitely-not-a-real-binary-xyz"))
+        XCTAssertEqual(CodexAppServerRateLimitClient.resolveExecutable("/bin/sh"), "/bin/sh")
+
+        let brewCodex = "/opt/homebrew/bin/codex"
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: brewCodex))
+        XCTAssertEqual(CodexAppServerRateLimitClient.resolveExecutable("codex"), brewCodex)
+    }
+
+    func testMissingExecutableReturnsNilWithoutSpawning() {
+        XCTAssertNil(CodexAppServerRateLimitClient(codexExecutable: "definitely-not-a-real-binary-xyz")
+            .readRateLimit(timeout: 0.1))
     }
 
     func testReadRateLimitTimesOutAndTerminatesSlowCodexProcess() throws {

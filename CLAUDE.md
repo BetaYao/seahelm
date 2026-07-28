@@ -135,7 +135,7 @@ So: one Ship ⊃ many Decks (repos) ⊃ many Cabins (worktrees) ⊃ many Sailors
 
 - **FirstMate** (`Sources/Core/FirstMate*.swift`): an autonomous supervisor reacting to agent status transitions. A green-zone/red-zone action model (watchWaiting, watchError, inspect, autoCommit, suggestNextOrder, returnToPort, broadcastOrder); `FirstMateConfig` holds user policy; `FirstMateCoordinator` (main thread) consumes status edges, routes green-zone actions to side effects and red-zone actions to the `PendingOrdersQueue`. Watches idle/blocked/errored agents and either auto-handles or surfaces them for approval.
 
-- **Usage** (`Sources/Usage/`): `ClaudeUsageSummaryProvider`/`CodexUsageSummaryProvider` parse each tool's local session logs into token/quota figures; `UsageSummaryStore` refreshes both on a background timer and emits the global usage readout shown in the status bar.
+- **Usage** (`Sources/Usage/`): `ClaudeUsageSummaryProvider`/`CodexUsageSummaryProvider` parse each tool's local session logs into token/quota figures; `UsageSummaryStore` refreshes both on a background timer and hands the snapshots to `IslandModel` — `UsageSummaryFormatter.readouts` turns them into `UsageReadout`s, which the closed pill rotates one window at a time (left wing, yielding to pending orders) and the opened header shows in full on the title row. Claude only reports rate limits inside its statusline payload, so `ClaudeStatuslineBridgeInstaller` (run at window setup) wraps the user's `statusLine` command to tee that payload into `~/Library/Caches/seahelm/claude-statusline.json`.
 
 ## Keyboard System (modal)
 
