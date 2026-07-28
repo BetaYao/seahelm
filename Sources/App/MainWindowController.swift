@@ -931,6 +931,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
             // its createForm keyboard substate were removed).
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
         }
+        dashboard.onAddWorktreeToProject = { [weak self] project, rect, anchor in
+            self?.presentAddWorktreePopover(project: project, rect: rect, anchor: anchor)
+        }
+        dashboard.onRequestAddRepo = { [weak self] in
+            self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window)
+        }
         dashboard.onInlineCreateFormEnd = { [weak self] in
             self?.keyboardSubstate.endCreateForm()
             self?.tabCoordinator.dashboardVC?.enterDashboardNavigation()
@@ -963,11 +969,37 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
+    /// The "+" on a fleet project header: an anchored create form for that deck.
+    /// Same landing as the helm's `/worktree` — create, staff, enter the cabin.
+    private func presentAddWorktreePopover(project: String, rect: NSRect, anchor: NSView) {
+        guard let repoPath = tabCoordinator.repoPath(forProject: project) else { NSSound.beep(); return }
+        let popover = NSPopover()
+        let creator = AddCabinPopoverController(project: project)
+        // No base picker: worktrees always branch off the repo's main line, which
+        // is what `performWorktreeCreate` picks when no base is passed.
+        creator.onCreate = { [weak self, weak popover, weak creator] task, agentType in
+            self?.performWorktreeCreate(
+                task: task, repoPath: repoPath, agentType: agentType, reuseEnv: false,
+                onError: { message in creator?.reportFailure(message) }
+            ) { path in
+                guard let path else { return }
+                popover?.performClose(nil)
+                self?.dashboardVC?.commitWorktreeSelection(path: path)
+            }
+        }
+        popover.contentViewController = creator
+        popover.behavior = .transient
+        popover.delegate = self
+        dashboardVC?.setFleetRenderPaused(true)
+        popover.show(relativeTo: rect, of: anchor, preferredEdge: .maxY)
+    }
+
     /// Creates a worktree off the main thread. `onComplete` fires on the main
     /// thread with the new worktree's path on success, or nil on failure —
     /// lets the caller (e.g. the Helm cockpit) drop its loading state and
     /// dismiss once the new tab is ready.
     private func performWorktreeCreate(task: String, repoPath: String, agentType: SailorType, reuseEnv: Bool,
+                                       onError: ((String) -> Void)? = nil,
                                        onComplete: ((String?) -> Void)? = nil) {
         let currentPath = tabCoordinator.selectedSailor?.worktreePath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1005,6 +1037,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 DispatchQueue.main.async {
                     NSSound.beep()
                     self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
+                    onError?(error.localizedDescription)
                     onComplete?(nil)
                 }
             }
@@ -1862,6 +1895,16 @@ class SeahelmWindow: NSWindow {
             }
         }
         super.sendEvent(event)
+    }
+}
+
+// MARK: - NSPopoverDelegate
+
+extension MainWindowController: NSPopoverDelegate {
+    /// The create form is gone — let the fleet repaint with whatever landed while
+    /// it was held.
+    func popoverDidClose(_ notification: Notification) {
+        dashboardVC?.setFleetRenderPaused(false)
     }
 }
 

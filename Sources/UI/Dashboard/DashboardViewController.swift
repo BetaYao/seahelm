@@ -89,6 +89,16 @@ class DashboardViewController: NSViewController {
     var onEnterTerminal: (() -> Void)?
     /// Set by MainWindowController. Called when the user requests the new-worktree creator.
     var onRequestNewWorktree: (() -> Void)?
+    /// The "+" on a project group header was clicked. Args: the project title and
+    /// the rect + view to anchor the create popover to.
+    var onAddWorktreeToProject: ((String, NSRect, NSView) -> Void)?
+    /// The fleet header "+" was clicked: open the folder picker to add a repo.
+    var onRequestAddRepo: (() -> Void)?
+
+    /// Hold/resume the fleet row rebuild while an anchored form is open.
+    func setFleetRenderPaused(_ paused: Bool) {
+        overviewView.isRenderPaused = paused
+    }
 
     /// Set by TabCoordinator during setup
     weak var stationManager: StationManager?
@@ -341,6 +351,16 @@ class DashboardViewController: NSViewController {
             guard let self else { return }
             overviewSelectedId = overviewView.selectedId
             syncOverviewFocusCounts()
+        }
+        // "+" on a project group header: the anchored create form, scoped to that
+        // deck. The window owns the create itself (it holds the repo map and the
+        // worktree-create path), so forward the click with its anchor view.
+        overviewView.onAddWorktree = { [weak self] project, rect, anchor in
+            self?.onAddWorktreeToProject?(project, rect, anchor)
+        }
+        // Header "+": the folder picker that adds a whole repo.
+        overviewView.onAddRepo = { [weak self] in
+            self?.onRequestAddRepo?()
         }
     }
 
@@ -2084,6 +2104,12 @@ final class DashboardOverviewView: NSView {
     var onDeleteWorktree: ((String) -> Void)?
     var onSubmitCommand: ((String) -> Void)?
     var onGroupingChanged: (() -> Void)?
+    /// The "+" on a project group header was clicked. Args: the project title,
+    /// the button's rect in this view's coordinates, and this view (the popover's
+    /// anchor — see `addWorktreeClicked`).
+    var onAddWorktree: ((String, NSRect, NSView) -> Void)?
+    /// The header "+" was clicked: add a repo via the folder picker.
+    var onAddRepo: (() -> Void)?
     /// A card's primary/secondary button was tapped. `optionText` is the chosen
     /// option label (or "" for a plain approve).
     var onOrderAction: ((PendingOrder, String) -> Void)?
@@ -2147,6 +2173,7 @@ final class DashboardOverviewView: NSView {
     private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
     private let groupingButton = NSButton()
+    private let addRepoButton = NSButton()
     private let groupingMenu = NSMenu()
     private let headerLine = NSView()
     private let scroll = NonFirstResponderScrollView()
@@ -2183,6 +2210,10 @@ final class DashboardOverviewView: NSView {
     private var latestSailors: [SailorDisplayInfo] = []
     private var rowViewsByID: [String: RowView] = [:]
     private var renderedGroupTitles: [String] = []
+    /// Project title per "add worktree" button, indexed by the button's tag —
+    /// rebuilt with the rows on every render.
+    private var addWorktreeProjects: [String] = []
+    private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
     private var revealedRowID: String?
 
     override init(frame frameRect: NSRect) {
@@ -2231,10 +2262,12 @@ final class DashboardOverviewView: NSView {
         headerSub.font = AppFont.mono(size: 11)
         headerSub.textColor = Self.inkFaint
         configureGroupingMenu()
+        configureAddRepoButton()
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let headerRow = NSStackView(views: [headerIcon, headerTitle, headerSub, spacer, groupingButton])
+        let headerRow = NSStackView(views: [headerIcon, headerTitle, headerSub, spacer,
+                                            addRepoButton, groupingButton])
         headerRow.orientation = .horizontal
         headerRow.spacing = 10
         headerRow.alignment = .centerY
@@ -2292,6 +2325,30 @@ final class DashboardOverviewView: NSView {
         ordersZoneHeight = ordersZone.heightAnchor.constraint(equalToConstant: 0)
         ordersZoneHeight?.isActive = true
     }
+
+    /// Header "+": add a whole repo (folder picker), the peer of the per-project
+    /// "+" that adds one worktree inside a deck.
+    private func configureAddRepoButton() {
+        addRepoButton.isBordered = false
+        if let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium)) {
+            addRepoButton.image = image
+            addRepoButton.title = ""
+            addRepoButton.imagePosition = .imageOnly
+        } else {
+            addRepoButton.title = "+"
+            addRepoButton.font = AppFont.mono(size: 13)
+        }
+        addRepoButton.contentTintColor = Self.inkDim
+        addRepoButton.refusesFirstResponder = true
+        addRepoButton.toolTip = "Add project"
+        addRepoButton.setAccessibilityLabel("Add project")
+        addRepoButton.setAccessibilityIdentifier("dashboard.addRepoButton")
+        addRepoButton.target = self
+        addRepoButton.action = #selector(addRepoClicked)
+    }
+
+    @objc private func addRepoClicked() { onAddRepo?() }
 
     private func configureGroupingMenu() {
         groupingButton.isBordered = false
@@ -2649,19 +2706,33 @@ final class DashboardOverviewView: NSView {
     /// Worktrees in display (grouped) order — the sequence keyboard nav walks.
     private(set) var orderedRows: [(id: String, path: String)] = []
 
+    /// Holds the row rebuild while an anchored form (the "+" create popover) is
+    /// open, so the list doesn't churn under it on every 2s status poll. Data
+    /// still lands; it just paints when the form goes away.
+    var isRenderPaused = false {
+        didSet {
+            guard oldValue, !isRenderPaused else { return }
+            render(latestSailors, revealSelection: false)
+        }
+    }
+
     func update(_ sailors: [SailorDisplayInfo]) {
         latestSailors = sailors
+        guard !isRenderPaused else { return }
         render(sailors, revealSelection: false)
     }
 
     private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
         let running = sailors.filter { SailorStatus.highestPriority($0.paneStatuses) == .running }.count
-        headerSub.stringValue = "\(sailors.count) projects · \(running) running"
+        // Tight enough to survive the 300pt docked column next to two buttons:
+        // total count, then only the running slice.
+        headerSub.stringValue = running > 0 ? "\(sailors.count) · \(running) running" : "\(sailors.count)"
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
         rowViewsByID = [:]
         renderedGroupTitles = []
+        addWorktreeProjects = []
         revealedRowID = nil
 
         let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
@@ -2752,6 +2823,15 @@ final class DashboardOverviewView: NSView {
         }
     }
     var renderedGroupTitlesForTesting: [String] { renderedGroupTitles }
+    /// Project titles behind the rendered "add worktree" buttons, in group order.
+    var addWorktreeProjectsForTesting: [String] {
+        stack.arrangedSubviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap { $0.arrangedSubviews }
+            .compactMap { $0 as? NSButton }
+            .filter { $0.identifier == Self.addWorktreeButtonIdentifier }
+            .compactMap { addWorktreeProjects[safeIndex: $0.tag] }
+    }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     var revealedRowIDForTesting: String? { revealedRowID }
     var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
@@ -2902,12 +2982,64 @@ final class DashboardOverviewView: NSView {
             views.append(title)
         }
 
+        // Project groups (Group by Project / Expand All Panes) carry a trailing
+        // "+" that opens the helm prefilled with `/worktree @<project>`.
+        var addButton: NSButton?
+        if case .repository = group.id {
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+            views.append(spacer)
+            let button = makeAddWorktreeButton(project: group.title)
+            views.append(button)
+            addButton = button
+        }
+
         let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.spacing = 7
         row.alignment = .centerY
         row.edgeInsets = NSEdgeInsets(top: topGap, left: 0, bottom: 7, right: 0)
+        if let addButton {
+            addButton.setContentHuggingPriority(.required, for: .horizontal)
+            addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         return row
+    }
+
+    /// Trailing "add worktree" affordance on a project group header. Equivalent
+    /// to typing `/worktree @<project>` in the helm.
+    private func makeAddWorktreeButton(project: String) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.refusesFirstResponder = true
+        if let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) {
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+        } else {
+            button.title = "+"
+            button.font = AppFont.mono(size: 12)
+        }
+        button.contentTintColor = Self.inkFaint
+        let description = "Add worktree to \(project)"
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
+        button.identifier = Self.addWorktreeButtonIdentifier
+        button.target = self
+        button.action = #selector(addWorktreeClicked(_:))
+        button.tag = addWorktreeProjects.count
+        addWorktreeProjects.append(project)
+        return button
+    }
+
+    @objc private func addWorktreeClicked(_ sender: NSButton) {
+        guard let project = addWorktreeProjects[safeIndex: sender.tag] else { return }
+        // Anchor to this long-lived view, not the button: the fleet re-renders on
+        // every status poll, and a popover whose anchor view leaves the hierarchy
+        // closes itself — which read as "the form collapses while I type".
+        onAddWorktree?(project, sender.convert(sender.bounds, to: self), self)
     }
 
     // MARK: - Fleet row

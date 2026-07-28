@@ -139,6 +139,59 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    func testProjectGroupsCarryAnAddWorktreeButtonAndStatusGroupsDoNot() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                           paneStatuses: [.waiting], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-100)),
+                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-200)),
+            ])
+
+            XCTAssertEqual(view.addWorktreeProjectsForTesting, ["alpha", "bravo"])
+
+            view.selectGroupingModeForTesting(.sailor)
+            XCTAssertEqual(view.addWorktreeProjectsForTesting, ["alpha", "bravo"])
+
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.addWorktreeProjectsForTesting, [])
+        }
+    }
+
+    func testPausedRenderHoldsRowsUntilResumed() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                           paneStatuses: [.waiting], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-100)),
+            ])
+
+            // A create popover is anchored into these rows: a poll must not
+            // rebuild them out from under it.
+            view.isRenderPaused = true
+            view.update([
+                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                           paneStatuses: [.waiting], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-100)),
+                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-200)),
+            ])
+            XCTAssertEqual(view.orderedRows.map(\.id), ["wait"])
+
+            view.isRenderPaused = false
+            XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run"])
+        }
+    }
+
     private func withDefaults(_ body: (UserDefaults) -> Void) {
         let suite = "DashboardOverviewGroupingTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
