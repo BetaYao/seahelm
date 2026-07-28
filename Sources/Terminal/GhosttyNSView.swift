@@ -431,6 +431,12 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // the old pane would still SIGWINCH and trash powerline prompts. Sync on
         // the first keypress instead (see keyDown).
         onFocusAcquired?()
+        // Warm the worktree file index off the main thread, so the first
+        // right-click on a bare filename finds a populated cache rather than
+        // silently offering nothing while it builds.
+        if let root = worktreeRoot {
+            WorktreeFileIndexStore.shared.warm(root)
+        }
         // Click→title fast path: announce from the view itself so every host
         // (repo tab, dashboard focus panel) hears it — `onFocusAcquired` is only
         // wired by SplitContainerView, and the ShipLog path trails the 2s poll.
@@ -607,7 +613,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     /// Read the current terminal selection as a string, or nil if there's none.
     private func readSelectionText() -> String? {
-        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        guard let surface else { return nil }
+        station?.ghosttyLock.lock()
+        defer { station?.ghosttyLock.unlock() }
+        guard ghostty_surface_has_selection(surface) else { return nil }
         var text = ghostty_text_s()
         guard ghostty_surface_read_selection(surface, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
@@ -655,19 +664,41 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// GitHub PR URL captured from the same row, checked after `pendingPreviewURL`
     /// (a PR link is not a file so `filePathAtClick` won't return it).
     private var pendingPRPreview: (owner: String, repo: String, number: Int)?
+    /// Worktree files whose trailing components match the clicked token, for a
+    /// bare name that resolves against no working directory. Offered as a
+    /// submenu because the name alone cannot say which file was meant.
+    private var pendingFuzzyMatches: [URL] = []
 
     override func rightMouseDown(with event: NSEvent) {
         // Resolve a previewable file for the menu. Prefer the path token under the
         // click point (works even in mouse-reporting TUIs like Claude Code, where
         // dragging never creates a ghostty selection); fall back to an explicit
         // text selection.
-        let fileURL = filePathAtClick(event)
-        self.pendingPreviewURL = fileURL ?? selectedFilePath()
-        // If the click didn't hit a file path, check for a GitHub PR URL on the row.
+        let bases = pathResolutionBases()
+        // An explicit selection outranks the token under the cursor: the user
+        // already said what they meant. In a mouse-reporting TUI a plain drag
+        // is eaten by the app, but a shift-drag still selects, so this is the
+        // one way to point at something the click heuristics get wrong.
+        let selection = (cachedSelectionText ?? readSelectionText())?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectionURL = selection.flatMap {
+            Self.resolveSelectedPath(raw: $0, bases: bases, allowingSpaces: true)
+        }
+        // Only read the grid when the selection didn't already answer.
+        let tokens = selectionURL == nil ? tokensAtClick(event) : []
+        let fileURL = selectionURL ?? tokens.lazy.compactMap { Self.resolveSelectedPath(raw: $0, bases: bases) }.first
+        self.pendingPreviewURL = fileURL
+        // Nothing resolved on disk: check for a GitHub PR URL, then for a name
+        // that exists somewhere in the worktree — selection first there too.
         if fileURL == nil {
-            self.pendingPRPreview = prURLAtClick(event)
+            self.pendingPRPreview = (selection.flatMap { Self.parsePRURL($0) })
+                ?? tokens.lazy.compactMap { Self.parsePRURL($0) }.first
+            self.pendingFuzzyMatches = pendingPRPreview == nil
+                ? worktreeMatches(for: [selection].compactMap { $0 } + tokens)
+                : []
         } else {
             self.pendingPRPreview = nil
+            self.pendingFuzzyMatches = []
         }
         // Focus the right-clicked pane so menu actions target it, then show
         // our pane context menu (split/close/copy/paste).
@@ -710,6 +741,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
             )
             prItem.target = self
             menu.addItem(prItem)
+            menu.addItem(.separator())
+        } else if !pendingFuzzyMatches.isEmpty {
+            menu.addItem(makeFuzzyPreviewItem(matches: pendingFuzzyMatches))
             menu.addItem(.separator())
         }
 
@@ -804,9 +838,28 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return row
     }
 
+    /// The viewport column the event landed on, clamped to the grid. Nil when the
+    /// cell metrics aren't usable yet, which just drops back to left-to-right.
+    private func viewportColumn(for event: NSEvent) -> Int? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
+        guard size.cell_width_px > 0, size.columns > 0, bounds.width > 0 else { return nil }
+
+        let pos = convert(event.locationInWindow, from: nil)
+        let scale = Double(size.width_px) / Double(bounds.width)
+        let column = Int(max(0, Double(pos.x) * scale) / Double(size.cell_width_px))
+        return min(column, Int(size.columns) - 1)
+    }
+
     /// Read a span of viewport rows as text, full width.
+    ///
+    /// Held under `ghosttyLock` like every other read: the 2s status poll reads
+    /// the same surface from its own queue, and an unserialised read here came
+    /// back empty often enough to make the Preview item look broken.
     private func readViewportRows(_ rows: ClosedRange<Int>) -> String? {
         guard let surface else { return nil }
+        station?.ghosttyLock.lock()
+        defer { station?.ghosttyLock.unlock() }
         let size = ghostty_surface_size(surface)
         var text = ghostty_text_s()
         let sel = ghostty_selection_s(
@@ -823,23 +876,143 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     /// Run `match` over the whitespace-delimited tokens of every logical line that
-    /// touches the clicked row, stopping at the first hit.
+    /// touches the clicked row, nearest the clicked column first.
     ///
-    /// Working in tokens means we never need an exact column-to-character mapping,
-    /// which CJK width breaks. Multiple matching tokens on one line are rare enough
-    /// that first-hit-wins is reliable.
+    /// The click column matters: a line listing several paths has to preview the
+    /// one under the cursor, not whichever comes first. Columns are counted in
+    /// display cells (CJK and emoji occupy two), which is how the grid lays the
+    /// text out. Ordering by distance rather than requiring a hit keeps a click
+    /// in the gap beside a path working.
     private func firstTokenAtClick<T>(_ event: NSEvent, match: (String) -> T?) -> T? {
-        guard let surface, let row = viewportRow(for: event) else { return nil }
-        let rowCount = Int(ghostty_surface_size(surface).rows)
+        tokensAtClick(event).lazy.compactMap(match).first
+    }
 
+    /// Every candidate token around the click, nearest first and deduplicated.
+    ///
+    /// Read once per right-click and shared by all three matchers (exact path,
+    /// PR link, worktree lookup): each one used to re-read the surface under
+    /// `ghosttyLock`, and the wrap search makes that up to three reads apiece.
+    private func tokensAtClick(_ event: NSEvent) -> [String] {
+        guard let surface, let row = viewportRow(for: event) else { return [] }
+        let rowCount = Int(ghostty_surface_size(surface).rows)
+        let column = viewportColumn(for: event)
+
+        var tokens: [String] = []
+        var seen = Set<String>()
         for step in Self.wrapSearchPlan(row: row, rowCount: rowCount) {
             guard let text = readViewportRows(step.range) else { continue }
             let line = Self.logicalLine(from: text, pick: step.pick)
-            for token in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
-                if let hit = match(String(token)) { return hit }
+            // Only a single-row read maps columns to this line; a wrapped read
+            // concatenates rows, so fall back to left-to-right there.
+            let nearColumn = step.pick == .only ? column : nil
+            for token in Self.tokensByProximity(in: line, to: nearColumn) where seen.insert(token).inserted {
+                tokens.append(token)
             }
         }
-        return nil
+        return tokens
+    }
+
+    /// Display width of one character in grid cells: 2 for East Asian wide and
+    /// fullwidth forms and for emoji, 1 otherwise. Enough to place a click in a
+    /// line of mixed CJK and ASCII, which is what terminal output looks like here.
+    static func displayWidth(of character: Character) -> Int {
+        guard let scalar = character.unicodeScalars.first else { return 1 }
+        if character.unicodeScalars.contains(where: { $0.properties.isEmojiPresentation }) { return 2 }
+        switch scalar.value {
+        case 0x1100...0x115F,   // Hangul Jamo
+             0x2E80...0x303E,   // CJK radicals, Kangxi, CJK symbols/punctuation
+             0x3041...0x33FF,   // Kana, Hangul compatibility, CJK compatibility
+             0x3400...0x4DBF,   // CJK ext A
+             0x4E00...0x9FFF,   // CJK unified
+             0xA000...0xA4CF,   // Yi
+             0xAC00...0xD7A3,   // Hangul syllables
+             0xF900...0xFAFF,   // CJK compatibility ideographs
+             0xFE30...0xFE6F,   // CJK compatibility forms
+             0xFF00...0xFF60,   // Fullwidth forms
+             0xFFE0...0xFFE6,
+             0x20000...0x3FFFD: // CJK ext B and beyond
+            return 2
+        default:
+            return 1
+        }
+    }
+
+    /// Tokens of `line`, ordered by how close their cell span is to `column`
+    /// (nil keeps the natural left-to-right order).
+    ///
+    /// Split on whitespace *and* CJK punctuation: Chinese prose writes
+    /// `a.swift、b.swift。` with no spaces, which a whitespace-only split hands
+    /// back as one unusable token.
+    static func tokensByProximity(in line: String, to column: Int?) -> [String] {
+        var tokens: [(text: String, start: Int, end: Int)] = []
+        var current = ""
+        var tokenStart = 0
+        var cursor = 0
+        for character in line {
+            let width = displayWidth(of: character)
+            if character == " " || character == "\t" || Self.isSeparator(character) {
+                if !current.isEmpty {
+                    tokens.append((current, tokenStart, cursor - 1))
+                    current = ""
+                }
+                tokenStart = cursor + width
+            } else {
+                if current.isEmpty { tokenStart = cursor }
+                current.append(character)
+            }
+            cursor += width
+        }
+        if !current.isEmpty { tokens.append((current, tokenStart, cursor - 1)) }
+
+        guard let column else { return tokens.map(\.text) }
+        return tokens
+            .enumerated()
+            .sorted { lhs, rhs in
+                let a = distance(from: column, to: lhs.element)
+                let b = distance(from: column, to: rhs.element)
+                // Equal distance keeps the original order, so the behaviour is
+                // stable rather than dependent on the sort's internals.
+                return a == b ? lhs.offset < rhs.offset : a < b
+            }
+            .map(\.element.text)
+    }
+
+    private static func isSeparator(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { PathToken.separators.contains($0) }
+    }
+
+    private static func distance(from column: Int, to token: (text: String, start: Int, end: Int)) -> Int {
+        if column < token.start { return token.start - column }
+        if column > token.end { return column - token.end }
+        return 0
+    }
+
+    /// The worktree this pane belongs to, if ShipLog knows one.
+    private var worktreeRoot: String? {
+        guard let station, let path = ShipLog.shared.sailor(for: station.id)?.worktreePath,
+              !path.isEmpty else { return nil }
+        return path
+    }
+
+    /// Files anywhere in the worktree whose trailing components match a clicked
+    /// token. Cache-only: a cold index returns nothing this time and warms in
+    /// the background, because the menu cannot wait on a directory walk.
+    private func worktreeMatches(for tokens: [String]) -> [URL] {
+        guard let root = worktreeRoot,
+              let index = WorktreeFileIndexStore.shared.cachedIndex(for: root) else { return [] }
+        let rootURL = URL(fileURLWithPath: root)
+        // The pane's own directory breaks ties — a bare name printed by a tool
+        // running there almost always means the copy next to it.
+        var preferred: String?
+        if let pwd = station?.pwd, pwd.hasPrefix(root) {
+            preferred = String(pwd.dropFirst(root.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        for token in tokens {
+            let hits = index.matches(token: token, preferring: preferred)
+            if !hits.isEmpty { return hits.map { rootURL.appendingPathComponent($0) } }
+        }
+        return []
     }
 
     /// Resolve a previewable file from the terminal cell under the right-click.
@@ -894,29 +1067,30 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 number: number)
     }
 
-    /// If the current selection is a path pointing at an existing file (relative
-    /// paths resolved against the pane's working directory), return that file's
-    /// URL. Returns nil for no selection, directories, or non-existent paths so
-    /// the Preview menu item is only offered when it will actually work.
-    private func selectedFilePath() -> URL? {
-        // Prefer the snapshot taken on mouseUp; fall back to the live selection
-        // in case one exists that we didn't capture (e.g. keyboard selection).
-        guard let raw = cachedSelectionText ?? readSelectionText() else { return nil }
-        return Self.resolveSelectedPath(raw: raw, bases: pathResolutionBases())
-    }
 
     /// Pure resolver (unit-testable): trims `raw`, rejects multi-token/multi-line
     /// selections, then returns the first existing *file* found by treating `raw`
     /// as an absolute/`~` path or resolving it against each base in `bases`
     /// (first non-empty base that yields an existing file wins).
-    static func resolveSelectedPath(raw: String, bases: [String?]) -> URL? {
+    /// `allowingSpaces` is for an explicit selection only: highlighting
+    /// `my notes.md` is a deliberate act, so interior spaces are part of the
+    /// name. Guessing from a click keeps the stricter rule, or every sentence
+    /// would look like a path.
+    static func resolveSelectedPath(raw: String, bases: [String?], allowingSpaces: Bool = false) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A path shouldn't span lines or contain interior whitespace; reject
-        // multi-token selections rather than guessing.
-        guard !trimmed.isEmpty,
-              !trimmed.contains(where: { $0 == "\n" || $0 == " " || $0 == "\t" }) else { return nil }
+        // A path never spans lines; interior whitespace is rejected unless the
+        // user selected the text themselves.
+        guard !trimmed.isEmpty, !trimmed.contains("\n") else { return nil }
+        guard allowingSpaces || !trimmed.contains(where: { $0 == " " || $0 == "\t" }) else { return nil }
 
-        let expanded = (trimmed as NSString).expandingTildeInPath
+        for form in PathToken.forms(of: trimmed) {
+            if let url = existingFile(form, bases: bases) { return url }
+        }
+        return nil
+    }
+
+    private static func existingFile(_ path: String, bases: [String?]) -> URL? {
+        let expanded = (path as NSString).expandingTildeInPath
         let candidates: [String]
         if expanded.hasPrefix("/") {
             candidates = [expanded]
@@ -935,6 +1109,28 @@ class GhosttyNSView: NSView, NSTextInputClient {
             }
         }
         return nil
+    }
+
+    /// "Preview ▸" over the worktree files a bare name could mean. Titles are
+    /// worktree-relative, which is what distinguishes two files sharing a name.
+    private func makeFuzzyPreviewItem(matches: [URL]) -> NSMenuItem {
+        let root = worktreeRoot
+        let submenu = NSMenu()
+        for url in matches {
+            let title = root.map { Self.relativePath(of: url, under: $0) } ?? url.path
+            let item = NSMenuItem(title: title, action: #selector(contextPreview), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            submenu.addItem(item)
+        }
+        let parent = NSMenuItem(title: "Preview", action: nil, keyEquivalent: "")
+        parent.submenu = submenu
+        return parent
+    }
+
+    static func relativePath(of url: URL, under root: String) -> String {
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.path
     }
 
     @objc private func contextPreview(_ sender: NSMenuItem) {

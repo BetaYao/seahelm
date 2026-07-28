@@ -109,6 +109,35 @@ final class TerminalHeaderViewTests: XCTestCase {
         }
     }
 
+    /// The fullscreen file viewer titles itself with the whole path, and tail
+    /// truncation would drop the filename — the one part that identifies it.
+    func testPathTitlesTruncateInTheMiddle() {
+        let header = makeHeader()
+        header.setPaneTitle("/Volumes/openbeta/workspace/seahelm/Sources/UI/Island/IslandModel.swift")
+        XCTAssertEqual(header.titleLineBreakModeForTesting, .byTruncatingMiddle)
+        XCTAssertEqual(header.titleToolTipForTesting,
+                       "/Volumes/openbeta/workspace/seahelm/Sources/UI/Island/IslandModel.swift")
+    }
+
+    /// Pane titles are prose or command lines; those keep tail truncation even
+    /// when they happen to mention a directory.
+    func testProseTitlesKeepTailTruncation() {
+        let header = makeHeader()
+        header.setPaneTitle("npx eslint apps/query-service/src")
+        XCTAssertEqual(header.titleLineBreakModeForTesting, .byTruncatingTail)
+
+        header.setPaneTitle("Fix the login flake")
+        XCTAssertEqual(header.titleLineBreakModeForTesting, .byTruncatingTail)
+    }
+
+    func testIsPathLikeClassification() {
+        XCTAssertTrue(TerminalHeaderView.isPathLike("~/src/a.swift"))
+        XCTAssertTrue(TerminalHeaderView.isPathLike("Sources/a.swift"))
+        XCTAssertFalse(TerminalHeaderView.isPathLike("a.swift"))
+        XCTAssertFalse(TerminalHeaderView.isPathLike("cd /tmp"))
+        XCTAssertFalse(TerminalHeaderView.isPathLike(""))
+    }
+
     /// Tabs must be inside the scroll view's visible rect, not merely well-framed.
     func testStripTabsAreVisibleOnTheHeaderRow() {
         let header = makeHeader()
