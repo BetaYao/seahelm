@@ -28,6 +28,12 @@ class TabCoordinator {
         return workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
     }
+    /// Repo path behind a project display name — the inverse of `repoName`, for
+    /// surfaces (fleet group headers) that only carry the display title.
+    func repoPath(forProject project: String) -> String? {
+        workspaceManager.tabs.first(where: { $0.displayName == project })?.repoPath
+    }
+
     var branchRefreshTimer: Timer?
     weak var dashboardVC: DashboardViewController?
     /// Per-worktree signature of the last-persisted pane titles, so the display
