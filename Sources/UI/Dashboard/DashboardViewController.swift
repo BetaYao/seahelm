@@ -2127,11 +2127,16 @@ final class DashboardOverviewView: NSView {
         ])
     }
 
-    /// Header "+": add a whole repo (folder picker), the peer of the per-project
-    /// "+" that adds one worktree inside a deck.
+    /// Header: add a whole repo via the folder picker.
+    ///
+    /// Deliberately *not* a bare "+" — the per-project group headers already use
+    /// that for "add one worktree inside this deck", and two identical glyphs on
+    /// one screen made the two scopes indistinguishable. `folder.badge.plus` says
+    /// "pick a folder", which is literally what this opens, and matches the
+    /// empty-state add-project button.
     private func configureAddRepoButton() {
         addRepoButton.isBordered = false
-        if let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+        if let image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .medium)) {
             addRepoButton.image = image
             addRepoButton.title = ""
