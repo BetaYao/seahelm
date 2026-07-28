@@ -178,7 +178,7 @@ targets:
         # it ships inside every app bundle so the client can verify the feed.
         SPARKLE_PUBLIC_ED_KEY: "Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds="
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: "2.0.34"
+        MARKETING_VERSION: "2.0.35"
         CURRENT_PROJECT_VERSION: 1
         # Local builds sign with the same Developer ID as the shipped app, and
         # deliberately not ad-hoc. TCC pins a Full Disk Access grant to a code
