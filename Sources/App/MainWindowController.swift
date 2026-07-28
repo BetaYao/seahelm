@@ -597,6 +597,12 @@ class MainWindowController: NSWindowController {
         applyChromeState(animated: true)
     }
 
+    /// Cmd+Esc / Cmd+E: leave the focused terminal chrome for the fleet list.
+    func navigateBack() {
+        tabCoordinator.switchToTab(0)
+        toggleChromeCollapsed()
+    }
+
     func setChromeCollapsed(_ collapsed: Bool) {
         guard chromeState.isCollapsed != collapsed else {
             // Still refresh dashboard content / keyboard when already in sync.
@@ -1865,8 +1871,18 @@ class SeahelmWindow: NSWindow {
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
             mwc.toggleChromeCollapsed(); return true
+        case .navigateBack:
+            mwc.navigateBack(); return true
         case .commandPalette:
             mwc.toggleCommandPalette(); return true
+        case .toggleOverview:
+            mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
+        case .firstMatePane:
+            mwc.selectChromePane(.firstMate); return true
+        case .filesPane:
+            mwc.selectChromePane(.files); return true
+        case .changesPane:
+            mwc.selectChromePane(.changes); return true
         }
     }
 

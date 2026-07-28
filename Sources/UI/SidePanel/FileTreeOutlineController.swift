@@ -95,8 +95,10 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     var showHidden: Bool = false {
         didSet {
             guard showHidden != oldValue else { return }
+            // Same preserve-expansion path as refreshFromDisk — toggling
+            // visibility must not collapse folders the user already opened.
             rebuildPathIndex()
-            reload()
+            reloadPreservingExpansionAndSelection()
         }
     }
 
@@ -258,10 +260,16 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func refreshFromDisk() {
         rebuildPathIndex()
+        for node in rootNodes { node.children = nil }
+        reloadPreservingExpansionAndSelection()
+    }
+
+    /// Reload the outline while keeping folder expansion and the current selection
+    /// (skipped while filtering — search owns expansion).
+    private func reloadPreservingExpansionAndSelection() {
         let expanded = isFiltering ? [] : currentExpandedPaths()
         let selectedPath = (outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode)?
             .url.standardizedFileURL.path
-        for node in rootNodes { node.children = nil }
         reload()
         if !isFiltering {
             restoreExpansion(expanded)
@@ -303,19 +311,27 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     /// Re-expand directories whose paths are in `paths`. Iterates until stable so
     /// nested folders (revealed only after their parent expands) are restored too.
+    /// Stops if a pass makes no progress (e.g. path missing after hide-dotfiles,
+    /// or AppKit refusing to expand in a headless test host).
     func restoreExpansion(_ paths: Set<String>) {
         guard !paths.isEmpty else { return }
-        var changed = true
-        while changed {
-            changed = false
+        var remaining = paths
+        // Bound by depth: each successful pass can only unlock nested children.
+        for _ in 0..<paths.count {
+            var progressed = false
             for row in 0..<outlineView.numberOfRows {
                 guard let node = outlineView.item(atRow: row) as? FileTreeNode,
                       node.isDirectory,
-                      !outlineView.isItemExpanded(node),
-                      paths.contains(node.url.standardizedFileURL.path) else { continue }
-                outlineView.expandItem(node)
-                changed = true
+                      remaining.contains(node.url.standardizedFileURL.path) else { continue }
+                if !outlineView.isItemExpanded(node) {
+                    outlineView.expandItem(node)
+                }
+                if outlineView.isItemExpanded(node) {
+                    remaining.remove(node.url.standardizedFileURL.path)
+                    progressed = true
+                }
             }
+            if !progressed || remaining.isEmpty { break }
         }
     }
 

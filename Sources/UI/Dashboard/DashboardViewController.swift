@@ -647,6 +647,10 @@ class DashboardViewController: NSViewController {
         }
     }
 
+    /// Worktree paths in the order the fleet list is currently rendering them
+    /// (respects `CabinGroupingMode`). Empty before the overview has laid out.
+    var cruiseOrderPaths: [String] { overviewView.orderedRows.map(\.path) }
+
     var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
 
     @discardableResult
@@ -1588,11 +1592,14 @@ extension DashboardViewController {
     /// Removes the center overlay and restores first responder to the active terminal pane.
     func dismissCenterOverlay() {
         guard let overlay = centerOverlay else { return }
-        overlay.removeFromSuperview()
         centerOverlay = nil
         onCenterOverlayTitleChange?(nil)
+        // Pull out of the hierarchy immediately so the click feels instant;
+        // CodeEdit/SwiftUI teardown is deferred to the next turn.
+        overlay.removeFromSuperview()
 
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.async { [weak self, overlay] in
+            _ = overlay // release after this runloop turn
             guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
             let focusedId = tree.focusedId
             if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
@@ -1741,8 +1748,12 @@ extension DashboardViewController {
 
     private func closePreviewTab(_ path: String) {
         guard let wt = currentWorktreePath else { return }
-        previewContentCache[path]?.removeFromSuperview()
-        previewContentCache.removeValue(forKey: path)
+        let doomed = previewContentCache.removeValue(forKey: path)
+        doomed?.removeFromSuperview()
+        // Defer CodeEdit teardown so the tab close isn't blocked on deinit.
+        if let doomed {
+            DispatchQueue.main.async { _ = doomed }
+        }
         _ = previewSets.remove(path, from: wt)
 
         if previewSets.isEmpty(wt) {
@@ -1798,23 +1809,60 @@ extension DashboardViewController {
     /// `CenterOverlayView` chrome the focus-mode overlay uses (Close / Save /
     /// Preview toolbar + Cmd+S + Esc) so the two modes are identical. The
     /// toolbar's Close closes this tab.
+    ///
+    /// Text files show a spinner first while bytes are read off-main, then the
+    /// cache entry is swapped for the real editor so the click stays responsive.
     private func makePreviewContent(path: String) -> NSView {
-        buildPreviewOverlayView(path: path) { [weak self] in
-            self?.closePreviewTab(path)
-        }
-    }
-
-    /// Shared builder: file → editor/media/fallback wrapped in `CenterOverlayView`,
-    /// with Save/Preview wiring for editable text. Used by the edit-mode right
-    /// column (the focus-mode path builds its own via `showCenterOverlay`).
-    private func buildPreviewOverlayView(path: String, onClose: @escaping () -> Void) -> NSView {
+        let onClose: () -> Void = { [weak self] in self?.closePreviewTab(path) }
         if let media = MediaPreviewView.make(path: path) {
             return CenterOverlayView(content: media, onClose: onClose)
         }
-        guard let editor = CodeEditorView(path: path) else {
-            let fallback = MediaPreviewView.fallback(path: path) ?? FileContentView(path: path)
-            return CenterOverlayView(content: fallback, onClose: onClose)
+
+        let loading = CenterOverlayView(content: EditorLoadingView(), onClose: onClose)
+        // Register before the async hop so a fast disk read can't miss the
+        // identity check (updatePreviewContent also assigns this same ref).
+        previewContentCache[path] = loading
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let text = FileContentView.readContent(at: path)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Tab closed or superseded while we were reading — drop the result.
+                guard self.previewContentCache[path] === loading else { return }
+                let replacement = self.buildPreviewOverlayView(
+                    path: path, text: text, onClose: onClose
+                )
+                self.previewContentCache[path] = replacement
+                loading.removeFromSuperview()
+                DispatchQueue.main.async { _ = loading }
+                if let wt = self.currentWorktreePath,
+                   self.previewSets.activeFile(for: wt) == path {
+                    self.updatePreviewContent()
+                }
+            }
         }
+        return loading
+    }
+
+    /// Shared builder: already-resolved text → editor/fallback wrapped in
+    /// `CenterOverlayView`, with Save/Preview wiring for editable text.
+    private func buildPreviewOverlayView(
+        path: String,
+        text: String?,
+        onClose: @escaping () -> Void
+    ) -> NSView {
+        if let text {
+            let editor = CodeEditorView(fileURL: URL(fileURLWithPath: path), text: text)
+            return wrapEditorInOverlay(editor, onClose: onClose)
+        }
+        let fallback = MediaPreviewView.fallback(path: path) ?? FileContentView(path: path)
+        return CenterOverlayView(content: fallback, onClose: onClose)
+    }
+
+    /// Wire Save / Preview / dirty chrome around a loaded `CodeEditorView`.
+    private func wrapEditorInOverlay(
+        _ editor: CodeEditorView,
+        onClose: @escaping () -> Void
+    ) -> CenterOverlayView {
         weak var overlayRef: CenterOverlayView?
         let overlay = CenterOverlayView(
             content: editor,
@@ -1918,27 +1966,41 @@ extension DashboardViewController: CabinSidePanelDelegate {
             return
         }
 
-        // Editable, syntax-highlighted editor for UTF-8 text; for binary /
-        // oversized files try QuickLook, then the read-only placeholder.
-        guard let editor = CodeEditorView(path: path) else {
-            let fallback = MediaPreviewView.fallback(path: path) ?? FileContentView(path: path)
-            showCenterOverlay(fallback, title: title)
-            return
-        }
+        // Show a spinner immediately; file I/O + CodeEdit construction follow
+        // once bytes are ready so the file-tree click isn't blocked on disk.
+        let loadingOverlay = showCenterOverlay(EditorLoadingView(), title: title)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let text = FileContentView.readContent(at: path)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // User closed or opened another file while we were reading.
+                guard self.centerOverlay === loadingOverlay else { return }
 
-        weak var overlayRef: CenterOverlayView?
-        let overlay = showCenterOverlay(
-            editor,
-            title: title,
-            onSave: { [weak editor] in editor?.save() },
-            onPreview: editor.isPreviewable ? { [weak editor] in
-                guard let editor else { return }
-                overlayRef?.setPreviewing(editor.togglePreview())
-            } : nil
-        )
-        overlayRef = overlay
-        editor.onDirtyChange = { [weak overlay] dirty in
-            overlay?.setDirty(dirty)
+                if let text {
+                    let editor = CodeEditorView(
+                        fileURL: URL(fileURLWithPath: path), text: text
+                    )
+                    weak var overlayRef: CenterOverlayView?
+                    let overlay = self.showCenterOverlay(
+                        editor,
+                        title: title,
+                        onSave: { [weak editor] in editor?.save() },
+                        onPreview: editor.isPreviewable ? { [weak editor] in
+                            guard let editor else { return }
+                            overlayRef?.setPreviewing(editor.togglePreview())
+                        } : nil
+                    )
+                    overlayRef = overlay
+                    editor.onDirtyChange = { [weak overlay] dirty in
+                        overlay?.setDirty(dirty)
+                    }
+                } else {
+                    // Binary / oversized: QuickLook, then the read-only placeholder.
+                    let fallback = MediaPreviewView.fallback(path: path)
+                        ?? FileContentView(path: path)
+                    self.showCenterOverlay(fallback, title: title)
+                }
+            }
         }
     }
 

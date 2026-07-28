@@ -1357,7 +1357,7 @@ class TabCoordinator {
     /// `⌃⇥` / `⌃⇧⇥`. Same as `selectTab(forWorktree:)` plus the fleet-list
     /// highlight, which `selectSailor` alone leaves on the previous cabin.
     func cycleTab(toWorktree path: String) {
-        dashboardVC?.cycleToCabin(path: path)
+        dashboardVC?.enterWorktree(byWorktreePath: path)
         saveSelectedWorktree()
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }

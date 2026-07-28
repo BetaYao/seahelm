@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import CodeEditSourceEditor
 import CodeEditLanguages
+import Combine
 
 // MARK: - Model
 
@@ -41,7 +42,14 @@ private struct CodeEditorSwiftUIView: View {
                     font: .monospacedSystemFont(ofSize: 12, weight: .regular),
                     wrapLines: false
                 ),
-                behavior: .init(isEditable: true)
+                behavior: .init(isEditable: true),
+                // Minimap + folding ribbon are on by upstream default and dominate
+                // open/scroll cost for a side-panel viewer. Keep the gutter only.
+                peripherals: .init(
+                    showGutter: true,
+                    showMinimap: false,
+                    showFoldingRibbon: false
+                )
             ),
             state: $model.editorState
         )
@@ -51,8 +59,8 @@ private struct CodeEditorSwiftUIView: View {
 // MARK: - AppKit host
 
 /// Editable, syntax-highlighted code editor (CodeEditSourceEditor) wrapped for
-/// use inside the AppKit center overlay. Returns nil for files that can't be
-/// read as UTF-8 text so callers can fall back to a placeholder.
+/// use inside the AppKit center overlay. Construct from already-loaded UTF-8
+/// text so file I/O can stay off the main thread at the call site.
 final class CodeEditorView: NSView {
     private let model: CodeEditorModel
     private var hosting: NSHostingView<CodeEditorSwiftUIView>!
@@ -71,9 +79,8 @@ final class CodeEditorView: NSView {
     /// Markdown and HTML files get a preview toggle in the overlay header.
     var isPreviewable: Bool { isMarkdown || isHTML }
 
-    init?(path: String) {
-        guard let text = FileContentView.readContent(at: path) else { return nil }
-        self.model = CodeEditorModel(fileURL: URL(fileURLWithPath: path), text: text)
+    init(fileURL: URL, text: String) {
+        self.model = CodeEditorModel(fileURL: fileURL, text: text)
         super.init(frame: .zero)
 
         let hosting = NSHostingView(rootView: CodeEditorSwiftUIView(model: model))
@@ -94,10 +101,12 @@ final class CodeEditorView: NSView {
 
         observeDirty()
 
-        // Build the web view up front for previewable files: creating it lazily
-        // put the WebKit process launch on the first toggle, where it read as lag.
+        // WebKit process launch used to sit on the open path via prewarm().
+        // Defer until after the first frame so the editor can paint first.
         if isPreviewable {
-            makePreviewView().prewarm()
+            DispatchQueue.main.async { [weak self] in
+                self?.makePreviewView().prewarm()
+            }
         }
     }
 
@@ -177,9 +186,33 @@ final class CodeEditorView: NSView {
     }
 }
 
-// MARK: - Combine box
+// MARK: - Loading placeholder
 
-import Combine
+/// Lightweight stand-in shown while file bytes are read off the main thread.
+final class EditorLoadingView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = SemanticColors.panel.cgColor
+        }
+
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .regular
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimation(nil)
+        addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+}
+
+// MARK: - Combine box
 
 /// Tiny wrapper so we can hold an AnyCancellable without importing Combine into
 /// the view's public surface.
