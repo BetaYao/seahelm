@@ -76,24 +76,42 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var rootPath: String?
     private var rootNodes: [FileTreeNode] = []
 
+    /// Flat path table for search. Built off the main thread; nil until ready.
+    private var pathIndex: [WorktreePathEntry] = []
+    private var pathIndexGeneration = 0
+    private let indexQueue = DispatchQueue(label: "seahelm.filetree.index", qos: .userInitiated)
+
     /// Watches the worktree subtree so external file changes (agents writing
     /// files, Finder edits, git) refresh the tree without a manual reload.
     private var watcher: DirectoryWatcher?
     /// Debounces bursts of FSEvents into a single main-thread refresh.
     private var pendingRefresh: DispatchWorkItem?
+    /// Debounces filter keystrokes before applying an in-memory match.
+    private var pendingFilter: DispatchWorkItem?
+    private var filterGeneration = 0
+    private static let filterDebounce: TimeInterval = 0.15
 
     /// When true, dotfiles are listed. Toggled from the side panel / context menu.
     var showHidden: Bool = false {
-        didSet { guard showHidden != oldValue else { return }; reload() }
+        didSet {
+            guard showHidden != oldValue else { return }
+            rebuildPathIndex()
+            reload()
+        }
     }
 
-    /// Case-insensitive name filter. Empty shows the full tree.
+    /// Case-insensitive name filter. Empty shows the full (lazy) tree.
     var filterText: String = "" {
         didSet {
             let trimmed = filterText.trimmingCharacters(in: .whitespaces)
             guard trimmed != oldValue.trimmingCharacters(in: .whitespaces) else { return }
-            reload()
+            scheduleFilterApply()
         }
+    }
+
+    /// True while a non-empty filter is active (including debounce wait).
+    var isFiltering: Bool {
+        !filterText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     init(rootPath: String) {
@@ -126,8 +144,87 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     func setRoot(_ path: String?) {
         rootPath = path
+        pendingFilter?.cancel()
+        pendingFilter = nil
+        rebuildPathIndex()
         reload()
         startWatching(path)
+    }
+
+    private func scheduleFilterApply() {
+        pendingFilter?.cancel()
+        filterGeneration += 1
+        let generation = filterGeneration
+        let work = DispatchWorkItem { [weak self] in
+            self?.startFilterCompute(generation: generation)
+        }
+        pendingFilter = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.filterDebounce, execute: work)
+    }
+
+    private func rebuildPathIndex() {
+        pathIndexGeneration += 1
+        let generation = pathIndexGeneration
+        guard let path = rootPath else {
+            pathIndex = []
+            return
+        }
+        let root = URL(fileURLWithPath: path)
+        let showHidden = self.showHidden
+        indexQueue.async { [weak self] in
+            let entries = WorktreePathIndex.enumerate(root: root, showHidden: showHidden)
+            DispatchQueue.main.async {
+                guard let self, self.pathIndexGeneration == generation else { return }
+                self.pathIndex = entries
+                if self.isFiltering {
+                    self.filterGeneration += 1
+                    self.startFilterCompute(generation: self.filterGeneration)
+                }
+            }
+        }
+    }
+
+    /// Match + tree build off the main thread; only swap outline data on main.
+    private func startFilterCompute(generation: Int) {
+        guard let path = rootPath else {
+            rootNodes = []
+            outlineView.reloadData()
+            return
+        }
+        let needle = filterText.trimmingCharacters(in: .whitespaces)
+        if needle.isEmpty {
+            // Back to lazy browse mode — one directory listing of the root.
+            let url = URL(fileURLWithPath: path)
+            rootNodes = FileTreeOutlineController.childNodes(of: url, showHidden: showHidden)
+            outlineView.reloadData()
+            return
+        }
+
+        let entries = pathIndex
+        let root = URL(fileURLWithPath: path)
+        indexQueue.async { [weak self] in
+            let matched = WorktreePathIndex.matching(entries: entries, needle: needle)
+            let tree = WorktreePathIndex.buildFilteredTree(root: root, matched: matched)
+            DispatchQueue.main.async {
+                guard let self, self.filterGeneration == generation else { return }
+                // Needle may have cleared while we were computing.
+                guard self.isFiltering else { return }
+                self.rootNodes = tree
+                self.outlineView.reloadData()
+                // Filtered tree is already capped; one expand-all is cheaper than
+                // hundreds of individual expandItem calls.
+                if !tree.isEmpty {
+                    self.outlineView.expandItem(nil, expandChildren: true)
+                }
+            }
+        }
+    }
+
+    /// Apply the current filter against the in-memory path index (main thread
+    /// entry used by reload/refresh; heavy work still hops to `indexQueue`).
+    private func applyFilterFromIndex() {
+        filterGeneration += 1
+        startFilterCompute(generation: filterGeneration)
     }
 
     // MARK: - Filesystem watching
@@ -160,34 +257,34 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     private func refreshFromDisk() {
-        let expanded = currentExpandedPaths()
+        rebuildPathIndex()
+        let expanded = isFiltering ? [] : currentExpandedPaths()
         let selectedPath = (outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode)?
             .url.standardizedFileURL.path
         for node in rootNodes { node.children = nil }
         reload()
-        restoreExpansion(expanded)
-        if let selectedPath, let node = findNode(for: URL(fileURLWithPath: selectedPath)) {
-            let row = outlineView.row(forItem: node)
-            if row >= 0 { outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        if !isFiltering {
+            restoreExpansion(expanded)
+            if let selectedPath, let node = findNode(for: URL(fileURLWithPath: selectedPath)) {
+                let row = outlineView.row(forItem: node)
+                if row >= 0 { outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+            }
         }
     }
 
     private func reload() {
+        if isFiltering {
+            applyFilterFromIndex()
+            return
+        }
         guard let path = rootPath else {
             rootNodes = []
             outlineView.reloadData()
             return
         }
         let url = URL(fileURLWithPath: path)
-        rootNodes = childNodesFiltered(of: url)
+        rootNodes = FileTreeOutlineController.childNodes(of: url, showHidden: showHidden)
         outlineView.reloadData()
-        if isFiltering {
-            outlineView.expandItem(nil, expandChildren: true)
-        }
-    }
-
-    private var isFiltering: Bool {
-        !filterText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     // MARK: - Expansion state (persisted per worktree)
@@ -222,30 +319,7 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
     }
 
-    // MARK: - Listing / filtering
-
-    /// Children of `directory` honouring `showHidden` and the current filter.
-    /// When filtering, directories are kept only if a descendant matches.
-    private func childNodesFiltered(of directory: URL) -> [FileTreeNode] {
-        let all = FileTreeOutlineController.childNodes(of: directory, showHidden: showHidden)
-        let needle = filterText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return all }
-
-        var result: [FileTreeNode] = []
-        for node in all {
-            let nameMatches = node.url.lastPathComponent.lowercased().contains(needle)
-            if node.isDirectory {
-                let kids = childNodesFiltered(of: node.url)
-                if nameMatches || !kids.isEmpty {
-                    node.children = kids
-                    result.append(node)
-                }
-            } else if nameMatches {
-                result.append(node)
-            }
-        }
-        return result
-    }
+    // MARK: - Listing
 
     /// Lists the contents of `directory`, with directories first and each group
     /// sorted alphabetically by lastPathComponent. Dotfiles hidden unless `showHidden`.
@@ -285,7 +359,8 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         guard let node = item as? FileTreeNode, node.isDirectory else { return 0 }
         if node.children == nil {
-            node.children = childNodesFiltered(of: node.url)
+            // Browse mode: lazy disk listing. Filter mode already materialised children.
+            node.children = FileTreeOutlineController.childNodes(of: node.url, showHidden: showHidden)
         }
         return node.children?.count ?? 0
     }
@@ -296,7 +371,7 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         let node = item as! FileTreeNode
         if node.children == nil {
-            node.children = childNodesFiltered(of: node.url)
+            node.children = FileTreeOutlineController.childNodes(of: node.url, showHidden: showHidden)
         }
         return node.children![index]
     }
