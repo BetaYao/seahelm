@@ -2943,6 +2943,9 @@ final class DashboardOverviewView: NSView {
             l.font = AppFont.mono(size: size, weight: weight)
             l.textColor = color
             l.lineBreakMode = .byTruncatingTail
+            // Every label in this row is one line by design. Without the cap, a
+            // title carrying newlines wraps and the row grows to fit it.
+            l.maximumNumberOfLines = 1
             return l
         }
         private static func spacer() -> NSView {

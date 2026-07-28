@@ -30,6 +30,23 @@ enum PaneTitleResolver {
         },
         pathDisplay: (String) -> String = { shortenPath($0) }
     ) -> String {
+        singleLine(resolvedTitle(for: sailor, sessionTitle: sessionTitle, pathDisplay: pathDisplay))
+    }
+
+    /// Flatten to one line. Several sources are free-form user text — a Claude
+    /// session title is the first user prompt, which is routinely a multi-line
+    /// block — and every surface that shows a title gives it a single row.
+    /// Trimming alone left the embedded newlines, so one prompt-shaped title
+    /// grew a dashboard row to full-card height.
+    static func singleLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func resolvedTitle(
+        for sailor: SailorInfo,
+        sessionTitle: (String, String) -> String?,
+        pathDisplay: (String) -> String
+    ) -> String {
         // A pane whose OSC title is the shell prompt (`user@host:/path`) is sitting
         // at a shell right now — even if its agent type is stale (an agent that
         // exited back to a shell keeps `claudeCode`/`codex`). Treat it as a shell

@@ -22,6 +22,40 @@ final class PaneTitleResolverTests: XCTestCase {
         XCTAssertEqual(title, "Fix login flake")
     }
 
+    /// A Claude session title is the first user prompt — often many lines. Every
+    /// surface renders a title on one row, so it must arrive already flattened.
+    func testMultiLineSessionTitleCollapsesToOneLine() {
+        let station = Station()
+        guard let ref = AgentSessionRef(agent: "claude", sessionId: "abc-123") else {
+            return XCTFail("expected valid AgentSessionRef")
+        }
+        station.agentSessionRef = ref
+        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x", commandLine: nil)
+        sailor.station = station
+
+        let title = PaneTitleResolver.title(
+            for: sailor,
+            sessionTitle: { _, _ in "  Plan mode\n\n<options>\n\t<option>Option 1</option>\n</options>  " }
+        )
+
+        XCTAssertEqual(title, "Plan mode <options> <option>Option 1</option> </options>")
+        XCTAssertFalse(title.contains("\n"))
+    }
+
+    func testMultiLineShellCommandCollapsesToOneLine() {
+        let sailor = makeSailor(
+            agentType: .shellCommand,
+            prompt: "",
+            branch: "main",
+            commandLine: "git commit -m 'first\nsecond'"
+        )
+
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "git commit -m 'first second'"
+        )
+    }
+
     func testShellPrefersCommandOverBranch() {
         let sailor = makeSailor(
             agentType: .shellCommand,
