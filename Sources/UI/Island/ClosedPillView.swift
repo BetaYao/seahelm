@@ -29,6 +29,7 @@ struct ClosedPillView: View {
         // out smoothly as counts change while closed.
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.orders.count)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.rows)
+        .animation(.easeInOut(duration: 0.3), value: model.pillUsage)
         .onAppear { updatePulse() }
         .onChange(of: pulseTiles) { updatePulse() }
     }
@@ -45,11 +46,18 @@ struct ClosedPillView: View {
 
     private var wingWidth: CGFloat { (model.closedWidth - model.notchWidth) / 2 - 10 }
 
-    /// How many suggestions are waiting on the user to pick an option. Nothing
-    /// else earns the left wing — status changes go to Notification Center.
+    /// How many suggestions are waiting on the user to pick an option, else
+    /// the rotating Claude/Codex quota readout. Nothing else earns the left
+    /// wing — status changes go to Notification Center.
     @ViewBuilder
     private var leftWing: some View {
-        if !model.orders.isEmpty {
+        if model.orders.isEmpty, let usage = model.pillUsage {
+            UsageReadoutView(logoName: usage.logoName, segments: [usage.segment])
+                // Keyed to the window so a rotation step crossfades instead of
+                // mutating the text in place.
+                .id("\(usage.logoName)-\(usage.segment.label)")
+                .transition(.opacity)
+        } else if !model.orders.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: "questionmark.bubble.fill")
                     .font(.system(size: 11, weight: .semibold))

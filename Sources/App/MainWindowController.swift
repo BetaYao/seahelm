@@ -383,7 +383,16 @@ class MainWindowController: NSWindowController {
         handleNotificationHistoryDidChange(nil)
         setupIsland()
         setupSuggestionReveal()
-        usageSummaryStore.onUpdate = { _ in }
+        // Claude only reports rate limits through its statusline payload, so
+        // the bridge that captures it has to be in place before the first poll.
+        DispatchQueue.global(qos: .utility).async {
+            ClaudeStatuslineBridgeInstaller.ensureInstalled()
+        }
+        usageSummaryStore.onUpdate = { [weak self] claude, codex in
+            self?.islandController.model.setUsageReadouts(
+                UsageSummaryFormatter.readouts(claude: claude, codex: codex)
+            )
+        }
         usageSummaryStore.start()
     }
 

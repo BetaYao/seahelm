@@ -254,12 +254,18 @@ struct OpenedSurfaceView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("Seahelm")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
-            Spacer()
+            Spacer(minLength: 8)
+            // Quota rides the title row: every provider's windows at once,
+            // rather than the closed pill's one-at-a-time rotation.
+            ForEach(model.usageReadouts) { readout in
+                UsageReadoutView(logoName: readout.logoName, segments: readout.segments)
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: model.usageReadouts)
     }
 
     private func agentRow(_ row: IslandAgentRow) -> some View {

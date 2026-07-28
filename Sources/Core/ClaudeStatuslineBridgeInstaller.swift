@@ -13,23 +13,31 @@ enum ClaudeStatuslineBridgeInstaller {
 
     @discardableResult
     private static func ensureInstalled(settingsURL: URL, supportDirectory: URL, cacheDirectory: URL) -> Bool {
-        guard let data = try? Data(contentsOf: settingsURL),
-              var settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let statusLine = settings["statusLine"] as? [String: Any],
-              statusLine["type"] as? String == "command",
-              let originalCommand = statusLine["command"] as? String,
-              !originalCommand.contains("claude-statusline-bridge.sh") else { return false }
+        let scriptURL = supportDirectory.appendingPathComponent("claude-statusline-bridge.sh")
+        var settings: [String: Any] = [:]
+        if let data = try? Data(contentsOf: settingsURL),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            settings = parsed
+        }
+        let statusLine = settings["statusLine"] as? [String: Any]
+        // Matched on *our* script path, not the bare filename: a legacy amux
+        // bridge shares the filename and still needs wrapping, or its rate
+        // limits never reach seahelm's cache.
+        let originalCommand = (statusLine?["type"] as? String == "command")
+            ? (statusLine?["command"] as? String ?? "")
+            : ""
+        guard !originalCommand.contains(scriptURL.path) else { return false }
 
         do {
+            try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             let originalURL = supportDirectory.appendingPathComponent("claude-statusline-original-command")
             try originalCommand.write(to: originalURL, atomically: true, encoding: .utf8)
-            let scriptURL = supportDirectory.appendingPathComponent("claude-statusline-bridge.sh")
             try bridgeScript(originalCommandURL: originalURL, cacheURL: cacheDirectory.appendingPathComponent("claude-statusline.json"))
                 .write(to: scriptURL, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-            var updatedStatusLine = statusLine
+            var updatedStatusLine = statusLine ?? [:]
             updatedStatusLine["type"] = "command"
             updatedStatusLine["command"] = "/bin/sh \(shellQuote(scriptURL.path))"
             settings["statusLine"] = updatedStatusLine
