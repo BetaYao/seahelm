@@ -57,7 +57,6 @@
 		216DCA58D600EA88B333A324 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CAD3E9929AC9E5E32EBA9F /* Station.swift */; };
 		2215E8F6A1F2571870A122F6 /* TabCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */; };
 		2313FC433D0111A77BB10B04 /* MqttChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78661A2AC2A8EFF154BA1FC2 /* MqttChannel.swift */; };
-		2342B54103FE7B8523E6F0FE /* KeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D903DD2BD63A00A9BBE71CD3 /* KeymapTests.swift */; };
 		242BFEB70069EF4739848192 /* FirstMateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */; };
 		26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DFD4558DAFB3276A91514A2 /* SwiftUI.framework */; };
 		26D0AE3B86D90817446E8FF4 /* ShipLogWebhookPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977EBF9499499F3C4E6C2891 /* ShipLogWebhookPathTests.swift */; };
@@ -174,7 +173,6 @@
 		7839409D46CC0B8E4810B869 /* WorktreeCreatorEnvCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */; };
 		79F532FA70B21691FB226AF8 /* GitHubDiffAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3492399099DDDAE527C6CA /* GitHubDiffAdapter.swift */; };
 		7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */; };
-		7A85312BE720DFFA0A03ADAB /* Keymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F12DC83A838ABCF3346194 /* Keymap.swift */; };
 		7B38C3C8130A83060B80E17D /* CabinTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9047286380B922BE6745E52 /* CabinTitleResolverTests.swift */; };
 		7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */; };
 		7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */; };
@@ -674,7 +672,6 @@
 		A51B009382FE3586E735355D /* CodexHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetup.swift; sourceTree = "<group>"; };
 		A5943C79014C5FE35819487C /* ScanDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoder.swift; sourceTree = "<group>"; };
 		A657EAE120C252D650A7961B /* FileTreeOutlineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineController.swift; sourceTree = "<group>"; };
-		A6F12DC83A838ABCF3346194 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
 		A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
 		A864EF5AD3DEA27B0135D7D1 /* GitHubPRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPRService.swift; sourceTree = "<group>"; };
 		A93CAFA62124025DCEA0F97A /* SailorReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducerTests.swift; sourceTree = "<group>"; };
@@ -748,7 +745,6 @@
 		D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEventTests.swift; sourceTree = "<group>"; };
 		D8F411B82FDF917ED61460FC /* QuickLookUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookUI.framework; path = System/Library/Frameworks/QuickLookUI.framework; sourceTree = SDKROOT; };
 		D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueueTests.swift; sourceTree = "<group>"; };
-		D903DD2BD63A00A9BBE71CD3 /* KeymapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeymapTests.swift; sourceTree = "<group>"; };
 		D94D0809EF8A568E5C3A80A5 /* WeComBotChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComBotChannel.swift; sourceTree = "<group>"; };
 		DA02A8188B616E0F6F413FC1 /* EventHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventHub.swift; sourceTree = "<group>"; };
 		DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLaunchCommandTests.swift; sourceTree = "<group>"; };
@@ -1029,7 +1025,6 @@
 				B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */,
 				798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */,
 				081CE1B8C53AC598217B30B7 /* KeyboardSubstateController.swift */,
-				A6F12DC83A838ABCF3346194 /* Keymap.swift */,
 				D56E02C4A6D726C18E655451 /* main.swift */,
 				63F65EEAACEE71D08FEF9313 /* MainWindowController.swift */,
 				5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */,
@@ -1247,7 +1242,6 @@
 				3FA6E78D00BFAF395356B892 /* IMessageRuleTests.swift */,
 				63049780738A9E97C8BCB55B /* InlineCabinCreateViewTests.swift */,
 				77AAEF167452AD3BAB184D84 /* KeyboardSubstateControllerTests.swift */,
-				D903DD2BD63A00A9BBE71CD3 /* KeymapTests.swift */,
 				85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */,
 				304981CB302BEC6B00289258 /* ManifestEngineTests.swift */,
 				A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */,
@@ -1572,7 +1566,8 @@
 				LastUpgradeCheck = 1610;
 				TargetAttributes = {
 					2EF6EE4B1A332625235C3148 = {
-						ProvisioningStyle = Automatic;
+						DevelopmentTeam = 43G5A6G9QV;
+						ProvisioningStyle = Manual;
 					};
 					62EFE1DC95607F575DBBF425 = {
 						TestTargetID = 2EF6EE4B1A332625235C3148;
@@ -1723,7 +1718,6 @@
 				19A26EE54A5CE77EB9A5A51B /* IdeaStoreTests.swift in Sources */,
 				AC2875297F590321111FDFEA /* InlineCabinCreateViewTests.swift in Sources */,
 				73225618467620F782EF0465 /* KeyboardSubstateControllerTests.swift in Sources */,
-				2342B54103FE7B8523E6F0FE /* KeymapTests.swift in Sources */,
 				926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */,
 				91AD0153C909A0DF726EE6A1 /* ManifestEngineTests.swift in Sources */,
 				7F9546C174F5D5E52457F7A8 /* MarkdownRendererTests.swift in Sources */,
@@ -1937,7 +1931,6 @@
 				C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */,
 				4344E9AEB5D00D092883F299 /* KeyboardMode.swift in Sources */,
 				8080334C2591CD6DAEE35749 /* KeyboardSubstateController.swift in Sources */,
-				7A85312BE720DFFA0A03ADAB /* Keymap.swift in Sources */,
 				D5E1195B106F29ACCB59D516 /* LayoutNode.swift in Sources */,
 				D41BF448B2DB04958D4C1B01 /* MainWindowController.swift in Sources */,
 				EE61D03E90AEC25A247BE3C9 /* ManifestEngine.swift in Sources */,
@@ -2082,9 +2075,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = seahelm.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 43G5A6G9QV;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
@@ -2315,10 +2310,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = seahelm.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEPLOYMENT_POSTPROCESSING = YES;
+				DEVELOPMENT_TEAM = 43G5A6G9QV;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",

@@ -402,7 +402,7 @@ class DashboardViewController: NSViewController {
         }
 
         if isInDState {
-            focusController.refreshCards(agents.map { $0.id })
+            focusController.refreshCards(cruiseOrder.map(\.id))
             applyKeyboardFocusVisuals()
         }
 
@@ -636,6 +636,29 @@ class DashboardViewController: NSViewController {
 
     /// Drill into a specific worktree without changing the chrome sidebar state.
     /// Clicking a row is what sets the overview's selection highlight.
+    /// `⌃⇥` / `⌃⇧⇥`: switch to `path` and slide the fleet-list highlight onto it.
+    ///
+    /// This used to go through `selectTab(forWorktree:)` → `selectSailor`, which
+    /// swaps the terminal content but never touches the overview's selection — so
+    /// the content changed while the fleet list (and the First Mate panel showing
+    /// it) stayed highlighted on the previous cabin. Everything the highlight
+    /// needs is here: the row id, the focus ring's index, and the animation.
+    func cycleToCabin(path: String) {
+        selectSailor(byWorktreePath: path)
+        overviewSelectedId = selectedSailorId
+        if let index = overviewView.orderedRows.firstIndex(where: { $0.path == path }) {
+            _ = overviewFocus.jumpToWorktree(index)
+        }
+        guard !overviewView.isHidden else {
+            overviewView.selectedId = overviewSelectedId
+            return
+        }
+        if !overviewView.moveSelection(to: overviewSelectedId, animated: true) {
+            overviewView.selectedId = overviewSelectedId
+            overviewView.update(agents)
+        }
+    }
+
     func enterWorktree(byWorktreePath path: String) {
         selectSailor(byWorktreePath: path)
         overviewSelectedId = selectedSailorId
@@ -1084,7 +1107,7 @@ class DashboardViewController: NSViewController {
         )
         focusController.captureSnapshot(snapshot)
 
-        let cardIds = agents.map { $0.id }
+        let cardIds = cruiseOrder.map(\.id)
         let initial = snapshot.focusedWorktreePath
             .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
             ?? (selectedSailorId.isEmpty ? nil : selectedSailorId)
@@ -1097,10 +1120,6 @@ class DashboardViewController: NSViewController {
 
     func exitDashboardNavigation(restoreSnapshot: Bool) {
         guard isInDState else { return }
-
-        // Ring is going away: clear any pending delete (guarded no-op otherwise).
-        // Do NOT clear .createForm here — the form outlives the ring.
-        windowKeyboardSubstate?.cancelDelete()
 
         let snapshot = focusController.snapshot
         tearDownNavVisuals()
@@ -1174,72 +1193,58 @@ class DashboardViewController: NSViewController {
 
     // MARK: - D-state key handling
 
+    /// The dashboard answers only three bare keys now: `?` for the cheat-sheet,
+    /// Esc to close an overlay / leave the focus ring, and the `/ @ #` command
+    /// prefixes (in `handleNavKey`). Cabin movement is `⌃⇥` / `⌃⇧⇥` at the window
+    /// level — the old `hjkl` / `{}` / `1–9` / `i d c f m n` ring is gone, so
+    /// everything else falls through to the responder chain.
     override func keyDown(with event: NSEvent) {
         if viewMode != .terminal, !isInDState {
             handleNavKey(event); return
         }
         guard isInDState else { super.keyDown(with: event); return }
-        let substateController = windowKeyboardSubstate
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // deletePending: d/y confirm, esc/other cancel
-        if case .deletePending(let agentId) = substateController?.substate {
-            if event.keyCode == 53 { substateController?.cancelDelete(); applyKeyboardFocusVisuals(); return }
-            if let ch = event.charactersIgnoringModifiers, ch == "d" || ch == "y" {
-                if substateController?.confirmDelete() == agentId { performDelete(agentId: agentId) }
-                return
-            }
-            substateController?.cancelDelete(); applyKeyboardFocusVisuals(); return
-        }
-
-        // Nav ring: ? toggles the keyboard help overlay; Esc closes it first
-        // before falling back to the legacy "exit nav" behavior.
-        if event.keyCode == 53 {  // Esc
+        if event.keyCode == 53 {  // Esc closes overlays first, then exits nav
             if closeTopmostOverlay() { return }
+            if flags.isEmpty { exitDashboardNavigation(restoreSnapshot: true); return }
         }
-        if flags.isDisjoint(with: [.command, .control, .option]) {
-            if event.characters == "?" {
-                toggleHelp(); return
-            }
+        if flags.isDisjoint(with: [.command, .control, .option]), event.characters == "?" {
+            toggleHelp(); return
         }
-
-        // Escape with no pending → exit nav (legacy behavior)
-        if event.keyCode == 53 && flags.isEmpty {
-            exitDashboardNavigation(restoreSnapshot: true); return
-        }
-
-        // Build chord: printable char with no command/control/option, else keyCode.
-        let chord: KeyChord
-        if flags.isDisjoint(with: [.command, .control, .option]),
-           let ch = event.charactersIgnoringModifiers, ch.count == 1,
-           ch.rangeOfCharacter(from: .alphanumerics) != nil {
-            chord = KeyChord(char: ch)
-        } else {
-            chord = KeyChord(keyCode: event.keyCode)
-        }
-
-        guard let action = Keymap.action(chord: chord) else {
-            super.keyDown(with: event); return
-        }
-        dispatch(action)
+        super.keyDown(with: event)
     }
 
     private var windowKeyboardSubstate: KeyboardSubstateController? {
         (view.window?.windowController as? MainWindowController)?.keyboardSubstate
     }
 
-    /// The agent currently focused by the nav ring, if a card is focused.
-    private var focusedSailor: SailorDisplayInfo? {
-        guard case .card(let agentId) = focusController.focusedTarget else { return nil }
-        return agents.first(where: { $0.id == agentId })
+    /// The D-state card ring, in fleet-list display order.
+    ///
+    /// The ring used to be `agents.map(\.id)` — discovery order — while the list on
+    /// screen is grouped and sorted by `CabinGroupingMode`. Under any grouping but
+    /// the default that made `hjkl` and `1–9` walk an order the eye can't see. The
+    /// rendered order is the only one that matches, so it is the ring; the raw
+    /// agent order survives only as a fallback for before the overview first
+    /// rendered (launching straight into terminal mode).
+    var cruiseOrder: [(id: String, path: String)] {
+        overviewView.orderedRows.isEmpty
+            ? agents.map { (id: $0.id, path: $0.worktreePath) }
+            : overviewView.orderedRows
     }
 
-    // MARK: - Overview (fleet) keyboard navigation — the vertical nav ring
+    /// Worktree paths in display order, for the window-level `⌃⇥` cabin cycle.
+    var cruiseOrderPaths: [String] { cruiseOrder.map(\.path) }
+
+    // MARK: - Overview (fleet) keyboard handling
 
     /// Keyboard handling while the overview drives the keyboard (modes 1 & 2).
-    /// ↑↓ (j/k) walk worktree rows → orders card row → command input; on the
-    /// orders row ←→ pick a card and Tab cycles its options; ⏎/→ commit forward
-    /// (mode 1 → 2 → 3); ← in mode 2 goes back to mode 1.
+    ///
+    /// The vertical nav ring that used to live here (↑↓ / `jk` walking rows,
+    /// `⏎`/`→` committing forward, `{}` group jumps, `1–9`) is gone: cabins move
+    /// with the window-level `⌃⇥` / `⌃⇧⇥` cycle, and rows are still clickable.
+    /// What stays is what isn't cabin movement — Tab's region cycle, `?`, and the
+    /// island's command prefixes.
     private func handleNavKey(_ event: NSEvent) {
         if event.keyCode == 53 {  // Esc closes overlays (help, …)
             if closeTopmostOverlay() { return }
@@ -1247,29 +1252,10 @@ class DashboardViewController: NSViewController {
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.isDisjoint(with: [.command, .control, .option]) else { super.keyDown(with: event); return }
-        let ch = event.charactersIgnoringModifiers
-        switch event.keyCode {
-        case 126: applyOverviewEffect(overviewFocus.moveUp());   return  // ↑
-        case 125: applyOverviewEffect(overviewFocus.moveDown()); return  // ↓
-        case 123: handleNavLeft();  return                               // ←
-        case 124: handleNavRight(); return                               // →
-        case 48:  handleNavTab();   return                               // Tab
-        case 36:  handleNavReturn(); return                              // ⏎
-        default: break
-        }
-        switch ch {
-        case "k": applyOverviewEffect(overviewFocus.moveUp())
-        case "j": applyOverviewEffect(overviewFocus.moveDown())
-        case "h": handleNavLeft()
-        case "l": handleNavRight()
+        if event.keyCode == 48 { handleNavTab(); return }                // Tab
+        switch event.charactersIgnoringModifiers {
         case "?": toggleHelp()
-        case "n": startNewCommand()
-        case "/", "@", "#": onRequestCommandBar?(ch ?? "")
-        case let d? where ("1"..."9").contains(d):
-            if let n = Int(d), case .previewWorktree = overviewFocus.jumpToWorktree(n - 1) {
-                applyOverviewEffect(.previewWorktree(n - 1))
-                commitFocusedWorktreeForward()
-            }
+        case let ch? where ch == "/" || ch == "@" || ch == "#": onRequestCommandBar?(ch)
         default: super.keyDown(with: event)
         }
     }
@@ -1296,16 +1282,6 @@ class DashboardViewController: NSViewController {
         }
     }
 
-    /// ← in the fleet list has nothing to step back into — the orders card row it
-    /// used to walk now lives in the island.
-    private func handleNavLeft() {}
-
-    private func handleNavRight() {
-        if overviewFocus.selectedWorktreeIndex != nil {
-            commitFocusedWorktreeForward()
-        }
-    }
-
     private func handleNavTab() {
         // Tab advances the outer region cycle (panes → sidebar → titlebar/chrome
         // header → helm).
@@ -1314,19 +1290,16 @@ class DashboardViewController: NSViewController {
             .cycleKeyboardRegion(forward: forward)
     }
 
-    private func handleNavReturn() {
-        if overviewFocus.selectedWorktreeIndex != nil {
-            commitFocusedWorktreeForward()
-        }
-    }
-
     /// Click on a fleet row:
     /// - mode 2, clicking a *different* row: stay in split and switch worktrees
     /// - mode 2, clicking the *selected* row: no-op (sidebar stays open)
     /// - mode 3: drill into the clicked worktree's terminal
-    /// Keyboard ⏎/→ still advances split → terminal via `commitFocusedWorktreeForward`.
     /// Test seam for the row-click path (the click itself arrives via a closure).
     func handleWorktreeRowClickForTesting(path: String) { handleWorktreeRowClick(path: path) }
+
+    /// What the fleet list — and the First Mate panel that renders it — is
+    /// currently highlighting, which is not always the selected sailor.
+    var overviewSelectedIdForTesting: String { overviewView.selectedId }
 
     /// Pane row click in "Group by Sailor": drill into the worktree, then focus
     /// the clicked pane's leaf. The split container may still be settling, so the
@@ -1349,8 +1322,8 @@ class DashboardViewController: NSViewController {
             return
         }
         let row = overviewView.orderedRows[i]
-        // Land the ring on the clicked row so a following ↑/↓ continues from here
-        // rather than from wherever the keyboard was last.
+        // Land the ring on the clicked row so a following ⌃⇥ continues from here
+        // rather than from wherever the selection was last.
         _ = overviewFocus.jumpToWorktree(i)
 
         switch viewMode {
@@ -1363,22 +1336,6 @@ class DashboardViewController: NSViewController {
             // Overview is hidden here, but a docked side panel can still surface
             // rows — keep the direct drill-in.
             enterWorktree(byWorktreePath: path)
-        }
-    }
-
-    /// ⏎/→ on a worktree row: mode 1 → mode 2 (selected worktree), mode 2 → mode 3.
-    private func commitFocusedWorktreeForward() {
-        guard let i = overviewFocus.selectedWorktreeIndex,
-              overviewView.orderedRows[safeIndex: i] != nil else { return }
-        switch viewMode {
-        case .split:
-            // The live preview is debounced, so it may still be queued when the
-            // user commits straight after an arrow key. Cash it in before handing
-            // over the keyboard, or they land in the previous worktree's terminal.
-            flushPendingPreview()
-            setViewMode(.terminal)
-        case .terminal:
-            break
         }
     }
 
@@ -1458,85 +1415,6 @@ class DashboardViewController: NSViewController {
             break
         }
     }
-
-    private func dispatch(_ action: KeyboardAction) {
-        switch action {
-        case .moveFocus(let dir):
-            focusController.move(dir, columns: 1)
-            applyKeyboardFocusVisuals(); scrollFocusedIntoView()
-            previewFocusedCard()
-        case .jumpToCard(let idx):
-            focusController.jump(toIndex: idx)
-            applyKeyboardFocusVisuals(); scrollFocusedIntoView()
-            previewFocusedCard()
-        case .enterTerminal:
-            onEnterTerminal?()
-            handleReturnInDState()
-        case .deleteFocused:
-            guard let agent = focusedSailor else { return }
-            // The main worktree cannot be deleted. There is no surface for a
-            // transient hint since the status bar was removed, so this is silent.
-            guard !agent.isMainWorktree else { return }
-            windowKeyboardSubstate?.beginDelete(agentId: agent.id)
-        case .showChanges:
-            guard let agent = focusedSailor else { return }
-            dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
-        case .browseFiles:
-            guard let agent = focusedSailor else { return }
-            dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
-        case .newWorktree:
-            // Leave the D-state focus ring before opening the form so no stale card
-            // visuals remain and a stray key in the form isn't read as a nav chord.
-            // The .createForm substate is set by beginCreateForm() and survives this.
-            exitNavForCreateForm()
-            onRequestNewWorktree?()
-        case .toggleFiles:      selectLeftPane(.file)
-        case .toggleChanges:    selectLeftPane(.change)
-        case .toggleFirstMate:  toggleFirstMateSide()
-        }
-    }
-
-    private func performDelete(agentId: String) {
-        dashboardDelegate?.dashboardDidRequestDelete(agentId)
-        focusController.removeCurrentCard()
-        applyKeyboardFocusVisuals()
-    }
-
-    private func handleReturnInDState() {
-        switch focusController.focusedTarget {
-        case .none:
-            exitDashboardNavigation(restoreSnapshot: true)
-        case .bigPanel:
-            exitDashboardNavigation(restoreSnapshot: false)
-        case .card(let agentId):
-            guard let agent = agents.first(where: { $0.id == agentId }) else {
-                exitDashboardNavigation(restoreSnapshot: true); return
-            }
-            selectSailor(byWorktreePath: agent.worktreePath)
-            exitDashboardNavigation(restoreSnapshot: false)
-        }
-    }
-
-    private func scrollFocusedIntoView() {
-        guard case .card = focusController.focusedTarget else { return }
-    }
-
-    /// In focus layouts, live-preview the focused mini card in the main panel as the
-    /// nav ring moves — the left panel "follows" the selection. The terminal is NOT
-    /// focused (the dashboard VC keeps first responder) so arrows keep navigating;
-    /// Return then commits via `handleReturnInDState`.
-    private func previewFocusedCard() {
-        guard case .card(let agentId) = focusController.focusedTarget else { return }
-        guard let agent = agents.first(where: { $0.id == agentId }), agent.id != selectedSailorId else { return }
-
-        selectedSailorId = agent.id
-        detachTerminals()
-        embedSplitContainerForSelectedSailor(focusTerminal: false)
-        // Re-assert nav visuals: embedding mutated the panel's subviews.
-        applyKeyboardFocusVisuals()
-        applyDimOverlayIfNeeded()
-    }
-
 
 }
 
@@ -2275,10 +2153,10 @@ final class DashboardOverviewView: NSView {
         }
         let description: String
         switch groupingMode {
-        case .repository: description = "Group projects by deck"
-        case .status: description = "Group projects by status"
-        case .activityTime: description = "Group projects by time"
-        case .sailor: description = "Expand projects into sailors"
+        case .repository: description = "Group cabins by deck"
+        case .status: description = "Group cabins by status"
+        case .activityTime: description = "Group cabins by time"
+        case .sailor: description = "Expand cabins into sailors"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2299,6 +2177,9 @@ final class DashboardOverviewView: NSView {
 
     /// Worktrees in display (grouped) order — the sequence keyboard nav walks.
     private(set) var orderedRows: [(id: String, path: String)] = []
+    /// Indices into `orderedRows` where each rendered group starts — the boundaries
+    /// `{` / `}` jump between. Pane rows never enter `orderedRows`, so cruising
+    /// stays at worktree level in `.sailor` mode too.
 
     /// Holds the row rebuild while an anchored form (the "+" create popover) is
     /// open, so the list doesn't churn under it on every 2s status poll. Data
@@ -2390,6 +2271,34 @@ final class DashboardOverviewView: NSView {
             selectedRow.scrollToVisible(selectedRow.bounds)
             revealedRowID = selectedId
         }
+    }
+
+    /// Move the highlight to `id` in place, cross-fading between the two rows and
+    /// scrolling the new one into view.
+    ///
+    /// The `⌃⇥` path deliberately avoids `update(_:)`: a full re-render tears down
+    /// every row view and builds new ones, which cannot animate and reads as the
+    /// whole list flickering. Returns false when `id` has no row on screen (the
+    /// list hasn't rendered, or the target is filtered out) so the caller can fall
+    /// back to a plain re-render.
+    @discardableResult
+    func moveSelection(to id: String, animated: Bool) -> Bool {
+        guard let target = rowViewsByID[id] else { return false }
+        guard id != selectedId else { return true }
+        rowViewsByID[selectedId]?.setSelected(false, animated: animated)
+        target.setSelected(true, animated: animated)
+        selectedId = id
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = RowView.selectionFadeDuration
+                context.allowsImplicitAnimation = true
+                target.scrollToVisible(target.bounds)
+            }
+        } else {
+            target.scrollToVisible(target.bounds)
+        }
+        revealedRowID = id
+        return true
     }
 
     /// Worktree directory creation date, cached — the sort key inside a repo
@@ -2542,9 +2451,14 @@ final class DashboardOverviewView: NSView {
         var onDelete: ((String) -> Void)?
         var onDeleteWithBranch: ((String) -> Void)?
         private let path: String
-        private let selected: Bool
+        private var selected: Bool
+        /// Whether the pointer is currently inside, so a selection change can
+        /// repaint without losing the hover tint on the row being left behind.
+        private var hovered = false
 
         private static let cornerRadius: CGFloat = 8
+        /// One beat, matched to the fleet list's other selection feedback.
+        static let selectionFadeDuration: CFTimeInterval = 0.18
         private static let highlightFill = NSColor(name: nil) { appearance in
             appearance.isDark
                 ? NSColor.white.withAlphaComponent(0.10)
@@ -2750,7 +2664,27 @@ final class DashboardOverviewView: NSView {
             applyBackground(hovered: false)
         }
 
+        /// Move the selection highlight on or off this row.
+        ///
+        /// `⌃⇥` cycles cabins one row at a time, and repainting instantly made the
+        /// highlight teleport — with the fleet list re-rendered underneath it, the
+        /// jump read as the list blinking rather than as a move. Cross-fading the
+        /// two rows' fills over one short beat is what makes it read as the
+        /// highlight travelling to the next / previous cabin.
+        func setSelected(_ isSelected: Bool, animated: Bool) {
+            guard selected != isSelected else { return }
+            selected = isSelected
+            guard animated else { applyBackground(hovered: hovered); return }
+            let fade = CABasicAnimation(keyPath: "backgroundColor")
+            fade.fromValue = layer?.backgroundColor
+            fade.duration = Self.selectionFadeDuration
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            applyBackground(hovered: hovered)
+            layer?.add(fade, forKey: "selectionFade")
+        }
+
         private func applyBackground(hovered: Bool) {
+            self.hovered = hovered
             if selected {
                 layer?.backgroundColor = resolvedCGColor(Self.highlightFill)
             } else if hovered {

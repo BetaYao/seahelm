@@ -11,13 +11,8 @@ enum GlobalShortcut: Equatable {
     case resize(FocusDirection)
     case resetRatio
     case toggleSidebar
-    case navigateBack          // Cmd+Esc: leave the terminal for the dashboard
     case nextWorktree          // Ctrl+Tab
     case prevWorktree          // Ctrl+Shift+Tab
-    case toggleOverview        // Cmd+E: Dashboard overview ⇄ worktree
-    case firstMatePane         // Cmd+1: toggle First Mate side panel
-    case filesPane             // Cmd+2: toggle Files side panel
-    case changesPane           // Cmd+3: toggle Changes side panel
     case commandPalette        // Cmd+P: open the island's command bar, focused
 }
 
@@ -27,7 +22,7 @@ enum GlobalKeymap {
     /// require `hasSplitContext`. Returns nil when nothing matches (event passes through).
     ///
     /// Precedence mirrors the original handler: split shortcuts first (gated), then the
-    /// always-available worktree cycle, sidebar toggle, palette, and back-navigation.
+    /// always-available cabin cycle, sidebar toggle, and palette.
     static func resolve(
         chars: String?,
         keyCode: UInt16,
@@ -72,13 +67,7 @@ enum GlobalKeymap {
 
         if flags == .command && chars == "b" { return .toggleSidebar }
 
-        if flags == .command && lower == "e" { return .toggleOverview }
-        if flags == .command && chars == "1" { return .firstMatePane }
-        if flags == .command && chars == "2" { return .filesPane }
-        if flags == .command && chars == "3" { return .changesPane }
         if flags == .command && lower == "p" { return .commandPalette }
-
-        if flags == .command && keyCode == 53 { return .navigateBack }   // Cmd+Esc
 
         return nil
     }

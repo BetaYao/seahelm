@@ -62,7 +62,7 @@
 
 ### 3.2 Repo 视图
 
-全屏 Repo 视图，通过"Open in Tab"（Cmd+↵）打开：
+全屏 Repo 视图，通过裸键 `⏎` / `i` 进入（旧的 "Open in Tab" Cmd+↵ 已无绑定）：
 
 #### 侧边栏（SidebarViewController）
 - 工作树列表，每行显示：
@@ -75,9 +75,9 @@
 
 #### 终端区域（TerminalSplitView）
 - 递归二叉树结构，支持任意复杂分割
+- 水平分割（Cmd+D）
 - 垂直分割（Cmd+Shift+D）
-- 水平分割（Cmd+Shift+E）
-- 关闭窗格（Cmd+Shift+W）
+- 关闭窗格（Cmd+W）
 - 焦点管理和表面同步
 
 ### 3.3 标签栏（TabBar）
@@ -86,11 +86,12 @@
 - 索引 ≥ 1：Repo 标签（可关闭）
 - "+" 按钮添加新 Repo
 - 状态计数徽章（运行中、等待、错误）
-- Cmd+0 切换到仪表板，Cmd+W 关闭当前标签
+- 仪表板是唯一标签，Cmd+0 / Cmd+W 关标签的旧绑定已废弃（`closeCurrentTab` 现为 no-op）；Cmd+W 只关聚焦窗格
 
 ### 3.4 快速切换器（Quick Switcher）
 
-Cmd+P 打开，Spotlight 风格搜索：
+Spotlight 风格搜索（`QuickSwitcherViewController`）。注意 Cmd+P 现已改为打开 island 命令栏，
+切换 cabin 走命令栏的 `@repo` 补全或裸键 `1–9`：
 - 模糊搜索所有工作树（`FuzzyMatch`）
 - 多维度评分：前缀 +10、边界 +5、连续匹配奖励、短名优先
 - 箭头键导航，回车确认，ESC 取消
@@ -98,7 +99,7 @@ Cmd+P 打开，Spotlight 风格搜索：
 
 ### 3.5 新建分支对话框（New Branch）
 
-Cmd+N 打开：
+NORMAL 模式裸键 `n` 打开（Cmd+N 从未真正绑定，已从帮助面板和提示条移除）：
 - Repo 选择下拉框
 - 分支名输入
 - 基础分支选择（从 `git branch -a` 获取）
@@ -120,7 +121,7 @@ Cmd+, 打开，标签式面板：
 
 ### 3.7 Diff 叠加面板
 
-Cmd+D 打开：
+NORMAL 模式裸键 `c`（Changes 侧栏）打开；Cmd+D 现在是水平分屏：
 - 左侧：更改文件列表（状态标识 + 行数变化）
 - 右侧：unified diff 内容（颜色编码：绿色增加、红色删除）
 - 头部：统计摘要（文件数、+/- 行数）
@@ -275,25 +276,43 @@ tmux 会话命名：`seahelm-<parent>-<name>`（特殊字符替换为下划线�
 
 ## 七、键盘快捷键
 
+键盘系统是模态的（NORMAL / INSERT），设计见 `docs/keyboard-redesign.md`。下表按真实绑定位置分组——
+窗口级来自 `GlobalKeymap`，菜单级来自 `MenuBuilder`，裸键来自 `Keymap`。
+
+**窗口级（`GlobalKeymap`，任意模式可用）**
+
 | 快捷键 | 动作 |
 |--------|------|
-| Cmd+, | 打开设置 |
-| Cmd+N | 新建分支/工作树 |
-| Cmd+P | 快速切换器 |
-| Cmd+G | 切换到 Grid 模式 |
-| Cmd+D | 显示 Diff |
-| Cmd+0 | 切换到仪表板 |
-| Cmd+1...9 | 聚焦第 N 个终端（Spotlight 模式） |
-| Cmd+W | 关闭当前标签 |
-| Cmd+↵ | 在标签页打开 |
-| Cmd+Shift+D | 垂直分割 |
-| Cmd+Shift+E | 水平分割 |
-| Cmd+Shift+W | 关闭窗格 |
-| Cmd+- | 缩小卡片 |
-| Cmd+= | 放大卡片 |
-| Esc | 退出 Spotlight |
-| Ctrl+Tab | 下一个焦点（Spotlight） |
-| Ctrl+Shift+Tab | 上一个焦点（Spotlight） |
+| Cmd+D / Cmd+Shift+D | 水平 / 垂直分屏（需已有分屏上下文） |
+| Cmd+Option+方向键 | 移动分屏焦点 |
+| Cmd+Ctrl+方向键 | 调整分屏比例 |
+| Cmd+Ctrl+= | 重置分屏比例 |
+| Cmd+B | 折叠 / 展开侧栏 |
+| Cmd+P | 打开 island 命令栏 |
+| Cmd+Esc | 返回：终端 → 分屏 → 仪表板 |
+| Ctrl+Tab / Ctrl+Shift+Tab | 下一个 / 上一个 cabin |
+
+**菜单级（`MenuBuilder`）**
+
+| 快捷键 | 动作 |
+|--------|------|
+| Cmd+W | 关闭聚焦窗格 |
+| Cmd+, / Cmd+U / Cmd+Q | 设置 / 检查更新 / 退出 |
+| Cmd+R | First Mate `/return` |
+| Cmd+Shift+T / O / B / A / F | `/worktree` / `/order` / `/broadcast` / `/add` / `/feedback` |
+
+**NORMAL 模式裸键（`Keymap`，仪表板持有键盘时）**
+
+| 按键 | 动作 |
+|--------|------|
+| h j k l / 方向键 | 移动焦点 |
+| ⏎ / i | 进入终端（INSERT） |
+| 1–9 | 进入第 N 个 cabin |
+| { / } | 跳到上一个 / 下一个分组的首行（跟随当前 `CabinGroupingMode`） |
+| n | 新建 cabin |
+| d | 删除聚焦 cabin |
+| c / f / m | Changes / Files / First Mate 侧栏 |
+| ? | 键盘帮助 |
 
 ---
 

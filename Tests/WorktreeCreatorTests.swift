@@ -73,9 +73,16 @@ final class WorktreeCreatorTests: XCTestCase {
     }
 
     func testBranchNameFromTaskDescriptionCreatesReadableSlug() {
+        let branch = WorktreeCreator.branchName(fromTaskDescription: "Fix flaky login!!!")
+
+        XCTAssertEqual(branch, "task/fix-flaky-login")
+    }
+
+    func testBranchNameFromLongTaskDescriptionIsTruncated() {
+        // Slugs are capped at 20 characters.
         let branch = WorktreeCreator.branchName(fromTaskDescription: "Fix flaky login redirect!!!")
 
-        XCTAssertEqual(branch, "task/fix-flaky-login-redirect")
+        XCTAssertEqual(branch, "task/fix-flaky-login-redi")
     }
 
     func testBranchNameFromChineseTaskDescriptionIsGitSafe() {
@@ -89,11 +96,11 @@ final class WorktreeCreatorTests: XCTestCase {
 
     func testBranchNameFromTaskDescriptionAvoidsExistingBranches() {
         let branch = WorktreeCreator.branchName(
-            fromTaskDescription: "Fix flaky login redirect",
-            existingBranches: ["main", "task/fix-flaky-login-redirect", "task/fix-flaky-login-redirect-2"]
+            fromTaskDescription: "Fix flaky login",
+            existingBranches: ["main", "task/fix-flaky-login", "task/fix-flaky-login-2"]
         )
 
-        XCTAssertEqual(branch, "task/fix-flaky-login-redirect-3")
+        XCTAssertEqual(branch, "task/fix-flaky-login-3")
     }
 
     func testCreateWorktreeDuplicatePathThrows() throws {
@@ -129,13 +136,14 @@ final class WorktreeCreatorTests: XCTestCase {
         let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
         XCTAssertTrue(worktrees.contains(where: { $0.branch == "lifecycle-test" }))
 
-        // Delete
+        // Delete. Creation drops untracked guidance files (CLAUDE.md / AGENTS.md)
+        // into the worktree, so a non-forced delete is always refused by git.
         try WorktreeDeleter.deleteWorktree(
             worktreePath: info.path,
             repoPath: repoPath,
             branchName: "lifecycle-test",
             deleteBranch: true,
-            force: false
+            force: true
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: info.path))
 

@@ -9,42 +9,6 @@ final class KeyboardSubstateControllerTests: XCTestCase {
         XCTAssertTrue(c.isIdle)
     }
 
-    // MARK: - Delete confirmation
-
-    func testConfirmReturnsThePendingAgentAndClears() {
-        let c = KeyboardSubstateController()
-        c.beginDelete(agentId: "a1")
-        XCTAssertEqual(c.substate, .deletePending(agentId: "a1"))
-        XCTAssertFalse(c.isIdle)
-        XCTAssertEqual(c.confirmDelete(), "a1")
-        XCTAssertTrue(c.isIdle)
-    }
-
-    /// Confirming twice must not delete a second time — the classic double-`d` bug.
-    func testConfirmIsNotIdempotentlyDestructive() {
-        let c = KeyboardSubstateController()
-        c.beginDelete(agentId: "a1")
-        XCTAssertEqual(c.confirmDelete(), "a1")
-        XCTAssertNil(c.confirmDelete())
-    }
-
-    func testCancelClearsWithoutReturningAnAgent() {
-        let c = KeyboardSubstateController()
-        c.beginDelete(agentId: "a1")
-        c.cancelDelete()
-        XCTAssertTrue(c.isIdle)
-        XCTAssertNil(c.confirmDelete())
-    }
-
-    /// cancelDelete is called on every nav-ring exit, so it must be a no-op when
-    /// some *other* substate is live — it must not clobber an open create form.
-    func testCancelDeleteLeavesCreateFormAlone() {
-        let c = KeyboardSubstateController()
-        c.beginCreateForm()
-        c.cancelDelete()
-        XCTAssertEqual(c.substate, .createForm)
-    }
-
     // MARK: - Create form
 
     func testCreateFormBeginAndEnd() {
@@ -55,16 +19,9 @@ final class KeyboardSubstateControllerTests: XCTestCase {
         XCTAssertTrue(c.isIdle)
     }
 
-    func testEndCreateFormIgnoresAPendingDelete() {
-        let c = KeyboardSubstateController()
-        c.beginDelete(agentId: "a1")
-        c.endCreateForm()
-        XCTAssertEqual(c.substate, .deletePending(agentId: "a1"))
-    }
-
     func testResetClearsAnything() {
         let c = KeyboardSubstateController()
-        c.beginDelete(agentId: "a1")
+        c.beginCreateForm()
         c.reset()
         XCTAssertTrue(c.isIdle)
     }

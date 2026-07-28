@@ -18,12 +18,20 @@ final class ShortcutHintBar: NSView {
 
     /// Most-used first, read left-to-right then wrapped. Keep the key glyphs in
     /// sync with `GlobalKeymap` and the labels with `KeyboardHelpOverlay`.
+    ///
+    /// The cabin cycle leads: with the bare-key nav ring gone it is the only way
+    /// to move between cabins from the keyboard, so it has to be the first thing
+    /// the strip says.
+    ///
+    /// Six is the ceiling — the strip is budgeted at two lines of three (see
+    /// `ShortcutHintBarTests`), so making room for the cycle cost `⇧⌘D`, the one
+    /// chord a reader can guess from the `⌘D` sitting next to it.
     private static let items: [(key: String, label: String)] = [
+        ("\u{2303}\u{21E5}", "Cabin+"),
+        ("\u{2303}\u{21E7}\u{21E5}", "Cabin-"),
         ("\u{2318}P", "Command"),
-        ("\u{2318}N", "New"),
-        ("\u{2318}E", "Overview"),
+        ("\u{2318}W", "Close"),
         ("\u{2318}D", "Split"),
-        ("\u{2318}1\u{2013}3", "Panes"),
         ("?", "Keys"),
     ]
 
@@ -185,8 +193,13 @@ final class ShortcutHintBar: NSView {
 
     /// Test accessors: how the strip wrapped at the current width.
     var rowCountForTesting: Int { grid.numberOfRows }
+    /// How many chord/caption pairs `items` currently declares.
+    static var itemCountForTesting: Int { items.count }
     var pairsPerRowForTesting: Int { pairsPerRow }
     var wideFittingWidthForTesting: CGFloat { wideFittingWidth }
+    /// How many chord/caption pairs the strip advertises, so the ghost-row test
+    /// doesn't have to restate `items.count` every time the list is edited.
+    var itemCountForTesting: Int { Self.items.count }
     /// Live cell views under the grid — catches rows orphaned by a re-wrap.
     var contentViewCountForTesting: Int { grid.subviews.count }
 

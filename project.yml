@@ -180,7 +180,20 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.0.34"
         CURRENT_PROJECT_VERSION: 1
-        CODE_SIGN_STYLE: Automatic
+        # Local builds sign with the same Developer ID as the shipped app, and
+        # deliberately not ad-hoc. TCC pins a Full Disk Access grant to a code
+        # requirement; for an ad-hoc bundle that requirement is its cdhash, so
+        # every rebuild invalidates the grant and the iMessage bridge goes deaf
+        # with nothing in the UI to say why ("Failed to match existing code
+        # requirement" is a tccd log line, not a prompt). Signed with the team
+        # identity, the requirement is identity-based and one grant covers both
+        # this build and /Applications.
+        #
+        # Manual, not Automatic: automatic resolves to an "Apple Development"
+        # cert, and the ones in this keychain are revoked.
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: 43G5A6G9QV
+        CODE_SIGN_IDENTITY: "Developer ID Application"
         # Hardened-runtime exceptions only — the app is not sandboxed. Needed so
         # signed builds can drive Messages.app for the iMessage bridge.
         CODE_SIGN_ENTITLEMENTS: seahelm.entitlements

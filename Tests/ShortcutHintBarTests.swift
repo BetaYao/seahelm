@@ -58,7 +58,7 @@ final class ShortcutHintBarTests: XCTestCase {
     /// past layout stays on screen, stacked on the current one.
     func testRewrapDoesNotLeaveGhostedRowsBehind() {
         let (bar, host) = hosted(width: 300)
-        let pairs = 6
+        let pairs = ShortcutHintBar.itemCountForTesting
         XCTAssertEqual(bar.contentViewCountForTesting, pairs * 2)
 
         resize(host, to: 170)          // 3-per-line → 2-per-line

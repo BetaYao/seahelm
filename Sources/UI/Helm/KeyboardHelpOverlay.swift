@@ -18,23 +18,16 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("↑ ↓ / k j", "Move through the cabin list"),
-        ("⏎ / →", "Forward: dashboard → split → terminal"),
-        ("⌘esc / ⌃⌃", "Back: terminal → split → dashboard"),
-        ("1 – 9", "Enter Nth cabin"),
-        ("n", "New cabin"),
         ("⌃⇥ / ⌃⇧⇥", "Next / previous cabin"),
         ("⇥", "Cycle region: panes → sidebar → header → island"),
-        ("⌘E", "Dashboard overview ⇄ cabin"),
-        ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
         ("?", "Keyboard shortcuts"),
     ]
     private static let helmKeys: [(String, String)] = [
         ("⌘D / ⌘⇧D", "Horizontal / vertical split"),
+        ("⌘W", "Close the focused pane"),
         ("⌘⌥ ← → ↑ ↓", "Move split focus"),
         ("⌘⌃ ← → ↑ ↓", "Resize split"),
         ("⌘P / ⌃⌃", "Open the island command bar"),
-        ("⌘N", "Island command bar, `/new` prefilled"),
         ("/ @ #", "Command / repo / agent completion"),
         ("↑ ↓ / ⇥", "Select / accept completion"),
         ("esc", "Close menu → close the island"),

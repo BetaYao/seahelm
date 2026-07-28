@@ -107,6 +107,7 @@ Space
 | `Space` | 打开 leader | — |
 | `d` | 删除聚焦 worktree（d/y 确认） | `Space d` |
 | `n` | 新建 worktree | `Space n` |
+| `{` / `}` | 跳上/下一个分组首行（粗档位，`jk` 是细档位） | — |
 | `c` | Changes | `Space c` |
 | `f` | Files | `Space f` |
 | `/` | 命令面板 | `Space /` |
@@ -116,10 +117,8 @@ Space
 | 键 | 动作 | 新范式等价 |
 |----|------|-----------|
 | `Cmd+D` / `Cmd+Shift+D` | 水平 / 垂直分屏 | `Space s s` / `Space s v` |
-| `Cmd+P` | Quick Switcher | `Space g w` |
-| `Cmd+N` | 新建 worktree | `n` / `Space n` |
-| `Cmd+W` | 关闭 pane/tab | `Space s x` |
-| `Cmd+0` | Dashboard | `Space g 0` |
+| `Cmd+P` | island 命令栏 | `Space g w` |
+| `Cmd+W` | 关闭聚焦 pane | `Space s x` |
 | `Cmd+B` | 折叠 sidebar | `Space g b` |
 | `Cmd+Option+方向` | 分屏焦点 | `hjkl`（panes region） |
 | `Cmd+Ctrl+方向` | 分屏缩放 | `Space w HJKL` |
@@ -189,7 +188,8 @@ Space
 - [x] **窗口级快捷键收敛为单一真相源**：新增 `GlobalShortcut` + `GlobalKeymap.resolve(chars:keyCode:flags:hasSplitContext:)`（`Sources/App/GlobalKeymap.swift`），把原先散在 `SeahelmWindow.performKeyEquivalent` 的 if 链抽成纯函数；handler 改为 `resolve → switch` 分发（方向映射用 `axisPositive`/`axisDelta` 辅助）。行为被 14 项单测锁定，零语义变更。
 - [x] 全部 §6.3 Cmd 别名保留并指向新逻辑（split / focus / resize / reset / sidebar / Cmd+Esc + 新增 Ctrl+Tab worktree 循环）。
 - [x] `Cmd+Esc` 按 D1 收窄为 INSERT→NORMAL（`.exitInsert`）。
-- [ ] `?` 帮助覆盖层文案改为反映新键位 — GUI 文案，待跑 App 时一并更新。
+- [x] `?` 帮助覆盖层文案改为反映新键位。
+- [x] **2026-07-28 精简**：`Cmd+E`（与 `Cmd+Esc` 重复的 back 别名）和 `Cmd+1/2/3`（侧栏切换）从 `GlobalKeymap` 删除；`Cmd+N` 查明从未绑定，只是帮助面板和提示条在宣传，一并撤下。侧栏仍可点表头切换（`selectChromePane` 保留）。
 
 ### WP-6 对话框统一
 - [x] **共享对话框导航解析器**：新增 `DialogNav` + `DialogKeymap.resolve(chars:keyCode:flags:allowVimKeys:)`（`Sources/App/DialogKeymap.swift`），统一 `↑↓`/`Enter`/`Esc`（+ 可选 `k/j`），供 Quick Switcher / Settings / 确认框复用。10 项单测。
@@ -206,5 +206,7 @@ Space
 | 分屏 `Cmd+Option`/`Cmd+Ctrl` | 保留为别名，主路径改裸 `hjkl` + `Space w` |
 | Helm 表 `ijkn` | **弃用**，统一 `hjkl`（`i` 现在=进 INSERT） |
 | 全部 `Cmd+*` 菜单键 | 全部保留 |
+| `Cmd+E` / `Cmd+1/2/3` | **删除**（2026-07-28）：前者与 `Cmd+Esc` 同义，后者让位给裸键 `c`/`f`/`m` |
+| `Cmd+N` | **从未实现**，仅存在于文案，2026-07-28 撤下；新建 cabin 用裸键 `n` |
 </content>
 </invoke>

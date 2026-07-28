@@ -169,12 +169,16 @@ Main window uses **two-column chrome** (`WindowChromeController`): glass sidebar
 | Click Dashboard tab | Return to dashboard grid |
 | Click thread in sidebar | Switch terminal to that thread's tmux session |
 | Escape | Dismiss modal > dismiss panel > return to dashboard |
-| Cmd+0 | Dashboard |
-| Cmd+W | Close current project tab (with confirmation) |
+| Cmd+Esc | Back: terminal > split > dashboard |
+| Cmd+W | Close the focused pane |
 | Cmd+, | Settings |
-| Cmd+P | Quick switcher |
-| Cmd+N | New thread/branch |
-| Cmd+D | Show diff overlay |
+| Cmd+P | Open the island command bar |
+| Cmd+D / Cmd+Shift+D | Horizontal / vertical split |
+| Cmd+B | Collapse the sidebar |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous cabin |
+| `n` / `c` / `f` / `m` (NORMAL) | New cabin / Changes / Files / First Mate |
+
+Full list: `docs/keyboard-redesign.md`, or `?` in-app.
 
 ### 6.2 Project Lifecycle
 

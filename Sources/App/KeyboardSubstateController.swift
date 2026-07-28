@@ -14,25 +14,6 @@ final class KeyboardSubstateController {
     /// handling instead of racing it.
     var isIdle: Bool { substate == .none }
 
-    // MARK: - Delete confirmation
-
-    func beginDelete(agentId: String) {
-        substate = .deletePending(agentId: agentId)
-    }
-
-    /// Returns the agent id to delete when a delete was pending, else nil.
-    @discardableResult
-    func confirmDelete() -> String? {
-        guard case .deletePending(let agentId) = substate else { return nil }
-        substate = .none
-        return agentId
-    }
-
-    func cancelDelete() {
-        guard case .deletePending = substate else { return }
-        substate = .none
-    }
-
     // MARK: - Inline create form
 
     func beginCreateForm() { substate = .createForm }

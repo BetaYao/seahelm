@@ -63,8 +63,11 @@ final class GlobalKeymapTests: XCTestCase {
         XCTAssertEqual(r("b", 11, .command, split: false), .toggleSidebar)
     }
 
-    func testCmdEscNavigatesBack() {
-        XCTAssertEqual(r(nil, 53, .command), .navigateBack)
+    /// Cmd+Esc was the "back" key; it was removed, and Esc must keep reaching the
+    /// terminal (it interrupts the agent) whatever modifiers ride along.
+    func testCmdEscIsNotAShortcut() {
+        XCTAssertNil(r(nil, 53, .command))
+        XCTAssertNil(r(nil, 53, []))
     }
 
     // MARK: - Command palette (Cmd+P)
