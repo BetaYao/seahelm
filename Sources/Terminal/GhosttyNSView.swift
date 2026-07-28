@@ -234,7 +234,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             CATransaction.commit()
         }
 
-        guard let surface, let window, bounds.width > 0, bounds.height > 0 else { return }
+        guard let surface, window != nil, bounds.width > 0, bounds.height > 0 else { return }
         // Use convertToBacking for the actual X/Y scale — window.backingScaleFactor
         // is a single scalar and can be wrong for non-integer scales or when the
         // view has a transform. This mirrors upstream Ghostty's approach.
@@ -662,7 +662,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// clear the terminal selection out from under us.
     private var pendingPreviewURL: URL?
     /// GitHub PR URL captured from the same row, checked after `pendingPreviewURL`
-    /// (a PR link is not a file so `filePathAtClick` won't return it).
+    /// (a PR link is not a file so path resolution won't return it).
     private var pendingPRPreview: (owner: String, repo: String, number: Int)?
     /// Worktree files whose trailing components match the clicked token, for a
     /// bare name that resolves against no working directory. Offered as a
@@ -875,19 +875,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return String(cString: cString)
     }
 
-    /// Run `match` over the whitespace-delimited tokens of every logical line that
-    /// touches the clicked row, nearest the clicked column first.
+    /// Every candidate token around the click, nearest first and deduplicated.
     ///
     /// The click column matters: a line listing several paths has to preview the
     /// one under the cursor, not whichever comes first. Columns are counted in
     /// display cells (CJK and emoji occupy two), which is how the grid lays the
     /// text out. Ordering by distance rather than requiring a hit keeps a click
     /// in the gap beside a path working.
-    private func firstTokenAtClick<T>(_ event: NSEvent, match: (String) -> T?) -> T? {
-        tokensAtClick(event).lazy.compactMap(match).first
-    }
-
-    /// Every candidate token around the click, nearest first and deduplicated.
     ///
     /// Read once per right-click and shared by all three matchers (exact path,
     /// PR link, worktree lookup): each one used to re-read the surface under
@@ -1013,20 +1007,6 @@ class GhosttyNSView: NSView, NSTextInputClient {
             if !hits.isEmpty { return hits.map { rootURL.appendingPathComponent($0) } }
         }
         return []
-    }
-
-    /// Resolve a previewable file from the terminal cell under the right-click.
-    /// Works regardless of text selection — important in mouse-reporting TUIs where
-    /// a drag is consumed by the app and never becomes a ghostty selection.
-    private func filePathAtClick(_ event: NSEvent) -> URL? {
-        let bases = pathResolutionBases()
-        return firstTokenAtClick(event) { Self.resolveSelectedPath(raw: $0, bases: bases) }
-    }
-
-    /// Checks the tokens around the click for a GitHub PR URL
-    /// (`https://github.com/{owner}/{repo}/pull/{number}`).
-    private func prURLAtClick(_ event: NSEvent) -> (owner: String, repo: String, number: Int)? {
-        firstTokenAtClick(event) { Self.parsePRURL($0) }
     }
 
     /// Directories a relative path is resolved against, most specific first.

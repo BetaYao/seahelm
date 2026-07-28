@@ -31,6 +31,8 @@ final class WindowChromeController: NSViewController {
     private let terminalContentHost = NSView()
 
     private var sidebarWidthConstraint: NSLayoutConstraint!
+    /// Bumped per collapse animation so a superseded one's completion is a no-op.
+    private var collapseGeneration = 0
     private var colorSchemeObserver: NSObjectProtocol?
 
     /// Last pane/repo title from the live terminal. Restored when an overlay closes.
@@ -91,11 +93,9 @@ final class WindowChromeController: NSViewController {
 
     func applyState(_ newState: ChromeLayoutState, animated: Bool) {
         state = newState
-        syncHeaders()
+        syncHeaders(animated: animated)
         layoutColumns(animated: animated)
     }
-
-    var layoutState: ChromeLayoutState { state }
 
     func updateTerminalTitle(repo: String, pane: String) {
         // Immersive chrome: show the current pane title only — unless a file /
@@ -254,52 +254,97 @@ final class WindowChromeController: NSViewController {
 
     // MARK: - Layout
 
-    private func syncHeaders() {
+    private func syncHeaders(animated: Bool) {
         sidebarHeader.setActivePane(state.activePane)
         terminalHeader.setActivePane(state.activePane)
-        terminalHeader.setCollapsed(state.isCollapsed)
-        // Icons live in the collapsed terminal header; hide sidebar chrome icons when collapsed.
-        sidebarHeader.isHidden = state.isCollapsed
+        terminalHeader.setCollapsed(state.isCollapsed, animated: animated)
     }
 
     private func layoutColumns(animated: Bool) {
+        // Fast repeat ⌘B — or a non-animated apply landing mid-slide — leaves an
+        // earlier animation in flight; letting its completion run would settle
+        // the sidebar to the state it was chasing, not the one we're now in.
+        collapseGeneration &+= 1
+        let generation = collapseGeneration
+
         let collapsed = state.isCollapsed
         let targetSidebarWidth = collapsed
             ? 0
             : ChromeLayoutMetrics.clampWidth(state.width, windowWidth: windowWidthForClamp())
 
+        // Icons live in the collapsed terminal header, so the sidebar header is
+        // hidden while collapsed — but only once the slide is over, or it
+        // vanishes at frame 0 and the hand-off looks like a pop rather than a move.
         if !collapsed {
             sidebarColumn.isHidden = false
             divider.isHidden = false
+            sidebarHeader.isHidden = false
         }
 
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let duration: TimeInterval = (!animated || reduceMotion) ? 0 : 0.2
+        let duration: TimeInterval = (!animated || reduceMotion)
+            ? 0
+            : ChromeLayoutMetrics.collapseAnimationDuration
 
         if duration == 0 {
             sidebarWidthConstraint.constant = targetSidebarWidth
-            if collapsed {
-                sidebarColumn.isHidden = true
-                divider.isHidden = true
-            }
+            sidebarColumn.alphaValue = 1
+            divider.alphaValue = 1
+            settle(collapsed: collapsed)
             view.layoutSubtreeIfNeeded()
             return
         }
 
+        // Cross-fade alongside the width. Sliding alone kept the contents fully
+        // opaque right up to the clipping edge, so the panel read as guillotined
+        // rather than dismissed.
+        sidebarColumn.alphaValue = collapsed ? 1 : 0
+        divider.alphaValue = collapsed ? 1 : 0
+
         // Defer PTY set_size for the whole slide — otherwise every animation
         // frame reflows the terminal grid (SIGWINCH storm) while the sidebar moves.
+        // Set the constant plainly, then animate the layout pass that consumes
+        // it. Mixing the two AppKit idioms — `.animator().constant` AND an
+        // in-group `layoutSubtreeIfNeeded()` — is what made this look instant:
+        // the forced layout resolved the constraint immediately, so the group
+        // had nothing left to interpolate and its completion fired on the next
+        // frame. (Collapse snapped outright; expand only appeared to move.)
+        sidebarWidthConstraint.constant = targetSidebarWidth
+
         GhosttyBridge.shared.beginLiveResize(pinHeight: true)
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = duration
+            context.timingFunction = ChromeLayoutMetrics.collapseTimingFunction
             context.allowsImplicitAnimation = true
-            self.sidebarWidthConstraint.animator().constant = targetSidebarWidth
-        }, completionHandler: {
+            self.sidebarColumn.animator().alphaValue = collapsed ? 0 : 1
+            self.divider.animator().alphaValue = collapsed ? 0 : 1
+            self.view.layoutSubtreeIfNeeded()
+        }, completionHandler: nil)
+
+        // Deliberately NOT the group's completionHandler. That fires as soon as
+        // the group's own NSAnimations are done, which is roughly the next frame
+        // — the width is carried by Core Animation and outlives it. Settling
+        // there set `isHidden = true` mid-slide, which cancels the in-flight
+        // animation and snaps the sidebar shut. Collapse looked instant; expand
+        // survived only because its settle happens to be a no-op.
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            // Unconditional: every beginLiveResize needs its end, including the
+            // one belonging to a slide that a newer ⌘B has already superseded.
             GhosttyBridge.shared.endLiveResize()
-            if collapsed {
-                self.sidebarColumn.isHidden = true
-                self.divider.isHidden = true
-            }
-        })
+            guard let self, self.collapseGeneration == generation else { return }
+            self.settle(collapsed: collapsed)
+        }
+    }
+
+    /// Park the sidebar in its resting state. Alpha is transition-only, so it
+    /// always returns to 1 — `isHidden` is what actually keeps a collapsed
+    /// sidebar out of layout and hit-testing.
+    private func settle(collapsed: Bool) {
+        sidebarColumn.isHidden = collapsed
+        divider.isHidden = collapsed
+        sidebarHeader.isHidden = collapsed
+        sidebarColumn.alphaValue = 1
+        divider.alphaValue = 1
     }
 
     private func handleDividerDragBegan() {

@@ -21,8 +21,6 @@ class SettingsViewController: NSViewController {
     private let cacheSizeField = NSTextField()
 
     // Agent Detection tab controls
-    private let agentTableView = NSTableView()
-    private let agentScrollView = NSScrollView()
     private let ruleTextView = NSTextView()
     private let ruleScrollView = NSScrollView()
 
@@ -43,6 +41,13 @@ class SettingsViewController: NSViewController {
     /// Edited copy of the WeChat binding; committed to `config` on save.
     private var wechatDraft: WeChatConfig?
     private var wechatLoginService: WeChatLoginService?
+
+    // iMessage tab controls
+    private let imessageHandlesView = NSTextView()
+    private let imessageHandlesScrollView = NSScrollView()
+    private let imessageDefaultRecipientField = NSTextField()
+    private let imessageAutoConnectCheckbox = NSButton()
+    private let imessagePermissionLabel = NSTextField(labelWithString: "")
 
     init(config: Config) {
         self.config = config
@@ -78,17 +83,13 @@ class SettingsViewController: NSViewController {
         agentTab.view = buildSailorTab()
         tabView.addTabViewItem(agentTab)
 
-        // Tab 3: WeCom Bot
-        let wecomTab = NSTabViewItem(identifier: "wecom")
-        wecomTab.label = "WeCom Bot"
-        wecomTab.view = buildWeComTab()
-        tabView.addTabViewItem(wecomTab)
-
-        // Tab 4: WeChat
-        let wechatTab = NSTabViewItem(identifier: "wechat")
-        wechatTab.label = "WeChat"
-        wechatTab.view = buildWeChatTab()
-        tabView.addTabViewItem(wechatTab)
+        // Tab 3: iMessage. The WeCom and WeChat tabs were retired here — their
+        // builders below are unreachable but kept so the channels can be revived
+        // without rewriting the UI.
+        let imessageTab = NSTabViewItem(identifier: "imessage")
+        imessageTab.label = "iMessage"
+        imessageTab.view = buildIMessageTab()
+        tabView.addTabViewItem(imessageTab)
 
         // Buttons
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveClicked))
@@ -343,7 +344,141 @@ class SettingsViewController: NSViewController {
         return view
     }
 
-    // MARK: - WeChat Tab
+    // MARK: - iMessage Tab
+
+    private func buildIMessageTab() -> NSView {
+        let view = NSView()
+        let cfg = config.imessage
+
+        let infoLabel = NSTextField(labelWithString: "Steer the fleet by texting this Mac. Reads Messages locally and replies through Messages.app — no server, no token.")
+        infoLabel.font = NSFont.systemFont(ofSize: 11)
+        infoLabel.textColor = Theme.textSecondary
+        infoLabel.lineBreakMode = .byWordWrapping
+        infoLabel.maximumNumberOfLines = 2
+        infoLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(infoLabel)
+
+        let handlesLabel = NSTextField(labelWithString: "Allowed senders (one per line):")
+        handlesLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        handlesLabel.textColor = Theme.textPrimary
+        handlesLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(handlesLabel)
+
+        // An open inbox drives agents, so spell out that this list is the gate.
+        let handlesHint = NSTextField(labelWithString: "Phone numbers (+8613800138000) or Apple IDs. Messages from anyone else are ignored; an empty list ignores everyone.")
+        handlesHint.font = NSFont.systemFont(ofSize: 11)
+        handlesHint.textColor = Theme.textSecondary
+        handlesHint.lineBreakMode = .byWordWrapping
+        handlesHint.maximumNumberOfLines = 2
+        handlesHint.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(handlesHint)
+
+        imessageHandlesView.font = AppFont.mono(size: 12, weight: .regular)
+        imessageHandlesView.isRichText = false
+        imessageHandlesView.isAutomaticQuoteSubstitutionEnabled = false
+        imessageHandlesView.string = (cfg?.allowedHandles ?? []).joined(separator: "\n")
+        imessageHandlesView.setAccessibilityIdentifier("settings.imessage.handles")
+        imessageHandlesScrollView.hasVerticalScroller = true
+        imessageHandlesScrollView.borderType = .bezelBorder
+        imessageHandlesScrollView.documentView = imessageHandlesView
+        imessageHandlesScrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imessageHandlesScrollView)
+
+        let recipientLabel = NSTextField(labelWithString: "Notify:")
+        recipientLabel.font = NSFont.systemFont(ofSize: 12)
+        recipientLabel.textColor = Theme.textPrimary
+        recipientLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(recipientLabel)
+
+        imessageDefaultRecipientField.placeholderString = "Defaults to the first allowed sender"
+        imessageDefaultRecipientField.font = AppFont.mono(size: 12, weight: .regular)
+        imessageDefaultRecipientField.stringValue = cfg?.defaultRecipient ?? ""
+        imessageDefaultRecipientField.setAccessibilityIdentifier("settings.imessage.recipient")
+        imessageDefaultRecipientField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imessageDefaultRecipientField)
+
+        imessageAutoConnectCheckbox.setButtonType(.switch)
+        imessageAutoConnectCheckbox.title = "Connect automatically at launch"
+        imessageAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
+        imessageAutoConnectCheckbox.state = (cfg?.resolvedAutoConnect ?? true) ? .on : .off
+        imessageAutoConnectCheckbox.setAccessibilityIdentifier("settings.imessage.autoConnect")
+        imessageAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imessageAutoConnectCheckbox)
+
+        imessagePermissionLabel.font = NSFont.systemFont(ofSize: 11)
+        imessagePermissionLabel.lineBreakMode = .byWordWrapping
+        imessagePermissionLabel.maximumNumberOfLines = 2
+        imessagePermissionLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imessagePermissionLabel)
+
+        let permissionButton = NSButton(title: "Open Full Disk Access", target: self,
+                                        action: #selector(openFullDiskAccessClicked))
+        permissionButton.bezelStyle = .rounded
+        permissionButton.font = NSFont.systemFont(ofSize: 11)
+        permissionButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(permissionButton)
+
+        NSLayoutConstraint.activate([
+            infoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            handlesLabel.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 14),
+            handlesLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+
+            handlesHint.topAnchor.constraint(equalTo: handlesLabel.bottomAnchor, constant: 2),
+            handlesHint.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            handlesHint.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            imessageHandlesScrollView.topAnchor.constraint(equalTo: handlesHint.bottomAnchor, constant: 6),
+            imessageHandlesScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            imessageHandlesScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            imessageHandlesScrollView.heightAnchor.constraint(equalToConstant: 96),
+
+            recipientLabel.topAnchor.constraint(equalTo: imessageHandlesScrollView.bottomAnchor, constant: 14),
+            recipientLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+
+            imessageDefaultRecipientField.centerYAnchor.constraint(equalTo: recipientLabel.centerYAnchor),
+            imessageDefaultRecipientField.leadingAnchor.constraint(equalTo: recipientLabel.trailingAnchor, constant: 8),
+            imessageDefaultRecipientField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            imessageAutoConnectCheckbox.topAnchor.constraint(equalTo: recipientLabel.bottomAnchor, constant: 14),
+            imessageAutoConnectCheckbox.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+
+            imessagePermissionLabel.topAnchor.constraint(equalTo: imessageAutoConnectCheckbox.bottomAnchor, constant: 12),
+            imessagePermissionLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            imessagePermissionLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            permissionButton.topAnchor.constraint(equalTo: imessagePermissionLabel.bottomAnchor, constant: 6),
+            permissionButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+        ])
+
+        refreshIMessagePermissionUI()
+        return view
+    }
+
+    /// Reading chat.db is the half that fails silently, so check it up front and
+    /// say so here rather than letting the bridge look connected but deaf.
+    private func refreshIMessagePermissionUI() {
+        switch IMessageChatDB().probe() {
+        case .ok:
+            imessagePermissionLabel.stringValue = "Messages database readable. Sending will ask for permission to control Messages the first time."
+            imessagePermissionLabel.textColor = Theme.textSecondary
+        case .missing:
+            imessagePermissionLabel.stringValue = "No Messages database found — sign in to iMessage in Messages.app first."
+            imessagePermissionLabel.textColor = .systemOrange
+        case .denied:
+            imessagePermissionLabel.stringValue = "Seahelm cannot read Messages. Grant Full Disk Access, then reopen Settings."
+            imessagePermissionLabel.textColor = .systemRed
+        }
+    }
+
+    @objc private func openFullDiskAccessClicked() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - WeChat Tab (retired — not reachable from the tab bar)
 
     private func buildWeChatTab() -> NSView {
         let view = NSView()
@@ -628,27 +763,27 @@ class SettingsViewController: NSViewController {
             config.agentDetect = agentConfig
         }
 
-        // WeCom Bot config
-        let botId = wecomBotIdField.stringValue.trimmingCharacters(in: .whitespaces)
-        let secret = wecomSecretField.stringValue.trimmingCharacters(in: .whitespaces)
-        if !botId.isEmpty && !secret.isEmpty {
-            let name = wecomNameField.stringValue.trimmingCharacters(in: .whitespaces)
-            config.wecomBot = WeComBotConfig(
-                botId: botId,
-                secret: secret,
-                name: name.isEmpty ? nil : name,
-                autoConnect: wecomAutoConnectCheckbox.state == .on
-            )
-        } else {
-            config.wecomBot = nil
-        }
+        // WeCom / WeChat are no longer editable here; their config keys are left
+        // exactly as loaded so a retired binding survives a save untouched.
 
-        // WeChat config
-        if var wechat = wechatDraft, !wechat.botToken.isEmpty {
-            wechat.autoConnect = wechatAutoConnectCheckbox.state == .on
-            config.wechat = wechat
+        // iMessage config
+        let handles = imessageHandlesView.string
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let recipient = imessageDefaultRecipientField.stringValue.trimmingCharacters(in: .whitespaces)
+        // Keep the row even with no handles: the user may be turning the bridge
+        // off by clearing the list, and dropping to nil would silently re-enable
+        // the default-on autoConnect next launch.
+        if handles.isEmpty && recipient.isEmpty && config.imessage == nil {
+            config.imessage = nil
         } else {
-            config.wechat = nil
+            config.imessage = IMessageConfig(
+                allowedHandles: handles,
+                defaultRecipient: recipient.isEmpty ? nil : recipient,
+                autoConnect: imessageAutoConnectCheckbox.state == .on,
+                backfillSeconds: config.imessage?.backfillSeconds
+            )
         }
 
         cancelWeChatLogin()

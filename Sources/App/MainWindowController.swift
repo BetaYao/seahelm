@@ -73,11 +73,16 @@ class MainWindowController: NSWindowController {
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
+    /// Live iMessage bridge, held so a Settings save can tear the old one down.
+    /// Nil when the bridge is unconfigured or was started by AppDelegate and
+    /// never reconfigured — `unregisterChannel("imessage")` covers that case.
+    private var imessageChannel: IMessageChannel?
+    /// Suppresses repeat alerts while the same permission is still missing.
+    private var lastIMessageError: String?
     private var runtimeBackend: String = "zmx"
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
     private var primaryCapsuleDismissWorkItem: DispatchWorkItem?
-    private var capsuleToken = 0
     private lazy var usageSummaryStore = UsageSummaryStore()
 
     // Vibe-island notch overlay
@@ -503,24 +508,43 @@ class MainWindowController: NSWindowController {
         }
     }
 
+    /// The iMessage bridge could not start. The only two real causes are
+    /// permissions the user has to grant by hand, so offer the pane that grants
+    /// them rather than just logging.
+    private func presentIMessageError(_ message: String) {
+        guard let window, lastIMessageError != message else { return }
+        lastIMessageError = message
+
+        let needsFullDisk = message.localizedCaseInsensitiveContains("full disk")
+
+        let alert = NSAlert()
+        alert.messageText = "iMessage bridge unavailable"
+        alert.informativeText = needsFullDisk
+            ? "Seahelm cannot read your Messages history. Grant Full Disk Access to Seahelm, then reopen Settings.\n\n\(message)"
+            : message
+        alert.addButton(withTitle: needsFullDisk ? "Open Privacy Settings" : "OK")
+        alert.addButton(withTitle: "Later")
+
+        alert.beginSheetModal(for: window) { response in
+            guard needsFullDisk, response == .alertFirstButtonReturn,
+                  let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            else { return }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func showNewBranchDialog() {
         // Cmd+N opens the island with `/new ` prefilled in its command field.
-        // Fall back to the overview composer when the island is disabled.
-        if config.islandEnabled {
-            islandController.openCommandBar(prefill: "/new ")
-        } else {
-            tabCoordinator.switchToTab(0)
-            dashboardVC?.startNewCommand()
-        }
+        islandController.openCommandBar(prefill: "/new ")
     }
 
     // MARK: - First Mate command shortcuts
 
-    /// Switch to the dashboard overview and prefill its composer with a slash
-    /// command (the floating cockpit was removed; the composer lives in overview).
+    /// Open the island's command bar with a slash command prefilled. The island
+    /// is the only command surface — the overview composer was removed, so these
+    /// menu items and Cmd+N/Cmd+P all land in the same place.
     private func openHelmCockpit(prefill: String) {
-        tabCoordinator.switchToTab(0)
-        dashboardVC?.startNewCommand(prefill: prefill)
+        islandController.openCommandBar(prefill: prefill)
     }
 
     @objc func helmTaskCommand() { openHelmCockpit(prefill: "/worktree ") }
@@ -565,7 +589,9 @@ class MainWindowController: NSWindowController {
     private func applyChromeState(animated: Bool) {
         windowChrome?.applyState(chromeState, animated: animated)
         positionStandardWindowButtons()
-        dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed, activePane: chromeState.activePane)
+        dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed,
+                                         activePane: chromeState.activePane,
+                                         animated: animated)
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
         persistChromeLayout()
@@ -636,7 +662,7 @@ class MainWindowController: NSWindowController {
         case .panes:
             dashboardVC?.activateInitialSplit()
         case .helm:
-            dashboardVC?.focusOverviewCommand()
+            islandController.openCommandBarFocused()
         }
     }
 
@@ -696,7 +722,6 @@ class MainWindowController: NSWindowController {
     }
 
     private func openIslandCommandFromHotkey() {
-        guard config.islandEnabled else { return }
         islandController.openCommandBarFocused()
     }
 
@@ -704,13 +729,6 @@ class MainWindowController: NSWindowController {
     /// panel with a command field, so this opens that rather than introducing a
     /// second floating surface. Pressing it again closes it.
     func toggleCommandPalette() {
-        guard config.islandEnabled else {
-            // No island: fall back to the dashboard composer, same as Cmd+N does,
-            // but with no prefill — the palette is for picking, not for `/new`.
-            tabCoordinator.switchToTab(0)
-            dashboardVC?.startNewCommand(prefill: "")
-            return
-        }
         if islandController.isCommandBarOpen {
             islandController.closeCommandBar()
         } else {
@@ -761,15 +779,6 @@ class MainWindowController: NSWindowController {
         let urlString = "https://github.com/\(UpdateCoordinator.repositoryOwner)/\(UpdateCoordinator.repositoryName)/issues/new?title=\(encodedTitle)"
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
-            // If images were pasted, put the first one on the pasteboard so the
-            // user can Cmd+V it into the issue body on GitHub. Subsequent images
-            // are kept on disk; the user pastes them one by one.
-            let imageURLs = dashboardVC?.pendingImageURLs ?? []
-            if let firstURL = imageURLs.first,
-               let image = NSImage(contentsOf: firstURL) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.writeObjects([image])
-            }
         }
     }
 
@@ -875,18 +884,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self?.handleBridgeApprove(order)
         }
 
-        // Feed the full-width overview's ORDERS carousel + composer with the live
-        // queue and command handlers.
-        dashboard.configureOverview(
-            pendingOrders: tabCoordinator.pendingOrders,
-            onSubmitCommand: { [weak self] text in _ = self?.submitBridgeCommand(text) },
-            onOrderAction: { [weak self] order, optionText in
-                self?.handleSuggestionTapped(order: order, optionText: optionText)
-            },
-            commandMenuProvider: { [weak self] trigger, query in
-                self?.helmMenuItems(trigger: trigger, query: query) ?? []
+        // Every command entry point in the dashboard (n, `/ @ #`, Cmd+N) opens the
+        // island's command bar — the fleet column has no composer of its own.
+        dashboard.onRequestCommandBar = { [weak self] prefill in
+            guard let self else { return }
+            if prefill.isEmpty {
+                self.islandController.openCommandBarFocused()
+            } else {
+                self.islandController.openCommandBar(prefill: prefill)
             }
-        )
+        }
 
         dashboard.onEnterTerminal = { [weak self] in
             // Drilling into a terminal collapses the chrome sidebar (INSERT).
@@ -1231,7 +1238,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         case .flagIssue(let title):
             openGitHubIssue(title: title)
-            dashboardVC?.clearPendingImage()
             reply("Opening GitHub issue for **seahelm**…")
 
         case .removeAll:
@@ -1328,7 +1334,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
             },
             flagIssue: { [weak self] title in
                 self?.openGitHubIssue(title: title)
-                self?.dashboardVC?.clearPendingImage()
             },
             activeSailorCount: { ShipLog.shared.allSailors().count },
             branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
@@ -2490,8 +2495,7 @@ extension MainWindowController {
 extension MainWindowController: SettingsDelegate {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
-        let oldWecomBot = self.config.wecomBot
-        let oldWechat = self.config.wechat
+        let oldIMessage = self.config.imessage
         // Preserve split layouts — SettingsVC doesn't track them
         var merged = config
         merged.splitLayouts = terminalCoordinator.config.splitLayouts
@@ -2506,25 +2510,23 @@ extension MainWindowController: SettingsDelegate {
             tabCoordinator.loadWorkspaces()
         }
 
-        // Hot-reload external channels on config change
-        if oldWecomBot != config.wecomBot || oldWechat != config.wechat {
-            ShipLog.shared.unregisterAllExternalChannels()
+        // Hot-reload the iMessage bridge on config change.
+        if oldIMessage != config.imessage {
+            ShipLog.shared.unregisterChannel(imessageChannel?.channelId ?? "imessage")
+            imessageChannel = nil
 
-            if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
-                let channel = WeComBotChannel(config: wecomConfig)
-                ShipLog.shared.registerChannel(channel)
-                channel.connect()
-                NSLog("[Settings] WeCom bot reconnecting: \(wecomConfig.resolvedName)")
-            }
-
-            if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
-                let channel = WeChatChannel(config: wechatConfig)
-                channel.onAuthExpired = { [weak self] in
-                    self?.promptWeChatReauth()
+            if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
+                let channel = IMessageChannel(config: imessageConfig)
+                channel.onStateChange = { [weak self] state in
+                    // Both halves of the bridge depend on permissions only the
+                    // user can grant, so a failure has to be said out loud —
+                    // otherwise the channel is just silently dead.
+                    if case .error(let msg) = state { self?.presentIMessageError(msg) }
                 }
                 ShipLog.shared.registerChannel(channel)
                 channel.connect()
-                NSLog("[Settings] WeChat reconnecting")
+                imessageChannel = channel
+                NSLog("[Settings] iMessage bridge reconnecting")
             }
         }
     }

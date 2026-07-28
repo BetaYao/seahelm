@@ -37,6 +37,8 @@ final class TerminalHeaderView: NSView {
     private var stripLeadingExpanded: NSLayoutConstraint?
 
     private var isCollapsed = false
+    /// Bumped per collapse animation so a superseded one's completion is a no-op.
+    private var collapseGeneration = 0
     private var collapsedConstraints: [NSLayoutConstraint] = []
     private var expandedConstraints: [NSLayoutConstraint] = []
     private var colorSchemeObserver: NSObjectProtocol?
@@ -78,10 +80,13 @@ final class TerminalHeaderView: NSView {
         applyTitleText()
     }
 
-    func setCollapsed(_ collapsed: Bool) {
+    /// `animated` is passed through from the chrome's collapse animation so the
+    /// icons this header owns while collapsed fade across the hand-off with the
+    /// sidebar instead of popping in at frame 0.
+    func setCollapsed(_ collapsed: Bool, animated: Bool = false) {
         guard isCollapsed != collapsed else { return }
         isCollapsed = collapsed
-        applyCollapsedState()
+        applyCollapsedState(animated: animated)
     }
 
     func setActivePane(_ pane: ChromeLeftPane?) {
@@ -240,24 +245,58 @@ final class TerminalHeaderView: NSView {
         applyStripSeam()
     }
 
-    private func applyCollapsedState() {
+    private func applyCollapsedState(animated: Bool = false) {
         stripLeadingCollapsed?.isActive = isCollapsed
         stripLeadingExpanded?.isActive = !isCollapsed
         if isCollapsed {
             NSLayoutConstraint.deactivate(expandedConstraints)
             NSLayoutConstraint.activate(collapsedConstraints)
-            trafficLightSlot.isHidden = false
-            collapsedLeadingStack.isHidden = false
-            expandButton.isHidden = false
             titleLabel.alignment = .left
         } else {
             NSLayoutConstraint.deactivate(collapsedConstraints)
             NSLayoutConstraint.activate(expandedConstraints)
-            trafficLightSlot.isHidden = true
-            collapsedLeadingStack.isHidden = true
-            expandButton.isHidden = true
             titleLabel.alignment = .center
         }
+        // The traffic-light slot is deliberately NOT faded: it hosts the real
+        // `standardWindowButton`s, which MainWindowController reparents into it
+        // the instant collapse flips. Fading the slot would blink the window's
+        // close/minimise/zoom out of existence for the length of the animation.
+        trafficLightSlot.isHidden = !isCollapsed
+
+        // Collapsed-only chrome. `isHidden` still does the layout/hit-testing
+        // work; alpha only covers the transition, so it is reset either side.
+        let views = [collapsedLeadingStack, expandButton]
+        guard animated else {
+            for v in views {
+                v.isHidden = !isCollapsed
+                v.alphaValue = 1
+            }
+            needsLayout = true
+            return
+        }
+
+        if isCollapsed {
+            for v in views {
+                v.alphaValue = 0
+                v.isHidden = false
+            }
+        }
+        // Fast repeat ⌘B leaves an earlier animation in flight; its completion
+        // must not settle alpha on top of the newer one.
+        collapseGeneration &+= 1
+        let generation = collapseGeneration
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = ChromeLayoutMetrics.collapseAnimationDuration
+            context.timingFunction = ChromeLayoutMetrics.collapseTimingFunction
+            context.allowsImplicitAnimation = true
+            for v in views { v.animator().alphaValue = self.isCollapsed ? 1 : 0 }
+        }, completionHandler: { [weak self] in
+            guard let self, self.collapseGeneration == generation else { return }
+            for v in views {
+                v.isHidden = !self.isCollapsed
+                v.alphaValue = 1
+            }
+        })
         needsLayout = true
     }
 

@@ -2,6 +2,9 @@ import AppKit
 
 /// `?` keyboard cheat-sheet — a two-column modal (NORMAL · HELM open) over the
 /// dashboard. Bare-TUI styled. Click the scrim or press Esc to dismiss.
+///
+/// The permanent bottom-of-column strip (`ShortcutHintBar`) is the teaser for
+/// this sheet; keep the two in sync when either list changes.
 final class KeyboardHelpOverlay: NSView {
 
     // Bare-TUI palette (prototype THEME.A)
@@ -15,14 +18,14 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("↑ ↓ / k j", "Move: cabins → cards → command"),
+        ("↑ ↓ / k j", "Move through the cabin list"),
         ("⏎ / →", "Forward: dashboard → split → terminal"),
-        ("← ", "Card row: previous card · split: back"),
         ("⌘esc / ⌃⌃", "Back: terminal → split → dashboard"),
-        ("⇥", "Cycle options on selected card"),
         ("1 – 9", "Enter Nth cabin"),
         ("n", "New cabin"),
         ("⌃⇥ / ⌃⇧⇥", "Next / previous cabin"),
+        ("⇥", "Cycle region: panes → sidebar → header → island"),
+        ("⌘E", "Dashboard overview ⇄ cabin"),
         ("⌘1 / ⌘2 / ⌘3", "First Mate / Files / Changes"),
         ("?", "Keyboard shortcuts"),
     ]
@@ -30,9 +33,11 @@ final class KeyboardHelpOverlay: NSView {
         ("⌘D / ⌘⇧D", "Horizontal / vertical split"),
         ("⌘⌥ ← → ↑ ↓", "Move split focus"),
         ("⌘⌃ ← → ↑ ↓", "Resize split"),
+        ("⌘P / ⌃⌃", "Open the island command bar"),
+        ("⌘N", "Island command bar, `/new` prefilled"),
         ("/ @ #", "Command / repo / agent completion"),
-        ("↑ ↓ / ⏎", "Select / confirm completion"),
-        ("esc", "Close menu → clear → leave command box"),
+        ("↑ ↓ / ⇥", "Select / accept completion"),
+        ("esc", "Close menu → close the island"),
     ]
 
     var onDismiss: (() -> Void)?

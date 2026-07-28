@@ -1036,7 +1036,9 @@ class ShipLog {
             let item = IdeaStore.shared.add(
                 text: cmd.args,
                 project: "external",
-                source: "wecom:\(cmd.rawMessage.senderId)",
+                // Channel id, not a hardcoded platform — an idea texted in over
+                // iMessage was being filed as "wecom:".
+                source: "\(cmd.rawMessage.channelId):\(cmd.rawMessage.senderId)",
                 tags: []
             )
             reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")

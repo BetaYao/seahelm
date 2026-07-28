@@ -73,13 +73,7 @@ struct SailorDisplayInfo {
 
 class DashboardViewController: NSViewController {
     enum LayoutMetrics {
-        static let focusPanelCornerRadius: CGFloat = 10
-        static let containerHorizontalInset: CGFloat = 0
-        static let containerBottomInset: CGFloat = 0
         static let leftColumnWidth: CGFloat = 300
-        static let columnSpacing: CGFloat = 8
-
-        static let leftRightFocusMaskedCorners: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
     }
 
     weak var dashboardDelegate: DashboardDelegate?
@@ -87,6 +81,10 @@ class DashboardViewController: NSViewController {
     /// Set by MainWindowController. Called when the user drills into a terminal so the
     /// keyboard mode can switch to .insert.
     var onEnterTerminal: (() -> Void)?
+    /// Set by MainWindowController. Opens the island's command bar with a prefill
+    /// (`""` just focuses it) — the single command surface since the fleet
+    /// column's composer was removed.
+    var onRequestCommandBar: ((String) -> Void)?
     /// Set by MainWindowController. Called when the user requests the new-worktree creator.
     var onRequestNewWorktree: (() -> Void)?
     /// The "+" on a project group header was clicked. Args: the project title and
@@ -158,8 +156,6 @@ class DashboardViewController: NSViewController {
     // Data
     private(set) var agents: [SailorDisplayInfo] = []
 
-    private let layoutTopInset: CGFloat = 0
-
     // Left-Right layout
     private let leftRightContainer = NSView()
     private let leftRightFocusPanel = FocusPanelView()
@@ -167,7 +163,6 @@ class DashboardViewController: NSViewController {
     // replaces it); the object is kept only so the existing setup/report wiring
     // in MainWindowController still compiles.
     private let inlineCreateView = InlineCabinCreateView()
-    private var inlineCreateHeightConstraint: NSLayoutConstraint?
 
     // Left column content host — overview + side panel swap (no outer width/collapse;
     // WindowChromeController owns column chrome). Exposed for MainWindow embedding.
@@ -271,7 +266,7 @@ class DashboardViewController: NSViewController {
     private var overviewSelectedId: String = ""
     /// Vertical nav ring over the overview (worktree rows → orders row → command
     /// input). Lives here (not in the view) because visuals need `agents`.
-    private var overviewFocus = OverviewFocusModel(worktreeCount: 0, orderCount: 0)
+    private var overviewFocus = OverviewFocusModel(worktreeCount: 0)
     /// Worktree awaiting a debounced terminal preview, and its timer. Walking the
     /// list must not re-parent Metal surfaces on every keystroke — see
     /// `schedulePreview(path:)`.
@@ -280,8 +275,6 @@ class DashboardViewController: NSViewController {
     /// How long ↑↓ must settle before the terminal actually swaps. Long enough to
     /// coalesce a fast key-repeat burst, short enough to feel live.
     private static let previewDebounce: TimeInterval = 0.12
-    private static let firstMateColumnWidth: CGFloat = 392
-    private static let overviewSideBg = NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 1)
 
     // Empty state
     private let emptyStateView = NSView()
@@ -328,24 +321,9 @@ class DashboardViewController: NSViewController {
             guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
             self.dashboardDelegate?.dashboardDidRequestDelete(agent.id)
         }
-        // Nav-ring ↔ command-field hand-off (see OverviewFocusModel).
-        overviewView.onCommandArrowUpAtEmpty = { [weak self] in
-            guard let self else { return false }
-            let effect = self.overviewFocus.moveUp(commandIsEmpty: true)
-            guard case .blurCommandThenLand = effect else { return false }
-            self.applyOverviewEffect(effect)
-            return true
-        }
-        overviewView.onCommandEscapeAtEmpty = { [weak self] in
-            guard let self else { return }
-            self.view.window?.makeFirstResponder(self)
-            self.applyOverviewEffect(self.overviewFocus.escapeFromCommand())
-        }
-        overviewView.onCommandFocused = { [weak self] in
-            self?.overviewFocus.noteCommandFocused()
-        }
-        overviewView.onOrdersChanged = { [weak self] in
-            self?.syncOverviewFocusCounts()
+        // The bottom shortcut strip is a teaser for the full `?` cheat-sheet.
+        overviewView.onShowAllShortcuts = { [weak self] in
+            self?.toggleHelp()
         }
         overviewView.onGroupingChanged = { [weak self] in
             guard let self else { return }
@@ -519,17 +497,22 @@ class DashboardViewController: NSViewController {
 
     /// Mirror chrome collapse into the deprecated `ViewMode` alias and apply
     /// content-only side effects (no local column width constraints).
-    func adoptChromeCollapse(_ collapsed: Bool, activePane: ChromeLeftPane?) {
+    /// `animated` says a chrome collapse animation is in flight. Re-embedding a
+    /// split container reparents Ghostty surfaces — hundreds of milliseconds of
+    /// synchronous main-thread work — and landing that mid-slide froze the main
+    /// thread for the animation's whole duration, so ⌘B only ever showed its end
+    /// state. Hold it until the slide is done.
+    func adoptChromeCollapse(_ collapsed: Bool, activePane: ChromeLeftPane?, animated: Bool = false) {
         isLeftColumnCollapsed = collapsed
         let mode: ViewMode = collapsed ? .terminal : .split
-        let modeChanged = mode != viewMode
         viewMode = mode
+        let settleDelay = animated ? ChromeLayoutMetrics.collapseAnimationDuration : 0
 
         if collapsed {
             if firstMateSideOpen { flushPendingPreview() }
             lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
                 ?? lastCommittedWorktreePath
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
                 guard let self, self.viewMode == .terminal else { return }
                 self.embedSplitContainerForSelectedSailor(focusTerminal: true)
             }
@@ -545,13 +528,15 @@ class DashboardViewController: NSViewController {
                 openFirstMateColumn()
                 currentSide = .firstMate
             }
-            if activeSplitContainer == nil {
-                embedSplitContainerForSelectedSailor(focusTerminal: false)
-            }
             lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
                 ?? lastCommittedWorktreePath
-            DispatchQueue.main.async { [weak self] in
+            // Same reasoning as the collapse branch — the first embed after a
+            // cold start is the most expensive one there is.
+            DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
                 guard let self, self.viewMode == .split else { return }
+                if self.activeSplitContainer == nil {
+                    self.embedSplitContainerForSelectedSailor(focusTerminal: false)
+                }
                 self.view.window?.makeFirstResponder(self)
             }
         }
@@ -643,30 +628,10 @@ class DashboardViewController: NSViewController {
         dashboardDelegate?.dashboardDidChangeSelection(self)
     }
 
-    /// Open the First Mate column and start a command in its composer.
+    /// Open the island's command bar with `prefill`. The fleet column no longer
+    /// carries a composer, so every command entry point funnels here.
     func startNewCommand(prefill: String = "/new ") {
-        setViewMode(.split)
-        DispatchQueue.main.async { [weak self] in
-            self?.overviewView.focusCommand(prefill: prefill)
-        }
-    }
-
-    /// The pending image URLs from pastes in the overview's command input, if any.
-    var pendingImageURLs: [URL] { overviewView.pendingImageURLs }
-
-    /// Clear the pending images from the overview's command input.
-    func clearPendingImage() {
-        overviewView.clearPendingImage()
-    }
-
-    func configureOverview(pendingOrders: PendingOrdersQueue?,
-                           onSubmitCommand: @escaping (String) -> Void,
-                           onOrderAction: @escaping (PendingOrder, String) -> Void,
-                           commandMenuProvider: @escaping (Character, String) -> [(name: String, desc: String)]) {
-        overviewView.pendingOrders = pendingOrders
-        overviewView.onSubmitCommand = onSubmitCommand
-        overviewView.onOrderAction = onOrderAction
-        overviewView.commandMenuProvider = commandMenuProvider
+        onRequestCommandBar?(prefill)
     }
 
     /// Drill into a specific worktree without changing the chrome sidebar state.
@@ -706,15 +671,6 @@ class DashboardViewController: NSViewController {
     /// the existing caller compiles. (Could move into the status bar later.)
     func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {}
 
-    private func animateColumnLayout(_ extra: @escaping () -> Void) {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.allowsImplicitAnimation = true
-            extra()
-            self.view.layoutSubtreeIfNeeded()
-        }
-    }
-
     // MARK: - Inline worktree creation
 
     func setupInlineCreate(repoPaths: [String],
@@ -743,22 +699,6 @@ class DashboardViewController: NSViewController {
 
     func inlineCreateReportSuccess() { inlineCreateView.reportCreateSuccess() }
     func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
-
-    // MARK: - Sorting
-
-    private func sortedAgents() -> [SailorDisplayInfo] {
-        agents.sorted { a, b in
-            statusOrder(a.status) < statusOrder(b.status)
-        }
-    }
-
-    private func statusOrder(_ status: String) -> Int {
-        switch status.lowercased() {
-        case "waiting": return 0
-        case "running": return 1
-        default: return 2
-        }
-    }
 
     // MARK: - Layout
 
@@ -970,28 +910,6 @@ class DashboardViewController: NSViewController {
 
         currentLeftPane = .file
         sidePanelVC.selectTab(.files)
-    }
-
-    private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {
-        guard let constraint = inlineCreateHeightConstraint else { return }
-        guard abs(constraint.constant - height) > 0.5 else { return }
-
-        let layout = {
-            constraint.constant = height
-            self.view.layoutSubtreeIfNeeded()
-        }
-
-        guard animated, view.window != nil else {
-            layout()
-            return
-        }
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            context.allowsImplicitAnimation = true
-            layout()
-        }
     }
 
     // MARK: - Split container embedding
@@ -1342,7 +1260,7 @@ class DashboardViewController: NSViewController {
         case "l": handleNavRight()
         case "?": toggleHelp()
         case "n": startNewCommand()
-        case "/", "@", "#": overviewView.focusCommand(prefill: ch ?? "")
+        case "/", "@", "#": onRequestCommandBar?(ch ?? "")
         case let d? where ("1"..."9").contains(d):
             if let n = Int(d), case .previewWorktree = overviewFocus.jumpToWorktree(n - 1) {
                 applyOverviewEffect(.previewWorktree(n - 1))
@@ -1359,7 +1277,6 @@ class DashboardViewController: NSViewController {
         case .none:
             break
         case .previewWorktree(let i):
-            overviewView.setKeyboardCardSelected(nil)
             guard let row = overviewView.orderedRows[safeIndex: i] else { break }
             let selectionChanged = row.id != overviewSelectedId
             overviewSelectedId = row.id
@@ -1372,60 +1289,28 @@ class DashboardViewController: NSViewController {
                 notifySelectionChanged()
             }
             if viewMode == .split { schedulePreview(path: row.path) }
-        case .selectCard(let i):
-            overviewView.setKeyboardCardSelected(i)
-        case .focusCommand:
-            overviewView.setKeyboardCardSelected(nil)
-            overviewView.commandInput.focusInput()
-        case .blurCommandThenLand(let row):
-            view.window?.makeFirstResponder(self)
-            switch row {
-            case .worktree(let i): applyOverviewEffect(.previewWorktree(i))
-            case .orders(let i):   applyOverviewEffect(.selectCard(i))
-            case .command:         break
-            }
         }
     }
 
-    private func handleNavLeft() {
-        if overviewFocus.selectedCardIndex != nil {
-            applyOverviewEffect(overviewFocus.moveLeftInOrders())
-        }
-    }
+    /// ← in the fleet list has nothing to step back into — the orders card row it
+    /// used to walk now lives in the island.
+    private func handleNavLeft() {}
 
     private func handleNavRight() {
-        if overviewFocus.selectedCardIndex != nil {
-            applyOverviewEffect(overviewFocus.moveRightInOrders())
-        } else if overviewFocus.selectedWorktreeIndex != nil {
+        if overviewFocus.selectedWorktreeIndex != nil {
             commitFocusedWorktreeForward()
         }
     }
 
     private func handleNavTab() {
-        // On an orders card, Tab cycles option chips. Otherwise Tab advances the
-        // outer region cycle (panes → sidebar → titlebar/chrome header → helm).
-        if let card = overviewFocus.selectedCardIndex {
-            overviewView.cycleChipOnCard(at: card)
-            return
-        }
+        // Tab advances the outer region cycle (panes → sidebar → titlebar/chrome
+        // header → helm).
         let forward = !(NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false)
         (view.window?.windowController as? MainWindowController)?
             .cycleKeyboardRegion(forward: forward)
     }
 
-    /// Focus the First Mate composer (helm region).
-    func focusOverviewCommand() {
-        overviewView.focusCommand(prefill: "")
-    }
-
     private func handleNavReturn() {
-        if let card = overviewFocus.selectedCardIndex {
-            // ⏎ on a card: jump straight into that card's terminal (mode 3).
-            if let path = overviewView.orderCardPaths[safeIndex: card] {
-                enterWorktree(byWorktreePath: path)
-            }
-            return
-        }
         if overviewFocus.selectedWorktreeIndex != nil {
             commitFocusedWorktreeForward()
         }
@@ -1480,7 +1365,7 @@ class DashboardViewController: NSViewController {
     /// ⏎/→ on a worktree row: mode 1 → mode 2 (selected worktree), mode 2 → mode 3.
     private func commitFocusedWorktreeForward() {
         guard let i = overviewFocus.selectedWorktreeIndex,
-              let row = overviewView.orderedRows[safeIndex: i] else { return }
+              overviewView.orderedRows[safeIndex: i] != nil else { return }
         switch viewMode {
         case .split:
             // The live preview is debounced, so it may still be queued when the
@@ -1531,15 +1416,6 @@ class DashboardViewController: NSViewController {
         previewWorktree(path: path)
     }
 
-    /// Drop a queued preview that is about to be made irrelevant (mode change,
-    /// explicit selection) so it cannot fire afterwards and swap the terminal out
-    /// from under the new selection.
-    private func cancelPendingPreview() {
-        previewDebounceWork?.cancel()
-        previewDebounceWork = nil
-        pendingPreviewPath = nil
-    }
-
     /// Live-follow in mode 2: swap the right-hand terminal to `path` without
     /// stealing keyboard focus from the nav ring. Selection identity is already
     /// updated (and persisted) by `applyOverviewEffect`; this only embeds.
@@ -1552,7 +1428,7 @@ class DashboardViewController: NSViewController {
         syncSidePanelToSelection()
     }
 
-    /// Re-clamp the focus ring after the fleet list or orders queue rebuilt.
+    /// Re-clamp the focus ring after the fleet list rebuilt.
     private func syncOverviewFocusCounts() {
         // Follow the selection by identity, not by position. The fleet list is
         // re-sorted by status, so one status flip anywhere reshuffles it and a
@@ -1564,14 +1440,11 @@ class DashboardViewController: NSViewController {
             : overviewView.orderedRows.firstIndex(where: { $0.id == overviewSelectedId })
         let effect = overviewFocus.rowsDidChange(
             worktreeCount: overviewView.orderedRows.count,
-            orderCount: overviewView.orderCards.count,
             worktreeAnchor: anchor
         )
         // Refresh highlights only — a data refresh must not re-trigger terminal
         // embeds or focus moves.
         switch effect {
-        case .selectCard(let i):
-            overviewView.setKeyboardCardSelected(i)
         case .previewWorktree(let i):
             if let row = overviewView.orderedRows[safeIndex: i], row.id != overviewSelectedId {
                 overviewSelectedId = row.id
@@ -1962,7 +1835,7 @@ extension DashboardViewController {
     // MARK: Tab strip refresh
 
     private func refreshEditModeTabs() {
-        guard let edit = editLayoutContainer, let wt = currentWorktreePath else { return }
+        guard editLayoutContainer != nil, let wt = currentWorktreePath else { return }
 
         let tree = activeSplitContainer?.tree
         let leaves = tree?.allLeaves ?? []
@@ -2089,9 +1962,10 @@ private final class NonFirstResponderScrollView: NSScrollView {
 
 // MARK: - Dashboard overview (spread First Mate fleet page)
 
-/// Full-width fleet overview: every worktree as a row grouped by the chosen mode, a
-/// horizontal ORDERS carousel, and a command composer. This is the landing
-/// surface (the "spread First Mate"); clicking a row drills into that worktree.
+/// Full-width fleet overview: every worktree as a row grouped by the chosen mode,
+/// with a shortcut cheat-strip along the bottom. This is the landing surface (the
+/// "spread First Mate"); clicking a row drills into that worktree. Commands and
+/// pending orders live in the island, not here.
 extension Array {
     subscript(safeIndex index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
@@ -2105,7 +1979,6 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
-    var onSubmitCommand: ((String) -> Void)?
     var onGroupingChanged: (() -> Void)?
     /// The "+" on a project group header was clicked. Args: the project title,
     /// the button's rect in this view's coordinates, and this view (the popover's
@@ -2113,64 +1986,23 @@ final class DashboardOverviewView: NSView {
     var onAddWorktree: ((String, NSRect, NSView) -> Void)?
     /// The header "+" was clicked: add a repo via the folder picker.
     var onAddRepo: (() -> Void)?
-    /// A card's primary/secondary button was tapped. `optionText` is the chosen
-    /// option label (or "" for a plain approve).
-    var onOrderAction: ((PendingOrder, String) -> Void)?
-
-    // Nav-ring hooks (owned by DashboardViewController, which holds the
-    // OverviewFocusModel — the same ring drives both the full-bleed overview and
-    // the docked left column since this is one reparented instance).
-    /// Orders queue rebuilt its cards — counts may have changed.
-    var onOrdersChanged: (() -> Void)?
-    /// ↑ in an EMPTY, menu-closed command field: ring reclaims focus upward.
-    var onCommandArrowUpAtEmpty: (() -> Bool)?
-    /// Esc in an EMPTY, menu-closed command field: ring reclaims focus (first row).
-    var onCommandEscapeAtEmpty: (() -> Void)?
-    /// The command field became first responder (incl. mouse click).
-    var onCommandFocused: (() -> Void)?
-
-    var pendingOrders: PendingOrdersQueue? {
-        didSet {
-            oldValue?.removeObserver(ordersToken); ordersToken = nil
-            ordersToken = pendingOrders?.addObserver { [weak self] in
-                DispatchQueue.main.async { self?.refreshOrders() }
-            }
-            refreshOrders()
-        }
-    }
-    private var ordersToken: Int?
+    /// The bottom shortcut strip was clicked — show the full `?` cheat-sheet.
+    var onShowAllShortcuts: (() -> Void)?
 
     // Palette — accent hues stay fixed; text/line/panel adapt to light/dark so
     // the navigator stays readable on the glass sidebar in both appearances.
-    private static let panelBg = NSColor(name: nil) { appearance in
-        appearance.isDark
-            ? NSColor(srgbRed: 120/255, green: 210/255, blue: 225/255, alpha: 0.045)
-            : NSColor(srgbRed: 0/255, green: 0/255, blue: 0/255, alpha: 0.04)
-    }
     private static let line = NSColor(name: nil) { appearance in
         appearance.isDark
             ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.10)
             : NSColor(srgbRed: 0x1f/255, green: 0x23/255, blue: 0x2b/255, alpha: 0.10)
     }
-    private static let lineStrong = NSColor(name: nil) { appearance in
-        appearance.isDark
-            ? NSColor(srgbRed: 150/255, green: 215/255, blue: 225/255, alpha: 0.18)
-            : NSColor(srgbRed: 0x1f/255, green: 0x23/255, blue: 0x2b/255, alpha: 0.14)
-    }
-    private static let cardBg = NSColor(name: nil) { appearance in
-        appearance.isDark
-            ? NSColor(srgbRed: 0x0e/255, green: 0x2d/255, blue: 0x37/255, alpha: 0.55)
-            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55)
-    }
     // Dynamic: the raw #1fc8da cyan is unreadable as label ink on the light
     // panel (ORDERS header, `/` trigger glyph).
     private static let sea: NSColor = SemanticColors.accent
-    private static let cornflower = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
     fileprivate static let ink: NSColor = SemanticColors.text
     fileprivate static let inkDim: NSColor = SemanticColors.muted
     fileprivate static let inkFaint: NSColor = SemanticColors.subtle
     fileprivate static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
-    private static let orange     = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
     fileprivate static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
 
     private let headerTitle = NSTextField(labelWithString: "First mate")
@@ -2182,30 +2014,8 @@ final class DashboardOverviewView: NSView {
     private let scroll = NonFirstResponderScrollView()
     private let stack = FlippedStackView()
 
-    // ORDERS zone
-    private let ordersZone = NSView()
-    private let ordersTopLine = NSView()
-    private let ordersCountLabel = NSTextField(labelWithString: "")
-    private let ordersCarousel = NSStackView()
-    private var ordersZoneHeight: NSLayoutConstraint?
-
-    // Composer chrome (layer fills need appearance refresh)
-    private let composerBar = NSView()
-
-    // Composer — the real First Mate command input (identical styling), plus the
-    // same `/ @ #` autocomplete menu the cockpit uses.
-    let commandInput = CommandInputView()
-    var commandMenuProvider: ((Character, String) -> [(name: String, desc: String)])?
-    private let menuContainer = FrostedPanelView()
-    private var menuRows: [MenuRowButton] = []
-    private var menuItems: [(name: String, desc: String)] = []
-    private var menuSel = 0
-    private var menuTrigger: Character = "/"
-    private var menuToken = ""
-    private var menuFullText = ""
-    /// Local mouse-down monitor so clicks on non-focusable chrome (fleet list,
-    /// labels) dismiss the slash menu even when the field stays first responder.
-    private var menuClickMonitor: Any?
+    // Bottom shortcut cheat-strip (replaced the composer).
+    private let hintBar = ShortcutHintBar()
 
     private let groupingPreference: CabinGroupingPreference
     private let now: () -> Date
@@ -2245,10 +2055,6 @@ final class DashboardOverviewView: NSView {
         setup()
     }
 
-    deinit {
-        stopMenuClickMonitor()
-        pendingOrders?.removeObserver(ordersToken)
-    }
 
     private func setup() {
         wantsLayer = true
@@ -2294,11 +2100,9 @@ final class DashboardOverviewView: NSView {
         scroll.documentView = stack
         addSubview(scroll)
 
-        // --- ORDERS zone (hidden until there are orders) ---
-        setupOrdersZone()
-
-        // --- Composer ---
-        let composer = setupComposer()
+        // --- Bottom shortcut strip ---
+        hintBar.onShowAllShortcuts = { [weak self] in self?.onShowAllShortcuts?() }
+        addSubview(hintBar)
 
         NSLayoutConstraint.activate([
             headerRow.topAnchor.constraint(equalTo: topAnchor, constant: 13),
@@ -2313,20 +2117,14 @@ final class DashboardOverviewView: NSView {
             scroll.topAnchor.constraint(equalTo: headerLine.bottomAnchor, constant: 14),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: ordersZone.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: hintBar.topAnchor),
 
-            ordersZone.leadingAnchor.constraint(equalTo: leadingAnchor),
-            ordersZone.trailingAnchor.constraint(equalTo: trailingAnchor),
-            ordersZone.bottomAnchor.constraint(equalTo: composer.topAnchor),
-
-            composer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            composer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            composer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hintBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hintBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hintBar.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
         ])
-        ordersZoneHeight = ordersZone.heightAnchor.constraint(equalToConstant: 0)
-        ordersZoneHeight?.isActive = true
     }
 
     /// Header "+": add a whole repo (folder picker), the peer of the per-project
@@ -2419,127 +2217,6 @@ final class DashboardOverviewView: NSView {
         groupingButton.setAccessibilityLabel(description)
     }
 
-    private func setupOrdersZone() {
-        ordersZone.wantsLayer = true
-        ordersZone.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(ordersZone)
-
-        ordersTopLine.wantsLayer = true
-        ordersTopLine.translatesAutoresizingMaskIntoConstraints = false
-
-        let lbl = NSTextField(labelWithString: "ORDERS")
-        lbl.font = AppFont.mono(size: 11, weight: .bold)
-        lbl.textColor = Self.sea
-        ordersCountLabel.font = AppFont.mono(size: 11)
-        ordersCountLabel.textColor = Self.inkFaint
-        let hint = NSTextField(labelWithString: "← scroll →")
-        hint.font = AppFont.mono(size: 10)
-        hint.textColor = Self.inkFaint
-
-        let head = NSStackView(views: [lbl, ordersCountLabel, NSView(), hint])
-        head.orientation = .horizontal
-        head.spacing = 9
-        head.alignment = .centerY
-        head.translatesAutoresizingMaskIntoConstraints = false
-
-        ordersCarousel.orientation = .horizontal
-        ordersCarousel.spacing = 12
-        ordersCarousel.alignment = .top
-        ordersCarousel.translatesAutoresizingMaskIntoConstraints = false
-        let cscroll = NonFirstResponderScrollView()
-        cscroll.hasHorizontalScroller = false
-        cscroll.drawsBackground = false
-        cscroll.borderType = .noBorder
-        cscroll.translatesAutoresizingMaskIntoConstraints = false
-        cscroll.documentView = ordersCarousel
-        ordersZone.addSubview(ordersTopLine)
-        ordersZone.addSubview(head)
-        ordersZone.addSubview(cscroll)
-
-        NSLayoutConstraint.activate([
-            ordersTopLine.topAnchor.constraint(equalTo: ordersZone.topAnchor),
-            ordersTopLine.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor),
-            ordersTopLine.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor),
-            ordersTopLine.heightAnchor.constraint(equalToConstant: 1),
-
-            head.topAnchor.constraint(equalTo: ordersZone.topAnchor, constant: 12),
-            head.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor, constant: 22),
-            head.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor, constant: -22),
-
-            cscroll.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 10),
-            cscroll.leadingAnchor.constraint(equalTo: ordersZone.leadingAnchor, constant: 22),
-            cscroll.trailingAnchor.constraint(equalTo: ordersZone.trailingAnchor, constant: -22),
-            cscroll.bottomAnchor.constraint(equalTo: ordersZone.bottomAnchor, constant: -14),
-            ordersCarousel.heightAnchor.constraint(equalTo: cscroll.contentView.heightAnchor),
-        ])
-    }
-
-    private func setupComposer() -> NSView {
-        let bar = composerBar
-        bar.wantsLayer = true
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(bar)
-
-        // Immersive composer: filled bar flush to the panel edges, no border /
-        // top rule / floating inner box.
-        commandInput.showsChrome = false
-        commandInput.boxCornerRadius = 0
-        commandInput.translatesAutoresizingMaskIntoConstraints = false
-        commandInput.onSubmit = { [weak self] text in
-            let t = text.trimmingCharacters(in: .whitespaces)
-            guard !t.isEmpty else { return }
-            self?.onSubmitCommand?(t)
-            self?.commandInput.text = ""
-            self?.commandInput.clearPendingImage()
-            self?.hideMenu()
-        }
-        commandInput.onTextChanged = { [weak self] text in self?.refreshMenu(for: text) }
-        commandInput.onMenuKey = { [weak self] key in self?.handleMenuKey(key) ?? false }
-        // Esc escalation: close the menu → clear the text → release focus to the ring.
-        commandInput.onCancel = { [weak self] in
-            guard let self else { return }
-            if !self.menuContainer.isHidden { self.hideMenu(); return }
-            if !self.commandInput.text.isEmpty {
-                self.commandInput.text = ""
-                self.commandInput.clearPendingImage()
-                self.hideMenu()
-                return
-            }
-            self.commandInput.clearPendingImage()
-            self.onCommandEscapeAtEmpty?()
-        }
-        commandInput.onArrowUpAtEmpty = { [weak self] in
-            guard let self, self.menuContainer.isHidden else { return false }
-            return self.onCommandArrowUpAtEmpty?() ?? false
-        }
-        commandInput.onFocused = { [weak self] in self?.onCommandFocused?() }
-        // Blur (or click outside) closes the slash menu. Defer so a menu-row
-        // mouseDown can run first and re-focus via applyCompletion.
-        commandInput.onUnfocused = { [weak self] in
-            DispatchQueue.main.async { self?.hideMenuIfBlurred() }
-        }
-
-        // System menu glass — same vibrancy as sidebar / InlineWorktreeCreate.
-        menuContainer.kind = .menu
-        menuContainer.translatesAutoresizingMaskIntoConstraints = false
-        menuContainer.isHidden = true
-
-        bar.addSubview(commandInput)
-        addSubview(menuContainer)
-        NSLayoutConstraint.activate([
-            commandInput.topAnchor.constraint(equalTo: bar.topAnchor),
-            commandInput.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            commandInput.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-            commandInput.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-
-            menuContainer.leadingAnchor.constraint(equalTo: commandInput.boxLeadingAnchor),
-            menuContainer.trailingAnchor.constraint(equalTo: commandInput.boxTrailingAnchor),
-            menuContainer.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -6),
-        ])
-        refreshChromeColors()
-        return bar
-    }
-
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshChromeColors()
@@ -2549,161 +2226,8 @@ final class DashboardOverviewView: NSView {
     private func refreshChromeColors() {
         layer?.backgroundColor = NSColor.clear.cgColor
         headerLine.layer?.backgroundColor = resolvedCGColor(Self.line)
-        ordersZone.layer?.backgroundColor = resolvedCGColor(Self.panelBg)
-        ordersTopLine.layer?.backgroundColor = resolvedCGColor(Self.line)
-        composerBar.layer?.backgroundColor = NSColor.clear.cgColor
-        menuContainer.applyAppearance()
         headerTitle.textColor = Self.ink
         headerSub.textColor = Self.inkFaint
-        ordersCountLabel.textColor = Self.inkFaint
-    }
-
-    // MARK: - `/ @ #` autocomplete (overview composer)
-
-    /// Trailing `/@#`-token of the input, if any.
-    private func trailingToken(_ text: String) -> (trigger: Character, query: String, token: String)? {
-        var token = ""
-        var idx = text.endIndex
-        while idx > text.startIndex {
-            let prev = text.index(before: idx)
-            let ch = text[prev]
-            if ch == " " { break }
-            token = String(ch) + token
-            idx = prev
-        }
-        guard let first = token.first, "/@#".contains(first) else { return nil }
-        return (first, String(token.dropFirst()).lowercased(), token)
-    }
-
-    private func refreshMenu(for text: String) {
-        guard let (trigger, query, token) = trailingToken(text),
-              let items = commandMenuProvider?(trigger, query), !items.isEmpty else {
-            hideMenu(); return
-        }
-        renderMenu(trigger: trigger, items: items, token: token, fullText: text)
-    }
-
-    private func renderMenu(trigger: Character, items: [(name: String, desc: String)],
-                            token: String, fullText: String) {
-        menuContainer.subviews.forEach { $0.removeFromSuperview() }
-        let triggerColor: NSColor
-        switch trigger {
-        case "@": triggerColor = Self.cornflower
-        case "#": triggerColor = Self.orange
-        default:  triggerColor = Self.sea
-        }
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        menuContainer.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: menuContainer.topAnchor, constant: 4),
-            stack.leadingAnchor.constraint(equalTo: menuContainer.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: menuContainer.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: menuContainer.bottomAnchor, constant: -4),
-        ])
-
-        menuRows = []
-        menuItems = Array(items.prefix(6))
-        menuTrigger = trigger
-        menuToken = token
-        menuFullText = fullText
-        for item in menuItems {
-            let row = MenuRowButton(name: item.name, desc: item.desc,
-                                    triggerSymbol: String(trigger), triggerColor: triggerColor)
-            row.onPick = { [weak self] in
-                self?.applyCompletion(name: item.name, trigger: trigger, token: token, fullText: fullText)
-            }
-            stack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            menuRows.append(row)
-        }
-        menuContainer.isHidden = false
-        startMenuClickMonitor()
-        setMenuSelection(0)
-    }
-
-    private func setMenuSelection(_ i: Int) {
-        guard !menuRows.isEmpty else { return }
-        menuSel = max(0, min(menuRows.count - 1, i))
-        for (idx, row) in menuRows.enumerated() { row.setSelected(idx == menuSel) }
-    }
-
-    private func acceptMenuSelection() {
-        guard menuSel < menuItems.count else { return }
-        applyCompletion(name: menuItems[menuSel].name, trigger: menuTrigger,
-                        token: menuToken, fullText: menuFullText)
-    }
-
-    private func handleMenuKey(_ key: CommandInputView.MenuKey) -> Bool {
-        guard !menuContainer.isHidden, !menuRows.isEmpty else { return false }
-        switch key {
-        case .up:     setMenuSelection(menuSel - 1)
-        case .down:   setMenuSelection(menuSel + 1)
-        case .accept: acceptMenuSelection()
-        }
-        return true
-    }
-
-    private func applyCompletion(name: String, trigger: Character, token: String, fullText: String) {
-        let base = String(fullText.dropLast(token.count))
-        hideMenu()
-        commandInput.setTextAndFocusEnd(base + String(trigger) + name + " ")
-    }
-
-    private func hideMenu() {
-        stopMenuClickMonitor()
-        menuContainer.isHidden = true
-        menuContainer.subviews.forEach { $0.removeFromSuperview() }
-        menuRows = []
-        menuItems = []
-        menuSel = 0
-    }
-
-    /// Hide the menu once the command field has truly lost focus (not just the
-    /// transient resign → field-editor handoff, and not a menu-row pick that
-    /// immediately re-focuses).
-    private func hideMenuIfBlurred() {
-        guard !menuContainer.isHidden else { return }
-        if commandInput.isFieldFocused { return }
-        hideMenu()
-    }
-
-    private func startMenuClickMonitor() {
-        guard menuClickMonitor == nil else { return }
-        menuClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self, !self.menuContainer.isHidden else { return event }
-            let loc = event.locationInWindow
-            let inMenu = self.menuContainer.bounds.contains(self.menuContainer.convert(loc, from: nil))
-            let inField = self.commandInput.bounds.contains(self.commandInput.convert(loc, from: nil))
-            if !inMenu && !inField {
-                self.hideMenu()
-            }
-            return event
-        }
-    }
-
-    private func stopMenuClickMonitor() {
-        if let monitor = menuClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            menuClickMonitor = nil
-        }
-    }
-
-    /// Focus the command input with a prefilled command (e.g. "/new ").
-    func focusCommand(prefill: String) {
-        commandInput.setTextAndFocusEnd(prefill)
-    }
-
-    /// The pending image URLs from pastes in the command input, if any.
-    var pendingImageURLs: [URL] { commandInput.pendingImageURLs }
-
-    /// Clear the pending images from the command input.
-    func clearPendingImage() {
-        commandInput.clearPendingImage()
     }
 
     /// Worktrees in display (grouped) order — the sequence keyboard nav walks.
@@ -2841,113 +2365,6 @@ final class DashboardOverviewView: NSView {
     var groupingButtonAccessibilityLabelForTesting: String? { groupingButton.accessibilityLabel() }
     var groupingButtonRefusesFirstResponderForTesting: Bool { groupingButton.refusesFirstResponder }
     func selectGroupingModeForTesting(_ mode: CabinGroupingMode) { applyGroupingMode(mode) }
-
-    /// Cards in carousel order + each card's worktree path, for keyboard nav.
-    private(set) var orderCards: [OrderCardView] = []
-    private(set) var orderCardPaths: [String] = []
-
-    /// Highlight card `index` as the keyboard selection (nil clears all).
-    func setKeyboardCardSelected(_ index: Int?) {
-        for (i, card) in orderCards.enumerated() {
-            card.setSelected(i == index)
-        }
-        if let index, let card = orderCards[safeIndex: index] {
-            card.scrollToVisible(card.bounds)
-        }
-    }
-
-    /// Tab on the orders row: cycle option-chip focus on the selected card.
-    func cycleChipOnCard(at index: Int) {
-        orderCards[safeIndex: index]?.cycleFocusedChip()
-    }
-
-    /// Carousel card sizing. Cards fill the available width so a small number of
-    /// orders never scrolls horizontally; past `minOrderCardWidth` they stop
-    /// shrinking and the carousel scrolls instead.
-    private static let minOrderCardWidth: CGFloat = 300
-    private static let maxOrderCardWidth: CGFloat = 720
-    private static let orderCardSpacing: CGFloat = 12
-    /// Horizontal inset of the carousel scroll view inside `ordersZone`.
-    private static let ordersZoneInset: CGFloat = 22
-
-    private var orderModels: [PendingOrder] = []
-    private var orderWidthConstraints: [NSLayoutConstraint] = []
-    private var orderHeightConstraints: [NSLayoutConstraint] = []
-    /// Width the cards were last sized for, so `layout()` is a no-op on the
-    /// (many) passes where nothing about the carousel changed.
-    private var lastOrderLayoutWidth: CGFloat = 0
-
-    private func refreshOrders() {
-        let orders = pendingOrders?.all() ?? []
-        ordersCarousel.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        ordersCountLabel.stringValue = "\(orders.count)"
-        orderCards = []
-        orderCardPaths = []
-        orderModels = orders
-        orderWidthConstraints = []
-        orderHeightConstraints = []
-        lastOrderLayoutWidth = 0
-        for order in orders {
-            // The real First Mate order card, laid out horizontally.
-            let card = OrderCardView()
-            card.wantsLayer = true
-            card.configure(order: order,
-                           currentPaneTitle: currentPaneTitleProvider?(order.action.worktreePath)) { [weak self] idx in
-                let opt = order.action.options?.indices.contains(idx) == true ? order.action.options![idx] : ""
-                self?.onOrderAction?(order, opt)
-            }
-            card.onNavigate = { [weak self] in self?.onSelectWorktree?(order.action.worktreePath) }
-            card.onDismiss = { [weak self] in self?.pendingOrders?.resolve(id: order.id) }
-            ordersCarousel.addArrangedSubview(card)
-            card.translatesAutoresizingMaskIntoConstraints = false
-            let w = card.widthAnchor.constraint(equalToConstant: Self.minOrderCardWidth)
-            let h = card.heightAnchor.constraint(
-                equalToConstant: BridgePanelViewController.cardHeight(for: order,
-                                                                     width: Self.minOrderCardWidth))
-            w.isActive = true
-            h.isActive = true
-            orderWidthConstraints.append(w)
-            orderHeightConstraints.append(h)
-            orderCards.append(card)
-            orderCardPaths.append(order.action.worktreePath)
-        }
-        // Collapse the whole zone when there's nothing pending.
-        ordersZone.isHidden = orders.isEmpty
-        layoutOrderCards()
-        onOrdersChanged?()
-    }
-
-    override func layout() {
-        super.layout()
-        layoutOrderCards()
-    }
-
-    /// Size the carousel cards to the width actually on offer: divide it evenly
-    /// when they all fit, otherwise pin them at the minimum and let the carousel
-    /// scroll. Card height follows, since the message block wraps at that width.
-    private func layoutOrderCards() {
-        guard !orderModels.isEmpty else {
-            ordersZoneHeight?.constant = 0
-            return
-        }
-        let available = bounds.width - Self.ordersZoneInset * 2
-        guard available > 0 else { return }
-        let n = CGFloat(orderModels.count)
-        let fitted = (available - Self.orderCardSpacing * (n - 1)) / n
-        let width = min(Self.maxOrderCardWidth, max(Self.minOrderCardWidth, floor(fitted)))
-        guard width != lastOrderLayoutWidth else { return }
-        lastOrderLayoutWidth = width
-
-        var maxCard: CGFloat = 0
-        for (i, order) in orderModels.enumerated() {
-            let h = BridgePanelViewController.cardHeight(for: order, width: width)
-            maxCard = max(maxCard, h)
-            orderWidthConstraints[safeIndex: i]?.constant = width
-            orderHeightConstraints[safeIndex: i]?.constant = h
-        }
-        // Size the zone to the tallest card + the "ORDERS" header + padding.
-        ordersZoneHeight?.constant = maxCard + 12 + 20 + 10 + 14
-    }
 
     private func pin(_ v: NSView) {
         v.translatesAutoresizingMaskIntoConstraints = false

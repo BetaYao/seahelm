@@ -75,21 +75,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationManager.shared.requestPermission()
         }
 
-        if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
-            let channel = WeComBotChannel(config: wecomConfig)
+        // WeCom and WeChat are retired — their channels still compile but nothing
+        // constructs them any more. iMessage is the phone-side transport now.
+        if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
+            let channel = IMessageChannel(config: imessageConfig)
             ShipLog.shared.registerChannel(channel)
             channel.connect()
-            NSLog("[App] WeCom bot auto-connecting: \(wecomConfig.resolvedName)")
-        }
-
-        if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
-            let channel = WeChatChannel(config: wechatConfig)
-            channel.onAuthExpired = { [weak self] in
-                self?.mainWindowController?.promptWeChatReauth()
-            }
-            ShipLog.shared.registerChannel(channel)
-            channel.connect()
-            NSLog("[App] WeChat auto-connecting")
+            NSLog("[App] iMessage bridge connecting (\(imessageConfig.allowedHandles.count) allowed handles)")
         }
 
         GhosttyBridge.shared.initialize()

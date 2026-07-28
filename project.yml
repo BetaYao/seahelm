@@ -66,6 +66,9 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        # Shown in the "Seahelm wants to control Messages" prompt. Required —
+        # without it the first Apple event from IMessageSender kills the app.
+        NSAppleEventsUsageDescription: "Seahelm sends agent updates and replies to your iMessage conversations through Messages."
         # Sparkle. The feed URL is deliberately absent — UpdateCoordinator supplies
         # it per CPU arch at runtime, because we ship arch-specific zips and Sparkle
         # has no built-in arch filtering, so there is one appcast per arch.
@@ -178,6 +181,9 @@ targets:
         MARKETING_VERSION: "2.0.33"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_STYLE: Automatic
+        # Hardened-runtime exceptions only — the app is not sandboxed. Needed so
+        # signed builds can drive Messages.app for the iMessage bridge.
+        CODE_SIGN_ENTITLEMENTS: seahelm.entitlements
         COMBINE_HIDPI_IMAGES: YES
         SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/seahelm-Bridging-Header.h"
         HEADER_SEARCH_PATHS:

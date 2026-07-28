@@ -84,7 +84,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
    - `Config` — JSON config at `~/.config/seahelm/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
    - `StationRegistry` — Global registry mapping surface IDs to `Station` instances
-   - `ExternalChannel` — Protocol for inbound remote-control chat (`WeChatChannel`, `WeComBotChannel`)
+   - `ExternalChannel` — Protocol for inbound remote-control chat. `IMessageChannel` is the live one: inbound reads `~/Library/Messages/chat.db` over SQLite, edge-triggered by an FSEvents watch (needs Full Disk Access); outbound drives Messages.app via AppleScript (`IMessageSender`, needs `NSAppleEventsUsageDescription` + the `com.apple.security.automation.apple-events` entitlement in `seahelm.entitlements`, since release builds are hardened-runtime). `IMessageConfig.allowedHandles` is a hard gate — an empty list drops every inbound message. `WeChatChannel`/`WeComBotChannel` are retired: they still compile but nothing constructs them and their Settings tabs are unreachable.
 
 4. **Terminal & System** (`Sources/Terminal/`, `Sources/Git/`)
    - `GhosttyBridge` — Singleton wrapping the Ghostty C API (`ghostty.h` via bridging header)

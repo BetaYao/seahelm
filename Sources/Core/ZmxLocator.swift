@@ -23,7 +23,6 @@ enum ZmxLocator {
     static func executable() -> String { path() ?? "zmx" }
 
     static var isAvailable: Bool { path() != nil }
-    static var isBundled: Bool { bundledResourcePath() != nil }
 
     /// Runtime backend resolution. zmx is the only persistent backend; fall back
     /// to a plain local shell when zmx is absent or reports an unexpectedly

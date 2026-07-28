@@ -1,21 +1,21 @@
 import Foundation
 
 /// Pure-value vertical focus ring for the overview (fleet) column, shared by the
-/// full-bleed dashboard (mode 1) and the split left column (mode 2):
+/// full-bleed dashboard (mode 1) and the split left column (mode 2).
 ///
-///     worktree rows  →  orders card row (the whole carousel is ONE row)  →  command input
+/// The ring is just the worktree rows. It used to continue into an orders-card
+/// row and a command input at the bottom of the column; both moved to the island,
+/// so ↑↓ now stays inside the fleet list and the bottom of the column is a static
+/// shortcut strip with nothing to focus.
 ///
-/// The model owns which row is focused and, within the orders row, which card is
-/// selected. It emits `Effect`s the host view/VC executes (focus the command
-/// field, preview a worktree in the terminal panel, …). Counts are snapshots the
-/// host refreshes via `rowsDidChange` whenever the fleet list or orders queue
+/// The model owns which row is focused and emits `Effect`s the host view/VC
+/// executes (highlight the row, live-preview its terminal, …). Counts are
+/// snapshots the host refreshes via `rowsDidChange` whenever the fleet list
 /// rebuilds.
 struct OverviewFocusModel: Equatable {
 
     enum Row: Equatable {
         case worktree(index: Int)
-        case orders(cardIndex: Int)
-        case command
     }
 
     enum Effect: Equatable {
@@ -23,24 +23,13 @@ struct OverviewFocusModel: Equatable {
         /// Landed on a worktree row — highlight it (and live-preview its terminal
         /// in split mode).
         case previewWorktree(Int)
-        /// Landed on the orders row — highlight the selected card.
-        case selectCard(Int)
-        /// Landed on the command input — make it first responder.
-        case focusCommand
-        /// Left the command input upward — blur the field, then land on `Row`.
-        case blurCommandThenLand(Row)
     }
 
     private(set) var row: Row = .worktree(index: 0)
     private(set) var worktreeCount: Int
-    private(set) var orderCount: Int
-    /// Remembered card selection so ↑↓ through the orders row returns to the
-    /// same card.
-    private var lastCardIndex = 0
 
-    init(worktreeCount: Int, orderCount: Int) {
+    init(worktreeCount: Int) {
         self.worktreeCount = max(0, worktreeCount)
-        self.orderCount = max(0, orderCount)
     }
 
     var selectedWorktreeIndex: Int? {
@@ -48,48 +37,16 @@ struct OverviewFocusModel: Equatable {
         return nil
     }
 
-    var selectedCardIndex: Int? {
-        if case .orders(let i) = row { return i }
-        return nil
-    }
-
     // MARK: - Vertical movement
 
     mutating func moveDown() -> Effect {
-        switch row {
-        case .worktree(let i):
-            if i + 1 < worktreeCount {
-                return land(.worktree(index: i + 1))
-            }
-            if orderCount > 0 {
-                return land(.orders(cardIndex: clampedCardIndex(lastCardIndex)))
-            }
-            return land(.command)
-        case .orders:
-            return land(.command)
-        case .command:
-            return .none
-        }
+        guard case .worktree(let i) = row, i + 1 < worktreeCount else { return .none }
+        return land(.worktree(index: i + 1))
     }
 
-    /// `commandIsEmpty` matters only when focus is in the command input: an empty
-    /// field releases focus upward, a non-empty one keeps the keystroke.
-    mutating func moveUp(commandIsEmpty: Bool = true) -> Effect {
-        switch row {
-        case .worktree(let i):
-            guard i > 0 else { return .none }
-            return land(.worktree(index: i - 1))
-        case .orders:
-            return landAboveOrders()
-        case .command:
-            guard commandIsEmpty else { return .none }
-            let target: Row = orderCount > 0
-                ? .orders(cardIndex: clampedCardIndex(lastCardIndex))
-                : lastWorktreeRowOrSelf()
-            row = target
-            if case .orders(let c) = target { lastCardIndex = c }
-            return .blurCommandThenLand(target)
-        }
+    mutating func moveUp() -> Effect {
+        guard case .worktree(let i) = row, i > 0 else { return .none }
+        return land(.worktree(index: i - 1))
     }
 
     /// Jump straight to worktree row `index` (1-9 shortcuts, mouse hover sync).
@@ -98,35 +55,10 @@ struct OverviewFocusModel: Equatable {
         return land(.worktree(index: index))
     }
 
-    /// Sync the model when the command field gains focus by mouse click.
-    mutating func noteCommandFocused() {
-        row = .command
-    }
-
-    /// Escape released focus from an empty command field — land on the FIRST
-    /// worktree row (user-specified), falling back to orders/command when empty.
-    mutating func escapeFromCommand() -> Effect {
-        if worktreeCount > 0 { return land(.worktree(index: 0)) }
-        if orderCount > 0 { return land(.orders(cardIndex: clampedCardIndex(lastCardIndex))) }
-        return .none
-    }
-
-    // MARK: - Orders row (horizontal)
-
-    mutating func moveLeftInOrders() -> Effect {
-        guard case .orders(let i) = row, i > 0 else { return .none }
-        return land(.orders(cardIndex: i - 1))
-    }
-
-    mutating func moveRightInOrders() -> Effect {
-        guard case .orders(let i) = row, i + 1 < orderCount else { return .none }
-        return land(.orders(cardIndex: i + 1))
-    }
-
     // MARK: - Data changes
 
-    /// Clamp the focus after the fleet list or orders queue rebuilds. Returns the
-    /// effect to re-apply the (possibly moved) highlight.
+    /// Clamp the focus after the fleet list rebuilds. Returns the effect to
+    /// re-apply the (possibly moved) highlight.
     ///
     /// `worktreeAnchor` is where the row the host still considers selected now
     /// lives. The fleet list is re-sorted by status, so a row index is NOT a
@@ -134,52 +66,22 @@ struct OverviewFocusModel: Equatable {
     /// the list and the old index silently lands on a different worktree. Pass the
     /// anchor to follow the selection by identity; nil keeps the plain clamp (the
     /// selected row is gone, or the host tracks no identity).
-    mutating func rowsDidChange(worktreeCount: Int, orderCount: Int,
-                                worktreeAnchor: Int? = nil) -> Effect {
+    mutating func rowsDidChange(worktreeCount: Int, worktreeAnchor: Int? = nil) -> Effect {
         self.worktreeCount = max(0, worktreeCount)
-        self.orderCount = max(0, orderCount)
-        lastCardIndex = clampedCardIndex(lastCardIndex)
-        switch row {
-        case .worktree(let i):
-            if self.worktreeCount == 0 {
-                if self.orderCount > 0 { return land(.orders(cardIndex: lastCardIndex)) }
-                row = .worktree(index: 0)
-                return .none
-            }
-            let target = worktreeAnchor ?? i
-            return land(.worktree(index: min(max(0, target), self.worktreeCount - 1)))
-        case .orders(let i):
-            if self.orderCount == 0 { return land(lastWorktreeRowOrSelf()) }
-            return land(.orders(cardIndex: min(i, self.orderCount - 1)))
-        case .command:
+        guard case .worktree(let i) = row else { return .none }
+        if self.worktreeCount == 0 {
+            row = .worktree(index: 0)
             return .none
         }
+        let target = worktreeAnchor ?? i
+        return land(.worktree(index: min(max(0, target), self.worktreeCount - 1)))
     }
 
     // MARK: - Helpers
 
     private mutating func land(_ target: Row) -> Effect {
         row = target
-        switch target {
-        case .worktree(let i): return .previewWorktree(i)
-        case .orders(let i):
-            lastCardIndex = i
-            return .selectCard(i)
-        case .command: return .focusCommand
-        }
-    }
-
-    private mutating func landAboveOrders() -> Effect {
-        if worktreeCount > 0 { return land(.worktree(index: worktreeCount - 1)) }
-        return .none
-    }
-
-    private func lastWorktreeRowOrSelf() -> Row {
-        worktreeCount > 0 ? .worktree(index: worktreeCount - 1) : .worktree(index: 0)
-    }
-
-    private func clampedCardIndex(_ i: Int) -> Int {
-        guard orderCount > 0 else { return 0 }
-        return min(max(0, i), orderCount - 1)
+        guard case .worktree(let i) = target else { return .none }
+        return .previewWorktree(i)
     }
 }

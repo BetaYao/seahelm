@@ -1,19 +1,6 @@
 import XCTest
 @testable import seahelm
 
-private class MockTerminalCoordinatorDelegate: TerminalCoordinatorDelegate {
-    var surfacesUpdated = false
-    var deletedWorktree: WorktreeInfo?
-
-    func terminalCoordinatorDidUpdateSurfaces(_ coordinator: TerminalCoordinator) {
-        surfacesUpdated = true
-    }
-
-    func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
-        deletedWorktree = info
-    }
-}
-
 final class TerminalCoordinatorTests: XCTestCase {
 
     func testStationManagerAccess() {

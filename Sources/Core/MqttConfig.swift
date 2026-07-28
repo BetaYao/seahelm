@@ -59,7 +59,6 @@ struct MqttConfig: Codable, Equatable {
     var resolvedWsPath: String { wsPath ?? "/mqtt" }
     var resolvedEnabled: Bool { enabled ?? false }
     var resolvedAllowRemoteWrite: Bool { allowRemoteWrite ?? false }
-    var resolvedPublishMessages: Bool { publishMessages ?? true }
     var resolvedMaxReconnectInterval: TimeInterval { maxReconnectInterval ?? 30.0 }
     /// Port by transport when unset: ws+tls 8084, ws 8083, tcp+tls 8883, tcp 1883.
     var resolvedPort: UInt16 {

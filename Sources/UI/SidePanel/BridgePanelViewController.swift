@@ -88,10 +88,6 @@ final class BridgePanelViewController: NSViewController {
     private let watchTableView = NSTableView()
     private let watchScrollView = NSScrollView()
 
-    /// Layer-backed views whose CGColors must be re-resolved when the
-    /// effective appearance changes (light/dark switch).
-    private var dividers: [NSView] = []
-
     // Tabbed sections (cockpit shows one at a time; the segmented control lives
     // in the cockpit header).
     enum Section { case orders, watch }
@@ -110,13 +106,6 @@ final class BridgePanelViewController: NSViewController {
     override func loadView() {
         let root = ThemedBackgroundView()
         root.backgroundToken = Theme.background
-        root.onAppearanceChange = { [weak self] in
-            guard let self else { return }
-            for line in self.dividers {
-                line.layer?.backgroundColor = line.resolvedCGColor(SemanticColors.line)
-            }
-        }
-
         stackView.orientation = .vertical
         stackView.alignment = .leading
         stackView.spacing = 0
@@ -246,16 +235,6 @@ final class BridgePanelViewController: NSViewController {
         }
         NSLayoutConstraint.activate(constraints)
         return container
-    }
-
-    private func makeDivider() -> NSView {
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.backgroundColor = line.resolvedCGColor(SemanticColors.line)
-        line.translatesAutoresizingMaskIntoConstraints = false
-        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        dividers.append(line)
-        return line
     }
 
     // MARK: - Data

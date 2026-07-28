@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The app is not sandboxed (it drives git worktrees and spawns shells), so
+	  this file exists purely for hardened-runtime exceptions.
+
+	  apple-events: release builds are signed with `--options runtime`, which
+	  blocks outgoing Apple events even after the user approves Automation.
+	  IMessageSender needs it to drive Messages.app.
+
+	  Reading ~/Library/Messages/chat.db needs no entitlement — it is gated by
+	  Full Disk Access, which only the user can grant in System Settings.
+	-->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
