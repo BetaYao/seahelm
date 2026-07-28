@@ -2033,7 +2033,10 @@ extension DashboardViewController: CabinSidePanelDelegate {
 
     /// Present a file as the fullscreen center overlay (focus-mode viewer).
     func presentFileOverlay(path: String) {
-        let title = URL(fileURLWithPath: path).lastPathComponent
+        // Full path, not just the basename: the fullscreen viewer fills the
+        // window with no other cue about which of several same-named files
+        // (Contents.json, index.ts, mod.rs…) is on screen.
+        let title = (path as NSString).abbreviatingWithTildeInPath
 
         // Images and audio/video get a native viewer. Everything else — including
         // markdown and unregistered extensions — goes to the editor first.

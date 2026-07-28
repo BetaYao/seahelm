@@ -363,8 +363,19 @@ final class TerminalHeaderView: NSView {
     private func applyTitleText() {
         // The strips occupy the whole row when hoisted; nothing else fits.
         titleLabel.isHidden = hasHoistedStrips
-        titleLabel.stringValue = editModeOn ? cabinContext : paneTitle
+        let text = editModeOn ? cabinContext : paneTitle
+        titleLabel.stringValue = text
+        // A file path loses the part that identifies it — the filename — to tail
+        // truncation, so paths give up their middle instead.
+        titleLabel.lineBreakMode = Self.isPathLike(text) ? .byTruncatingMiddle : .byTruncatingTail
+        titleLabel.toolTip = text.isEmpty ? nil : text
         applyTitleEmphasis()
+    }
+
+    /// A single path-shaped token, as opposed to a prose title or a command line
+    /// that merely mentions a directory.
+    static func isPathLike(_ text: String) -> Bool {
+        text.contains("/") && !text.contains(where: { $0 == " " || $0 == "\t" })
     }
 
     /// Context reads as a quieter label than a title, so it doesn't compete with
@@ -376,6 +387,8 @@ final class TerminalHeaderView: NSView {
     }
 
     var titleTextForTesting: String { titleLabel.stringValue }
+    var titleLineBreakModeForTesting: NSLineBreakMode { titleLabel.lineBreakMode }
+    var titleToolTipForTesting: String? { titleLabel.toolTip }
     var isTitleHiddenForTesting: Bool { titleLabel.isHidden }
 
     @objc private func expandClicked() {

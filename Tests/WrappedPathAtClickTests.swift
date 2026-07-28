@@ -119,3 +119,79 @@ final class WrappedPathAtClickTests: XCTestCase {
         )
     }
 }
+
+/// Covers `GhosttyNSView.tokensByProximity` — which token on the clicked row the
+/// Preview item resolves against.
+final class TokenProximityTests: XCTestCase {
+    func testNilColumnKeepsLeftToRightOrder() {
+        XCTAssertEqual(
+            GhosttyNSView.tokensByProximity(in: "a.ts b.ts c.ts", to: nil),
+            ["a.ts", "b.ts", "c.ts"]
+        )
+    }
+
+    /// The whole point: a line listing several paths must offer the one under
+    /// the cursor, not whichever comes first.
+    func testClickedTokenComesFirst() {
+        let line = "a.ts b.ts c.ts"           // columns 0-3, 5-8, 10-13
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: line, to: 6).first, "b.ts")
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: line, to: 11).first, "c.ts")
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: line, to: 0).first, "a.ts")
+    }
+
+    /// A click in the gap beside a path still previews it — nearest wins rather
+    /// than requiring an exact hit.
+    func testClickInGapPicksNearestToken() {
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: "a.ts     z.ts", to: 12).first, "z.ts")
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: "a.ts     z.ts", to: 5).first, "a.ts")
+    }
+
+    func testEveryTokenIsStillReachable() {
+        XCTAssertEqual(
+            Set(GhosttyNSView.tokensByProximity(in: "  a.ts \t b.ts  ", to: 3)),
+            ["a.ts", "b.ts"]
+        )
+    }
+
+    /// CJK cells are two columns wide, so a click past a run of Chinese text
+    /// lands on the wrong token if widths are counted as one.
+    func testWideCharactersAdvanceTwoColumns() {
+        // "补丁 a.ts" — 补丁 spans columns 0-3, the space is 4, a.ts is 5-8.
+        let line = "补丁 a.ts"
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: line, to: 6).first, "a.ts")
+        XCTAssertEqual(GhosttyNSView.tokensByProximity(in: line, to: 1).first, "补丁")
+        XCTAssertEqual(GhosttyNSView.displayWidth(of: "补"), 2)
+        XCTAssertEqual(GhosttyNSView.displayWidth(of: "a"), 1)
+    }
+
+    /// Chinese prose separates paths with 、 and no space. A whitespace-only
+    /// split handed the whole run back as one token, so none of the paths in a
+    /// sentence like this could ever be previewed.
+    func testCJKPunctuationSeparatesPaths() {
+        let line = "完成的文件：Sources/Core/WorktreeFileIndex.swift、Tests/A.swift。"
+        let tokens = GhosttyNSView.tokensByProximity(in: line, to: nil)
+
+        XCTAssertTrue(tokens.contains("Sources/Core/WorktreeFileIndex.swift"), "got \(tokens)")
+        XCTAssertTrue(tokens.contains("Tests/A.swift"), "got \(tokens)")
+    }
+
+    func testClickPicksTheEnumeratedPathUnderTheCursor() {
+        // "a.swift、bb.swift" — a.swift spans 0-6, 、 is 7-8, bb.swift is 9-16.
+        let tokens = GhosttyNSView.tokensByProximity(in: "a.swift、bb.swift", to: 12)
+        XCTAssertEqual(tokens.first, "bb.swift")
+    }
+
+    /// CJK letters are not separators — a path with a Chinese filename must stay
+    /// one token — but they are shaved off as a fallback spelling.
+    func testCJKLettersStayInTheTokenButAreStrippedAsAForm() {
+        XCTAssertEqual(
+            GhosttyNSView.tokensByProximity(in: "修改了docs/设计文档.md文件", to: nil),
+            ["修改了docs/设计文档.md文件"]
+        )
+        XCTAssertTrue(PathToken.forms(of: "修改了docs/设计文档.md文件").contains("docs/设计文档.md"))
+    }
+
+    func testEmptyLineYieldsNoTokens() {
+        XCTAssertTrue(GhosttyNSView.tokensByProximity(in: "   ", to: 1).isEmpty)
+    }
+}
