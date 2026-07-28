@@ -133,11 +133,71 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // Shadow is computed from an explicit path so Core Animation never has to
         // derive it from the live Metal contents (which forces offscreen passes).
         layer?.shadowPath = CGPath(rect: bounds, transform: nil)
+        syncWashLayerFrame()
         syncSurfaceSize()
+    }
+
+    // MARK: - Inactive wash
+
+    /// Scrim over this pane while another pane holds the split's focus. It lives
+    /// *inside* the view as a sublayer rather than as a sibling overlay: sibling
+    /// views get buried whenever a surface is re-added on top (tab switch,
+    /// reparent), which made the cue appear in some worktrees and not others.
+    private var washLayer: CALayer?
+
+    /// Whether the pane currently wears the inactive scrim.
+    private(set) var showsInactiveWash = false
+
+    func setInactiveWash(_ on: Bool, animated: Bool = true) {
+        guard let layer else { return }
+        showsInactiveWash = on
+        if on, washLayer == nil {
+            let wash = CALayer()
+            wash.frame = bounds
+            // Above the Metal contents drawn into this view's own layer.
+            wash.zPosition = 100
+            wash.opacity = 0
+            layer.addSublayer(wash)
+            washLayer = wash
+        }
+        guard let wash = washLayer else { return }
+        wash.backgroundColor = Self.washColor(for: effectiveAppearance)
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        CATransaction.setAnimationDuration(0.12)
+        wash.opacity = on ? 1 : 0
+        CATransaction.commit()
+    }
+
+    private func syncWashLayerFrame() {
+        guard let wash = washLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        wash.frame = bounds
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        washLayer?.backgroundColor = Self.washColor(for: effectiveAppearance)
+    }
+
+    /// Dark themes are already near-black, so a black wash lands on black and two
+    /// agent panes read as identical — lift the inactive one instead. Light themes
+    /// take the opposite treatment (a light wash there would be invisible).
+    private static func washColor(for appearance: NSAppearance) -> CGColor {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let color = dark
+            ? NSColor.white.withAlphaComponent(0.085)
+            : NSColor.black.withAlphaComponent(0.055)
+        return (color.usingColorSpace(.sRGB) ?? color).cgColor
     }
 
     override func removeFromSuperview() {
         super.removeFromSuperview()
+        // Reparenting (dashboard focus panel, another tab) starts from a clean
+        // pane; whoever embeds it next re-applies the wash if it belongs there.
+        setInactiveWash(false, animated: false)
         // Reset debounce for the next embed — but keep a structural-split freeze
         // so a reparent mid-absorb cannot immediately SIGWINCH.
         if !freezePtyGridResize {

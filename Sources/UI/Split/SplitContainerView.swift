@@ -9,34 +9,6 @@ protocol SplitContainerDelegate: AnyObject {
     func splitContainerDidChangeLayout(_ view: SplitContainerView)
 }
 
-// MARK: - Dim overlay
-
-/// Transparent overlay that dims unfocused panes. Passes all mouse events through
-/// so clicks reach the terminal view underneath.
-private class DimOverlayView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        refreshAppearance()
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        refreshAppearance()
-    }
-
-    func refreshAppearance() {
-        // Light: barely-there wash (0.35 black turns Catppuccin Latte muddy grey).
-        // Dark: keep a readable focus cue without crushing the surface.
-        let alpha: CGFloat = effectiveAppearance.isDark ? 0.28 : 0.055
-        layer?.backgroundColor = resolvedCGColor(NSColor.black.withAlphaComponent(alpha))
-    }
-}
-
 // MARK: - SplitContainerView
 
 class SplitContainerView: NSView, DividerDelegate {
@@ -54,7 +26,6 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private var dividers: [String: DividerView] = [:]
     private var leafFrames: [String: CGRect] = [:]
-    private var dimOverlays: [String: DimOverlayView] = [:]
 
     override var isFlipped: Bool { true }
 
@@ -65,11 +36,6 @@ class SplitContainerView: NSView, DividerDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        dimOverlays.values.forEach { $0.refreshAppearance() }
-    }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
@@ -177,8 +143,7 @@ class SplitContainerView: NSView, DividerDelegate {
             // A single full-container pane has no dividers and nothing to dim.
             dividers.values.forEach { $0.removeFromSuperview() }
             dividers.removeAll()
-            dimOverlays.values.forEach { $0.removeFromSuperview() }
-            dimOverlays.removeAll()
+            updateDimOverlays()
         } else {
             layoutDividers(node: tree.root, in: bounds)
             let activeSplitIds = collectSplitIds(tree.root)
@@ -222,81 +187,33 @@ class SplitContainerView: NSView, DividerDelegate {
         if zoomedLeafId == nil {
             layoutDividers(node: tree.root, in: bounds)
         }
-        for (id, overlay) in dimOverlays {
-            if let frame = leafFrames[id] { overlay.frame = frame }
-        }
         CATransaction.commit()
     }
 
-    // MARK: - Dim overlays
+    // MARK: - Inactive wash
 
-    /// Update semi-transparent overlays that dim unfocused panes.
-    /// Overlays are sibling views above terminals but below dividers, and pass mouse events through.
+    /// Mark every pane but the focused one as inactive. The scrim is drawn by the
+    /// terminal view itself (`GhosttyNSView.setInactiveWash`) rather than by a
+    /// sibling overlay, so re-embedding a surface can't bury it.
     func updateDimOverlays() {
         guard let tree = tree else {
-            dimOverlays.values.forEach { $0.removeFromSuperview() }
-            dimOverlays.removeAll()
+            surfaceViews.values.forEach { ($0 as? GhosttyNSView)?.setInactiveWash(false, animated: false) }
             return
         }
 
-        // Single pane: no dimming needed
+        // Single pane: nothing to tell apart, so no wash.
         guard tree.leafCount > 1 else {
-            dimOverlays.values.forEach { $0.removeFromSuperview() }
-            dimOverlays.removeAll()
+            surfaceViews.values.forEach { ($0 as? GhosttyNSView)?.setInactiveWash(false, animated: false) }
             return
         }
 
         let focusedId = tree.focusedId
-        let activeLeafIds = Set(tree.allLeaves.map(\.id))
-
-        // Remove overlays for leaves that no longer exist
-        for id in dimOverlays.keys where !activeLeafIds.contains(id) {
-            dimOverlays[id]?.removeFromSuperview()
-            dimOverlays.removeValue(forKey: id)
-        }
-
         for leaf in tree.allLeaves {
-            if leaf.id == focusedId {
-                // Fade out, then remove — an instant pop reads as flicker during
-                // rapid focus navigation.
-                if let overlay = dimOverlays.removeValue(forKey: leaf.id) {
-                    NSAnimationContext.runAnimationGroup({ context in
-                        context.duration = 0.12
-                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                        overlay.animator().alphaValue = 0
-                    }, completionHandler: {
-                        overlay.removeFromSuperview()
-                    })
-                }
-            } else {
-                let frame = leafFrames[leaf.id] ?? .zero
-                if let overlay = dimOverlays[leaf.id] {
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
-                    overlay.frame = frame
-                    // Color update stays inside the transaction so an appearance
-                    // flip can't land a frame behind the just-moved overlay.
-                    overlay.refreshAppearance()
-                    // Re-dimming a pane that was mid-fade-out: bring it back.
-                    overlay.alphaValue = 1
-                    CATransaction.commit()
-                } else {
-                    let overlay = DimOverlayView(frame: frame)
-                    overlay.alphaValue = 0
-                    // Insert above terminal views but below dividers
-                    if let firstDivider = dividers.values.first {
-                        addSubview(overlay, positioned: .below, relativeTo: firstDivider)
-                    } else {
-                        addSubview(overlay)
-                    }
-                    dimOverlays[leaf.id] = overlay
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.12
-                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                        overlay.animator().alphaValue = 1
-                    }
-                }
-            }
+            guard let view = surfaceViews[leaf.stationId] as? GhosttyNSView else { continue }
+            // A zoomed-out (hidden) leaf is not on screen; leave it unwashed so it
+            // comes back clean if it is zoomed in next.
+            let visible = leafFrames[leaf.id] != nil
+            view.setInactiveWash(visible && leaf.id != focusedId)
         }
     }
 
