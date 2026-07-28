@@ -161,4 +161,60 @@ class SessionManagerTests: XCTestCase {
         XCTAssertEqual(orphaned, ["seahelm-repo-idle"],
                        "only a reachable session with a known clients=0 may be reaped")
     }
+
+    // MARK: - Session monitor parsing
+
+    func testParseZmxSessionsReadsEveryField() {
+        let output = "  name=seahelm-repo-main\tpid=123\tclients=2\tcreated=1785228325\tstart_dir=/tmp/repo"
+
+        let sessions = SessionManager.parseZmxSessions(listOutput: output)
+
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions[0].name, "seahelm-repo-main")
+        XCTAssertEqual(sessions[0].pid, 123)
+        XCTAssertEqual(sessions[0].clients, 2)
+        XCTAssertEqual(sessions[0].created, Date(timeIntervalSince1970: 1_785_228_325))
+        XCTAssertEqual(sessions[0].startDir, "/tmp/repo")
+        XCTAssertTrue(sessions[0].isManaged)
+        XCTAssertFalse(sessions[0].isDetached)
+    }
+
+    /// The monitor lists everything `zmx list` reports, including sessions the
+    /// user started by hand — hiding rows from a cleanup screen is the one thing
+    /// it must not do. `isManaged` is what gates the kill buttons instead.
+    func testParseZmxSessionsIncludesUnmanagedSessions() {
+        let output = """
+          name=seahelm-repo-main\tpid=1\tclients=1
+          name=my-own-session\tpid=2\tclients=1
+        """
+
+        let sessions = SessionManager.parseZmxSessions(listOutput: output)
+
+        XCTAssertEqual(sessions.map(\.name), ["seahelm-repo-main", "my-own-session"])
+        XCTAssertEqual(sessions.map(\.isManaged), [true, false])
+    }
+
+    /// A missing `clients=` is unknown, not zero — the distinction is what keeps
+    /// a busy-but-unreported session out of "Kill All Detached".
+    func testParseZmxSessionsKeepsMissingClientsNil() {
+        let sessions = SessionManager.parseZmxSessions(
+            listOutput: "  name=seahelm-repo-busy\terr=Timeout\tstatus=unreachable")
+
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertNil(sessions[0].clients)
+        XCTAssertFalse(sessions[0].isDetached)
+    }
+
+    func testParseZmxSessionsKeepsSpacesInStartDir() {
+        let sessions = SessionManager.parseZmxSessions(
+            listOutput: "  name=seahelm-a\tpid=1\tclients=0\tstart_dir=/tmp/my repo/wt")
+
+        XCTAssertEqual(sessions[0].startDir, "/tmp/my repo/wt")
+        XCTAssertTrue(sessions[0].isDetached)
+    }
+
+    func testParseZmxSessionsIgnoresBlankLines() {
+        XCTAssertTrue(SessionManager.parseZmxSessions(listOutput: "\n  \n").isEmpty)
+    }
+
 }

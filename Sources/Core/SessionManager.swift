@@ -1,6 +1,27 @@
 import Foundation
 import CommonCrypto
 
+/// One live zmx session as reported by `zmx list`.
+///
+/// The daemon outlives the app, so this is also the only place stray sessions
+/// become visible: a pane closed while its session survived shows up here with
+/// `clients == 0` and nothing pointing at it.
+struct ZmxSessionInfo: Equatable {
+    let name: String
+    let pid: Int?
+    /// Attached clients. 0 means the session is running with nobody watching —
+    /// the shape an orphan takes. Nil means `zmx` didn't report the field, which
+    /// is not the same as zero and must never be treated as reapable.
+    let clients: Int?
+    let created: Date?
+    let startDir: String?
+    /// Whether Seahelm created it (current or legacy prefix). Sessions started
+    /// by hand outside the app are listed but never offered for cleanup.
+    let isManaged: Bool
+
+    var isDetached: Bool { clients == 0 }
+}
+
 enum SessionManager {
     /// Maximum session name length to keep backend session names bounded.
     private static let maxSessionNameLength = 40
@@ -76,6 +97,42 @@ enum SessionManager {
                 let candidate = String(first)
                 return candidate.isEmpty ? nil : candidate
             }
+    }
+
+    /// Full `zmx list` rows, for the session monitor in Settings.
+    ///
+    /// Deliberately separate from `orphanZmxSessionNames`: that one answers "may
+    /// I kill this unattended?" and fails closed on anything ambiguous, while
+    /// this one has to show everything, including the ambiguous rows, because
+    /// hiding a session from a cleanup screen is the one thing it must not do.
+    static func parseZmxSessions(listOutput: String) -> [ZmxSessionInfo] {
+        listOutput.components(separatedBy: .newlines).compactMap { line -> ZmxSessionInfo? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let name = zmxListField(trimmed, "name=")
+                ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
+            guard !name.isEmpty else { return nil }
+
+            let created = zmxListField(trimmed, "created=")
+                .flatMap(TimeInterval.init)
+                .map(Date.init(timeIntervalSince1970:))
+            // start_dir is last on the line and paths contain spaces, so it runs
+            // to end-of-line rather than to the next whitespace.
+            var startDir: String?
+            if let range = trimmed.range(of: "start_dir=") {
+                let value = String(trimmed[range.upperBound...])
+                startDir = value.isEmpty ? nil : value
+            }
+
+            return ZmxSessionInfo(
+                name: name,
+                pid: zmxListField(trimmed, "pid=").flatMap(Int.init),
+                clients: zmxListField(trimmed, "clients=").flatMap(Int.init),
+                created: created,
+                startDir: startDir,
+                isManaged: isManagedSessionPrefix(name)
+            )
+        }
     }
 
     static func orphanZmxSessionNames(activeSessionNames: Set<String>, listOutput: String) -> [String] {

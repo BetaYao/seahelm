@@ -2,18 +2,17 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// The macOS "配对远程客户端" window (design: `docs/remote-clients-design.md` §7.5.4).
+/// The pairing UI (design: `docs/remote-clients-design.md` §7.5.4), as a plain
+/// view so it can live in two places at once: the Settings sidebar page, and the
+/// standalone window the menu item still opens.
 ///
 /// Always shows the **QR + long link** carrying the full pairing payload
 /// (`seahelm://pair?…` with the real root secret) — the strong channels for
 /// camera/paste-capable clients (iOS scan, Web paste). The **短码** is opt-in:
 /// generated only on button click, 1-minute TTL, single-use — the weak channel
 /// for no-camera clients (Watch). Not clicking it means no short code exists.
-///
-/// The root secret is generated once and persisted to `config.json` (`mqtt.root_secret`);
-/// `MqttChannel` derives broker auth + the E2EE key from it on next connect.
-final class PairingWindowController: NSWindowController {
-    private var rootSecret: Data
+final class PairingPaneView: NSView {
+    private let rootSecret: Data
     private let brokerURL: String
     private let macId: String
     private var pairURI: String { MqttCrypto.pairURI(broker: brokerURL, macId: macId, rootSecret: rootSecret) }
@@ -25,50 +24,33 @@ final class PairingWindowController: NSWindowController {
     private var shortCode: String?
     private var countdown = 0
     private var codeTimer: Timer?
+
     /// Called when a short code is minted, so the app can arm the live
     /// `MqttChannel` responder to honor a matching `pair/claim`.
     var onShortCode: ((String, TimeInterval) -> Void)?
 
-    /// View-only: the caller (`MainWindowController.showPairing`) owns minting +
-    /// persisting the secret on the *live* config and reconnecting the channel;
-    /// this window just renders the QR / link / short code for the given secret.
-    convenience init(secret: Data, mqtt: MqttConfig) {
-        self.init(rootSecret: secret,
-                  brokerURL: Self.clientBrokerURL(mqtt),
-                  macId: mqtt.macId ?? MqttChannel.deriveMacId())
-    }
-
-    /// The WS(S) endpoint clients dial — prefers `mqtt.client_broker`, else
-    /// derives from host/port (e.g. `wss://gw.seahelm.dev/mqtt`).
-    private static func clientBrokerURL(_ m: MqttConfig) -> String {
-        m.resolvedClientBrokerURL
-    }
-
-    init(rootSecret: Data, brokerURL: String, macId: String) {
+    /// `qrSide` shrinks for the Settings page, where the QR shares the width
+    /// with a sidebar and does not need to be scannable across a room.
+    init(rootSecret: Data, brokerURL: String, macId: String, qrSide: CGFloat = 240) {
         self.rootSecret = rootSecret
         self.brokerURL = brokerURL
         self.macId = macId
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
-                              styleMask: [.titled, .closable],
-                              backing: .buffered, defer: false)
-        window.title = "配对远程客户端"
-        super.init(window: window)
-        buildUI()
+        super.init(frame: .zero)
+        build(qrSide: qrSide)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit { codeTimer?.invalidate() }
+
     // MARK: - UI
 
-    private func buildUI() {
-        guard let content = window?.contentView else { return }
-
-        let title = NSTextField(labelWithString: "扫码 / 粘贴长链接配对")
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
+    private func build(qrSide: CGFloat) {
+        translatesAutoresizingMaskIntoConstraints = false
 
         qrView.imageScaling = .scaleProportionallyUpOrDown
         qrView.wantsLayer = true
-        qrView.image = Self.qrImage(from: pairURI, side: 240)
+        qrView.image = Self.qrImage(from: pairURI, side: qrSide)
 
         let linkCaption = NSTextField(labelWithString: "长链接(Web 粘贴 · iOS 扫上方码):")
         linkCaption.font = .systemFont(ofSize: 11); linkCaption.textColor = .secondaryLabelColor
@@ -97,23 +79,23 @@ final class PairingWindowController: NSWindowController {
         warn.font = .systemFont(ofSize: 10); warn.textColor = .tertiaryLabelColor
 
         let stack = NSStackView(views: [
-            title, qrView, linkCaption, linkField, copyBtn, divider,
+            qrView, linkCaption, linkField, copyBtn, divider,
             codeCaption, codeLabel, countdownLabel, genBtn, warn,
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+        addSubview(stack)
+
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            qrView.widthAnchor.constraint(equalToConstant: 240),
-            qrView.heightAnchor.constraint(equalToConstant: 240),
-            linkField.widthAnchor.constraint(equalToConstant: 360),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            qrView.widthAnchor.constraint(equalToConstant: qrSide),
+            qrView.heightAnchor.constraint(equalToConstant: qrSide),
+            divider.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
     }
 
@@ -167,4 +149,62 @@ final class PairingWindowController: NSWindowController {
         img.addRepresentation(rep)
         return img
     }
+}
+
+/// The standalone "配对远程客户端" window. Settings now hosts the same pane, but
+/// the menu item stays a direct route: pairing is a thing you do once, in a
+/// hurry, with a phone already in your hand.
+///
+/// The root secret is generated once and persisted to `config.json` (`mqtt.root_secret`);
+/// `MqttChannel` derives broker auth + the E2EE key from it on next connect.
+final class PairingWindowController: NSWindowController {
+    private let pane: PairingPaneView
+
+    var onShortCode: ((String, TimeInterval) -> Void)? {
+        get { pane.onShortCode }
+        set { pane.onShortCode = newValue }
+    }
+
+    /// View-only: the caller (`MainWindowController.showPairing`) owns minting +
+    /// persisting the secret on the *live* config and reconnecting the channel;
+    /// this window just renders the QR / link / short code for the given secret.
+    convenience init(secret: Data, mqtt: MqttConfig) {
+        self.init(rootSecret: secret,
+                  brokerURL: Self.clientBrokerURL(mqtt),
+                  macId: mqtt.macId ?? MqttChannel.deriveMacId())
+    }
+
+    /// The WS(S) endpoint clients dial — prefers `mqtt.client_broker`, else
+    /// derives from host/port (e.g. `wss://gw.seahelm.dev/mqtt`).
+    private static func clientBrokerURL(_ m: MqttConfig) -> String {
+        m.resolvedClientBrokerURL
+    }
+
+    init(rootSecret: Data, brokerURL: String, macId: String) {
+        pane = PairingPaneView(rootSecret: rootSecret, brokerURL: brokerURL, macId: macId)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
+                              styleMask: [.titled, .closable],
+                              backing: .buffered, defer: false)
+        window.title = "配对远程客户端"
+        super.init(window: window)
+
+        guard let content = window.contentView else { return }
+        let title = NSTextField(labelWithString: "扫码 / 粘贴长链接配对")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(title)
+        content.addSubview(pane)
+
+        NSLayoutConstraint.activate([
+            title.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            title.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+
+            pane.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 10),
+            pane.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            pane.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+            pane.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -18),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

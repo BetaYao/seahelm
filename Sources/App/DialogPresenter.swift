@@ -29,10 +29,10 @@ final class DialogPresenter {
         return switcher
     }
 
-    func makeSettings(config: Config, settingsDelegate: SettingsDelegate) -> SettingsViewController {
-        let settingsVC = SettingsViewController(config: config)
-        settingsVC.settingsDelegate = settingsDelegate
-        return settingsVC
+    /// Settings is a window, not a sheet — it applies live and has no Save, so
+    /// it isn't a transaction the way a sheet is.
+    func makeSettings(config: Config, settingsDelegate: SettingsDelegate) -> SettingsWindowController {
+        SettingsWindowController(config: config, settingsDelegate: settingsDelegate)
     }
 
     static func showKeyboardShortcuts() {

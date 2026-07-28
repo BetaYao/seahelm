@@ -108,7 +108,13 @@ final class IMessageChannel: ExternalChannel {
             return
         }
 
-        let body = Self.flatten(message.content, format: message.format)
+        lock.lock()
+        let cfg = config
+        lock.unlock()
+
+        // Every outbound goes through here, so stamping in this one place is
+        // what guarantees the drain loop can always tell our own echo apart.
+        let body = cfg.stampReply(Self.flatten(message.content, format: message.format))
         queue.async {
             do {
                 try IMessageSender.send(body, to: target)
@@ -182,7 +188,7 @@ final class IMessageChannel: ExternalChannel {
 
     // MARK: - Draining
 
-    /// Read every new inbound row and forward the allowed ones.
+    /// Read every new row and forward the ones that are actually orders.
     ///
     /// The cursor advances past rejected rows too — an unauthorised sender must
     /// not wedge the bridge by leaving a permanent unread row at the head.
@@ -196,30 +202,109 @@ final class IMessageChannel: ExternalChannel {
         lock.unlock()
 
         for row in rows {
-            guard cfg.allows(handle: row.sender) else {
-                NSLog("[iMessage] Ignoring message from unlisted handle \(row.sender)")
+            guard let command = Self.command(in: row, config: cfg) else {
+                deliverSignal(row, config: cfg)
                 continue
             }
+
             if let chatGuid = row.chatGuid {
                 lock.lock()
-                chatGuidBySender[row.sender] = chatGuid
+                chatGuidBySender[command.sender] = chatGuid
                 lock.unlock()
             }
 
             let inbound = InboundMessage(
                 channelId: channelId,
-                senderId: row.sender,
-                senderName: row.sender,
+                senderId: command.sender,
+                senderName: command.sender,
                 chatId: row.chatGuid,
                 chatType: row.isGroup ? .group : .direct,
-                content: row.text,
+                content: command.body,
                 messageId: row.guid,
                 timestamp: row.date,
                 replyTo: nil,
-                metadata: ["rowId": row.rowId]
+                metadata: ["rowId": row.rowId, "fromMe": row.isFromMe]
             )
             onMessage?(inbound)
         }
+    }
+
+    /// A non-command message may still be work: an alert, a CI text, a person
+    /// asking for something. Run it past the rules and, on a match, hand the
+    /// rendered prompt up as an inbound carrying `ruleTarget` metadata — the
+    /// router uses that to inject rather than reply.
+    ///
+    /// Own messages are skipped entirely: you texting yourself is either an
+    /// order (handled above) or a note, never a signal, and letting notes fire
+    /// agents would make the thread unusable for anything else.
+    private func deliverSignal(_ row: IMessageRow, config cfg: IMessageConfig) {
+        guard !row.isFromMe, !cfg.resolvedRules.isEmpty else { return }
+        guard let match = IMessageRuleEngine.firstMatch(rules: cfg.resolvedRules,
+                                                       sender: row.sender,
+                                                       text: row.text) else { return }
+
+        NSLog("[iMessage] Rule '\(match.rule.name)' matched from \(row.sender)")
+        onMessage?(InboundMessage(
+            channelId: channelId,
+            senderId: row.sender,
+            senderName: row.sender,
+            chatId: row.chatGuid,
+            chatType: row.isGroup ? .group : .direct,
+            content: match.prompt,
+            messageId: row.guid,
+            timestamp: row.date,
+            replyTo: nil,
+            metadata: [
+                "rowId": row.rowId,
+                "ruleName": match.rule.name,
+                "ruleTarget": match.rule.target,
+            ]
+        ))
+    }
+
+    struct Command: Equatable {
+        let body: String
+        /// Who to hold responsible — the actual sender for incoming rows, the
+        /// chat's other party for the user's own.
+        let sender: String
+    }
+
+    /// Decide whether one row is an order, and for whom.
+    ///
+    /// Three gates in this order, and the order matters:
+    ///
+    /// 1. **Echo** — anything wearing our own reply prefix is dropped first, so
+    ///    a reply that quotes a command can never re-trigger it.
+    /// 2. **Address** — the line must open with the command prefix. This runs
+    ///    before authorisation on purpose: with outgoing rows now included, the
+    ///    reader sees the user's entire message history, and authorising first
+    ///    would log a rejection for every text they exchange with anyone.
+    /// 3. **Authorisation** — the allowlist. Incoming rows are matched on the
+    ///    sender. The user's own rows have no sender to match (Messages records
+    ///    no `handle_id` for outgoing messages), so they are matched on the
+    ///    chat's other party instead, which means the allowlist reads as "which
+    ///    thread is a command line" — and a group thread is never one.
+    static func command(in row: IMessageRow, config: IMessageConfig) -> Command? {
+        if row.isFromMe, config.isOwnReply(row.text) { return nil }
+        guard let body = config.commandBody(of: row.text) else { return nil }
+
+        let sender: String
+        if row.isFromMe {
+            guard !row.isGroup,
+                  let counterpart = IMessageConfig.counterpart(ofChatGuid: row.chatGuid) else {
+                NSLog("[iMessage] Ignoring own command outside a 1:1 thread")
+                return nil
+            }
+            sender = counterpart
+        } else {
+            sender = row.sender
+        }
+
+        guard config.allows(handle: sender) else {
+            NSLog("[iMessage] Ignoring command from unlisted handle \(sender)")
+            return nil
+        }
+        return Command(body: body, sender: sender)
     }
 
     /// Walk the cursor back so messages from the last `seconds` are replayed —

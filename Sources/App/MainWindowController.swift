@@ -73,6 +73,7 @@ class MainWindowController: NSWindowController {
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
+    private var settingsWindowController: SettingsWindowController?
     /// Live iMessage bridge, held so a Settings save can tear the old one down.
     /// Nil when the bridge is unconfigured or was started by AppDelegate and
     /// never reconfigured — `unregisterChannel("imessage")` covers that case.
@@ -306,6 +307,9 @@ class MainWindowController: NSWindowController {
             )
         }
         ShipLog.shared.chatCommandRoute = makeChatCommandRoute()
+        ShipLog.shared.ruleTriggerRoute = { [weak self] prompt, target in
+            self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
+        }
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
         statusAggregator.onActivity = { [weak self] path, date in
@@ -459,18 +463,52 @@ class MainWindowController: NSWindowController {
         dialogPresenter.presentSheetOnActiveVC(switcher, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
+    /// Held strongly so the window survives this call, and reused so ⌘, twice
+    /// raises the existing one instead of stacking a second copy with stale
+    /// config.
     @objc func showSettings() {
-        let settingsVC = dialogPresenter.makeSettings(config: config, settingsDelegate: self)
-        dialogPresenter.presentSheetOnActiveVC(settingsVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
+        if let existing = settingsWindowController {
+            existing.show()
+            return
+        }
+        let wc = dialogPresenter.makeSettings(config: config, settingsDelegate: self)
+        settingsWindowController = wc
+        wc.show()
     }
 
     /// Remote-client pairing window (QR + long link + on-demand short code).
     /// Held strongly so it survives past this call. See `PairingWindowController`.
     @objc func showPairing() {
-        // Mint + persist the root secret on the LIVE config (a throwaway
-        // `Config.load()` copy is clobbered by the app's own config saves), then
-        // hot-reload the MQTT channel so it reconnects with E2EE + derived broker
-        // creds — no restart needed.
+        let (secret, mqtt) = mintPairingContext()
+        let wc = PairingWindowController(secret: secret, mqtt: mqtt)
+        wc.onShortCode = { [weak self] code, ttl in self?.tabCoordinator.setMqttPairingCode(code, ttl: ttl) }
+        wc.showWindow(nil)
+        wc.window?.center()
+        NSApp.activate(ignoringOtherApps: true)
+        pairingWindowController = wc
+    }
+
+    /// Type a rule-matched prompt into the pane its target names.
+    ///
+    /// Goes through `sendText(enter: true)` — the same write channel the control
+    /// socket uses — so a triggered prompt is indistinguishable from one typed
+    /// by hand, and lands whatever agent already owns that pane.
+    private func dispatchRuleTrigger(prompt: String, target: IMessageRuleTarget) -> Bool {
+        guard let dataSource = tabCoordinator.mqttDataSource else { return false }
+        guard let pane = IMessageRuleEngine.resolvePane(target,
+                                                        panes: dataSource.snapshotPanes())
+        else { return false }
+        return dataSource.sendText(paneId: pane.paneId, text: prompt, enter: true)
+    }
+
+    /// Mint + persist the root secret on the LIVE config (a throwaway
+    /// `Config.load()` copy is clobbered by the app's own config saves), then
+    /// hot-reload the MQTT channel so it reconnects with E2EE + derived broker
+    /// creds — no restart needed.
+    ///
+    /// Shared by the pairing window and the Settings pairing page: both render
+    /// the same payload, and neither may mint its own.
+    private func mintPairingContext() -> (secret: Data, mqtt: MqttConfig) {
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
         // Self-hosted edge stack: Mac publishes to local EMQX (TCP), but the
         // pair QR/link must advertise the public WSS for Watch / web. Retarget
@@ -483,12 +521,7 @@ class MainWindowController: NSWindowController {
         let mqtt = config.mqtt!
         tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")   // sync + reconnect E2EE
         let secret = MqttCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? MqttCrypto.newRootSecret()
-        let wc = PairingWindowController(secret: secret, mqtt: mqtt)
-        wc.onShortCode = { [weak self] code, ttl in self?.tabCoordinator.setMqttPairingCode(code, ttl: ttl) }
-        wc.showWindow(nil)
-        wc.window?.center()
-        NSApp.activate(ignoringOtherApps: true)
-        pairingWindowController = wc
+        return (secret, mqtt)
     }
 
     /// The WeChat bot token stopped being accepted. Point the user at the QR
@@ -558,13 +591,7 @@ class MainWindowController: NSWindowController {
     @objc func splitHorizontal() { splitFocusedPane(axis: .horizontal) }
     @objc func splitVertical() { splitFocusedPane(axis: .vertical) }
 
-    /// Cmd+Esc / Cmd+E: toggle chrome sidebar collapse.
-    func navigateBack() {
-        tabCoordinator.switchToTab(0)
-        toggleChromeCollapsed()
-    }
-
-    /// ⌘B / navigateBack — chrome collapse is the only layout collapse signal.
+    /// ⌘B — chrome collapse is the only layout collapse signal.
     @objc func toggleChromeCollapsed() {
         chromeState.toggleCollapsed()
         applyChromeState(animated: true)
@@ -1781,12 +1808,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Keyboard cycle through worktrees (Ctrl+Tab / Ctrl+Shift+Tab).
     func selectAdjacentWorktree(forward: Bool) {
-        let paths = tabCoordinator.allWorktrees.map(\.info.path)
+        // Cycle in the order the fleet list is actually showing, so ⌃⇥ agrees with
+        // the eye under every `CabinGroupingMode`. Discovery order is the fallback
+        // for before the overview has rendered.
+        let displayed = tabCoordinator.dashboardVC?.cruiseOrderPaths ?? []
+        let paths = displayed.isEmpty ? tabCoordinator.allWorktrees.map(\.info.path) : displayed
         let current = tabCoordinator.selectedSailor?.worktreePath
         guard let path = CabinPathNavigation.adjacentPath(
             paths: paths, from: current, forward: forward
         ) else { return }
-        tabCoordinator.selectTab(forWorktree: path)
+        tabCoordinator.cycleTab(toWorktree: path)
     }
 
 }
@@ -1834,18 +1865,8 @@ class SeahelmWindow: NSWindow {
             mwc.selectAdjacentWorktree(forward: false); return true
         case .toggleSidebar:
             mwc.toggleChromeCollapsed(); return true
-        case .navigateBack:
-            mwc.navigateBack(); return true
         case .commandPalette:
             mwc.toggleCommandPalette(); return true
-        case .toggleOverview:
-            mwc.navigateBack(); return true   // Cmd+E: mouse-discoverable back alias
-        case .firstMatePane:
-            mwc.selectChromePane(.firstMate); return true
-        case .filesPane:
-            mwc.selectChromePane(.files); return true
-        case .changesPane:
-            mwc.selectChromePane(.changes); return true
         }
     }
 
@@ -1873,17 +1894,6 @@ class SeahelmWindow: NSWindow {
         if event.type == .keyDown {
             // Escape: exit spotlight (existing)
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
-                return
-            }
-            // Cmd+Esc = unified back key (mode 3 → 2 → 1, and 1 ⇄ 2 toggle).
-            // macOS does not route Cmd+Esc through performKeyEquivalent the way it
-            // does Cmd+<letter>, so it lands here. Read the real Command flag —
-            // a plain Esc must keep passing through to the terminal (interrupting
-            // the agent otherwise).
-            if event.keyCode == 53,
-               event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
-               let mwc = windowController as? MainWindowController {
-                mwc.navigateBack()
                 return
             }
             // Tab / Shift+Tab while the chrome header owns region focus: cycle
@@ -2493,6 +2503,29 @@ extension MainWindowController {
 // MARK: - SettingsDelegate
 
 extension MainWindowController: SettingsDelegate {
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? {
+        mintPairingContext()
+    }
+
+    func settings(_ settings: SettingsViewController, didMintShortCode code: String, ttl: TimeInterval) {
+        tabCoordinator.setMqttPairingCode(code, ttl: ttl)
+    }
+
+    /// Live panes, so a rule's target is picked from what exists rather than
+    /// recalled from memory.
+    func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] {
+        tabCoordinator.mqttDataSource?.snapshotPanes() ?? []
+    }
+
+    /// Session names the live panes are attached to, so the monitor can mark a
+    /// kill that would take an agent down with it.
+    func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> {
+        SessionManager.expectedSessionNames(
+            config: config,
+            discoveredWorktreePaths: tabCoordinator.allWorktrees.map { $0.info.path }
+        )
+    }
+
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
         let oldIMessage = self.config.imessage

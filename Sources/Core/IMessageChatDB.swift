@@ -13,6 +13,11 @@ struct IMessageRow {
     let isGroup: Bool
     let text: String
     let date: Date
+    /// True for rows Messages recorded as sent by this Apple ID — either typed
+    /// on another of the user's devices, or written by seahelm itself. The
+    /// single-Apple-ID setup lives entirely in this branch, so the reader can't
+    /// filter it out; telling the two apart is the channel's job.
+    let isFromMe: Bool
 }
 
 /// Read-only incremental reader over the Messages database.
@@ -101,7 +106,14 @@ final class IMessageChatDB {
         return sqlite3_column_int64(stmt, 0)
     }
 
-    /// Incoming messages with `ROWID > afterRowId`, oldest first.
+    /// Every message with `ROWID > afterRowId`, oldest first — both directions.
+    ///
+    /// Outgoing rows are deliberately *not* filtered out here. With one Apple ID
+    /// (the normal case: your Mac and your phone are the same account) a command
+    /// texted from the phone syncs to this database as `is_from_me = 1`, so
+    /// excluding those would make the bridge structurally unable to hear its own
+    /// owner. The cost is that seahelm's own replies come back too;
+    /// `IMessageChannel` sorts that out by prefix.
     ///
     /// `text` is NULL on macOS 13+ for most messages — the body moved into
     /// `attributedBody`, an NSKeyedArchiver blob — so both columns are selected
@@ -110,12 +122,12 @@ final class IMessageChatDB {
         guard let db else { return [] }
         let sql = """
         SELECT m.ROWID, m.guid, m.text, m.attributedBody, m.date,
-               h.id AS handle_id, c.guid AS chat_guid, c.style
+               h.id AS handle_id, c.guid AS chat_guid, c.style, m.is_from_me
         FROM message m
         LEFT JOIN handle h ON m.handle_id = h.ROWID
         LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
         LEFT JOIN chat c ON c.ROWID = cmj.chat_id
-        WHERE m.ROWID > ? AND m.is_from_me = 0
+        WHERE m.ROWID > ?
         ORDER BY m.ROWID ASC
         LIMIT ?
         """
@@ -152,10 +164,11 @@ final class IMessageChatDB {
             let chatGuid = sqlite3_column_text(stmt, 6).map { String(cString: $0) }
             // chat.style: 43 = group, 45 = one-on-one.
             let isGroup = sqlite3_column_int(stmt, 7) == 43
+            let isFromMe = sqlite3_column_int(stmt, 8) == 1
 
             rows.append(IMessageRow(rowId: rowId, guid: guid, sender: sender,
                                     chatGuid: chatGuid, isGroup: isGroup,
-                                    text: body, date: date))
+                                    text: body, date: date, isFromMe: isFromMe))
         }
         return rows
     }

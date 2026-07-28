@@ -961,6 +961,11 @@ class ShipLog {
     /// Nil in tests and headless runs, where only the chat-only verbs answer.
     var chatCommandRoute: ((_ text: String, _ reply: @escaping (String) -> Void) -> Bool)?
 
+    /// Injects a rule-matched prompt into the pane a target names. Set by
+    /// `MainWindowController`, which owns the pane list. Returns false when the
+    /// target resolves to nothing.
+    var ruleTriggerRoute: ((_ prompt: String, _ target: IMessageRuleTarget) -> Bool)?
+
     func handleInbound(_ message: InboundMessage) {
         // Channels deliver from their own poll threads, and `chatCommandRoute`
         // reads the dashboard's selection and moves it. Hop to main before any
@@ -972,6 +977,17 @@ class ShipLog {
 
         let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+
+        // A rule-matched signal is dispatch, not conversation: inject and stay
+        // silent. Replying would text an alerting service back — at best noise,
+        // at worst an SMS to a shortcode that charges for it.
+        if let target = message.metadata?["ruleTarget"] as? IMessageRuleTarget {
+            let ruleName = message.metadata?["ruleName"] as? String ?? "?"
+            if ruleTriggerRoute?(text, target) != true {
+                NSLog("[iMessage] Rule '\(ruleName)' matched but target \(target.kind.rawValue)=\(target.value) resolved to no pane")
+            }
+            return
+        }
 
         // Bare prose steers the worktree you last worked in — the phone equivalent
         // of typing into its pane. It deliberately does NOT mean what it means in

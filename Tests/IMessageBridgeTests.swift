@@ -123,6 +123,133 @@ final class IMessageBridgeTests: XCTestCase {
         XCTAssertNil(IMessageBodyDecoder.decode(text: nil, attributedBody: Data([0x00, 0x01, 0x02])))
     }
 
+    // MARK: - Prefixes
+
+    func testCommandPrefixIsStrippedCaseInsensitively() {
+        let cfg = IMessageConfig()
+        XCTAssertEqual(cfg.commandBody(of: "sea status"), "status")
+        XCTAssertEqual(cfg.commandBody(of: "Sea   status"), "status")
+        XCTAssertEqual(cfg.commandBody(of: "  sea /new fix the test  "), "/new fix the test")
+    }
+
+    /// Without a separator `seahelm` would read as the prefix plus `helm`.
+    func testPrefixRequiresASeparator() {
+        let cfg = IMessageConfig()
+        XCTAssertNil(cfg.commandBody(of: "seahelm is nice"))
+        XCTAssertNil(cfg.commandBody(of: "seagull"))
+    }
+
+    /// A bare prefix carries no order.
+    func testBarePrefixIsNotACommand() {
+        let cfg = IMessageConfig()
+        XCTAssertNil(cfg.commandBody(of: "sea"))
+        XCTAssertNil(cfg.commandBody(of: "sea   "))
+    }
+
+    func testUnprefixedTextIsNotACommand() {
+        XCTAssertNil(IMessageConfig().commandBody(of: "remember to buy milk"))
+    }
+
+    func testReplyStampIsIdempotent() {
+        let cfg = IMessageConfig()
+        XCTAssertEqual(cfg.stampReply("done"), "helm done")
+        XCTAssertEqual(cfg.stampReply("helm done"), "helm done")
+        XCTAssertTrue(cfg.isOwnReply("helm ✅ Finished"))
+        XCTAssertFalse(cfg.isOwnReply("sea status"))
+    }
+
+    func testPrefixesAreConfigurable() {
+        let cfg = IMessageConfig(commandPrefix: "yo", replyPrefix: "bot")
+        XCTAssertEqual(cfg.commandBody(of: "yo status"), "status")
+        XCTAssertNil(cfg.commandBody(of: "sea status"))
+        XCTAssertEqual(cfg.stampReply("done"), "bot done")
+    }
+
+    func testPrefixDecodingAndBlankFallback() throws {
+        let json = """
+        { "command_prefix": "yo", "reply_prefix": "  " }
+        """.data(using: .utf8)!
+        let cfg = try JSONDecoder().decode(IMessageConfig.self, from: json)
+        XCTAssertEqual(cfg.resolvedCommandPrefix, "yo")
+        XCTAssertEqual(cfg.resolvedReplyPrefix, "helm")
+    }
+
+    // MARK: - Chat GUID
+
+    func testCounterpartExtractedFromDirectChatGuid() {
+        XCTAssertEqual(IMessageConfig.counterpart(ofChatGuid: "iMessage;-;+8613800138000"),
+                       "+8613800138000")
+        XCTAssertEqual(IMessageConfig.counterpart(ofChatGuid: "SMS;-;10690000"), "10690000")
+    }
+
+    /// A group thread is not a private command line.
+    func testCounterpartIsNilForGroupChat() {
+        XCTAssertNil(IMessageConfig.counterpart(ofChatGuid: "iMessage;+;chat1234567890"))
+        XCTAssertNil(IMessageConfig.counterpart(ofChatGuid: nil))
+    }
+
+    // MARK: - Command classification
+
+    private func row(_ text: String,
+                     fromMe: Bool = false,
+                     sender: String = "+8613800138000",
+                     chatGuid: String? = "iMessage;-;+8613800138000",
+                     isGroup: Bool = false) -> IMessageRow {
+        IMessageRow(rowId: 1, guid: "guid", sender: fromMe ? "" : sender,
+                    chatGuid: chatGuid, isGroup: isGroup, text: text,
+                    date: Date(), isFromMe: fromMe)
+    }
+
+    private var ownerConfig: IMessageConfig {
+        IMessageConfig(allowedHandles: ["+8613800138000"])
+    }
+
+    /// The single-Apple-ID case: the command syncs over as an outgoing row with
+    /// no sender, and the chat is the only thing left to authorise against.
+    func testOwnCommandIsAcceptedAndAttributedToTheChat() {
+        let cmd = IMessageChannel.command(in: row("sea status", fromMe: true), config: ownerConfig)
+        XCTAssertEqual(cmd, IMessageChannel.Command(body: "status", sender: "+8613800138000"))
+    }
+
+    /// The echo guard — without it every reply becomes the next command.
+    func testOwnReplyIsNotACommand() {
+        XCTAssertNil(IMessageChannel.command(in: row("helm ✅ Finished", fromMe: true),
+                                             config: ownerConfig))
+    }
+
+    /// Texting yourself is also how people keep notes; only prefixed lines count.
+    func testOwnUnprefixedNoteIsIgnored() {
+        XCTAssertNil(IMessageChannel.command(in: row("买牛奶", fromMe: true), config: ownerConfig))
+    }
+
+    func testOwnCommandInGroupChatIsRejected() {
+        let r = row("sea status", fromMe: true, chatGuid: "iMessage;+;chat123", isGroup: true)
+        XCTAssertNil(IMessageChannel.command(in: r, config: ownerConfig))
+    }
+
+    /// A thread with someone not on the allowlist is not a command line, even
+    /// though the message is technically "from me".
+    func testOwnCommandInUnlistedThreadIsRejected() {
+        let r = row("sea status", fromMe: true, chatGuid: "iMessage;-;+8613900139000")
+        XCTAssertNil(IMessageChannel.command(in: r, config: ownerConfig))
+    }
+
+    func testIncomingCommandFromAllowedSenderIsAccepted() {
+        let cmd = IMessageChannel.command(in: row("sea status"), config: ownerConfig)
+        XCTAssertEqual(cmd, IMessageChannel.Command(body: "status", sender: "+8613800138000"))
+    }
+
+    func testIncomingCommandFromUnlistedSenderIsRejected() {
+        let r = row("sea status", sender: "+8613900139000")
+        XCTAssertNil(IMessageChannel.command(in: r, config: ownerConfig))
+    }
+
+    /// Alerts and ordinary texts stay out of the command path — they are the
+    /// rule engine's input, not orders.
+    func testIncomingUnprefixedMessageIsNotACommand() {
+        XCTAssertNil(IMessageChannel.command(in: row("【阿里云】CPU 使用率 95%"), config: ownerConfig))
+    }
+
     // MARK: - Database probe
 
     func testProbeReportsMissingDatabase() {

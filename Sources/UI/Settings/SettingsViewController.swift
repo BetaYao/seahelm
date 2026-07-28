@@ -3,14 +3,61 @@ import CoreImage
 
 protocol SettingsDelegate: AnyObject {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config)
+
+    /// Mint (if needed) and persist the pairing secret on the *live* config, and
+    /// hand back what the QR needs. Settings edits a copy of the config, and a
+    /// secret minted into a copy would be lost or clobbered — so the owner of the
+    /// live config does it, exactly as the standalone pairing window does.
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)?
+
+    /// A short code was minted, so the live MQTT channel can arm its responder.
+    func settings(_ settings: SettingsViewController, didMintShortCode code: String, ttl: TimeInterval)
+
+    /// Live panes, so a rule's target is picked from a project → worktree →
+    /// pane cascade of what actually exists rather than typed from memory.
+    func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot]
+
+    /// Sessions the running app has panes attached to — flagged in the monitor so
+    /// a kill that would take out a live agent is at least an informed one.
+    func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String>
 }
 
-/// Settings window with tabs: General, Agent Detection, WeCom Bot.
+/// Optional halves of the protocol: only the main window can answer them, and
+/// tests conform with just the config callback.
+extension SettingsDelegate {
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? { nil }
+    func settings(_ settings: SettingsViewController, didMintShortCode code: String, ttl: TimeInterval) {}
+    func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
+    func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
+}
+
+/// Settings, as a sidebar of pages built from `SettingsChrome` groups.
+///
+/// Pages are built on first visit and cached: the session monitor shells out to
+/// `zmx list` and the pairing page mints a secret, and neither should happen
+/// just because someone opened Settings to change a path.
 class SettingsViewController: NSViewController {
     weak var settingsDelegate: SettingsDelegate?
 
     private var config: Config
-    private let tabView = NSTabView()
+
+    // Sidebar / page host
+    private let sidebar = SettingsSidebarView(items: [
+        .init(id: "general", title: "General", symbol: "gearshape",
+              keywords: ["projects", "paths", "repo", "scrollback", "cache", "terminal"]),
+        .init(id: "agents", title: "Agents", symbol: "bolt.horizontal",
+              keywords: ["detection", "rules", "status", "claude", "codex", "json"]),
+        .init(id: "imessage", title: "iMessage", symbol: "message",
+              keywords: ["messages", "sms", "phone", "prefix", "sea", "helm",
+                         "full disk access", "permission", "bridge"]),
+        .init(id: "pairing", title: "Pairing", symbol: "qrcode",
+              keywords: ["qr", "remote", "watch", "mqtt", "code"]),
+        .init(id: "sessions", title: "Sessions", symbol: "rectangle.stack",
+              keywords: ["zmx", "cleanup", "kill", "detached", "orphan"]),
+    ])
+    private let contentScroll = NSScrollView()
+    private var pages: [String: NSView] = [:]
+    private lazy var sessionMonitor = SessionMonitorView()
 
     // General tab controls
     private let pathListView = NSTableView()
@@ -18,7 +65,7 @@ class SettingsViewController: NSViewController {
     private var workspacePaths: [String] = []
     private let addButton = NSButton()
     private let removeButton = NSButton()
-    private let cacheSizeField = NSTextField()
+    private let cacheSizeField = SettingsTextField()
 
     // Agent Detection tab controls
     private let ruleTextView = NSTextView()
@@ -45,9 +92,13 @@ class SettingsViewController: NSViewController {
     // iMessage tab controls
     private let imessageHandlesView = NSTextView()
     private let imessageHandlesScrollView = NSScrollView()
-    private let imessageDefaultRecipientField = NSTextField()
-    private let imessageAutoConnectCheckbox = NSButton()
+    private let imessageDefaultRecipientField = SettingsTextField()
+    private let imessageCommandPrefixField = SettingsTextField()
+    private let imessageReplyPrefixField = SettingsTextField()
+    private lazy var imessageAutoConnectToggle = SettingsControls.toggle(
+        on: config.imessage?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
     private let imessagePermissionLabel = NSTextField(labelWithString: "")
+    private lazy var imessageRulesView = IMessageRulesView(rules: config.imessage?.resolvedRules ?? [])
 
     init(config: Config) {
         self.config = config
@@ -61,82 +112,113 @@ class SettingsViewController: NSViewController {
     }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 820, height: 600))
         container.wantsLayer = true
+        container.layer?.backgroundColor = SettingsPalette.windowBg.cgColor
         container.setAccessibilityIdentifier("settings.sheet")
         container.setAccessibilityElement(true)
         container.setAccessibilityRole(.group)
         self.view = container
 
-        tabView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(tabView)
+        sidebar.onSelect = { [weak self] id in self?.showPage(id) }
+        container.addSubview(sidebar)
 
-        // Tab 1: General
-        let generalTab = NSTabViewItem(identifier: "general")
-        generalTab.label = "General"
-        generalTab.view = buildGeneralTab()
-        tabView.addTabViewItem(generalTab)
-
-        // Tab 2: Agent Detection
-        let agentTab = NSTabViewItem(identifier: "agents")
-        agentTab.label = "Agent Detection"
-        agentTab.view = buildSailorTab()
-        tabView.addTabViewItem(agentTab)
-
-        // Tab 3: iMessage. The WeCom and WeChat tabs were retired here — their
-        // builders below are unreachable but kept so the channels can be revived
-        // without rewriting the UI.
-        let imessageTab = NSTabViewItem(identifier: "imessage")
-        imessageTab.label = "iMessage"
-        imessageTab.view = buildIMessageTab()
-        tabView.addTabViewItem(imessageTab)
-
-        // Buttons
-        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveClicked))
-        saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "\r"
-        saveButton.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(saveButton)
-
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
-        cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(cancelButton)
+        contentScroll.hasVerticalScroller = true
+        contentScroll.drawsBackground = false
+        contentScroll.automaticallyAdjustsContentInsets = false
+        // Content clears the transparent titlebar the traffic lights float in.
+        contentScroll.contentInsets = NSEdgeInsets(top: SettingsChrome.titlebarInset,
+                                                   left: 0, bottom: 0, right: 0)
+        contentScroll.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(contentScroll)
 
         NSLayoutConstraint.activate([
-            tabView.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            tabView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            tabView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            tabView.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -12),
+            sidebar.topAnchor.constraint(equalTo: container.topAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: SettingsChrome.sidebarWidth),
 
-            saveButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            saveButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
-
-            cancelButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -8),
-            cancelButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            contentScroll.topAnchor.constraint(equalTo: container.topAnchor),
+            contentScroll.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            contentScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            contentScroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+
+        sidebar.select("general")
     }
 
-    // MARK: - General Tab
+    // MARK: - Page host
 
-    private func buildGeneralTab() -> NSView {
-        let view = NSView()
+    private func showPage(_ id: String) {
+        let page: NSView
+        if let cached = pages[id] {
+            page = cached
+        } else {
+            page = buildPage(id)
+            pages[id] = page
+        }
 
-        // Workspace paths section
-        let pathsLabel = NSTextField(labelWithString: "Project Paths:")
-        pathsLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        pathsLabel.textColor = Theme.textPrimary
-        pathsLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(pathsLabel)
+        contentScroll.documentView = page
+        NSLayoutConstraint.activate([
+            page.leadingAnchor.constraint(equalTo: contentScroll.contentView.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: contentScroll.contentView.trailingAnchor),
+            page.topAnchor.constraint(equalTo: contentScroll.contentView.topAnchor),
+        ])
 
-        // Path list
+        // Revisiting shows what zmx reports *now*, not what it reported when the
+        // page was first built.
+        if id == "sessions" {
+            sessionMonitor.activeSessionNames = settingsDelegate?.settingsActiveSessionNames(self) ?? []
+            sessionMonitor.reload()
+        }
+    }
+
+    private func buildPage(_ id: String) -> NSView {
+        switch id {
+        case "agents":   return makePage(buildAgentGroups())
+        case "imessage": return makePage(buildIMessageGroups())
+        case "pairing":  return makePage(buildPairingGroups())
+        case "sessions": return makePage(buildSessionGroups())
+        default:         return makePage(buildGeneralGroups())
+        }
+    }
+
+    /// Stack groups top-down in a flipped container, so a short page starts at
+    /// the top of the scroll view instead of the bottom.
+    private func makePage(_ groups: [NSView]) -> NSView {
+        let page = FlippedView()
+        page.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: groups)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = SettingsChrome.groupSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        page.addSubview(stack)
+
+        var constraints = [
+            stack.topAnchor.constraint(equalTo: page.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: page.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(equalTo: page.bottomAnchor, constant: -20),
+        ]
+        for group in groups {
+            constraints.append(group.widthAnchor.constraint(equalTo: stack.widthAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
+        return page
+    }
+
+    // MARK: - General
+
+    private func buildGeneralGroups() -> [NSView] {
         pathScrollView.hasVerticalScroller = true
-        pathScrollView.borderType = .bezelBorder
+        pathScrollView.borderType = .noBorder
+        pathScrollView.drawsBackground = false
         pathScrollView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(pathScrollView)
 
         pathListView.headerView = nil
+        pathListView.backgroundColor = .clear
         pathListView.rowHeight = 22
         pathListView.delegate = self
         pathListView.dataSource = self
@@ -146,79 +228,44 @@ class SettingsViewController: NSViewController {
         pathListView.setAccessibilityIdentifier("settings.workspacePaths")
         pathScrollView.documentView = pathListView
 
-        // Add/Remove buttons
         addButton.title = "+"
         addButton.bezelStyle = .rounded
         addButton.target = self
         addButton.action = #selector(addPathClicked)
         addButton.setAccessibilityIdentifier("settings.addPath")
-        addButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(addButton)
 
         removeButton.title = "−"
         removeButton.bezelStyle = .rounded
         removeButton.target = self
         removeButton.action = #selector(removePathClicked)
         removeButton.setAccessibilityIdentifier("settings.removePath")
-        removeButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(removeButton)
-
-        // Cache size
-        let cacheLabel = NSTextField(labelWithString: "Terminal cache rows:")
-        cacheLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        cacheLabel.textColor = Theme.textSecondary
-        cacheLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(cacheLabel)
 
         cacheSizeField.stringValue = "\(config.terminalRowCacheSize)"
-        cacheSizeField.font = AppFont.mono(size: 12, weight: .regular)
-        cacheSizeField.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(cacheSizeField)
+        cacheSizeField.target = self
+        cacheSizeField.action = #selector(controlChanged)
 
-        NSLayoutConstraint.activate([
-            pathsLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            pathsLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            pathScrollView.topAnchor.constraint(equalTo: pathsLabel.bottomAnchor, constant: 6),
-            pathScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            pathScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            pathScrollView.heightAnchor.constraint(equalToConstant: 150),
-
-            addButton.topAnchor.constraint(equalTo: pathScrollView.bottomAnchor, constant: 4),
-            addButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            addButton.widthAnchor.constraint(equalToConstant: 32),
-
-            removeButton.topAnchor.constraint(equalTo: pathScrollView.bottomAnchor, constant: 4),
-            removeButton.leadingAnchor.constraint(equalTo: addButton.trailingAnchor, constant: 4),
-            removeButton.widthAnchor.constraint(equalToConstant: 32),
-
-            cacheLabel.topAnchor.constraint(equalTo: addButton.bottomAnchor, constant: 16),
-            cacheLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            cacheLabel.widthAnchor.constraint(equalToConstant: 140),
-
-            cacheSizeField.centerYAnchor.constraint(equalTo: cacheLabel.centerYAnchor),
-            cacheSizeField.leadingAnchor.constraint(equalTo: cacheLabel.trailingAnchor, constant: 8),
-            cacheSizeField.widthAnchor.constraint(equalToConstant: 80),
-        ])
-
-        return view
+        return [
+            SettingsGroupView(title: "Projects", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Repositories seahelm watches. Each becomes a deck; its worktrees become cabins.",
+                                    content: SettingsControls.surface(pathScrollView), height: 140),
+                SettingsRow.actions([addButton, removeButton]),
+            ]),
+            SettingsGroupView(title: "Terminal", rows: [
+                SettingsRow.make("Scrollback rows cached",
+                                 subtitle: "How much of each pane's viewport the status poll re-reads every cycle.",
+                                 control: cacheSizeField),
+            ]),
+        ]
     }
 
-    // MARK: - Agent Detection Tab
+    // MARK: - Agents
 
-    private func buildSailorTab() -> NSView {
-        let view = NSView()
-
-        let infoLabel = NSTextField(labelWithString: "Agent detection rules (JSON). Edit and save to apply.")
-        infoLabel.font = NSFont.systemFont(ofSize: 11)
-        infoLabel.textColor = Theme.textSecondary
-        infoLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(infoLabel)
-
+    private func buildAgentGroups() -> [NSView] {
         ruleScrollView.hasVerticalScroller = true
-        ruleScrollView.borderType = .bezelBorder
+        ruleScrollView.borderType = .noBorder
+        ruleScrollView.drawsBackground = false
         ruleScrollView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(ruleScrollView)
 
         ruleTextView.isEditable = true
         ruleTextView.isSelectable = true
@@ -227,6 +274,9 @@ class SettingsViewController: NSViewController {
         ruleTextView.isAutomaticQuoteSubstitutionEnabled = false
         ruleTextView.isAutomaticDashSubstitutionEnabled = false
         ruleTextView.isAutomaticTextReplacementEnabled = false
+        ruleTextView.drawsBackground = false
+        ruleTextView.textColor = SettingsPalette.text
+        ruleTextView.delegate = self
         ruleScrollView.documentView = ruleTextView
 
         // Populate with current agent config as pretty JSON
@@ -237,17 +287,13 @@ class SettingsViewController: NSViewController {
             ruleTextView.string = json
         }
 
-        NSLayoutConstraint.activate([
-            infoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            ruleScrollView.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 6),
-            ruleScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            ruleScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            ruleScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
-        ])
-
-        return view
+        return [
+            SettingsGroupView(title: "Detection rules", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Text patterns that classify a pane. This is the last tier of the ladder — process exit and OSC 133 shell phase both win over it.",
+                                    content: SettingsControls.surface(ruleScrollView), height: 320),
+            ]),
+        ]
     }
 
     // MARK: - WeCom Bot Tab
@@ -344,117 +390,138 @@ class SettingsViewController: NSViewController {
         return view
     }
 
-    // MARK: - iMessage Tab
+    // MARK: - iMessage
 
-    private func buildIMessageTab() -> NSView {
-        let view = NSView()
+    private func buildIMessageGroups() -> [NSView] {
         let cfg = config.imessage
-
-        let infoLabel = NSTextField(labelWithString: "Steer the fleet by texting this Mac. Reads Messages locally and replies through Messages.app — no server, no token.")
-        infoLabel.font = NSFont.systemFont(ofSize: 11)
-        infoLabel.textColor = Theme.textSecondary
-        infoLabel.lineBreakMode = .byWordWrapping
-        infoLabel.maximumNumberOfLines = 2
-        infoLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(infoLabel)
-
-        let handlesLabel = NSTextField(labelWithString: "Allowed senders (one per line):")
-        handlesLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        handlesLabel.textColor = Theme.textPrimary
-        handlesLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(handlesLabel)
-
-        // An open inbox drives agents, so spell out that this list is the gate.
-        let handlesHint = NSTextField(labelWithString: "Phone numbers (+8613800138000) or Apple IDs. Messages from anyone else are ignored; an empty list ignores everyone.")
-        handlesHint.font = NSFont.systemFont(ofSize: 11)
-        handlesHint.textColor = Theme.textSecondary
-        handlesHint.lineBreakMode = .byWordWrapping
-        handlesHint.maximumNumberOfLines = 2
-        handlesHint.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(handlesHint)
 
         imessageHandlesView.font = AppFont.mono(size: 12, weight: .regular)
         imessageHandlesView.isRichText = false
         imessageHandlesView.isAutomaticQuoteSubstitutionEnabled = false
         imessageHandlesView.string = (cfg?.allowedHandles ?? []).joined(separator: "\n")
         imessageHandlesView.setAccessibilityIdentifier("settings.imessage.handles")
+        imessageHandlesView.drawsBackground = false
+        imessageHandlesView.textColor = SettingsPalette.text
+        imessageHandlesView.textContainerInset = NSSize(width: 6, height: 6)
+        imessageHandlesView.delegate = self
         imessageHandlesScrollView.hasVerticalScroller = true
-        imessageHandlesScrollView.borderType = .bezelBorder
+        imessageHandlesScrollView.borderType = .noBorder
+        imessageHandlesScrollView.drawsBackground = false
         imessageHandlesScrollView.documentView = imessageHandlesView
         imessageHandlesScrollView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imessageHandlesScrollView)
 
-        let recipientLabel = NSTextField(labelWithString: "Notify:")
-        recipientLabel.font = NSFont.systemFont(ofSize: 12)
-        recipientLabel.textColor = Theme.textPrimary
-        recipientLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(recipientLabel)
-
-        imessageDefaultRecipientField.placeholderString = "Defaults to the first allowed sender"
+        imessageDefaultRecipientField.placeholderString = "First allowed sender"
         imessageDefaultRecipientField.font = AppFont.mono(size: 12, weight: .regular)
         imessageDefaultRecipientField.stringValue = cfg?.defaultRecipient ?? ""
         imessageDefaultRecipientField.setAccessibilityIdentifier("settings.imessage.recipient")
-        imessageDefaultRecipientField.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imessageDefaultRecipientField)
+        imessageDefaultRecipientField.target = self
+        imessageDefaultRecipientField.action = #selector(controlChanged)
 
-        imessageAutoConnectCheckbox.setButtonType(.switch)
-        imessageAutoConnectCheckbox.title = "Connect automatically at launch"
-        imessageAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
-        imessageAutoConnectCheckbox.state = (cfg?.resolvedAutoConnect ?? true) ? .on : .off
-        imessageAutoConnectCheckbox.setAccessibilityIdentifier("settings.imessage.autoConnect")
-        imessageAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imessageAutoConnectCheckbox)
+        imessageCommandPrefixField.placeholderString = "sea"
+        imessageCommandPrefixField.font = AppFont.mono(size: 12, weight: .regular)
+        imessageCommandPrefixField.stringValue = cfg?.commandPrefix ?? ""
+        imessageCommandPrefixField.setAccessibilityIdentifier("settings.imessage.commandPrefix")
+        imessageCommandPrefixField.target = self
+        imessageCommandPrefixField.action = #selector(controlChanged)
+
+        imessageReplyPrefixField.placeholderString = "helm"
+        imessageReplyPrefixField.font = AppFont.mono(size: 12, weight: .regular)
+        imessageReplyPrefixField.stringValue = cfg?.replyPrefix ?? ""
+        imessageReplyPrefixField.setAccessibilityIdentifier("settings.imessage.replyPrefix")
+        imessageReplyPrefixField.target = self
+        imessageReplyPrefixField.action = #selector(controlChanged)
+
+        imessageAutoConnectToggle.setAccessibilityIdentifier("settings.imessage.autoConnect")
 
         imessagePermissionLabel.font = NSFont.systemFont(ofSize: 11)
+        imessagePermissionLabel.preferredMaxLayoutWidth = 460
         imessagePermissionLabel.lineBreakMode = .byWordWrapping
-        imessagePermissionLabel.maximumNumberOfLines = 2
+        imessagePermissionLabel.maximumNumberOfLines = 3
         imessagePermissionLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imessagePermissionLabel)
 
-        let permissionButton = NSButton(title: "Open Full Disk Access", target: self,
-                                        action: #selector(openFullDiskAccessClicked))
-        permissionButton.bezelStyle = .rounded
-        permissionButton.font = NSFont.systemFont(ofSize: 11)
-        permissionButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(permissionButton)
+        let permissionButton = SettingsControls.button("Open Full Disk Access", target: self,
+                                                       action: #selector(openFullDiskAccessClicked))
 
-        NSLayoutConstraint.activate([
-            infoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-
-            handlesLabel.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 14),
-            handlesLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            handlesHint.topAnchor.constraint(equalTo: handlesLabel.bottomAnchor, constant: 2),
-            handlesHint.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            handlesHint.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-
-            imessageHandlesScrollView.topAnchor.constraint(equalTo: handlesHint.bottomAnchor, constant: 6),
-            imessageHandlesScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            imessageHandlesScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            imessageHandlesScrollView.heightAnchor.constraint(equalToConstant: 96),
-
-            recipientLabel.topAnchor.constraint(equalTo: imessageHandlesScrollView.bottomAnchor, constant: 14),
-            recipientLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            imessageDefaultRecipientField.centerYAnchor.constraint(equalTo: recipientLabel.centerYAnchor),
-            imessageDefaultRecipientField.leadingAnchor.constraint(equalTo: recipientLabel.trailingAnchor, constant: 8),
-            imessageDefaultRecipientField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-
-            imessageAutoConnectCheckbox.topAnchor.constraint(equalTo: recipientLabel.bottomAnchor, constant: 14),
-            imessageAutoConnectCheckbox.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            imessagePermissionLabel.topAnchor.constraint(equalTo: imessageAutoConnectCheckbox.bottomAnchor, constant: 12),
-            imessagePermissionLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            imessagePermissionLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-
-            permissionButton.topAnchor.constraint(equalTo: imessagePermissionLabel.bottomAnchor, constant: 6),
-            permissionButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-        ])
+        let permissionStack = NSStackView(views: [imessagePermissionLabel, permissionButton])
+        permissionStack.orientation = .vertical
+        permissionStack.alignment = .leading
+        permissionStack.spacing = 6
 
         refreshIMessagePermissionUI()
-        return view
+
+        imessageRulesView.panes = settingsDelegate?.settingsPaneTargets(self) ?? []
+        imessageRulesView.onChange = { [weak self] _ in self?.applyChanges() }
+
+        return [
+            SettingsGroupView(title: "Bridge", rows: [
+                SettingsRow.stacked("Allowed senders",
+                                    subtitle: "One per line: phone numbers (+8613800138000) or Apple IDs. Gates who may command you, and \u{2014} for commands you text yourself \u{2014} which thread counts. Empty ignores everyone.",
+                                    content: SettingsControls.surface(imessageHandlesScrollView),
+                                    height: 90),
+                SettingsRow.make("Notify",
+                                 subtitle: "Where agent-finished notifications are sent.",
+                                 control: imessageDefaultRecipientField),
+                SettingsRow.make("Connect at launch", control: imessageAutoConnectToggle),
+            ]),
+            SettingsGroupView(title: "Prefixes", rows: [
+                SettingsRow.make("Command", control: imessageCommandPrefixField),
+                SettingsRow.make("Reply",
+                                 subtitle: "You text \"sea status\"; seahelm answers \"helm \u{2026}\". Lines without the command prefix are left alone, so the thread stays usable for notes \u{2014} and the reply prefix is how seahelm knows not to obey itself.",
+                                 control: imessageReplyPrefixField),
+            ]),
+            SettingsGroupView(title: "Triggers", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Messages that are not commands \u{2014} alerts, texts from other people \u{2014} can put an agent to work. The first matching rule wins; nothing is replied to, and no pane or worktree is ever created.",
+                                    content: imessageRulesView),
+            ]),
+            SettingsGroupView(title: "Permissions", rows: [
+                SettingsRow.stacked("Messages database", content: permissionStack),
+            ]),
+        ]
+    }
+
+    // MARK: - Pairing
+
+    private func buildPairingGroups() -> [NSView] {
+        guard let context = settingsDelegate?.settingsPairingContext(self) else {
+            return [
+                SettingsGroupView(title: "Remote clients", rows: [
+                    SettingsRow.stacked("Pairing unavailable",
+                                        subtitle: "MQTT is not configured, so there is no payload to hand a client yet.",
+                                        content: NSView()),
+                ]),
+            ]
+        }
+
+        let pane = PairingPaneView(rootSecret: context.secret,
+                                   brokerURL: context.mqtt.resolvedClientBrokerURL,
+                                   macId: context.mqtt.macId ?? MqttChannel.deriveMacId(),
+                                   qrSide: 180)
+        pane.onShortCode = { [weak self] code, ttl in
+            guard let self else { return }
+            self.settingsDelegate?.settings(self, didMintShortCode: code, ttl: ttl)
+        }
+
+        return [
+            SettingsGroupView(title: "Remote clients", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Scan or paste to pair a phone, watch, or browser.",
+                                    content: pane),
+            ]),
+        ]
+    }
+
+    // MARK: - Sessions
+
+    private func buildSessionGroups() -> [NSView] {
+        sessionMonitor.activeSessionNames = settingsDelegate?.settingsActiveSessionNames(self) ?? []
+        return [
+            SettingsGroupView(title: "zmx sessions", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Sessions outlive the app, so panes you closed can leave daemons behind. Detached rows (0 clients) are the ones nothing is watching. Killing a session ends whatever runs inside it.",
+                                    content: sessionMonitor),
+            ]),
+        ]
     }
 
     /// Reading chat.db is the half that fails silently, so check it up front and
@@ -741,6 +808,7 @@ class SettingsViewController: NSViewController {
                 }
             }
             self.pathListView.reloadData()
+            self.applyChanges()
         }
     }
 
@@ -749,9 +817,15 @@ class SettingsViewController: NSViewController {
         guard row >= 0, row < workspacePaths.count else { return }
         workspacePaths.remove(at: row)
         pathListView.reloadData()
+        applyChanges()
     }
 
-    @objc private func saveClicked() {
+    /// Any control changed. There is no Save button: the window applies as you
+    /// go and persists immediately, so closing it can never lose an edit — and
+    /// there is nothing to cancel back to.
+    @objc private func controlChanged() { applyChanges() }
+
+    private func applyChanges() {
         // Update config from UI
         config.workspacePaths = workspacePaths
         config.terminalRowCacheSize = Int(cacheSizeField.stringValue) ?? 200
@@ -772,6 +846,8 @@ class SettingsViewController: NSViewController {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let recipient = imessageDefaultRecipientField.stringValue.trimmingCharacters(in: .whitespaces)
+        let commandPrefix = imessageCommandPrefixField.stringValue.trimmingCharacters(in: .whitespaces)
+        let replyPrefix = imessageReplyPrefixField.stringValue.trimmingCharacters(in: .whitespaces)
         // Keep the row even with no handles: the user may be turning the bridge
         // off by clearing the list, and dropping to nil would silently re-enable
         // the default-on autoConnect next launch.
@@ -781,20 +857,45 @@ class SettingsViewController: NSViewController {
             config.imessage = IMessageConfig(
                 allowedHandles: handles,
                 defaultRecipient: recipient.isEmpty ? nil : recipient,
-                autoConnect: imessageAutoConnectCheckbox.state == .on,
-                backfillSeconds: config.imessage?.backfillSeconds
+                autoConnect: imessageAutoConnectToggle.state == .on,
+                // Carried through rather than re-read: no field in this tab, so
+                // rebuilding the struct would erase it.
+                backfillSeconds: config.imessage?.backfillSeconds,
+                // Blank means "use the default", which is what the placeholder
+                // already shows — storing "" would resolve to the default anyway
+                // but would read as a deliberate empty prefix in the JSON.
+                commandPrefix: commandPrefix.isEmpty ? nil : commandPrefix,
+                replyPrefix: replyPrefix.isEmpty ? nil : replyPrefix,
+                // `pages` is lazy, so an untouched iMessage page must not wipe
+                // rules the config already carries.
+                rules: pages["imessage"] == nil ? config.imessage?.rules
+                                                : imessageRulesView.rules
             )
         }
 
-        cancelWeChatLogin()
         config.save()
         settingsDelegate?.settingsDidUpdateConfig(self, config: config)
-        dismiss(nil)
     }
 
-    @objc private func cancelClicked() {
+    /// Called by the window controller as it closes, so an edit still being typed
+    /// when the window is dismissed is not lost.
+    func commitPendingEdits() {
+        view.window?.makeFirstResponder(nil)   // force-ends field editing
         cancelWeChatLogin()
-        dismiss(nil)
+        applyChanges()
+    }
+}
+
+// MARK: - NSTextViewDelegate
+
+extension SettingsViewController: NSTextViewDelegate {
+    /// The multi-line editors (handles list, detection JSON) apply when focus
+    /// leaves, not per keystroke: half-typed JSON is not a config, and
+    /// re-encoding on every character would fight the caret.
+    func textDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextView === imessageHandlesView
+                || notification.object as? NSTextView === ruleTextView else { return }
+        applyChanges()
     }
 }
 

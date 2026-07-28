@@ -16,7 +16,9 @@ class TabCoordinator {
     /// MQTT remote-client backend (Watch / web / ESP32), if `config.mqtt` enabled.
     private var mqttChannel: MqttChannel?
     /// Retained so the channel can be torn down and rebuilt on pairing (E2EE).
-    private var mqttDataSource: ControlDataSource?
+    /// The live control data source. Also the pane lookup + write channel the
+    /// iMessage rule engine dispatches through, so it is not MQTT-private.
+    private(set) var mqttDataSource: ControlDataSource?
 
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
@@ -1348,6 +1350,14 @@ class TabCoordinator {
 
     func selectTab(forWorktree path: String) {
         dashboardVC?.selectSailor(byWorktreePath: path)
+        saveSelectedWorktree()
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
+    /// `⌃⇥` / `⌃⇧⇥`. Same as `selectTab(forWorktree:)` plus the fleet-list
+    /// highlight, which `selectSailor` alone leaves on the previous cabin.
+    func cycleTab(toWorktree path: String) {
+        dashboardVC?.cycleToCabin(path: path)
         saveSelectedWorktree()
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
