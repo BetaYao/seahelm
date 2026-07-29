@@ -126,4 +126,54 @@ final class SelectedFilePathResolutionTests: XCTestCase {
     func testEmptySelectionReturnsNil() {
         XCTAssertNil(GhosttyNSView.resolveSelectedPath(raw: "   \n ", bases: [tmpDir]))
     }
+
+    // MARK: - Multiple files on one line
+
+    /// A line naming several real files should offer all of them. Picking only
+    /// the nearest made the menu look broken whenever the click landed a cell
+    /// off — `AGENTS.md / CLAUDE.md` is two files a space apart.
+    func testEveryResolvableTokenIsReturnedInOrder() throws {
+        let agents = try touch("AGENTS.md")
+        let claude = try touch("CLAUDE.md")
+
+        let urls = GhosttyNSView.resolvableFiles(
+            in: ["AGENTS.md", "CLAUDE.md", "没动"], bases: [tmpDir])
+
+        XCTAssertEqual(urls.map(\.path), [agents, claude])
+    }
+
+    /// Tokens arrive nearest-click-first, and that order is what the submenu
+    /// shows — the file you clicked nearest is the first choice.
+    func testOrderFollowsTheTokenOrder() throws {
+        let agents = try touch("AGENTS.md")
+        let claude = try touch("CLAUDE.md")
+
+        let urls = GhosttyNSView.resolvableFiles(in: ["CLAUDE.md", "AGENTS.md"], bases: [tmpDir])
+
+        XCTAssertEqual(urls.map(\.path), [claude, agents])
+    }
+
+    func testDuplicateTokensCollapse() throws {
+        let file = try touch("dup.md")
+        let urls = GhosttyNSView.resolvableFiles(in: ["dup.md", "./dup.md", "dup.md"],
+                                                 bases: [tmpDir])
+        XCTAssertEqual(urls.map(\.path), [file])
+    }
+
+    /// A trailing directory on the same line contributes nothing rather than a
+    /// choice that would open to nothing.
+    func testDirectoriesAreNotOffered() throws {
+        let file = try touch("real.md")
+        _ = try touch("docs/inner.md")   // creates docs/
+
+        let urls = GhosttyNSView.resolvableFiles(in: ["real.md", "docs/"], bases: [tmpDir])
+
+        XCTAssertEqual(urls.map(\.path), [file])
+    }
+
+    func testNoResolvableTokensReturnsEmpty() {
+        XCTAssertTrue(GhosttyNSView.resolvableFiles(in: ["没动", "四份文档。"],
+                                                    bases: [tmpDir]).isEmpty)
+    }
+
 }

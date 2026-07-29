@@ -664,10 +664,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// GitHub PR URL captured from the same row, checked after `pendingPreviewURL`
     /// (a PR link is not a file so path resolution won't return it).
     private var pendingPRPreview: (owner: String, repo: String, number: Int)?
-    /// Worktree files whose trailing components match the clicked token, for a
-    /// bare name that resolves against no working directory. Offered as a
-    /// submenu because the name alone cannot say which file was meant.
-    private var pendingFuzzyMatches: [URL] = []
+    /// Several files the click could have meant, offered as a submenu because
+    /// nothing in the click says which. Two ways to get here: one line naming
+    /// several files that all exist, or a bare name matching several files in
+    /// the worktree index.
+    private var pendingPreviewChoices: [URL] = []
 
     override func rightMouseDown(with event: NSEvent) {
         // Resolve a previewable file for the menu. Prefer the path token under the
@@ -686,19 +687,25 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
         // Only read the grid when the selection didn't already answer.
         let tokens = selectionURL == nil ? tokensAtClick(event) : []
-        let fileURL = selectionURL ?? tokens.lazy.compactMap { Self.resolveSelectedPath(raw: $0, bases: bases) }.first
-        self.pendingPreviewURL = fileURL
+        // Every file the line names, nearest to the click first — not just the
+        // nearest one. A line like `AGENTS.md / CLAUDE.md 没动` names two real
+        // files a cell apart, and silently picking one makes the menu look
+        // broken half the time.
+        let tokenURLs = selectionURL.map { [$0] } ?? Self.resolvableFiles(in: tokens, bases: bases)
+
+        self.pendingPreviewURL = tokenURLs.count == 1 ? tokenURLs.first : nil
+        self.pendingPreviewChoices = tokenURLs.count > 1 ? tokenURLs : []
+
         // Nothing resolved on disk: check for a GitHub PR URL, then for a name
         // that exists somewhere in the worktree — selection first there too.
-        if fileURL == nil {
+        if tokenURLs.isEmpty {
             self.pendingPRPreview = (selection.flatMap { Self.parsePRURL($0) })
                 ?? tokens.lazy.compactMap { Self.parsePRURL($0) }.first
-            self.pendingFuzzyMatches = pendingPRPreview == nil
+            self.pendingPreviewChoices = pendingPRPreview == nil
                 ? worktreeMatches(for: [selection].compactMap { $0 } + tokens)
                 : []
         } else {
             self.pendingPRPreview = nil
-            self.pendingFuzzyMatches = []
         }
         // Focus the right-clicked pane so menu actions target it, then show
         // our pane context menu (split/close/copy/paste).
@@ -742,8 +749,8 @@ class GhosttyNSView: NSView, NSTextInputClient {
             prItem.target = self
             menu.addItem(prItem)
             menu.addItem(.separator())
-        } else if !pendingFuzzyMatches.isEmpty {
-            menu.addItem(makeFuzzyPreviewItem(matches: pendingFuzzyMatches))
+        } else if !pendingPreviewChoices.isEmpty {
+            menu.addItem(makeChoicePreviewItem(matches: pendingPreviewChoices))
             menu.addItem(.separator())
         }
 
@@ -1069,6 +1076,27 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return nil
     }
 
+    /// Every token that resolves to a real file, de-duplicated, in the order
+    /// given — which for a click is nearest-first.
+    ///
+    /// Directories are absent by construction (`existingFile` rejects them), so
+    /// a trailing `docs/mini-app-refactor/` on the same line contributes
+    /// nothing rather than a choice that opens to nothing.
+    static func resolvableFiles(in tokens: [String], bases: [String?]) -> [URL] {
+        var urls: [URL] = []
+        var seen = Set<String>()
+        for token in tokens {
+            guard let url = resolveSelectedPath(raw: token, bases: bases) else { continue }
+            // Standardized before comparing: a line often names the same file
+            // twice in different shapes (`dup.md` and `./dup.md`), and the raw
+            // strings differ even though the file does not.
+            let standardized = url.standardizedFileURL
+            guard seen.insert(standardized.path).inserted else { continue }
+            urls.append(standardized)
+        }
+        return urls
+    }
+
     private static func existingFile(_ path: String, bases: [String?]) -> URL? {
         let expanded = (path as NSString).expandingTildeInPath
         let candidates: [String]
@@ -1091,9 +1119,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return nil
     }
 
-    /// "Preview ▸" over the worktree files a bare name could mean. Titles are
+    /// "Preview ▸" over the files a click could have meant. Titles are
     /// worktree-relative, which is what distinguishes two files sharing a name.
-    private func makeFuzzyPreviewItem(matches: [URL]) -> NSMenuItem {
+    private func makeChoicePreviewItem(matches: [URL]) -> NSMenuItem {
         let root = worktreeRoot
         let submenu = NSMenu()
         for url in matches {
