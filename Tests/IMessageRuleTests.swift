@@ -30,6 +30,15 @@ final class IMessageRuleTests: XCTestCase {
         XCTAssertNotNil(IMessageRuleEngine.matches(pattern: "alert", in: "ALERT: disk full"))
     }
 
+    /// Alert texts reflow. `^(?=.*A)(?=.*B).*` reads as "mentions both", and
+    /// without dotall the lookaheads only see line one — so a working rule would
+    /// start failing silently the day the sender adds a line break.
+    func testPatternSpansNewlines() {
+        let body = "【阿里云】尊敬的 may_cauc@aliyun.com\n您的告警项 high-cpu 连续发生 1 次。"
+        XCTAssertNotNil(IMessageRuleEngine.matches(pattern: "^(?=.*阿里云)(?=.*告警).*",
+                                                   in: body))
+    }
+
     func testNonMatchingPatternReturnsNil() {
         XCTAssertNil(IMessageRuleEngine.matches(pattern: "disk", in: "CPU high"))
     }

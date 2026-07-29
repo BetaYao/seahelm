@@ -347,10 +347,19 @@ class Station {
         }
     }
 
+    /// How long to wait between `sendText` and `sendEnterKey`.
+    ///
+    /// A real Return key event still reads as part of the paste if it lands in
+    /// the same burst — agent TUIs debounce their input to decide where a paste
+    /// ends, so the Return becomes a newline in the composer and the text sits
+    /// there unsent. Every "type this, then run it" path must space the two.
+    static let enterSubmitDelay: TimeInterval = 0.08
+
     /// Send a real Return key press+release (not a `\r` via the text path). Agent
     /// TUIs (Claude Code, codex) treat a `\r` arriving through text/paste as a
     /// literal newline, but a genuine Enter key event as submit. Used to send a
-    /// command after `sendText` so it actually executes.
+    /// command after `sendText` so it actually executes — after
+    /// `enterSubmitDelay`, never in the same burst.
     func sendEnterKey() {
         guard let surface else { return }
         let returnKeycode: UInt32 = 36  // macOS kVK_Return

@@ -638,7 +638,7 @@ class ShipLog {
                 station.sendText(command)
                 // Submit via a real Return key event (not "\r" text), after a beat
                 // so the TUI finishes ingesting the pasted text first.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
                     station.sendEnterKey()
                 }
             }
@@ -665,7 +665,7 @@ class ShipLog {
             let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
             for _ in 0..<abs(offset) { station.sendText(arrow) }
             // Same beat as sendCommand: let the TUI ingest the arrows first.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
                 station.sendEnterKey()
             }
         }

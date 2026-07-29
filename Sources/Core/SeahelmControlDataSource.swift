@@ -64,19 +64,41 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard let station = station(for: paneId) else { return false }
         runOnMain {
             if !text.isEmpty { station.sendText(text) }
-            if enter { station.sendEnterKey() }
+            guard enter else { return }
+            // Not in the same burst — see `Station.enterSubmitDelay`. Sending
+            // both together leaves the text sitting unsent in the composer.
+            if text.isEmpty {
+                station.sendEnterKey()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
+                    station.sendEnterKey()
+                }
+            }
         }
         return true
     }
 
+    /// Replays a key list in order. Enter is spaced off whatever preceded it for
+    /// the same reason `sendText` is: `["up", "enter"]` submits the wrong thing
+    /// if the TUI is still ingesting the arrow when the Return lands.
     func sendKeys(paneId: String, keys: [String]) -> Bool {
         guard let station = station(for: paneId) else { return false }
         runOnMain {
-            for key in keys {
-                if ControlKeys.isEnter(key) {
-                    station.sendEnterKey()
-                } else if let bytes = ControlKeys.bytes(for: key) {
-                    station.sendText(bytes)
+            var delay: TimeInterval = 0
+            for (index, key) in keys.enumerated() {
+                let isEnter = ControlKeys.isEnter(key)
+                if isEnter, index > 0 { delay += Station.enterSubmitDelay }
+                let send = {
+                    if isEnter {
+                        station.sendEnterKey()
+                    } else if let bytes = ControlKeys.bytes(for: key) {
+                        station.sendText(bytes)
+                    }
+                }
+                if delay == 0 {
+                    send()
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: send)
                 }
             }
         }

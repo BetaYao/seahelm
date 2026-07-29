@@ -88,10 +88,17 @@ enum IMessageRuleEngine {
     ///
     /// An uncompilable pattern fails closed. A typo'd regex that matched
     /// everything would fire an agent on every text the user receives.
+    ///
+    /// `.` spans newlines. Alert texts are multi-line as often as not, and the
+    /// natural way to write these patterns — `^(?=.*阿里云)(?=.*告警).*` — reads
+    /// as "mentions both somewhere". Without dotall the lookaheads can only see
+    /// the first line, so the same rule that worked all week fails silently the
+    /// day the sender reflows their template.
     static func matches(pattern: String?, in subject: String) -> [String]? {
         guard let pattern = pattern?.trimmingCharacters(in: .whitespacesAndNewlines),
               !pattern.isEmpty else { return [] }
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators])
         else { return nil }
 
         let range = NSRange(subject.startIndex..., in: subject)
