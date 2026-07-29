@@ -25,10 +25,25 @@ final class ShipLogWebhookPathTests: XCTestCase {
     }
 
     override func tearDown() {
+        // Detach first, then let the queue empty: `notifyObservers` hops to main
+        // and reads `onOutcome` when the block *runs*, so an outcome still in
+        // flight when a test ends would otherwise be delivered to the next
+        // test's closure. That cost this suite a crash — one leftover `.waiting`
+        // plus the next test's own is two fulfills of a one-shot expectation,
+        // which is an uncaught exception that takes the whole runner down.
         ShipLog.shared.onOutcome = nil
+        drainMainQueue()
         ShipLog.shared.unregister(terminalID: tid)
         ShipLog.shared.unregisterAllExternalChannels()
         super.tearDown()
+    }
+
+    /// Block until everything already queued on main has run. FIFO means our own
+    /// marker lands last.
+    private func drainMainQueue() {
+        let drained = expectation(description: "main queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 2)
     }
 
     private func makeEvent(_ type: WebhookEventType) -> WebhookEvent {
@@ -135,8 +150,13 @@ final class ShipLogWebhookPathTests: XCTestCase {
         mockChannel.sentMessages.removeAll()
 
         let exp = expectation(description: "status reaches waiting")
+        // One-shot: a duplicate must fail this test, never crash the runner and
+        // take the other 370-odd tests with it.
+        var reached = false
         ShipLog.shared.onOutcome = { o in
-            if o.newStatus == .waiting { exp.fulfill() }
+            guard o.newStatus == .waiting, !reached else { return }
+            reached = true
+            exp.fulfill()
         }
 
         ShipLog.shared.handleWebhookEvent(makeEvent(.prompt))
