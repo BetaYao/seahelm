@@ -1287,9 +1287,8 @@ class DashboardViewController: NSViewController {
     }
 
     /// Click on a fleet row:
-    /// - mode 2, clicking a *different* row: stay in split and switch worktrees
-    /// - mode 2, clicking the *selected* row: no-op (sidebar stays open)
-    /// - mode 3: drill into the clicked worktree's terminal
+    /// - different row: switch worktrees and hand the keyboard to the active pane
+    /// - already-selected row: reclaim terminal keyboard focus (sidebar stays open)
     /// Test seam for the row-click path (the click itself arrives via a closure).
     func handleWorktreeRowClickForTesting(path: String) { handleWorktreeRowClick(path: path) }
 
@@ -1312,6 +1311,12 @@ class DashboardViewController: NSViewController {
     }
 
     private func handleWorktreeRowClick(path: String) {
+        // A click commits immediately — cancel any queued live-preview so it
+        // can't race the embed and leave focus on the previous worktree.
+        previewDebounceWork?.cancel()
+        previewDebounceWork = nil
+        pendingPreviewPath = nil
+
         guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
             // Not a fleet row (orders card path, stale list) — drill in as before.
             enterWorktree(byWorktreePath: path)
@@ -1322,17 +1327,16 @@ class DashboardViewController: NSViewController {
         // rather than from wherever the selection was last.
         _ = overviewFocus.jumpToWorktree(i)
 
-        switch viewMode {
-        case .split:
-            if row.id == overviewSelectedId {
-                return
-            }
-            applyOverviewEffect(.previewWorktree(i))
-        case .terminal:
-            // Overview is hidden here, but a docked side panel can still surface
-            // rows — keep the direct drill-in.
-            enterWorktree(byWorktreePath: path)
+        // Mouse click must focus the terminal. The old split-mode path used
+        // preview-without-focus so ↑↓ keyboard live-nav could keep the dashboard
+        // as first responder — that ring is gone, and leaving `tree.focusedId`
+        // lit while Ghostty is not first responder made panes look focused but
+        // reject typing until a second click.
+        if row.id == overviewSelectedId, activeSplitWorktreePath == path {
+            focusActiveTerminalLeaf()
+            return
         }
+        enterWorktree(byWorktreePath: path)
     }
 
     /// Coalesce live-follow previews while the user walks the fleet list.

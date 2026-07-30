@@ -75,6 +75,27 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertEqual(vc.selectedSailorId, "agent-b")
     }
 
+    /// Regression: split-mode row clicks used to live-preview with
+    /// `focusTerminal: false`, so the pane looked focused (dim wash) but
+    /// rejected typing until a second click on the pane. Clicking a row must
+    /// go through `enterWorktree` (which focuses) rather than the preview path.
+    func testRowClickInSplitModeSelectsViaEnterWorktree() {
+        let vc = DashboardViewController()
+        vc.dashboardDelegate = DashboardDelegateSpy()
+        vc.loadViewIfNeeded()
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        XCTAssertEqual(vc.viewMode, .split)
+
+        vc.handleWorktreeRowClickForTesting(path: "/repo/b")
+
+        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-b")
+    }
+
     // MARK: - ⌃⇥ cabin cycle
 
     /// The bug this fixes: `⌃⇥` swapped the terminal content but left the fleet
