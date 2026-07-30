@@ -4,6 +4,12 @@ A native macOS workspace for coding agents, git worktrees, and parallel developm
 
 [中文文档](README.zh-CN.md)
 
+## Why Seahelm
+
+- **Minimal** — No bloated code editor or diff review. Everything is delegated to agents; the UI stays out of the way.
+- **Fast** — Native macOS, built on the Ghostty terminal and AppKit. Low latency, responsive rendering.
+- **Compatible** — Works with up to 12 coding agents out of the box. Not locked into any single platform.
+
 ## Install
 
 ```bash

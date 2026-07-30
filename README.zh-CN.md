@@ -4,6 +4,12 @@
 
 [English](README.md)
 
+## 为什么选择 Seahelm
+
+- **简洁** — 没有复杂的代码编辑和 diff review,一切都交给 agent,界面不挡路。
+- **高性能** — macOS 原生,基于 Ghostty 终端和 AppKit 渲染,低延迟、响应快。
+- **兼容性** — 兼容多达 12 种 coding agent,不绑死在单一平台。
+
 ## 安装
 
 ```bash
