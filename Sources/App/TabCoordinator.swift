@@ -714,6 +714,12 @@ class TabCoordinator {
                     controlDataSource.focusHandler = { [weak self] stationId in
                         self?.terminalCoordinator.focusPane(targetStationId: stationId) ?? false
                     }
+                    controlDataSource.sleepHandler = { [weak self] stationId in
+                        self?.terminalCoordinator.sleepPane(targetStationId: stationId) ?? []
+                    }
+                    controlDataSource.wakeHandler = { [weak self] stationId in
+                        self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
+                    }
                     controlDataSource.exportLayoutHandler = { [weak self] in
                         self?.terminalCoordinator.exportLayout()
                     }
