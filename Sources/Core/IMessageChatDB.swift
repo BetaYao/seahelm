@@ -209,20 +209,40 @@ enum IMessageBodyDecoder {
     }
 
     /// Last resort for archives whose class graph the runtime refuses: the body
-    /// sits in the archive as a length-prefixed UTF-8 run right after the
-    /// `NSString` marker. Crude, but it beats dropping the message — and a
-    /// dropped command looks to the user like the bridge is broken.
+    /// sits in the archive as a length-prefixed UTF-8 run after an `NSString`
+    /// marker. Messages.app SMS (Aliyun 106* shortcodes, etc.) wrap that in
+    /// typedstream class-ref bytes — `NSString \x01\x95\x84\x01 + \x81 <u16le>
+    /// <utf8>` — so the length is not the first byte after the marker. Find the
+    /// `+` (0x2b) string tag within a short window, then read the length the
+    /// same way NSArchiver does. Crude, but it beats dropping the message — and
+    /// a dropped alert looks to the user like the rule never matched.
     private static func scavengeString(_ data: Data) -> String? {
         guard let marker = "NSString".data(using: .utf8),
               let range = data.range(of: marker) else { return nil }
-        var idx = range.upperBound
-        // Skip the class-name terminator and the archiver's type byte.
-        while idx < data.count, data[idx] < 0x20 { idx += 1 }
-        guard idx < data.count else { return nil }
 
+        // Prefer the typedstream '+' string tag that Messages actually writes.
+        let searchEnd = min(range.upperBound + 16, data.count)
+        if let plus = data[range.upperBound..<searchEnd].firstIndex(of: 0x2b),
+           let body = lengthPrefixedUTF8(in: data, startingAt: data.index(after: plus)) {
+            return body
+        }
+
+        // Older / simpler archives: length is the first non-control byte.
+        var idx = range.upperBound
+        while idx < data.count, data[idx] < 0x20 { idx += 1 }
+        return lengthPrefixedUTF8(in: data, startingAt: idx)
+    }
+
+    /// Read an NSArchiver length prefix at `start` and the UTF-8 payload that
+    /// follows. `0x81` introduces a 16-bit little-endian length (bodies longer
+    /// than 127 bytes — every real Aliyun alert SMS); a bare byte < 0x80 is the
+    /// length itself. Anything else fails closed.
+    private static func lengthPrefixedUTF8(in data: Data, startingAt start: Data.Index) -> String? {
+        guard start < data.count else { return nil }
+        var idx = start
         var length = Int(data[idx])
         idx += 1
-        if length == 0x81 {  // 1-byte marker → 16-bit length follows, little-endian
+        if length == 0x81 {
             guard idx + 1 < data.count else { return nil }
             length = Int(data[idx]) | Int(data[idx + 1]) << 8
             idx += 2

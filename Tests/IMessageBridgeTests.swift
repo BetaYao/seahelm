@@ -123,6 +123,29 @@ final class IMessageBridgeTests: XCTestCase {
         XCTAssertNil(IMessageBodyDecoder.decode(text: nil, attributedBody: Data([0x00, 0x01, 0x02])))
     }
 
+    /// Real Messages.app SMS archives (Aliyun / 106* shortcodes) are *not* a
+    /// clean `NSKeyedArchiver` root of `NSAttributedString` — `forReadingFrom:`
+    /// fails — and their typedstream length sits behind class-ref bytes
+    /// (`…NSString \x01\x95\x84\x01 + \x81 <u16le> <utf8>`). The old scavenger
+    /// treated the first byte ≥ 0x20 as length, hit `0x95`, and dropped the
+    /// message. That is why an Alibaba Cloud alert SMS that only lived in
+    /// `attributedBody` never fired a rule even though the body regex matched.
+    func testMessagesTypedstreamAttributedBodyIsScavenged() {
+        let body = "【阿里云】尊敬的may_cauc@aliyun.com - 1317424610922997 , 华南1(深圳)的云数据库RDS版  发生告警  ，cpu_usage平均值>=90  当前值: 90.94  告警规则high-cpu 请登录云监控查看"
+        let utf8 = Data(body.utf8)
+        XCTAssertGreaterThan(utf8.count, 0x80, "fixture must need the 0x81 extended length")
+
+        var blob = Data("xNSString".utf8)                         // marker with junk ahead
+        blob.append(contentsOf: [0x01, 0x95, 0x84, 0x01, 0x2b])   // class refs + '+'
+        blob.append(0x81)                                          // extended length
+        blob.append(UInt8(utf8.count & 0xff))
+        blob.append(UInt8((utf8.count >> 8) & 0xff))
+        blob.append(utf8)
+        blob.append(contentsOf: [0x00, 0x02])                      // trailing archive junk
+
+        XCTAssertEqual(IMessageBodyDecoder.decode(text: nil, attributedBody: blob), body)
+    }
+
     // MARK: - Prefixes
 
     func testCommandPrefixIsStrippedCaseInsensitively() {
