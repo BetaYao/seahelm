@@ -501,14 +501,30 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private func activateRow(_ row: Int) {
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileTreeNode else { return }
         if node.isDirectory {
-            if outlineView.isItemExpanded(node) {
-                outlineView.collapseItem(node)
-            } else {
-                outlineView.expandItem(node)
+            animateExpandCollapse {
+                if outlineView.isItemExpanded(node) {
+                    outlineView.collapseItem(node)
+                } else {
+                    outlineView.expandItem(node)
+                }
             }
         } else {
             onSelectFile?(node.url.path)
         }
+    }
+
+    /// Wrap a single user-initiated expand/collapse in an animation context so
+    /// child rows slide in/out instead of snapping. Honors "Reduce Motion".
+    private func animateExpandCollapse(_ operation: () -> Void) {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            operation()
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            operation()
+        }, completionHandler: nil)
     }
 
     /// Handle keys not covered by NSOutlineView's built-in arrow navigation.
