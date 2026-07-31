@@ -634,21 +634,28 @@ class TabCoordinator {
                         if event.event == .suggest {
                             sessionSuggestedAt[turnKey] = Date()
                         }
-                        // Cursor has no last_assistant_message on stop; harvest the
-                        // inline sentinel from afterAgentResponse's `text` instead.
+                        // Cursor has no last_assistant_message on stop. Always stash
+                        // afterAgentResponse `text` as the card summary — even when the
+                        // agent forgot the sentinel and already emitted options via a
+                        // Shell-invoked seahelm-suggest (that path leaves message="Shell").
+                        // Harvest options from the sentinel only when present.
                         if event.event == .assistantResponse,
-                           let text = event.data?["text"] as? String,
-                           let options = StopHookResponder.parseSuggestions(from: text) {
-                            ShipLog.shared.noteAssistantMessage(
-                                cwd: event.cwd, paneId: event.paneId,
-                                message: StopHookResponder.stripSentinel(from: text))
-                            let suggestEvent = WebhookEvent(
-                                source: "seahelm-suggest", sessionId: event.sessionId,
-                                event: .suggest, cwd: event.cwd, timestamp: nil,
-                                data: ["options": options], paneId: event.paneId)
-                            self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
-                            ShipLog.shared.handleWebhookEvent(suggestEvent)
-                            sessionSuggestedAt[turnKey] = Date()
+                           let text = event.data?["text"] as? String {
+                            let prose = StopHookResponder.stripSentinel(from: text)
+                            if let tid = ShipLog.shared.noteAssistantMessage(
+                                cwd: event.cwd, paneId: event.paneId, message: prose) {
+                                self.pendingOrders.refreshSuggestMessage(
+                                    terminalID: tid, message: prose)
+                            }
+                            if let options = StopHookResponder.parseSuggestions(from: text) {
+                                let suggestEvent = WebhookEvent(
+                                    source: "seahelm-suggest", sessionId: event.sessionId,
+                                    event: .suggest, cwd: event.cwd, timestamp: nil,
+                                    data: ["options": options], paneId: event.paneId)
+                                self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
+                                ShipLog.shared.handleWebhookEvent(suggestEvent)
+                                sessionSuggestedAt[turnKey] = Date()
+                            }
                         }
                         // Suppress the suggestion block when the user sent a message after our
                         // last block — Claude is responding to explicit user direction and doesn't

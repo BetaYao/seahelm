@@ -8,11 +8,14 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
     private func outcome(kind: NormalizedEventKind, source: EventSource = .hook("claude-code"),
                          changed: Bool = false,
                          completion: Bool = false, newStatus: SailorStatus = .running,
-                         hold: Double = 0) -> IngestOutcome {
-        let info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
-                              project: "p", branch: "b", status: newStatus, lastMessage: "",
+                         hold: Double = 0,
+                         lastMessage: String = "",
+                         lastAssistantMessage: String = "") -> IngestOutcome {
+        var info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
+                              project: "p", branch: "b", status: newStatus, lastMessage: lastMessage,
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())
+        info.lastAssistantMessage = lastAssistantMessage
         return IngestOutcome(info: info, statusChanged: changed, oldStatus: .running,
                              newStatus: newStatus, holdSeconds: hold, isCompletionSignal: completion,
                              event: NormalizedEvent(terminalID: "t1", source: source, kind: kind))
@@ -23,6 +26,36 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
         XCTAssertEqual(acts.map(\.kind), [.suggestNextOrder])
         XCTAssertEqual(acts.first?.zone, .red)
         XCTAssertEqual(acts.first?.options, ["a", "b"])
+    }
+
+    /// Cursor often runs `seahelm-suggest` as a Shell tool. The viewport scanner then
+    /// leaves `lastMessage == "Shell"` — that must not become the card summary when
+    /// the real assistant prose never landed in `lastAssistantMessage`.
+    func testSuggestIgnoresShellToolLabelAsSummary() {
+        let acts = FirstMate.evaluate(
+            outcome(kind: .suggest(options: ["打开架构页", "继续改"]),
+                    lastMessage: "Shell"),
+            config: .default)
+        XCTAssertEqual(acts.first?.options, ["打开架构页", "继续改"])
+        XCTAssertEqual(acts.first?.message, "",
+                       "tool chrome is not the agent's answer")
+    }
+
+    func testSuggestPrefersAssistantProseOverShellLabel() {
+        let prose = "当前分支已与远端同步，无新提交。"
+        let acts = FirstMate.evaluate(
+            outcome(kind: .suggest(options: ["打开架构页"]),
+                    lastMessage: "Shell",
+                    lastAssistantMessage: prose),
+            config: .default)
+        XCTAssertEqual(acts.first?.message, prose)
+    }
+
+    func testJunkSuggestionSummaryDetectsToolChrome() {
+        XCTAssertTrue(FirstMate.isJunkSuggestionSummary("Shell"))
+        XCTAssertTrue(FirstMate.isJunkSuggestionSummary("Bash"))
+        XCTAssertTrue(FirstMate.isJunkSuggestionSummary("seahelm-suggest 'a' 'b'"))
+        XCTAssertFalse(FirstMate.isJunkSuggestionSummary("当前分支已与远端同步"))
     }
 
     func testEmptySuggestEmitsNothing() {

@@ -46,4 +46,33 @@ final class PendingOrdersQueueTests: XCTestCase {
         q.resolve(id: id)
         XCTAssertEqual(count, 2)
     }
+
+    /// Cursor's afterAgentResponse often arrives *after* a Shell-invoked
+    /// `seahelm-suggest` already queued a card whose message is tool chrome.
+    /// Late prose must upgrade that summary without touching options.
+    func testRefreshSuggestMessageUpgradesJunkSummary() {
+        let q = PendingOrdersQueue()
+        q.upsert(FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt",
+            branch: "docs/5577", project: "saas-mono", terminalID: "t1",
+            message: "Shell", options: ["打开架构页", "用 spec-pr 建 PR"]))
+        q.refreshSuggestMessage(
+            terminalID: "t1",
+            message: "当前分支 docs/5577-marketing-prototype 已与远端同步，无新提交。")
+        XCTAssertEqual(q.all().count, 1)
+        XCTAssertEqual(q.all().first?.action.options, ["打开架构页", "用 spec-pr 建 PR"])
+        XCTAssertEqual(
+            q.all().first?.action.message,
+            "当前分支 docs/5577-marketing-prototype 已与远端同步，无新提交。")
+    }
+
+    func testRefreshSuggestMessageDoesNotClobberRealProse() {
+        let q = PendingOrdersQueue()
+        q.upsert(FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt",
+            branch: "b", project: "p", terminalID: "t1",
+            message: "Already have a good summary.", options: ["a"]))
+        q.refreshSuggestMessage(terminalID: "t1", message: "Shorter late text")
+        XCTAssertEqual(q.all().first?.action.message, "Already have a good summary.")
+    }
 }

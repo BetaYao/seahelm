@@ -569,19 +569,23 @@ class ShipLog {
     /// WITHOUT changing status — used to give suggestion cards a summary line. Resolves
     /// pane → terminal the same way `handleWebhookEvent` does: the exact pane wins,
     /// cwd's first pane is the fallback.
-    func noteAssistantMessage(cwd: String, paneId: String? = nil, message: String) {
+    /// Returns the terminal id that was updated, so callers can refresh a pending
+    /// suggest card that was queued before this prose arrived.
+    @discardableResult
+    func noteAssistantMessage(cwd: String, paneId: String? = nil, message: String) -> String? {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
         let paneTid = paneId.flatMap { StationRegistry.shared.station(forSessionName: $0)?.id }
         lock.lock()
         let tid = (paneTid.flatMap { agents[$0] != nil ? $0 : nil })
             ?? worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
-        guard let tid, var info = agents[tid] else { lock.unlock(); return }
+        guard let tid, var info = agents[tid] else { lock.unlock(); return nil }
         info.lastMessage = trimmed
         info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
         agents[tid] = info
         lock.unlock()
         DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }
+        return tid
     }
 
     // MARK: - Background-task tracking (for suggestion gating)

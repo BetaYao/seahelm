@@ -99,9 +99,11 @@ enum FirstMate {
             // Short summary of the agent's final message above the option buttons so the user
             // has context to choose. Prefer lastAssistantMessage (Stop hook's
             // last_assistant_message, never clobbered by screen scans) over lastMessage,
-            // which a poll may have overwritten with the `seahelm-suggest …` command line.
-            let prose = i.lastAssistantMessage.isEmpty ? i.lastMessage : i.lastAssistantMessage
-            let summary = String(prose.prefix(200))
+            // which a poll may have overwritten with the `seahelm-suggest …` command line —
+            // or, for Cursor, the Shell tool chrome when the agent invoked seahelm-suggest
+            // via Bash instead of the sentinel line.
+            let summary = suggestionSummary(
+                lastAssistant: i.lastAssistantMessage, lastMessage: i.lastMessage)
             return [FirstMateAction(kind: .suggestNextOrder, zone: .red,
                                     worktreePath: i.worktreePath, branch: i.branch,
                                     project: i.project, terminalID: i.id,
@@ -115,6 +117,34 @@ enum FirstMate {
             oldStatus: outcome.oldStatus, newStatus: outcome.newStatus,
             holdSeconds: outcome.holdSeconds, isCompletionSignal: outcome.isCompletionSignal)
         return evaluate(t, config: config)
+    }
+
+    /// Card summary above suggestion chips. Real assistant prose wins; viewport
+    /// tool chrome (`Shell`, `Bash`, a `seahelm-suggest …` line) is treated as empty
+    /// so the island doesn't pretend that was the agent's answer.
+    static func suggestionSummary(lastAssistant: String, lastMessage: String) -> String {
+        let prose = lastAssistant.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prose.isEmpty { return String(prose.prefix(200)) }
+        let fallback = lastMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isJunkSuggestionSummary(fallback) { return "" }
+        return String(fallback.prefix(200))
+    }
+
+    /// True when `s` is tool/UI chrome rather than assistant prose.
+    static func isJunkSuggestionSummary(_ s: String) -> Bool {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if trimmed.localizedCaseInsensitiveContains("seahelm-suggest") { return true }
+        let lower = trimmed.lowercased()
+        if ["shell", "bash", "zsh", "tool", "command"].contains(lower) { return true }
+        // Non-AI sailor display names ("Shell", "Docker", …) show up when the
+        // scanner latches onto a tool header in Cursor's TUI.
+        if SailorType.allCases.contains(where: {
+            !$0.isAIAgent && $0.displayName.caseInsensitiveCompare(trimmed) == .orderedSame
+        }) {
+            return true
+        }
+        return false
     }
 
     static func evaluate(_ t: StatusTransition, config: FirstMateConfig) -> [FirstMateAction] {

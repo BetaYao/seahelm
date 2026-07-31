@@ -59,6 +59,32 @@ final class PendingOrdersQueue {
         notify()
     }
 
+    /// Upgrade a suggest card's summary after late assistant prose arrives
+    /// (Cursor `afterAgentResponse` often lands after a Shell-invoked
+    /// `seahelm-suggest` already queued the options with tool-chrome as message).
+    /// Leaves options untouched; never clobbers a non-junk summary already shown.
+    func refreshSuggestMessage(terminalID: String, message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let summary = String(trimmed.prefix(200))
+        var changed = false
+        for i in orders.indices {
+            let action = orders[i].action
+            guard action.kind == .suggestNextOrder,
+                  action.terminalID == terminalID,
+                  FirstMate.isJunkSuggestionSummary(action.message) else { continue }
+            let updated = FirstMateAction(
+                kind: action.kind, zone: action.zone,
+                worktreePath: action.worktreePath, branch: action.branch,
+                project: action.project, terminalID: action.terminalID,
+                message: summary, payload: action.payload,
+                options: action.options, followups: action.followups)
+            orders[i] = PendingOrder(id: orders[i].id, action: updated)
+            changed = true
+        }
+        if changed { notify() }
+    }
+
     func all() -> [PendingOrder] { orders }
 
     func resolve(id: String) {
