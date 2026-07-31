@@ -16,6 +16,18 @@ struct GitChangedFile {
 struct GitDiffSnapshot {
     let changedFiles: [GitChangedFile]
     let files: [DiffFile]
+    /// Uncapped count of changed files before the recent-activity limit.
+    let totalChangedFileCount: Int
+
+    init(
+        changedFiles: [GitChangedFile],
+        files: [DiffFile],
+        totalChangedFileCount: Int? = nil
+    ) {
+        self.changedFiles = changedFiles
+        self.files = files
+        self.totalChangedFileCount = totalChangedFileCount ?? changedFiles.count
+    }
 }
 
 struct DiffFile {
@@ -70,7 +82,38 @@ struct DiffLine {
     }
 }
 
+/// Files changed on this worktree relative to a base branch (typically main),
+/// including commits and the dirty working tree.
+struct GitBranchChanges {
+    /// Resolved compare base (`origin/main`, `main`, …). `nil` when falling
+    /// back to working-tree `git status` only.
+    let baseRef: String?
+    /// Newest-first slice, capped at `GitDiff.maxListedChangedFiles`.
+    let files: [GitChangedFile]
+    /// Full change count before capping.
+    let totalCount: Int
+
+    var isTruncated: Bool { files.count < totalCount }
+
+    /// Short label for UI (“main” rather than “origin/main”).
+    var baseDisplayName: String? {
+        guard let baseRef else { return nil }
+        if baseRef.hasPrefix("origin/") {
+            return String(baseRef.dropFirst("origin/".count))
+        }
+        return baseRef
+    }
+}
+
 enum GitDiff {
+    /// Preferred compare targets, first hit wins. Remote-tracking refs first so
+    /// a stale local `main` does not hide origin's tip; no network fetch here.
+    static let preferredBaseRefs = ["origin/main", "origin/master", "main", "master"]
+
+    /// Cap for Changes list + DiffReview. Beyond this we keep the most recently
+    /// modified files (by mtime) so huge long-lived branches stay responsive.
+    static let maxListedChangedFiles = 100
+
     /// Get diff for a worktree (staged + unstaged)
     static func diff(worktreePath: String) -> [DiffFile] {
         let stagedOutput = runGit(args: ["diff", "--cached", "--no-color"], in: worktreePath) ?? ""
@@ -81,26 +124,76 @@ enum GitDiff {
         return files
     }
 
-    static func snapshot(worktreePath: String, maxSyntheticFileBytes: Int = 128 * 1024) -> GitDiffSnapshot {
-        let changed = changedFileEntries(worktreePath: worktreePath)
-        let stagedOutput = runGit(args: ["diff", "--cached", "--no-color"], in: worktreePath) ?? ""
-        let unstagedOutput = runGit(args: ["diff", "--no-color"], in: worktreePath) ?? ""
+    /// Snapshot of this worktree vs its base branch (merge-base with main/master).
+    /// Includes committed-on-branch changes, staged/unstaged edits, and untracked
+    /// files — so Changes stays populated after commit/push until merged to base.
+    /// Diff content is limited to the same recent-file cap as the Changes list.
+    static func snapshot(
+        worktreePath: String,
+        maxSyntheticFileBytes: Int = 128 * 1024,
+        limit: Int = maxListedChangedFiles
+    ) -> GitDiffSnapshot {
+        let branch = branchChangedFiles(worktreePath: worktreePath, limit: limit)
+        let changed = branch.files
+        let paths = changed.map(\.path)
 
-        var files = parseDiff(stagedOutput, stage: .staged)
-        files.append(contentsOf: parseDiff(unstagedOutput, stage: .unstaged))
-
-        let untrackedDiffs = changed
-            .filter { $0.stage == .untracked }
-            .compactMap {
-                syntheticUntrackedDiff(
-                    for: $0.path,
-                    worktreePath: worktreePath,
-                    maxBytes: maxSyntheticFileBytes
-                )
+        let files: [DiffFile]
+        if let mergeBase = mergeBase(with: branch.baseRef, worktreePath: worktreePath) {
+            let output: String
+            if paths.isEmpty {
+                output = ""
+            } else {
+                output = runGit(
+                    args: ["diff", "--no-color", "-M", mergeBase, "--"] + paths,
+                    in: worktreePath
+                ) ?? ""
             }
-        files.append(contentsOf: untrackedDiffs)
+            var parsed = parseDiff(output, stage: .unstaged)
+            let knownPaths = Set(parsed.map(\.path))
+            let untrackedDiffs = changed
+                .filter { $0.stage == .untracked && !knownPaths.contains($0.path) }
+                .compactMap {
+                    syntheticUntrackedDiff(
+                        for: $0.path,
+                        worktreePath: worktreePath,
+                        maxBytes: maxSyntheticFileBytes
+                    )
+                }
+            parsed.append(contentsOf: untrackedDiffs)
+            files = parsed
+        } else if paths.isEmpty {
+            files = []
+        } else {
+            // No main/master ref — fall back to working-tree dirty state, scoped
+            // to the capped path set so we never materialize a huge patch.
+            let stagedOutput = runGit(
+                args: ["diff", "--cached", "--no-color", "--"] + paths,
+                in: worktreePath
+            ) ?? ""
+            let unstagedOutput = runGit(
+                args: ["diff", "--no-color", "--"] + paths,
+                in: worktreePath
+            ) ?? ""
+            var parsed = parseDiff(stagedOutput, stage: .staged)
+            parsed.append(contentsOf: parseDiff(unstagedOutput, stage: .unstaged))
+            let untrackedDiffs = changed
+                .filter { $0.stage == .untracked }
+                .compactMap {
+                    syntheticUntrackedDiff(
+                        for: $0.path,
+                        worktreePath: worktreePath,
+                        maxBytes: maxSyntheticFileBytes
+                    )
+                }
+            parsed.append(contentsOf: untrackedDiffs)
+            files = parsed
+        }
 
-        return GitDiffSnapshot(changedFiles: changed, files: files)
+        return GitDiffSnapshot(
+            changedFiles: changed,
+            files: files,
+            totalChangedFileCount: branch.totalCount
+        )
     }
 
     /// Get short stat summary
@@ -120,8 +213,89 @@ enum GitDiff {
     }
 
     static func changedFileEntries(worktreePath: String) -> [GitChangedFile] {
-        let output = runGit(args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"], in: worktreePath) ?? ""
-        return parsePorcelainStatus(output)
+        branchChangedFiles(worktreePath: worktreePath).files
+    }
+
+    /// Branch-relative change list: `git diff <merge-base(base)>` plus untracked.
+    /// Falls back to porcelain `git status` when no base ref exists.
+    /// When over `limit`, keeps the most recently modified files.
+    static func branchChangedFiles(
+        worktreePath: String,
+        limit: Int = maxListedChangedFiles
+    ) -> GitBranchChanges {
+        let uncapped: [GitChangedFile]
+        let baseRef: String?
+        if let resolved = resolveBaseRef(worktreePath: worktreePath),
+           let mergeBase = mergeBase(with: resolved, worktreePath: worktreePath) {
+            baseRef = resolved
+            let nameStatus = runGit(
+                args: ["diff", "--name-status", "-z", "-M", mergeBase],
+                in: worktreePath
+            ) ?? ""
+            var entries = parseNameStatus(nameStatus, stage: .unstaged)
+
+            let porcelain = runGit(
+                args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                in: worktreePath
+            ) ?? ""
+            let known = Set(entries.map(\.path))
+            let untracked = parsePorcelainStatus(porcelain)
+                .filter { $0.stage == .untracked && !known.contains($0.path) }
+            entries.append(contentsOf: untracked)
+            uncapped = entries
+        } else {
+            baseRef = nil
+            let output = runGit(
+                args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                in: worktreePath
+            ) ?? ""
+            uncapped = parsePorcelainStatus(output)
+        }
+
+        let capped = capToRecentFiles(uncapped, worktreePath: worktreePath, limit: limit)
+        return GitBranchChanges(baseRef: baseRef, files: capped, totalCount: uncapped.count)
+    }
+
+    /// Keep up to `limit` entries, preferring newest mtime. Deleted/missing paths
+    /// sort last so live edits surface first.
+    static func capToRecentFiles(
+        _ entries: [GitChangedFile],
+        worktreePath: String,
+        limit: Int = maxListedChangedFiles
+    ) -> [GitChangedFile] {
+        guard limit >= 0, entries.count > limit else { return entries }
+        guard limit > 0 else { return [] }
+
+        let root = URL(fileURLWithPath: worktreePath)
+        let ranked: [(GitChangedFile, Date)] = entries.map { entry in
+            let url = root.appendingPathComponent(entry.path)
+            let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return (entry, date)
+        }
+        return ranked
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                return lhs.0.path < rhs.0.path
+            }
+            .prefix(limit)
+            .map(\.0)
+    }
+
+    static func resolveBaseRef(worktreePath: String) -> String? {
+        for ref in preferredBaseRefs {
+            if runGit(args: ["rev-parse", "--verify", "--quiet", ref], in: worktreePath) != nil {
+                return ref
+            }
+        }
+        return nil
+    }
+
+    private static func mergeBase(with baseRef: String?, worktreePath: String) -> String? {
+        guard let baseRef else { return nil }
+        let output = runGit(args: ["merge-base", "HEAD", baseRef], in: worktreePath)
+        let trimmed = output?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty == false) ? trimmed : nil
     }
 
     // MARK: - Diff Parser
@@ -277,6 +451,49 @@ enum GitDiff {
                         stage: .unstaged
                     ))
                 }
+            }
+        }
+        return entries
+    }
+
+    /// Parse `git diff --name-status -z` output.
+    /// Fields are NUL-separated: `M\0path\0`, or `R100\0old\0new\0` for renames/copies.
+    static func parseNameStatus(_ output: String, stage: GitChangeStage = .unstaged) -> [GitChangedFile] {
+        let records = output
+            .components(separatedBy: "\0")
+            .filter { !$0.isEmpty }
+
+        var entries: [GitChangedFile] = []
+        var index = 0
+        while index < records.count {
+            let statusField = records[index]
+            guard let statusChar = statusField.first else {
+                index += 1
+                continue
+            }
+
+            let entryStatus = status(from: statusChar)
+            let isRenameOrCopy = statusChar == "R" || statusChar == "C"
+            if isRenameOrCopy {
+                guard index + 2 < records.count else { break }
+                let oldPath = records[index + 1]
+                let newPath = records[index + 2]
+                entries.append(GitChangedFile(
+                    path: newPath,
+                    oldPath: oldPath,
+                    status: .renamed,
+                    stage: stage
+                ))
+                index += 3
+            } else {
+                guard index + 1 < records.count else { break }
+                entries.append(GitChangedFile(
+                    path: records[index + 1],
+                    oldPath: nil,
+                    status: entryStatus,
+                    stage: stage
+                ))
+                index += 2
             }
         }
         return entries

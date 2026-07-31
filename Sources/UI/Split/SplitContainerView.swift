@@ -414,6 +414,14 @@ extension SplitContainerView: StationDelegate {
         reembedRecoveredView(stationId: station.id, view: view)
     }
 
+    /// A station slept and freed its surface. Drop the dead view so `layoutTree`
+    /// skips the leaf (it already tolerates a missing entry) instead of laying
+    /// out a view whose surface is gone.
+    func stationDidSleep(_ station: Station) {
+        surfaceViews.removeValue(forKey: station.id)
+        layoutTree()
+    }
+
     /// Swap in a recovered view for `stationId`, relayout (which reparents it into
     /// this container), and restore keyboard focus if that leaf was focused.
     /// Factored out from `stationDidRecover` so the re-embed can be unit-tested

@@ -49,6 +49,14 @@ private final class FakeDataSource: ControlDataSource {
     func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
         zoomCalls.append((paneId, mode)); return zoomResult
     }
+    var sleepCalls: [String?] = []
+    var wakeCalls: [String?] = []
+    var sleepResult: [String]? = ["p1"]
+    var wakeResult: [String]? = ["p1"]
+    func sleepPane(paneId: String?) -> [String]? { sleepCalls.append(paneId); return sleepResult }
+    func wakePane(paneId: String?) -> [String]? { wakeCalls.append(paneId); return wakeResult }
+    var memory: [String: Any]? = ["phys_footprint": 123]
+    func memoryStats() -> [String: Any]? { memory }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -438,5 +446,57 @@ final class ControlRouterTests: XCTestCase {
         let err = obj["error"] as? [String: Any]
         XCTAssertEqual(err?["code"] as? Int, -32601)
         XCTAssertEqual(err?["message"] as? String, "nope")
+    }
+
+    func testPaneSleepByIdAndAll() {
+        let (r, ds) = router()
+        ds.sleepResult = ["p1", "p2"]
+        guard case .ok(let d) = r.handle(method: "pane.sleep", params: ["pane_id": "p1"])
+        else { return XCTFail() }
+        XCTAssertEqual(d["count"] as? Int, 2)
+        XCTAssertEqual(ds.sleepCalls.first ?? nil, "p1")
+
+        _ = r.handle(method: "pane.sleep", params: ["all": true])
+        // `all` reaches the data source as nil — "every eligible pane".
+        XCTAssertEqual(ds.sleepCalls.count, 2)
+        XCTAssertNil(ds.sleepCalls[1])
+    }
+
+    /// An empty request must not be read as "sleep everything" — a bare
+    /// `pane.sleep` with no target would otherwise blank the whole fleet.
+    func testPaneSleepRequiresTarget() {
+        let (r, ds) = router()
+        guard case .error(let code, _) = r.handle(method: "pane.sleep", params: [:])
+        else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+        XCTAssertTrue(ds.sleepCalls.isEmpty)
+    }
+
+    func testPaneSleepUnknownPane() {
+        let (r, ds) = router()
+        ds.sleepResult = nil
+        guard case .error(let code, _) = r.handle(method: "pane.sleep", params: ["pane_id": "nope"])
+        else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    func testPaneWake() {
+        let (r, ds) = router()
+        ds.wakeResult = ["p9"]
+        guard case .ok(let d) = r.handle(method: "pane.wake", params: ["pane_id": "p9"])
+        else { return XCTFail() }
+        XCTAssertEqual(d["panes"] as? [String], ["p9"])
+        XCTAssertEqual(ds.wakeCalls.first ?? nil, "p9")
+    }
+
+    func testAppMemory() {
+        let (r, ds) = router()
+        ds.memory = ["phys_footprint": 42, "panes_awake": 3]
+        guard case .ok(let d) = r.handle(method: "app.memory", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(d["panes_awake"] as? Int, 3)
+
+        ds.memory = nil
+        guard case .error(let code, _) = r.handle(method: "app.memory", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
     }
 }

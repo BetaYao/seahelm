@@ -4,6 +4,13 @@ protocol StationDelegate: AnyObject {
     /// Called when a stale session was detected and the station was recreated.
     /// The delegate should re-embed `station.view` into the appropriate container.
     func stationDidRecover(_ station: Station)
+    /// Called after a station tore its surface down to sleep. The delegate should
+    /// drop the now-dead view registration so layout skips the leaf.
+    func stationDidSleep(_ station: Station)
+}
+
+extension StationDelegate {
+    func stationDidSleep(_ station: Station) {}
 }
 
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
@@ -556,6 +563,58 @@ class Station {
                 self.delegate?.stationDidRecover(self)
             }
         }
+    }
+
+    // MARK: - Sleep / Wake
+
+    /// True while this pane's ghostty surface is torn down to reclaim memory.
+    /// Only the surface goes away — the zmx session (and the agent inside it)
+    /// keeps running, and status detection falls back to `readBackendText()`,
+    /// the same path already used for dashboard cards that were never opened.
+    private(set) var isAsleep = false
+    /// Superview + frame captured at sleep so `wake()` can rebuild in place.
+    private weak var sleepContainer: NSView?
+    private var sleepFrame: CGRect?
+
+    /// Whether this pane may sleep. A pane with no persistent backend session
+    /// has nowhere to keep its process, so sleeping it would silently kill the
+    /// work — `local` panes are never eligible.
+    var canSleep: Bool {
+        surface != nil && !isAsleep && backend == "zmx" && !(paneSessionKey ?? "").isEmpty
+    }
+
+    /// Free the ghostty surface (Metal drawables + screen buffer) while leaving
+    /// the backend session running. Main thread. Returns false if not eligible.
+    @discardableResult
+    func sleep() -> Bool {
+        guard canSleep else { return false }
+        sleepContainer = view?.superview ?? containerView
+        sleepFrame = view?.frame
+        destroy()
+        isAsleep = true
+        delegate?.stationDidSleep(self)
+        return true
+    }
+
+    /// Re-create the surface and re-attach to the backend session, then hand the
+    /// new view back to the container through the same re-embed path zmx recovery
+    /// uses. Main thread. Returns false if the station wasn't asleep.
+    @discardableResult
+    func wake() -> Bool {
+        guard isAsleep, surface == nil,
+              let container = sleepContainer,
+              let app = GhosttyBridge.shared.app else { return false }
+        isAsleep = false
+        _createWithCommand(
+            app: app,
+            container: container,
+            workingDirectory: initialWorkingDirectory,
+            command: paneSessionKey.map { Self.zmxAttachCommand(paneSessionKey: $0) },
+            initialFrame: sleepFrame
+        )
+        guard surface != nil else { return false }
+        delegate?.stationDidRecover(self)
+        return true
     }
 
     /// Destroy the surface and clean up

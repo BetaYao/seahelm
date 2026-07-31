@@ -73,6 +73,15 @@ protocol ControlDataSource: AnyObject {
     /// The on-screen numbered choices (permission prompt / AskUserQuestion) for a
     /// pane, as [{index, label, selected}]. [] when none; nil if pane unknown.
     func paneOptions(paneId: String) -> [[String: Any]]?
+    /// Free a pane's terminal surface while its backend session keeps running
+    /// (nil = every eligible pane but the focused one). Returns the affected
+    /// pane ids, or nil if a named pane isn't found.
+    func sleepPane(paneId: String?) -> [String]?
+    /// Re-create a slept pane's surface (nil = every slept pane). Returns the
+    /// affected pane ids, or nil if a named pane isn't found.
+    func wakePane(paneId: String?) -> [String]?
+    /// This process's own memory accounting plus awake/asleep pane counts.
+    func memoryStats() -> [String: Any]?
 }
 
 extension ControlDataSource {
@@ -87,6 +96,9 @@ extension ControlDataSource {
     func applyLayout(root: [String: Any]) -> Bool { false }
     func zoomPane(paneId: String?, mode: String) -> [String: Any]? { nil }
     func paneOptions(paneId: String) -> [[String: Any]]? { nil }
+    func sleepPane(paneId: String?) -> [String]? { nil }
+    func wakePane(paneId: String?) -> [String]? { nil }
+    func memoryStats() -> [String: Any]? { nil }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -228,6 +240,28 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "cannot zoom pane")
             }
             return .ok(result)
+
+        case "pane.sleep", "pane.wake":
+            // `pane_id` targets one pane; `--all` (no pane_id) targets every
+            // eligible pane but the focused one. One or the other is required —
+            // an empty request must not silently sleep the whole fleet.
+            let paneId = (params["pane_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            guard paneId != nil || (params["all"] as? Bool ?? false) else {
+                return .error(code: ControlError.invalidParams, message: "pane_id or all required")
+            }
+            let ids = method == "pane.sleep"
+                ? dataSource?.sleepPane(paneId: paneId)
+                : dataSource?.wakePane(paneId: paneId)
+            guard let ids else {
+                return .error(code: ControlError.notFound, message: "pane not found: \(paneId ?? "")")
+            }
+            return .ok(["panes": ids, "count": ids.count])
+
+        case "app.memory":
+            guard let stats = dataSource?.memoryStats() else {
+                return .error(code: ControlError.notFound, message: "memory stats unavailable")
+            }
+            return .ok(stats)
 
         case "pane.close", "pane.focus":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {

@@ -281,7 +281,7 @@ final class CabinSidePanelViewController: NSViewController {
             buildSelectedTab()
         } else if selectedTab == .changes, let path = worktreePath {
             // Files self-refreshes through its FSEvents watcher and First Mate is
-            // pushed from the queue, but `git status` has no such signal — re-scan
+            // pushed from the queue, but branch diff has no such signal — re-scan
             // on entry, restoring scroll so the refresh isn't felt as a reset.
             showChangesTab(path)
         }
@@ -456,23 +456,23 @@ final class CabinSidePanelViewController: NSViewController {
     }
 
     private func showChangesTab(_ path: String) {
-        // `git status` can take hundreds of ms on large repos — run it off the
-        // main thread. The generation counter drops stale results if the user
-        // switched tab/worktree (or re-entered) before the scan finished.
+        // Branch-relative `git diff` can take hundreds of ms on large repos —
+        // run it off the main thread. The generation counter drops stale results
+        // if the user switched tab/worktree (or re-entered) before the scan finished.
         changesLoadGeneration += 1
         let generation = changesLoadGeneration
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let entries = GitDiff.changedFileEntries(worktreePath: path)
+            let branch = GitDiff.branchChangedFiles(worktreePath: path)
             DispatchQueue.main.async {
                 guard let self, self.changesLoadGeneration == generation,
                       self.selectedTab == .changes, self.worktreePath == path else { return }
-                self.presentChanges(entries)
+                self.presentChanges(branch)
             }
         }
     }
 
-    private func presentChanges(_ entries: [GitChangedFile]) {
-        changedFiles = entries
+    private func presentChanges(_ branch: GitBranchChanges) {
+        changedFiles = branch.files
 
         // This rebuilds the tab's subtree, so carry the scroll offset across —
         // re-entering Changes should not silently jump the list back to the top.
@@ -481,9 +481,25 @@ final class CabinSidePanelViewController: NSViewController {
         changesTableView = nil
         changesScrollView = nil
 
+        let subtitle: String
+        if changedFiles.isEmpty {
+            subtitle = branch.baseDisplayName.map { "clean · vs \($0)" } ?? "clean"
+        } else {
+            let countLabel: String
+            if branch.isTruncated {
+                countLabel = "\(changedFiles.count) of \(branch.totalCount)"
+            } else {
+                countLabel = "\(changedFiles.count) files"
+            }
+            if let base = branch.baseDisplayName {
+                subtitle = "\(countLabel) · vs \(base)"
+            } else {
+                subtitle = countLabel
+            }
+        }
         let header = makePaneHeader(
             title: "Changes",
-            subtitle: changedFiles.isEmpty ? "clean" : "\(changedFiles.count) files"
+            subtitle: subtitle
         )
         contentView.addSubview(header)
         NSLayoutConstraint.activate([

@@ -1975,11 +1975,23 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        closeAuxiliaryWindows()
         usageSummaryStore.stop()
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
         terminalCoordinator.cleanup()
+    }
+
+    /// Settings and pairing are separate windows, so they keep the app alive past
+    /// the main window's close — `applicationShouldTerminateAfterLastWindowClosed`
+    /// only fires on the *last* one. Leaving them up strands a config editor over
+    /// an app whose coordinators this very method is about to tear down.
+    private func closeAuxiliaryWindows() {
+        settingsWindowController?.close()
+        settingsWindowController = nil
+        pairingWindowController?.close()
+        pairingWindowController = nil
     }
 
     func cleanupBeforeTermination() {

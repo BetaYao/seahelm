@@ -381,6 +381,38 @@ class TerminalCoordinator {
         return true
     }
 
+    // MARK: - Sleep / Wake
+
+    /// Sleep a pane by station id — frees its ghostty surface while the zmx
+    /// session keeps running. Unlike close/focus this is not limited to the
+    /// active container: the panes worth sleeping are the ones off screen.
+    /// Main thread. Returns the ids actually slept ([] = nothing eligible).
+    @discardableResult
+    func sleepPane(targetStationId: String?) -> [String] {
+        stations(matching: targetStationId).compactMap { $0.sleep() ? $0.id : nil }
+    }
+
+    /// Wake a slept pane by station id (nil = every slept pane). Main thread.
+    @discardableResult
+    func wakePane(targetStationId: String?) -> [String] {
+        stations(matching: targetStationId).compactMap { $0.wake() ? $0.id : nil }
+    }
+
+    /// The stations a sleep/wake request applies to: one named pane, or every
+    /// pane except the focused one (which must stay live — sleeping the pane the
+    /// user is typing into would yank the surface out from under first responder).
+    private func stations(matching targetStationId: String?) -> [Station] {
+        if let targetStationId {
+            return StationRegistry.shared.station(forId: targetStationId).map { [$0] } ?? []
+        }
+        var focused: String?
+        if let container = activeSplitContainer(), let tree = container.tree,
+           let leaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }) {
+            focused = leaf.stationId
+        }
+        return StationRegistry.shared.allStations().filter { $0.id != focused }
+    }
+
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
         guard let container = activeSplitContainer() else { return }
         if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {

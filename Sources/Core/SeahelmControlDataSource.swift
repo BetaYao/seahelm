@@ -20,6 +20,10 @@ final class SeahelmControlDataSource: ControlDataSource {
     var closeHandler: ((String) -> Bool)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
     var focusHandler: ((String) -> Bool)?
+    /// Sleep/wake panes by station id (nil = all but the focused one), on the
+    /// main thread. Each returns the ids actually affected.
+    var sleepHandler: ((String?) -> [String])?
+    var wakeHandler: ((String?) -> [String])?
 
     init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
         self.hookSink = hookSink
@@ -143,6 +147,29 @@ final class SeahelmControlDataSource: ControlDataSource {
         var ok = false
         runOnMain { ok = focusHandler(sid) }
         return ok
+    }
+
+    func sleepPane(paneId: String?) -> [String]? {
+        dispatchPaneLifecycle(paneId: paneId, handler: sleepHandler)
+    }
+
+    func wakePane(paneId: String?) -> [String]? {
+        dispatchPaneLifecycle(paneId: paneId, handler: wakeHandler)
+    }
+
+    /// Shared resolve-then-run for sleep/wake: a named pane must exist (nil ⇒
+    /// "not found" for the caller), while nil means "all" and is passed through.
+    private func dispatchPaneLifecycle(paneId: String?, handler: ((String?) -> [String])?) -> [String]? {
+        guard let handler else { return nil }
+        let sid = paneId.flatMap { station(for: $0)?.id }
+        if paneId != nil && sid == nil { return nil }
+        var affected: [String] = []
+        runOnMain { affected = handler(sid) }
+        return affected
+    }
+
+    func memoryStats() -> [String: Any]? {
+        MemoryProbe.stats()
     }
 
     func explainPane(paneId: String) -> [String: Any]? {
