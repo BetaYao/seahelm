@@ -121,6 +121,52 @@ final class ManifestEngineTests: XCTestCase {
         }
     }
 
+    /// Regression: a multi-pane Claude worktree (short nested split) can push the
+    /// `Thundering… (5m · ↓ tokens)` spinner above `bottom_lines:12`, leaving only
+    /// the tool-progress line (`Running 2 shell commands · 53s…`) and the idle-
+    /// looking footer visible. Without matching that tool line — and without
+    /// seeing the spinner anywhere on the screen — First Mate shows a static
+    /// idle circle while the pane is clearly working.
+    func testClaudeToolProgressAndBuriedSpinnerDetectAsRunning() {
+        guard let cm = ManifestStore.shared.manifest(for: "claude") else {
+            return XCTFail("missing claude manifest")
+        }
+        let footer = """
+
+            ───────────────────────────────
+            ❯
+            ───────────────────────────────
+              [opus 5 (1m context)]
+              teamclaw git:(chore/guard-against-stray-file-commits*)
+              ⏵⏵ bypass permissions on (shift+tab to cycle) · pr #662 · ← 3 agents
+            """
+        // Live capture from seahelm-workspace-teamclaw-3: tool line without the
+        // paren-duration spinner shape.
+        let toolOnly = """
+            running 2 shell commands · 53s…
+              ⎿  $ cargo test -p amuxd --manifest-path apps/daemon/cargo.toml
+                 (ctrl+b to run in background)
+            \(footer)
+            """.lowercased()
+        let dTool = cm.evaluate(DetectionInput(screen: toolOnly))
+        XCTAssertEqual(dTool.state, .running, "expected running for tool-progress line")
+        XCTAssertTrue(dTool.visibleWorking)
+
+        // Spinner buried under >12 lines of shell output — still on screen, but
+        // outside bottom_lines:12.
+        var buried = (0..<20).map { "[cron] scheduler gen \($0) stopped (current: 20)" }
+            .joined(separator: "\n")
+        buried += "\n✢ thundering… (5m 33s · ↓ 15.7k tokens)\n"
+        buried += (0..<14).map { _ in "  ⎿  cargo test output line" }.joined(separator: "\n")
+        buried += footer
+        let dBuried = cm.evaluate(DetectionInput(screen: buried.lowercased()))
+        XCTAssertEqual(dBuried.state, .running, "spinner above bottom_lines:12 must still match")
+        XCTAssertTrue(dBuried.visibleWorking)
+
+        // Footer alone (idle prompt) must stay unmatched.
+        XCTAssertEqual(cm.evaluate(DetectionInput(screen: footer.lowercased())).state, .unknown)
+    }
+
     /// Regression: Cursor Agent CLI (entrypoint `agent`) no longer prints
     /// "to interrupt". Live panes show "ctrl+c to stop" plus a status line
     /// ("Working" / "Grepping  83.03k tokens"). Without these rules the sidebar

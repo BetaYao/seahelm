@@ -44,7 +44,8 @@ class SettingsViewController: NSViewController {
     // Sidebar / page host
     private let sidebar = SettingsSidebarView(items: [
         .init(id: "general", title: "General", symbol: "gearshape",
-              keywords: ["projects", "paths", "repo", "scrollback", "cache", "terminal"]),
+              keywords: ["projects", "paths", "repo", "scrollback", "cache", "terminal",
+                         "copy", "select", "clipboard", "ghostty"]),
         .init(id: "agents", title: "Agents", symbol: "bolt.horizontal",
               keywords: ["detection", "rules", "status", "claude", "codex", "json"]),
         .init(id: "imessage", title: "iMessage", symbol: "message",
@@ -66,6 +67,11 @@ class SettingsViewController: NSViewController {
     private let addButton = NSButton()
     private let removeButton = NSButton()
     private let cacheSizeField = SettingsTextField()
+    private lazy var copyOnSelectToggle = SettingsControls.toggle(
+        on: GhosttyConfigImporter.copyOnSelectEnabled(),
+        target: self, action: #selector(copyOnSelectChanged))
+    private lazy var revealGhosttyConfButton = SettingsControls.button(
+        "Reveal ghostty.conf", target: self, action: #selector(revealGhosttyConfClicked))
 
     // Agent Detection tab controls
     private let ruleTextView = NSTextView()
@@ -255,6 +261,12 @@ class SettingsViewController: NSViewController {
                 SettingsRow.make("Scrollback rows cached",
                                  subtitle: "How much of each pane's viewport the status poll re-reads every cycle.",
                                  control: cacheSizeField),
+                SettingsRow.make("Copy on select",
+                                 subtitle: "Copy selected text to the clipboard as soon as you drag-select in a pane.",
+                                 control: copyOnSelectToggle),
+                SettingsRow.make("Ghostty config",
+                                 subtitle: "Seahelm's overlay at ~/.config/seahelm/ghostty.conf. Overrides the bundled defaults.",
+                                 control: revealGhosttyConfButton),
             ]),
         ]
     }
@@ -824,6 +836,17 @@ class SettingsViewController: NSViewController {
     /// go and persists immediately, so closing it can never lose an edit — and
     /// there is nothing to cancel back to.
     @objc private func controlChanged() { applyChanges() }
+
+    @objc private func copyOnSelectChanged() {
+        let enabled = copyOnSelectToggle.state == .on
+        guard GhosttyConfigImporter.setCopyOnSelect(enabled) else { return }
+        GhosttyBridge.shared.reloadUserConfig()
+    }
+
+    @objc private func revealGhosttyConfClicked() {
+        let url = GhosttyConfigImporter.ensureOverlayConf()
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
 
     private func applyChanges() {
         // Update config from UI

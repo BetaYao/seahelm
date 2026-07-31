@@ -129,6 +129,41 @@ final class GhosttyConfigImporterTests: XCTestCase {
         XCTAssertTrue(result.contains("font-family = Iosevka"))
         XCTAssertTrue(result.contains("font-size = 15"))
     }
+
+    func testCopyOnSelectDefaultsFalseWhenAbsent() {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seahelm-ghostty-copy-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let dest = tmp.appendingPathComponent("ghostty.conf")
+        XCTAssertFalse(GhosttyConfigImporter.copyOnSelectEnabled(destination: dest))
+    }
+
+    func testSetCopyOnSelectUpsertsAndReadsBack() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seahelm-ghostty-copy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let dest = tmp.appendingPathComponent("ghostty.conf")
+        try "cursor-style = block\n".write(to: dest, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(GhosttyConfigImporter.setCopyOnSelect(true, destination: dest))
+        XCTAssertTrue(GhosttyConfigImporter.copyOnSelectEnabled(destination: dest))
+        let once = try String(contentsOf: dest, encoding: .utf8)
+        XCTAssertTrue(once.contains("cursor-style = block"))
+        XCTAssertTrue(once.contains("copy-on-select = true"))
+
+        XCTAssertTrue(GhosttyConfigImporter.setCopyOnSelect(false, destination: dest))
+        XCTAssertFalse(GhosttyConfigImporter.copyOnSelectEnabled(destination: dest))
+        let twice = try String(contentsOf: dest, encoding: .utf8)
+        XCTAssertEqual(twice.components(separatedBy: "copy-on-select").count - 1, 1)
+        XCTAssertTrue(twice.contains("copy-on-select = false"))
+    }
+
+    func testBoolValueIgnoresClipboardMode() {
+        let conf = "copy-on-select = clipboard\n"
+        XCTAssertNil(GhosttyConfigImporter.boolValue(forKey: "copy-on-select", in: conf))
+    }
 }
 
 final class AgentYoloLaunchTests: XCTestCase {

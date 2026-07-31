@@ -1,6 +1,6 @@
 {
   "id": "claude",
-  "version": "2026.07.16.1",
+  "version": "2026.07.30.1",
   "min_engine_version": 1,
   "aliases": ["claude-code"],
   "default_status": "idle",
@@ -64,8 +64,18 @@
       "id": "working_spinner",
       "state": "running",
       "priority": 400,
-      "region": "bottom_lines:12",
+      "region": "whole_recent",
       "any": [{ "line_regex": ["(…|\\.\\.\\.)\\s*\\(\\d+[smh]\\b"] }],
+      "visible_working": true
+    },
+    {
+      "id": "working_tool_progress",
+      "state": "running",
+      "priority": 400,
+      "region": "whole_recent",
+      "any": [
+        { "line_regex": ["(?i)running\\s+\\d+\\s+shell\\s+commands?\\s*·\\s*\\d+[smh]"] }
+      ],
       "visible_working": true
     }
   ]

@@ -212,6 +212,15 @@ class GhosttyBridge {
         NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
     }
 
+    /// Hard-reload Ghostty config from disk (bundled defaults + seahelm overlay).
+    /// Call after Settings writes `~/.config/seahelm/ghostty.conf` so live panes
+    /// pick up keys like `copy-on-select` without a restart.
+    func reloadUserConfig() {
+        var target = ghostty_target_s()
+        target.tag = GHOSTTY_TARGET_APP
+        reloadConfig(target: target, soft: false)
+    }
+
     /// Push the current system appearance to the app and every live surface.
     private func syncColorScheme() {
         guard let app else { return }

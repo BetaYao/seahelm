@@ -162,7 +162,13 @@ final class DiffReviewView: NSView {
         let totalAdd = files.reduce(0) { $0 + $1.additions }
         let totalDel = files.reduce(0) { $0 + $1.deletions }
         let uniqueFileCount = Set(changedFiles.map(\.path)).count
-        headerLabel.stringValue = "Changes: \(uniqueFileCount) files  +\(totalAdd) -\(totalDel)"
+        let countLabel: String
+        if snapshot.totalChangedFileCount > uniqueFileCount {
+            countLabel = "\(uniqueFileCount) of \(snapshot.totalChangedFileCount) files"
+        } else {
+            countLabel = "\(uniqueFileCount) files"
+        }
+        headerLabel.stringValue = "Changes: \(countLabel)  +\(totalAdd) -\(totalDel)"
         outlineView.reloadData()
         outlineView.expandItem(nil, expandChildren: true)
         showAllDiffs()

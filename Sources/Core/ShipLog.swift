@@ -966,6 +966,11 @@ class ShipLog {
     /// target resolves to nothing.
     var ruleTriggerRoute: ((_ prompt: String, _ target: IMessageRuleTarget) -> Bool)?
 
+    /// Merges rapid rule hits aimed at the same pane (Aliyun multi-threshold
+    /// SMS, etc.) into one inject. Owned here so every inbound path — live
+    /// bridge, tests — gets the same window without MainWindow wiring it.
+    let ruleCoalescer = IMessageRuleCoalescer()
+
     func handleInbound(_ message: InboundMessage) {
         // Channels deliver from their own poll threads, and `chatCommandRoute`
         // reads the dashboard's selection and moves it. Hop to main before any
@@ -981,10 +986,15 @@ class ShipLog {
         // A rule-matched signal is dispatch, not conversation: inject and stay
         // silent. Replying would text an alerting service back — at best noise,
         // at worst an SMS to a shortcode that charges for it.
+        //
+        // Hits for one pane are coalesced for 30s so a same-second 80%+90%
+        // alert burst becomes one agent turn instead of two overlapping ones.
         if let target = message.metadata?["ruleTarget"] as? IMessageRuleTarget {
             let ruleName = message.metadata?["ruleName"] as? String ?? "?"
-            if ruleTriggerRoute?(text, target) != true {
-                NSLog("[iMessage] Rule '\(ruleName)' matched but target \(target.kind.rawValue)=\(target.value) resolved to no pane")
+            ruleCoalescer.enqueue(prompt: text, target: target, ruleName: ruleName) { [weak self] combined, t in
+                if self?.ruleTriggerRoute?(combined, t) != true {
+                    NSLog("[iMessage] Rule '\(ruleName)' matched but target \(t.kind.rawValue)=\(t.value) resolved to no pane")
+                }
             }
             return
         }
