@@ -19,6 +19,45 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Cursor installs a full hook set (`CursorHooksSetup`), so its hook status is
+    /// real signal. A `screen_only` authority threw it away, which pinned a working
+    /// Cursor pane — and its whole worktree — on Idle whenever a scan frame missed
+    /// the spinner.
+    func testCursorHookRunningPromotesOverScanIdle() {
+        XCTAssertEqual(
+            ShipLog.arbitrate(scan: .idle, hook: .running, agentType: .cursor), .running,
+            "cursor hooks are installed, so a hook running edge must beat a stale scan idle")
+    }
+
+    func testCursorManifestIsNotScreenOnly() {
+        let authority = ManifestStore.shared.manifest(for: "cursor")?.manifest.authority
+        XCTAssertEqual(authority, "session_only",
+                       "cursor has real lifecycle hooks; screen_only discards them")
+    }
+
+    /// The trailing edge still belongs to the screen: once the scan has seen a
+    /// sustained idle past the grace window, a stale hook `.running` is dropped.
+    func testCursorScanIdleReclaimsStaleHookRunningAfterGrace() {
+        ShipLog.hookRunningGrace = 0
+        var callCount = 0
+        var captured: IngestOutcome?
+        let exp = expectation(description: "outcome")
+        exp.assertForOverFulfill = false
+        ShipLog.shared.onOutcome = { o in
+            callCount += 1
+            if callCount == 2 { captured = o; exp.fulfill() }
+        }
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("cursor"),
+                                              kind: .userPrompt("do the thing")))
+        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .idle, message: "", activity: [],
+                                  commandLine: nil, agentType: .cursor,
+                                  roundDuration: 0, tasks: [])))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured?.newStatus, .idle)
+        ShipLog.hookRunningGrace = 3.0
+    }
+
     func testSessionOnlyHookRunningPromotesOverStaleScanIdle() {
         // Leading edge: a hook running edge (prompt submitted) must surface
         // immediately even while the scan still shows the pre-prompt idle prompt —

@@ -22,6 +22,25 @@ final class ManifestEngineTests: XCTestCase {
         }
     }
 
+    /// Cursor animates an hourglass label in its OSC title
+    /// (`<chat name> - ⏳ Working ...`) rather than the braille spinner the shared
+    /// `osc_title_working` rule expects, so that rule never fired and a working
+    /// pane read as idle.
+    func testCursorHourglassTitleDetectsAsRunning() {
+        guard let cm = ManifestStore.shared.manifest(for: "cursor") else {
+            return XCTFail("missing cursor manifest")
+        }
+        let working = cm.evaluate(DetectionInput(
+            screen: "", oscTitle: "Tauri Performance Check - \u{23F3} Working .\u{00B7}\u{00B7}"))
+        XCTAssertEqual(working.state, .running)
+        XCTAssertTrue(working.visibleWorking)
+
+        // A plain cwd title (Cursor's idle state) must not read as running.
+        let idle = cm.evaluate(DetectionInput(
+            screen: "", oscTitle: "/Volumes/openbeta/workspace/teamclaw"))
+        XCTAssertNotEqual(idle.state, .running)
+    }
+
     /// Pi has no text permission prompts (it uses a project-trust model) and a
     /// spinner-with-message working line ending "… to cancel". Verify the manifest
     /// maps the trust prompt to waiting and the working line to running.

@@ -1,6 +1,6 @@
 {
   "id": "cursor",
-  "version": "2026.07.22.1",
+  "version": "2026.07.31.1",
   "min_engine_version": 1,
   "aliases": [],
   "default_status": "idle",
@@ -22,7 +22,7 @@
     "generic_runtimes": [],
     "env_hint": "SEAHELM_AGENT"
   },
-  "authority": "screen_only",
+  "authority": "session_only",
   "rules": [
     {
       "id": "osc_title_working",
@@ -31,6 +31,25 @@
       "region": "osc_title",
       "regex": [
         "^[\\x{2800}-\\x{28FF}] "
+      ],
+      "visible_working": true
+    },
+    {
+      "id": "osc_title_hourglass",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "any": [
+        {
+          "contains": [
+            "\u23f3"
+          ]
+        },
+        {
+          "regex": [
+            "-\\s*working\\b"
+          ]
+        }
       ],
       "visible_working": true
     },
