@@ -15,6 +15,7 @@ final class CodeEditorModel: ObservableObject {
 
     let fileURL: URL
     let language: CodeLanguage
+    let scrollCoordinator = CodeEditorScrollCoordinator()
 
     var isDirty: Bool { text != savedText }
 
@@ -51,8 +52,28 @@ private struct CodeEditorSwiftUIView: View {
                     showFoldingRibbon: false
                 )
             ),
-            state: $model.editorState
+            state: $model.editorState,
+            coordinators: [model.scrollCoordinator]
         )
+    }
+}
+
+/// CodeEditSourceEditor enables horizontal scrolling when wrapping is off, but
+/// its overlay scrollers inherit macOS's auto-hide behavior. Keep the horizontal
+/// thumb visible so long configuration lines remain discoverable and draggable.
+final class CodeEditorScrollCoordinator: TextViewCoordinator {
+    func prepareCoordinator(controller: TextViewController) {}
+
+    func controllerDidAppear(controller: TextViewController) {
+        Self.configure(controller.scrollView)
+    }
+
+    static func configure(_ scrollView: NSScrollView) {
+        scrollView.hasHorizontalScroller = true
+        scrollView.horizontalScrollElasticity = .automatic
+        scrollView.autohidesScrollers = false
+        scrollView.scrollerStyle = .overlay
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 }
 
