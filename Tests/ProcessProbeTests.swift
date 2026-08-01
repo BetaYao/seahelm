@@ -17,6 +17,9 @@ final class ProcessProbeTests: XCTestCase {
     private func p(_ pid: Int32, _ ppid: Int32, _ argv: [String]) -> ProcessProbe.Proc {
         ProcessProbe.Proc(pid: pid, ppid: ppid, argv: argv)
     }
+    private func p(_ pid: Int32, _ ppid: Int32, _ argv: [String], mb: UInt64) -> ProcessProbe.Proc {
+        ProcessProbe.Proc(pid: pid, ppid: ppid, argv: argv, residentBytes: mb * 1_048_576)
+    }
 
     func testSessionPidParse() {
         let out = """
@@ -92,6 +95,36 @@ final class ProcessProbeTests: XCTestCase {
         let all = [p(2, 1, ["zsh"]), p(3, 2, ["node"]), p(4, 3, ["codex"]), p(5, 1, ["unrelated"])]
         let d = ProcessProbe.descendants(of: 2, in: all).map(\.pid).sorted()
         XCTAssertEqual(d, [3, 4])
+    }
+
+    func testSessionMemoryIncludesAgentSubtree() {
+        let ms = [manifest(id: "claude", exec: ["claude"], argv: ["claude-code"], generic: ["node"])]
+        let all = [
+            p(2, 1, ["/bin/zsh"], mb: 1),
+            p(3, 2, ["/opt/homebrew/bin/claude"], mb: 20),
+            p(4, 3, ["node", "/Users/me/.claude/helper.js"], mb: 300),
+            p(5, 2, ["/usr/bin/git", "status"], mb: 9),
+        ]
+
+        let mem = ProcessProbe.memory(rootPid: 2, in: all, manifests: ms)
+
+        XCTAssertEqual(mem.totalBytes, 330 * 1_048_576)
+        XCTAssertEqual(mem.agentBytes, 320 * 1_048_576)
+        XCTAssertNotNil(mem.processName)
+    }
+
+    func testSessionMemoryCountsClaudeCodeNodeWrapperAndChildren() {
+        let ms = [manifest(id: "claude", argv: ["claude-code"], generic: ["node"])]
+        let all = [
+            p(2, 1, ["/bin/zsh"], mb: 1),
+            p(3, 2, ["node", "/Users/me/.local/bin/claude-code"], mb: 120),
+            p(4, 3, ["/usr/bin/python3", "worker.py"], mb: 80),
+        ]
+
+        let mem = ProcessProbe.memory(rootPid: 2, in: all, manifests: ms)
+
+        XCTAssertEqual(mem.totalBytes, 201 * 1_048_576)
+        XCTAssertEqual(mem.agentBytes, 200 * 1_048_576)
     }
 
     func testForegroundCommandLinePrefersLeafJob() {

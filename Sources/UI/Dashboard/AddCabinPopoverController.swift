@@ -19,6 +19,8 @@ final class AddCabinPopoverController: NSViewController {
     private let taskScroll = NSScrollView()
     private let taskBox = NSView()
     private let thumbnailStrip = NSStackView()
+    private let headerRow = NSStackView()
+    private let footerRow = NSStackView()
     private let agentPopup = NSPopUpButton()
     private let createButton = NSButton()
     private let errorLabel = NSTextField(labelWithString: "")
@@ -31,7 +33,9 @@ final class AddCabinPopoverController: NSViewController {
         didSet { rebuildThumbnails() }
     }
 
-    private static let contentWidth: CGFloat = 320
+    private static let contentWidth: CGFloat = 340
+    private static let baseContentHeight: CGFloat = 142
+    private static let thumbnailContentHeight: CGFloat = 178
     /// Two lines of the task font — a one-liner felt cramped for a task brief.
     private static let taskLineHeight: CGFloat = 15
     private static let taskVisibleLines: CGFloat = 2
@@ -44,12 +48,36 @@ final class AddCabinPopoverController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 152))
+        let root = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: Self.contentWidth,
+            height: Self.baseContentHeight
+        ))
 
-        let header = NSTextField(labelWithString: "New worktree · \(project)")
-        header.font = AppFont.mono(size: 11, weight: .semibold)
-        header.textColor = .secondaryLabelColor
-        header.lineBreakMode = .byTruncatingMiddle
+        let titleLabel = NSTextField(labelWithString: "New worktree")
+        titleLabel.font = AppFont.mono(size: 12, weight: .semibold)
+        titleLabel.textColor = .labelColor
+
+        let projectIcon = NSImageView(image: NSImage(
+            systemSymbolName: "folder",
+            accessibilityDescription: "Project"
+        ) ?? NSImage())
+        projectIcon.symbolConfiguration = .init(pointSize: 10, weight: .medium)
+        projectIcon.contentTintColor = .secondaryLabelColor
+        projectIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        let projectLabel = NSTextField(labelWithString: project)
+        projectLabel.font = AppFont.mono(size: 10, weight: .medium)
+        projectLabel.textColor = .secondaryLabelColor
+        projectLabel.lineBreakMode = .byTruncatingMiddle
+
+        let headerSpacer = NSView()
+        headerSpacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        headerRow.setViews([titleLabel, headerSpacer, projectIcon, projectLabel], in: .leading)
+        headerRow.orientation = .horizontal
+        headerRow.alignment = .centerY
+        headerRow.spacing = 6
 
         configureTaskField()
         configureAgentPopup()
@@ -65,7 +93,7 @@ final class AddCabinPopoverController: NSViewController {
 
         createButton.title = "Create"
         createButton.bezelStyle = .rounded
-        createButton.controlSize = .small
+        createButton.controlSize = .regular
         createButton.font = AppFont.mono(size: 11)
         createButton.keyEquivalent = "\r"
         createButton.setAccessibilityIdentifier("dashboard.addWorktree.createButton")
@@ -78,33 +106,43 @@ final class AddCabinPopoverController: NSViewController {
         let footerSpacer = NSView()
         footerSpacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
         footerSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [agentPopup, errorLabel, footerSpacer, spinner, createButton])
-        footer.orientation = .horizontal
-        footer.spacing = 8
-        footer.alignment = .centerY
+        footerRow.setViews([agentPopup, errorLabel, footerSpacer, spinner, createButton], in: .leading)
+        footerRow.orientation = .horizontal
+        footerRow.spacing = 8
+        footerRow.alignment = .centerY
         agentPopup.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         errorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         createButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let stack = NSStackView(views: [header, taskBox, thumbnailStrip, footer])
+        let stack = NSStackView(views: [headerRow, taskBox, thumbnailStrip, footerRow])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
-        stack.setCustomSpacing(6, after: header)
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
 
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            headerRow.heightAnchor.constraint(equalToConstant: 20),
+            projectIcon.widthAnchor.constraint(equalToConstant: 13),
+            projectIcon.heightAnchor.constraint(equalToConstant: 13),
+            taskBox.heightAnchor.constraint(equalToConstant: 50),
+            thumbnailStrip.heightAnchor.constraint(equalToConstant: 26),
+            footerRow.heightAnchor.constraint(equalToConstant: 28),
+            agentPopup.widthAnchor.constraint(equalToConstant: 142),
+            agentPopup.heightAnchor.constraint(equalToConstant: 28),
+            createButton.widthAnchor.constraint(equalToConstant: 78),
+            createButton.heightAnchor.constraint(equalToConstant: 28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+            headerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             taskBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
 
         view = root
+        updateContentSize()
     }
 
     override func viewDidAppear() {
@@ -116,9 +154,9 @@ final class AddCabinPopoverController: NSViewController {
     /// the helm uses, so paste behaviour matches). Return submits, Shift+Return
     /// inserts a newline.
     private func configureTaskField() {
-        taskView.font = AppFont.mono(size: 11)
+        taskView.font = AppFont.mono(size: 12)
         taskView.placeholder = "Describe the task…"
-        taskView.placeholderFont = AppFont.mono(size: 11)
+        taskView.placeholderFont = AppFont.mono(size: 12)
         taskView.placeholderColor = .secondaryLabelColor
         taskView.placeholderAccentColor = .secondaryLabelColor
         taskView.isRichText = false
@@ -149,11 +187,11 @@ final class AddCabinPopoverController: NSViewController {
         taskBox.layer?.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.5).cgColor
         taskBox.addSubview(taskScroll)
         NSLayoutConstraint.activate([
-            taskScroll.leadingAnchor.constraint(equalTo: taskBox.leadingAnchor, constant: 7),
-            taskScroll.trailingAnchor.constraint(equalTo: taskBox.trailingAnchor, constant: -7),
-            taskScroll.topAnchor.constraint(equalTo: taskBox.topAnchor, constant: 6),
-            taskScroll.bottomAnchor.constraint(equalTo: taskBox.bottomAnchor, constant: -6),
-            taskScroll.heightAnchor.constraint(equalToConstant: Self.taskLineHeight * Self.taskVisibleLines),
+            taskScroll.leadingAnchor.constraint(equalTo: taskBox.leadingAnchor, constant: 10),
+            taskScroll.trailingAnchor.constraint(equalTo: taskBox.trailingAnchor, constant: -10),
+            taskScroll.topAnchor.constraint(equalTo: taskBox.topAnchor, constant: 8),
+            taskScroll.bottomAnchor.constraint(equalTo: taskBox.bottomAnchor, constant: -8),
+            taskScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.taskLineHeight * Self.taskVisibleLines),
         ])
 
         thumbnailStrip.orientation = .horizontal
@@ -204,6 +242,16 @@ final class AddCabinPopoverController: NSViewController {
             thumbnailStrip.addArrangedSubview(container)
         }
         thumbnailStrip.isHidden = pendingImageURLs.isEmpty
+        updateContentSize()
+    }
+
+    private func updateContentSize() {
+        let height = pendingImageURLs.isEmpty
+            ? Self.baseContentHeight
+            : Self.thumbnailContentHeight
+        preferredContentSize = NSSize(width: Self.contentWidth, height: height)
+        guard isViewLoaded else { return }
+        view.frame.size = preferredContentSize
     }
 
     @objc private func removeThumbnail(_ sender: NSButton) {
@@ -221,7 +269,7 @@ final class AddCabinPopoverController: NSViewController {
         }
         agentPopup.selectItem(withTitle: defaultAgent.displayName)
         agentPopup.font = AppFont.mono(size: 11)
-        agentPopup.controlSize = .small
+        agentPopup.controlSize = .regular
         agentPopup.setAccessibilityIdentifier("dashboard.addWorktree.agentPopup")
     }
 
@@ -280,6 +328,7 @@ final class AddCabinPopoverController: NSViewController {
     var errorTextForTesting: String? { errorLabel.isHidden ? nil : errorLabel.stringValue }
     var agentChoiceTitlesForTesting: [String] { agentPopup.itemTitles }
     var thumbnailCountForTesting: Int { thumbnailStrip.arrangedSubviews.count }
+    var contentSizeForTesting: NSSize { preferredContentSize }
     func setTaskForTesting(_ text: String) { taskView.string = text }
     func attachImageForTesting(_ url: URL) { pendingImageURLs.append(url) }
     func removeImageForTesting(at index: Int) {

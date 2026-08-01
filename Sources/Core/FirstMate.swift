@@ -67,6 +67,8 @@ struct StatusTransition {
 
 /// Pure rule engine: status-transition edge + config → action list. No IO, no singletons.
 enum FirstMate {
+    private static let maxSuggestionSummaryCharacters = 700
+
     /// Unified entry: folds the agent-suggestion path into the same pure rule engine.
     /// `.suggest` events become a red-zone suggestNextOrder carrying options; everything
     /// else derives a StatusTransition and runs the standard rules.
@@ -123,11 +125,19 @@ enum FirstMate {
     /// tool chrome (`Shell`, `Bash`, a `seahelm-suggest …` line) is treated as empty
     /// so the island doesn't pretend that was the agent's answer.
     static func suggestionSummary(lastAssistant: String, lastMessage: String) -> String {
-        let prose = lastAssistant.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prose.isEmpty { return String(prose.prefix(200)) }
-        let fallback = lastMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        if isJunkSuggestionSummary(fallback) { return "" }
-        return String(fallback.prefix(200))
+        let prose = suggestionSummaryText(from: lastAssistant)
+        if !prose.isEmpty { return prose }
+        return suggestionSummaryText(from: lastMessage)
+    }
+
+    /// Normalize text for the body above suggestion chips: remove the sentinel
+    /// option line, drop tool chrome, and keep enough multi-line answer context
+    /// for the card to be useful.
+    static func suggestionSummaryText(from raw: String) -> String {
+        let stripped = StopHookResponder.stripSentinel(from: raw)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stripped.isEmpty, !isJunkSuggestionSummary(stripped) else { return "" }
+        return String(stripped.prefix(maxSuggestionSummaryCharacters))
     }
 
     /// True when `s` is tool/UI chrome rather than assistant prose.

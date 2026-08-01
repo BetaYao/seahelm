@@ -73,6 +73,32 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(json.contains("confirm_before_quit"), "must persist under its snake_case key")
     }
 
+    func testAgentMemoryGuardDefaults() throws {
+        let config = Config()
+        XCTAssertEqual(config.agentMemoryGuard.warnMB, 5 * 1024)
+        XCTAssertEqual(config.agentMemoryGuard.stopMB, 6 * 1024)
+        XCTAssertEqual(config.agentMemoryGuard.killMB, 8 * 1024)
+
+        let legacy = try JSONDecoder().decode(Config.self, from: "{}".data(using: .utf8)!)
+        XCTAssertEqual(legacy.agentMemoryGuard, .default)
+    }
+
+    func testAgentMemoryGuardRoundtrip() throws {
+        var config = Config()
+        config.agentMemoryGuard = AgentMemoryGuardConfig(warnMB: 4096, stopMB: 5120, killMB: 6144)
+
+        let data = try JSONEncoder().encode(config)
+        let reloaded = try JSONDecoder().decode(Config.self, from: data)
+
+        XCTAssertEqual(reloaded.agentMemoryGuard.warnMB, 4096)
+        XCTAssertEqual(reloaded.agentMemoryGuard.stopMB, 5120)
+        XCTAssertEqual(reloaded.agentMemoryGuard.killMB, 6144)
+
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("agent_memory_guard"))
+        XCTAssertTrue(json.contains("warn_mb"))
+    }
+
     // MARK: - JSON Roundtrip
 
     func testEncodeDecodeRoundtrip() throws {

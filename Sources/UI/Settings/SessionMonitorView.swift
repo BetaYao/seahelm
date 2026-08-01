@@ -23,6 +23,11 @@ final class SessionMonitorView: NSView {
     /// Sessions the running app is actively using; they get a marker so a kill
     /// that would yank a live pane is at least an informed one.
     var activeSessionNames: Set<String> = []
+    /// Display-only thresholds for runaway agent memory. No automatic action is
+    /// taken here; the table only highlights rows so the user can decide.
+    var memoryGuard: AgentMemoryGuardConfig = .default {
+        didSet { tableView.reloadData() }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -49,6 +54,7 @@ final class SessionMonitorView: NSView {
             ("name", "Session", CGFloat(220)),
             ("clients", "Clients", CGFloat(56)),
             ("age", "Age", CGFloat(64)),
+            ("memory", "Memory", CGFloat(92)),
             ("dir", "Directory", CGFloat(260)),
         ] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
@@ -125,7 +131,7 @@ final class SessionMonitorView: NSView {
         // a beat when one is busy. Off the main thread; the window stays live.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let output = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
-            let parsed = SessionManager.parseZmxSessions(listOutput: output)
+            let parsed = SessionManager.parseZmxSessionsWithProcessMemory(listOutput: output)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.sessions = parsed
@@ -139,9 +145,11 @@ final class SessionMonitorView: NSView {
     private func updateSummary() {
         let detached = sessions.filter { $0.isManaged && $0.isDetached }.count
         let total = sessions.count
+        let processBytes = sessions.compactMap(\.processMemoryBytes).reduce(UInt64(0), +)
+        let memory = processBytes > 0 ? " · \(Self.formatBytes(processBytes)) RSS" : ""
         summaryLabel.stringValue = detached == 0
-            ? "\(total) session(s), all attached."
-            : "\(total) session(s) · \(detached) detached"
+            ? "\(total) session(s), all attached\(memory)."
+            : "\(total) session(s) · \(detached) detached\(memory)"
         summaryLabel.textColor = detached == 0 ? Theme.textSecondary : .systemOrange
     }
 
@@ -224,6 +232,16 @@ extension SessionMonitorView: NSTableViewDataSource, NSTableViewDelegate {
         case "age":
             text = session.created.map(Self.age(since:)) ?? "—"
             color = Theme.textSecondary
+        case "memory":
+            if let agent = session.agentMemoryBytes, agent > 0,
+               let total = session.processMemoryBytes, total > agent {
+                text = "\(Self.formatBytes(agent)) / \(Self.formatBytes(total))"
+            } else if let total = session.processMemoryBytes, total > 0 {
+                text = Self.formatBytes(total)
+            } else {
+                text = "—"
+            }
+            color = memoryColor(for: session.agentMemoryBytes)
         default:
             text = session.startDir.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "—"
             color = Theme.textSecondary
@@ -234,6 +252,11 @@ extension SessionMonitorView: NSTableViewDataSource, NSTableViewDelegate {
                                         : .systemFont(ofSize: 11)
         label.textColor = color
         label.lineBreakMode = .byTruncatingMiddle
+        if columnId == "memory" {
+            label.toolTip = Self.memoryTooltip(for: session)
+        } else if columnId == "dir" {
+            label.toolTip = session.processName
+        }
         return label
     }
 
@@ -247,5 +270,35 @@ extension SessionMonitorView: NSTableViewDataSource, NSTableViewDelegate {
         if seconds < 3600 { return "\(seconds / 60)m" }
         if seconds < 86_400 { return "\(seconds / 3600)h" }
         return "\(seconds / 86_400)d"
+    }
+
+    private static func formatBytes(_ bytes: UInt64) -> String {
+        guard bytes > 0 else { return "0 MB" }
+        let mb = Double(bytes) / 1_048_576
+        if mb < 1024 { return mb >= 10 ? String(format: "%.0f MB", mb) : String(format: "%.1f MB", mb) }
+        return String(format: "%.1f GB", mb / 1024)
+    }
+
+    private static func memoryTooltip(for session: ZmxSessionInfo) -> String? {
+        guard session.processMemoryBytes != nil || session.agentMemoryBytes != nil else { return nil }
+        var parts: [String] = []
+        if let agent = session.agentMemoryBytes, agent > 0 {
+            parts.append("Agent subtree: \(formatBytes(agent))")
+        }
+        if let total = session.processMemoryBytes {
+            parts.append("Session tree: \(formatBytes(total))")
+        }
+        if let process = session.processName, !process.isEmpty {
+            parts.append(process)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
+    private func memoryColor(for agentBytes: UInt64?) -> NSColor {
+        guard let agentBytes, agentBytes > 0 else { return Theme.textSecondary }
+        if memoryGuard.killBytes > 0, agentBytes >= memoryGuard.killBytes { return .systemRed }
+        if memoryGuard.stopBytes > 0, agentBytes >= memoryGuard.stopBytes { return .systemOrange }
+        if memoryGuard.warnBytes > 0, agentBytes >= memoryGuard.warnBytes { return .systemYellow }
+        return Theme.textPrimary
     }
 }

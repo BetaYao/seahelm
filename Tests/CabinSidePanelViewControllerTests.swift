@@ -65,4 +65,18 @@ final class CabinSidePanelViewControllerTests: XCTestCase {
         XCTAssertEqual(vc.mountedTabsForTesting, [.changes],
                        "only the freshly shown tab should be mounted after a worktree switch")
     }
+
+    func testChangeTreeBuilderGroupsFilesByDirectory() {
+        let files = [
+            GitChangedFile(path: "Sources/App/Main.swift", oldPath: nil, status: .modified, stage: .unstaged),
+            GitChangedFile(path: "Sources/Core/Config.swift", oldPath: nil, status: .added, stage: .unstaged),
+            GitChangedFile(path: "README.md", oldPath: nil, status: .modified, stage: .unstaged),
+        ]
+
+        let roots = ChangeTreeBuilder.build(from: files)
+        XCTAssertEqual(roots.map(\.name), ["Sources", "README.md"])
+        XCTAssertEqual(roots.first?.children.map(\.name), ["App", "Core"])
+        XCTAssertEqual(roots.first?.children.first?.children.map(\.name), ["Main.swift"])
+        XCTAssertEqual(roots.last?.entry?.path, "README.md")
+    }
 }

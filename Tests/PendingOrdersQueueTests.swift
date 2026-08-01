@@ -66,6 +66,33 @@ final class PendingOrdersQueueTests: XCTestCase {
             "当前分支 docs/5577-marketing-prototype 已与远端同步，无新提交。")
     }
 
+    func testRefreshSuggestMessageKeepsMultilineSummaryWithoutSentinel() {
+        let q = PendingOrdersQueue()
+        q.upsert(FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt",
+            branch: "docs/5577", project: "saas-mono", terminalID: "t1",
+            message: "Shell", options: ["生成 Issue 规格", "查看澄清结论", "开始实施"]))
+        q.refreshSuggestMessage(
+            terminalID: "t1",
+            message: """
+            澄清完成，且未修改 Issue 或业务代码。
+
+            已新增：
+
+            - CONTEXT.md：记录 Dashboard 权限、指标、周期、空状态、会话隔离与数据边界术语。
+            - docs/adr/0001-workbench-dashboard-metrics-boundary.md：明确员工端必须经后端聚合接口读取指标，服务端强制权限与门店范围。
+
+            文档格式与 diff 校验均通过。
+
+            ::seahelm-suggest:: 生成 Issue 规格 | 查看澄清结论 | 开始实施
+            """)
+        let message = q.all().first?.action.message ?? ""
+        XCTAssertTrue(message.contains("- CONTEXT.md"))
+        XCTAssertTrue(message.contains("- docs/adr/0001-workbench-dashboard-metrics-boundary.md"))
+        XCTAssertTrue(message.contains("文档格式与 diff 校验均通过。"))
+        XCTAssertFalse(message.contains("::seahelm-suggest::"))
+    }
+
     func testRefreshSuggestMessageDoesNotClobberRealProse() {
         let q = PendingOrdersQueue()
         q.upsert(FirstMateAction(

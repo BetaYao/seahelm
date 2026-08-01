@@ -15,6 +15,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Context-menu hooks, wired by `SplitContainerView` to the split delegate.
     var onRequestSplit: ((SplitAxis) -> Void)?
     var onRequestClose: (() -> Void)?
+    var onRequestSleep: (() -> Void)?
     /// Wired by `SplitContainerView` to open a file in the app's file viewer.
     var onRequestPreview: ((URL) -> Void)?
     /// Wired by `SplitContainerView` to open a GitHub PR review for a detected URL.
@@ -766,6 +767,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
         menu.addItem(.separator())
 
+        let sleepItem = NSMenuItem(title: "Sleep Pane", action: #selector(contextSleep), keyEquivalent: "")
+        sleepItem.target = self
+        sleepItem.isEnabled = station?.canSleep == true
+        menu.addItem(sleepItem)
+
         let closeItem = NSMenuItem(title: "Close Pane", action: #selector(contextClose), keyEquivalent: "")
         closeItem.target = self
         menu.addItem(closeItem)
@@ -1153,6 +1159,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }
     @objc private func contextSplitVertical() { onRequestSplit?(.vertical) }
+    @objc private func contextSleep() { onRequestSleep?() }
     @objc private func contextClose() { onRequestClose?() }
     @objc private func contextPaste() { paste(nil) }
 

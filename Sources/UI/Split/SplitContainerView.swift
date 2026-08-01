@@ -4,6 +4,8 @@ protocol SplitContainerDelegate: AnyObject {
     func splitContainer(_ view: SplitContainerView, didChangeFocus leafId: String)
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis)
     func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String)
+    func splitContainer(_ view: SplitContainerView, didRequestSleepPane leafId: String)
+    func splitContainer(_ view: SplitContainerView, didRequestWakePane leafId: String)
     func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL)
     func splitContainer(_ view: SplitContainerView, didRequestPRPreview owner: String, repo: String, number: Int)
     func splitContainerDidChangeLayout(_ view: SplitContainerView)
@@ -26,6 +28,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private var dividers: [String: DividerView] = [:]
     private var leafFrames: [String: CGRect] = [:]
+    private var asleepViews: [String: AsleepPaneView] = [:]
 
     override var isFlipped: Bool { true }
 
@@ -73,9 +76,14 @@ class SplitContainerView: NSView, DividerDelegate {
         for leaf in tree.allLeaves {
             surfaceViews[leaf.stationId]?.isHidden = (leafFrames[leaf.id] == nil)
         }
+        layoutAsleepViews(tree: tree)
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
                   let view = surfaceViews[leaf.stationId] else { continue }
+            if StationRegistry.shared.station(forId: leaf.stationId)?.isAsleep == true {
+                view.isHidden = true
+                continue
+            }
             // Deactivate any Auto Layout constraints and switch to frame-based positioning.
             // Station.create() sets up Auto Layout, but SplitContainerView uses frames.
             if !view.translatesAutoresizingMaskIntoConstraints {
@@ -116,6 +124,10 @@ class SplitContainerView: NSView, DividerDelegate {
                     guard let self else { return }
                     self.delegate?.splitContainer(self, didRequestClosePane: leafId)
                 }
+                ghosttyView.onRequestSleep = { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.splitContainer(self, didRequestSleepPane: leafId)
+                }
                 ghosttyView.onRequestPreview = { [weak self] url in
                     guard let self else { return }
                     self.delegate?.splitContainer(self, didRequestPreview: url)
@@ -155,6 +167,35 @@ class SplitContainerView: NSView, DividerDelegate {
         }
     }
 
+    private func layoutAsleepViews(tree: SplitTree) {
+        var activeIds = Set<String>()
+        for leaf in tree.allLeaves {
+            guard let frame = leafFrames[leaf.id],
+                  let station = StationRegistry.shared.station(forId: leaf.stationId),
+                  station.isAsleep else { continue }
+            activeIds.insert(leaf.id)
+            let view = asleepViews[leaf.id] ?? AsleepPaneView()
+            if asleepViews[leaf.id] == nil {
+                asleepViews[leaf.id] = view
+                addSubview(view)
+            }
+            view.frame = frame
+            view.isHidden = false
+            view.configure(
+                title: station.persistedTitle ?? station.paneSessionKey ?? "Sleeping pane",
+                detail: station.paneSessionKey ?? ""
+            )
+            view.onWake = { [weak self] in
+                guard let self else { return }
+                self.delegate?.splitContainer(self, didRequestWakePane: leaf.id)
+            }
+        }
+        for (id, view) in asleepViews where !activeIds.contains(id) {
+            view.removeFromSuperview()
+            asleepViews.removeValue(forKey: id)
+        }
+    }
+
     /// Toggle/set tmux-style zoom for a leaf. `on == nil` toggles. Returns whether
     /// the container is zoomed afterward.
     @discardableResult
@@ -181,7 +222,12 @@ class SplitContainerView: NSView, DividerDelegate {
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
                   let view = surfaceViews[leaf.stationId],
-                  view.superview == self else { continue }
+                  view.superview == self else {
+                if let asleep = asleepViews[leaf.id] {
+                    asleep.frame = frame
+                }
+                continue
+            }
             view.frame = frame
         }
         if zoomedLeafId == nil {
@@ -401,6 +447,86 @@ class SplitContainerView: NSView, DividerDelegate {
         applyFramesOnly()
         GhosttyBridge.shared.endLiveResize()
         delegate?.splitContainerDidChangeLayout(self)
+    }
+}
+
+private final class AsleepPaneView: NSView {
+    var onWake: (() -> Void)?
+
+    private let glyph = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let wakeButton = NSButton(title: "Wake", target: nil, action: nil)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    override var isFlipped: Bool { true }
+
+    func configure(title: String, detail: String) {
+        titleLabel.stringValue = title.isEmpty ? "Sleeping pane" : title
+        detailLabel.stringValue = detail.isEmpty
+            ? "The zmx session is still running."
+            : "\(detail) · zmx session still running"
+    }
+
+    private func build() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+
+        glyph.image = NSImage(systemSymbolName: "moon.zzz", accessibilityDescription: "Sleeping")
+        glyph.contentTintColor = Theme.textSecondary
+        glyph.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = Theme.textPrimary
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = Theme.textSecondary
+        detailLabel.lineBreakMode = .byTruncatingMiddle
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        wakeButton.bezelStyle = .rounded
+        wakeButton.font = .systemFont(ofSize: 11, weight: .medium)
+        wakeButton.target = self
+        wakeButton.action = #selector(wakeClicked)
+        wakeButton.translatesAutoresizingMaskIntoConstraints = false
+        wakeButton.setAccessibilityIdentifier("splitPane.asleep.wake")
+
+        addSubview(glyph)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
+        addSubview(wakeButton)
+
+        NSLayoutConstraint.activate([
+            glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            glyph.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -10),
+            glyph.widthAnchor.constraint(equalToConstant: 22),
+            glyph.heightAnchor.constraint(equalToConstant: 22),
+
+            titleLabel.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: wakeButton.leadingAnchor, constant: -14),
+            titleLabel.centerYAnchor.constraint(equalTo: glyph.centerYAnchor),
+
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.trailingAnchor.constraint(lessThanOrEqualTo: wakeButton.leadingAnchor, constant: -14),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+
+            wakeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            wakeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            wakeButton.widthAnchor.constraint(equalToConstant: 72),
+        ])
+    }
+
+    @objc private func wakeClicked() {
+        onWake?()
     }
 }
 

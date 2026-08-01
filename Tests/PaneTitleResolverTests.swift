@@ -302,6 +302,33 @@ final class PaneTitleResolverTests: XCTestCase {
         )
     }
 
+    /// Codex sets no OSC title of its own, so the pane keeps whatever the shell
+    /// last announced — its cwd's basename. That is the shell talking, not a pane
+    /// title, and it read as a real title because the cwd guard only recognised
+    /// this pane's own full worktree path. A Codex pane whose shell sat in the
+    /// seahelm checkout was therefore titled "seahelm".
+    func testDirectoryNameOscTitleIsNotAPaneTitle() {
+        let station = Station()
+        station.setOscTitle("seahelm")
+        station.setPwd("/Volumes/openbeta/workspace/seahelm")
+        var sailor = makeSailor(
+            agentType: .codex, prompt: "", branch: "task/cloud-probe-jiang-za",
+            commandLine: nil,
+            worktreePath: "/Volumes/openbeta/workspace/saas-mono-worktrees/task/cloud-probe-jiang-za")
+        sailor.station = station
+        XCTAssertEqual(
+            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            "task/cloud-probe-jiang-za")
+    }
+
+    /// Same guard once the pane's shell is in the right place: the worktree's own
+    /// directory name is still just the cwd, not a title.
+    func testWorktreeDirectoryNameOscTitleIsNotAPaneTitle() {
+        XCTAssertNil(PaneTitleResolver.displayOscTitle(
+            "cloud-probe-jiang-za",
+            worktreePath: "/Volumes/openbeta/workspace/saas-mono-worktrees/task/cloud-probe-jiang-za"))
+    }
+
     func testFocusedStationIdIsNilWithoutTree() {
         XCTAssertNil(PaneTitleResolver.focusedStationId(in: nil))
     }

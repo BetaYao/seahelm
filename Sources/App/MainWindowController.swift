@@ -1706,7 +1706,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         // fall back to the pane's persisted (last-known) title instead of leaving
         // the header stale.
         let persisted = station.persistedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = PaneTitleResolver.displayOscTitle(station.oscTitle, worktreePath: path)
+        let title = PaneTitleResolver.displayOscTitle(station.oscTitle, worktreePath: path,
+                                                      pwd: station.pwd)
             ?? (persisted?.isEmpty == false ? persisted : nil)
         guard let title else { return }
         windowChrome?.updateTerminalTitle(repo: "", pane: title)
@@ -2199,6 +2200,16 @@ extension MainWindowController: SplitContainerDelegate {
 
     func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String) {
         closeFocusedPane()
+    }
+
+    func splitContainer(_ view: SplitContainerView, didRequestSleepPane leafId: String) {
+        guard let stationId = view.tree?.root.findLeaf(id: leafId)?.stationId else { return }
+        _ = terminalCoordinator.sleepPane(targetStationId: stationId)
+    }
+
+    func splitContainer(_ view: SplitContainerView, didRequestWakePane leafId: String) {
+        guard let stationId = view.tree?.root.findLeaf(id: leafId)?.stationId else { return }
+        _ = terminalCoordinator.wakePane(targetStationId: stationId)
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestPreview url: URL) {

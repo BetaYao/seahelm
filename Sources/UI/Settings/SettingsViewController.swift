@@ -59,6 +59,9 @@ class SettingsViewController: NSViewController {
     private let contentScroll = NSScrollView()
     private var pages: [String: NSView] = [:]
     private lazy var sessionMonitor = SessionMonitorView()
+    private let memoryWarnField = SettingsTextField()
+    private let memoryStopField = SettingsTextField()
+    private let memoryKillField = SettingsTextField()
 
     // General tab controls
     private let pathListView = NSTableView()
@@ -527,13 +530,41 @@ class SettingsViewController: NSViewController {
 
     private func buildSessionGroups() -> [NSView] {
         sessionMonitor.activeSessionNames = settingsDelegate?.settingsActiveSessionNames(self) ?? []
+        sessionMonitor.memoryGuard = config.agentMemoryGuard
+        configureMemoryGuardFields()
         return [
+            SettingsGroupView(title: "Memory Guard", rows: [
+                SettingsRow.make("Warn at",
+                                 subtitle: "Highlight and report Claude/Codex panes above this agent-process RSS. No automatic action runs yet.",
+                                 control: memoryWarnField,
+                                 accessibilityId: "settings.memoryGuard.warn"),
+                SettingsRow.make("Stop threshold",
+                                 subtitle: "Stored for the future manual/automatic stop policy. Currently display-only.",
+                                 control: memoryStopField,
+                                 accessibilityId: "settings.memoryGuard.stop"),
+                SettingsRow.make("Kill threshold",
+                                 subtitle: "Stored for the future manual/automatic session-kill policy. Currently display-only.",
+                                 control: memoryKillField,
+                                 accessibilityId: "settings.memoryGuard.kill"),
+            ]),
             SettingsGroupView(title: "zmx sessions", rows: [
                 SettingsRow.stacked(nil,
                                     subtitle: "Sessions outlive the app, so panes you closed can leave daemons behind. Detached rows (0 clients) are the ones nothing is watching. Killing a session ends whatever runs inside it.",
                                     content: sessionMonitor),
             ]),
         ]
+    }
+
+    private func configureMemoryGuardFields() {
+        for (field, value) in [
+            (memoryWarnField, config.agentMemoryGuard.warnMB),
+            (memoryStopField, config.agentMemoryGuard.stopMB),
+            (memoryKillField, config.agentMemoryGuard.killMB),
+        ] {
+            field.stringValue = Self.formatGB(value)
+            field.target = self
+            field.action = #selector(controlChanged)
+        }
     }
 
     /// Reading chat.db is the half that fails silently, so check it up front and
@@ -852,6 +883,12 @@ class SettingsViewController: NSViewController {
         // Update config from UI
         config.workspacePaths = workspacePaths
         config.terminalRowCacheSize = Int(cacheSizeField.stringValue) ?? 200
+        config.agentMemoryGuard = AgentMemoryGuardConfig(
+            warnMB: Self.parseGBField(memoryWarnField, fallbackMB: config.agentMemoryGuard.warnMB),
+            stopMB: Self.parseGBField(memoryStopField, fallbackMB: config.agentMemoryGuard.stopMB),
+            killMB: Self.parseGBField(memoryKillField, fallbackMB: config.agentMemoryGuard.killMB)
+        )
+        sessionMonitor.memoryGuard = config.agentMemoryGuard
 
         // Parse agent detection JSON
         let jsonString = ruleTextView.string
@@ -898,6 +935,19 @@ class SettingsViewController: NSViewController {
 
         config.save()
         settingsDelegate?.settingsDidUpdateConfig(self, config: config)
+    }
+
+    private static func parseGBField(_ field: NSTextField, fallbackMB: Int) -> Int {
+        let raw = field.stringValue
+            .replacingOccurrences(of: "GB", with: "", options: [.caseInsensitive])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let gb = Double(raw), gb >= 0 else { return fallbackMB }
+        return Int((gb * 1024).rounded())
+    }
+
+    private static func formatGB(_ mb: Int) -> String {
+        let gb = Double(mb) / 1024
+        return gb.rounded() == gb ? String(format: "%.0f GB", gb) : String(format: "%.1f GB", gb)
     }
 
     /// Called by the window controller as it closes, so an edit still being typed

@@ -47,4 +47,26 @@ final class BridgeCardModelTests: XCTestCase {
                                                                   options: ["a", "b", "c", "d", "e"]))
         XCTAssertGreaterThan(big, small)
     }
+
+    func testCardHeightGrowsWithMultilineMessage() {
+        let short = order(kind: .suggestNextOrder, options: ["a"])
+        let longAction = FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt", branch: "b",
+            project: "p", terminalID: "t",
+            message: """
+            澄清完成，且未修改 Issue 或业务代码。
+
+            已新增：
+
+            - CONTEXT.md：记录 Dashboard 权限、指标、周期、空状态、会话隔离与数据边界术语。
+            - docs/adr/0001-workbench-dashboard-metrics-boundary.md：明确员工端必须经后端聚合接口读取指标。
+
+            文档格式与 diff 校验均通过。
+            """,
+            options: ["a"])
+        let long = PendingOrder(id: "long", action: longAction)
+        XCTAssertGreaterThan(
+            BridgePanelViewController.cardHeight(for: long, width: 320),
+            BridgePanelViewController.cardHeight(for: short, width: 320))
+    }
 }

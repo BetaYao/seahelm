@@ -80,10 +80,15 @@ enum ProcessRunner {
     }
 
     /// Run a command synchronously, waiting for exit. Logs errors.
-    static func runSync(_ args: [String]) {
+    /// When `currentDirectory` is set, the child inherits that cwd — needed for
+    /// `zmx run`, whose session shell starts in the creator's working directory.
+    static func runSync(_ args: [String], currentDirectory: String? = nil) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
+        if let currentDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        }
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         do {

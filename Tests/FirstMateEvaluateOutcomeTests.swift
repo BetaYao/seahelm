@@ -51,6 +51,24 @@ final class FirstMateEvaluateOutcomeTests: XCTestCase {
         XCTAssertEqual(acts.first?.message, prose)
     }
 
+    func testSuggestSummaryStripsSentinelAndKeepsBullets() {
+        let prose = """
+        澄清完成，且未修改 Issue 或业务代码。
+
+        已新增：
+
+        - CONTEXT.md：记录 Dashboard 权限、指标、周期、空状态。
+        - docs/adr/0001.md：明确员工端必须经后端聚合接口读取指标。
+
+        ::seahelm-suggest:: 生成 Issue 规格 | 查看澄清结论 | 开始实施
+        """
+        let summary = FirstMate.suggestionSummaryText(from: prose)
+        XCTAssertTrue(summary.contains("澄清完成"))
+        XCTAssertTrue(summary.contains("- CONTEXT.md"))
+        XCTAssertTrue(summary.contains("- docs/adr/0001.md"))
+        XCTAssertFalse(summary.contains("::seahelm-suggest::"))
+    }
+
     func testJunkSuggestionSummaryDetectsToolChrome() {
         XCTAssertTrue(FirstMate.isJunkSuggestionSummary("Shell"))
         XCTAssertTrue(FirstMate.isJunkSuggestionSummary("Bash"))

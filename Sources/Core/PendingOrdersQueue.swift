@@ -64,9 +64,8 @@ final class PendingOrdersQueue {
     /// `seahelm-suggest` already queued the options with tool-chrome as message).
     /// Leaves options untouched; never clobbers a non-junk summary already shown.
     func refreshSuggestMessage(terminalID: String, message: String) {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let summary = String(trimmed.prefix(200))
+        let summary = FirstMate.suggestionSummaryText(from: message)
+        guard !summary.isEmpty else { return }
         var changed = false
         for i in orders.indices {
             let action = orders[i].action

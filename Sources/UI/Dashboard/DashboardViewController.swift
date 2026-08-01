@@ -1886,7 +1886,10 @@ extension DashboardViewController: CabinSidePanelDelegate {
         let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let title = fileName.isEmpty ? "Changes" : fileName
-        showCenterOverlay(DiffReviewView(worktreePath: worktreePath), title: title)
+        showCenterOverlay(
+            DiffReviewView(worktreePath: worktreePath, selectedPath: path),
+            title: title
+        )
     }
 }
 

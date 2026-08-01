@@ -15,6 +15,13 @@ struct ZmxSessionInfo: Equatable {
     let clients: Int?
     let created: Date?
     let startDir: String?
+    /// RSS sum for the zmx session root process and descendants.
+    var processMemoryBytes: UInt64?
+    /// RSS sum for the recognized agent process and descendants, if any.
+    var agentMemoryBytes: UInt64?
+    /// Best human-facing command under the session, useful when memory belongs
+    /// to a tool wrapped by a shell or node process.
+    var processName: String?
     /// Whether Seahelm created it (current or legacy prefix). Sessions started
     /// by hand outside the app are listed but never offered for cleanup.
     let isManaged: Bool
@@ -130,8 +137,32 @@ enum SessionManager {
                 clients: zmxListField(trimmed, "clients=").flatMap(Int.init),
                 created: created,
                 startDir: startDir,
+                processMemoryBytes: nil,
+                agentMemoryBytes: nil,
+                processName: nil,
                 isManaged: isManagedSessionPrefix(name)
             )
+        }
+    }
+
+    /// Parse `zmx list` rows and attach process-tree RSS data. This is used by
+    /// the Settings monitor, not the orphan sweeper: memory probing is best-
+    /// effort UI detail and must never affect cleanup decisions.
+    static func parseZmxSessionsWithProcessMemory(listOutput: String) -> [ZmxSessionInfo] {
+        let sessions = parseZmxSessions(listOutput: listOutput)
+        guard sessions.contains(where: { $0.pid != nil }) else { return sessions }
+        let procs = ProcessProbe.allProcesses()
+        guard !procs.isEmpty else { return sessions }
+        let manifests = ManifestStore.shared.all.map(\.manifest)
+
+        return sessions.map { session in
+            guard let pid = session.pid else { return session }
+            let memory = ProcessProbe.memory(rootPid: Int32(pid), in: procs, manifests: manifests)
+            var enriched = session
+            enriched.processMemoryBytes = memory.totalBytes
+            enriched.agentMemoryBytes = memory.agentBytes
+            enriched.processName = memory.processName
+            return enriched
         }
     }
 
@@ -214,8 +245,12 @@ enum SessionManager {
             // `zmx run` types the command into its own persistent interactive
             // shell (and appends a ZMX_TASK_COMPLETED marker), so the session
             // survives the agent exiting on its own — no `exec "$0"` trick
-            // needed. Wrap only in a login shell that cd's and `clear`s the
-            // echoed command line before the agent renders inline.
+            // needed. Wrap in a login shell that cd's and `clear`s before the
+            // agent renders. That inner `cd` only affects the nested shell; the
+            // outer session shell's cwd is set separately by spawning `zmx` with
+            // `Process.currentDirectoryURL = cwd` (see `createDetachedSession`),
+            // so exiting the agent lands you back in the worktree — not in
+            // whatever directory Seahelm itself was launched from.
             //
             // Export the control-socket context first so the agent (and any tool
             // it spawns, e.g. seahelm-suggest) can reach the multiplexer socket
@@ -261,8 +296,11 @@ enum SessionManager {
             agentCommandLine: agentCommandLine, shell: shell
         )
         guard !commands.isEmpty else { return false }
+        // zmx's session shell inherits this process's cwd. Without it, exiting
+        // the agent drops you in Seahelm's launch directory (often the seahelm
+        // checkout itself) instead of the worktree.
         for argv in commands {
-            ProcessRunner.runSync(argv)
+            ProcessRunner.runSync(argv, currentDirectory: cwd)
         }
         return true
     }

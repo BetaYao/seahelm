@@ -156,7 +156,7 @@ enum PaneTitleResolver {
     ///
     /// Public because the click→title fast path resolves straight from a
     /// `Station` (no ShipLog round-trip — its snapshots trail the poll cycle).
-    static func displayOscTitle(_ raw: String?, worktreePath: String) -> String? {
+    static func displayOscTitle(_ raw: String?, worktreePath: String, pwd: String = "") -> String? {
         guard let raw else { return nil }
         let stripped = raw.drop { ch in
             ch.isWhitespace || !(ch.isLetter || ch.isNumber || ch.isPunctuation)
@@ -164,11 +164,23 @@ enum PaneTitleResolver {
         let title = String(stripped).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         // Shells and some agents park the cwd in the title — the path fallback
-        // below already handles that, and handles it better. Reject both the bare
-        // path and the shell prompt form (`user@host:/path`).
-        guard title != worktreePath, title != shortenPath(worktreePath),
+        // below already handles that, and handles it better. Reject the bare
+        // path, the shell prompt form (`user@host:/path`), and the plain
+        // directory name: macOS zsh titles a window with just the basename, and
+        // agents that set no title of their own (Codex) inherit it.
+        guard !isDirectoryTitle(title, of: worktreePath),
+              !isDirectoryTitle(title, of: pwd),
               !isShellPromptTitle(title, worktreePath: worktreePath) else { return nil }
         return title
+    }
+
+    /// True when `title` is just `path` — spelled out, `~`-shortened, or reduced
+    /// to its last component.
+    private static func isDirectoryTitle(_ title: String, of path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        return title == path
+            || title == shortenPath(path)
+            || title == (path as NSString).lastPathComponent
     }
 
     /// True when an OSC title is really a shell prompt — `user@host:/path` — for
@@ -181,7 +193,8 @@ enum PaneTitleResolver {
     }
 
     private static func oscTitle(for sailor: SailorInfo) -> String? {
-        displayOscTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath)
+        displayOscTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath,
+                        pwd: sailor.station?.pwd ?? "")
     }
 
     /// Per-pane only — a worktree-scoped agent pick must not make shell siblings

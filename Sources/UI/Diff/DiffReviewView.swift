@@ -23,6 +23,7 @@ final class DiffReviewView: NSView {
     private let headerLabel = NSTextField(labelWithString: "")
 
     private let loadSnapshot: () -> GitDiffSnapshot
+    private let selectedPath: String?
     private var files: [DiffFile] = []
     private var treeNodes: [DiffReviewFileTreeNode] = []
     private var hasLoaded = false
@@ -31,8 +32,17 @@ final class DiffReviewView: NSView {
         diffTextView.string
     }
 
-    init(worktreePath: String, loadSnapshot: (() -> GitDiffSnapshot)? = nil) {
-        self.loadSnapshot = loadSnapshot ?? { GitDiff.snapshot(worktreePath: worktreePath) }
+    var isFileListVisibleForTesting: Bool { selectedPath == nil }
+
+    init(
+        worktreePath: String,
+        selectedPath: String? = nil,
+        loadSnapshot: (() -> GitDiffSnapshot)? = nil
+    ) {
+        self.selectedPath = selectedPath
+        self.loadSnapshot = loadSnapshot ?? {
+            GitDiff.snapshot(worktreePath: worktreePath, selectedPath: selectedPath)
+        }
         super.init(frame: .zero)
         setup()
     }
@@ -45,6 +55,7 @@ final class DiffReviewView: NSView {
 
     override func layout() {
         super.layout()
+        guard selectedPath == nil else { return }
         guard splitView.subviews.count > 1, bounds.width > 0 else { return }
         // Set the divider once — re-asserting it every layout pass fights user
         // drags and re-enters layout on every resize frame.
@@ -83,31 +94,6 @@ final class DiffReviewView: NSView {
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerLabel)
 
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(splitView)
-
-        fileScrollView.hasVerticalScroller = true
-        fileScrollView.drawsBackground = false
-        fileScrollView.borderType = .noBorder
-        fileScrollView.translatesAutoresizingMaskIntoConstraints = true
-
-        outlineView.setAccessibilityIdentifier("diffReview.fileTree")
-        outlineView.backgroundColor = .clear
-        outlineView.headerView = nil
-        outlineView.rowHeight = 22
-        outlineView.indentationPerLevel = 16
-        outlineView.delegate = self
-        outlineView.dataSource = self
-        outlineView.selectionHighlightStyle = .regular
-
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("file"))
-        column.resizingMask = .autoresizingMask
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
-        fileScrollView.documentView = outlineView
-
         diffScrollView.hasVerticalScroller = true
         diffScrollView.hasHorizontalScroller = true
         diffScrollView.drawsBackground = false
@@ -129,19 +115,51 @@ final class DiffReviewView: NSView {
         )
         diffScrollView.documentView = diffTextView
 
-        splitView.addSubview(fileScrollView)
-        splitView.addSubview(diffScrollView)
-        splitView.adjustSubviews()
+        let contentView: NSView
+        if selectedPath == nil {
+            splitView.isVertical = true
+            splitView.dividerStyle = .thin
+            splitView.translatesAutoresizingMaskIntoConstraints = false
+
+            fileScrollView.hasVerticalScroller = true
+            fileScrollView.drawsBackground = false
+            fileScrollView.borderType = .noBorder
+            fileScrollView.translatesAutoresizingMaskIntoConstraints = true
+
+            outlineView.setAccessibilityIdentifier("diffReview.fileTree")
+            outlineView.backgroundColor = .clear
+            outlineView.headerView = nil
+            outlineView.rowHeight = 22
+            outlineView.indentationPerLevel = 16
+            outlineView.delegate = self
+            outlineView.dataSource = self
+            outlineView.selectionHighlightStyle = .regular
+
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("file"))
+            column.resizingMask = .autoresizingMask
+            outlineView.addTableColumn(column)
+            outlineView.outlineTableColumn = column
+            fileScrollView.documentView = outlineView
+
+            splitView.addSubview(fileScrollView)
+            splitView.addSubview(diffScrollView)
+            splitView.adjustSubviews()
+            contentView = splitView
+        } else {
+            diffScrollView.translatesAutoresizingMaskIntoConstraints = false
+            contentView = diffScrollView
+        }
+        addSubview(contentView)
 
         NSLayoutConstraint.activate([
             headerLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -96),
 
-            splitView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
-            splitView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            splitView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
@@ -168,10 +186,15 @@ final class DiffReviewView: NSView {
         } else {
             countLabel = "\(uniqueFileCount) files"
         }
-        headerLabel.stringValue = "Changes: \(countLabel)  +\(totalAdd) -\(totalDel)"
-        outlineView.reloadData()
-        outlineView.expandItem(nil, expandChildren: true)
-        showAllDiffs()
+        if let selectedPath {
+            headerLabel.stringValue = "\(selectedPath)  +\(totalAdd) -\(totalDel)"
+            showDiffForFile(path: selectedPath)
+        } else {
+            headerLabel.stringValue = "Changes: \(countLabel)  +\(totalAdd) -\(totalDel)"
+            outlineView.reloadData()
+            outlineView.expandItem(nil, expandChildren: true)
+            showAllDiffs()
+        }
     }
 
     private func showAllDiffs() {

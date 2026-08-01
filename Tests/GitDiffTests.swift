@@ -75,6 +75,37 @@ final class GitDiffTests: XCTestCase {
         XCTAssertTrue(snapshot.files.contains { $0.path == "tracked.txt" && !$0.hunks.isEmpty })
     }
 
+    func testSnapshotCanLoadOnlySelectedFile() throws {
+        let repo = try makeRepoWithFeatureBranch()
+        try "tracked-feature\n".write(toFile: repo + "/tracked.txt", atomically: true, encoding: .utf8)
+        try "shared-feature\n".write(toFile: repo + "/shared.txt", atomically: true, encoding: .utf8)
+
+        let snapshot = GitDiff.snapshot(worktreePath: repo, selectedPath: "tracked.txt")
+
+        XCTAssertEqual(snapshot.changedFiles.map(\.path), ["tracked.txt"])
+        XCTAssertEqual(snapshot.files.map(\.path), ["tracked.txt"])
+        XCTAssertEqual(snapshot.totalChangedFileCount, 1)
+    }
+
+    func testDiffReviewSelectedPathUsesSingleFileLayout() {
+        let view = DiffReviewView(
+            worktreePath: "/tmp/worktree",
+            selectedPath: "Sources/App/Main.swift",
+            loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+        )
+
+        XCTAssertFalse(view.isFileListVisibleForTesting)
+    }
+
+    func testDiffReviewDefaultLayoutKeepsFileList() {
+        let view = DiffReviewView(
+            worktreePath: "/tmp/worktree",
+            loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+        )
+
+        XCTAssertTrue(view.isFileListVisibleForTesting)
+    }
+
     func testOnMainCleanWorkingTreeShowsNoBranchChanges() throws {
         tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("seahelm-gitdiff-\(UUID().uuidString)")

@@ -6,6 +6,67 @@ enum SidePanelTab: Int {
     case changes = 2
 }
 
+enum ChangesListMode: Int {
+    case tree = 0
+    case flat = 1
+}
+
+final class ChangeTreeNode {
+    let name: String
+    let path: String
+    var entry: GitChangedFile?
+    var children: [ChangeTreeNode] = []
+
+    var isLeaf: Bool { entry != nil }
+
+    init(name: String, path: String, entry: GitChangedFile? = nil) {
+        self.name = name
+        self.path = path
+        self.entry = entry
+    }
+}
+
+enum ChangeTreeBuilder {
+    static func build(from files: [GitChangedFile]) -> [ChangeTreeNode] {
+        let root = ChangeTreeNode(name: "", path: "")
+        var directoriesByPath: [String: ChangeTreeNode] = ["": root]
+
+        for entry in files {
+            let parts = entry.path.split(separator: "/").map(String.init)
+            guard !parts.isEmpty else { continue }
+            var parent = root
+            var prefixParts: [String] = []
+
+            for part in parts.dropLast() {
+                prefixParts.append(part)
+                let path = prefixParts.joined(separator: "/")
+                if let existing = directoriesByPath[path] {
+                    parent = existing
+                    continue
+                }
+                let node = ChangeTreeNode(name: part, path: path)
+                parent.children.append(node)
+                directoriesByPath[path] = node
+                parent = node
+            }
+
+            let leaf = ChangeTreeNode(name: parts.last ?? entry.path, path: entry.path, entry: entry)
+            parent.children.append(leaf)
+        }
+
+        sort(&root.children)
+        return root.children
+    }
+
+    private static func sort(_ nodes: inout [ChangeTreeNode]) {
+        for node in nodes { sort(&node.children) }
+        nodes.sort { lhs, rhs in
+            if lhs.isLeaf != rhs.isLeaf { return !lhs.isLeaf }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
 protocol CabinSidePanelDelegate: AnyObject {
     func sidePanel(_ vc: CabinSidePanelViewController, didSelectFile path: String)
     func sidePanel(_ vc: CabinSidePanelViewController, didSelectChange path: String)
@@ -74,14 +135,20 @@ final class CabinSidePanelViewController: NSViewController {
 
     // Changes tab
     private var changesTableView: NSTableView?
+    private var changesOutlineView: NSOutlineView?
     private var changesScrollView: NSScrollView?
     private var changedFiles: [GitChangedFile] = []
+    private var changeTreeRoots: [ChangeTreeNode] = []
+    private var changesListMode: ChangesListMode = .flat
+    private var currentBranchChanges: GitBranchChanges?
     /// Bumped each time the changes tab starts a (background) reload; stale
     /// completions from an earlier reload are discarded.
     private var changesLoadGeneration = 0
 
     var selectedTabForTesting: SidePanelTab { selectedTab }
     var worktreePathForTesting: String? { worktreePath }
+    var changesListModeForTesting: ChangesListMode { changesListMode }
+    var changeTreeRootsForTesting: [ChangeTreeNode] { changeTreeRoots }
     /// Tabs whose content is currently mounted (built and still in the hierarchy).
     var mountedTabsForTesting: Set<SidePanelTab> { Set(tabContainers.keys) }
     /// Identity of a tab's container, so a test can prove it was reused not rebuilt.
@@ -158,7 +225,7 @@ final class CabinSidePanelViewController: NSViewController {
     }
 
     /// `◍ Title` + optional subtitle + hairline — same rhythm as First Mate.
-    private func makePaneHeader(title: String, subtitle: String = "") -> NSView {
+    private func makePaneHeader(title: String, subtitle: String = "", trailingView: NSView? = nil) -> NSView {
         let icon = NSTextField(labelWithString: "◍")
         icon.font = AppFont.mono(size: 13)
         icon.textColor = Self.sea
@@ -187,17 +254,30 @@ final class CabinSidePanelViewController: NSViewController {
         wrap.translatesAutoresizingMaskIntoConstraints = false
         wrap.addSubview(row)
         wrap.addSubview(hairline)
-        NSLayoutConstraint.activate([
+        var constraints = [
             row.topAnchor.constraint(equalTo: wrap.topAnchor, constant: 13),
             row.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 15),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: wrap.trailingAnchor, constant: -15),
 
             hairline.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 11),
             hairline.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
             hairline.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
             hairline.heightAnchor.constraint(equalToConstant: 1),
             hairline.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
-        ])
+        ]
+        if let trailingView {
+            trailingView.translatesAutoresizingMaskIntoConstraints = false
+            wrap.addSubview(trailingView)
+            constraints += [
+                row.trailingAnchor.constraint(lessThanOrEqualTo: trailingView.leadingAnchor, constant: -10),
+                trailingView.trailingAnchor.constraint(equalTo: wrap.trailingAnchor, constant: -12),
+                trailingView.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                trailingView.widthAnchor.constraint(equalToConstant: 24),
+                trailingView.heightAnchor.constraint(equalToConstant: 24),
+            ]
+        } else {
+            constraints.append(row.trailingAnchor.constraint(lessThanOrEqualTo: wrap.trailingAnchor, constant: -15))
+        }
+        NSLayoutConstraint.activate(constraints)
         return wrap
     }
 
@@ -240,6 +320,7 @@ final class CabinSidePanelViewController: NSViewController {
         fileSearchField = nil
         hiddenToggleButton = nil
         changesTableView = nil
+        changesOutlineView = nil
         changesScrollView = nil
     }
 
@@ -472,13 +553,19 @@ final class CabinSidePanelViewController: NSViewController {
     }
 
     private func presentChanges(_ branch: GitBranchChanges) {
+        currentBranchChanges = branch
         changedFiles = branch.files
+        changeTreeRoots = ChangeTreeBuilder.build(from: branch.files)
+        rebuildChangesView(branch)
+    }
 
+    private func rebuildChangesView(_ branch: GitBranchChanges) {
         // This rebuilds the tab's subtree, so carry the scroll offset across —
         // re-entering Changes should not silently jump the list back to the top.
         let restoredScrollOrigin = changesScrollView?.contentView.bounds.origin
         contentView.subviews.forEach { $0.removeFromSuperview() }
         changesTableView = nil
+        changesOutlineView = nil
         changesScrollView = nil
 
         let subtitle: String
@@ -497,9 +584,24 @@ final class CabinSidePanelViewController: NSViewController {
                 subtitle = countLabel
             }
         }
+        let modeButton = NSButton()
+        modeButton.bezelStyle = .recessed
+        modeButton.isBordered = false
+        modeButton.imagePosition = .imageOnly
+        modeButton.image = NSImage(
+            systemSymbolName: "list.bullet.indent",
+            accessibilityDescription: "Toggle tree view"
+        )
+        modeButton.contentTintColor = changesListMode == .tree ? Theme.accent : Theme.textSecondary
+        modeButton.target = self
+        modeButton.action = #selector(toggleChangesListMode(_:))
+        modeButton.toolTip = changesListMode == .tree ? "Tree view" : "Flat list"
+        modeButton.setAccessibilityIdentifier("sidePanel.changesMode")
+
         let header = makePaneHeader(
             title: "Changes",
-            subtitle: subtitle
+            subtitle: subtitle,
+            trailingView: changedFiles.isEmpty ? nil : modeButton
         )
         contentView.addSubview(header)
         NSLayoutConstraint.activate([
@@ -513,6 +615,39 @@ final class CabinSidePanelViewController: NSViewController {
             return
         }
 
+        let scrollView: NSScrollView
+        if changesListMode == .tree {
+            scrollView = makeChangesTreeScrollView()
+        } else {
+            scrollView = makeChangesFlatScrollView()
+        }
+        contentView.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+
+        changesScrollView = scrollView
+
+        if changesListMode == .tree {
+            expandChangesTree()
+        }
+
+        // Restore after layout — the document view has no height until then, so
+        // scrolling now would be clamped to zero.
+        if let origin = restoredScrollOrigin, origin.y > 0 {
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let scrollView else { return }
+                scrollView.contentView.scroll(to: origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+    }
+
+    private func makeChangesFlatScrollView() -> NSScrollView {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ChangeColumn"))
         column.title = "Changed Files"
 
@@ -537,26 +672,54 @@ final class CabinSidePanelViewController: NSViewController {
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(scrollView)
-
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
-            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-
         changesTableView = tableView
-        changesScrollView = scrollView
+        return scrollView
+    }
 
-        // Restore after layout — the document view has no height until then, so
-        // scrolling now would be clamped to zero.
-        if let origin = restoredScrollOrigin, origin.y > 0 {
-            DispatchQueue.main.async { [weak scrollView] in
-                guard let scrollView else { return }
-                scrollView.contentView.scroll(to: origin)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-            }
+    private func makeChangesTreeScrollView() -> NSScrollView {
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ChangeTreeColumn"))
+        column.title = "Changed Files"
+
+        let outlineView = NSOutlineView()
+        outlineView.addTableColumn(column)
+        outlineView.outlineTableColumn = column
+        outlineView.headerView = nil
+        outlineView.rowHeight = 26
+        outlineView.style = .sourceList
+        outlineView.dataSource = self
+        outlineView.delegate = self
+        outlineView.target = self
+        outlineView.action = #selector(changeTreeRowClicked)
+        outlineView.setAccessibilityIdentifier("sidePanel.changesTree")
+        outlineView.backgroundColor = .clear
+        outlineView.selectionHighlightStyle = .regular
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = outlineView
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        changesOutlineView = outlineView
+        return scrollView
+    }
+
+    private func expandChangesTree() {
+        guard let outlineView = changesOutlineView else { return }
+        func expand(_ node: ChangeTreeNode) {
+            guard !node.isLeaf else { return }
+            outlineView.expandItem(node)
+            node.children.forEach(expand)
+        }
+        changeTreeRoots.forEach(expand)
+    }
+
+    @objc private func toggleChangesListMode(_ sender: NSButton) {
+        changesListMode = changesListMode == .tree ? .flat : .tree
+        if let currentBranchChanges {
+            rebuildChangesView(currentBranchChanges)
         }
     }
 
@@ -565,6 +728,22 @@ final class CabinSidePanelViewController: NSViewController {
         let row = tableView.clickedRow
         guard row >= 0, row < changedFiles.count else { return }
         handleChangeSelection(changedFiles[row].path)
+    }
+
+    @objc private func changeTreeRowClicked() {
+        guard let outlineView = changesOutlineView else { return }
+        let row = outlineView.clickedRow
+        guard row >= 0,
+              let node = outlineView.item(atRow: row) as? ChangeTreeNode else { return }
+        guard let entry = node.entry else {
+            if outlineView.isItemExpanded(node) {
+                outlineView.collapseItem(node)
+            } else {
+                outlineView.expandItem(node)
+            }
+            return
+        }
+        handleChangeSelection(entry.path)
     }
 
     private func showPlaceholder(_ message: String, identifier: String, below header: NSView? = nil) {
@@ -613,27 +792,105 @@ extension CabinSidePanelViewController: NSTableViewDataSource, NSTableViewDelega
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry = changedFiles[row]
-        let badge: String
-        let badgeColor: NSColor
-        switch entry.status {
-        case .added:
-            badge = "A"
-            badgeColor = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
-        case .modified:
-            badge = "M"
-            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
-        case .deleted:
-            badge = "D"
-            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
-        case .renamed:
-            badge = "R"
-            badgeColor = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
-        case .unknown:
-            badge = "?"
-            badgeColor = Self.inkDim
+        return makeChangeCell(in: tableView, text: entry.path, entry: entry, identifier: "ChangeCell")
+    }
+}
+
+// MARK: - NSOutlineViewDataSource / Delegate (Changes tree)
+
+extension CabinSidePanelViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        if let node = item as? ChangeTreeNode { return node.children.count }
+        return changeTreeRoots.count
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        if let node = item as? ChangeTreeNode { return node.children[index] }
+        return changeTreeRoots[index]
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        guard let node = item as? ChangeTreeNode else { return false }
+        return !node.children.isEmpty
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        guard let node = item as? ChangeTreeNode else { return nil }
+        return makeChangeTreeCell(in: outlineView, node: node)
+    }
+}
+
+// MARK: - Changes cell helpers
+
+private extension CabinSidePanelViewController {
+    func makeChangeTreeCell(in outlineView: NSOutlineView, node: ChangeTreeNode) -> NSTableCellView {
+        let id = NSUserInterfaceItemIdentifier("ChangeTreeCell")
+        let cellView: NSTableCellView
+        if let reused = outlineView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
+            cellView = reused
+        } else {
+            cellView = NSTableCellView()
+            cellView.identifier = id
+
+            let badgeLabel = NSTextField(labelWithString: "")
+            badgeLabel.font = AppFont.mono(size: 11, weight: .semibold)
+            badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+            badgeLabel.tag = 100
+
+            let imageView = NSImageView()
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.imageScaling = .scaleProportionallyDown
+            imageView.tag = 101
+            cellView.imageView = imageView
+
+            let pathLabel = NSTextField(labelWithString: "")
+            pathLabel.font = AppFont.mono(size: 12)
+            pathLabel.lineBreakMode = .byTruncatingTail
+            pathLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.textField = pathLabel
+
+            cellView.addSubview(badgeLabel)
+            cellView.addSubview(imageView)
+            cellView.addSubview(pathLabel)
+
+            NSLayoutConstraint.activate([
+                badgeLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 2),
+                badgeLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                badgeLabel.widthAnchor.constraint(equalToConstant: 14),
+
+                imageView.leadingAnchor.constraint(equalTo: badgeLabel.trailingAnchor, constant: 4),
+                imageView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 14),
+                imageView.heightAnchor.constraint(equalToConstant: 14),
+
+                pathLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 4),
+                pathLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -2),
+                pathLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+            ])
         }
 
-        let id = NSUserInterfaceItemIdentifier("ChangeCell")
+        if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
+            if let entry = node.entry {
+                let badge = statusBadge(for: entry.status)
+                badgeLabel.stringValue = badge.text
+                badgeLabel.textColor = badge.color
+            } else {
+                badgeLabel.stringValue = ""
+                badgeLabel.textColor = Self.inkDim
+            }
+        }
+        let icon = changeTreeIcon(for: node)
+        cellView.imageView?.image = NSImage(systemSymbolName: icon.symbol, accessibilityDescription: nil)
+        cellView.imageView?.contentTintColor = icon.tint
+        cellView.textField?.stringValue = node.name
+        cellView.textField?.font = AppFont.mono(size: 12)
+        cellView.textField?.textColor = node.isLeaf ? Self.ink : Self.inkDim
+        return cellView
+    }
+
+    func makeChangeCell(in tableView: NSTableView, text: String, entry: GitChangedFile?,
+                        identifier: String) -> NSTableCellView {
+        let id = NSUserInterfaceItemIdentifier(identifier)
         let cellView: NSTableCellView
         if let reused = tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
             cellView = reused
@@ -668,12 +925,48 @@ extension CabinSidePanelViewController: NSTableViewDataSource, NSTableViewDelega
         }
 
         if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
-            badgeLabel.stringValue = badge
-            badgeLabel.textColor = badgeColor
+            if let entry {
+                let badge = statusBadge(for: entry.status)
+                badgeLabel.stringValue = badge.text
+                badgeLabel.textColor = badge.color
+            } else {
+                badgeLabel.stringValue = ""
+                badgeLabel.textColor = Self.inkDim
+            }
         }
-        cellView.textField?.stringValue = entry.path
-        cellView.textField?.textColor = Self.ink
+        cellView.textField?.stringValue = text
+        cellView.textField?.textColor = entry == nil ? Self.inkDim : Self.ink
         cellView.textField?.font = AppFont.mono(size: 12)
         return cellView
+    }
+
+    func changeTreeIcon(for node: ChangeTreeNode) -> (symbol: String, tint: NSColor) {
+        if !node.isLeaf { return ("folder.fill", .systemBlue) }
+        let fileNode = FileTreeNode(url: URL(fileURLWithPath: node.path), isDirectory: false)
+        let icon = FileTreeOutlineController.icon(for: fileNode)
+        return (icon.0, icon.1)
+    }
+
+    func statusBadge(for status: DiffFile.FileStatus) -> (text: String, color: NSColor) {
+        let badge: String
+        let badgeColor: NSColor
+        switch status {
+        case .added:
+            badge = "A"
+            badgeColor = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
+        case .modified:
+            badge = "M"
+            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
+        case .deleted:
+            badge = "D"
+            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
+        case .renamed:
+            badge = "R"
+            badgeColor = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
+        case .unknown:
+            badge = "?"
+            badgeColor = Self.inkDim
+        }
+        return (badge, badgeColor)
     }
 }

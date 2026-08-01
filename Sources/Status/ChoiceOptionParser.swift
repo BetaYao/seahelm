@@ -58,9 +58,9 @@ enum ChoiceOptionParser {
 
             let trimmed = s.trimmingCharacters(in: .whitespaces)
             guard !current.isEmpty else {
-                // Only harmless choice-dialog chrome may trail a completed run.
-                // Any real content means an older list in the viewport is stale.
-                if !trimmed.isEmpty, !isChoiceFooter(trimmed) {
+                // Only harmless chrome may trail a completed run. Any real
+                // content means an older list in the viewport is stale.
+                if !trimmed.isEmpty, !isTrailingChrome(trimmed) {
                     lastValid.removeAll()
                 }
                 continue
@@ -80,8 +80,24 @@ enum ChoiceOptionParser {
         return lastValid
     }
 
-    private static func isChoiceFooter(_ text: String) -> Bool {
+    /// Chrome that may sit below a live choice list without making it stale.
+    ///
+    /// Agent TUIs pin an input composer and a status line to the bottom of the
+    /// viewport, so a dialog is rarely the last thing on screen — Codex renders
+    /// `› <composer>` and `<model> · <cwd>` under its approval prompt. Treating
+    /// those as new output discarded the options, which is why Codex approvals
+    /// never reached the island.
+    private static func isTrailingChrome(_ text: String) -> Bool {
         let lower = text.lowercased()
-        return lower.contains("press enter") && (lower.contains("confirm") || lower.contains("cancel"))
+        // The confirmation hint directly under the list.
+        if lower.contains("press enter"), lower.contains("confirm") || lower.contains("cancel") {
+            return true
+        }
+        // The composer: the agent's input box, always the bottom-most element.
+        if let first = text.first, "›❯>".contains(first) { return true }
+        // A status line — `gpt-5.6-terra medium · /path`, `Auto · 17 files edited
+        // · /path`. Middle-dot separated segments are TUI chrome, not prose.
+        if text.contains(" · ") { return true }
+        return false
     }
 }

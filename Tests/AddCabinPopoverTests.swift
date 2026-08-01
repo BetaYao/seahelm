@@ -63,6 +63,20 @@ final class AddCabinPopoverTests: XCTestCase {
         XCTAssertEqual(submitted, "fix this layout /tmp/shot-b.png")
     }
 
+    func testPopoverGrowsOnlyWhenAttachmentsArePresent() {
+        let controller = makeLoadedController()
+        let baseSize = controller.contentSizeForTesting
+
+        controller.attachImageForTesting(URL(fileURLWithPath: "/tmp/shot.png"))
+        let attachmentSize = controller.contentSizeForTesting
+
+        XCTAssertEqual(baseSize.width, attachmentSize.width)
+        XCTAssertGreaterThan(attachmentSize.height, baseSize.height)
+
+        controller.removeImageForTesting(at: 0)
+        XCTAssertEqual(controller.contentSizeForTesting, baseSize)
+    }
+
     func testAnImageAloneIsEnoughToCreate() {
         let controller = makeLoadedController()
         var submitted: String?

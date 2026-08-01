@@ -25,9 +25,24 @@ enum ProcessProbe {
         let pid: Int32
         let ppid: Int32
         let argv: [String]
+        let residentBytes: UInt64?
+
+        init(pid: Int32, ppid: Int32, argv: [String], residentBytes: UInt64? = nil) {
+            self.pid = pid
+            self.ppid = ppid
+            self.argv = argv
+            self.residentBytes = residentBytes
+        }
+
         var execBasename: String {
             (argv.first.map { ($0 as NSString).lastPathComponent } ?? "").lowercased()
         }
+    }
+
+    struct SessionMemory: Equatable {
+        let totalBytes: UInt64
+        let agentBytes: UInt64
+        let processName: String?
     }
 
     /// Given the descendant processes of a session (any order) and the loaded
@@ -39,7 +54,7 @@ enum ProcessProbe {
     static func identify(procs: [Proc], manifests: [AgentManifest]) -> String? {
         // Pass 1: direct exec_names match (most specific).
         for p in procs {
-            for m in manifests where m.process?.execNames.contains(p.execBasename) == true {
+            for m in manifests where directlyMatches(p, manifest: m) {
                 return m.id
             }
         }
@@ -49,10 +64,7 @@ enum ProcessProbe {
             for m in manifests {
                 guard let pm = m.process, !pm.argvContains.isEmpty else { continue }
                 let isGeneric = pm.genericRuntimes.contains(p.execBasename)
-                let hit = p.argv.contains { token in
-                    let t = token.lowercased()
-                    return pm.argvContains.contains { t.contains($0) }
-                }
+                let hit = argvMatches(p, manifest: m)
                 if hit && (isGeneric || pm.genericRuntimes.isEmpty) { return m.id }
             }
         }
@@ -83,6 +95,36 @@ enum ProcessProbe {
         guard !descendants.isEmpty else { return (nil, nil) }
         let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
         return (agentId, foregroundCommandLine(from: descendants))
+    }
+
+    /// Aggregate memory under a zmx session root. `totalBytes` includes the root
+    /// process (usually the session shell) and all descendants. `agentBytes`
+    /// includes any recognized agent process and its children, so Claude Code's
+    /// node/helper subprocesses are counted with the agent rather than only the
+    /// thin launcher process.
+    static func memory(rootPid: Int32, in all: [Proc], manifests: [AgentManifest]) -> SessionMemory {
+        let descendants = descendants(of: rootPid, in: all)
+        let root = all.first { $0.pid == rootPid }
+        let sessionProcs = (root.map { [$0] } ?? []) + descendants
+        let total = uniqueMemoryBytes(sessionProcs)
+
+        var childrenOf: [Int32: [Proc]] = [:]
+        for p in all { childrenOf[p.ppid, default: []].append(p) }
+
+        let agentRoots = descendants.filter { processMatchesAnyAgent($0, manifests: manifests) }
+        var agentPids = Set<Int32>()
+        for root in agentRoots {
+            collect(root.pid, childrenOf: childrenOf, into: &agentPids)
+        }
+        let byPid = Dictionary(uniqueKeysWithValues: all.map { ($0.pid, $0) })
+        let agentProcs = agentPids.compactMap { byPid[$0] }
+        let agent = uniqueMemoryBytes(agentProcs)
+
+        return SessionMemory(
+            totalBytes: total,
+            agentBytes: agent,
+            processName: foregroundCommandLine(from: descendants)
+        )
     }
 
     /// Human-facing command for pane titles: prefer a non-shell leaf under the
@@ -136,10 +178,11 @@ enum ProcessProbe {
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
         guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
         let actual = size / MemoryLayout<kinfo_proc>.stride
+        let rss = residentBytesByPid()
         return procs.prefix(actual).map { kp in
             let pid = kp.kp_proc.p_pid
             let ppid = kp.kp_eproc.e_ppid
-            return Proc(pid: pid, ppid: ppid, argv: argv(of: pid))
+            return Proc(pid: pid, ppid: ppid, argv: argv(of: pid), residentBytes: rss[pid])
         }
     }
 
@@ -173,6 +216,52 @@ enum ProcessProbe {
             collected += 1
         }
         return result
+    }
+
+    private static func residentBytesByPid() -> [Int32: UInt64] {
+        guard let output = ProcessRunner.output(["ps", "-axo", "pid=,rss="]) else { return [:] }
+        var result: [Int32: UInt64] = [:]
+        for line in output.components(separatedBy: .newlines) {
+            let parts = line.split(whereSeparator: \.isWhitespace)
+            guard parts.count >= 2,
+                  let pid = Int32(parts[0]),
+                  let rssKB = UInt64(parts[1]) else { continue }
+            result[pid] = rssKB * 1024
+        }
+        return result
+    }
+
+    private static func directlyMatches(_ p: Proc, manifest m: AgentManifest) -> Bool {
+        m.process?.execNames.contains(p.execBasename) == true
+    }
+
+    private static func argvMatches(_ p: Proc, manifest m: AgentManifest) -> Bool {
+        guard let pm = m.process, !pm.argvContains.isEmpty else { return false }
+        return p.argv.contains { token in
+            let t = token.lowercased()
+            return pm.argvContains.contains { t.contains($0) }
+        }
+    }
+
+    private static func processMatchesAnyAgent(_ p: Proc, manifests: [AgentManifest]) -> Bool {
+        manifests.contains { m in
+            directlyMatches(p, manifest: m) || argvMatches(p, manifest: m)
+        }
+    }
+
+    private static func collect(_ pid: Int32, childrenOf: [Int32: [Proc]], into pids: inout Set<Int32>) {
+        guard pids.insert(pid).inserted else { return }
+        for child in childrenOf[pid] ?? [] {
+            collect(child.pid, childrenOf: childrenOf, into: &pids)
+        }
+    }
+
+    private static func uniqueMemoryBytes(_ procs: [Proc]) -> UInt64 {
+        var seen = Set<Int32>()
+        return procs.reduce(UInt64(0)) { total, proc in
+            guard seen.insert(proc.pid).inserted else { return total }
+            return total + (proc.residentBytes ?? 0)
+        }
     }
 
     // MARK: - Field parsing helpers

@@ -131,10 +131,16 @@ enum GitDiff {
     static func snapshot(
         worktreePath: String,
         maxSyntheticFileBytes: Int = 128 * 1024,
-        limit: Int = maxListedChangedFiles
+        limit: Int = maxListedChangedFiles,
+        selectedPath: String? = nil
     ) -> GitDiffSnapshot {
         let branch = branchChangedFiles(worktreePath: worktreePath, limit: limit)
-        let changed = branch.files
+        let changed: [GitChangedFile]
+        if let selectedPath {
+            changed = branch.files.filter { $0.path == selectedPath || $0.oldPath == selectedPath }
+        } else {
+            changed = branch.files
+        }
         let paths = changed.map(\.path)
 
         let files: [DiffFile]
@@ -192,7 +198,7 @@ enum GitDiff {
         return GitDiffSnapshot(
             changedFiles: changed,
             files: files,
-            totalChangedFileCount: branch.totalCount
+            totalChangedFileCount: selectedPath == nil ? branch.totalCount : changed.count
         )
     }
 

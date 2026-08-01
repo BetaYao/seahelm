@@ -370,7 +370,7 @@ private struct SuggestionCard: View {
                 Text(order.action.message)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(4)
+                    .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Options keep their own taps so they don't bubble to onReveal.

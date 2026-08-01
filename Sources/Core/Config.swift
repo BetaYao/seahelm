@@ -52,6 +52,8 @@ struct Config: Codable {
     var notificationSound: String
     /// Ask before quitting. Cleared by the alert's "Don't ask again" checkbox.
     var confirmBeforeQuit: Bool
+    /// Protect the machine from runaway Claude/Codex process trees.
+    var agentMemoryGuard: AgentMemoryGuardConfig
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -87,6 +89,7 @@ struct Config: Codable {
         case enabledHookAgents = "enabled_hook_agents"
         case notificationSound = "notification_sound"
         case confirmBeforeQuit = "confirm_before_quit"
+        case agentMemoryGuard = "agent_memory_guard"
     }
 
     init() {
@@ -123,6 +126,7 @@ struct Config: Codable {
         enabledHookAgents = []
         notificationSound = "default"
         confirmBeforeQuit = true
+        agentMemoryGuard = .default
     }
 
     init(from decoder: Decoder) throws {
@@ -169,6 +173,7 @@ struct Config: Codable {
         enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
         confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true
+        agentMemoryGuard = try container.decodeIfPresent(AgentMemoryGuardConfig.self, forKey: .agentMemoryGuard) ?? .default
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -278,6 +283,29 @@ struct Config: Codable {
         Config.pendingSaveLock.unlock()
         Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
+}
+
+struct AgentMemoryGuardConfig: Codable, Equatable {
+    /// Thresholds are stored in MB so the JSON stays readable and stable.
+    var warnMB: Int
+    var stopMB: Int
+    var killMB: Int
+
+    static let `default` = AgentMemoryGuardConfig(
+        warnMB: 5 * 1024,
+        stopMB: 6 * 1024,
+        killMB: 8 * 1024
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case warnMB = "warn_mb"
+        case stopMB = "stop_mb"
+        case killMB = "kill_mb"
+    }
+
+    var warnBytes: UInt64 { UInt64(max(0, warnMB)) * 1_048_576 }
+    var stopBytes: UInt64 { UInt64(max(0, stopMB)) * 1_048_576 }
+    var killBytes: UInt64 { UInt64(max(0, killMB)) * 1_048_576 }
 }
 
 struct SailorDetectConfig: Codable {

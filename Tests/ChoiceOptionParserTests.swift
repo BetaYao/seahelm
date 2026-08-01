@@ -59,6 +59,48 @@ final class ChoiceOptionParserTests: XCTestCase {
         XCTAssertTrue(opts[0].selected)
     }
 
+    /// Codex pins a composer and a `model · cwd` status line to the bottom of the
+    /// viewport, so its approval dialog is never the last thing on screen. That
+    /// trailing chrome was read as "new output" and discarded the options, so a
+    /// Codex approval never reached the island.
+    func testKeepsCodexOptionsAboveComposerAndStatusFooter() {
+        let screen = """
+        Would you like to make the following edits?
+
+        › 1. Yes, proceed (y)
+          2. Yes, and don't ask again for these files (a)
+          3. No, and tell Codex what to do differently (esc)
+
+          Press enter to confirm or esc to cancel
+
+
+        › Write tests for @filename
+
+          gpt-5.6-terra medium · /Volumes/openbeta/workspace/seahelm
+        """
+        let opts = ChoiceOptionParser.parse(screen)
+        XCTAssertEqual(opts.map(\.index), [1, 2, 3])
+        XCTAssertEqual(opts[0].label, "Yes, proceed (y)")
+        XCTAssertTrue(opts[0].selected)
+    }
+
+    /// Same dialog when the modal replaces the composer — only the status line
+    /// trails it.
+    func testKeepsCodexOptionsAboveStatusFooterOnly() {
+        let screen = """
+        Would you like to make the following edits?
+
+        › 1. Yes, proceed (y)
+          2. Yes, and don't ask again for these files (a)
+          3. No, and tell Codex what to do differently (esc)
+
+          Press enter to confirm or esc to cancel
+
+          gpt-5.6-terra medium · /Volumes/openbeta/workspace/seahelm
+        """
+        XCTAssertEqual(ChoiceOptionParser.parse(screen).map(\.index), [1, 2, 3])
+    }
+
     func testIgnoresNonConsecutiveProse() {
         // A numbered list in normal output must NOT be treated as a choice box.
         let screen = """
