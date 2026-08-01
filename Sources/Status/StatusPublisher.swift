@@ -26,6 +26,9 @@ class StatusPublisher {
     /// (~6s at a 2s interval) rather than every cycle, and stagger panes by an
     /// id-derived offset so they don't all fork on the same tick.
     private let backendCaptureStride: Int = 3
+    /// Even a stable viewport is periodically decoded again. This bounds how
+    /// long a missed cache invalidation can leave ShipLog on a stale scan state.
+    private let unchangedFrameRecheckStride = 15
     private var preferredPaths: Set<String> = []
     private var pollCycle: Int = 0
 
@@ -163,6 +166,15 @@ class StatusPublisher {
         schedulePoll()
     }
 
+    /// Hook/lifecycle events can change ShipLog's arbitration while the terminal
+    /// frame stays unchanged. Force that pane through detection on the next poll
+    /// instead of letting the viewport hash preserve an obsolete scan component.
+    func invalidateScanCache(terminalID: String) {
+        lock.lock()
+        lastViewportHashes.removeValue(forKey: terminalID)
+        lock.unlock()
+    }
+
     private func schedulePoll() {
         // Capture surfaces snapshot under lock, then poll on background
         lock.lock()
@@ -217,9 +229,22 @@ class StatusPublisher {
 
             lock.lock()
             let lastHash = lastViewportHashes[terminalID]
+            let committedScanStatus = trackers[terminalID]?.currentStatus
             lock.unlock()
 
-            if let lastHash, lastHash == contentHash { continue }
+            let publishedScanStatus = ShipLog.shared.sailor(for: terminalID)?.scanStatus
+            let forceRecheck = Self.shouldBackendCapture(
+                pollCycle: pollCycle,
+                offset: Int(truncatingIfNeeded: terminalID.stableHash),
+                stride: unchangedFrameRecheckStride)
+            if Self.shouldSkipUnchangedFrame(
+                lastHash: lastHash,
+                contentHash: contentHash,
+                committedScanStatus: committedScanStatus,
+                publishedScanStatus: publishedScanStatus,
+                forceRecheck: forceRecheck) {
+                continue
+            }
 
             lock.lock()
             lastViewportHashes[terminalID] = contentHash
@@ -419,6 +444,17 @@ class StatusPublisher {
     static func shouldBackendCapture(pollCycle: Int, offset: Int, stride: Int) -> Bool {
         let s = max(1, stride)
         return ((pollCycle &+ offset) % s + s) % s == 0
+    }
+
+    static func shouldSkipUnchangedFrame(
+        lastHash: UInt64?,
+        contentHash: UInt64,
+        committedScanStatus: SailorStatus?,
+        publishedScanStatus: SailorStatus?,
+        forceRecheck: Bool
+    ) -> Bool {
+        guard lastHash == contentHash, !forceRecheck else { return false }
+        return committedScanStatus != nil && committedScanStatus == publishedScanStatus
     }
 
     deinit {

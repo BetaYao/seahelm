@@ -107,6 +107,12 @@ class TabCoordinator {
         )
         ShipLog.shared.onOutcome = { [weak self] outcome in
             guard let self else { return }
+            switch outcome.event.source {
+            case .scan:
+                break
+            case .hook, .mcp, .shell:
+                self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
+            }
             self.firstMate?.handle(outcome)
             // Feed the worktree aggregator from ShipLog's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
