@@ -52,10 +52,11 @@ final class PendingOrdersQueue {
         let order = PendingOrder(id: id, action: action)
         if let idx = orders.firstIndex(where: { $0.id == id }) {
             guard orders[idx] != order else { return }
-            orders[idx] = order
-        } else {
-            orders.append(order)
+            orders.remove(at: idx)
         }
+        // Preserve arrival order. Replacing a pane's suggestion is a new arrival,
+        // so consumers that show newest-first can move it back to the top.
+        orders.append(order)
         notify()
     }
 

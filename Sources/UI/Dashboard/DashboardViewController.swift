@@ -479,6 +479,9 @@ class DashboardViewController: NSViewController {
     func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
         let changed = agent.id != selectedSailorId
+        if changed {
+            dismissCenterOverlay()
+        }
         selectedSailorId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedSailor(focusTerminal: focusTerminal)
@@ -1295,6 +1298,7 @@ class DashboardViewController: NSViewController {
     /// What the fleet list — and the First Mate panel that renders it — is
     /// currently highlighting, which is not always the selected sailor.
     var overviewSelectedIdForTesting: String { overviewView.selectedId }
+    var hasCenterOverlayForTesting: Bool { centerOverlay != nil }
 
     /// Pane row click in "Group by Sailor": drill into the worktree, then focus
     /// the clicked pane's leaf. The split container may still be settling, so the

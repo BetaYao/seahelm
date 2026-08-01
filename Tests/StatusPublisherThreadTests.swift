@@ -44,6 +44,33 @@ class StatusPublisherThreadTests: XCTestCase {
         XCTAssertEqual(fires.count, 1)
     }
 
+    func testUnchangedFrameSkipsWhenScanStateIsSynchronized() {
+        XCTAssertTrue(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42,
+            contentHash: 42,
+            committedScanStatus: .idle,
+            publishedScanStatus: .idle,
+            forceRecheck: false))
+    }
+
+    func testUnchangedFrameDoesNotSkipStalePublishedScanState() {
+        XCTAssertFalse(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42,
+            contentHash: 42,
+            committedScanStatus: .idle,
+            publishedScanStatus: .running,
+            forceRecheck: false))
+    }
+
+    func testPeriodicRecheckDoesNotSkipSynchronizedFrame() {
+        XCTAssertFalse(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42,
+            contentHash: 42,
+            committedScanStatus: .idle,
+            publishedScanStatus: .idle,
+            forceRecheck: true))
+    }
+
     func testAgentDefSelectionUsesExistingCodexType() {
         let content = "Would you like to run the following command?"
         let candidates = SailorDetectConfig.default.agents.map { ($0.name.lowercased(), $0) }

@@ -59,6 +59,33 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertEqual(vc.selectedSailorId, "agent-b")
     }
 
+    func testRowClickClosesEditorOverlayWhenSwitchingWorktrees() {
+        let vc = DashboardViewController()
+        vc.dashboardDelegate = DashboardDelegateSpy()
+        vc.loadViewIfNeeded()
+        vc.updateSailors([
+            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
+            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.showCenterOverlay(NSView(), title: "file.env")
+        XCTAssertTrue(vc.hasCenterOverlayForTesting)
+
+        vc.handleWorktreeRowClickForTesting(path: "/repo/b")
+
+        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertFalse(vc.hasCenterOverlayForTesting)
+    }
+
+    func testCodeEditorKeepsHorizontalScrollerVisible() {
+        let scrollView = NSScrollView()
+
+        CodeEditorScrollCoordinator.configure(scrollView)
+
+        XCTAssertTrue(scrollView.hasHorizontalScroller)
+        XCTAssertFalse(scrollView.autohidesScrollers)
+        XCTAssertEqual(scrollView.scrollerStyle, .overlay)
+    }
+
     func testRowClickNotifiesSelectionChange() {
         let vc = DashboardViewController()
         let spy = DashboardDelegateSpy()

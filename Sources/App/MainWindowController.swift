@@ -2415,8 +2415,7 @@ extension MainWindowController {
         // Equality-gate every assignment: this runs on a 2s timer, and an
         // ungated @Observable set re-evaluates the SwiftUI island every tick
         // even when nothing changed.
-        let orders = tabCoordinator.pendingOrders.all()
-            .filter { $0.action.kind == .suggestNextOrder }
+        let orders = IslandModel.newestSuggestions(from: tabCoordinator.pendingOrders.all())
         if model.orders != orders { model.orders = orders }
 
         // A new suggestion is actionable — expand so the card is visible

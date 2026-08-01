@@ -27,6 +27,30 @@ final class PendingOrdersQueueTests: XCTestCase {
         XCTAssertEqual(q.all().count, 2)
     }
 
+    func testReplacingSuggestionMovesItToLatestPosition() {
+        let q = PendingOrdersQueue()
+        q.upsert(action(.suggestNextOrder, wt: "/wt/a"))
+        q.upsert(action(.suggestNextOrder, wt: "/wt/b"))
+        let replacement = FirstMateAction(
+            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt/a",
+            branch: "b", project: "p", terminalID: "t", message: "new")
+
+        q.upsert(replacement)
+
+        XCTAssertEqual(q.all().map(\.action.worktreePath), ["/wt/b", "/wt/a"])
+        XCTAssertEqual(q.all().last?.action.message, "new")
+    }
+
+    func testIslandSuggestionsAreNewestFirst() {
+        let q = PendingOrdersQueue()
+        q.upsert(action(.suggestNextOrder, wt: "/wt/a"))
+        q.upsert(action(.suggestNextOrder, wt: "/wt/b"))
+
+        let orders = IslandModel.newestSuggestions(from: q.all())
+
+        XCTAssertEqual(orders.map(\.action.worktreePath), ["/wt/b", "/wt/a"])
+    }
+
     func testResolveRemovesAndAllowsReenqueue() {
         let q = PendingOrdersQueue()
         q.enqueue(action(.suggestNextOrder))
