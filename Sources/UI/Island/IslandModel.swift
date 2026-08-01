@@ -54,6 +54,12 @@ final class IslandModel {
     /// and are not mirrored here.
     var orders: [PendingOrder] = []
 
+    static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
+        Array(orders.lazy
+            .filter { $0.action.kind == .suggestNextOrder }
+            .reversed())
+    }
+
     /// Screen geometry, set by the panel controller.
     var notchWidth: CGFloat = 190
     var notchHeight: CGFloat = 38
