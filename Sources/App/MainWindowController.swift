@@ -2621,7 +2621,15 @@ extension MainWindowController: TerminalCoordinatorDelegate {
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
+        // Sweep the cabin's cards before the UI drops it: deleting a worktree
+        // takes every pane with it, so worktree-scoped cards (returnToPort in
+        // particular, which is usually what triggered the delete) are stale too.
+        tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
         worktreeDidDelete(info)
+    }
+
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String) {
+        tabCoordinator.pendingOrders.resolvePane(terminalID: terminalID)
     }
 }
 

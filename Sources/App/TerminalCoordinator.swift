@@ -3,6 +3,9 @@ import AppKit
 protocol TerminalCoordinatorDelegate: AnyObject {
     func terminalCoordinatorDidUpdateSurfaces(_ coordinator: TerminalCoordinator)
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo)
+    /// A pane and its session are gone. Anything keyed by its terminal id — most
+    /// visibly a pending suggestion card — has to go with it.
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String)
 }
 
 class TerminalCoordinator {
@@ -329,6 +332,7 @@ class TerminalCoordinator {
         }
         StationRegistry.shared.unregister(closed.stationId)
         ShipLog.shared.unregister(terminalID: closed.stationId)
+        delegate?.terminalCoordinator(self, didClosePane: closed.stationId)
         container.surfaceViews.removeValue(forKey: closed.stationId)
 
         // Same SIGWINCH tolerance as structural split: grow the remaining pane's

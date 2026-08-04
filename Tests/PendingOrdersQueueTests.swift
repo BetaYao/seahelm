@@ -126,4 +126,81 @@ final class PendingOrdersQueueTests: XCTestCase {
         q.refreshSuggestMessage(terminalID: "t1", message: "Shorter late text")
         XCTAssertEqual(q.all().first?.action.message, "Already have a good summary.")
     }
+
+    // MARK: - Teardown of a pane that is gone
+
+    private func paneAction(
+        _ kind: FirstMateActionKind,
+        terminalID: String,
+        wt: String = "/wt/x",
+        payload: String? = nil
+    ) -> FirstMateAction {
+        FirstMateAction(kind: kind, zone: .red, worktreePath: wt, branch: "b",
+                        project: "p", terminalID: terminalID, message: "m",
+                        payload: payload, options: ["a"])
+    }
+
+    func testResolvePaneDropsEveryCardForThatPane() {
+        let q = PendingOrdersQueue()
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t1"))
+        q.enqueue(paneAction(.suggestNextOrder, terminalID: "t1",
+                             payload: FirstMateAction.askUserQuestionPayload))
+        q.resolvePane(terminalID: "t1")
+        XCTAssertTrue(q.all().isEmpty)
+    }
+
+    func testResolvePaneSparesSiblingPanes() {
+        // Closing one pane must not clear the other pane's suggestion — both
+        // panes of a worktree can hold a card each.
+        let q = PendingOrdersQueue()
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t1"))
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t2"))
+        q.resolvePane(terminalID: "t1")
+        XCTAssertEqual(q.all().count, 1)
+        XCTAssertEqual(q.all().first?.action.terminalID, "t2")
+    }
+
+    func testResolvePaneSparesWorktreeScopedCards() {
+        // returnToPort carries no terminalID because it belongs to the whole
+        // cabin; one pane closing must not sweep it away.
+        let q = PendingOrdersQueue()
+        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/x",
+                                  branch: "b", project: "p", terminalID: "", message: "m"))
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t1"))
+        q.resolvePane(terminalID: "t1")
+        XCTAssertEqual(q.all().count, 1)
+        XCTAssertEqual(q.all().first?.action.kind, .returnToPort)
+    }
+
+    func testResolvePaneWithEmptyIDIsANoOp() {
+        // Guards the above: an empty id must not match every worktree-scoped card.
+        let q = PendingOrdersQueue()
+        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/x",
+                                  branch: "b", project: "p", terminalID: "", message: "m"))
+        q.resolvePane(terminalID: "")
+        XCTAssertEqual(q.all().count, 1)
+    }
+
+    func testResolveWorktreeDropsPaneAndWorktreeScopedCards() {
+        let q = PendingOrdersQueue()
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t1", wt: "/wt/gone"))
+        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/gone",
+                                  branch: "b", project: "p", terminalID: "", message: "m"))
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t9", wt: "/wt/kept"))
+        q.resolveWorktree(path: "/wt/gone")
+        XCTAssertEqual(q.all().count, 1)
+        XCTAssertEqual(q.all().first?.action.worktreePath, "/wt/kept")
+    }
+
+    func testResolvePaneNotifiesObserversOnlyWhenSomethingWasRemoved() {
+        let q = PendingOrdersQueue()
+        var notifications = 0
+        q.addObserver { notifications += 1 }
+        q.upsert(paneAction(.suggestNextOrder, terminalID: "t1"))
+        notifications = 0
+        q.resolvePane(terminalID: "nobody")
+        XCTAssertEqual(notifications, 0, "a no-op sweep must not churn observers")
+        q.resolvePane(terminalID: "t1")
+        XCTAssertEqual(notifications, 1)
+    }
 }

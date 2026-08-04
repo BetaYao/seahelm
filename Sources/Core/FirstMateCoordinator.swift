@@ -37,11 +37,23 @@ final class FirstMateCoordinator {
             break
         }
         route(FirstMate.evaluate(outcome, config: config))
+        clearIfPaneIsGone(status: outcome.newStatus, terminalID: outcome.info.id)
     }
 
     func handle(_ t: StatusTransition) {
         dispatchPrecondition(condition: .onQueue(.main))
         route(FirstMate.evaluate(t, config: config))
+        clearIfPaneIsGone(status: t.newStatus, terminalID: t.terminalID)
+    }
+
+    /// Once an agent has exited, every card it left behind is stale: its
+    /// suggestions can no longer be sent anywhere and its question will never be
+    /// answered. Runs *after* routing on purpose — routing still gets to fire the
+    /// green-zone "exited" notification, and sweeping last means a suggestion
+    /// arriving in the same outcome as the exit can't survive it.
+    private func clearIfPaneIsGone(status: SailorStatus, terminalID: String) {
+        guard status == .exited else { return }
+        queue.resolvePane(terminalID: terminalID)
     }
 
     /// Pure routing of decided actions to side-effect closures / the queue.

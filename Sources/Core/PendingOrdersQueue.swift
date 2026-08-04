@@ -112,4 +112,30 @@ final class PendingOrdersQueue {
         orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
         if orders.count != before { notify() }
     }
+
+    /// Drop every card belonging to a pane that is gone — closed, or its agent
+    /// exited. Until this ran, a suggestion outlived its pane: the card stayed on
+    /// screen naming a terminalID that no longer resolves, and tapping one of its
+    /// options sent text to a terminal that isn't there.
+    ///
+    /// Only pane-scoped cards match. `returnToPort` and `broadcastOrder` carry no
+    /// terminalID (see `key`) because they belong to the worktree or the whole
+    /// app, and must outlive any single pane — the empty-id guard is what keeps
+    /// one pane's death from sweeping them away.
+    func resolvePane(terminalID: String) {
+        guard !terminalID.isEmpty else { return }
+        let before = orders.count
+        orders.removeAll { $0.action.terminalID == terminalID }
+        if orders.count != before { notify() }
+    }
+
+    /// Drop every card for a worktree that is gone. Used when a whole cabin is
+    /// deleted, which takes all of its panes with it — including the
+    /// worktree-scoped cards `resolvePane` deliberately spares.
+    func resolveWorktree(path: String) {
+        guard !path.isEmpty else { return }
+        let before = orders.count
+        orders.removeAll { $0.action.worktreePath == path }
+        if orders.count != before { notify() }
+    }
 }
