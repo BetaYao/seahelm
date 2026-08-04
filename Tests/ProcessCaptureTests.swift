@@ -188,6 +188,77 @@ final class ProcessCaptureTests: XCTestCase {
         }
     }
 
+    // MARK: - Descriptor leaks
+
+    /// Open descriptors in this process. Cheap enough to call per assertion.
+    private func openDescriptorCount() -> Int {
+        (0..<8192).reduce(0) { fcntl(Int32($1), F_GETFD) != -1 ? $0 + 1 : $0 }
+    }
+
+    /// Reaching EOF does not release a pipe's read end, and `Process` keeps its
+    /// pipes alive past the call, so every capture used to strand two
+    /// descriptors. That leak is the reason the original deadlock was
+    /// reachable at all: enough stranded pipes exhaust the machine-wide pipe
+    /// budget, the kernel starts handing out minimal buffers, and a write of
+    /// only a few KB begins to block. Guard every path, not just the happy one.
+    private func assertNoDescriptorLeak(
+        iterations: Int = 25,
+        _ body: () -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // Warm up first: the initial calls spin up queue threads and other
+        // one-time state, which would otherwise read as a leak.
+        for _ in 0..<3 { body() }
+        let before = openDescriptorCount()
+        for _ in 0..<iterations { body() }
+        let after = openDescriptorCount()
+        XCTAssertEqual(
+            after, before,
+            "leaked \(after - before) descriptors over \(iterations) calls",
+            file: file, line: line
+        )
+    }
+
+    func testNoDescriptorLeakOnNormalRun() {
+        assertNoDescriptorLeak { _ = self.bash("echo hi") }
+    }
+
+    func testNoDescriptorLeakOnLargeOutput() {
+        assertNoDescriptorLeak(iterations: 10) { _ = self.bash("seq 1 100000") }
+    }
+
+    func testNoDescriptorLeakOnTimeout() {
+        assertNoDescriptorLeak(iterations: 5) { _ = self.bash("sleep 30", timeout: 1) }
+    }
+
+    func testNoDescriptorLeakOnLaunchFailure() {
+        // The early-return path: nothing spawned, so no drain thread exists to
+        // close the pipes it never got to read.
+        assertNoDescriptorLeak {
+            _ = self.runBounded {
+                ProcessRunner.capture(
+                    executable: URL(fileURLWithPath: "/nonexistent/binary"),
+                    arguments: [],
+                    timeout: 5
+                )
+            }
+        }
+    }
+
+    func testNoDescriptorLeakWithStandardInput() {
+        assertNoDescriptorLeak {
+            _ = self.runBounded {
+                ProcessRunner.capture(
+                    executable: URL(fileURLWithPath: "/bin/bash"),
+                    arguments: ["-c", "cat"],
+                    standardInput: "payload",
+                    timeout: 20
+                )
+            }
+        }
+    }
+
     // MARK: - GitProcess wrapper
 
     private var repoDir: URL!

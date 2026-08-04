@@ -64,6 +64,15 @@ enum ProcessRunner {
             try process.run()
         } catch {
             process.terminationHandler = nil
+            // Nothing was spawned, so no drain thread exists to close these —
+            // close all four ends here or a failing lookup leaks on every call.
+            for handle in [
+                outPipe.fileHandleForReading, outPipe.fileHandleForWriting,
+                errPipe.fileHandleForReading, errPipe.fileHandleForWriting,
+                inPipe?.fileHandleForReading, inPipe?.fileHandleForWriting,
+            ].compactMap({ $0 }) {
+                try? handle.close()
+            }
             return Capture(exitCode: nil, stdout: "", stderr: error.localizedDescription, timedOut: false)
         }
 
@@ -148,6 +157,15 @@ enum ProcessRunner {
     )
 
     private static func drain(_ handle: FileHandle) -> Data {
+        // Closing is not optional. Reaching EOF does not release the read end,
+        // and `Process` keeps its pipes alive past this scope, so without an
+        // explicit close every call permanently leaks two descriptors. At the
+        // poll rates here that reached ~2900 pipes (~48MB of kernel pipe
+        // buffers) within minutes — which starves the machine-wide pipe budget
+        // until the kernel hands out minimal buffers, and *that* is what makes
+        // a mere 5KB write block in the first place. The leak is what turns a
+        // latent deadlock into a certain one.
+        defer { try? handle.close() }
         var captured = Data()
         while true {
             let chunk = handle.availableData
