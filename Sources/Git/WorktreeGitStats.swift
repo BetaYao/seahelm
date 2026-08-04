@@ -47,38 +47,8 @@ enum WorktreeGitStatsProvider {
         return result
     }
 
-    /// Runs git with a hard deadline; returns stdout on a clean exit, else nil.
-    /// Mirrors WorktreeDiscovery's timeout guard so a wedged git on a removable
-    /// volume can't hang the poll.
     private static func runGit(_ arguments: [String], at path: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: path)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        let group = DispatchGroup()
-        group.enter()
-        process.terminationHandler = { _ in group.leave() }
-        do {
-            try process.run()
-        } catch {
-            process.terminationHandler = nil
-            return nil
-        }
-        if group.wait(timeout: .now() + gitTimeout) == .timedOut {
-            process.terminate()
-            _ = group.wait(timeout: .now() + 1)
-            process.terminationHandler = nil
-            return nil
-        }
-        process.terminationHandler = nil
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        GitProcess.run(arguments, in: path, timeout: gitTimeout)
     }
 }
 

@@ -16,36 +16,9 @@ enum WorktreeDiscovery {
 
     /// Upper bound on any single git invocation. A repo on a removable volume
     /// that was ejected and remounted can leave git blocked in uninterruptible
-    /// kernel I/O; without a bound `waitUntilExit()` never returns and the whole
-    /// launch state-restore pipeline hangs behind it.
+    /// kernel I/O; without a bound the whole launch state-restore pipeline hangs
+    /// behind it. See `GitProcess` for the deadline + pipe-draining mechanics.
     private static let gitTimeout: TimeInterval = 5
-
-    /// Runs `process` to completion, or terminates it after `timeout`. Returns
-    /// `true` only if the process exited on its own within the deadline. On
-    /// timeout the caller must NOT read the output pipe — the child may still be
-    /// stuck holding the write end, which would re-block the read.
-    private static func runWithTimeout(_ process: Process, timeout: TimeInterval) -> Bool {
-        let group = DispatchGroup()
-        group.enter()
-        process.terminationHandler = { _ in group.leave() }
-        do {
-            try process.run()
-        } catch {
-            process.terminationHandler = nil
-            return false
-        }
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            // Best-effort reap; a process wedged in kernel I/O won't die on
-            // SIGTERM, so give up after a beat and leak the worker rather than
-            // the caller.
-            _ = group.wait(timeout: .now() + 1)
-            process.terminationHandler = nil
-            return false
-        }
-        process.terminationHandler = nil
-        return true
-    }
 
     /// Cache for repo root lookups (path -> repo root)
     private static var repoRootCache: [String: String] = [:]
@@ -92,19 +65,7 @@ enum WorktreeDiscovery {
     }
 
     private static func runGit(_ arguments: [String], at path: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: path)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        guard runWithTimeout(process, timeout: gitTimeout) else { return nil }
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        GitProcess.run(arguments, in: path, timeout: gitTimeout)
     }
 
     /// Async version: find repo root on background queue, callback on main
@@ -143,27 +104,10 @@ enum WorktreeDiscovery {
     }
 
     private static func _discoverSync(repoPath: String) -> [WorktreeInfo] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["worktree", "list", "--porcelain"]
-        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        guard runWithTimeout(process, timeout: gitTimeout) else {
+        guard let output = runGit(["worktree", "list", "--porcelain"], at: repoPath) else {
             NSLog("git worktree list timed out or failed at \(repoPath)")
             return []
         }
-
-        guard process.terminationStatus == 0 else {
-            return []
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return [] }
-
         return parsePorcelain(output)
     }
 

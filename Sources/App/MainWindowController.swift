@@ -155,23 +155,11 @@ class MainWindowController: NSWindowController {
     /// 从项目级 git config 读 github.token。
     /// 用户只需在项目目录执行：`git config github.token ghp_xxx`
     private static func gitLocalConfigToken(in repoPath: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["config", "--local", "github.token"]
-        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return token?.isEmpty == false ? token : nil
-        } catch {
+        guard let raw = GitProcess.run(["config", "--local", "github.token"], in: repoPath) else {
             return nil
         }
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
 
     /// 通过 `gh auth token` 拿 gh CLI 缓存的 token。
@@ -191,22 +179,14 @@ class MainWindowController: NSWindowController {
         for ghPath in candidates {
             let url = URL(fileURLWithPath: ghPath)
             guard FileManager.default.isExecutableFile(atPath: ghPath) else { continue }
-            let process = Process()
-            process.executableURL = url
-            process.arguments = ["auth", "token"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = Pipe()
-            do {
-                try process.run()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else { continue }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let token, !token.isEmpty { return token }
-            } catch {
-                continue
-            }
+            let result = ProcessRunner.capture(
+                executable: url,
+                arguments: ["auth", "token"],
+                timeout: ProcessRunner.lookupTimeout
+            )
+            guard result.succeeded else { continue }
+            let token = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty { return token }
         }
         return nil
     }
@@ -225,32 +205,19 @@ class MainWindowController: NSWindowController {
 
     /// 通过 `git credential fill` 从系统钥匙串获取 github.com 的 token。
     private static func gitCredentialToken() -> String? {
-        let input = "protocol=https\nhost=github.com\n\n"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["credential", "fill"]
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            stdinPipe.fileHandleForWriting.write(input.data(using: .utf8)!)
-            stdinPipe.fileHandleForWriting.closeFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            for line in output.components(separatedBy: .newlines) {
-                if line.hasPrefix("password=") {
-                    return String(line.dropFirst("password=".count)).trimmingCharacters(in: .whitespaces)
-                }
-            }
-            return nil
-        } catch {
-            return nil
+        // A credential helper can sit waiting on a prompt that never comes, so
+        // this needs a deadline as much as it needs its pipes drained.
+        let result = ProcessRunner.capture(
+            executable: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["credential", "fill"],
+            standardInput: "protocol=https\nhost=github.com\n\n",
+            timeout: ProcessRunner.lookupTimeout
+        )
+        guard result.succeeded else { return nil }
+        for line in result.stdout.components(separatedBy: .newlines) where line.hasPrefix("password=") {
+            return String(line.dropFirst("password=".count)).trimmingCharacters(in: .whitespaces)
         }
+        return nil
     }
 
     private lazy var terminalCoordinator: TerminalCoordinator = {

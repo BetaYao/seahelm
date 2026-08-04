@@ -247,32 +247,22 @@ final class WorktreeFileIndexStore {
     /// repo), and it honours .gitignore for free. `includingUntracked` adds the
     /// working-tree walk that makes it slow.
     static func gitPaths(worktreePath: String, includingUntracked: Bool) -> [String]? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["ls-files", "-z", "--cached"]
+        // `--others` walks the working tree, which is the slow mode this comment
+        // warns about — hence the wider deadline than a plain index read needs.
+        let arguments = ["ls-files", "-z", "--cached"]
             + (includingUntracked ? ["--others", "--exclude-standard"] : [])
-        process.currentDirectoryURL = URL(fileURLWithPath: worktreePath)
-        let pipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = errorPipe
-
-        do {
-            try process.run()
-        } catch {
+        guard let output = GitProcess.run(arguments, in: worktreePath, timeout: listTimeout) else {
             return nil
         }
-        // Drain stderr too: git blocks once its error pipe fills, and nothing
-        // else here would ever read it.
-        let errorQueue = DispatchQueue(label: "seahelm.worktree-file-index.stderr")
-        errorQueue.async { _ = errorPipe.fileHandleForReading.readDataToEndOfFile() }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        return output
             .split(separator: "\0", omittingEmptySubsequences: true)
             .map(String.init)
     }
+
+    /// Deadline for one `ls-files`. Generous because the untracked walk on a big
+    /// repo is legitimately slow, but bounded so a wedged volume can't park the
+    /// caller forever.
+    private static let listTimeout: TimeInterval = 30
 
     /// Fallback for a directory that is not a git repo. Capped, because without
     /// ignore rules the walk can otherwise pull in an entire dependency tree.

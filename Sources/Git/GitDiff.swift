@@ -106,6 +106,10 @@ struct GitBranchChanges {
 }
 
 enum GitDiff {
+    /// Deadline for one git invocation. Wider than `GitProcess.defaultTimeout`
+    /// because a cold branch diff over a big repo can take a few seconds.
+    private static let gitTimeout: TimeInterval = 15
+
     /// Preferred compare targets, first hit wins. Remote-tracking refs first so
     /// a stale local `main` does not hide origin's tip; no network fetch here.
     static let preferredBaseRefs = ["origin/main", "origin/master", "main", "master"]
@@ -567,25 +571,11 @@ enum GitDiff {
         )
     }
 
+    /// Diff output routinely runs to hundreds of KB, so this must go through
+    /// `GitProcess` — reading the pipe only after the child exits deadlocks.
+    /// Allow longer than the default: a cold `git diff` over a large branch on a
+    /// slow volume is legitimately slow, and these all run off the main thread.
     private static func runGit(args: [String], in directory: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        GitProcess.run(args, in: directory, timeout: gitTimeout)
     }
 }

@@ -32,6 +32,9 @@ struct WorktreeCleanupSummary: Equatable {
 }
 
 enum WorktreeDeleter {
+    /// `git worktree remove` deletes a whole checkout, so it gets the same
+    /// generous deadline as creation rather than the read-only helpers'.
+    private static let gitTimeout: TimeInterval = 120
 
     /// Remove a git worktree and optionally delete its branch.
     /// - Parameters:
@@ -221,25 +224,11 @@ enum WorktreeDeleter {
     }
 
     private static func runGitFull(args: [String], in directory: String) -> (success: Bool, stderr: String, stdout: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return (false, error.localizedDescription, "")
-        }
-
-        let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus == 0, stderr.trimmingCharacters(in: .whitespacesAndNewlines), stdout)
+        let result = GitProcess.capture(args, in: directory, timeout: gitTimeout)
+        return (
+            result.succeeded,
+            result.stderr.trimmingCharacters(in: .whitespacesAndNewlines),
+            result.stdout
+        )
     }
 }

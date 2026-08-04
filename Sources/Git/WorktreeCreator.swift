@@ -15,6 +15,11 @@ enum WorktreeCreatorError: Error, LocalizedError {
 }
 
 enum WorktreeCreator {
+    /// `git worktree add` checks out a full tree, so this is far more generous
+    /// than the read-only helpers' deadline — it only has to be short enough
+    /// that a wedged git eventually surfaces as an error instead of a hang.
+    private static let gitTimeout: TimeInterval = 120
+
     static func branchName(fromTaskDescription description: String) -> String {
         branchName(fromTaskDescription: description, existingBranches: [])
     }
@@ -156,24 +161,6 @@ enum WorktreeCreator {
     }
 
     private static func runGit(args: [String], in directory: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        GitProcess.run(args, in: directory, timeout: gitTimeout)
     }
 }

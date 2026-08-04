@@ -185,6 +185,10 @@ struct CodexAppServerRateLimitClient {
             // write(_:) raises an ObjC NSFileHandleOperationException that no
             // Swift catch can intercept — it crashed the app when the codex
             // process exited before reading stdin.
+            // The throw only happens because EPIPE reaches us as an error at
+            // all: its default disposition is SIGPIPE, which kills the process
+            // outright and no `catch` can see. Ask the kernel for EPIPE.
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
             try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8))
 
             _ = answered.wait(timeout: .now() + timeout)

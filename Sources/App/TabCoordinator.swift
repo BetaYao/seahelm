@@ -1443,6 +1443,15 @@ class TabCoordinator {
 // MARK: - First Mate Inspection
 
 extension TabCoordinator {
+    /// Deadline for one FirstMate inspection command (a test suite, a build, a
+    /// lint pass). Generous, but bounded — a hung command must not park a
+    /// background thread for the rest of the session.
+    static let inspectionCommandTimeout: TimeInterval = 15 * 60
+
+    /// Deadline for the auto-commit pair. Wide enough for a big `add -A` plus
+    /// whatever pre-commit hooks the repo installs.
+    static let autoCommitTimeout: TimeInterval = 5 * 60
+
     /// Run inspectionCommands in the worktree dir on a background queue,
     /// then notify with the combined output. autoReview is stubbed — the
     /// auto-launch mechanism lives in MainWindowController and requires
@@ -1457,7 +1466,14 @@ extension TabCoordinator {
             var results: [String] = []
             var firstFailedCmd: String? = nil
             for cmd in commands {
-                let rawOutput = ProcessRunner.output(["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"])
+                // A user-configured inspection command is a whole test/lint run:
+                // unbounded output (which is why it must not be read only after
+                // exit) and minutes of runtime, so it gets a far wider deadline
+                // than the quick lookups.
+                let rawOutput = ProcessRunner.output(
+                    ["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"],
+                    timeout: Self.inspectionCommandTimeout
+                )
                 if rawOutput == nil && firstFailedCmd == nil { firstFailedCmd = cmd }
                 results.append("[\(cmd)]\n\(rawOutput ?? "(failed)")")
             }
@@ -1466,8 +1482,17 @@ extension TabCoordinator {
 
             var commitResult: String? = nil
             if isAutoCommit {
-                _ = ProcessRunner.output(["git", "-C", worktreePath, "add", "-A"])
-                let commitOut = ProcessRunner.output(["git", "-C", worktreePath, "commit", "-m", "seahelm: auto-commit after agent completion"])
+                // `add -A` walks the whole tree and `commit` runs the repo's
+                // pre-commit hooks, so neither fits the default quick-lookup
+                // deadline.
+                _ = ProcessRunner.output(
+                    ["git", "-C", worktreePath, "add", "-A"],
+                    timeout: Self.autoCommitTimeout
+                )
+                let commitOut = ProcessRunner.output(
+                    ["git", "-C", worktreePath, "commit", "-m", "seahelm: auto-commit after agent completion"],
+                    timeout: Self.autoCommitTimeout
+                )
                 commitResult = commitOut != nil ? "auto-commit succeeded" : "auto-commit: nothing to commit or failed"
             }
 

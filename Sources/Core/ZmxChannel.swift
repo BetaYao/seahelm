@@ -32,36 +32,28 @@ class ZmxChannel: SailorChannel {
         return allLines.suffix(lines).joined(separator: "\n")
     }
 
+    /// Deadline for one zmx call. zmx talks to a local socket, so anything past
+    /// this means the session is wedged, not slow.
+    static let commandTimeout: TimeInterval = 15
+
     private func runZmx(_ args: [String]) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            NSLog("[ZmxChannel] Failed to run: \(args.joined(separator: " ")): \(error)")
-        }
+        // Output already goes to /dev/null, so there is no pipe to fill — but
+        // still bound the wait so a wedged zmx can't park the caller's thread.
+        ProcessRunner.runSync(args, timeout: Self.commandTimeout)
     }
 
+    /// `zmx history` dumps a pane's entire scrollback — hundreds of KB is normal
+    /// — so this must never read the pipe only after the child exits.
     private func runZmxWithOutput(_ args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)
-            return output?.isEmpty == true ? nil : output
-        } catch {
-            NSLog("[ZmxChannel] Failed to read: \(args.joined(separator: " ")): \(error)")
+        let result = ProcessRunner.capture(
+            executable: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: args,
+            timeout: Self.commandTimeout
+        )
+        if result.timedOut {
+            NSLog("[ZmxChannel] Timed out reading: \(args.joined(separator: " "))")
             return nil
         }
+        return result.stdout.isEmpty ? nil : result.stdout
     }
 }
