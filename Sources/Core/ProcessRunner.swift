@@ -116,6 +116,13 @@ enum ProcessRunner {
                 // rather than the caller.
                 _ = exited.wait(timeout: .now() + 1)
                 process.terminationHandler = nil
+                // Give the readers the same beat to notice EOF and close. Once
+                // the child is signalled this is immediate, and without it the
+                // descriptors outlive the call: returning early left them open
+                // until the reader threads happened to wake, so a caller that
+                // timed out in a loop accumulated fds it had no way to reclaim.
+                // Still bounded — a genuinely wedged child must not park us.
+                _ = drained.wait(timeout: .now() + 1)
                 return Capture(
                     exitCode: nil,
                     stdout: "",
