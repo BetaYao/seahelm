@@ -296,13 +296,41 @@ class StationReparentTests: XCTestCase {
         XCTAssertEqual(view.pasteCallCount, 0)
     }
 
-    func testPerformKeyEquivalent_CommandVInvokesPasteAction() {
+    /// Puts the view in a window and focuses it, so `performKeyEquivalent` gets
+    /// past its first-responder guard.
+    private func focusedPasteView() -> (PasteTrackingGhosttyNSView, NSWindow) {
         let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let event = makeKeyDownEvent(characters: "v", modifiers: [.command])
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled],
+                              backing: .buffered, defer: true)
+        window.contentView?.addSubview(view)
+        window.makeFirstResponder(view)
+        return (view, window)
+    }
 
-        _ = view.performKeyEquivalent(with: event)
+    func testPerformKeyEquivalent_ClaimsCommandVWhenFocused() {
+        let (view, window) = focusedPasteView()
+        XCTAssertTrue(window.firstResponder === view, "precondition: view must be focused")
 
-        XCTAssertEqual(view.pasteCallCount, 1)
+        let handled = view.performKeyEquivalent(with: makeKeyDownEvent(characters: "v", modifiers: [.command]))
+
+        // Claimed, so AppKit stops routing it — but deliberately NOT through
+        // `paste(_:)`. Cmd+V is forwarded to Ghostty's own key handling, which
+        // is what preserves image paste (it reads the pasteboard natively
+        // rather than only `.string`).
+        XCTAssertTrue(handled)
+        XCTAssertEqual(view.pasteCallCount, 0)
+    }
+
+    func testPerformKeyEquivalent_IgnoredWhenNotFirstResponder() {
+        // performKeyEquivalent is offered to every view in the hierarchy, not
+        // just the focused one. Without this guard a paste lands in whichever
+        // pane AppKit asked first rather than the one the user is typing in.
+        let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+
+        let handled = view.performKeyEquivalent(with: makeKeyDownEvent(characters: "v", modifiers: [.command]))
+
+        XCTAssertFalse(handled)
+        XCTAssertEqual(view.pasteCallCount, 0)
     }
 
     func testPerformKeyEquivalent_ControlVDoesNotInvokePasteAction() {

@@ -308,11 +308,19 @@ final class DebouncedStatusTrackerTests: XCTestCase {
 
 final class SailorStatusTests: XCTestCase {
     func testPriorityOrder() {
+        // `waiting` outranks even `error`: an agent blocked on the user is the
+        // state most in need of attention, so it must win the worktree rollup
+        // badge. (Reordered in "worktree status rollup — priority reorder".)
+        XCTAssertGreaterThan(SailorStatus.waiting.priority, SailorStatus.error.priority)
         XCTAssertGreaterThan(SailorStatus.error.priority, SailorStatus.exited.priority)
-        XCTAssertGreaterThan(SailorStatus.exited.priority, SailorStatus.waiting.priority)
-        XCTAssertGreaterThan(SailorStatus.waiting.priority, SailorStatus.running.priority)
+        XCTAssertGreaterThan(SailorStatus.exited.priority, SailorStatus.running.priority)
         XCTAssertGreaterThan(SailorStatus.running.priority, SailorStatus.idle.priority)
         XCTAssertGreaterThan(SailorStatus.idle.priority, SailorStatus.unknown.priority)
+    }
+
+    func testWaitingWinsTheRollupOverError() {
+        // The point of the ordering above, stated as the behaviour it exists for.
+        XCTAssertEqual(SailorStatus.highestPriority([.error, .waiting, .running]), .waiting)
     }
 
     func testHighestPriority() {

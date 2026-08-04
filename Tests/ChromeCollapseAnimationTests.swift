@@ -77,11 +77,27 @@ final class ChromeCollapseAnimationTests: XCTestCase {
         XCTAssertEqual(sidebar.frame.width, expandedWidth, accuracy: 0.5)
 
         apply(collapsed: true, animated: true)
-        spin(ChromeLayoutMetrics.collapseAnimationDuration / 2)
 
-        let mid = sidebar.frame.width
-        XCTAssertGreaterThan(mid, 0, "sidebar snapped shut instead of animating")
-        XCTAssertLessThan(mid, expandedWidth,"sidebar had not started moving")
+        // Sample repeatedly rather than once at the midpoint. A single
+        // `spin(duration / 2)` only holds if the run loop wakes near that
+        // instant; under load it overshoots the whole 0.24s animation, the
+        // sidebar reads 0, and the test fails claiming it "snapped shut" when
+        // it had merely finished. Polling asks the real question — did the
+        // width ever pass through an intermediate value — instead of betting
+        // on one wake-up landing in the window.
+        let duration = ChromeLayoutMetrics.collapseAnimationDuration
+        var sawIntermediate = false
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            let w = sidebar.frame.width
+            if w > 0, w < expandedWidth {
+                sawIntermediate = true
+                break
+            }
+            spin(duration / 20)
+        }
+
+        XCTAssertTrue(sawIntermediate, "sidebar snapped shut instead of animating")
     }
 
     func testAnimatedCollapseSettlesClosed() {

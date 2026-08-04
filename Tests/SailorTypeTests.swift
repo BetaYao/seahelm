@@ -5,23 +5,41 @@ final class SailorTypeTests: XCTestCase {
 
     // MARK: - Launch command + suggest instruction injection
 
+    // These all pass `agentYolo:` explicitly. The single-argument overload reads
+    // the *user's real* ~/.config/seahelm/config.json, which made these tests
+    // pass or fail depending on whether the machine happened to have YOLO mode
+    // on — they flipped mid-session when the running app rewrote its config.
+
     func testClaudeLaunchInjectsSuggestInstruction() {
-        let cmd = SailorType.claudeCode.launchCommand(withTask: "fix the bug")!
+        let cmd = SailorType.claudeCode.launchCommand(withTask: "fix the bug", agentYolo: false)!
         XCTAssertTrue(cmd.hasPrefix("claude --append-system-prompt "))
         XCTAssertTrue(cmd.contains(StopHookResponder.sentinel))   // inline sentinel, not a Bash call
         XCTAssertTrue(cmd.hasSuffix("'fix the bug'"))   // task stays the positional arg
     }
 
     func testNonClaudeAgentNoInjection() {
-        let cmd = SailorType.codex.launchCommand(withTask: "do x")!
+        let cmd = SailorType.codex.launchCommand(withTask: "do x", agentYolo: false)!
         XCTAssertFalse(cmd.contains("--append-system-prompt"))
         XCTAssertEqual(cmd, "codex 'do x'")
     }
 
     func testEmptyTaskStillInjectsForClaude() {
-        let cmd = SailorType.claudeCode.launchCommand(withTask: "  ")!
+        let cmd = SailorType.claudeCode.launchCommand(withTask: "  ", agentYolo: false)!
         XCTAssertTrue(cmd.contains("--append-system-prompt"))
         XCTAssertFalse(cmd.hasSuffix("''"))   // no empty positional task
+    }
+
+    func testYoloFlagIsAppendedWhenEnabled() {
+        // The behaviour that used to leak in from the user's config — pinned
+        // down deliberately instead.
+        XCTAssertEqual(
+            SailorType.codex.launchCommand(withTask: "do x", agentYolo: true),
+            "codex --dangerously-bypass-approvals-and-sandbox 'do x'"
+        )
+        XCTAssertTrue(
+            SailorType.claudeCode.launchCommand(withTask: "do x", agentYolo: true)!
+                .hasPrefix("claude --dangerously-skip-permissions ")
+        )
     }
 
     // MARK: - Pi agent
@@ -186,25 +204,25 @@ final class SailorTypeTests: XCTestCase {
     // string is stable. Claude's injection is covered above.
     func testLaunchCommandWithTaskComposesPositionalPrompt() {
         XCTAssertEqual(
-            SailorType.codex.launchCommand(withTask: "add tests"),
+            SailorType.codex.launchCommand(withTask: "add tests", agentYolo: false),
             "codex 'add tests'"
         )
     }
 
     func testLaunchCommandWithEmptyTaskReturnsBareCommand() {
-        XCTAssertEqual(SailorType.codex.launchCommand(withTask: ""), "codex")
-        XCTAssertEqual(SailorType.codex.launchCommand(withTask: "   "), "codex")
+        XCTAssertEqual(SailorType.codex.launchCommand(withTask: "", agentYolo: false), "codex")
+        XCTAssertEqual(SailorType.codex.launchCommand(withTask: "   ", agentYolo: false), "codex")
     }
 
     func testLaunchCommandWithTaskEscapesQuotes() {
         XCTAssertEqual(
-            SailorType.codex.launchCommand(withTask: "can't stop"),
+            SailorType.codex.launchCommand(withTask: "can't stop", agentYolo: false),
             "codex 'can'\\''t stop'"
         )
     }
 
     func testLaunchCommandWithTaskNilForNonAISailor() {
-        XCTAssertNil(SailorType.npm.launchCommand(withTask: "anything"))
-        XCTAssertNil(SailorType.shellCommand.launchCommand(withTask: "anything"))
+        XCTAssertNil(SailorType.npm.launchCommand(withTask: "anything", agentYolo: false))
+        XCTAssertNil(SailorType.shellCommand.launchCommand(withTask: "anything", agentYolo: false))
     }
 }

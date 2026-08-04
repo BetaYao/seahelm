@@ -47,10 +47,13 @@ final class FirstMateTests: XCTestCase {
         XCTAssertFalse(acts.contains { $0.kind == .autoCommit })
     }
 
-    func testIdleWithoutCompletionEmitsSuggestNextOrderRed() {
+    func testIdleWithoutCompletionEmitsNothing() {
+        // Suggestions are no longer guessed from a status transition. They come
+        // only from what the agent actually offered — a `.suggest` sentinel line
+        // or an AskUserQuestion — which the `IngestOutcome` overload handles.
+        // Going idle on its own says nothing about what to do next.
         let acts = FirstMate.evaluate(tx(.running, .idle, completion: false), config: .default)
-        XCTAssertEqual(acts.map(\.kind), [.suggestNextOrder])
-        XCTAssertEqual(acts.first?.zone, .red)
+        XCTAssertTrue(acts.isEmpty)
     }
 
     func testDisabledEmitsNothing() {
