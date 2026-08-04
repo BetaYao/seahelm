@@ -36,10 +36,21 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func snapshotPanes() -> [PaneSnapshot] {
-        ShipLog.shared.allSailors().map { s in
+        snapshotPanes(includingMemory: false)
+    }
+
+    func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] {
+        // Probe once for the whole list, not once per pane: `zmx list` and the
+        // process-table walk are the expensive part, and every pane reads from
+        // the same two snapshots.
+        let memoryBySessionKey = includingMemory ? sessionMemoryBySessionKey() : [:]
+
+        return ShipLog.shared.allSailors().map { s in
             let station = StationRegistry.shared.station(forId: s.id)
             let osc = station?.oscTitle ?? ""
             let title = osc.isEmpty ? (station?.persistedTitle ?? "") : osc
+            let sessionKey = station?.paneSessionKey ?? ""
+            let memory = memoryBySessionKey[sessionKey]
             return PaneSnapshot(
                 paneId: s.id,
                 worktreePath: s.worktreePath,
@@ -48,10 +59,37 @@ final class SeahelmControlDataSource: ControlDataSource {
                 agentType: s.agentType.rawValue,
                 status: s.status.rawValue,
                 lastMessage: s.lastMessage,
-                paneSessionKey: station?.paneSessionKey ?? "",
-                title: title
+                paneSessionKey: sessionKey,
+                title: title,
+                memoryBytes: memory?.totalBytes,
+                agentMemoryBytes: memory?.agentBytes,
+                processName: memory?.processName
             )
         }
+    }
+
+    /// Resident memory per zmx session, keyed by session name (a pane's
+    /// `paneSessionKey`). Empty when zmx isn't the backend or the probe fails —
+    /// memory is best-effort detail and must never break `pane.list`.
+    private func sessionMemoryBySessionKey() -> [String: ProcessProbe.SessionMemory] {
+        guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else {
+            return [:]
+        }
+        let sessions = SessionManager.parseZmxSessions(listOutput: listOutput)
+            .filter { $0.pid != nil }
+        guard !sessions.isEmpty else { return [:] }
+        let procs = ProcessProbe.allProcesses()
+        guard !procs.isEmpty else { return [:] }
+        let manifests = ManifestStore.shared.all.map(\.manifest)
+
+        var result: [String: ProcessProbe.SessionMemory] = [:]
+        for session in sessions {
+            guard let pid = session.pid else { continue }
+            result[session.name] = ProcessProbe.memory(
+                rootPid: Int32(pid), in: procs, manifests: manifests
+            )
+        }
+        return result
     }
 
     func readPane(paneId: String, source: String, lines: Int) -> String? {

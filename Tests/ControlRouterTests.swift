@@ -10,7 +10,14 @@ private final class FakeDataSource: ControlDataSource {
     var sentKeys: [(pane: String, keys: [String])] = []
     var statuses: [String: String] = [:]
     var knownPanes: Set<String> = []
+    /// Records what the router asked for, so tests can assert the opt-in flag
+    /// actually reaches the data source rather than being silently dropped.
+    var memoryRequests: [Bool] = []
     func snapshotPanes() -> [PaneSnapshot] { panes }
+    func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] {
+        memoryRequests.append(includingMemory)
+        return panes
+    }
     func readPane(paneId: String, source: String, lines: Int) -> String? { reads[paneId] }
     func ingestHook(json: [String: Any]) -> String? { ingested.append(json); return blockReturn }
     func sendText(paneId: String, text: String, enter: Bool) -> Bool {
@@ -498,5 +505,66 @@ final class ControlRouterTests: XCTestCase {
         ds.memory = nil
         guard case .error(let code, _) = r.handle(method: "app.memory", params: [:]) else { return XCTFail() }
         XCTAssertEqual(code, ControlError.notFound)
+    }
+
+    // MARK: - Per-pane memory
+
+    private func pane(_ id: String) -> PaneSnapshot {
+        PaneSnapshot(paneId: id, worktreePath: "/wt", branch: "b", project: "p",
+                     agentType: "claudeCode", status: "Running", lastMessage: "m")
+    }
+
+    func testPaneListOmitsMemoryByDefault() {
+        // Probing walks the whole process table, so the hot path agents poll
+        // must not pay for it unless asked.
+        let (r, ds) = router()
+        ds.panes = [pane("p1")]
+        guard case .ok(let d) = r.handle(method: "pane.list", params: [:]),
+              let panes = d["panes"] as? [[String: Any]] else { return XCTFail() }
+        XCTAssertEqual(ds.memoryRequests, [false])
+        XCTAssertNil(panes.first?["memory_bytes"])
+        XCTAssertNil(panes.first?["agent_memory_bytes"])
+    }
+
+    func testPaneListRequestsMemoryWhenAsked() {
+        let (r, ds) = router()
+        ds.panes = [pane("p1")]
+        guard case .ok = r.handle(method: "pane.list", params: ["memory": true]) else { return XCTFail() }
+        XCTAssertEqual(ds.memoryRequests, [true])
+    }
+
+    func testSessionSnapshotHonoursMemoryFlagToo() {
+        let (r, ds) = router()
+        ds.panes = [pane("p1")]
+        guard case .ok = r.handle(method: "session.snapshot", params: ["memory": true]) else { return XCTFail() }
+        XCTAssertEqual(ds.memoryRequests, [true])
+    }
+
+    func testPaneMemoryIsSerializedInBothBytesAndMB() {
+        let (r, ds) = router()
+        var p = pane("p1")
+        p.memoryBytes = 2 * 1_048_576
+        p.agentMemoryBytes = 1_048_576
+        p.processName = "claude"
+        ds.panes = [p]
+        guard case .ok(let d) = r.handle(method: "pane.list", params: ["memory": true]),
+              let first = (d["panes"] as? [[String: Any]])?.first else { return XCTFail() }
+        XCTAssertEqual(first["memory_bytes"] as? UInt64, 2 * 1_048_576)
+        XCTAssertEqual(first["memory_mb"] as? Double, 2.0)
+        XCTAssertEqual(first["agent_memory_bytes"] as? UInt64, 1_048_576)
+        XCTAssertEqual(first["agent_memory_mb"] as? Double, 1.0)
+        XCTAssertEqual(first["process_name"] as? String, "claude")
+    }
+
+    func testUnprobedPaneOmitsFieldsRatherThanReportingZero() {
+        // "not measured" and "measured as nothing" must stay distinguishable —
+        // a zero would read as a pane using no memory.
+        let (r, ds) = router()
+        ds.panes = [pane("p1")]
+        guard case .ok(let d) = r.handle(method: "pane.list", params: ["memory": true]),
+              let first = (d["panes"] as? [[String: Any]])?.first else { return XCTFail() }
+        XCTAssertNil(first["memory_bytes"])
+        XCTAssertNil(first["memory_mb"])
+        XCTAssertNil(first["process_name"])
     }
 }

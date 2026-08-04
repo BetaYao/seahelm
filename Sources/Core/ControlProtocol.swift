@@ -22,10 +22,32 @@ struct PaneSnapshot {
     var paneSessionKey: String = ""  // stable id agents get as SEAHELM_PANE_ID
     var title: String = ""        // stable pane title (OSC / persisted), for lists
 
+    /// Resident bytes for the pane's whole session tree, and for the agent
+    /// subtree within it. Only populated when the caller asks for memory —
+    /// see `ControlDataSource.snapshotPanes(includingMemory:)`.
+    var memoryBytes: UInt64?
+    var agentMemoryBytes: UInt64?
+    /// Foreground command under the session shell, when memory was probed.
+    var processName: String?
+
     var dict: [String: Any] {
-        ["pane_id": paneId, "pane_session_key": paneSessionKey, "worktree_path": worktreePath,
-         "branch": branch, "project": project, "agent_type": agentType,
-         "status": status, "last_message": lastMessage, "title": title]
+        var d: [String: Any] = [
+            "pane_id": paneId, "pane_session_key": paneSessionKey, "worktree_path": worktreePath,
+            "branch": branch, "project": project, "agent_type": agentType,
+            "status": status, "last_message": lastMessage, "title": title,
+        ]
+        // Omitted rather than zero-filled when unprobed, so a caller can tell
+        // "not measured" from "measured as nothing".
+        if let memoryBytes {
+            d["memory_bytes"] = memoryBytes
+            d["memory_mb"] = Double(memoryBytes) / 1_048_576
+        }
+        if let agentMemoryBytes {
+            d["agent_memory_bytes"] = agentMemoryBytes
+            d["agent_memory_mb"] = Double(agentMemoryBytes) / 1_048_576
+        }
+        if let processName { d["process_name"] = processName }
+        return d
     }
 }
 
@@ -33,6 +55,10 @@ struct PaneSnapshot {
 /// (read-only); write methods (send_text/split) extend this later.
 protocol ControlDataSource: AnyObject {
     func snapshotPanes() -> [PaneSnapshot]
+    /// Same, but optionally attaching per-pane memory. Opt-in because probing
+    /// means one `zmx list` plus a full process-table walk (argv included) —
+    /// far too costly to put on every `pane.list`, which agents poll.
+    func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot]
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
@@ -85,6 +111,9 @@ protocol ControlDataSource: AnyObject {
 }
 
 extension ControlDataSource {
+    /// Default ignores the flag, so read-only conformers and test fakes that
+    /// only implement the plain form keep working.
+    func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] { snapshotPanes() }
     func sendText(paneId: String, text: String, enter: Bool) -> Bool { false }
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
     func paneStatus(paneId: String) -> String? { nil }
@@ -168,7 +197,9 @@ final class ControlRouter {
             return .ok(["pong": true])
 
         case "session.snapshot", "pane.list":
-            let panes = dataSource?.snapshotPanes() ?? []
+            // `memory: true` costs a process-table walk, so it stays opt-in.
+            let wantMemory = params["memory"] as? Bool ?? false
+            let panes = dataSource?.snapshotPanes(includingMemory: wantMemory) ?? []
             return .ok(["panes": panes.map(\.dict)])
 
         case "pane.read":
