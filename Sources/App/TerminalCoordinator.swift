@@ -130,7 +130,8 @@ class TerminalCoordinator {
     }
 
     @discardableResult
-    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool, ratio: CGFloat? = nil) -> String? {
+    func splitPane(targetStationId: String?, axis: SplitAxis, focus: Bool, ratio: CGFloat? = nil,
+                   paneSessionKeyOverride: String? = nil) -> String? {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return nil }
 
@@ -145,7 +146,7 @@ class TerminalCoordinator {
             targetLeafId = tree.focusedId
         }
 
-        let paneSessionKey = tree.nextSessionName()
+        let paneSessionKey = paneSessionKeyOverride ?? tree.nextSessionName()
         let station = Station()
         station.paneSessionKey = paneSessionKey
         station.backend = runtimeBackend

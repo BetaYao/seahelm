@@ -19,6 +19,9 @@ class TabCoordinator {
     /// The live control data source. Also the pane lookup + write channel the
     /// iMessage rule engine dispatches through, so it is not MQTT-private.
     private(set) var mqttDataSource: ControlDataSource?
+    private var mailPaneRouter: MailPaneRouter?
+    private let mailConversationStore = EmailConversationStore()
+    private lazy var mailPaneObserver = MailPaneObserver(conversations: mailConversationStore)
 
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
@@ -114,6 +117,7 @@ class TabCoordinator {
                 self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
             }
             self.firstMate?.handle(outcome)
+            self.mailPaneObserver.ingest(outcome)
             // Feed the worktree aggregator from ShipLog's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
@@ -718,6 +722,11 @@ class TabCoordinator {
                     // (The HTTP webhook was retired once the socket path was
                     // verified end-to-end.)
                     let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
+                    self.mailPaneRouter = MailPaneRouter(control: controlDataSource, creator: self, store: self.mailConversationStore, accountEmail: self.config.gmailMail?.accountEmail)
+                    if let account = self.config.gmailMail?.accountEmail {
+                        let sender = GmailRESTMailSender(account: account)
+                        self.mailPaneObserver.onIntent = { intent in sender.send(intent, to: account) { _ in } }
+                    }
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
                         self?.terminalCoordinator.splitPane(targetStationId: targetStationId, axis: axis, focus: focus)
                     }
@@ -1435,6 +1444,54 @@ class TabCoordinator {
                         self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
                     }
                 }
+            }
+        }
+    }
+}
+
+extension TabCoordinator {
+    func routeMail(message: GmailInboundMessage, project: GmailMailProjectRule) {
+        mailPaneRouter?.route(message: message, project: project, text: message.bodyText)
+    }
+    func closeMailPane(paneID: String) -> EmailConversation? { mailPaneRouter?.close(paneID: paneID) }
+}
+
+extension TabCoordinator: MailPaneCreating {
+    /// Creates an explicitly targeted sibling pane in an already discovered
+    /// worktree. This never uses the focused pane as an implicit destination.
+    func createMailPane(worktreePath: String, completion: @escaping (Result<(paneID: String, paneSessionKey: String), Error>) -> Void) {
+        precondition(Thread.isMainThread)
+        guard allWorktrees.contains(where: { $0.info.path == worktreePath }),
+              let tree = terminalCoordinator.stationManager.tree(forPath: worktreePath),
+              let target = tree.allLeaves.first?.stationId,
+              let agent = SailorType(rawValue: config.defaultAgent),
+              let command = agent.launchCommand(withTask: "", agentYolo: config.agentYolo) else {
+            completion(.failure(NSError(domain: "SeahelmMail", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to create the configured agent pane."])))
+            return
+        }
+
+        selectTab(forWorktree: worktreePath)
+        let sessionKey = runtimeBackend == "local" ? "" : tree.nextSessionName()
+        let finish: () -> Void = { [weak self] in
+            guard let self,
+                  let paneID = self.terminalCoordinator.splitPane(targetStationId: target, axis: .horizontal, focus: false,
+                                                                   paneSessionKeyOverride: sessionKey),
+                  let station = StationRegistry.shared.station(forId: paneID) else {
+                completion(.failure(NSError(domain: "SeahelmMail", code: 2, userInfo: [NSLocalizedDescriptionKey: "Pane creation failed."]))); return
+            }
+            if self.runtimeBackend == "local" { station.sendText(command) }
+            completion(.success((paneID: paneID, paneSessionKey: station.paneSessionKey ?? sessionKey)))
+        }
+        guard runtimeBackend != "local" else { finish(); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            SessionManager.createDetachedSession(name: sessionKey, backend: self.runtimeBackend,
+                                                 cwd: worktreePath, agentCommandLine: command)
+            let ready = SessionManager.waitUntilSessionExists(name: sessionKey, backend: self.runtimeBackend, timeoutSeconds: 5)
+            DispatchQueue.main.async {
+                guard ready else {
+                    completion(.failure(NSError(domain: "SeahelmMail", code: 3, userInfo: [NSLocalizedDescriptionKey: "Agent session did not start."]))); return
+                }
+                finish()
             }
         }
     }

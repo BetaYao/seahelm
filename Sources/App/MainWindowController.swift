@@ -78,6 +78,8 @@ class MainWindowController: NSWindowController {
     /// Nil when the bridge is unconfigured or was started by AppDelegate and
     /// never reconfigured — `unregisterChannel("imessage")` covers that case.
     private var imessageChannel: IMessageChannel?
+    private var gmailOAuthCoordinator: GmailOAuthCoordinator?
+    private var gmailMailPoller: GmailMailPoller?
     /// Suppresses repeat alerts while the same permission is still missing.
     private var lastIMessageError: String?
     private var runtimeBackend: String = "zmx"
@@ -1962,7 +1964,22 @@ extension MainWindowController: NSWindowDelegate {
         pairingWindowController = nil
     }
 
+    func startGmailMailChannel(config gmailConfig: GmailMailConfig?) {
+        gmailMailPoller?.stop()
+        gmailMailPoller = nil
+        guard let gmailConfig, gmailConfig.enabled, gmailConfig.validationError == nil else { return }
+        let poller = GmailMailPoller(client: GmailRESTMailClient(accountEmail: gmailConfig.accountEmail))
+        poller.onAcceptedMessage = { [weak self] message, project in
+            DispatchQueue.main.async { self?.tabCoordinator.routeMail(message: message, project: project) }
+        }
+        poller.onStateChange = { code in NSLog("[App] Gmail mail channel state: \(code.rawValue)") }
+        poller.start(config: gmailConfig)
+        gmailMailPoller = poller
+    }
+
     func cleanupBeforeTermination() {
+        gmailMailPoller?.stop()
+        gmailMailPoller = nil
         usageSummaryStore.stop()
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
@@ -2498,6 +2515,26 @@ extension MainWindowController {
 // MARK: - SettingsDelegate
 
 extension MainWindowController: SettingsDelegate {
+    func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {
+        let coordinator = GmailOAuthCoordinator()
+        gmailOAuthCoordinator = coordinator
+        coordinator.connect(accountEmail: email) { [weak self] result in
+            guard let self else { return }
+            self.gmailOAuthCoordinator = nil
+            switch result {
+            case .success:
+                settings.setGmailConnectionStatus("Connected. Gmail credentials are stored in Keychain.")
+                if self.config.gmailMail == nil {
+                    self.config.gmailMail = GmailMailConfig(accountEmail: email,
+                                                            inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias)
+                    self.config.save()
+                }
+            case .failure(let error):
+                NSLog("[Gmail] OAuth failed: %@", error.localizedDescription)
+                settings.setGmailConnectionStatus("Connection failed: \(error.localizedDescription)")
+            }
+        }
+    }
     func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? {
         mintPairingContext()
     }
@@ -2630,6 +2667,10 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String) {
         tabCoordinator.pendingOrders.resolvePane(terminalID: terminalID)
+        if let conversation = tabCoordinator.closeMailPane(paneID: terminalID),
+           let account = config.gmailMail?.accountEmail {
+            EmailAttachmentStore().remove(threadID: conversation.gmailThreadID, account: account)
+        }
     }
 }
 

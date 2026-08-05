@@ -88,6 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
+        mainWindowController?.startGmailMailChannel(config: config.gmailMail)
     }
 
     /// Schedule periodic cleanup of zmx sessions whose worktree no longer exists.

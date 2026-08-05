@@ -20,6 +20,7 @@ protocol SettingsDelegate: AnyObject {
     /// Sessions the running app has panes attached to — flagged in the monitor so
     /// a kill that would take out a live agent is at least an informed one.
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String>
+    func settings(_ settings: SettingsViewController, connectGmailAccount email: String)
 }
 
 /// Optional halves of the protocol: only the main window can answer them, and
@@ -29,6 +30,7 @@ extension SettingsDelegate {
     func settings(_ settings: SettingsViewController, didMintShortCode code: String, ttl: TimeInterval) {}
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
+    func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {}
 }
 
 /// Settings, as a sidebar of pages built from `SettingsChrome` groups.
@@ -51,6 +53,8 @@ class SettingsViewController: NSViewController {
         .init(id: "imessage", title: "iMessage", symbol: "message",
               keywords: ["messages", "sms", "phone", "prefix", "sea", "helm",
                          "full disk access", "permission", "bridge"]),
+        .init(id: "gmail", title: "Gmail", symbol: "envelope",
+              keywords: ["email", "mail", "oauth", "google", "alias"]),
         .init(id: "pairing", title: "Pairing", symbol: "qrcode",
               keywords: ["qr", "remote", "watch", "mqtt", "code"]),
         .init(id: "sessions", title: "Sessions", symbol: "rectangle.stack",
@@ -108,6 +112,10 @@ class SettingsViewController: NSViewController {
         on: config.imessage?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
     private let imessagePermissionLabel = NSTextField(labelWithString: "")
     private lazy var imessageRulesView = IMessageRulesView(rules: config.imessage?.resolvedRules ?? [])
+    private let gmailAccountField = SettingsTextField()
+    private let gmailAliasLabel = NSTextField(labelWithString: "")
+    private let gmailStatusLabel = NSTextField(labelWithString: "Not connected")
+    private lazy var gmailEnabledToggle = SettingsControls.toggle(on: config.gmailMail?.enabled ?? false, target: self, action: #selector(controlChanged))
 
     init(config: Config) {
         self.config = config
@@ -186,10 +194,53 @@ class SettingsViewController: NSViewController {
         switch id {
         case "agents":   return makePage(buildAgentGroups())
         case "imessage": return makePage(buildIMessageGroups())
+        case "gmail":    return makePage(buildGmailGroups())
         case "pairing":  return makePage(buildPairingGroups())
         case "sessions": return makePage(buildSessionGroups())
         default:         return makePage(buildGeneralGroups())
         }
+    }
+
+    private func buildGmailGroups() -> [NSView] {
+        gmailAccountField.stringValue = config.gmailMail?.accountEmail ?? ""
+        gmailAccountField.placeholderString = "you@gmail.com"
+        gmailAccountField.target = self
+        gmailAccountField.action = #selector(gmailAccountChanged)
+        gmailAliasLabel.stringValue = config.gmailMail?.derivedInboundAlias ?? "Enter an account to see the alias"
+        gmailAliasLabel.textColor = SettingsPalette.secondary
+        if let account = config.gmailMail?.accountEmail,
+           (try? GmailOAuthCredentialStore().load(accountEmail: account)) != nil {
+            gmailStatusLabel.stringValue = "Connected. Gmail credentials are stored in Keychain."
+        } else {
+            gmailStatusLabel.stringValue = "Not connected"
+        }
+        let connect = SettingsControls.button("Connect Gmail", target: self, action: #selector(connectGmailClicked))
+        return [
+            SettingsGroupView(title: "Gmail", rows: [
+                SettingsRow.make("Google account", subtitle: "Only this account may send mail into Seahelm.", control: gmailAccountField),
+                SettingsRow.make("Inbound alias", subtitle: "Send project mail to this fixed Gmail plus-address.", control: gmailAliasLabel),
+                SettingsRow.make("Enable mail", subtitle: "Poll only while Seahelm is running. Use a configured project alias to route mail.", control: gmailEnabledToggle),
+                SettingsRow.actions([connect]),
+                SettingsRow.stacked(nil, content: gmailStatusLabel),
+            ]),
+        ]
+    }
+
+    @objc private func gmailAccountChanged() {
+        let email = GmailMailConfig.normalizeEmail(gmailAccountField.stringValue)
+        gmailAliasLabel.stringValue = GmailMailConfig(accountEmail: email).derivedInboundAlias
+        applyChanges()
+    }
+
+    @objc private func connectGmailClicked() {
+        let email = GmailMailConfig.normalizeEmail(gmailAccountField.stringValue)
+        guard GmailMailConfig.isEmail(email) else { gmailStatusLabel.stringValue = "Enter a valid Gmail address."; return }
+        gmailStatusLabel.stringValue = "Opening Google sign-in…"
+        settingsDelegate?.settings(self, connectGmailAccount: email)
+    }
+
+    func setGmailConnectionStatus(_ text: String) {
+        gmailStatusLabel.stringValue = text
     }
 
     /// Stack groups top-down in a flipped container, so a short page starts at
@@ -931,6 +982,13 @@ class SettingsViewController: NSViewController {
                 rules: pages["imessage"] == nil ? config.imessage?.rules
                                                 : imessageRulesView.rules
             )
+        }
+
+        if pages["gmail"] != nil {
+            let email = GmailMailConfig.normalizeEmail(gmailAccountField.stringValue)
+            config.gmailMail = GmailMailConfig(enabled: gmailEnabledToggle.state == .on, accountEmail: email,
+                                                inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias,
+                                                projects: config.gmailMail?.projects ?? [])
         }
 
         config.save()
