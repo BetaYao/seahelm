@@ -84,8 +84,7 @@ final class GmailOAuthCoordinator {
             let result = callback.map { GmailOAuthAuthorization.authorizationCode(from: $0, expectedState: self.request?.state ?? "") }
             let succeeded: Bool
             if case .some(.success) = result { succeeded = true } else { succeeded = false }
-            let body = succeeded ? "Authorization received. You may return to Seahelm." : "Authorization failed. Return to Seahelm."
-            connection.send(content: Data("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)".utf8), completion: .contentProcessed { _ in connection.cancel() })
+            connection.send(content: GmailOAuthCallbackPage.httpResponse(succeeded: succeeded), completion: .contentProcessed { _ in connection.cancel() })
             guard let result, case .success(let code) = result else { self.finish(.failure(GmailOAuthAuthorization.CallbackError.invalidCallback)); return }
             self.exchange(code: code)
         }
