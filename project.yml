@@ -81,6 +81,16 @@ targets:
         # correct failure mode, since an unverified feed is the whole attack.
         SUPublicEDKey: "$(SPARKLE_PUBLIC_ED_KEY)"
         SUEnableAutomaticChecks: true
+        # Gmail OAuth client, baked in the same way as SUPublicEDKey above.
+        # Empty in local Debug builds — GmailOAuthClientConfiguration falls
+        # back to ~/.config/seahelm/gmail-oauth-client.json for local testing.
+        # CI supplies the real values from GMAIL_OAUTH_CLIENT_ID/SECRET repo
+        # secrets (see scripts/package_release.sh); they are not committed
+        # here because there's no reason to hand them to every clone, even
+        # though Google does not treat a Desktop-app client secret as
+        # confidential.
+        GmailOAuthClientID: "$(GMAIL_OAUTH_CLIENT_ID)"
+        GmailOAuthClientSecret: "$(GMAIL_OAUTH_CLIENT_SECRET)"
     dependencies:
       - package: CodeEditSourceEditor
         product: CodeEditSourceEditor
@@ -177,6 +187,9 @@ targets:
         # keychain (and in the SPARKLE_PRIVATE_KEY repo secret). Public by design —
         # it ships inside every app bundle so the client can verify the feed.
         SPARKLE_PUBLIC_ED_KEY: "Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds="
+        # Defaults empty; package_release.sh overrides these for release builds.
+        GMAIL_OAUTH_CLIENT_ID: ""
+        GMAIL_OAUTH_CLIENT_SECRET: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.0.39"
         CURRENT_PROJECT_VERSION: 1

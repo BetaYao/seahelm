@@ -18,6 +18,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GmailOAuthClientID</key>
+	<string>$(GMAIL_OAUTH_CLIENT_ID)</string>
+	<key>GmailOAuthClientSecret</key>
+	<string>$(GMAIL_OAUTH_CLIENT_SECRET)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSAppleEventsUsageDescription</key>

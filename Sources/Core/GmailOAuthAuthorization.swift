@@ -84,15 +84,34 @@ enum GmailOAuthAuthorization {
     }
 }
 
-/// Machine-local OAuth client metadata. It intentionally lives beside the
-/// user config rather than in the application bundle or git repository.
+/// OAuth client metadata for the Gmail channel. A machine-local override at
+/// ~/.config/seahelm/gmail-oauth-client.json wins when present (handy for
+/// testing against a personal Google Cloud OAuth client); otherwise this
+/// falls back to the client baked into Info.plist at release-build time (see
+/// project.yml / scripts/package_release.sh). Google does not treat a
+/// Desktop-app client secret as confidential — it necessarily ships inside
+/// every copy of the app — so bundling it is the sanctioned distribution
+/// model, not a security shortcut.
 struct GmailOAuthClientConfiguration: Codable {
     let clientID: String
     let clientSecret: String
 
     static let fileURL = Config.configDir.appendingPathComponent("gmail-oauth-client.json")
+
     static func load() -> GmailOAuthClientConfiguration? {
+        fromConfigFile() ?? fromBundle()
+    }
+
+    private static func fromConfigFile() -> GmailOAuthClientConfiguration? {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    private static func fromBundle() -> GmailOAuthClientConfiguration? {
+        guard
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "GmailOAuthClientID") as? String, !clientID.isEmpty,
+            let clientSecret = Bundle.main.object(forInfoDictionaryKey: "GmailOAuthClientSecret") as? String, !clientSecret.isEmpty
+        else { return nil }
+        return GmailOAuthClientConfiguration(clientID: clientID, clientSecret: clientSecret)
     }
 }

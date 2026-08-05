@@ -157,6 +157,11 @@ jobs:
           # travel further than the step that needs it.
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          # Baked into Info.plist so the shipped app works without users
+          # creating their own Google Cloud OAuth client. Empty is a valid,
+          # safe default — it just ships with Gmail unconfigured.
+          GMAIL_OAUTH_CLIENT_ID: ${{ secrets.GMAIL_OAUTH_CLIENT_ID }}
+          GMAIL_OAUTH_CLIENT_SECRET: ${{ secrets.GMAIL_OAUTH_CLIENT_SECRET }}
         run: ./scripts/package_release.sh
 
       - name: Upload packaged app

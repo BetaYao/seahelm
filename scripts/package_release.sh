@@ -19,6 +19,12 @@ APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 # start without it, so a build with this empty ships an app whose updater is
 # inert — deliberate: an unverified feed is worse than no auto-update.
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
+# Gmail OAuth client baked into Info.plist. Empty means the shipped app has no
+# default Gmail client — GmailOAuthClientConfiguration still falls back to a
+# machine-local ~/.config/seahelm/gmail-oauth-client.json, so this only
+# disables Gmail out-of-the-box, not the app itself.
+GMAIL_OAUTH_CLIENT_ID="${GMAIL_OAUTH_CLIENT_ID:-}"
+GMAIL_OAUTH_CLIENT_SECRET="${GMAIL_OAUTH_CLIENT_SECRET:-}"
 
 case "$ARCH" in
   arm64|x86_64)
@@ -190,6 +196,8 @@ xcodebuild \
   ONLY_ACTIVE_ARCH=NO \
   ${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"} \
   SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
+  GMAIL_OAUTH_CLIENT_ID="$GMAIL_OAUTH_CLIENT_ID" \
+  GMAIL_OAUTH_CLIENT_SECRET="$GMAIL_OAUTH_CLIENT_SECRET" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
