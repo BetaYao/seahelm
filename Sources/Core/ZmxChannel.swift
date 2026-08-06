@@ -45,11 +45,22 @@ class ZmxChannel: SailorChannel {
     /// than a submit, so the prompt would sit in the composer forever. Same
     /// reasoning as `ShipLog.sendCommand`.
     func sendPrompt(_ text: String) -> Bool {
-        guard !paneSessionKey.isEmpty, !text.isEmpty else { return false }
-        let zmx = ZmxLocator.executable()
-        guard runZmxChecked([zmx, "send", paneSessionKey, text]) else { return false }
+        guard !text.isEmpty, sendRaw(text) else { return false }
         Thread.sleep(forTimeInterval: Station.enterSubmitDelay)
-        return runZmxChecked([zmx, "send", paneSessionKey, "\r"])
+        return submit()
+    }
+
+    /// Raw input to the session's PTY, submitting nothing. Arrow keys and other
+    /// escape sequences go through here.
+    func sendRaw(_ text: String) -> Bool {
+        guard !paneSessionKey.isEmpty, !text.isEmpty else { return false }
+        return runZmxChecked([ZmxLocator.executable(), "send", paneSessionKey, text])
+    }
+
+    /// The Return, always as a write of its own — see `sendPrompt`.
+    func submit() -> Bool {
+        guard !paneSessionKey.isEmpty else { return false }
+        return runZmxChecked([ZmxLocator.executable(), "send", paneSessionKey, "\r"])
     }
 
     private func runZmxChecked(_ args: [String]) -> Bool {

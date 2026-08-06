@@ -675,9 +675,25 @@ class ShipLog {
     /// viewport-discovered prompts pass their currently highlighted row.
     func answerChoiceByArrows(to terminalID: String, index: Int, from selectedIndex: Int = 0) {
         guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
+        let offset = index - selectedIndex
+        let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
+
+        // Same surface-versus-session split as `sendCommand`: answering a prompt
+        // in a pane whose tab was never opened would otherwise move no
+        // selection and press nothing, while looking like it worked.
+        guard station.canDeliverInput else {
+            let sessionKey = station.paneSessionKey ?? ""
+            guard !sessionKey.isEmpty else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let channel = ZmxChannel(paneSessionKey: sessionKey)
+                guard channel.sendRaw(String(repeating: arrow, count: abs(offset))) else { return }
+                Thread.sleep(forTimeInterval: Station.enterSubmitDelay)
+                _ = channel.submit()
+            }
+            return
+        }
+
         DispatchQueue.main.async {
-            let offset = index - selectedIndex
-            let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
             for _ in 0..<abs(offset) { station.sendText(arrow) }
             // Same beat as sendCommand: let the TUI ingest the arrows first.
             DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {

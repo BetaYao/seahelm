@@ -133,6 +133,24 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// if the TUI is still ingesting the arrow when the Return lands.
     func sendKeys(paneId: String, keys: [String]) -> Bool {
         guard let station = station(for: paneId) else { return false }
+        // Same as `sendText`: with no surface the writes below do nothing, and
+        // claiming otherwise tells the caller a key was pressed that wasn't.
+        guard station.canDeliverInput else {
+            guard let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return false }
+            let channel = ZmxChannel(paneSessionKey: sessionKey)
+            var delivered = true
+            for (index, key) in keys.enumerated() {
+                if ControlKeys.isEnter(key) {
+                    // The pause before a Return is what stops a TUI reading it
+                    // as part of the paste it is still ingesting.
+                    if index > 0 { Thread.sleep(forTimeInterval: Station.enterSubmitDelay) }
+                    delivered = channel.submit() && delivered
+                } else if let bytes = ControlKeys.bytes(for: key) {
+                    delivered = channel.sendRaw(bytes) && delivered
+                }
+            }
+            return delivered
+        }
         runOnMain {
             var delay: TimeInterval = 0
             for (index, key) in keys.enumerated() {
