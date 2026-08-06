@@ -32,6 +32,31 @@ class ZmxChannel: SailorChannel {
         return allLines.suffix(lines).joined(separator: "\n")
     }
 
+    /// Types a prompt into the session and submits it, bypassing the on-screen
+    /// surface entirely.
+    ///
+    /// A pane whose tab is not open has no attached surface, and a write to one
+    /// is dropped while still reporting success. Everything reaching a pane from
+    /// off the desktop therefore has to go to the session, which is there
+    /// whether or not anyone is looking at it.
+    ///
+    /// The Return is a second write on purpose: an agent TUI treats a `\r` that
+    /// arrives in the same burst as the pasted text as a literal newline rather
+    /// than a submit, so the prompt would sit in the composer forever. Same
+    /// reasoning as `ShipLog.sendCommand`.
+    func sendPrompt(_ text: String) -> Bool {
+        guard !paneSessionKey.isEmpty, !text.isEmpty else { return false }
+        let zmx = ZmxLocator.executable()
+        guard runZmxChecked([zmx, "send", paneSessionKey, text]) else { return false }
+        Thread.sleep(forTimeInterval: Station.enterSubmitDelay)
+        return runZmxChecked([zmx, "send", paneSessionKey, "\r"])
+    }
+
+    private func runZmxChecked(_ args: [String]) -> Bool {
+        ProcessRunner.capture(executable: URL(fileURLWithPath: "/usr/bin/env"),
+                              arguments: args, timeout: Self.commandTimeout).succeeded
+    }
+
     /// Deadline for one zmx call. zmx talks to a local socket, so anything past
     /// this means the session is wedged, not slow.
     static let commandTimeout: TimeInterval = 15

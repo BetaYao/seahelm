@@ -43,6 +43,14 @@ class Station {
     /// `pwd` hasn't been reported — which is the common case inside zmx sessions.
     private(set) var initialWorkingDirectory: String?
 
+    /// Whether typing into this pane can actually reach it.
+    ///
+    /// A pane whose tab has not been opened in this run owns a Station but no
+    /// surface yet, and both `sendText` and `sendEnterKey` quietly return in
+    /// that state. Callers must ask before preferring the surface over the
+    /// persistent session, or the input is dropped with nothing to show for it.
+    var canDeliverInput: Bool { surface != nil }
+
     /// Session name for persistence backend (nil = direct shell)
     var paneSessionKey: String?
     /// Last-known "strong" pane title (agent session / OSC title), persisted in

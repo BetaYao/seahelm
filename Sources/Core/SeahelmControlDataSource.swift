@@ -104,6 +104,14 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func sendText(paneId: String, text: String, enter: Bool) -> Bool {
         guard let station = station(for: paneId) else { return false }
+        // A pane whose tab was never opened has a Station but no surface, and
+        // the writes below silently no-op. Reporting success for that is worse
+        // than failing: callers believe an agent was told something it never
+        // heard. Deliver through the persistent session instead.
+        guard station.canDeliverInput else {
+            guard let key = station.paneSessionKey, !key.isEmpty, !text.isEmpty else { return false }
+            return ZmxChannel(paneSessionKey: key).sendPrompt(text)
+        }
         runOnMain {
             if !text.isEmpty { station.sendText(text) }
             guard enter else { return }

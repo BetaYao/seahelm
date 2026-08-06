@@ -632,7 +632,12 @@ class ShipLog {
     /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
     /// only when the surface isn't available (e.g. pane not currently rendered).
     func sendCommand(to terminalID: String, command: String) {
-        if let station = StationRegistry.shared.station(forId: terminalID) {
+        let station = StationRegistry.shared.station(forId: terminalID)
+        // `canDeliverInput`, not merely "a Station exists" — the two come apart
+        // for any pane whose tab has not been opened in this run, and that gap
+        // is what silently swallowed every message sent to a backgrounded pane
+        // from iMessage, mail, and the control socket alike.
+        if let station, station.canDeliverInput {
             // Send the text first, then the Enter as a separate write. Agent TUIs
             // (Claude Code, codex) treat a `\r` arriving in the same burst as the
             // pasted text as a literal newline (multiline input) instead of a
@@ -648,12 +653,18 @@ class ShipLog {
             }
             return
         }
+
+        let sessionKey = station?.paneSessionKey ?? ""
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
         // Channel sends spawn a subprocess (zmx/tmux) and wait for it — callers
         // are mostly main-thread interaction sites, so keep it off-thread.
         DispatchQueue.global(qos: .userInitiated).async {
+            // `zmx send` in preference to the registered channel's `zmx run`,
+            // which appends a ZMX_TASK_COMPLETED marker that ends up typed into
+            // the command line verbatim.
+            if !sessionKey.isEmpty, ZmxChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
             channel?.sendCommand(command)
         }
     }
