@@ -46,7 +46,11 @@ enum GmailOAuthAuthorization {
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
             return .failure(.invalidCallback)
         }
-        let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        // Same trap as the mail headers: a callback that repeats a parameter
+        // would otherwise crash the app rather than fail the exchange. First
+        // wins, which is the conventional reading of a duplicated query item.
+        let values = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") },
+                                uniquingKeysWith: { first, _ in first })
         guard values["state"] == expectedState else { return .failure(.stateMismatch) }
         if let description = values["error_description"], !description.isEmpty { return .failure(.provider(description)) }
         if let error = values["error"], !error.isEmpty { return .failure(.provider(error)) }

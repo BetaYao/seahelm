@@ -69,7 +69,14 @@ final class GmailRESTMailClient: GmailMailClient {
                 self.fetchMessages(Array(refs.dropFirst()), token: token, historyID: historyID, completion: completion)
             case .failure(let error): completion(.failure(error))
             case .success(let detail):
-                let headers = Dictionary(uniqueKeysWithValues: (detail.payload?.headers ?? []).map { ($0.name, $0.value) })
+                // `uniqueKeysWithValues` traps on a repeated key, and a repeated
+                // key is the normal case: a message carries one `Received` per
+                // relay hop, so building this map crashed the app on essentially
+                // every real mail. Joining rather than keeping the first also
+                // preserves multi-hop `Delivered-To`, which the recipient gate
+                // splits on commas and must see in full.
+                let headers = Dictionary((detail.payload?.headers ?? []).map { ($0.name, $0.value) },
+                                         uniquingKeysWith: { "\($0), \($1)" })
                 let date = Date(timeIntervalSince1970: (Double(detail.internalDate ?? "") ?? 0) / 1_000)
                 let parts = Self.flatten(detail.payload)
                 let text = parts.first(where: { $0.mimeType.lowercased() == "text/plain" })

@@ -16,7 +16,11 @@ struct GmailInboundMessage: Equatable {
         self.id = id
         self.threadId = threadId
         self.receivedAt = receivedAt
-        self.headers = Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value) })
+        // Lowercasing can collide even when the source keys were unique, and the
+        // source keys usually are not — see the note in GmailRESTMailClient.
+        // Trapping here would crash the app on ordinary mail.
+        self.headers = Dictionary(headers.map { ($0.key.lowercased(), $0.value) },
+                                  uniquingKeysWith: { "\($0), \($1)" })
         self.bodyText = bodyText
         self.attachments = attachments
     }
