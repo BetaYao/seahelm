@@ -94,17 +94,28 @@ final class GmailRESTMailSender: GmailMailSending {
     ///
     /// Both parts are base64: RFC 5322 caps a line at 998 characters and agent
     /// output regularly runs past that, which would otherwise corrupt the mail.
-    static func rawMessage(intent: OutboundMailIntent, to account: String, boundary: String = "seahelm-\(UUID().uuidString)") -> String {
+    static func rawMessage(intent: OutboundMailIntent, to account: String, replyToAccount: String = "",
+                           boundary: String = "seahelm-\(UUID().uuidString)") -> String {
         // Every outbound mail carries the command list. Mail is the one surface
         // with no autocomplete and no keyboard help, and the `-- ` marker means
         // a reply quoting it back gets stripped again on arrival.
         let plain = MailSignature.appended(to: intent.body)
         let html = MailHTML.document(body: intent.body)
-        let message = [
-            "To: \(account)",
+        // Replies have to come back to the alias, and they are addressed from
+        // whatever this mail says it is from — the plain account. Without a
+        // Reply-To, pressing Reply produces mail the recipient gate refuses,
+        // so a conversation could never reach its second round.
+        let alias = GmailMailConfig(accountEmail: replyToAccount).derivedInboundAlias
+        var headers = ["To: \(account)"]
+        if !alias.isEmpty { headers.append("Reply-To: \(alias)") }
+        headers += [
             "Subject: \(intent.subject)",
             "MIME-Version: 1.0",
             "Content-Type: multipart/alternative; boundary=\"\(boundary)\"",
+        ]
+        // The empty strings below are structural — they end the header block and
+        // each part's own headers — so this list must never be filtered.
+        let message = (headers + [
             "",
             "--\(boundary)",
             "Content-Type: text/plain; charset=utf-8",
@@ -117,7 +128,7 @@ final class GmailRESTMailSender: GmailMailSending {
             "",
             base64Body(html),
             "--\(boundary)--",
-        ].joined(separator: "\r\n")
+        ]).joined(separator: "\r\n")
         return Data(message.utf8).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
@@ -139,7 +150,7 @@ final class GmailRESTMailSender: GmailMailSending {
             guard case .success(let token) = result else {
                 completion(.failure(result.failureError ?? .authorizationExpired)); return
             }
-            let raw = Self.rawMessage(intent: intent, to: account)
+            let raw = Self.rawMessage(intent: intent, to: account, replyToAccount: self.account)
             var request = URLRequest(url: URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")!)
             request.httpMethod = "POST"; request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["threadId": intent.threadID, "raw": raw])

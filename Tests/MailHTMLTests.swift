@@ -49,7 +49,8 @@ final class MailHTMLTests: XCTestCase {
     private func mime(body: String) -> String {
         let intent = OutboundMailIntent(id: "i", threadID: "t", paneSessionKey: "k", sequence: 1,
                                         kind: .reply, subject: "[seahelm:demo]", body: body, state: "pending")
-        let raw = GmailRESTMailSender.rawMessage(intent: intent, to: "user@example.com", boundary: "BOUND")
+        let raw = GmailRESTMailSender.rawMessage(intent: intent, to: "user@example.com",
+                                                 replyToAccount: "me@example.com", boundary: "BOUND")
         var padded = raw.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while padded.count % 4 != 0 { padded += "=" }
         let data = Data(base64Encoded: padded, options: .ignoreUnknownCharacters)
@@ -63,6 +64,21 @@ final class MailHTMLTests: XCTestCase {
         let encoded = String(section[range.upperBound...])
         return Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    /// Seahelm's own mail is From the plain account, so pressing Reply produces
+    /// mail addressed there — which the recipient gate refuses. Without this a
+    /// conversation could never reach its second round.
+    func testRepliesAreDirectedBackToTheAlias() {
+        XCTAssertTrue(mime(body: "x").contains("Reply-To: me+seahelm@example.com"))
+    }
+
+    /// The blank lines in the MIME body are structural: they end the header
+    /// block and each part's headers.
+    func testStructuralBlankLinesSurvive() {
+        let message = mime(body: "x")
+        XCTAssertTrue(message.contains("boundary=\"BOUND\"\r\n\r\n--BOUND"), "header block must end")
+        XCTAssertTrue(message.contains("Content-Transfer-Encoding: base64\r\n\r\n"), "part headers must end")
     }
 
     func testSendsBothAlternatives() {
