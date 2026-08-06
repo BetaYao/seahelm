@@ -37,8 +37,8 @@ class ZmxChannel: SailorChannel {
     ///
     /// A pane whose tab is not open has no attached surface, and a write to one
     /// is dropped while still reporting success. Everything reaching a pane from
-    /// off the desktop therefore has to go to the session, which is there
-    /// whether or not anyone is looking at it.
+    /// off the desktop — mail above all — therefore has to go to the session,
+    /// which is there whether or not anyone is looking at it.
     ///
     /// The Return is a second write on purpose: an agent TUI treats a `\r` that
     /// arrives in the same burst as the pasted text as a literal newline rather
@@ -55,6 +55,49 @@ class ZmxChannel: SailorChannel {
     private func runZmxChecked(_ args: [String]) -> Bool {
         ProcessRunner.capture(executable: URL(fileURLWithPath: "/usr/bin/env"),
                               arguments: args, timeout: Self.commandTimeout).succeeded
+    }
+
+    /// The session's own scrollback, stripped of the escape sequences a TUI
+    /// paints itself with. Reads the persistent session rather than the surface,
+    /// so it works for a pane whose tab was never opened.
+    func recentTranscript(lines: Int) -> String? {
+        guard let raw = readOutput(lines: lines) else { return nil }
+        return Self.stripTerminalControl(raw)
+    }
+
+    /// Enough of an ANSI/OSC scrub to make a transcript readable in a mail.
+    static func stripTerminalControl(_ text: String) -> String {
+        var out = text
+        // `\#u{…}` rather than `\u{…}`: a raw string leaves escapes uninterpreted,
+        // so the plain form would look for a literal backslash-u.
+        for pattern in [#"\#u{1B}\][^\#u{07}\#u{1B}]*(?:\#u{07}|\#u{1B}\\)"#,   // OSC …BEL/ST
+                        #"\#u{1B}\[[0-9;?]*[ -/]*[@-~]"#,                        // CSI
+                        #"\#u{1B}[@-Z\\-_]"#,                                    // lone escapes
+                        #"[\#u{00}-\#u{08}\#u{0B}\#u{0C}\#u{0E}-\#u{1F}]"#] {    // stray control bytes
+            out = out.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        return out.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.replacingOccurrences(of: "\r", with: "").trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !isChrome($0) }
+            .joined(separator: "\n")
+    }
+
+    /// Furniture an agent TUI repaints around the conversation — rules, meters,
+    /// the prompt caret, permission banners. Reading a transcript in a mail is
+    /// about what was said, and left in, the chrome outweighs it.
+    private static func isChrome(_ line: String) -> Bool {
+        // Box-drawing rules are pure decoration once the colours are gone.
+        if let first = line.first, "─━═│┃╭╮╰╯├┤┌┐└┘".contains(first) { return true }
+        // Meters and progress bars.
+        if line.contains("█") || line.contains("░") || line.contains("▓") { return true }
+        if line == "❯" || line == ">" || line == "⏺" { return true }
+        for marker in ["⏵⏵", "✻ Churned", "⚠ Transcript saving",
+                       // Seahelm's own control line, which is an instruction to
+                       // the agent rather than anything it said.
+                       "::seahelm-suggest::"] where line.contains(marker) {
+            return true
+        }
+        return false
     }
 
     /// Deadline for one zmx call. zmx talks to a local socket, so anything past

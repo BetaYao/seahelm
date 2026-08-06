@@ -43,7 +43,7 @@ enum WindowStyling {
     }
 }
 
-class MainWindowController: NSWindowController {
+class MainWindowController: NSWindowController, MailCommandContext {
     private static let primaryCapsuleDisplayDuration: TimeInterval = 8.0
 
     private let backgroundEffectView = NSVisualEffectView()
@@ -1137,7 +1137,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
 
             switch BridgeCommandParser.parse(body, worktrees: self.currentWorktreeRefs(),
-                                             agents: self.currentWorktreeAgentRefs(),
+                                             agents: self.fleetAgentRefs(),
                                              repoPaths: self.tabCoordinator.config.workspacePaths) {
             case .failure(.unknownCommand):
                 return false   // not ours — let /status, /idea, /help try
@@ -1161,6 +1161,35 @@ dashboard.stationManager = terminalCoordinator.stationManager
                      branch: $0.branch,
                      type: $0.agentType.displayName,
                      title: Self.agentTitle(for: $0))
+        }
+    }
+
+    /// Every pane, grouped so one project's worktrees stay together — the order
+    /// the listing prints and therefore the order `/pane <n>` counts in.
+    ///
+    /// Chat surfaces select from this rather than from the current worktree: a
+    /// phone and a mail thread have no tab bar to say which worktree is meant.
+    func fleetAgentRefs() -> [AgentRef] {
+        ShipLog.shared.allSailors()
+            .sorted { ($0.project, $0.branch) < ($1.project, $1.branch) }
+            .map {
+                AgentRef(id: $0.id,
+                         project: $0.project,
+                         branch: $0.branch,
+                         type: $0.agentType.displayName,
+                         title: Self.agentTitle(for: $0),
+                         status: $0.status,
+                         // The assistant's own prose where there is any; a screen
+                         // scan makes poor reading in a chat or a mail.
+                         lastMessage: $0.lastAssistantMessage.isEmpty ? $0.lastMessage : $0.lastAssistantMessage)
+            }
+    }
+
+    /// Recent tool activity for one pane, as plain lines.
+    func fleetActivity(forPaneID paneID: String) -> [String] {
+        guard let sailor = ShipLog.shared.sailor(for: paneID) else { return [] }
+        return sailor.activityEvents.map {
+            "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
         }
     }
 
@@ -1207,22 +1236,26 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
 
         case .listAgents:
-            guard dashboardVC?.lastCommittedWorktreePath != nil else {
-                reply("No current worktree. `/worktree` to pick one.")
-                return
-            }
-            reply(BridgeCommandFormatter.agentList(
-                currentWorktreeAgentRefs(),
+            // Fleet-wide, not current-worktree: this listing's numbering is what
+            // `/pane <n>` and `/order <n>` resolve against.
+            reply(BridgeCommandFormatter.fleetList(
+                fleetAgentRefs(),
                 currentId: dashboardVC?.lastCommittedWorktreePath
                     .flatMap { ShipLog.shared.sailor(forWorktree: $0)?.id }))
 
         case .selectAgent(let id):
-            guard let s = ShipLog.shared.sailor(for: id) else {
+            guard let agent = fleetAgentRefs().first(where: { $0.id == id }),
+                  let sailor = ShipLog.shared.sailor(for: id) else {
                 reply("That agent is gone. `/pane` to see what's left.")
                 return
             }
-            dashboardVC?.commitWorktreeSelection(path: s.worktreePath)
-            reply("Now steering **\(s.project)** [\(s.branch)]")
+            // Opening a pane is also steering it — reading it and then having to
+            // say so again is a round-trip this surface can't afford.
+            dashboardVC?.commitWorktreeSelection(path: sailor.worktreePath)
+            reply(BridgeCommandFormatter.paneDetail(
+                agent, activity: fleetActivity(forPaneID: id),
+                transcript: ZmxChannel(paneSessionKey: sailor.station?.paneSessionKey ?? "").recentTranscript(lines: 60),
+                joined: "Now steering **\(agent.project)** [\(agent.branch)] — reply to send it anything."))
 
         case .orderAgent(let id, let task):
             guard let s = ShipLog.shared.sailor(for: id) else { reply("No such agent."); return }
@@ -1967,14 +2000,59 @@ extension MainWindowController: NSWindowDelegate {
     func startGmailMailChannel(config gmailConfig: GmailMailConfig?) {
         gmailMailPoller?.stop()
         gmailMailPoller = nil
+        tabCoordinator.mailCommandContext = self
         guard let gmailConfig, gmailConfig.enabled, gmailConfig.validationError == nil else { return }
         let poller = GmailMailPoller(client: GmailRESTMailClient(accountEmail: gmailConfig.accountEmail))
-        poller.onAcceptedMessage = { [weak self] message, project in
-            DispatchQueue.main.async { self?.tabCoordinator.routeMail(message: message, project: project) }
+        poller.onAcceptedMessage = { [weak self] message in
+            DispatchQueue.main.async { self?.tabCoordinator.routeMail(message: message) }
         }
         poller.onStateChange = { code in NSLog("[App] Gmail mail channel state: \(code.rawValue)") }
         poller.start(config: gmailConfig)
         gmailMailPoller = poller
+    }
+
+    /// Mail speaks the same grammar as the Helm line and iMessage; only the
+    /// binding is its own, because "the pane I'm talking to" is a thread here
+    /// and a focused pane on the desktop.
+    ///
+    /// Returns nil for anything that isn't a command — that gets delivered to
+    /// the thread's pane as prose.
+    func interpret(_ text: String) -> MailCommandResult? {
+        precondition(Thread.isMainThread)
+        guard text.hasPrefix("/") else { return nil }
+        let fleet = fleetAgentRefs()
+
+        // `/pane <n>` binds this thread, so mail resolves that one itself.
+        // Everything else runs through the very closure iMessage uses.
+        if case .success(.selectAgent(let id)) = BridgeCommandParser.parse(text, worktrees: [], agents: fleet) {
+            guard let agent = fleet.first(where: { $0.id == id }),
+                  let sailor = ShipLog.shared.sailor(for: id) else {
+                return .reply("That pane is gone. `/pane` to see what's left.")
+            }
+            let sessionKey = sailor.station?.paneSessionKey ?? ""
+            return .bind(paneID: sailor.id,
+                         sessionKey: sessionKey,
+                         worktreePath: sailor.worktreePath,
+                         reply: BridgeCommandFormatter.paneDetail(
+                            agent, activity: fleetActivity(forPaneID: id),
+                            transcript: ZmxChannel(paneSessionKey: sessionKey).recentTranscript(lines: 60),
+                            joined: "This thread now talks to **\(agent.project)** [\(agent.branch)] — reply to send it anything."))
+        }
+
+        var answer: String?
+        // The shared grammar answers synchronously for every verb it owns.
+        let owned = ShipLog.shared.chatCommandRoute?(text, { answer = $0 }) ?? false
+        guard owned, let answer else { return .reply("Unknown command.\n\n\(MailSignature.commands)") }
+        return .reply(answer)
+    }
+
+    func steerCurrent(_ text: String) -> String? {
+        precondition(Thread.isMainThread)
+        var answer: String?
+        // The same closure that routes bare prose from iMessage, so an unbound
+        // mail thread behaves exactly like a phone conversation.
+        guard ShipLog.shared.chatCommandRoute?(text, { answer = $0 }) ?? false else { return nil }
+        return answer
     }
 
     func cleanupBeforeTermination() {
@@ -2561,6 +2639,7 @@ extension MainWindowController: SettingsDelegate {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
         let oldIMessage = self.config.imessage
+        let oldGmail = self.config.gmailMail
         // Preserve split layouts — SettingsVC doesn't track them
         var merged = config
         merged.splitLayouts = terminalCoordinator.config.splitLayouts
@@ -2573,6 +2652,14 @@ extension MainWindowController: SettingsDelegate {
         let newPaths = Set(config.workspacePaths)
         if oldPaths != newPaths {
             tabCoordinator.loadWorkspaces()
+        }
+
+        // Hot-reload the mail channel too. The poller captures its config when
+        // it starts, so without this an edited sender whitelist (or account, or
+        // alias) sat in config.json doing nothing until the next launch, while
+        // inbound mail was rejected against the values from startup.
+        if oldGmail != config.gmailMail {
+            startGmailMailChannel(config: config.gmailMail)
         }
 
         // Hot-reload the iMessage bridge on config change.

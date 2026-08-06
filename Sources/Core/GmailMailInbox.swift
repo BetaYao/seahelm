@@ -29,7 +29,7 @@ struct GmailInboundMessage: Equatable {
 }
 
 enum GmailInboundDecision: Equatable {
-    case accept(project: GmailMailProjectRule)
+    case accept
     case reject(GmailMailAuditCode)
 }
 
@@ -40,6 +40,9 @@ enum GmailMailAuditCode: String, Codable, Equatable {
     case missingMessageID
     case missingThreadID
     case invalidSender
+    /// A whitelisted address that Google could not vouch for — most likely a
+    /// forged `From`.
+    case unauthenticatedSender
     case invalidRecipient
     case autoReply
     case malformedSubject
@@ -53,15 +56,22 @@ struct GmailMailAuditEntry: Codable, Equatable {
     let timestamp: Date
     let messageIDHash: String
     let threadIDHash: String
-    let projectAlias: String?
+    /// The `From` address, recorded in the clear and only when it is why the
+    /// message was refused.
+    ///
+    /// Message and thread ids are hashed because nothing needs to read them
+    /// back, but a whitelist cannot be corrected against an address you are not
+    /// allowed to see — and the address a provider actually sends from is
+    /// routinely not the one you typed into it.
+    let sender: String?
     let code: GmailMailAuditCode
 
-    init(messageID: String, threadID: String, projectAlias: String? = nil,
+    init(messageID: String, threadID: String, sender: String? = nil,
          code: GmailMailAuditCode, timestamp: Date = Date()) {
         self.timestamp = timestamp
         messageIDHash = Self.hash(messageID)
         threadIDHash = Self.hash(threadID)
-        self.projectAlias = projectAlias
+        self.sender = sender
         self.code = code
     }
 
@@ -77,25 +87,34 @@ enum GmailInboundValidator {
         guard !message.threadId.isEmpty else { return .reject(.missingThreadID) }
         guard message.receivedAt >= syncStartedAt else { return .reject(.preEnableMessage) }
         guard !processedIDs.contains(message.id) else { return .reject(.duplicateMessage) }
-        guard normalizedAddress(message.header("from")) == config.accountEmail else { return .reject(.invalidSender) }
+        let sender = normalizedAddress(message.header("from"))
+        if sender != config.accountEmail {
+            guard config.normalizedAllowedSenders.contains(sender) else { return .reject(.invalidSender) }
+            // Anyone can put a whitelisted address in a `From` header, and what
+            // arrives here is typed into a terminal running an agent. Only
+            // Google's own verdict makes an outside address worth trusting;
+            // mail the account sent itself never leaves Google and carries no
+            // such header, which is why the check is scoped to outside senders.
+            guard isSenderAuthenticated(message) else { return .reject(.unauthenticatedSender) }
+        }
         guard recipientHeadersContainAlias(message, alias: config.inboundAlias) else { return .reject(.invalidRecipient) }
         guard !isAutomated(message) else { return .reject(.autoReply) }
-        guard let alias = projectAlias(from: message.header("subject")),
-              let project = config.projects.first(where: { $0.normalizedAlias == alias }) else {
-            return .reject(message.header("subject") == nil ? .malformedSubject : .unknownProject)
-        }
-        return .accept(project: project)
+        // The recipient alias is the whole gate. There is no subject tag and no
+        // per-project routing: every command is fleet-wide, and a thread that
+        // wants one particular pane says so with `/pane <n>`.
+        return .accept
     }
 
-    static func projectAlias(from subject: String?) -> String? {
-        guard let subject else { return nil }
-        // Gmail adds `Re:` (and occasionally `Fwd:`) before a reply subject.
-        // Strip those first so extraction still begins at `[seahelm:`.
-        let normalized = subject.replacingOccurrences(of: #"(?i)^(?:(?:re|fwd):\s*)*"#, with: "", options: .regularExpression)
-        let pattern = #"^\[seahelm:([a-z0-9-]+)\]\s*"#
-        guard let match = normalized.range(of: pattern, options: .regularExpression) else { return nil }
-        let prefix = String(normalized[match])
-        return prefix.dropFirst("[seahelm:".count).dropLast(2).trimmingCharacters(in: .whitespaces)
+    /// Google's inbound verdict, from the `Authentication-Results` header it
+    /// stamps on everything arriving from outside.
+    ///
+    /// DKIM is the stronger signal — it binds the message to a domain's key and
+    /// survives forwarding — but SPF alone still proves the sending host was
+    /// authorised, so either is accepted. A message with no verdict at all is
+    /// refused rather than assumed good.
+    static func isSenderAuthenticated(_ message: GmailInboundMessage) -> Bool {
+        guard let results = message.header("authentication-results")?.lowercased() else { return false }
+        return results.contains("dkim=pass") || results.contains("spf=pass")
     }
 
     private static func recipientHeadersContainAlias(_ message: GmailInboundMessage, alias: String) -> Bool {
@@ -103,6 +122,11 @@ enum GmailInboundValidator {
             .compactMap { $0 }
             .flatMap { $0.split(separator: ",") }
             .contains { normalizedAddress(String($0)) == alias }
+    }
+
+    /// The address the sender gate compares against, so a rejection can name it.
+    static func senderAddress(of message: GmailInboundMessage) -> String {
+        normalizedAddress(message.header("from"))
     }
 
     private static func normalizedAddress(_ value: String?) -> String {
@@ -141,12 +165,12 @@ struct GmailMailState: Codable, Equatable {
         self.audit = audit
     }
 
-    mutating func record(messageID: String, threadID: String, projectAlias: String? = nil, code: GmailMailAuditCode) {
+    mutating func record(messageID: String, threadID: String, sender: String? = nil, code: GmailMailAuditCode) {
         if !messageID.isEmpty {
             processedMessageIDs.append(messageID)
             processedMessageIDs = Array(processedMessageIDs.suffix(Self.maxProcessedMessageIDs))
         }
-        audit.append(.init(messageID: messageID, threadID: threadID, projectAlias: projectAlias, code: code))
+        audit.append(.init(messageID: messageID, threadID: threadID, sender: sender, code: code))
         audit = Array(audit.suffix(Self.maxAuditEntries))
     }
 }

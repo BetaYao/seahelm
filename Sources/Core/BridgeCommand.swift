@@ -12,9 +12,6 @@ struct CabinRef: Equatable {
 /// An agent as the command language sees it — one split pane running one agent.
 struct AgentRef: Equatable {
     let id: String
-    /// Repo and branch are the same for every agent in one listing — it lists a
-    /// single worktree's agents — so they head the reply rather than repeat on
-    /// every row.
     let project: String
     let branch: String
     /// Agent kind, e.g. "Claude".
@@ -22,6 +19,21 @@ struct AgentRef: Equatable {
     /// This agent's own session title. Distinct per agent, unlike the
     /// worktree-keyed title the dashboard shows.
     let title: String
+    /// Carried so a listing can show state without a second lookup. Defaulted
+    /// because the desktop paths that only select never read them.
+    let status: SailorStatus
+    let lastMessage: String
+
+    init(id: String, project: String, branch: String, type: String, title: String,
+         status: SailorStatus = .unknown, lastMessage: String = "") {
+        self.id = id
+        self.project = project
+        self.branch = branch
+        self.type = type
+        self.title = title
+        self.status = status
+        self.lastMessage = lastMessage
+    }
 }
 
 /// The command language, spoken identically by the desktop Helm line and the
@@ -210,6 +222,80 @@ enum BridgeCommandFormatter {
             "\(index + 1). \(wt.repo) / \(wt.branch)\(wt.path == currentPath ? "  ← current" : "")"
         }
         return (["**Worktrees**", ""] + lines + ["", "`/worktree #<code|name>` to switch."]).joined(separator: "\n")
+    }
+
+    /// Every pane in the fleet, numbered, grouped under project and worktree.
+    ///
+    /// The chat surfaces list globally rather than per-worktree: neither a phone
+    /// nor a mail thread has a tab bar to establish which worktree is meant, and
+    /// the number printed here is what `/pane <n>` and `/order <n>` resolve
+    /// against, so there must be exactly one numbering.
+    static func fleetList(_ agents: [AgentRef], currentId: String?) -> String {
+        guard !agents.isEmpty else { return "No panes running. `/worktree <description>` to start one." }
+        var out = ["**Panes** — \(agents.count)", ""]
+        var project: String?
+        var branch: String?
+        // The number is the 1-based position in this array, which is exactly
+        // what `resolveIndexed` reads back — so the two can never disagree.
+        for (offset, agent) in agents.enumerated() {
+            if agent.project != project {
+                out.append("**\(agent.project)**")
+                project = agent.project
+                branch = nil
+            }
+            if agent.branch != branch {
+                out.append("  \(agent.branch)")
+                branch = agent.branch
+            }
+            let here = agent.id == currentId ? "  ← current" : ""
+            // A pane with no session title falls back to its branch, which the
+            // line above already carries — and a shell pane's title is its whole
+            // command line, which wraps for several lines and destroys the
+            // alignment the numbering is read from.
+            let label = agent.title == agent.branch ? "" : " — \(truncated(agent.title))"
+            out.append("    \(offset + 1). \(agent.status.icon) \(agent.type)\(label)\(here)")
+        }
+        out.append("")
+        out.append("`/pane <n>` opens one · `/order <n> <task>` sends without switching.")
+        return out.joined(separator: "\n")
+    }
+
+    /// Keeps one listing row to one line. Shell panes carry their entire
+    /// command line as a title.
+    private static func truncated(_ title: String, limit: Int = 60) -> String {
+        title.count <= limit ? title : "\(title.prefix(limit - 1))…"
+    }
+
+    /// One pane in full, and the note that this conversation now steers it.
+    ///
+    /// `transcript` is the session's own scrollback. It leads, because the
+    /// status fields alone say almost nothing about what an agent has actually
+    /// been doing — and for a pane that reports no structured events they are
+    /// empty, which left the reply with nothing in it at all.
+    static func paneDetail(_ agent: AgentRef, activity: [String], transcript: String?,
+                           joined: String) -> String {
+        var out = ["**\(agent.type) — \(truncated(agent.title, limit: 90))**",
+                   "\(agent.project) / \(agent.branch) · \(agent.status.icon) \(agent.status.groupLabel)",
+                   ""]
+        if let transcript = transcript.map({ MailContentRedactor.summary($0, limit: 6_000) }),
+           !transcript.isEmpty {
+            out.append("**Session**")
+            out.append(transcript)
+            out.append("")
+        }
+        let message = MailContentRedactor.summary(agent.lastMessage, limit: 1_500)
+        if !message.isEmpty {
+            out.append("**Latest**")
+            out.append(message)
+            out.append("")
+        }
+        if !activity.isEmpty {
+            out.append("**Recent activity**")
+            out.append(contentsOf: activity.prefix(8).map { "· \($0)" })
+            out.append("")
+        }
+        out.append(joined)
+        return out.joined(separator: "\n")
     }
 
     static func agentList(_ agents: [AgentRef], currentId: String?) -> String {

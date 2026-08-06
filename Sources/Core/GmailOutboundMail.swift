@@ -1,7 +1,7 @@
 import Foundation
 
 struct OutboundMailIntent: Codable, Equatable {
-    enum Kind: String, Codable { case waiting, completion, error }
+    enum Kind: String, Codable { case waiting, completion, error, reply }
     var id: String
     var threadID: String
     var paneSessionKey: String
@@ -37,7 +37,9 @@ enum MailContentRedactor {
 }
 
 final class MailPaneObserver {
-    var onIntent: ((OutboundMailIntent) -> Void)?
+    /// `(intent, recipient)` — the recipient is the thread's commander, so an
+    /// agent's output reaches whoever is actually running it.
+    var onIntent: ((OutboundMailIntent, String?) -> Void)?
     private let conversations: EmailConversationStore
     private var emitted: Set<String> = []
     private let intentStore: OutboundMailIntentStore
@@ -51,6 +53,11 @@ final class MailPaneObserver {
         if outcome.isCompletionSignal { kind = .completion }
         else if outcome.statusChanged && outcome.newStatus == .waiting { kind = .waiting }
         else if outcome.statusChanged && outcome.newStatus == .error { kind = .error }
+        // A turn that simply ends. Agents that report a Stop hook raise
+        // `isCompletionSignal`; the rest just fall back to resting, and without
+        // this their answer never left the pane — which is the whole point of
+        // having mailed them.
+        else if outcome.statusChanged && outcome.oldStatus == .running && outcome.newStatus == .idle { kind = .completion }
         else { kind = nil }
         guard let kind else { return }
         let id = "\(key):\(outcome.seq):\(kind.rawValue)"
@@ -58,9 +65,11 @@ final class MailPaneObserver {
         let text = outcome.isCompletionSignal ? outcome.info.lastAssistantMessage : outcome.info.lastMessage
         let body = MailContentRedactor.summary(text.isEmpty ? "Seahelm pane status: \(outcome.newStatus.groupLabel)." : text)
         let intent = OutboundMailIntent(id: id, threadID: conversation.gmailThreadID, paneSessionKey: key, sequence: outcome.seq, kind: kind,
-                                        subject: "[seahelm:\(conversation.projectAlias)]", body: body, state: "pending")
+                                        // Nothing parses the subject any more — the recipient alias is
+                                        // the gate — so it just has to read well in a thread list.
+                                        subject: "Seahelm — \(outcome.newStatus.groupLabel)", body: body, state: "pending")
         guard intentStore.insertIfAbsent(intent) else { return }
-        onIntent?(intent)
+        onIntent?(intent, conversation.commander)
     }
 }
 
@@ -77,6 +86,48 @@ final class GmailRESTMailSender: GmailMailSending {
         self.account = GmailMailConfig.normalizeEmail(account)
         self.tokens = tokens ?? GmailAccessTokenProvider(accountEmail: account)
     }
+    /// A `multipart/alternative` of the same content twice.
+    ///
+    /// The plain part is not a fallback — it is what the reader parses on the way
+    /// back (`GmailRESTMailClient` takes `text/plain`), so quoting and therefore
+    /// `MailBody.newContent` keep working. The HTML part is only what you see.
+    ///
+    /// Both parts are base64: RFC 5322 caps a line at 998 characters and agent
+    /// output regularly runs past that, which would otherwise corrupt the mail.
+    static func rawMessage(intent: OutboundMailIntent, to account: String, boundary: String = "seahelm-\(UUID().uuidString)") -> String {
+        // Every outbound mail carries the command list. Mail is the one surface
+        // with no autocomplete and no keyboard help, and the `-- ` marker means
+        // a reply quoting it back gets stripped again on arrival.
+        let plain = MailSignature.appended(to: intent.body)
+        let html = MailHTML.document(body: intent.body)
+        let message = [
+            "To: \(account)",
+            "Subject: \(intent.subject)",
+            "MIME-Version: 1.0",
+            "Content-Type: multipart/alternative; boundary=\"\(boundary)\"",
+            "",
+            "--\(boundary)",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Transfer-Encoding: base64",
+            "",
+            base64Body(plain),
+            "--\(boundary)",
+            "Content-Type: text/html; charset=utf-8",
+            "Content-Transfer-Encoding: base64",
+            "",
+            base64Body(html),
+            "--\(boundary)--",
+        ].joined(separator: "\r\n")
+        return Data(message.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func base64Body(_ text: String) -> String {
+        Data(text.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn, .endLineWithLineFeed])
+    }
+
     func send(_ intent: OutboundMailIntent, to account: String, completion: @escaping (Result<String, GmailMailClientError>) -> Void) {
         send(intent, to: account, forceRefresh: false, completion: completion)
     }
@@ -84,31 +135,30 @@ final class GmailRESTMailSender: GmailMailSending {
     private func send(_ intent: OutboundMailIntent, to account: String, forceRefresh: Bool,
                       completion: @escaping (Result<String, GmailMailClientError>) -> Void) {
         tokens.token(forceRefresh: forceRefresh) { [weak self] result in
-        guard let self else { return }
-        guard case .success(let token) = result else {
-            completion(.failure(result.failureError ?? .authorizationExpired)); return
-        }
-        let message = ["To: \(account)", "Subject: \(intent.subject)", "Content-Type: text/plain; charset=utf-8", "", intent.body].joined(separator: "\r\n")
-        let raw = Data(message.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        var request = URLRequest(url: URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")!)
-        request.httpMethod = "POST"; request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["threadId": intent.threadID, "raw": raw])
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error { completion(.failure(.transport(error.localizedDescription))); return }
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(status), let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = json["id"] as? String else {
-                // A token can be rejected before its recorded expiry — revoked,
-                // or clock skew — so try one forced exchange before giving up.
-                if status == 401, !forceRefresh {
-                    self.send(intent, to: account, forceRefresh: true, completion: completion)
-                } else {
-                    completion(.failure(status == 401 ? .authorizationExpired : .transport("HTTP \(status)")))
-                }
-                return
+            guard let self else { return }
+            guard case .success(let token) = result else {
+                completion(.failure(result.failureError ?? .authorizationExpired)); return
             }
-            completion(.success(id))
-        }.resume()
+            let raw = Self.rawMessage(intent: intent, to: account)
+            var request = URLRequest(url: URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")!)
+            request.httpMethod = "POST"; request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["threadId": intent.threadID, "raw": raw])
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error { completion(.failure(.transport(error.localizedDescription))); return }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200..<300).contains(status), let data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = json["id"] as? String else {
+                    // Same one-shot forced exchange as the poller: a token can be
+                    // rejected before its recorded expiry.
+                    if status == 401, !forceRefresh {
+                        self.send(intent, to: account, forceRefresh: true, completion: completion)
+                    } else {
+                        completion(.failure(status == 401 ? .authorizationExpired : .transport("HTTP \(status)")))
+                    }
+                    return
+                }
+                completion(.success(id))
+            }.resume()
         }
     }
 }

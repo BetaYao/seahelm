@@ -24,7 +24,7 @@ protocol GmailMailClient {
 /// Owns the application-lifetime polling window. It never scans before `start`;
 /// a restart and a history expiration both establish a new "now" boundary.
 final class GmailMailPoller {
-    var onAcceptedMessage: ((GmailInboundMessage, GmailMailProjectRule) -> Void)?
+    var onAcceptedMessage: ((GmailInboundMessage) -> Void)?
     var onStateChange: ((GmailMailAuditCode) -> Void)?
 
     private let client: GmailMailClient
@@ -85,13 +85,17 @@ final class GmailMailPoller {
                                                                       syncStartedAt: state.syncStartedAt,
                                                                       processedIDs: Set(state.processedMessageIDs))
                         switch decision {
-                        case .accept(let project):
+                        case .accept:
                             // Deduplicate before invoking a caller that might create UI.
-                            state.record(messageID: message.id, threadID: message.threadId,
-                                         projectAlias: project.normalizedAlias, code: .accepted)
-                            self.onAcceptedMessage?(message, project)
+                            state.record(messageID: message.id, threadID: message.threadId, code: .accepted)
+                            self.onAcceptedMessage?(message)
                         case .reject(let code):
-                            state.record(messageID: message.id, threadID: message.threadId, code: code)
+                            // Name the address only when it is the reason, so an
+                            // unusable whitelist can actually be fixed.
+                            let sender = (code == .invalidSender || code == .unauthenticatedSender)
+                                ? GmailInboundValidator.senderAddress(of: message) : nil
+                            state.record(messageID: message.id, threadID: message.threadId,
+                                         sender: sender, code: code)
                         }
                     }
                     self.state = state

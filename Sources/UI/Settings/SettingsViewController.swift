@@ -114,6 +114,7 @@ class SettingsViewController: NSViewController {
     private lazy var imessageRulesView = IMessageRulesView(rules: config.imessage?.resolvedRules ?? [])
     private let gmailAccountField = SettingsTextField()
     private let gmailAliasLabel = NSTextField(labelWithString: "")
+    private let gmailAllowedSendersField = SettingsTextField()
     private let gmailStatusLabel = NSTextField(labelWithString: "Not connected")
     private lazy var gmailEnabledToggle = SettingsControls.toggle(on: config.gmailMail?.enabled ?? false, target: self, action: #selector(controlChanged))
 
@@ -214,11 +215,16 @@ class SettingsViewController: NSViewController {
         } else {
             gmailStatusLabel.stringValue = "Not connected"
         }
+        gmailAllowedSendersField.stringValue = (config.gmailMail?.allowedSenders ?? []).joined(separator: ", ")
+        gmailAllowedSendersField.placeholderString = "work@example.com, phone@example.com"
+        gmailAllowedSendersField.target = self
+        gmailAllowedSendersField.action = #selector(controlChanged)
         let connect = SettingsControls.button("Connect Gmail", target: self, action: #selector(connectGmailClicked))
         return [
             SettingsGroupView(title: "Gmail", rows: [
-                SettingsRow.make("Google account", subtitle: "Only this account may send mail into Seahelm.", control: gmailAccountField),
-                SettingsRow.make("Inbound alias", subtitle: "Send project mail to this fixed Gmail plus-address.", control: gmailAliasLabel),
+                SettingsRow.make("Google account", subtitle: "The mailbox Seahelm reads, and always allowed to command it.", control: gmailAccountField),
+                SettingsRow.make("Inbound alias", subtitle: "Commands must be addressed here — ordinary mail to your account is ignored.", control: gmailAliasLabel),
+                SettingsRow.make("Also accept from", subtitle: "Other addresses allowed to command Seahelm, comma separated. Accepted only when Google's SPF/DKIM check passes, since a From header can be forged.", control: gmailAllowedSendersField),
                 SettingsRow.make("Enable mail", subtitle: "Poll only while Seahelm is running. Use a configured project alias to route mail.", control: gmailEnabledToggle),
                 SettingsRow.actions([connect]),
                 SettingsRow.stacked(nil, content: gmailStatusLabel),
@@ -986,9 +992,14 @@ class SettingsViewController: NSViewController {
 
         if pages["gmail"] != nil {
             let email = GmailMailConfig.normalizeEmail(gmailAccountField.stringValue)
+            let senders = gmailAllowedSendersField.stringValue
+                .split(whereSeparator: { ", ;\n".contains($0) })
+                .map { GmailMailConfig.normalizeEmail(String($0)) }
+                .filter { GmailMailConfig.isEmail($0) }
             config.gmailMail = GmailMailConfig(enabled: gmailEnabledToggle.state == .on, accountEmail: email,
                                                 inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias,
-                                                projects: config.gmailMail?.projects ?? [])
+                                                projects: config.gmailMail?.projects ?? [],
+                                                allowedSenders: senders)
         }
 
         config.save()

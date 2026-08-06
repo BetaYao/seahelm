@@ -20,6 +20,11 @@ class TabCoordinator {
     /// iMessage rule engine dispatches through, so it is not MQTT-private.
     private(set) var mqttDataSource: ControlDataSource?
     private var mailPaneRouter: MailPaneRouter?
+    /// Set by `MainWindowController`, which owns the fleet accessors and the
+    /// shared chat route mail commands are executed through.
+    weak var mailCommandContext: MailCommandContext? {
+        didSet { mailPaneRouter?.commandContext = mailCommandContext }
+    }
     private let mailConversationStore = EmailConversationStore()
     private lazy var mailPaneObserver = MailPaneObserver(conversations: mailConversationStore)
 
@@ -722,10 +727,29 @@ class TabCoordinator {
                     // (The HTTP webhook was retired once the socket path was
                     // verified end-to-end.)
                     let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
-                    self.mailPaneRouter = MailPaneRouter(control: controlDataSource, creator: self, store: self.mailConversationStore, accountEmail: self.config.gmailMail?.accountEmail)
+                    self.mailPaneRouter = MailPaneRouter(control: controlDataSource, store: self.mailConversationStore, accountEmail: self.config.gmailMail?.accountEmail)
+                    self.mailPaneRouter?.commandContext = self.mailCommandContext
                     if let account = self.config.gmailMail?.accountEmail {
                         let sender = GmailRESTMailSender(account: account)
-                        self.mailPaneObserver.onIntent = { intent in sender.send(intent, to: account) { _ in } }
+                        self.mailPaneObserver.onIntent = { intent, commander in
+                            sender.send(intent, to: commander?.isEmpty == false ? commander! : account) { _ in }
+                        }
+                        // Command replies ride the same in-thread sender as
+                        // status mail, but skip the intent store: a reply is
+                        // already idempotent per inbound mail, and persisting
+                        // one would have it retried after it was answered.
+                        // Echo the subject the thread already carries. Gmail
+                        // threads on `threadId`, but clients group on subject
+                        // too, and nothing parses it any more — the recipient
+                        // alias is the whole gate.
+                        self.mailPaneRouter?.onReply = { body, threadID, subject, replyTo in
+                            let replySubject = subject.isEmpty ? "Seahelm"
+                                : (subject.lowercased().hasPrefix("re:") ? subject : "Re: \(subject)")
+                            sender.send(OutboundMailIntent(id: UUID().uuidString, threadID: threadID, paneSessionKey: "",
+                                                           sequence: 0, kind: .reply, subject: replySubject,
+                                                           body: body, state: "pending"),
+                                        to: replyTo.isEmpty ? account : replyTo) { _ in }
+                        }
                     }
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
                         self?.terminalCoordinator.splitPane(targetStationId: targetStationId, axis: axis, focus: focus)
@@ -1450,54 +1474,11 @@ class TabCoordinator {
 }
 
 extension TabCoordinator {
-    func routeMail(message: GmailInboundMessage, project: GmailMailProjectRule) {
-        mailPaneRouter?.route(message: message, project: project, text: message.bodyText)
+    func routeMail(message: GmailInboundMessage) {
+        mailPaneRouter?.route(message: message, text: message.bodyText)
     }
     func closeMailPane(paneID: String) -> EmailConversation? { mailPaneRouter?.close(paneID: paneID) }
 }
-
-extension TabCoordinator: MailPaneCreating {
-    /// Creates an explicitly targeted sibling pane in an already discovered
-    /// worktree. This never uses the focused pane as an implicit destination.
-    func createMailPane(worktreePath: String, completion: @escaping (Result<(paneID: String, paneSessionKey: String), Error>) -> Void) {
-        precondition(Thread.isMainThread)
-        guard allWorktrees.contains(where: { $0.info.path == worktreePath }),
-              let tree = terminalCoordinator.stationManager.tree(forPath: worktreePath),
-              let target = tree.allLeaves.first?.stationId,
-              let agent = SailorType(rawValue: config.defaultAgent),
-              let command = agent.launchCommand(withTask: "", agentYolo: config.agentYolo) else {
-            completion(.failure(NSError(domain: "SeahelmMail", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to create the configured agent pane."])))
-            return
-        }
-
-        selectTab(forWorktree: worktreePath)
-        let sessionKey = runtimeBackend == "local" ? "" : tree.nextSessionName()
-        let finish: () -> Void = { [weak self] in
-            guard let self,
-                  let paneID = self.terminalCoordinator.splitPane(targetStationId: target, axis: .horizontal, focus: false,
-                                                                   paneSessionKeyOverride: sessionKey),
-                  let station = StationRegistry.shared.station(forId: paneID) else {
-                completion(.failure(NSError(domain: "SeahelmMail", code: 2, userInfo: [NSLocalizedDescriptionKey: "Pane creation failed."]))); return
-            }
-            if self.runtimeBackend == "local" { station.sendText(command) }
-            completion(.success((paneID: paneID, paneSessionKey: station.paneSessionKey ?? sessionKey)))
-        }
-        guard runtimeBackend != "local" else { finish(); return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            SessionManager.createDetachedSession(name: sessionKey, backend: self.runtimeBackend,
-                                                 cwd: worktreePath, agentCommandLine: command)
-            let ready = SessionManager.waitUntilSessionExists(name: sessionKey, backend: self.runtimeBackend, timeoutSeconds: 5)
-            DispatchQueue.main.async {
-                guard ready else {
-                    completion(.failure(NSError(domain: "SeahelmMail", code: 3, userInfo: [NSLocalizedDescriptionKey: "Agent session did not start."]))); return
-                }
-                finish()
-            }
-        }
-    }
-}
-
-// MARK: - First Mate Inspection
 
 extension TabCoordinator {
     /// Deadline for one FirstMate inspection command (a test suite, a build, a
