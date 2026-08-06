@@ -998,7 +998,6 @@ class SettingsViewController: NSViewController {
                 .filter { GmailMailConfig.isEmail($0) }
             config.gmailMail = GmailMailConfig(enabled: gmailEnabledToggle.state == .on, accountEmail: email,
                                                 inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias,
-                                                projects: config.gmailMail?.projects ?? [],
                                                 allowedSenders: senders)
         }
 

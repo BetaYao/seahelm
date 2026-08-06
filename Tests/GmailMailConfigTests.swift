@@ -11,30 +11,22 @@ final class GmailMailConfigTests: XCTestCase {
         XCTAssertFalse(String(data: try JSONEncoder().encode(config), encoding: .utf8)!.contains("token"))
     }
 
-    func testDerivesAndValidatesFixedInboundAlias() throws {
-        let worktree = try makeDirectory()
-        let config = GmailMailConfig(accountEmail: " Me@Example.com ", inboundAlias: "me+seahelm@example.com",
-                                    projects: [.init(alias: "my-app", worktreePath: worktree.path)])
+    func testDerivesAndValidatesFixedInboundAlias() {
+        let config = GmailMailConfig(accountEmail: " Me@Example.com ", inboundAlias: "me+seahelm@example.com")
 
         XCTAssertEqual(config.accountEmail, "me@example.com")
         XCTAssertEqual(config.derivedInboundAlias, "me+seahelm@example.com")
         XCTAssertNil(config.validationError)
     }
 
-    func testRejectsInvalidAliasDuplicateRuleAndUnknownDirectory() throws {
-        let worktree = try makeDirectory()
-        let wrongAlias = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "mail@example.com",
-                                         projects: [.init(alias: "app", worktreePath: worktree.path)])
-        XCTAssertNotNil(wrongAlias.validationError)
+    /// The alias is the only recipient Seahelm answers on, so a config naming
+    /// any other address has to be refused rather than silently listening wide.
+    func testRejectsAnInboundAliasThatIsNotThePlusAddress() {
+        let wrongAlias = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "mail@example.com")
+        XCTAssertEqual(wrongAlias.validationError, "The inbound alias must be me+seahelm@example.com.")
 
-        let duplicate = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com",
-                                        projects: [.init(alias: "app", worktreePath: worktree.path),
-                                                   .init(alias: "APP", worktreePath: worktree.path)])
-        XCTAssertEqual(duplicate.validationError, "Project aliases must be unique.")
-
-        let missing = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com",
-                                      projects: [.init(alias: "app", worktreePath: "/does/not/exist")])
-        XCTAssertNotNil(missing.validationError)
+        let notAnEmail = GmailMailConfig(accountEmail: "nonsense", inboundAlias: "nonsense")
+        XCTAssertNotNil(notAnEmail.validationError)
     }
 
     func testClampsPollingIntervalAndAttachmentLimit() {
@@ -175,18 +167,8 @@ final class GmailMailConfigTests: XCTestCase {
                        .reject(.invalidRecipient))
     }
 
-    /// Project rules are no longer part of routing, so a config without any is
-    /// valid and the channel starts.
-    func testConfigIsValidWithoutProjectRules() {
-        let config = GmailMailConfig(enabled: true, accountEmail: "me@example.com",
-                                     inboundAlias: "me+seahelm@example.com")
-        XCTAssertNil(config.validationError)
-    }
-
-    func testInboundValidatorRejectsPreEnableDuplicateAndAutomatedMail() throws {
-        let worktree = try makeDirectory()
-        let config = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com",
-                                     projects: [.init(alias: "app", worktreePath: worktree.path)])
+    func testInboundValidatorRejectsPreEnableDuplicateAndAutomatedMail() {
+        let config = GmailMailConfig(accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com")
         let headers = ["From": "me@example.com", "To": "me+seahelm@example.com", "Subject": "Hi"]
         let old = GmailInboundMessage(id: "old", threadId: "t", receivedAt: .distantPast, headers: headers)
         XCTAssertEqual(GmailInboundValidator.validate(old, config: config, syncStartedAt: Date(), processedIDs: []), .reject(.preEnableMessage))
@@ -214,9 +196,7 @@ final class GmailMailConfigTests: XCTestCase {
     }
 
     func testPollerUsesFakeAndAcceptsCurrentWindowMessageOnce() throws {
-        let worktree = try makeDirectory()
-        let config = GmailMailConfig(enabled: true, accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com",
-                                     projects: [.init(alias: "app", worktreePath: worktree.path)])
+        let config = GmailMailConfig(enabled: true, accountEmail: "me@example.com", inboundAlias: "me+seahelm@example.com")
         let message = GmailInboundMessage(id: "m", threadId: "t", receivedAt: Date().addingTimeInterval(1), headers: [
             "From": "me@example.com", "To": "me+seahelm@example.com", "Subject": "Hello"
         ])
