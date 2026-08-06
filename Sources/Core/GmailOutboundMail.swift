@@ -72,12 +72,22 @@ protocol GmailMailSending {
 /// dependency, so outbound mail cannot accidentally capture a screen buffer.
 final class GmailRESTMailSender: GmailMailSending {
     private let account: String
-    private let credentials: GmailOAuthCredentialStoring
-    init(account: String, credentials: GmailOAuthCredentialStoring = GmailOAuthCredentialStore()) {
-        self.account = GmailMailConfig.normalizeEmail(account); self.credentials = credentials
+    private let tokens: GmailAccessTokenProviding
+    init(account: String, tokens: GmailAccessTokenProviding? = nil) {
+        self.account = GmailMailConfig.normalizeEmail(account)
+        self.tokens = tokens ?? GmailAccessTokenProvider(accountEmail: account)
     }
     func send(_ intent: OutboundMailIntent, to account: String, completion: @escaping (Result<String, GmailMailClientError>) -> Void) {
-        guard let token = try? credentials.load(accountEmail: self.account)?.accessToken, !token.isEmpty else { completion(.failure(.authorizationExpired)); return }
+        send(intent, to: account, forceRefresh: false, completion: completion)
+    }
+
+    private func send(_ intent: OutboundMailIntent, to account: String, forceRefresh: Bool,
+                      completion: @escaping (Result<String, GmailMailClientError>) -> Void) {
+        tokens.token(forceRefresh: forceRefresh) { [weak self] result in
+        guard let self else { return }
+        guard case .success(let token) = result else {
+            completion(.failure(result.failureError ?? .authorizationExpired)); return
+        }
         let message = ["To: \(account)", "Subject: \(intent.subject)", "Content-Type: text/plain; charset=utf-8", "", intent.body].joined(separator: "\r\n")
         let raw = Data(message.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         var request = URLRequest(url: URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")!)
@@ -87,8 +97,18 @@ final class GmailRESTMailSender: GmailMailSending {
             if let error { completion(.failure(.transport(error.localizedDescription))); return }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status), let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = json["id"] as? String else { completion(.failure(status == 401 ? .authorizationExpired : .transport("HTTP \(status)"))); return }
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = json["id"] as? String else {
+                // A token can be rejected before its recorded expiry — revoked,
+                // or clock skew — so try one forced exchange before giving up.
+                if status == 401, !forceRefresh {
+                    self.send(intent, to: account, forceRefresh: true, completion: completion)
+                } else {
+                    completion(.failure(status == 401 ? .authorizationExpired : .transport("HTTP \(status)")))
+                }
+                return
+            }
             completion(.success(id))
         }.resume()
+        }
     }
 }

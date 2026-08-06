@@ -5,34 +5,49 @@ import Foundation
 /// attachments are intentionally deferred to the routing/attachment ticket.
 final class GmailRESTMailClient: GmailMailClient {
     private let accountEmail: String
-    private let credentialStore: GmailOAuthCredentialStoring
+    private let tokens: GmailAccessTokenProviding
     private let session: URLSession
 
-    init(accountEmail: String, credentialStore: GmailOAuthCredentialStoring = GmailOAuthCredentialStore(),
+    init(accountEmail: String, tokens: GmailAccessTokenProviding? = nil,
          session: URLSession = .shared) {
         self.accountEmail = GmailMailConfig.normalizeEmail(accountEmail)
-        self.credentialStore = credentialStore
+        self.tokens = tokens ?? GmailAccessTokenProvider(accountEmail: accountEmail, session: session)
         self.session = session
     }
 
     func poll(since: Date, historyID: String?, inboundAlias: String,
               completion: @escaping (Result<GmailMailPoll, GmailMailClientError>) -> Void) {
-        do {
-            guard let credentials = try credentialStore.load(accountEmail: accountEmail),
-                  !credentials.accessToken.isEmpty else {
-                completion(.failure(.authorizationExpired)); return
+        poll(historyID: historyID, forceRefresh: false, completion: completion)
+    }
+
+    private func poll(historyID: String?, forceRefresh: Bool,
+                      completion: @escaping (Result<GmailMailPoll, GmailMailClientError>) -> Void) {
+        tokens.token(forceRefresh: forceRefresh) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let token) = result else {
+                completion(.failure(result.failureError ?? .authorizationExpired)); return
+            }
+            // A token can be rejected before its recorded expiry — revoked, or
+            // simply clock skew — so one forced exchange is tried before giving
+            // up, since the poller shuts itself down on `authorizationExpired`.
+            let retrying: (Result<GmailMailPoll, GmailMailClientError>) -> Void = { outcome in
+                if case .failure(.authorizationExpired) = outcome, !forceRefresh {
+                    self.poll(historyID: historyID, forceRefresh: true, completion: completion)
+                } else {
+                    completion(outcome)
+                }
             }
             if let historyID {
-                self.fetchHistory(historyID, token: credentials.accessToken, completion: completion)
+                self.fetchHistory(historyID, token: token, completion: retrying)
             } else {
                 // Establish a cursor only. Do not list the inbox here: mail that
                 // predates this running window must remain out of scope.
-                self.request(URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/profile")!, token: credentials.accessToken) {
+                self.request(URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/profile")!, token: token) {
                     (result: Result<Profile, GmailMailClientError>) in
-                    completion(result.map { .init(messages: [], latestHistoryId: $0.historyId) })
+                    retrying(result.map { .init(messages: [], latestHistoryId: $0.historyId) })
                 }
             }
-        } catch { completion(.failure(.transport(error.localizedDescription))) }
+        }
     }
 
     private func fetchHistory(_ historyID: String, token: String,
