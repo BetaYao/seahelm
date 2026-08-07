@@ -35,16 +35,19 @@ final class UsageReadoutTests: XCTestCase {
         XCTAssertEqual(UsageReadoutSegment.Severity(usedPercent: 100), .critical)
     }
 
-    func testProviderWithoutRateLimitsIsDropped() {
+    func testProviderWithoutRateLimitsUsesPlaceholderReadout() {
         let empty = UsageSnapshot(provider: .codex, rateLimit: nil, todayTokens: nil, updatedAt: nil, isStale: true)
-        XCTAssertNil(UsageSummaryFormatter.readout(for: empty))
+        let codex = UsageSummaryFormatter.readout(for: empty)
+        XCTAssertEqual(codex?.segments.map(\.label), ["quota"])
+        XCTAssertEqual(codex?.segments.map(\.percentText), ["--"])
+        XCTAssertEqual(codex?.segments.map(\.severity), [.unknown])
 
         let readouts = UsageSummaryFormatter.readouts(
             claude: claudeSnapshot(fiveHour: 11, sevenDay: 2),
             codex: empty,
             now: Date(timeIntervalSince1970: 0)
         )
-        XCTAssertEqual(readouts.map(\.provider), [.claude])
+        XCTAssertEqual(readouts.map(\.provider), [.claude, .codex])
     }
 
     @MainActor

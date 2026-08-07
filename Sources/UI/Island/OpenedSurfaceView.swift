@@ -60,9 +60,9 @@ struct OpenedSurfaceView: View {
                     }
                 } else {
                     if !model.rows.isEmpty {
-                        VStack(spacing: 2) {
-                            ForEach(model.rows) { row in
-                                agentRow(row)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(model.deckGroups) { group in
+                                deckSection(group)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
@@ -268,25 +268,78 @@ struct OpenedSurfaceView: View {
         .animation(.easeInOut(duration: 0.25), value: model.usageReadouts)
     }
 
-    private func agentRow(_ row: IslandAgentRow) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            agentRowHeader(row)
-            if !row.message.isEmpty {
-                Text(row.message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 15) // align under the text, past the dot
+    private func deckSection(_ group: IslandDeckGroup) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(group.project)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(IslandStyle.accent.opacity(0.85))
+                    .textCase(.uppercase)
+                Text("\(group.rows.count) worktree\(group.rows.count == 1 ? "" : "s")")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.35))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
+            ForEach(group.rows) { row in
+                agentRow(row)
             }
         }
+    }
+
+    private func agentRow(_ row: IslandAgentRow) -> some View {
+        let statusColor = Color(nsColor: row.status.color)
+        return HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(statusColor.opacity(row.needsAttention ? 1 : 0.45))
+                .frame(width: 4)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    if !row.branch.isEmpty {
+                        Text(row.branch)
+                            .font(.system(size: 12, weight: row.needsAttention ? .semibold : .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(row.needsAttention ? 0.92 : 0.72))
+                            .lineLimit(1)
+                    }
+                    if !row.title.isEmpty {
+                        Text(row.title)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if row.needsAttention {
+                        Text(row.status.rawValue)
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(statusColor.opacity(0.95))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(statusColor.opacity(0.14))
+                            )
+                    }
+                }
+                if row.needsAttention, !row.message.isEmpty {
+                    Text(row.message)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(statusColor.opacity(0.65))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(hoveredRowID == row.id ? 0.09 : 0))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(hoveredRowID == row.id ? 0.07 : 0))
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -298,34 +351,6 @@ struct OpenedSurfaceView: View {
                 hoveredRowID = inside ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
             }
         }
-    }
-
-    private func agentRowHeader(_ row: IslandAgentRow) -> some View {
-        HStack(spacing: 8) {
-                Circle()
-                    .fill(Color(nsColor: row.status.color))
-                    .frame(width: 7, height: 7)
-                Text(row.project)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                if !row.branch.isEmpty {
-                    Text(row.branch)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                }
-                if !row.title.isEmpty {
-                    Text(row.title)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Text(row.status.rawValue)
-                    .font(.system(size: 9.5, weight: .bold))
-                    .foregroundStyle(Color(nsColor: row.status.color).opacity(0.9))
-            }
     }
 
 }

@@ -148,6 +148,7 @@
 		5FC647D840678AE10E2FF5BC /* ShortcutHintBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E664A1C5B1466EF19108D6B8 /* ShortcutHintBar.swift */; };
 		608A71AD329F3222B8668A1E /* ZmxLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3737CB607E821B5D3EFDBDAF /* ZmxLocator.swift */; };
 		608DDB1CC5C107E0E543EE93 /* UsageReadoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C559AE5CD4ECA7DCD1E11D4C /* UsageReadoutView.swift */; };
+		60A7FE4D40A56783A893C6F5 /* IslandDeckGroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9D58C741BB7EE4BEC1BB5 /* IslandDeckGroupTests.swift */; };
 		6152CD919925AF8CBC204000 /* DebugFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAFF4D1021558298332264D5 /* DebugFlags.swift */; };
 		619695CCD02199EC32866D47 /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 902196E72A614F0FF9C90514 /* AVKit.framework */; };
 		62E1DFF3457248FF5F30594F /* DiffReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27293C9549D95350D5CA8E80 /* DiffReviewView.swift */; };
@@ -551,6 +552,7 @@
 		42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewControllerClickTests.swift; sourceTree = "<group>"; };
 		446946B61962D55D1395F45B /* BridgeCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommandRouterTests.swift; sourceTree = "<group>"; };
 		46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDecoderTests.swift; sourceTree = "<group>"; };
+		46A9D58C741BB7EE4BEC1BB5 /* IslandDeckGroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandDeckGroupTests.swift; sourceTree = "<group>"; };
 		472ACEFBD0F23747FC60EB0D /* TerminalHeaderViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalHeaderViewTests.swift; sourceTree = "<group>"; };
 		47B0201979B7976AC0A77D56 /* ActivityEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEvent.swift; sourceTree = "<group>"; };
 		47BB2DB0B6757C922D065765 /* IMessageChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageChannel.swift; sourceTree = "<group>"; };
@@ -1316,6 +1318,7 @@
 				2AAB99BA4CC29AB4376ACC12 /* IMessageRuleTargetTests.swift */,
 				3FA6E78D00BFAF395356B892 /* IMessageRuleTests.swift */,
 				63049780738A9E97C8BCB55B /* InlineCabinCreateViewTests.swift */,
+				46A9D58C741BB7EE4BEC1BB5 /* IslandDeckGroupTests.swift */,
 				77AAEF167452AD3BAB184D84 /* KeyboardSubstateControllerTests.swift */,
 				85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */,
 				B463225AE9F973C259F06772 /* MailBodyTests.swift */,
@@ -1801,6 +1804,7 @@
 				AD939E73CEF429CD04ACE1BD /* IMessageRuleTests.swift in Sources */,
 				19A26EE54A5CE77EB9A5A51B /* IdeaStoreTests.swift in Sources */,
 				AC2875297F590321111FDFEA /* InlineCabinCreateViewTests.swift in Sources */,
+				60A7FE4D40A56783A893C6F5 /* IslandDeckGroupTests.swift in Sources */,
 				73225618467620F782EF0465 /* KeyboardSubstateControllerTests.swift in Sources */,
 				926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */,
 				F62D784C6BDA373D99051F3A /* MailBodyTests.swift in Sources */,

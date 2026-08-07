@@ -19,6 +19,21 @@ struct IslandAgentRow: Identifiable, Equatable {
     let message: String
     /// Task description entered at worktree-creation time.
     let title: String
+
+    /// Running / waiting / error get a chip + activity line; idle stays quiet.
+    var needsAttention: Bool {
+        switch status {
+        case .running, .waiting, .error: return true
+        case .idle, .exited, .unknown: return false
+        }
+    }
+}
+
+/// Repo (= deck) bucket for the opened island list.
+struct IslandDeckGroup: Identifiable, Equatable {
+    let id: String // project name
+    let project: String
+    let rows: [IslandAgentRow]
 }
 
 enum IslandState: Equatable {
@@ -198,13 +213,50 @@ final class IslandModel {
         rows.sorted { statusRank($0.status) > statusRank($1.status) }
     }
 
-    private func statusRank(_ s: SailorStatus) -> Int {
+    /// Opened list: group by repo, attention-first within each group.
+    /// Decks themselves sort by their hottest status so a flaming seahelm
+    /// group floats above a quiet saas-mono block.
+    var deckGroups: [IslandDeckGroup] {
+        Self.groupedByDeck(rows)
+    }
+
+    static func groupedByDeck(_ rows: [IslandAgentRow]) -> [IslandDeckGroup] {
+        var order: [String] = []
+        var buckets: [String: [IslandAgentRow]] = [:]
+        for row in rows {
+            if buckets[row.project] == nil {
+                order.append(row.project)
+                buckets[row.project] = []
+            }
+            buckets[row.project, default: []].append(row)
+        }
+        let groups = order.map { project -> IslandDeckGroup in
+            let sorted = (buckets[project] ?? []).sorted {
+                if statusRank($0.status) != statusRank($1.status) {
+                    return statusRank($0.status) > statusRank($1.status)
+                }
+                return ($0.branch, $0.id) < ($1.branch, $1.id)
+            }
+            return IslandDeckGroup(id: project, project: project, rows: sorted)
+        }
+        return groups.sorted {
+            let lhs = $0.rows.map { statusRank($0.status) }.max() ?? 0
+            let rhs = $1.rows.map { statusRank($0.status) }.max() ?? 0
+            if lhs != rhs { return lhs > rhs }
+            return $0.project < $1.project
+        }
+    }
+
+    static func statusRank(_ s: SailorStatus) -> Int {
         switch s {
-        case .error, .exited: return 4
-        case .waiting: return 3
-        case .running: return 2
-        case .idle: return 1
+        case .error: return 5
+        case .waiting: return 4
+        case .running: return 3
+        case .idle: return 2
+        case .exited: return 1
         case .unknown: return 0
         }
     }
+
+    private func statusRank(_ s: SailorStatus) -> Int { Self.statusRank(s) }
 }

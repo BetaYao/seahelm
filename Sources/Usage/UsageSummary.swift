@@ -65,6 +65,7 @@ struct UsageReadoutSegment: Equatable {
     /// Coarse bucket for the percentage's tint. Keyed to how much is *used*,
     /// so a fresh window reads green and an almost-spent one reads red.
     enum Severity: Equatable {
+        case unknown
         case ok
         case warn
         case critical
@@ -179,11 +180,16 @@ enum UsageSummaryFormatter {
         var segments: [UsageReadoutSegment] = []
         if let window = snapshot.rateLimit {
             segments.append(segment(label: window.label ?? "5h", window: window, now: now))
+        } else {
+            let defaultLabel = snapshot.provider == .claude ? "5h" : "quota"
+            segments.append(placeholderSegment(label: defaultLabel))
         }
         if let window = snapshot.weeklyRateLimit {
             segments.append(segment(label: window.label ?? "7d", window: window, now: now))
+        } else if snapshot.provider == .claude {
+            // Claude always has a weekly window in the UI model.
+            segments.append(placeholderSegment(label: "7d"))
         }
-        guard !segments.isEmpty else { return nil }
         return UsageReadout(
             provider: snapshot.provider,
             logoName: snapshot.provider == .claude ? "ClaudeLogo" : "OpenAILogo",
@@ -197,6 +203,15 @@ enum UsageSummaryFormatter {
             percentText: "\(window.usedPercent)%",
             severity: .init(usedPercent: window.usedPercent),
             resetText: window.resetsAt.flatMap { compactResetText(until: $0, now: now) }
+        )
+    }
+
+    private static func placeholderSegment(label: String) -> UsageReadoutSegment {
+        UsageReadoutSegment(
+            label: label,
+            percentText: "--",
+            severity: .unknown,
+            resetText: nil
         )
     }
 

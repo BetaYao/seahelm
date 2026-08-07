@@ -58,6 +58,7 @@ struct UsageReadoutView: View {
 
     static func color(for severity: UsageReadoutSegment.Severity) -> Color {
         switch severity {
+        case .unknown: return .white.opacity(0.5)
         case .ok: return Color(red: 0.30, green: 0.85, blue: 0.39)
         case .warn: return Color(red: 0.98, green: 0.75, blue: 0.28)
         case .critical: return Color(red: 0.98, green: 0.38, blue: 0.35)
