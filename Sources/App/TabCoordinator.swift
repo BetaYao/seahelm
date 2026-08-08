@@ -1286,6 +1286,13 @@ class TabCoordinator {
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)
     }
 
+    func dashboardDidRequestDeleteWithBranch(_ terminalID: String, window: NSWindow?) {
+        guard let agent = ShipLog.shared.sailor(for: terminalID) else { return }
+        let worktreePath = agent.worktreePath
+        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
+        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window, preferredDeleteBranch: true)
+    }
+
     // MARK: - New Branch Integration
 
     func handleNewBranch(info: WorktreeInfo, repoPath: String) {

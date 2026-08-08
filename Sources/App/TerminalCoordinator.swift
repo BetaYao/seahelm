@@ -462,7 +462,7 @@ class TerminalCoordinator {
 
     // MARK: - Worktree Deletion
 
-    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
+    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?, preferredDeleteBranch: Bool? = nil) {
         guard !info.isMainWorktree else { return }
         guard let window else { return }
 
@@ -473,37 +473,59 @@ class TerminalCoordinator {
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
             DispatchQueue.main.async {
                 self?.presentDeleteConfirmation(info, window: window,
-                                                hasChanges: hasChanges, repoPath: repoPath)
+                                                hasChanges: hasChanges,
+                                                repoPath: repoPath,
+                                                preferredDeleteBranch: preferredDeleteBranch)
             }
         }
     }
 
     private func presentDeleteConfirmation(_ info: WorktreeInfo, window: NSWindow,
-                                           hasChanges: Bool, repoPath: String) {
+                                           hasChanges: Bool, repoPath: String,
+                                           preferredDeleteBranch: Bool?) {
         let alert = NSAlert()
         alert.alertStyle = hasChanges ? .critical : .warning
         alert.messageText = "Delete worktree \"\(info.branch)\"?"
+        let deleteBranch = preferredDeleteBranch ?? false
         if hasChanges {
-            alert.informativeText = "This worktree has uncommitted changes that will be lost."
+            if deleteBranch {
+                alert.informativeText = "This worktree has uncommitted changes that will be lost. Seahelm will also try to delete the local branch."
+            } else {
+                alert.informativeText = "This worktree has uncommitted changes that will be lost."
+            }
         } else {
-            alert.informativeText = "The worktree directory will be removed."
+            if deleteBranch {
+                alert.informativeText = "The worktree directory will be removed, then Seahelm will try to delete the local branch."
+            } else {
+                alert.informativeText = "The worktree directory will be removed."
+            }
         }
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Delete + Branch")
-        alert.addButton(withTitle: "Cancel")
+        if let preferredDeleteBranch {
+            alert.addButton(withTitle: preferredDeleteBranch ? "Delete + Branch" : "Delete")
+            alert.addButton(withTitle: "Cancel")
+        } else {
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Delete + Branch")
+            alert.addButton(withTitle: "Cancel")
+        }
 
         alert.buttons[0].hasDestructiveAction = true
-        alert.buttons[1].hasDestructiveAction = true
+        if preferredDeleteBranch == nil {
+            alert.buttons[1].hasDestructiveAction = true
+        }
 
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
+            if let preferredDeleteBranch {
+                if response == .alertFirstButtonReturn {
+                    self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: preferredDeleteBranch, force: hasChanges)
+                }
+                return
+            }
+            if response == .alertFirstButtonReturn {
                 self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
-            case .alertSecondButtonReturn:
+            } else if response == .alertSecondButtonReturn {
                 self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: true, force: hasChanges)
-            default:
-                break
             }
         }
     }
@@ -526,15 +548,32 @@ class TerminalCoordinator {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        // Tear the sessions down BEFORE the tree (and its session names) are gone —
-        // afterwards there is nothing left to name them by.
-        //
-        // Killing them is not optional. `SessionManager.expectedSessionNames` counts
-        // every session named in `config.splitLayouts` as live, so a layout left
-        // behind here makes the orphan reaper skip these sessions forever, and
-        // `resolveTree` can restore that same layout and resurrect the deleted
-        // worktree's card. Deleting the directory is not enough; the worktree's
-        // state has to go with it. (`performCloseRepo` already does this.)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let result = try WorktreeDeleter.deleteWorktree(
+                    worktreePath: info.path,
+                    repoPath: repoPath,
+                    branchName: info.branch,
+                    deleteBranch: deleteBranch,
+                    force: force
+                )
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.finalizeDeletedWorktree(info)
+                    if let warning = result.branchWarning {
+                        self.presentDeleteWarning(title: "Worktree deleted, branch kept", message: warning)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.presentDeleteError(error)
+                }
+            }
+        }
+    }
+
+    private func finalizeDeletedWorktree(_ info: WorktreeInfo) {
+        // Tear sessions down only after git deletion succeeded.
         if let tree = stationManager.tree(forPath: info.path) {
             for leaf in tree.allLeaves {
                 config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
@@ -547,30 +586,23 @@ class TerminalCoordinator {
         config.focusedPaneIds.removeValue(forKey: info.path)
         config.save()
         stationManager.removeTree(forPath: info.path)
-
-        // Notify delegate immediately so the UI card disappears instantly
         delegate?.terminalCoordinator(self, didDeleteWorktree: info)
+    }
 
-        DispatchQueue.global().async { [weak self] in
-            do {
-                try WorktreeDeleter.deleteWorktree(
-                    worktreePath: info.path,
-                    repoPath: repoPath,
-                    branchName: info.branch,
-                    deleteBranch: deleteBranch,
-                    force: force
-                )
-                // Git deletion succeeded — no further UI update needed
-            } catch {
-                DispatchQueue.main.async {
-                    let errAlert = NSAlert()
-                    errAlert.alertStyle = .critical
-                    errAlert.messageText = "Failed to delete worktree"
-                    errAlert.informativeText = error.localizedDescription
-                    errAlert.runModal()
-                }
-            }
-        }
+    private func presentDeleteError(_ error: Error) {
+        let errAlert = NSAlert()
+        errAlert.alertStyle = .critical
+        errAlert.messageText = "Failed to delete worktree"
+        errAlert.informativeText = error.localizedDescription
+        errAlert.runModal()
+    }
+
+    private func presentDeleteWarning(title: String, message: String) {
+        let warn = NSAlert()
+        warn.alertStyle = .warning
+        warn.messageText = title
+        warn.informativeText = message
+        warn.runModal()
     }
 
     // MARK: - Cleanup

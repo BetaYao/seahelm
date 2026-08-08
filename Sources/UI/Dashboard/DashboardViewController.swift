@@ -8,6 +8,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestEnterProject(_ project: String)
     func dashboardDidReorderCards(order: [String])
     func dashboardDidRequestDelete(_ terminalID: String)
+    func dashboardDidRequestDeleteWithBranch(_ terminalID: String)
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
@@ -320,6 +321,10 @@ class DashboardViewController: NSViewController {
         overviewView.onDeleteWorktree = { [weak self] path in
             guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
             self.dashboardDelegate?.dashboardDidRequestDelete(agent.id)
+        }
+        overviewView.onDeleteWorktreeWithBranch = { [weak self] path in
+            guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
+            self.dashboardDelegate?.dashboardDidRequestDeleteWithBranch(agent.id)
         }
         // The bottom shortcut strip is a teaser for the full `?` cheat-sheet.
         overviewView.onShowAllShortcuts = { [weak self] in
@@ -1926,6 +1931,7 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
+    var onDeleteWorktreeWithBranch: ((String) -> Void)?
     var onGroupingChanged: (() -> Void)?
     /// The "+" on a project group header was clicked. Args: the project title,
     /// the button's rect in this view's coordinates, and this view (the popover's
@@ -2249,7 +2255,7 @@ final class DashboardOverviewView: NSView {
                                   showsRepository: groupingMode != .repository)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
-                row.onDeleteWithBranch = { [weak self] path in self?.onDeleteWorktree?(path) }
+                row.onDeleteWithBranch = { [weak self] path in self?.onDeleteWorktreeWithBranch?(path) }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((groupedItem.id, groupedItem.path))
@@ -2458,6 +2464,7 @@ final class DashboardOverviewView: NSView {
         var onDelete: ((String) -> Void)?
         var onDeleteWithBranch: ((String) -> Void)?
         private let path: String
+        private let isMainWorktree: Bool
         private var selected: Bool
         /// Whether the pointer is currently inside, so a selection change can
         /// repaint without losing the hover tint on the row being left behind.
@@ -2499,6 +2506,7 @@ final class DashboardOverviewView: NSView {
         init(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool,
              showsRepository: Bool) {
             self.path = sailor.worktreePath
+            self.isMainWorktree = sailor.isMainWorktree
             self.selected = selected
             super.init(frame: .zero)
             wantsLayer = true
@@ -2637,6 +2645,12 @@ final class DashboardOverviewView: NSView {
             let deleteBranchItem = NSMenuItem(title: "Delete + Branch", action: #selector(deleteWithBranchAction), keyEquivalent: "")
             deleteBranchItem.target = self
             menu.addItem(deleteBranchItem)
+            if isMainWorktree {
+                deleteItem.isEnabled = false
+                deleteBranchItem.isEnabled = false
+                deleteItem.toolTip = "Main worktree cannot be deleted."
+                deleteBranchItem.toolTip = "Main worktree cannot be deleted."
+            }
             return menu
         }
 

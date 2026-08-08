@@ -14,6 +14,11 @@ enum WorktreeDeleterError: Error, LocalizedError {
     }
 }
 
+struct WorktreeDeleteResult: Equatable {
+    /// Non-empty when the worktree was removed but branch deletion failed.
+    let branchWarning: String?
+}
+
 struct WorktreeMergeCheck: Equatable {
     let canDelete: Bool
     let reason: String
@@ -48,7 +53,7 @@ enum WorktreeDeleter {
         branchName: String,
         deleteBranch: Bool = false,
         force: Bool = false
-    ) throws {
+    ) throws -> WorktreeDeleteResult {
         // Don't allow deleting the main worktree.
         // Use the first entry from `git worktree list` which is always the main worktree.
         // Note: `git rev-parse --show-toplevel` returns the worktree's own path when run
@@ -68,18 +73,20 @@ enum WorktreeDeleter {
 
         let (success, stderr) = runGitWithStderr(args: args, in: repoPath)
         if !success {
-            throw WorktreeDeleterError.gitFailed(stderr)
+            throw WorktreeDeleterError.gitFailed(classifyWorktreeRemoveError(stderr, path: worktreePath))
         }
 
         // Optionally delete the branch
+        var branchWarning: String?
         if deleteBranch {
             let flag = force ? "-D" : "-d"
             let (branchOk, branchErr) = runGitWithStderr(args: ["branch", flag, branchName], in: repoPath)
             if !branchOk {
-                // Non-fatal: worktree removed but branch delete failed
-                NSLog("Warning: worktree removed but branch delete failed: \(branchErr)")
+                branchWarning = classifyBranchDeleteError(branchErr, branch: branchName, forced: force)
+                NSLog("Warning: worktree removed but branch delete failed: \(branchWarning ?? branchErr)")
             }
         }
+        return WorktreeDeleteResult(branchWarning: branchWarning)
     }
 
     /// Check if a worktree has uncommitted changes
@@ -230,5 +237,49 @@ enum WorktreeDeleter {
             result.stderr.trimmingCharacters(in: .whitespacesAndNewlines),
             result.stdout
         )
+    }
+
+    private static func classifyWorktreeRemoveError(_ stderr: String, path: String) -> String {
+        let lower = stderr.lowercased()
+        if lower.contains("is a main working tree") || lower.contains("main worktree") {
+            return "Cannot delete the main worktree."
+        }
+        if lower.contains("contains modified or untracked files")
+            || lower.contains("contains uncommitted changes")
+            || lower.contains("would be overwritten by checkout") {
+            return "Worktree has uncommitted changes. Use force delete to discard local changes."
+        }
+        if lower.contains("locked") || lower.contains("in use by another process") {
+            return "Worktree is locked or currently in use. Close processes using it and try again."
+        }
+        if lower.contains("not a working tree")
+            || lower.contains("no such file or directory")
+            || lower.contains("could not remove") {
+            return "Worktree path not found or already removed: \(path)"
+        }
+        if stderr.isEmpty {
+            return "git worktree remove failed."
+        }
+        return stderr
+    }
+
+    private static func classifyBranchDeleteError(_ stderr: String, branch: String, forced: Bool) -> String {
+        let lower = stderr.lowercased()
+        if lower.contains("not fully merged") {
+            if forced {
+                return "Worktree was deleted, but branch '\(branch)' still could not be removed (not fully merged)."
+            }
+            return "Worktree was deleted, but branch '\(branch)' was not removed because it is not fully merged."
+        }
+        if lower.contains("checked out at") || lower.contains("is checked out") {
+            return "Worktree was deleted, but branch '\(branch)' is still checked out by another worktree."
+        }
+        if lower.contains("not found") || lower.contains("branch '\(branch)' not found") {
+            return "Worktree was deleted. Branch '\(branch)' was already absent locally."
+        }
+        if stderr.isEmpty {
+            return "Worktree was deleted, but branch '\(branch)' could not be removed."
+        }
+        return "Worktree was deleted, but branch '\(branch)' could not be removed: \(stderr)"
     }
 }

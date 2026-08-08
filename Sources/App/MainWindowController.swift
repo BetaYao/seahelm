@@ -2216,6 +2216,10 @@ extension MainWindowController: DashboardDelegate {
         tabCoordinator.dashboardDidRequestDelete(terminalID, window: window)
     }
 
+    func dashboardDidRequestDeleteWithBranch(_ terminalID: String) {
+        tabCoordinator.dashboardDidRequestDeleteWithBranch(terminalID, window: window)
+    }
+
     func dashboardDidRequestAddProject() {
         tabCoordinator.addRepoViaOpenPanel(window: window)
     }
