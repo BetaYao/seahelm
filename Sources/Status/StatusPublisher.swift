@@ -31,6 +31,9 @@ class StatusPublisher {
     private let unchangedFrameRecheckStride = 15
     private var preferredPaths: Set<String> = []
     private var pollCycle: Int = 0
+    private var pollInFlight = false
+    private var pollPending = false
+    private var pollingActive = false
 
     // Cache: skip detection when viewport text hasn't changed
     private var lastViewportHashes: [String: UInt64] = [:]           // keyed by terminal ID
@@ -90,6 +93,9 @@ class StatusPublisher {
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             self?.schedulePoll()
         }
+        lock.lock()
+        pollingActive = true
+        lock.unlock()
         // Run immediately on start
         schedulePoll()
     }
@@ -97,6 +103,10 @@ class StatusPublisher {
     func stop() {
         timer?.invalidate()
         timer = nil
+        lock.lock()
+        pollingActive = false
+        pollPending = false
+        lock.unlock()
     }
 
     /// Drop all per-terminal state for a dead pane. Caller must hold `lock`.
@@ -176,16 +186,41 @@ class StatusPublisher {
     }
 
     private func schedulePoll() {
-        // Capture surfaces snapshot under lock, then poll on background
         lock.lock()
+        guard pollingActive else {
+            lock.unlock()
+            return
+        }
+        // Keep at most one queued/running poll. If a tick arrives while a poll
+        // is still executing (slow backend capture, many panes), coalesce it
+        // into exactly one follow-up run to prevent unbounded queue buildup.
+        if pollInFlight {
+            pollPending = true
+            lock.unlock()
+            return
+        }
+        pollInFlight = true
         let surfaceSnapshot = surfaces
         let pathSnapshot = worktreePaths
-        lock.unlock()
         pollCycle &+= 1
         let cycle = pollCycle
         let preferredSnapshot = preferredPaths
+        lock.unlock()
         pollQueue.async { [weak self] in
-            self?.pollAll(surfaceSnapshot, preferredPaths: preferredSnapshot, pollCycle: cycle, paths: pathSnapshot)
+            guard let self else { return }
+            self.pollAll(surfaceSnapshot, preferredPaths: preferredSnapshot, pollCycle: cycle, paths: pathSnapshot)
+            self.pollDidFinish()
+        }
+    }
+
+    private func pollDidFinish() {
+        lock.lock()
+        let rerun = pollPending && pollingActive
+        pollPending = false
+        pollInFlight = false
+        lock.unlock()
+        if rerun {
+            schedulePoll()
         }
     }
 

@@ -25,11 +25,7 @@ class ZmxChannel: SailorChannel {
         guard lines > 0 else {
             return output
         }
-        let allLines = output.components(separatedBy: "\n")
-        if allLines.count <= lines {
-            return output
-        }
-        return allLines.suffix(lines).joined(separator: "\n")
+        return Self.tailLines(output, count: lines)
     }
 
     /// Types a prompt into the session and submits it, bypassing the on-screen
@@ -114,6 +110,10 @@ class ZmxChannel: SailorChannel {
     /// Deadline for one zmx call. zmx talks to a local socket, so anything past
     /// this means the session is wedged, not slow.
     static let commandTimeout: TimeInterval = 15
+    /// `zmx history` can be huge; we only need the latest viewport-ish slice for
+    /// status detection. Keeping this small prevents transient polling spikes
+    /// from retaining tens of MB per pane.
+    static let historyCaptureLimit = 256 * 1024
 
     private func runZmx(_ args: [String]) {
         // Output already goes to /dev/null, so there is no pipe to fill — but
@@ -127,12 +127,31 @@ class ZmxChannel: SailorChannel {
         let result = ProcessRunner.capture(
             executable: URL(fileURLWithPath: "/usr/bin/env"),
             arguments: args,
-            timeout: Self.commandTimeout
+            timeout: Self.commandTimeout,
+            maxCapturedBytes: Self.historyCaptureLimit
         )
         if result.timedOut {
             NSLog("[ZmxChannel] Timed out reading: \(args.joined(separator: " "))")
             return nil
         }
         return result.stdout.isEmpty ? nil : result.stdout
+    }
+
+    /// Keep the last N lines without splitting the whole transcript into an
+    /// intermediate array.
+    private static func tailLines(_ text: String, count: Int) -> String {
+        guard count > 0, !text.isEmpty else { return "" }
+        var idx = text.endIndex
+        var newlinesSeen = 0
+        while idx > text.startIndex {
+            idx = text.index(before: idx)
+            if text[idx] == "\n" {
+                newlinesSeen += 1
+                if newlinesSeen == count {
+                    return String(text[text.index(after: idx)...])
+                }
+            }
+        }
+        return text
     }
 }

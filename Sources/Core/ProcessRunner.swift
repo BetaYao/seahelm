@@ -39,7 +39,8 @@ enum ProcessRunner {
         arguments: [String],
         currentDirectory: String? = nil,
         standardInput: String? = nil,
-        timeout: TimeInterval?
+        timeout: TimeInterval?,
+        maxCapturedBytes: Int = defaultMaxCapturedBytes
     ) -> Capture {
         let process = Process()
         process.executableURL = executable
@@ -82,13 +83,13 @@ enum ProcessRunner {
         var stderrData = Data()
         drained.enter()
         ioQueue.async {
-            let data = drain(outPipe.fileHandleForReading)
+            let data = drain(outPipe.fileHandleForReading, maxCapturedBytes: maxCapturedBytes)
             lock.lock(); stdoutData = data; lock.unlock()
             drained.leave()
         }
         drained.enter()
         ioQueue.async {
-            let data = drain(errPipe.fileHandleForReading)
+            let data = drain(errPipe.fileHandleForReading, maxCapturedBytes: maxCapturedBytes)
             lock.lock(); stderrData = data; lock.unlock()
             drained.leave()
         }
@@ -155,7 +156,7 @@ enum ProcessRunner {
 
     /// Retained output cap per stream. Draining continues past this so the
     /// child never blocks; we just stop accumulating.
-    static let maxCapturedBytes = 32 * 1024 * 1024
+    static let defaultMaxCapturedBytes = 32 * 1024 * 1024
 
     private static let ioQueue = DispatchQueue(
         label: "com.seahelm.process-runner.io",
@@ -163,7 +164,7 @@ enum ProcessRunner {
         attributes: .concurrent
     )
 
-    private static func drain(_ handle: FileHandle) -> Data {
+    private static func drain(_ handle: FileHandle, maxCapturedBytes: Int) -> Data {
         // Closing is not optional. Reaching EOF does not release the read end,
         // and `Process` keeps its pipes alive past this scope, so without an
         // explicit close every call permanently leaks two descriptors. At the
