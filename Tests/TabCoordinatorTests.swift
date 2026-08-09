@@ -165,4 +165,12 @@ final class TabCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.worktreeRepoCache[deleted.path])
         XCTAssertEqual(Set(coordinator.workspaceManager.tabs[tabIndex].worktrees.map(\.path)), Set([main.path, added.path]))
     }
+
+    func testShouldRefreshDashboardElapsedTimeUsesSlowCadence() {
+        XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 1))
+        XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 3))
+        XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 5))
+        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 6))
+        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 12))
+    }
 }

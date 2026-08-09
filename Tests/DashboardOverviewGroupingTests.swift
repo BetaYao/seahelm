@@ -192,6 +192,80 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    func testUpdateWithSameStructureSkipsFullRebuildAndRefreshesRuntimeText() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-20),
+                           currentPaneRunTime: "10s"),
+            ])
+
+            XCTAssertEqual(view.fullRenderCountForTesting, 1)
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "10s")
+
+            view.update([
+                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-10),
+                           currentPaneRunTime: "20s"),
+            ])
+
+            XCTAssertEqual(view.fullRenderCountForTesting, 1)
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "20s")
+        }
+    }
+
+    func testIncrementalUpdateDoesNotBlankTitleWhenIncomingTitleIsEmpty() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-20),
+                           currentPaneTitle: "Initial title"),
+            ])
+            XCTAssertEqual(view.rowTitleTextForTesting(id: "run"), "Initial title")
+
+            view.update([
+                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-10),
+                           currentPaneTitle: "   "),
+            ])
+            XCTAssertEqual(view.rowTitleTextForTesting(id: "run"), "Initial title")
+        }
+    }
+
+    /// Regression: the status dot is a plain `addSubview` child, so it has to opt
+    /// out of autoresizing constraints by hand. Without that, the frame-derived
+    /// constraints win and the whole text column lays out at zero height — every
+    /// row paints as a bare dot with no title, branch, or timings.
+    func testWorktreeRowLaysOutTitleWithRealSize() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                           paneStatuses: [.idle], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-20),
+                           currentPaneTitle: "claude — building"),
+            ])
+            view.layoutSubtreeIfNeeded()
+
+            let frame = view.rowTitleFrameForTesting(id: "run")
+            XCTAssertNotNil(frame)
+            XCTAssertGreaterThan(frame?.height ?? 0, 0, "row title collapsed to zero height")
+            XCTAssertGreaterThan(frame?.width ?? 0, 0, "row title collapsed to zero width")
+        }
+    }
+
     private func withDefaults(_ body: (UserDefaults) -> Void) {
         let suite = "DashboardOverviewGroupingTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -207,7 +281,9 @@ private func makeSailor(
     worktreePath: String,
     paneStatuses: [SailorStatus],
     isMainWorktree: Bool,
-    lastActivityAt: Date?
+    lastActivityAt: Date?,
+    currentPaneTitle: String? = nil,
+    currentPaneRunTime: String = "30s"
 ) -> SailorDisplayInfo {
     let surface = Station()
     return SailorDisplayInfo(
@@ -231,7 +307,7 @@ private func makeSailor(
         lastActivityAge: "1m",
         lastActivityAt: lastActivityAt,
         gitStats: nil,
-        currentPaneTitle: id,
-        currentPaneRunTime: "30s"
+        currentPaneTitle: currentPaneTitle ?? id,
+        currentPaneRunTime: currentPaneRunTime
     )
 }

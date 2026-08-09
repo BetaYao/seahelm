@@ -63,28 +63,6 @@ enum SessionManager {
         "\(base)-\(index)"
     }
 
-    static func sessionNames(in layout: CodableSplitNode) -> [String] {
-        switch layout {
-        case .leaf(let paneSessionKey, _):
-            return [paneSessionKey]
-        case .split(_, _, let first, let second):
-            return sessionNames(in: first) + sessionNames(in: second)
-        }
-    }
-
-    static func expectedSessionNames(config: Config, discoveredWorktreePaths: [String]) -> Set<String> {
-        var names = Set(discoveredWorktreePaths.map { persistentSessionName(for: $0) })
-        for layout in config.splitLayouts.values {
-            names.formUnion(sessionNames(in: layout))
-        }
-        // Include current seahelm-* names
-        let current = names.filter { $0.hasPrefix("seahelm-") }
-        // Also include legacy amux-* variants for backward compatibility
-        let legacy = Set(current.map { $0.replacingOccurrences(
-            of: "^seahelm-", with: "amux-", options: .regularExpression) })
-        return current.union(legacy)
-    }
-
     static func parseZmxSessionNames(listOutput: String) -> [String] {
         listOutput
             .components(separatedBy: .newlines)

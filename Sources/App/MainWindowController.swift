@@ -785,7 +785,6 @@ class MainWindowController: NSWindowController, MailCommandContext {
     }
 
     @objc func cleanOrphanSessions() {
-        let configSnapshot = config
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard ZmxLocator.isAvailable else {
                 DispatchQueue.main.async {
@@ -797,23 +796,17 @@ class MainWindowController: NSWindowController, MailCommandContext {
                 return
             }
 
-            let worktreePaths = configSnapshot.workspacePaths.flatMap { repoPath in
-                WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
-            }
-            let activeSessionNames = SessionManager.expectedSessionNames(
-                config: configSnapshot,
-                discoveredWorktreePaths: worktreePaths
-            )
+            guard let self else { return }
+            let activeSessionNames = self.activePaneSessionNamesForCleanup()
             let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
 
             DispatchQueue.main.async {
-                guard let self else { return }
                 let alert = NSAlert()
                 alert.messageText = cleaned.isEmpty
                     ? "No orphan sessions found"
                     : "Cleaned \(cleaned.count) orphan session(s)"
                 if cleaned.isEmpty {
-                    alert.informativeText = "All seahelm zmx sessions are still referenced by the current config and worktrees."
+                    alert.informativeText = "All seahelm zmx sessions are attached to currently open panes."
                 } else {
                     alert.informativeText = cleaned.joined(separator: "\n")
                 }
@@ -2634,10 +2627,13 @@ extension MainWindowController: SettingsDelegate {
     /// Session names the live panes are attached to, so the monitor can mark a
     /// kill that would take an agent down with it.
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> {
-        SessionManager.expectedSessionNames(
-            config: config,
-            discoveredWorktreePaths: tabCoordinator.allWorktrees.map { $0.info.path }
-        )
+        activePaneSessionNamesForCleanup()
+    }
+
+    /// Session names that currently exist as pane leaves in the live UI trees.
+    /// Orphan cleanup treats this set as authoritative.
+    func activePaneSessionNamesForCleanup() -> Set<String> {
+        tabCoordinator.livePaneSessionNames()
     }
 
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {

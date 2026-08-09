@@ -103,30 +103,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Sweep orphan zmx sessions on a background queue. Config is reloaded each
-    /// call so newly added/removed worktrees and split layouts are reflected.
+    /// call; only sessions not attached to current panes are eligible.
     private func cleanOrphanZmxSessions() {
+        // The live-pane set is walked off `allWorktrees` and its split trees,
+        // which the main thread mutates on discovery/create/delete — so snapshot
+        // it here (both callers are already on main) and send only the zmx
+        // probing to the background queue.
+        guard let controller = mainWindowController else {
+            NSLog("[App] Skipping orphan zmx cleanup — main window not ready")
+            return
+        }
+        let activeSessionNames = controller.activePaneSessionNamesForCleanup()
+        guard !activeSessionNames.isEmpty else {
+            // During startup/teardown there may be no attached panes yet; an
+            // empty set would match everything and is too risky to sweep.
+            NSLog("[App] Skipping orphan zmx cleanup — no live pane sessions")
+            return
+        }
         DispatchQueue.global(qos: .utility).async {
             guard ZmxLocator.isAvailable else { return }
-            let config = Config.load()
-            let discovered = config.workspacePaths.map { repoPath in
-                WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
-            }
-            // A repo always has at least its main worktree, so an empty result
-            // for ANY repo means discovery failed transiently (git lock, timing,
-            // unmounted volume) — not that the repo has no sessions. Proceeding
-            // would classify that repo's live sessions as orphans and force-kill
-            // attached panes (agents included). Skip the whole sweep this round.
-            guard !discovered.contains(where: \.isEmpty) else {
-                if !config.workspacePaths.isEmpty {
-                    NSLog("[App] Skipping orphan zmx cleanup — worktree discovery incomplete")
-                }
-                return
-            }
-            let worktreePaths = discovered.flatMap { $0 }
-            let activeSessionNames = SessionManager.expectedSessionNames(
-                config: config,
-                discoveredWorktreePaths: worktreePaths
-            )
             let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
             if !cleaned.isEmpty {
                 NSLog("[App] Cleaned %d orphan zmx session(s)", cleaned.count)
