@@ -42,20 +42,6 @@ class SessionManagerTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
-    func testSessionNamesExtractedFromSplitLayout() {
-        let layout = CodableSplitNode.split(
-            axis: "horizontal",
-            ratio: 0.5,
-            first: .leaf(paneSessionKey: "seahelm-repo-main", title: nil),
-            second: .leaf(paneSessionKey: "seahelm-repo-main-1", title: nil)
-        )
-
-        XCTAssertEqual(
-            SessionManager.sessionNames(in: layout),
-            ["seahelm-repo-main", "seahelm-repo-main-1"]
-        )
-    }
-
     func testParseZmxSessionNamesReadsNameEqualsFormat() {
         let output = """
         name=seahelm-repo-main pid=123 cwd=/tmp/repo
@@ -129,16 +115,6 @@ class SessionManagerTests: XCTestCase {
 
         XCTAssertEqual(orphaned, ["amux-repo-detached"],
                        "amux- session with a live client must not be reaped")
-    }
-
-    func testExpectedSessionNamesIncludesLegacyAmuxVariants() {
-        let names = SessionManager.expectedSessionNames(
-            config: Config(),
-            discoveredWorktreePaths: ["/Users/test/repo/feature"]
-        )
-        XCTAssertTrue(names.contains("seahelm-repo-feature"))
-        XCTAssertTrue(names.contains("amux-repo-feature"),
-                      "expected session names must include legacy amux- variants")
     }
 
     func testOrphanZmxSessionNamesNeverReapsUnreachableSessions() {

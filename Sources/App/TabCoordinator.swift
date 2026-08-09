@@ -1140,6 +1140,12 @@ class TabCoordinator {
     // MARK: - Branch Refresh
 
     private var branchRefreshTick = 0
+    private static let elapsedRefreshEveryTicks = 6
+
+    static func shouldRefreshDashboardElapsedTime(tick: Int) -> Bool {
+        guard tick > 0 else { return false }
+        return tick % elapsedRefreshEveryTicks == 0
+    }
 
     func startBranchRefreshTimer() {
         branchRefreshTimer?.invalidate()
@@ -1152,7 +1158,7 @@ class TabCoordinator {
             // ShipLog no longer fans out on roundDuration ticks (see
             // displayedStateUnchanged), so elapsed-time and activity-age labels
             // are advanced here at a gentle cadence while anything is running.
-            if self.branchRefreshTick % 2 == 0,
+            if Self.shouldRefreshDashboardElapsedTime(tick: self.branchRefreshTick),
                ShipLog.shared.allSailors().contains(where: { $0.status == .running }) {
                 self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
             }
@@ -1435,6 +1441,17 @@ class TabCoordinator {
         dashboardVC?.enterWorktree(byWorktreePath: path)
         saveSelectedWorktree()
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
+    /// Session names currently attached to panes that exist in the live split
+    /// trees. Cleanup code uses this as the source of truth: if a zmx session is
+    /// not in this set, no pane is using it right now.
+    func livePaneSessionNames() -> Set<String> {
+        guard runtimeBackend == "zmx" else { return [] }
+        let names = allWorktrees.flatMap { entry in
+            entry.tree.allLeaves.map(\.paneSessionKey)
+        }
+        return Set(names.filter { !$0.isEmpty })
     }
 
     // MARK: - Navigation

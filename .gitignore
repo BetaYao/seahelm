@@ -48,3 +48,6 @@ gmail-oauth-client.json
 # AI assistant configs
 .cursor/
 .claude/
+
+# Python bytecode from scripts/perf
+__pycache__/

@@ -1981,6 +1981,15 @@ final class DashboardOverviewView: NSView {
     private var addWorktreeProjects: [String] = []
     private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
     private var revealedRowID: String?
+    private var paneRowViewsByStationID: [String: PaneRowView] = [:]
+    private var lastStructureSignature: String?
+    private var fullRenderCount = 0
+    #if DEBUG
+    private var incrementalUpdateCount = 0
+    private var fullRenderTotalDurationMs: Double = 0
+    private var incrementalTotalDurationMs: Double = 0
+    private var lastTelemetryLogAt = Date.distantPast
+    #endif
 
     override init(frame frameRect: NSRect) {
         let preference = CabinGroupingPreference(defaults: .standard)
@@ -2216,13 +2225,6 @@ final class DashboardOverviewView: NSView {
         // total count, then only the running slice.
         headerSub.stringValue = running > 0 ? "\(sailors.count) · \(running) running" : "\(sailors.count)"
 
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        orderedRows = []
-        rowViewsByID = [:]
-        renderedGroupTitles = []
-        addWorktreeProjects = []
-        revealedRowID = nil
-
         let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
         let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
         let groups = CabinGrouping.groups(groupingItems, mode: groupingMode, now: now())
@@ -2236,6 +2238,33 @@ final class DashboardOverviewView: NSView {
            !groups.contains(where: { group in group.items.contains(where: { $0.id == selectedId }) }) {
             selectedId = groups.first?.items.first?.id ?? ""
         }
+
+        let structureSignature = Self.structureSignature(for: groups, sailorsByPath: sailorsByPath, groupingMode: groupingMode)
+        if !revealSelection, structureSignature == lastStructureSignature {
+            #if DEBUG
+            let start = DispatchTime.now().uptimeNanoseconds
+            #endif
+            applyIncrementalUpdates(groups: groups, sailorsByPath: sailorsByPath)
+            #if DEBUG
+            recordTelemetry(kind: "incremental",
+                            elapsedMs: elapsedMilliseconds(since: start),
+                            rowCount: orderedRows.count)
+            #endif
+            return
+        }
+
+        #if DEBUG
+        let start = DispatchTime.now().uptimeNanoseconds
+        #endif
+        fullRenderCount += 1
+        lastStructureSignature = structureSignature
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        orderedRows = []
+        rowViewsByID = [:]
+        paneRowViewsByStationID = [:]
+        renderedGroupTitles = []
+        addWorktreeProjects = []
+        revealedRowID = nil
 
         for (groupIndex, group) in groups.enumerated() {
             renderedGroupTitles.append(group.title)
@@ -2266,12 +2295,13 @@ final class DashboardOverviewView: NSView {
                 // expanding it would just duplicate — only expand 2+ panes.
                 if groupingMode == .sailor, sailor.panes.count > 1 {
                     for pane in sailor.panes {
-                        let paneRow = PaneRowView(pane: pane)
-                        paneRow.onTap = { [weak self] stationId in
-                            self?.onSelectPane?(sailor.worktreePath, stationId)
+                        let paneRow = PaneRowView(pane: pane, worktreePath: sailor.worktreePath)
+                        paneRow.onTap = { [weak self] worktreePath, stationId in
+                            self?.onSelectPane?(worktreePath, stationId)
                         }
                         rowsBox.addArrangedSubview(paneRow)
                         paneRow.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
+                        paneRowViewsByStationID[pane.stationId] = paneRow
                     }
                 }
             }
@@ -2284,7 +2314,76 @@ final class DashboardOverviewView: NSView {
             selectedRow.scrollToVisible(selectedRow.bounds)
             revealedRowID = selectedId
         }
+        #if DEBUG
+        recordTelemetry(kind: "full",
+                        elapsedMs: elapsedMilliseconds(since: start),
+                        rowCount: orderedRows.count)
+        #endif
     }
+
+    private static func structureSignature(
+        for groups: [CabinGroup],
+        sailorsByPath: [String: SailorDisplayInfo],
+        groupingMode: CabinGroupingMode
+    ) -> String {
+        groups.map { group in
+            let rows = group.items.map { item in
+                let paneIDs: [String]
+                if groupingMode == .sailor, let sailor = sailorsByPath[item.path], sailor.panes.count > 1 {
+                    paneIDs = sailor.panes.map(\.stationId)
+                } else {
+                    paneIDs = []
+                }
+                return "\(item.id){\(paneIDs.joined(separator: ","))}"
+            }
+            return "\(String(describing: group.id))|\(group.title)|\(rows.joined(separator: ";"))"
+        }.joined(separator: "||")
+    }
+
+    private func applyIncrementalUpdates(
+        groups: [CabinGroup],
+        sailorsByPath: [String: SailorDisplayInfo]
+    ) {
+        orderedRows = groups.flatMap { group in group.items.map { ($0.id, $0.path) } }
+        renderedGroupTitles = groups.map(\.title)
+
+        for group in groups {
+            for item in group.items {
+                guard let sailor = sailorsByPath[item.path] else { continue }
+                if let row = rowViewsByID[item.id] {
+                    row.update(sailor: sailor, status: item.status, selected: item.id == selectedId)
+                }
+                if groupingMode == .sailor, sailor.panes.count > 1 {
+                    for pane in sailor.panes {
+                        paneRowViewsByStationID[pane.stationId]?
+                            .update(pane: pane, worktreePath: sailor.worktreePath)
+                    }
+                }
+            }
+        }
+    }
+
+    #if DEBUG
+    private func elapsedMilliseconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000.0
+    }
+
+    private func recordTelemetry(kind: String, elapsedMs: Double, rowCount: Int) {
+        if kind == "full" {
+            fullRenderTotalDurationMs += elapsedMs
+        } else {
+            incrementalUpdateCount += 1
+            incrementalTotalDurationMs += elapsedMs
+        }
+        let now = Date()
+        guard now.timeIntervalSince(lastTelemetryLogAt) >= 30 else { return }
+        lastTelemetryLogAt = now
+        let fullAvg = fullRenderCount > 0 ? fullRenderTotalDurationMs / Double(fullRenderCount) : 0
+        let incrementalAvg = incrementalUpdateCount > 0 ? incrementalTotalDurationMs / Double(incrementalUpdateCount) : 0
+        NSLog("[DashboardOverview] rows=%d full_count=%d full_avg_ms=%.2f incremental_count=%d incremental_avg_ms=%.2f last=%@ %.2fms",
+              rowCount, fullRenderCount, fullAvg, incrementalUpdateCount, incrementalAvg, kind, elapsedMs)
+    }
+    #endif
 
     /// Move the highlight to `id` in place, cross-fading between the two rows and
     /// scrolling the new one into view.
@@ -2339,6 +2438,7 @@ final class DashboardOverviewView: NSView {
         }
     }
     var renderedGroupTitlesForTesting: [String] { renderedGroupTitles }
+    var fullRenderCountForTesting: Int { fullRenderCount }
     /// Project titles behind the rendered "add worktree" buttons, in group order.
     var addWorktreeProjectsForTesting: [String] {
         stack.arrangedSubviews
@@ -2350,6 +2450,9 @@ final class DashboardOverviewView: NSView {
     }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     var revealedRowIDForTesting: String? { revealedRowID }
+    func rowRuntimeTextForTesting(id: String) -> String? { rowViewsByID[id]?.runtimeTextForTesting }
+    func rowTitleTextForTesting(id: String) -> String? { rowViewsByID[id]?.titleTextForTesting }
+    func rowTitleFrameForTesting(id: String) -> NSRect? { rowViewsByID[id]?.titleFrameForTesting }
     var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
     var groupingButtonAccessibilityLabelForTesting: String? { groupingButton.accessibilityLabel() }
     var groupingButtonRefusesFirstResponderForTesting: Bool { groupingButton.refusesFirstResponder }
@@ -2463,9 +2566,22 @@ final class DashboardOverviewView: NSView {
         var onTap: ((String) -> Void)?
         var onDelete: ((String) -> Void)?
         var onDeleteWithBranch: ((String) -> Void)?
-        private let path: String
-        private let isMainWorktree: Bool
+        /// Refreshed by `update` rather than fixed at init: a row is keyed by its
+        /// station id, and a worktree transfer (`handleNewBranch`) re-registers the
+        /// same stations under a new path. A reused row that kept its original
+        /// `path` would open, reveal, and *delete* the worktree it used to be.
+        private var path: String
+        private var isMainWorktree: Bool
         private var selected: Bool
+        private let showsRepository: Bool
+        private let staticDot: NSTextField
+        private let runningDot: SpinnerDotView
+        private let titleLabel: NSTextField
+        private let timeLabel: NSTextField
+        private let branchLabel: NSTextField
+        private let gitLabel: NSTextField
+        private let paneCountLabel: NSTextField
+        private let repositoryLabel: NSTextField?
         /// Whether the pointer is currently inside, so a selection change can
         /// repaint without losing the hover tint on the row being left behind.
         private var hovered = false
@@ -2508,6 +2624,27 @@ final class DashboardOverviewView: NSView {
             self.path = sailor.worktreePath
             self.isMainWorktree = sailor.isMainWorktree
             self.selected = selected
+            self.showsRepository = showsRepository
+            self.staticDot = Self.label(status.glyph, status.color, 8)
+            // The spinner is only ever visible while the row is `.running`, and it
+            // now outlives the status it was built under (rows are reused across
+            // incremental updates), so pin it to `.running`'s colour rather than
+            // whatever status happened to be current at construction time.
+            self.runningDot = SpinnerDotView(color: SailorStatus.running.color)
+            self.titleLabel = Self.label(sailor.currentPaneTitle, DashboardOverviewView.ink, 12)
+            self.timeLabel = Self.label(sailor.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
+            let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+            self.branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
+            self.gitLabel = NSTextField(labelWithString: "")
+            self.paneCountLabel = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—",
+                                             DashboardOverviewView.inkFaint, 10)
+            if showsRepository {
+                let repo = Self.label(sailor.project.isEmpty ? "Unknown deck" : sailor.project,
+                                      DeckColor.color(for: sailor.project), 10, weight: .semibold)
+                self.repositoryLabel = repo
+            } else {
+                self.repositoryLabel = nil
+            }
             super.init(frame: .zero)
             wantsLayer = true
             layer?.cornerRadius = Self.cornerRadius
@@ -2516,23 +2653,16 @@ final class DashboardOverviewView: NSView {
             setAccessibilityIdentifier("chrome.worktreeRow.\(sailor.id)")
             setAccessibilityLabel(sailor.name)
             applyBackground(hovered: false)
-
-            let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
-
-            // Status dot sits in its own column so both text lines share one
-            // leading edge — a fixed indent under "● + spacing" drifts with glyph metrics.
-            // `running` spins a 3/4 arc; every other status is a static glyph.
-            let dot: NSView = status == .running
-                ? SpinnerDotView(color: status.color)
-                : Self.label(status.glyph, status.color, 8)
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.setContentHuggingPriority(.required, for: .horizontal)
-            dot.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-            let title = Self.label(sailor.currentPaneTitle, DashboardOverviewView.ink, 12)
-            title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            let time = Self.label(sailor.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
-            time.setContentHuggingPriority(.required, for: .horizontal)
+            // Both dots are plain `addSubview` children (not stack-arranged), so
+            // the label-backed one has to opt out of autoresizing constraints by
+            // hand — `SpinnerDotView` already does it in its own init.
+            staticDot.translatesAutoresizingMaskIntoConstraints = false
+            staticDot.setContentHuggingPriority(.required, for: .horizontal)
+            staticDot.setContentCompressionResistancePriority(.required, for: .horizontal)
+            runningDot.setContentHuggingPriority(.required, for: .horizontal)
+            runningDot.setContentCompressionResistancePriority(.required, for: .horizontal)
+            titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
             // Line 1: current pane title                         time
             let line1 = NSStackView()
@@ -2540,41 +2670,34 @@ final class DashboardOverviewView: NSView {
             line1.alignment = .centerY
             line1.spacing = 7
             line1.translatesAutoresizingMaskIntoConstraints = false
-            line1.addArrangedSubview(title)
+            line1.addArrangedSubview(titleLabel)
             line1.addArrangedSubview(Self.spacer())
-            line1.addArrangedSubview(time)
+            line1.addArrangedSubview(timeLabel)
 
             // Line 2: branch  git info                              N panes
-            let branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
             branchLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-            let git = NSTextField(labelWithString: "")
-            git.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
-            git.translatesAutoresizingMaskIntoConstraints = false
-            git.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            git.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-            let panes = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—",
-                                   DashboardOverviewView.inkFaint, 10)
-            panes.setContentHuggingPriority(.required, for: .horizontal)
+            gitLabel.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
+            gitLabel.translatesAutoresizingMaskIntoConstraints = false
+            gitLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            gitLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            paneCountLabel.setContentHuggingPriority(.required, for: .horizontal)
 
             let line2 = NSStackView()
             line2.orientation = .horizontal
             line2.alignment = .firstBaseline
             line2.spacing = 8
             line2.translatesAutoresizingMaskIntoConstraints = false
-            if showsRepository {
-                let repository = Self.label(sailor.project.isEmpty ? "Unknown deck" : sailor.project,
-                                            DeckColor.color(for: sailor.project), 10, weight: .semibold)
+            if let repository = repositoryLabel {
                 repository.setContentHuggingPriority(.defaultHigh, for: .horizontal)
                 repository.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 line2.addArrangedSubview(repository)
             }
             line2.addArrangedSubview(branchLabel)
-            line2.addArrangedSubview(git)
+            line2.addArrangedSubview(gitLabel)
             line2.addArrangedSubview(Self.spacer())
-            line2.addArrangedSubview(panes)
+            line2.addArrangedSubview(paneCountLabel)
 
             let textCol = NSStackView(views: [line1, line2])
             textCol.orientation = .vertical
@@ -2582,20 +2705,24 @@ final class DashboardOverviewView: NSView {
             textCol.alignment = .leading
             textCol.translatesAutoresizingMaskIntoConstraints = false
 
-            addSubview(dot)
+            addSubview(staticDot)
+            addSubview(runningDot)
             addSubview(textCol)
             NSLayoutConstraint.activate([
-                textCol.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 7),
+                textCol.leadingAnchor.constraint(equalTo: staticDot.trailingAnchor, constant: 7),
                 textCol.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
                 textCol.topAnchor.constraint(equalTo: topAnchor, constant: 8),
                 textCol.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
-                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-                dot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
+                staticDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                staticDot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
+                runningDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                runningDot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
 
                 line1.widthAnchor.constraint(equalTo: textCol.widthAnchor),
                 line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
             ])
+            applyContent(sailor: sailor, status: status)
         }
         required init?(coder: NSCoder) { fatalError() }
 
@@ -2621,6 +2748,49 @@ final class DashboardOverviewView: NSView {
                 append(ab, DashboardOverviewView.inkFaint)
             }
             return result
+        }
+
+        func update(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool) {
+            path = sailor.worktreePath
+            isMainWorktree = sailor.isMainWorktree
+            setSelected(selected, animated: false)
+            setAccessibilityLabel(sailor.name)
+            applyContent(sailor: sailor, status: status)
+        }
+
+        var runtimeTextForTesting: String { timeLabel.stringValue }
+        var titleTextForTesting: String { titleLabel.stringValue }
+        var titleFrameForTesting: NSRect { titleLabel.frame }
+
+        private func applyContent(sailor: SailorDisplayInfo, status: SailorStatus) {
+            let nextTitle = sailor.currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nextTitle.isEmpty {
+                titleLabel.stringValue = nextTitle
+            } else if titleLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                titleLabel.stringValue = PaneTitleResolver.shortenPath(sailor.worktreePath)
+            }
+
+            let nextRuntime = sailor.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nextRuntime.isEmpty {
+                timeLabel.stringValue = nextRuntime
+            }
+
+            let nextBranch = (sailor.thread.isEmpty ? sailor.name : sailor.thread)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nextBranch.isEmpty {
+                branchLabel.stringValue = nextBranch
+            }
+            gitLabel.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
+            paneCountLabel.stringValue = sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—"
+            if let repositoryLabel, showsRepository {
+                let project = sailor.project.isEmpty ? "Unknown deck" : sailor.project
+                repositoryLabel.stringValue = project
+                repositoryLabel.textColor = DeckColor.color(for: project)
+            }
+            staticDot.stringValue = status.glyph
+            staticDot.textColor = status.color
+            staticDot.isHidden = status == .running
+            runningDot.isHidden = status != .running
         }
 
         override func mouseDown(with event: NSEvent) { onTap?(path) }
@@ -2726,8 +2896,13 @@ final class DashboardOverviewView: NSView {
     /// Third-level row under a worktree in the expanded "Group by Sailor" mode:
     /// an indented, clickable pane. `● pane title`, dimmed unless focused.
     private final class PaneRowView: NSView {
-        var onTap: ((String) -> Void)?
+        var onTap: ((String, String) -> Void)?
         private let stationId: String
+        /// Carried on the view, not captured in `onTap`: rows outlive a single
+        /// render now, and a transferred worktree keeps its station ids.
+        private var worktreePath: String
+        private let dotLabel: NSTextField
+        private let titleLabel: NSTextField
 
         private static let cornerRadius: CGFloat = 6
         private static let hoverFill = NSColor(name: nil) { appearance in
@@ -2736,8 +2911,11 @@ final class DashboardOverviewView: NSView {
                 : NSColor.black.withAlphaComponent(0.04)
         }
 
-        init(pane: PaneDisplayInfo) {
+        init(pane: PaneDisplayInfo, worktreePath: String) {
             self.stationId = pane.stationId
+            self.worktreePath = worktreePath
+            self.dotLabel = NSTextField(labelWithString: "\u{25CF}")
+            self.titleLabel = NSTextField(labelWithString: pane.title)
             super.init(frame: .zero)
             wantsLayer = true
             layer?.cornerRadius = Self.cornerRadius
@@ -2746,35 +2924,40 @@ final class DashboardOverviewView: NSView {
             setAccessibilityIdentifier("chrome.paneRow.\(pane.stationId)")
             setAccessibilityLabel(pane.title)
 
-            let dot = NSTextField(labelWithString: "\u{25CF}")
-            dot.font = AppFont.mono(size: 7)
-            dot.textColor = pane.status.color
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.setContentHuggingPriority(.required, for: .horizontal)
-            dot.setContentCompressionResistancePriority(.required, for: .horizontal)
+            dotLabel.font = AppFont.mono(size: 7)
+            dotLabel.translatesAutoresizingMaskIntoConstraints = false
+            dotLabel.setContentHuggingPriority(.required, for: .horizontal)
+            dotLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-            let title = NSTextField(labelWithString: pane.title)
-            title.font = AppFont.mono(size: 11)
-            title.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
-            title.lineBreakMode = .byTruncatingTail
-            title.translatesAutoresizingMaskIntoConstraints = false
-            title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            titleLabel.font = AppFont.mono(size: 11)
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-            addSubview(dot)
-            addSubview(title)
+            addSubview(dotLabel)
+            addSubview(titleLabel)
             NSLayoutConstraint.activate([
                 // Indent under the worktree row's status dot + text column.
-                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 27),
-                dot.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-                title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 7),
-                title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-                title.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-                title.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+                dotLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 27),
+                dotLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+                titleLabel.leadingAnchor.constraint(equalTo: dotLabel.trailingAnchor, constant: 7),
+                titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+                titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
             ])
+            update(pane: pane, worktreePath: worktreePath)
         }
         required init?(coder: NSCoder) { fatalError() }
 
-        override func mouseDown(with event: NSEvent) { onTap?(stationId) }
+        override func mouseDown(with event: NSEvent) { onTap?(worktreePath, stationId) }
+
+        func update(pane: PaneDisplayInfo, worktreePath: String) {
+            self.worktreePath = worktreePath
+            setAccessibilityLabel(pane.title)
+            dotLabel.textColor = pane.status.color
+            titleLabel.stringValue = pane.title
+            titleLabel.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
+        }
 
         private var tracking: NSTrackingArea?
         override func updateTrackingAreas() {
