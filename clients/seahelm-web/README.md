@@ -68,6 +68,14 @@ MAC=live npm run mock  # 终端 B:起 Seahelm 替身(发快照 + 应答命令)
 
 > attach 的重放**包含 scrollback**(实测一接上就有上百行),所以往回翻是有内容的。
 
+> **worktree 的身份是 `git rev-parse --show-toplevel`,不是 session 的 `start_dir`** ——
+> 在子目录里起的 shell 只是同一个 cabin 的另一个 sailor。按 start_dir 分组会把一个
+> worktree 拆成"每个子目录一行",而它们分支和 diff 完全相同,很容易被当成真的多个 cabin。
+>
+> 开着 `ZMX_PANES=1` 时**不再发布 canned fixture**(p1/p3/p8):既然在看真实 pane,
+> 混入假 cabin 会让列表说谎。协议测试跑在 bridge 关闭下,fixture 原样保留;
+> 需要时用右栏「发 mock 快照」或 `mock.emit.*` 手动注入。
+>
 > deck / 分支 / diff 数是**真的 git 读数**(`git rev-parse` / `diff --shortstat` /
 > `rev-list --count`,按 worktree 缓存 30s),不是造的。没有来源的只有"任务标题" ——
 > zmx session 不知道自己在做什么任务,所以退回 worktree 目录名;Mac 上那一栏是
@@ -113,7 +121,7 @@ cd devbroker
 # 跑测试(mock 与 vt-test 都默认 testmac):
 npm run broker            # 终端 A
 npm run mock:zmx          # 终端 B:ZMX_PANES=1,把真实 zmx session 发成 pane
-node vt-test.js           # 终端 C:7 项端到端全绿
+node vt-test.js           # 终端 C:8 项端到端全绿
 
 # 用网页看渲染:终端 B 改成发到页面默认的 live(理由见上面那条注)
 MAC=live npm run mock:zmx
@@ -127,7 +135,8 @@ MAC=live npm run mock:zmx
 | topic / method | 方向 | 说明 |
 |---|---|---|
 | `pane/{key}/vt` | S→* | **不 retained**。`{type:'vt.snapshot'\|'vt.data', b64, cols?, rows?}` |
-| `pane.vt_open` | C→S | 起 attach 客户端;头 350ms 的重放作为 `vt.snapshot`(含几何)发出,其后转直播 |
+| `pane.vt_open` | C→S | 起 attach 客户端;首屏重放**安静下来后**(160ms 空闲判定,2.5s 硬上限)作为 `vt.snapshot`(含几何)发出,其后转直播。**不幂等**:每次都重新 attach 并重发快照 |
+| `pane.vt_keepalive` | C→S | 心跳续租(20s);流有 60s TTL,浏览器崩掉时由它回收 attach 客户端 |
 | `pane.vt_close` | C→S | 断开该 attach 客户端(**绝不能调 `zmx detach`,那会断开所有客户端**) |
 | `pane.send_keys` | C→S | `{b64}` = UTF-8 键序列的 base64;已 attach 时直接写进 pty |
 | `mock.vt_stats` | C→S | 吞吐读数(字节/消息/秒) |

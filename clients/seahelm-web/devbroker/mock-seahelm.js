@@ -121,14 +121,19 @@ async function gitInfo(dir) {
 
   // `--git-common-dir` resolves to the *main* repo's .git even from a linked
   // worktree, so its grandparent is the deck name every worktree shares.
-  const [commonDir, branch, shortstat, aheadBehind] = await Promise.all([
+  // `--show-toplevel` is the worktree root, which is the identity a cabin has —
+  // a session's start_dir is just wherever that shell happened to be launched,
+  // and grouping by it split one worktree into a row per subdirectory.
+  const [commonDir, top, branch, shortstat, aheadBehind] = await Promise.all([
     sh('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], dir),
+    sh('git', ['rev-parse', '--show-toplevel'], dir),
     sh('git', ['rev-parse', '--abbrev-ref', 'HEAD'], dir),
     sh('git', ['diff', '--shortstat', 'HEAD'], dir),
     sh('git', ['rev-list', '--left-right', '--count', 'HEAD...@{u}'], dir),
   ]);
 
-  const info = { project: '', branch: branch || '', added: 0, removed: 0, ahead: 0, behind: 0 };
+  const info = { project: '', root: top || dir, branch: branch || '',
+                 added: 0, removed: 0, ahead: 0, behind: 0 };
   if (commonDir) info.project = path.basename(path.dirname(commonDir));
   if (shortstat) {
     info.added = Number((shortstat.match(/(\d+) insertion/) || [])[1] || 0);
@@ -145,17 +150,23 @@ async function gitInfo(dir) {
 
 /** Roll live zmx sessions up into the per-worktree records the First Mate shows. */
 async function publishZmxWorktrees(rows) {
-  const byDir = new Map();
+  // Keyed by worktree root, not by start_dir: sessions launched in different
+  // subdirectories of one worktree are all sailors of the same cabin, which is
+  // what the Mac shows. Grouping by start_dir listed `seahelm`, `seahelm-web`
+  // and `devbroker` as three cabins that happened to share a branch and diff.
+  const byRoot = new Map();
   for (const r of rows) {
     const dir = r.start_dir || '';
     if (!dir) continue;
-    if (!byDir.has(dir)) byDir.set(dir, []);
-    byDir.get(dir).push(r);
+    const info = await gitInfo(dir);
+    const root = info.root || dir;
+    if (!byRoot.has(root)) byRoot.set(root, { info, sessions: [] });
+    byRoot.get(root).sessions.push(r);
   }
 
   const live = new Set();
-  for (const [dir, sessions] of byDir) {
-    const info = await gitInfo(dir);
+  for (const [dir, entry] of byRoot) {
+    const { info, sessions } = entry;
     const id = `zmx:${dir}`;
     live.add(id);
     // Elapsed ticks in the browser, so publish the origin instant rather than a
@@ -213,7 +224,9 @@ async function refreshZmxPanes() {
                 // Without a title the tree falls back to shortId(), which collapses
                 // every `seahelm-*` session to the same label. The name is the label.
                 title: r.name,
-                worktree_path: dir, branch: info.branch || path.basename(dir),
+                // The worktree root, so the client groups panes into the same
+                // cabins the worktree records describe.
+                worktree_path: info.root || dir, branch: info.branch || path.basename(dir),
                 // Empty, not a placeholder deck: a session whose start_dir has been
                 // deleted has no deck, and the client renders that as "Unknown deck".
                 project: info.project || '', agent_type: 'shell', status: 'Idle',
@@ -226,9 +239,19 @@ async function refreshZmxPanes() {
 
 function publishSnapshot() {
   pub('presence', { online:true }, true);
-  for (const p of Object.values(panes)) pub(`pane/${p.pane_session_key}/status`, p, true);
-  pub('worktree/main/status', { worktree_id:'main', worktree_path:'/repo/seahelm', branch:'main',
-    project:'seahelm', status:'Running', pane_count:1 }, true);
+  // With the zmx bridge on you are looking at real panes, and mixing the canned
+  // fixture in makes the list lie — it showed cabins the Mac does not have.
+  // Protocol tests run with the bridge off, so their fixture is untouched; the
+  // 「发 mock 快照」 button and `mock.emit.*` still inject it on demand.
+  if (!ZMX_ON) {
+    for (const p of Object.values(panes)) pub(`pane/${p.pane_session_key}/status`, p, true);
+    pub('worktree/main/status', { worktree_id:'main', worktree_path:'/repo/seahelm', branch:'main',
+      project:'seahelm', status:'Running', pane_count:1 }, true);
+  } else {
+    // Clear a fixture left retained by an earlier bridge-off run.
+    for (const p of Object.values(panes)) c.publish(`${B}/pane/${p.pane_session_key}/status`, '', { qos:1, retain:true });
+    c.publish(`${B}/worktree/main/status`, '', { qos:1, retain:true });
+  }
   pub('dnd/state', { on:false, ends_at_epoch:0, blocked_count:0 }, true);
   publishFocus();
 }
@@ -352,6 +375,9 @@ function onHistory(req) {
 c.on('connect', () => {
   console.log(`[mock-seahelm] connected ${URL} as ${B}`);
   c.subscribe([`${B}/command`, `${B}/history/request`], { qos:1 });
+  // See the handler below: this is how we learn about retained worktree records
+  // a previous run of this process published.
+  if (ZMX_ON) c.subscribe(`${B}/worktree/+/status`, { qos:1 });
   publishSnapshot();
   console.log('[mock-seahelm] snapshot published (retained). Ready.');
   if (!ZMX_ON) return;
@@ -392,5 +418,14 @@ c.on('message', (t, buf) => {
   let m; try { m = JSON.parse(raw); } catch { return; }
   if (t === `${B}/command`) { console.log('[mock-seahelm] cmd', m.method); onCommand(m); }
   else if (t === `${B}/history/request`) { console.log('[mock-seahelm] history', m.pane_id); onHistory(m); }
+  else if (ZMX_ON && /\/worktree\/[^/]+\/status$/.test(t) && m && typeof m.worktree_id === 'string'
+           && m.worktree_id.startsWith('zmx:')) {
+    // Retained records outlive the process that published them. Adopt whatever a
+    // previous run left behind so the sweep below can tombstone the ones we no
+    // longer own — otherwise a restart (or a change in how they are keyed, which
+    // is exactly what moving from start_dir to worktree root was) strands them
+    // on the broker forever.
+    zmxWorktrees.add(m.worktree_id);
+  }
 });
 c.on('error', e => console.error('[mock-seahelm] error', e.message));
