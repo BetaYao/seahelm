@@ -51,6 +51,16 @@ final class SpinnerDotView: NSView {
         arc.frame = layer?.bounds ?? bounds
     }
 
+    /// Dashboard rows outlive a single status now — they keep a spinner around
+    /// and toggle it — so a hidden spinner must stop rather than tick forever
+    /// behind `isHidden`. Every row would otherwise host a permanent animation.
+    override var isHidden: Bool {
+        didSet {
+            guard isHidden != oldValue else { return }
+            if isHidden { arc.removeAnimation(forKey: Self.animationKey) } else { installSpin() }
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // Animations are stripped when a layer leaves the window; (re)install
@@ -68,6 +78,7 @@ final class SpinnerDotView: NSView {
     }
 
     private func installSpin() {
+        guard window != nil, !isHidden else { return }
         guard arc.animation(forKey: Self.animationKey) == nil else { return }
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let spin = CABasicAnimation(keyPath: "transform.rotation.z")

@@ -2770,8 +2770,13 @@ final class DashboardOverviewView: NSView {
                 titleLabel.stringValue = PaneTitleResolver.shortenPath(sailor.worktreePath)
             }
 
+            // Unlike the title, a duration must be allowed to disappear: it falls
+            // back to the activity age once the pane stops, and that is "" when
+            // unknown. Holding the last value there would leave a dead pane
+            // reading "12s" next to an idle dot. Only a *running* row keeps its
+            // last known figure, so a live counter never blanks mid-flight.
             let nextRuntime = sailor.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !nextRuntime.isEmpty {
+            if !nextRuntime.isEmpty || status != .running {
                 timeLabel.stringValue = nextRuntime
             }
 
