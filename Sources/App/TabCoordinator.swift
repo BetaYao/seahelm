@@ -1140,7 +1140,12 @@ class TabCoordinator {
     // MARK: - Branch Refresh
 
     private var branchRefreshTick = 0
-    private static let elapsedRefreshEveryTicks = 6
+    /// Every 2nd tick of the 5s timer, i.e. 10s. This is the *only* thing that
+    /// advances the seconds-resolution elapsed labels (ShipLog stopped fanning
+    /// out on roundDuration ticks), so a slower cadence reads as a frozen
+    /// counter. `buildSailorDisplayInfos` is cache-served and the render it
+    /// feeds is now incremental, so the tick is cheap enough to keep at 10s.
+    private static let elapsedRefreshEveryTicks = 2
 
     static func shouldRefreshDashboardElapsedTime(tick: Int) -> Bool {
         guard tick > 0 else { return false }
@@ -1448,10 +1453,30 @@ class TabCoordinator {
     /// not in this set, no pane is using it right now.
     func livePaneSessionNames() -> Set<String> {
         guard runtimeBackend == "zmx" else { return [] }
+        guard allConfiguredReposAreRepresented() else {
+            NSLog("[TabCoordinator] Withholding live pane sessions — a configured repo has no worktrees")
+            return []
+        }
         let names = allWorktrees.flatMap { entry in
             entry.tree.allLeaves.map(\.paneSessionKey)
         }
         return Set(names.filter { !$0.isEmpty })
+    }
+
+    /// Whether every configured repo contributed at least one worktree to
+    /// `allWorktrees`. A repo always has its main worktree, so a repo with none
+    /// means discovery never landed — git lock, unmounted volume, a path that
+    /// vanished. Its panes are live but absent from the trees above, and callers
+    /// treat this set as authoritative, so a partial answer would have the
+    /// orphan sweep force-kill those sessions with their agents inside. Both
+    /// callers skip on an empty set, which is the safe direction to fail.
+    private func allConfiguredReposAreRepresented() -> Bool {
+        let represented = Set(allWorktrees.compactMap { entry in
+            worktreeRepoCache[entry.info.path].map(WorktreeDiscovery.canonicalPath)
+        })
+        return config.workspacePaths.allSatisfy {
+            represented.contains(WorktreeDiscovery.canonicalPath($0))
+        }
     }
 
     // MARK: - Navigation

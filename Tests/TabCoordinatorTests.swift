@@ -166,11 +166,43 @@ final class TabCoordinatorTests: XCTestCase {
         XCTAssertEqual(Set(coordinator.workspaceManager.tabs[tabIndex].worktrees.map(\.path)), Set([main.path, added.path]))
     }
 
-    func testShouldRefreshDashboardElapsedTimeUsesSlowCadence() {
+    /// 10s on the 5s timer. This tick is the only thing advancing the elapsed
+    /// labels, so it has to stay fast enough that a seconds readout doesn't
+    /// visibly freeze.
+    func testShouldRefreshDashboardElapsedTimeEveryTenSeconds() {
+        XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 0))
         XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 1))
+        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 2))
         XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 3))
-        XCTAssertFalse(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 5))
-        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 6))
-        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 12))
+        XCTAssertTrue(TabCoordinator.shouldRefreshDashboardElapsedTime(tick: 4))
+    }
+
+    /// Regression: the orphan sweep treats this set as authoritative, so a repo
+    /// whose discovery never landed must withhold the whole set rather than
+    /// report a partial one — otherwise its live sessions read as orphans.
+    func testLivePaneSessionNamesWithheldWhenARepoHasNoWorktrees() {
+        var config = Config()
+        config.workspacePaths = ["/tmp/repo-a", "/tmp/repo-b"]
+        let coordinator = TabCoordinator(config: config)
+        coordinator.terminalCoordinator = TerminalCoordinator(config: config, activeSplitContainer: { nil })
+        coordinator.runtimeBackend = "zmx"
+
+        let info = WorktreeInfo(path: "/tmp/repo-a", branch: "main", commitHash: "", isMainWorktree: true)
+        let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-a",
+                             stationId: "station-a", paneSessionKey: "seahelm-repo-a-main")
+        coordinator.allWorktrees = [(info: info, tree: tree)]
+        coordinator.worktreeRepoCache[info.path] = "/tmp/repo-a"
+
+        XCTAssertTrue(coordinator.livePaneSessionNames().isEmpty,
+                      "repo-b contributed no worktrees — the set must be withheld")
+
+        let infoB = WorktreeInfo(path: "/tmp/repo-b", branch: "main", commitHash: "", isMainWorktree: true)
+        let treeB = SplitTree(worktreePath: infoB.path, rootLeafId: "leaf-b",
+                              stationId: "station-b", paneSessionKey: "seahelm-repo-b-main")
+        coordinator.allWorktrees.append((info: infoB, tree: treeB))
+        coordinator.worktreeRepoCache[infoB.path] = "/tmp/repo-b"
+
+        XCTAssertEqual(coordinator.livePaneSessionNames(),
+                       ["seahelm-repo-a-main", "seahelm-repo-b-main"])
     }
 }

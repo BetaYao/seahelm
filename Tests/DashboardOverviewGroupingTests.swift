@@ -242,6 +242,38 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    /// A duration must clear once the pane stops — the row would otherwise hold
+    /// the last figure forever and read as "12s" next to an idle dot. A row that
+    /// is still running keeps its last value so a live counter never blanks.
+    func testStoppedRowClearsRuntimeButRunningRowKeepsIt() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            func push(_ status: SailorStatus, runtime: String) {
+                view.update([
+                    makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                               paneStatuses: [status], isMainWorktree: false,
+                               lastActivityAt: now.addingTimeInterval(-10),
+                               currentPaneRunTime: runtime),
+                ])
+            }
+
+            push(.running, runtime: "12s")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "12s")
+
+            // Still running, value momentarily unavailable — hold the last figure.
+            push(.running, runtime: "")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "12s")
+
+            // Stopped with no known activity age — the counter must go away.
+            push(.idle, runtime: "")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "")
+
+            XCTAssertEqual(view.fullRenderCountForTesting, 1, "these should all be incremental")
+        }
+    }
+
     /// Regression: the status dot is a plain `addSubview` child, so it has to opt
     /// out of autoresizing constraints by hand. Without that, the frame-derived
     /// constraints win and the whole text column lays out at zero height — every
