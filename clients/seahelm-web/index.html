@@ -77,11 +77,64 @@
   .st-off{background:var(--danger-14);color:var(--danger)}
   .st-on{background:var(--running-14);color:var(--running)}
   /* ── layout ─────────────────────────────────────────────── */
-  main{flex:1;display:grid;grid-template-columns:300px 1fr 360px;overflow:hidden}
+  main{flex:1;display:grid;grid-template-columns:300px 1fr 360px;overflow:hidden;
+    transition:grid-template-columns .16s ease}
+  /* Debug panel collapsed — the terminal takes the width back. */
+  main.nolog{grid-template-columns:300px 1fr 0}
+  main.nolog #rightcol{display:none}
+
+  /* Narrow-layout affordances. These base rules must precede the media queries:
+     same specificity means source order decides, and declaring them afterwards
+     silently re-hid the drawer button at every width. */
+  #drawerBtn{display:none;align-items:center;justify-content:center;
+    background:var(--panel);color:var(--text);border:1px solid var(--line-20);
+    border-radius:var(--r);padding:5px 9px;font-size:13px;line-height:1;cursor:pointer;
+    font-family:var(--mono)}
+  #drawerBtn:hover{border-color:var(--accent);color:var(--accent)}
+  #scrim{display:none}
+
+  /* ── responsive ───────────────────────────────────────────
+     `main.nolog` outranks `main`, so every override below has to name both or
+     the debug toggle would decide the narrow layout. */
+  @media (max-width:1100px){
+    main, main.nolog{grid-template-columns:260px 1fr 0}
+    main #rightcol, main.nolog #rightcol{display:none}   /* no room to debug and work */
+    #logBtn{display:none}
+  }
+  /* Phone / narrow window: one column, First Mate slides over it. */
+  @media (max-width:760px){
+    main, main.nolog{grid-template-columns:1fr}
+    #drawerBtn{display:inline-flex}
+    #dndBtn{display:none}
+    #leftcol{position:fixed;top:0;bottom:0;left:0;z-index:80;
+      width:min(86vw,320px);background:var(--bg);
+      border-right:1px solid var(--line-20);box-shadow:0 0 40px rgba(0,0,0,.55);
+      transform:translateX(-101%);transition:transform .18s ease;will-change:transform}
+    #leftcol.open{transform:none}
+    #scrim{display:block;position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.5);
+      opacity:0;pointer-events:none;transition:opacity .18s ease}
+    #scrim.on{opacity:1;pointer-events:auto}
+    header{padding:6px 8px;gap:6px;min-height:36px}
+    .wordmark{font-size:13px}
+    .detail-head{margin:0 0 8px}
+    .col{padding:8px}
+    .suggest-dock{padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+  }
   .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
   #midcol{display:flex;flex-direction:column;overflow:hidden}
-  #midcol #feed{flex:1 1 auto;min-height:0;overflow-y:auto}
-  #midcol .cmdbar{flex:0 0 auto}
+  /* The terminal is the mid column now — there is nothing else to share it with. */
+  #termWrap{flex:1 1 auto;min-height:0;background:#05090c;
+    border:1px solid var(--line-12);border-radius:var(--r);padding:6px;overflow:auto}
+  #term{width:100%;height:100%}
+  #termWrap.empty{display:flex;align-items:center;justify-content:center}
+  /* Scrolled back in a live terminal, there is otherwise no way home but to
+     swipe all the way down — and new output keeps arriving below you. */
+  #toBottom{position:absolute;right:16px;bottom:16px;z-index:40;display:none;
+    background:var(--panel2);color:var(--accent);border:1px solid var(--accent-20);
+    border-radius:14px;padding:5px 12px;font-family:var(--mono);font-size:11px;
+    cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  #toBottom.on{display:block}
+  #midcol{position:relative}
   .col::-webkit-scrollbar{width:6px}
   .col::-webkit-scrollbar-thumb{background:var(--line-20);border-radius:3px}
   .col h2{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;
@@ -93,11 +146,6 @@
     border-radius:var(--r);padding:5px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600}
   .detail-head button:hover{border-color:var(--accent);color:var(--accent)}
   .detail-head button:disabled{opacity:.45;cursor:default;border-color:var(--line-12);color:var(--muted)}
-  .feed-more{align-self:center;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
-    border-radius:var(--r);padding:6px 14px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600;
-    margin:2px 0 8px}
-  .feed-more:hover{border-color:var(--accent);color:var(--accent)}
-  .feed-more:disabled{opacity:.45;cursor:default;border-color:var(--line-12);color:var(--muted)}
   /* ── First Mate header (matches Mac DashboardOverviewView) ─ */
   #leftcol{display:flex;flex-direction:column;padding:0;overflow:hidden}
   .fm-scroll{flex:1;min-height:0;overflow-y:auto;padding:8px 10px 12px}
@@ -106,64 +154,69 @@
   .fm-header .fm-glyph{color:var(--accent);font-size:13px;line-height:1}
   .fm-header .fm-title{font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:.02em}
   .fm-header .fm-sub{font-size:11px;color:var(--muted);margin-left:2px}
-  /* pinned bottom like Mac orders zone */
-  .fm-suggest{flex:none;max-height:42%;overflow-y:auto;padding:10px 10px 12px;
-    border-top:1px solid var(--line-12);background:rgba(8,34,42,.55)}
-  .fm-suggest:empty{display:none;padding:0;border:0}
-  .fm-suggest .fm-suggest-h{font-size:10px;letter-spacing:.18em;text-transform:uppercase;
-    color:var(--muted);margin-bottom:8px}
-  /* ── tree ───────────────────────────────────────────────── */
-  .repo-head{display:flex;align-items:center;gap:8px;margin:12px 0 4px;padding:2px 2px 6px 0;
-    border-bottom:1px solid var(--line-12);
-    font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-  .repo-head:first-child{margin-top:0}
-  .repo-swatch{width:3px;height:12px;border-radius:1px;flex:none;background:var(--accent)}
-  .wt{margin-bottom:2px;padding-left:2px}
-  .wt-head{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:var(--r)}
-  .wt-head .wt-label{flex:1;min-width:0}
-  .wt-head .wt-title{font-family:var(--mono);font-size:13px;color:var(--text);font-weight:500;
+  /* ── First Mate list ─────────────────────────────────────────
+     Ported 1:1 from DashboardOverviewView (DashboardViewController.swift):
+     group header mono 11 semibold inkDim with 13/7 gaps; rows 8pt radius,
+     8/10 padding, 4 apart; dot column then a 3pt-spaced two-line text column.
+     Colours are SemanticColors' dark values. */
+  .fm-group{padding-top:13px}
+  .fm-group:first-child{padding-top:0}
+  .fm-group-head{display:flex;align-items:center;gap:7px;padding-bottom:7px;
+    font-size:11px;font-weight:600;color:var(--muted)}
+  .fm-group-head .fm-deck{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-add{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;
+    font-family:var(--mono);font-size:13px;line-height:1;padding:0 2px;border-radius:3px}
+  .fm-add:hover{color:var(--accent)}
+  .fm-rows{display:flex;flex-direction:column;gap:4px}
+  .fm-row{display:flex;gap:7px;padding:8px 10px;border-radius:8px;cursor:pointer;
+    transition:background .12s}
+  .fm-row:hover{background:rgba(255,255,255,.05)}
+  .fm-row.sel{background:rgba(255,255,255,.10)}
+  /* The dot sits in its own column so both text lines share one leading edge. */
+  .fm-dot{flex:none;width:9px;display:flex;justify-content:center;align-items:center;
+    height:17px;font-size:9px;line-height:1}
+  /* `running` is a spinning 3/4 arc on the Mac (SpinnerDotView), not a glyph. */
+  .fm-spin{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--running);
+    border-right-color:transparent;animation:fmspin .9s linear infinite}
+  @keyframes fmspin{to{transform:rotate(360deg)}}
+  .fm-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .fm-l1{display:flex;align-items:center;gap:7px}
+  .fm-name{flex:1;min-width:0;font-size:12px;color:var(--text);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .wt-head .wt-branch{font-family:var(--mono);font-size:10px;color:var(--muted);
-    letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-  .pane-row{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 18px;border-radius:var(--r);
-    cursor:pointer;font-size:12px;transition:background .1s;border:1px solid transparent}
-  .pane-row:hover{background:var(--panel)}
-  .pane-row.sel{background:var(--panel2);border-color:var(--accent-20)}
-  .dot{width:7px;height:7px;border-radius:50%;flex:none}
-  .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .pid{color:var(--accent);font-family:var(--mono);font-size:12px;font-weight:500}
-  .agent{color:var(--muted);font-size:11px}
-  .badge{font-family:var(--mono);font-size:10px;color:var(--muted)}
-  /* ── detail / feed ──────────────────────────────────────── */
-  .feed{display:flex;flex-direction:column;gap:6px}
-  .msg{max-width:88%;padding:8px 10px;border-radius:var(--r);font-size:12px;line-height:1.45;
-    word-break:break-word;border:1px solid var(--line-12)}
-  .msg.you{align-self:flex-end;background:var(--panel2);border-color:var(--accent-20)}
-  .msg.agent{align-self:flex-start;background:var(--panel);max-width:96%}
-  .msg.agent h4{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);margin:8px 0 4px}
-  .msg.agent p{margin:5px 0}
-  .msg.agent ul,.msg.agent ol{margin:5px 0;padding-left:18px}
-  .msg.agent li{margin:2px 0}
-  .msg.agent strong{color:var(--text);font-weight:600}
-  .msg.agent em{font-style:italic;color:var(--muted)}
-  .msg.agent code{font-family:var(--mono);font-size:11px;background:var(--accent-12);
-    color:var(--accent);padding:1px 4px;border-radius:3px;word-break:break-word}
-  .msg.agent pre{background:rgba(0,0,0,.28);border:1px solid var(--line-12);border-radius:var(--r);
-    padding:8px 10px;margin:6px 0;overflow-x:auto}
-  .msg.agent pre code{background:none;color:var(--text);padding:0;font-size:11px;line-height:1.5;white-space:pre}
-  .msg.agent>:first-child{margin-top:0} .msg.agent>:last-child{margin-bottom:0}
-  .msg.ask{align-self:flex-start;background:var(--attention-12);border-color:rgba(224,164,88,.35)}
-  .msg.status{align-self:center;color:var(--muted);font-family:var(--mono);font-size:11px;
-    background:none;border:0;padding:2px}
-  .msg.term{align-self:stretch;max-width:100%;background:rgba(0,0,0,.28);border-color:var(--line-12);
-    font-family:var(--mono);font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
-  .cmdbar{display:flex;gap:6px;padding:10px 0 0;border-top:1px solid var(--line-12);margin-top:10px}
-  .cmdbar input{flex:1;background:var(--panel);border:1px solid var(--line-20);color:var(--text);
-    border-radius:var(--r);padding:7px 10px;font-size:12px;font-family:var(--mono);outline:none}
-  .cmdbar input:focus{border-color:var(--accent)}
-  .cmdbar button{background:var(--accent);color:#042028;border:0;border-radius:var(--r);padding:7px 12px;
-    font-weight:600;cursor:pointer;font-family:var(--mono);font-size:12px}
-  .cmdbar button.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line-20)}
+  .fm-time{flex:none;font-size:10px;color:var(--muted)}
+  .fm-l2{display:flex;align-items:baseline;gap:8px}
+  /* Both can truncate, but the deck gives way first — it is the one fact the
+     group header above already tells you. Matches the Mac, where the deck label
+     compresses to "teamc…" while the branch stays whole. */
+  .fm-branch{flex:0 1 auto;min-width:0;flex-shrink:1;font-size:11px;color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-git{flex:none;font-size:10px;white-space:nowrap}
+  .fm-git .add{color:#5fb87a} .fm-git .del{color:#e07a6a} .fm-git .ab{color:var(--muted)}
+  .fm-sailors{flex:none;margin-left:auto;font-size:10px;color:var(--muted)}
+  /* Shrinks first, but never to nothing — the Mac always keeps a stub ("teamc…"),
+     and a row whose deck vanished entirely reads as if it had none. */
+  .fm-deck-tag{flex:0 1 auto;min-width:2.6em;flex-shrink:4;font-size:10px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Third level (PaneRowView): indented 27px to clear the worktree dot+gutter. */
+  .fm-pane{display:flex;align-items:center;gap:7px;padding:4px 10px 4px 27px;
+    border-radius:6px;cursor:pointer;transition:background .12s}
+  .fm-pane:hover{background:rgba(255,255,255,.05)}
+  .fm-pane.sel{background:rgba(255,255,255,.10)}
+  .fm-pane .pdot{flex:none;font-size:7px;line-height:1}
+  .fm-pane .ptitle{flex:1;min-width:0;font-size:11px;color:var(--muted);opacity:.78;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-pane.sel .ptitle,.fm-pane:hover .ptitle{opacity:1}
+  /* ── suggestion dock ─────────────────────────────────────────
+     Floats over the whole page, pinned to the very bottom, so a suggestion is
+     equally reachable whichever column has focus. Sits above the terminal
+     rather than inside a column, which is why it is fixed, not sticky. */
+  .suggest-dock{position:fixed;left:0;right:0;bottom:0;z-index:60;
+    display:flex;flex-direction:column;gap:8px;align-items:center;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:linear-gradient(to top, rgba(6,26,32,.97) 65%, rgba(6,26,32,0));
+    max-height:52vh;overflow-y:auto;pointer-events:none}
+  .suggest-dock:empty{display:none}
+  .suggest-dock>*{pointer-events:auto;width:100%;max-width:760px}
   /* ── event / suggestion cards ───────────────────────────── */
   .ev{background:var(--panel);border:1px solid var(--attention);
     border-radius:var(--r);padding:10px;margin-bottom:8px}
@@ -196,6 +249,7 @@
 </head>
 <body>
   <header>
+    <button id="drawerBtn" title="船员列表">☰</button>
     <span class="wordmark"><span class="sea">sea</span>helm</span>
     <span class="spacer"></span>
     <!-- hidden manual fields: connect() reads these; pairing overrides them -->
@@ -208,6 +262,7 @@
     <span id="pairZone" class="pairzone"></span>
     <button id="connectBtn">连接</button>
     <button class="ghost" id="dndBtn" title="切换专注勿扰(Do Not Disturb)">DND</button>
+    <button class="ghost" id="logBtn" title="隐藏报文日志">日志</button>
     <span id="status" class="st-off">离线</span>
   </header>
   <main>
@@ -220,18 +275,13 @@
       <div class="fm-scroll">
         <div id="tree"></div>
       </div>
-      <div class="fm-suggest" id="fmSuggest"></div>
     </div>
     <div class="col" id="midcol">
       <div class="detail-head">
-        <h2 id="detailHead">Pane 详情</h2>
-        <button id="syncHistBtn" title="同步最新历史到面板" disabled>同步历史</button>
+        <h2 id="detailHead">终端</h2>
       </div>
-      <div id="feed" class="feed"><div class="muted">选择一个 pane</div></div>
-      <div class="cmdbar">
-        <input id="sendText" placeholder="pane.send_text …(回车发送)" />
-        <button id="sendBtn">发送</button>
-      </div>
+      <div id="termWrap" class="empty"><div id="term"></div></div>
+      <button id="toBottom" title="回到最新输出">↓ 最新</button>
     </div>
     <div class="col" id="rightcol" style="border-right:0">
       <h2>报文日志</h2>
@@ -242,22 +292,46 @@
       <div id="log"></div>
     </div>
   </main>
+  <div id="scrim"></div>
+  <!-- Suggestions float over the page, pinned to its very bottom. -->
+  <div class="suggest-dock" id="suggestDock"></div>
 
+<link rel="stylesheet" href="./xterm.css" />
+<script src="./xterm.js"></script>
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const S = {
   client:null, mac:'testmac',
-  panes:new Map(), worktrees:new Map(), msgs:new Map(),
-  // pid → { hasMore } — whether older history exists above the loaded window
-  histMeta:new Map(),
-  focus:null, dnd:null, sel:null, events:new Map(),
+  panes:new Map(), worktrees:new Map(),
+  focus:null, dnd:null, events:new Map(),
+  // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
+  sel:null, selPane:null,
   encKey:null, authPass:null,   // set once a seahelm:// pair link is applied (E2EE on)
+  // VT terminal: `open` is the pane key currently streaming
+  vt:{ term:null, open:null, pending:'', flushT:null },
 };
-const HIST_PAGE = 20;
+// Opening size only. zmx reports no geometry and has no resize verb, so the
+// bridge reads the session's real grid from outside (pid → tty → `stty size`)
+// and ships it with the snapshot; we resize to that before replaying. These
+// numbers just give the terminal a sane box for the moment before it lands.
+// Sizing stays one-way — the remote adapts by scaling the font (fitTermFont),
+// it cannot make the Mac-side pane a different shape.
+const VT_COLS = 120, VT_ROWS = 32;
+// The size the terminal renders at when the grid fits; fitTermFont scales down
+// from here and never past it. VT_FONT_MIN is where shrinking stops being worth
+// it — below this you cannot read the pane anyway, so we pan instead.
+const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
+// SailorStatus.color, 1:1 with Sources/Core/SailorStatus.swift (dark values).
+// `waiting` is the amber attention accent, NOT the blue one — the Mac routes
+// waiting through SemanticColors.attention, and exited shares idle's grey.
 const STC = {
-  running:'#1bb062', waiting:'#5b93f0', done:'#1bb062',
-  failed:'#e84635', idle:'#557170', unknown:'#557170',
+  running:'#1bb062', waiting:'#e0a458', done:'#557170',
+  failed:'#e84635', idle:'#557170', unknown:'#7fa0a3',
+};
+// SailorStatus.glyph. `running` is drawn as a spinning arc instead (SpinnerDotView).
+const STG = {
+  running:'◐', waiting:'●', done:'◌', failed:'✕', idle:'○', unknown:'◌',
 };
 // DeckColor — same 10-swatch djb2 hash as Sources/UI/Dashboard/DeckColor.swift
 const DECK = [0xd97757,0x10a37f,0x8b7fd9,0x4285f4,0x6aa84f,
@@ -288,37 +362,6 @@ const stColor = s => STC[normStatus(s)] || STC.unknown;
 // pane_id is a UUID (station id); show a short, stable prefix.
 const shortId = id => String(id||'').split('-')[0].slice(0,8) || '—';
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-// Minimal, self-contained, XSS-safe markdown → HTML (escape first, then structure).
-// Handles: ``` code fences, `inline code`, **bold**, *italic*, # headings,
-// - / * / 1. lists, blank-line paragraphs. No external lib (CSP/offline safe).
-function md(src){
-  const e = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-  const inline = s => e(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
-  let out = '', ul = false, ol = false, code = false, buf = '';
-  const closeLists = () => { if (ul) { out += '</ul>'; ul = false; } if (ol) { out += '</ol>'; ol = false; } };
-  for (const line of lines) {
-    if (/^```/.test(line)) {
-      if (code) { out += '<pre><code>' + e(buf) + '</code></pre>'; buf = ''; code = false; }
-      else { closeLists(); code = true; }
-      continue;
-    }
-    if (code) { buf += line + '\n'; continue; }
-    const h = line.match(/^(#{1,6})\s+(.*)/);
-    if (h) { closeLists(); out += '<h4>' + inline(h[2]) + '</h4>'; continue; }
-    const uli = line.match(/^\s*[-*]\s+(.*)/);
-    if (uli) { if (ol) { out += '</ol>'; ol = false; } if (!ul) { out += '<ul>'; ul = true; } out += '<li>' + inline(uli[1]) + '</li>'; continue; }
-    const oli = line.match(/^\s*\d+\.\s+(.*)/);
-    if (oli) { if (ul) { out += '</ul>'; ul = false; } if (!ol) { out += '<ol>'; ol = true; } out += '<li>' + inline(oli[1]) + '</li>'; continue; }
-    if (line.trim() === '') { closeLists(); continue; }
-    closeLists(); out += '<p>' + inline(line) + '</p>';
-  }
-  closeLists(); if (code) out += '<pre><code>' + e(buf) + '</code></pre>';
-  return out;
-}
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
@@ -366,9 +409,9 @@ function connect(){
   const c = wrapClient(mqtt.connect(url, opts));
   S.client = c;
   c.on('connect', () => { setStatus(true,'已连接'); const t=`${base()}/#`; c.subscribe(t,{qos:1});
-    log('sys','(subscribe)', t); if (S.sel) setSyncBusy(false); });
+    log('sys','(subscribe)', t); });
   c.on('reconnect', () => setStatus(false,'重连中…'));
-  c.on('close', () => { setStatus(false,'离线'); setSyncBusy(false); $('syncHistBtn').disabled = true; });
+  c.on('close', () => setStatus(false,'离线'));
   c.on('error', e => { setStatus(false,'错误'); log('sys','(error)', String(e)); });
   // Inbound: decrypt before routing (topic = AES-GCM AAD). Empty = retained-delete.
   c.on('message', async (topic, buf) => {
@@ -433,86 +476,60 @@ function renderPairZone(){
 
 // ── inbound routing ────────────────────────────────────────────────────────
 function onMessage(topic, raw){
-  log('rx', topic, raw);
-  let m; try { m = raw ? JSON.parse(raw) : null; } catch { m = raw; }
   const parts = topic.split('/');
   const seg = parts.slice(2);
+  // The `#` subscription hands us back the commands we just published. We log
+  // those on the way out and there is no inbound-command handler here, so this
+  // is pure echo — and at one command per keystroke it buried the panel.
+  if (seg[0]==='command') return;
+  // VT chunks arrive many times a second — logging each payload would drown the
+  // panel and dominate the profile. Log a one-line size receipt instead.
+  if (seg[0]==='pane' && seg[2]==='vt'){
+    let v; try { v = JSON.parse(raw); } catch { return; }
+    if (!v) return;
+    // A snapshot may legitimately carry no bytes — an idle pane can replay
+    // nothing — but it still carries the geometry, and dropping it for an empty
+    // payload left the terminal on its default grid while live data poured in at
+    // the wrong size. Only `vt.data` is worthless when empty.
+    const bytes = v.b64 ? b64ToBytes(v.b64) : new Uint8Array(0);
+    if (v.type !== 'vt.snapshot' && !bytes.length) return;
+    log('rx', topic, `${v.type||'vt.data'} ${bytes.length}B (payload elided)`);
+    if (S.vt.open !== seg[1]) return;      // stale stream from a pane we left
+    const t = ensureTerm();
+    if (v.type === 'vt.snapshot'){
+      // Resize before interpreting the replay, never after.
+      if (v.cols && v.rows && (t.cols !== v.cols || t.rows !== v.rows)){
+        t.resize(v.cols, v.rows);
+        log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
+      }
+      t.reset();
+      if (bytes.length) t.write(bytes, () => fitTermFont());  // measure once rendered
+      else fitTermFont();
+      updateToBottom();
+      return;
+    }
+    t.write(bytes);
+    return;
+  }
+  log('rx', topic, raw);
+  let m; try { m = raw ? JSON.parse(raw) : null; } catch { m = raw; }
   if (seg[0]==='pane' && seg[2]==='status'){
     if (!raw) S.panes.delete(seg[1]); else S.panes.set(seg[1], m);
     renderTree();
   } else if (seg[0]==='pane' && seg[2]==='message'){
-    pushMsg(seg[1], m); if (S.sel===seg[1]) renderDetail();
+    // The feed is gone; a pane message only matters as an activity signal now.
   } else if (seg[0]==='pane' && seg[2]==='event'){
     if (!raw) S.events.delete(seg[1]); else S.events.set(seg[1], m);
-    if (S.sel===seg[1]) renderDetail(); renderTree();
+    renderTree();
   } else if (seg[0]==='worktree' && seg[2]==='status'){
     if (!raw) S.worktrees.delete(seg[1]); else S.worktrees.set(seg[1], m); renderTree();
   } else if (seg[0]==='focus'){ S.focus = m; // retained for MQTT sync; UI uses First Mate header
   } else if (seg[0]==='dnd'){ S.dnd = m;
   } else if (seg[0]==='reply'){
-    // history reply → sync (replace latest page) or load-more (prepend older)
     const corr = seg[seg.length-1];
-    const req = histReq.get(corr);
-    if (!req || !m) return;
-    histReq.delete(corr);
-    if (m.ok === false || m.error || !m.result || !Array.isArray(m.result.messages)){
-      setSyncBusy(false);
-      const btn=document.querySelector('#feed .feed-more');
-      if (btn){ btn.disabled=false; btn.textContent='继续加载'; }
-      return;
-    }
-    applyHistoryReply(req, m.result);
+    const onReply = cmdReq.get(corr);
+    if (onReply){ cmdReq.delete(corr); onReply(m); }
   }
-}
-
-function msgKey(m){
-  if (typeof m.seq === 'number') return 's'+m.seq;
-  return 't'+(m.kind||'')+':'+(m.text||'');
-}
-function oldestSeq(ms){
-  let min = null;
-  for (const m of ms){
-    if (typeof m.seq === 'number' && (min === null || m.seq < min)) min = m.seq;
-  }
-  return min;
-}
-function applyHistoryReply(req, result){
-  const { pid, mode } = req;
-  const incoming = result.messages || [];
-  const hasMore = !!result.has_more;
-  const prev = S.msgs.get(pid) || [];
-  if (mode === 'more'){
-    const seen = new Set(prev.map(msgKey));
-    const older = incoming.filter(m => !seen.has(msgKey(m)));
-    S.msgs.set(pid, older.concat(prev));
-  } else {
-    // sync: take the latest page as the panel window
-    S.msgs.set(pid, incoming.slice());
-  }
-  S.histMeta.set(pid, { hasMore });
-  setSyncBusy(false);
-  if (S.sel !== pid) return;
-  if (mode === 'more'){
-    const feed = $('feed');
-    const prevH = feed.scrollHeight;
-    const prevTop = feed.scrollTop;
-    renderDetail({ stickBottom: false });
-    feed.scrollTop = prevTop + (feed.scrollHeight - prevH);
-  } else {
-    renderDetail({ stickBottom: true });
-  }
-}
-function pushMsg(pid, m){
-  if (!S.msgs.has(pid)) S.msgs.set(pid, []);
-  if (m && m.messages){ S.msgs.set(pid, m.messages); return; }
-  // Feed = final messages only. A live pane/message event carries EVERY agent
-  // event (tool/command lines, status churn) in `last_message`; only a completion
-  // event carries `final_message` (the Stop hook's last_assistant_message). Skip
-  // the rest so the feed doesn't fill with tool noise. User echoes (kind:'you')
-  // are kept so you can see what you sent.
-  const finalText = (m.final_message || '').trim();
-  if (finalText) { S.msgs.get(pid).push({ kind:'agent', text: finalText }); return; }
-  if (m.kind === 'you' && (m.text || '').trim()) { S.msgs.get(pid).push({ kind:'you', text: m.text }); }
 }
 
 // ── render ─────────────────────────────────────────────────────────────────
@@ -527,20 +544,12 @@ function highestStatus(statuses){
   }
   return best;
 }
-function updateFirstMateHeader(){
-  // Mac: "N projects · M running" where projects = worktrees (sailors).
-  const byWt = new Map();
-  for (const [,p] of S.panes){
-    const wt = p.worktree_path || p.branch || p.project || '—';
-    if (!byWt.has(wt)) byWt.set(wt, []);
-    byWt.get(wt).push(p.status);
-  }
-  const projects = byWt.size;
-  let running = 0;
-  for (const statuses of byWt.values()){
-    if (highestStatus(statuses) === 'running') running++;
-  }
-  $('fmSub').textContent = `${projects} projects · ${running} running`;
+function updateFirstMateHeader(rows){
+  // Verbatim from DashboardOverviewView.render: "N · M running", and just "N"
+  // when nothing is running — no "projects" noun, the count stands alone.
+  const fleet = rows || buildFleet();
+  const running = fleet.filter(r => normStatus(r.status) === 'running').length;
+  $('fmSub').textContent = running > 0 ? `${fleet.length} · ${running} running` : `${fleet.length}`;
 }
 function renderSuggestCard(pid, e){
   const box=document.createElement('div'); box.className='ev';
@@ -552,11 +561,13 @@ function renderSuggestCard(pid, e){
   box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}</div>`
     + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
     + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
-  box.onclick=(ev)=>{ if (ev.target.closest('button')) return; S.sel=pid; renderTree(); renderDetail(); };
+  // Tapping the card jumps to the pane that asked, so you can see the context
+  // before answering.
+  box.onclick=(ev)=>{ if (ev.target.closest('button')) return; selectPaneByKey(pid); };
   (e.options||[]).forEach((opt,i)=>{
     const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${esc(opt)}`;
     b.onclick=(ev)=>{ ev.stopPropagation();
-      S.sel=pid;
+      selectPaneByKey(pid);
       sendCommand(method, e.type==='question'?{question_id:rid,index:i}:{suggest_id:rid,index:i});
     };
     box.appendChild(b);
@@ -564,152 +575,362 @@ function renderSuggestCard(pid, e){
   return box;
 }
 function renderSuggestions(){
-  const host = $('fmSuggest'); host.innerHTML='';
-  if (!S.events.size) return;
-  const h=document.createElement('div'); h.className='fm-suggest-h'; h.textContent='Suggestions';
-  host.appendChild(h);
+  // Docked to the bottom of the page, not to a column: a suggestion is the one
+  // thing that must be reachable no matter which pane you are looking at.
+  const host = $('suggestDock'); host.innerHTML='';
   for (const [pid,e] of S.events){
     if (!e) continue;
     host.appendChild(renderSuggestCard(pid, e));
   }
 }
-function renderTree(){
-  updateFirstMateHeader();
-  const t = $('tree'); t.innerHTML='';
-  // group by repo (project) → worktree_path → panes  (fixed grouping, matches Mac repo mode)
-  const repos = new Map();
-  for (const [pid,p] of S.panes){
-    const repo = p.project || '—';
-    if(!repos.has(repo)) repos.set(repo, new Map());
-    const wtMap = repos.get(repo);
-    const wt = p.worktree_path || p.branch || '—';
-    if(!wtMap.has(wt)) wtMap.set(wt, []);
-    wtMap.get(wt).push([pid,p]);
+
+// ── First Mate list ────────────────────────────────────────────────────────
+// A port of DashboardOverviewView's "Group by Sailor" mode: repository groups,
+// one row per worktree, and — only where a worktree owns more than one pane —
+// an indented row per pane. Metrics and colours come from the Swift source, not
+// from eyeballing a screenshot.
+
+/** SailorDisplayHelpers.relativeAge — coarse age for anything not running. */
+function relativeAge(sinceEpoch){
+  if (!sinceEpoch) return '';
+  const secs = Math.max(0, Math.floor(Date.now()/1000 - sinceEpoch));
+  if (secs < 10) return 'just now';
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs/60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins/60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours/24)}d`;
+}
+/** SailorDisplayHelpers.compactDuration — precise running timer. */
+function compactDuration(sinceEpoch){
+  if (!sinceEpoch) return '';
+  const total = Math.max(0, Math.floor(Date.now()/1000 - sinceEpoch));
+  const h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
+  if (h > 0) return `${h}h${String(m).padStart(2,'0')}m`;
+  if (m > 0) return `${m}m${String(s).padStart(2,'0')}s`;
+  return `${s}s`;
+}
+/** "+adds −dels  ↑ahead↓behind", coloured; empty when nothing diverged. */
+function gitInfoHTML(g){
+  if (!g) return '';
+  const bits = [];
+  if (g.added > 0) bits.push(`<span class="add">+${g.added}</span>`);
+  if (g.removed > 0) bits.push(`<span class="del">−${g.removed}</span>`);
+  let ab = '';
+  if (g.ahead > 0) ab += `↑${g.ahead}`;
+  if (g.behind > 0) ab += `↓${g.behind}`;
+  const head = bits.join(' ');
+  return head + (ab ? (head ? '  ' : '') + `<span class="ab">${ab}</span>` : '');
+}
+/** Status dot: a spinning arc for running, the SailorStatus glyph otherwise. */
+function statusDotHTML(status, cls){
+  const st = normStatus(status);
+  return st === 'running'
+    ? `<span class="${cls}"><span class="fm-spin"></span></span>`
+    : `<span class="${cls}" style="color:${STC[st]||STC.unknown}">${STG[st]||STG.unknown}</span>`;
+}
+
+/** Collapse panes + worktree records into the rows the list draws. */
+function buildFleet(){
+  const byPath = new Map();
+  for (const [key,p] of S.panes){
+    const path = p.worktree_path || p.branch || p.project || '—';
+    if (!byPath.has(path)) byPath.set(path, { path, panes:[], wt:null });
+    byPath.get(path).panes.push([key, p]);
   }
-  if (!repos.size){ t.innerHTML='<div class="muted">无 pane</div>'; renderSuggestions(); return; }
-  for (const [repo,wtMap] of repos){
-    const paneCount = [...wtMap.values()].reduce((n,l)=>n+l.length,0);
-    const rh=document.createElement('div'); rh.className='repo-head';
-    rh.innerHTML=`<span class="repo-swatch" style="background:${deckColor(repo)}"></span>`
-      + `<span class="grow">${esc(repo)}</span><span class="badge">${paneCount}</span>`;
-    t.appendChild(rh);
-    for (const [wt,list] of wtMap){
-      const wrap=document.createElement('div'); wrap.className='wt';
-      const head=document.createElement('div'); head.className='wt-head';
-      const first = list[0][1];
-      // worktree title = worktree dir name (last path segment); branch = git branch
-      const wtTitle = (first.worktree_path||wt).split('/').pop() || wt;
-      const wtBranch = first.branch || '';
-      const branchLine = (wtBranch && wtBranch!==wtTitle)
-        ? `<div class="wt-branch">${esc(wtBranch)}</div>` : '';
-      head.innerHTML=`<span class="wt-label"><div class="wt-title">${esc(wtTitle)}</div>${branchLine}</span><span class="badge">${list.length}</span>`;
-      wrap.appendChild(head);
-      for (const [pid,p] of list){
-        const row=document.createElement('div'); row.className='pane-row'+(S.sel===pid?' sel':'');
-        // pane name = stable pane title, fall back to short pane id (payload UUID)
-        const name = (p.title||'').trim() || shortId(p.pane_id||pid);
-        row.innerHTML=`<span class="dot" style="color:${stColor(p.status)};background:${stColor(p.status)}"></span>
-          <span class="pid grow">${esc(name)}</span><span class="agent">${esc(p.agent_type||'')}</span>
-          ${S.events.get(pid)?'<span class="badge" style="color:var(--attention)">●</span>':''}`;
-        row.onclick=()=>{ S.sel=pid; renderTree(); renderDetail(); };
-        wrap.appendChild(row);
+  // Worktree records carry the git stats and start time panes don't have.
+  for (const [,w] of S.worktrees){
+    if (!w) continue;
+    const path = w.worktree_path || w.worktree_id;
+    if (!byPath.has(path)) byPath.set(path, { path, panes:[], wt:null });
+    byPath.get(path).wt = w;
+  }
+  const rows = [];
+  for (const entry of byPath.values()){
+    const w = entry.wt || {};
+    const lead = (entry.panes[0] || [])[1] || {};
+    const statuses = entry.panes.map(([,p]) => p.status);
+    rows.push({
+      path: entry.path,
+      // DashboardOverviewView's own fallback for a worktree with no deck.
+      project: w.project || lead.project || 'Unknown deck',
+      branch: w.branch || lead.branch || '',
+      title: w.title || (entry.path.split('/').pop() || entry.path),
+      status: w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
+      startedAt: w.started_at || null,
+      git: w.git || null,
+      paneCount: w.pane_count || entry.panes.length,
+      panes: entry.panes,
+    });
+  }
+  return rows;
+}
+
+function renderTree(){
+  const t = $('tree'); t.innerHTML='';
+  const rows = buildFleet();
+  updateFirstMateHeader(rows);
+  if (!rows.length){ t.innerHTML='<div class="muted">无 pane</div>'; renderSuggestions(); return; }
+
+  // Repository groups, most recently started worktree first inside each.
+  const groups = new Map();
+  for (const r of rows){
+    if (!groups.has(r.project)) groups.set(r.project, []);
+    groups.get(r.project).push(r);
+  }
+  for (const list of groups.values()){
+    list.sort((a,b) => (b.startedAt||0) - (a.startedAt||0));
+  }
+
+  for (const [project, list] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){
+    const g = document.createElement('div'); g.className='fm-group';
+    const head = document.createElement('div'); head.className='fm-group-head';
+    head.innerHTML = `<span class="fm-deck">${esc(project)}</span>`
+      + `<button class="fm-add" title="新建 worktree">+</button>`;
+    // The Mac opens the helm prefilled with `/worktree @<project>`; the web has
+    // no helm, so this is deliberately inert rather than pretending to work.
+    head.querySelector('.fm-add').onclick = (e) => {
+      e.stopPropagation();
+      log('sys','(not wired)', `新建 worktree @${project} —— web 端暂未接`);
+    };
+    g.appendChild(head);
+
+    const box = document.createElement('div'); box.className='fm-rows';
+    for (const r of list){
+      const sel = S.sel === r.path;
+      const row = document.createElement('div');
+      row.className = 'fm-row' + (sel ? ' sel' : '');
+      const timeText = normStatus(r.status) === 'running'
+        ? compactDuration(r.startedAt) : relativeAge(r.startedAt);
+      const git = gitInfoHTML(r.git);
+      row.innerHTML =
+        statusDotHTML(r.status, 'fm-dot') +
+        `<span class="fm-txt">
+           <span class="fm-l1">
+             <span class="fm-name">${esc(r.title)}</span>
+             <span class="fm-time" data-started="${r.startedAt||''}" data-status="${esc(r.status)}">${esc(timeText)}</span>
+           </span>
+           <span class="fm-l2">
+             <span class="fm-deck-tag" style="color:${deckColor(r.project)}">${esc(r.project)}</span>
+             <span class="fm-branch">${esc(r.branch)}</span>
+             <span class="fm-git">${git}</span>
+             <span class="fm-sailors">${r.paneCount > 0 ? r.paneCount + ' sailors' : '—'}</span>
+           </span>
+         </span>`;
+      row.onclick = () => selectWorktree(r);
+      box.appendChild(row);
+
+      // Third level only when the worktree owns more than one pane — a lone
+      // pane is already represented by the worktree row itself.
+      if (r.panes.length > 1){
+        for (const [key,p] of r.panes){
+          const pr = document.createElement('div');
+          pr.className = 'fm-pane' + (S.selPane === key ? ' sel' : '');
+          pr.innerHTML = statusDotHTML(p.status, 'pdot')
+            + `<span class="ptitle">${esc((p.title||'').trim() || shortId(p.pane_id||key))}</span>`;
+          pr.onclick = (e) => { e.stopPropagation(); selectWorktree(r, key); };
+          box.appendChild(pr);
+        }
       }
-      t.appendChild(wrap);
     }
+    g.appendChild(box);
+    t.appendChild(g);
   }
   renderSuggestions();
 }
-function renderDetail(opts={}){
-  const stickBottom = opts.stickBottom !== false;
-  const pid=S.sel; const head=$('detailHead'); const feed=$('feed');
-  const syncBtn=$('syncHistBtn');
-  feed.innerHTML='';
-  if(!pid){
-    head.textContent='Pane 详情';
-    feed.innerHTML='<div class="muted">选择一个 pane</div>';
-    syncBtn.disabled = true;
-    return;
-  }
-  const p=S.panes.get(pid)||{};
-  head.textContent=`${p.project||''} · ${p.branch||''} · ${shortId(p.pane_id||pid)} · ${normStatus(p.status)}`;
-  syncBtn.disabled = !S.client;
-  const ms=S.msgs.get(pid)||[];
-  const meta=S.histMeta.get(pid) || { hasMore:false };
-  // 往回滚到顶部：还有更早历史时，在最上面放「继续加载」
-  if (meta.hasMore && ms.length){
-    const more=document.createElement('button');
-    more.className='feed-more';
-    more.textContent='继续加载';
-    more.onclick=()=>loadMoreHistory();
-    feed.appendChild(more);
-  }
-  if(!ms.length){
-    feed.innerHTML='<div class="muted">无消息(点右上角「同步历史」拉取)</div>';
-  } else {
-    ms.forEach(m=>{
-      const d=document.createElement('div');
-      const k=m.kind||'agent';
-      d.className='msg '+(k==='you'?'you':k==='status'?'status':k==='ask'?'ask':k==='term'?'term':'agent');
-      // agent/ask = markdown; term = plain monospace dump; you/status = plain text
-      if (k==='agent'||k==='ask') d.innerHTML=md(m.text||''); else d.textContent=m.text||'';
-      feed.appendChild(d);
-    });
-  }
-  if (stickBottom) feed.scrollTop=feed.scrollHeight;
+
+/** Narrow layouts hide First Mate behind a drawer; wide ones ignore the class. */
+function setDrawer(open){
+  $('leftcol').classList.toggle('open', open);
+  $('scrim').classList.toggle('on', open);
 }
 
+/** Selecting anything in the list means: show that pane's terminal. */
+function selectWorktree(row, paneKey){
+  S.sel = row.path;
+  S.selPane = paneKey || (row.panes[0] || [])[0] || null;
+  renderTree();
+  renderDetail();
+  setDrawer(false);      // on a phone the list is covering the terminal it just opened
+}
+/** Same, addressed by pane key — used by the suggestion dock. */
+function selectPaneByKey(key){
+  const row = buildFleet().find(r => r.panes.some(([k]) => k === key));
+  if (row) selectWorktree(row, key);
+}
+
+// The grid is fixed by the remote, so the only thing a window resize can change
+// is how big we draw it.
+window.addEventListener('resize', () => { if (S.vt.term) fitTermFont(); });
+
+/** Retick the elapsed labels in place — no re-render, no scroll jump. */
+function tickTimes(){
+  for (const el of document.querySelectorAll('.fm-time[data-started]')){
+    const started = Number(el.dataset.started || 0);
+    if (!started) continue;
+    el.textContent = normStatus(el.dataset.status) === 'running'
+      ? compactDuration(started) : relativeAge(started);
+  }
+}
+setInterval(tickTimes, 1000);
+/** The mid column is the terminal. Selecting a pane is the only thing that fills it. */
+function renderDetail(){
+  const key = S.selPane; const head = $('detailHead'); const wrap = $('termWrap');
+  // A terminal belongs to one pane; switching panes tears the old stream down.
+  if (S.vt.open && S.vt.open !== key) closeTerm();
+  if (!key){
+    head.textContent = '终端';
+    wrap.classList.add('empty');
+    if (!S.vt.term) wrap.innerHTML = '<div id="term"></div>';
+    return;
+  }
+  const p = S.panes.get(key) || {};
+  const row = buildFleet().find(r => r.path === S.sel);
+  head.textContent = [row && row.project, row && row.branch, (p.title||key)]
+    .filter(Boolean).join(' · ');
+  wrap.classList.remove('empty');
+  if (S.vt.open !== key) openTerm(key);
+}
+
+// ── VT terminal ─────────────────────────────────────────────────────────────
+// Renders the raw PTY byte stream a `zmx tail` produces. Nothing here knows
+// about Ghostty — in a browser xterm.js *is* the renderer, which is the whole
+// reason this PoC can validate the transport without touching libghostty.
+function b64ToBytes(b64){
+  const s = atob(b64); const a = new Uint8Array(s.length);
+  for (let i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
+  return a;
+}
+function bytesToB64(bytes){
+  let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+function ensureTerm(){
+  if (S.vt.term) return S.vt.term;
+  const t = new Terminal({
+    cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:5000,
+    fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
+    theme:{ background:'#05090c', foreground:'#c8d6d5' },
+  });
+  t.open($('term'));
+  // Keystrokes go out as base64 of the UTF-8 bytes: the bridge feeds them
+  // straight to `zmx send`, so control bytes and escapes survive intact.
+  // Coalesced over a frame — one message per burst of typing rather than per
+  // character. The bridge also serializes sends, which is what actually
+  // guarantees order; this just keeps the message count sane.
+  t.onData((data) => {
+    if (!S.vt.open) return;
+    S.vt.pending += data;
+    if (S.vt.flushT) return;
+    S.vt.flushT = setTimeout(() => {
+      S.vt.flushT = null;
+      const buf = S.vt.pending; S.vt.pending = '';
+      if (!buf || !S.vt.open) return;
+      sendCommand('pane.send_keys',
+        { pane_session_key:S.vt.open, b64: bytesToB64(new TextEncoder().encode(buf)) });
+    }, 10);
+  });
+  // Scrolled away from the live edge, offer the way back — new output keeps
+  // landing below you and xterm deliberately holds your position.
+  t.onScroll(() => updateToBottom());
+  S.vt.term = t;
+  return t;
+}
+function updateToBottom(){
+  const t = S.vt.term, btn = $('toBottom');
+  if (!btn) return;
+  if (!t || !S.vt.open) { btn.classList.remove('on'); return; }
+  const b = t.buffer.active;
+  btn.classList.toggle('on', b.viewportY < b.baseY);
+}
+/**
+ * Scale the font so the session's rows fit the column.
+ * The grid size is dictated by the Mac side and cannot be renegotiated, so the
+ * only free variable is how big we draw it. Measures a real rendered row rather
+ * than assuming a line-height ratio, then clamps to something still readable.
+ */
+function fitTermFont(){
+  const t = S.vt.term, wrap = $('termWrap');
+  if (!t || !wrap) return;
+  const screen = document.querySelector('#term .xterm-screen');
+  if (!screen) return;
+  const box = screen.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+
+  // Constrain on BOTH axes and take the tighter one. Fitting height alone let a
+  // wide session (128 cols) spill ~118px past the column, so the right-hand edge
+  // of the terminal was only reachable by scrolling sideways.
+  const availW = wrap.clientWidth - 14;                  // padding + border
+  if (availW <= 0) return;
+
+  // Fit on WIDTH, not on both axes. Two reasons: broken/clipped columns ruin a
+  // TUI far more than a bit of vertical scrolling does, and leaving the vertical
+  // axis alone keeps it free for xterm's own scrollback scroller, so the two
+  // never fight over the same gesture. Clamp up to the base size but never past
+  // it — this also runs after the debug panel is hidden, and the terminal should
+  // grow back into the space it gained.
+  const desired = availW * t.options.fontSize / box.width;
+  let size = Math.max(VT_FONT_MIN, Math.min(VT_FONT_BASE, Math.floor(desired)));
+  if (size !== t.options.fontSize) t.options.fontSize = size;
+
+  // xterm rounds cell metrics to whole pixels, so cell size is a step function of
+  // font size and the linear guess can still overflow (measured: 128 cols still
+  // spilled 60px). Step down until it genuinely fits — but never past the
+  // readable floor. 128 columns cannot be legible on a 390px phone at any size,
+  // so below the floor panning is the honest answer, not smaller type.
+  for (let i = 0; i < 8 && size > VT_FONT_MIN; i++){
+    const el = document.querySelector('#term .xterm-screen');
+    if (!el) return;
+    if (el.getBoundingClientRect().width <= availW) break;
+    size -= 1;
+    t.options.fontSize = size;
+  }
+}
+function openTerm(pid){
+  if (!S.client) return alert('未连接');
+  if (S.vt.open === pid) return;
+  closeTerm();
+  const t = ensureTerm();
+  t.reset();
+  S.vt.open = pid;
+  // Geometry is applied from the snapshot message (it lands first); the reply is
+  // only useful for surfacing a failure.
+  sendCommand('pane.vt_open', { pane_session_key: pid, cols: VT_COLS, rows: VT_ROWS }, (r) => {
+    if (r && r.ok === false) log('sys','(vt open failed)', JSON.stringify(r.error||r));
+  });
+}
+function closeTerm(){
+  if (!S.vt.open) return;
+  if (S.client) sendCommand('pane.vt_close', { pane_session_key: S.vt.open });
+  S.vt.open = null;
+}
+// An attach client is a real client of the zmx session, so leaving one behind is
+// not harmless. vt_close covers the tidy exits; this covers closing the tab, and
+// the bridge's lease sweep covers a crash, where neither of these ever runs.
+window.addEventListener('pagehide', closeTerm);
+setInterval(() => {
+  if (S.vt.open && S.client) sendCommand('pane.vt_keepalive', { pane_session_key: S.vt.open });
+}, 20000);
 // ── outbound (commands) ─────────────────────────────────────────────────────
 let corrN=0;
-const histReq = new Map();   // corr → { pid, mode:'sync'|'more' }
-function sendCommand(method, params){
+const cmdReq = new Map();    // corr → onReply, for commands whose result we need
+function sendCommand(method, params, onReply){
   if(!S.client){ alert('未连接'); return; }
   const corr = 'w'+(++corrN);
   const reply_to = `${base()}/reply/web/${corr}`;
   const payload = { method, params, reply_to, corr };
-  S.client.subscribe(reply_to,{qos:1});
+  if (onReply) {
+    cmdReq.set(corr, onReply);
+    // A command that never gets answered would otherwise sit here forever.
+    if (cmdReq.size > 200) cmdReq.delete(cmdReq.keys().next().value);
+  }
+  // No per-command subscribe: the `${base()}/#` taken at connect already covers
+  // every reply topic. Subscribing here as well leaked one subscription per
+  // command with no matching unsubscribe — typing a paragraph into the terminal
+  // is one command per keystroke, so it ran to hundreds within a minute.
   S.client.publish(`${base()}/command`, JSON.stringify(payload), {qos:1});
   log('tx', `${base()}/command`, payload);
-}
-function sendText(){
-  const pid=S.sel; if(!pid) return alert('先选 pane');
-  const v=$('sendText').value.trim(); if(!v) return;
-  // pid is the stable slot key (pane_session_key) — the remote addressing key (§15)
-  sendCommand('pane.send_text', {pane_session_key:pid, text:v, enter:true});
-  $('sendText').value='';
-}
-function setSyncBusy(busy){
-  const btn=$('syncHistBtn');
-  if (!btn) return;
-  btn.disabled = busy || !S.sel || !S.client;
-  btn.textContent = busy ? '同步中…' : '同步历史';
-}
-function requestHistory(mode, beforeSeq){
-  const pid=S.sel; if(!pid) return alert('先选 pane');
-  if(!S.client) return alert('未连接');
-  const corr='h'+(++corrN); const reply_to=`${base()}/reply/web/${corr}`;
-  histReq.set(corr, { pid, mode });
-  S.client.subscribe(reply_to,{qos:1});
-  const payload={pane_session_key:pid, limit:HIST_PAGE, reply_to, corr};
-  if (typeof beforeSeq === 'number') payload.before_seq = beforeSeq;
-  setSyncBusy(mode === 'sync');
-  S.client.publish(`${base()}/history/request`, JSON.stringify(payload), {qos:1});
-  log('tx', `${base()}/history/request`, payload);
-}
-/** 右上角：拉最新一页写入面板 */
-function syncHistory(){ requestHistory('sync'); }
-/** 顶部：继续往前翻更早的历史 */
-function loadMoreHistory(){
-  const pid=S.sel; if(!pid) return;
-  const ms=S.msgs.get(pid)||[];
-  const before=oldestSeq(ms);
-  if (before === null){
-    // no seq yet — fall back to a fresh sync window
-    requestHistory('sync');
-    return;
-  }
-  const btn=document.querySelector('#feed .feed-more');
-  if (btn){ btn.disabled=true; btn.textContent='加载中…'; }
-  requestHistory('more', before);
 }
 function toggleDnd(){
   const on = !(S.dnd && S.dnd.on);
@@ -739,10 +960,26 @@ $('connectBtn').onclick=connect;
   const saved = localStorage.getItem('seahelm_pair');
   if (saved) applyPair(saved).catch(()=>localStorage.removeItem('seahelm_pair'));
 })();
-$('sendBtn').onclick=sendText;
-$('sendText').addEventListener('keydown',e=>{ if(e.key==='Enter') sendText(); });
-$('syncHistBtn').onclick=syncHistory;
 $('dndBtn').onclick=toggleDnd;
+$('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
+$('scrim').onclick=()=>setDrawer(false);
+$('toBottom').onclick=()=>{ if (S.vt.term) S.vt.term.scrollToBottom(); updateToBottom(); };
+// Debug panel is a developer surface — remembered per browser so it stays out
+// of the way once you've dismissed it.
+function applyLogVisibility(){
+  const off = localStorage.getItem('seahelm_log_off') === '1';
+  document.querySelector('main').classList.toggle('nolog', off);
+  const btn = $('logBtn');
+  btn.classList.toggle('on', !off);
+  btn.title = off ? '显示报文日志' : '隐藏报文日志';
+  if (S.vt.term) setTimeout(fitTermFont, 200);   // the terminal just got wider
+}
+$('logBtn').onclick = () => {
+  const off = localStorage.getItem('seahelm_log_off') === '1';
+  localStorage.setItem('seahelm_log_off', off ? '0' : '1');
+  applyLogVisibility();
+};
+applyLogVisibility();
 $('clearLog').onclick=()=>$('log').innerHTML='';
 $('pubMock').onclick=pubMock;
 </script>
