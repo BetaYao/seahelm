@@ -7,6 +7,7 @@
   "scripts": {
     "broker": "node broker.js",
     "mock": "node mock-seahelm.js",
+    "mock:zmx": "ZMX_PANES=1 node mock-seahelm.js",
     "test": "node protocol-test.js"
   },
   "dependencies": {
