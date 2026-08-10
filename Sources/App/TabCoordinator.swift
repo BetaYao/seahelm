@@ -1167,6 +1167,14 @@ class TabCoordinator {
                ShipLog.shared.allSailors().contains(where: { $0.status == .running }) {
                 self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
             }
+            // Rides this timer rather than starting its own: the policy only
+            // needs to notice minutes-scale absences, and a 5s tick is already
+            // far finer than that.
+            if self.config.autoSleep.enabled {
+                self.terminalCoordinator?.sleepIdleOffscreenPanes(
+                    idleAfter: self.config.autoSleep.effectiveAfterSeconds
+                )
+            }
         }
     }
 

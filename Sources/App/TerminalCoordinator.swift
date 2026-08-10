@@ -397,6 +397,60 @@ class TerminalCoordinator {
         stations(matching: targetStationId).compactMap { $0.sleep() ? $0.id : nil }
     }
 
+    // MARK: - Auto sleep
+
+    /// When each off-screen pane was first seen off screen. Only panes absent
+    /// from the displayed tree get an entry; coming back on screen clears it, so
+    /// the timer measures one continuous absence rather than accumulated time.
+    private var offscreenSince: [String: Date] = [:]
+
+    /// Which panes have been off screen long enough to sleep, and the updated
+    /// clock. Pure so the policy is testable without stations, a window, or a
+    /// real clock — the part that can silently sleep a pane the user is looking
+    /// at is exactly the part worth pinning down in tests.
+    static func autoSleepPlan(
+        visible: Set<String>,
+        sleepable: [String],
+        offscreenSince: [String: Date],
+        idleAfter: TimeInterval,
+        now: Date
+    ) -> (sleep: [String], offscreenSince: [String: Date]) {
+        var since = offscreenSince
+        for id in visible { since.removeValue(forKey: id) }
+
+        var sleepIds: [String] = []
+        for id in sleepable where !visible.contains(id) {
+            guard let firstSeen = since[id] else {
+                since[id] = now
+                continue
+            }
+            if now.timeIntervalSince(firstSeen) >= idleAfter {
+                sleepIds.append(id)
+                since.removeValue(forKey: id)
+            }
+        }
+        // Closed panes would otherwise keep their entry forever.
+        let known = visible.union(sleepable)
+        return (sleepIds, since.filter { known.contains($0.key) })
+    }
+
+    /// Sleep panes that have stayed off screen past `idleAfter`. Main thread.
+    /// Returns the ids actually slept. Nothing wakes automatically: a slept pane
+    /// renders as a placeholder with a Wake button, which is the existing
+    /// contract for panes whose surface is gone.
+    @discardableResult
+    func sleepIdleOffscreenPanes(idleAfter: TimeInterval, now: Date = Date()) -> [String] {
+        let visible = Set(activeSplitContainer()?.tree?.allLeaves.map(\.stationId) ?? [])
+        let sleepable = StationRegistry.shared.allStations().filter(\.canSleep).map(\.id)
+        let plan = Self.autoSleepPlan(visible: visible,
+                                      sleepable: sleepable,
+                                      offscreenSince: offscreenSince,
+                                      idleAfter: idleAfter,
+                                      now: now)
+        offscreenSince = plan.offscreenSince
+        return plan.sleep.filter { StationRegistry.shared.station(forId: $0)?.sleep() == true }
+    }
+
     /// Wake a slept pane by station id (nil = every slept pane). Main thread.
     @discardableResult
     func wakePane(targetStationId: String?) -> [String] {

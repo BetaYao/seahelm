@@ -7,10 +7,16 @@ protocol StationDelegate: AnyObject {
     /// Called after a station tore its surface down to sleep. The delegate should
     /// drop the now-dead view registration so layout skips the leaf.
     func stationDidSleep(_ station: Station)
+    /// A live view a woken station can be created into when the container it
+    /// slept in is gone. Placement is not this view's job — `stationDidRecover`
+    /// fires immediately afterwards and lays the surface out properly — so any
+    /// view still in the hierarchy will do.
+    func stationContainer(for station: Station) -> NSView?
 }
 
 extension StationDelegate {
     func stationDidSleep(_ station: Station) {}
+    func stationContainer(for station: Station) -> NSView? { nil }
 }
 
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
@@ -591,6 +597,38 @@ class Station {
         surface != nil && !isAsleep && backend == "zmx" && !(paneSessionKey ?? "").isEmpty
     }
 
+    /// Pins the post-`sleep()` flag without a live Ghostty surface, so layout /
+    /// Wake wiring can be unit-tested. Precondition: no surface (same as after
+    /// a real sleep).
+    func adoptAsleepStateForTesting() {
+        precondition(surface == nil, "adoptAsleepStateForTesting requires no surface")
+        isAsleep = true
+    }
+
+    /// Whether an embed/restore pass should call `create`. Asleep panes keep
+    /// `surface == nil` on purpose; recreating one while leaving `isAsleep`
+    /// set makes the Wake button a no-op (`wake()` used to require
+    /// `surface == nil`).
+    static func shouldCreateSurfaceOnEmbed(hasSurface: Bool, isAsleep: Bool) -> Bool {
+        !hasSurface && !isAsleep
+    }
+
+    /// How `wake()` should proceed. Pure so the "Wake does nothing" regressions
+    /// are pin-downable without a live Ghostty surface.
+    enum WakePlan: Equatable {
+        case noop
+        /// Surface already exists (embed incorrectly recreated it while asleep).
+        case adoptExisting
+        /// Need to recreate into the given container.
+        case recreate
+    }
+
+    static func wakePlan(isAsleep: Bool, hasSurface: Bool, hasContainer: Bool) -> WakePlan {
+        guard isAsleep else { return .noop }
+        if hasSurface { return .adoptExisting }
+        return hasContainer ? .recreate : .noop
+    }
+
     /// Free the ghostty surface (Metal drawables + screen buffer) while leaving
     /// the backend session running. Main thread. Returns false if not eligible.
     @discardableResult
@@ -609,20 +647,48 @@ class Station {
     /// uses. Main thread. Returns false if the station wasn't asleep.
     @discardableResult
     func wake() -> Bool {
-        guard isAsleep, surface == nil,
-              let container = sleepContainer,
-              let app = GhosttyBridge.shared.app else { return false }
-        isAsleep = false
-        _createWithCommand(
-            app: app,
-            container: container,
-            workingDirectory: initialWorkingDirectory,
-            command: paneSessionKey.map { Self.zmxAttachCommand(paneSessionKey: $0) },
-            initialFrame: sleepFrame
-        )
-        guard surface != nil else { return false }
-        delegate?.stationDidRecover(self)
-        return true
+        // `sleepContainer` is weak, and a pane can stay asleep long enough for
+        // the container it slept in to be torn down (worktree switch, layout
+        // rebuild). Without a fallback such a pane is stranded: `wake()` bails,
+        // and with `surface == nil` it can never be slept or woken again either.
+        let originalContainer = sleepContainer
+        let container = originalContainer ?? delegate?.stationContainer(for: self)
+        switch Self.wakePlan(isAsleep: isAsleep, hasSurface: surface != nil, hasContainer: container != nil) {
+        case .noop:
+            return false
+        case .adoptExisting:
+            // Embed recreated the surface while we were still marked asleep —
+            // clear the flag and re-register so the placeholder goes away.
+            isAsleep = false
+            sleepContainer = nil
+            sleepFrame = nil
+            delegate?.stationDidRecover(self)
+            return true
+        case .recreate:
+            guard let container, let app = GhosttyBridge.shared.app else { return false }
+            _createWithCommand(
+                app: app,
+                container: container,
+                workingDirectory: initialWorkingDirectory,
+                command: paneSessionKey.map { Self.zmxAttachCommand(paneSessionKey: $0) },
+                // The captured frame only means anything inside the container it was
+                // captured from; a substitute container lays out from its own bounds.
+                initialFrame: originalContainer != nil ? sleepFrame : nil
+            )
+            // Stay asleep if the surface did not come back, so the pane keeps the one
+            // state `wake()` accepts and the next attempt can retry. Clearing the flag
+            // first left a failed wake as `!isAsleep && surface == nil`, which neither
+            // `sleep()` nor `wake()` will touch again.
+            guard surface != nil else { return false }
+            // Before `stationDidRecover`, which registers the new view: `layoutTree`
+            // hides the surface view of a leaf it still believes is asleep, and only
+            // the placeholder is ever un-hidden.
+            isAsleep = false
+            sleepContainer = nil
+            sleepFrame = nil
+            delegate?.stationDidRecover(self)
+            return true
+        }
     }
 
     /// Destroy the surface and clean up

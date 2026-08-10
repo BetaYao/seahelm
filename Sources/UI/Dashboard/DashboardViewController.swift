@@ -989,8 +989,12 @@ class DashboardViewController: NSViewController {
         var surfaceViews: [String: NSView] = [:]
         for leaf in tree.allLeaves {
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
-                // Ensure station is created
-                if station.surface == nil {
+                // Asleep panes keep surface nil on purpose — recreating here while
+                // leaving isAsleep set made Wake a no-op. The placeholder's Wake
+                // button is the only way back.
+                if Station.shouldCreateSurfaceOnEmbed(
+                    hasSurface: station.surface != nil, isAsleep: station.isAsleep
+                ) {
                     let stationId = leaf.stationId
                     _ = station.create(in: container, workingDirectory: worktreePath, paneSessionKey: station.paneSessionKey) { [weak splitView] in
                         // Async backend: register the view once creation finishes
