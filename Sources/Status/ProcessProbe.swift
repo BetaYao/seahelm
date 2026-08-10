@@ -85,13 +85,39 @@ enum ProcessProbe {
         probeSession(paneSessionKey: paneSessionKey).agentId
     }
 
+    /// Everything a probe needs from the system, captured once and shared by every
+    /// pane in a poll cycle. Both halves are identical for all panes, and paying
+    /// for them per pane — one `zmx list` fork plus one full process walk each —
+    /// was what pinned a core with the app idle.
+    struct ProbeContext {
+        let zmxListOutput: String
+        let table: [Proc]
+
+        static func capture() -> ProbeContext? {
+            guard let out = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return nil }
+            return ProbeContext(zmxListOutput: out, table: processTable())
+        }
+    }
+
     /// One sysctl walk: agent identity (if any) + foreground command line.
     static func probeSession(paneSessionKey: String) -> (agentId: String?, commandLine: String?) {
-        guard let out = ProcessRunner.output([ZmxLocator.executable(), "list"]),
-              let root = sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: out) else {
+        guard let context = ProbeContext.capture() else { return (nil, nil) }
+        return probeSession(paneSessionKey: paneSessionKey, context: context)
+    }
+
+    /// As above, against a context already captured for this cycle.
+    static func probeSession(
+        paneSessionKey: String,
+        context: ProbeContext
+    ) -> (agentId: String?, commandLine: String?) {
+        guard let root = sessionPid(paneSessionKey: paneSessionKey,
+                                    zmxListOutput: context.zmxListOutput) else {
             return (nil, nil)
         }
-        let descendants = descendants(of: root, in: allProcesses())
+        // argv is read only for this session's own descendants — a handful —
+        // rather than for every process on the machine, almost all of which the
+        // very next line would have discarded.
+        let descendants = withArgv(descendants(of: root, in: context.table))
         guard !descendants.isEmpty else { return (nil, nil) }
         let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
         return (agentId, foregroundCommandLine(from: descendants))
@@ -169,48 +195,96 @@ enum ProcessProbe {
         return result
     }
 
-    /// Enumerate all processes with pid/ppid/argv via sysctl.
+    /// Enumerate all processes with pid/ppid/argv (plus rss) via sysctl. Callers
+    /// that only need the tree shape should use `processTable()` — this reads
+    /// argv for every process on the machine and forks `ps` for the rss map.
     static func allProcesses() -> [Proc] {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
-        let count = size / MemoryLayout<kinfo_proc>.stride
-        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
-        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
-        let actual = size / MemoryLayout<kinfo_proc>.stride
         let rss = residentBytesByPid()
-        return procs.prefix(actual).map { kp in
+        var buffer = [CChar](repeating: 0, count: argMax)
+        return kinfoProcs().map { kp in
             let pid = kp.kp_proc.p_pid
-            let ppid = kp.kp_eproc.e_ppid
-            return Proc(pid: pid, ppid: ppid, argv: argv(of: pid), residentBytes: rss[pid])
+            return Proc(pid: pid,
+                        ppid: kp.kp_eproc.e_ppid,
+                        argv: argv(of: pid, buffer: &buffer),
+                        residentBytes: rss[pid])
         }
     }
 
+    /// pid/ppid only. Walking the tree needs neither argv nor rss, so this skips
+    /// both the per-process `KERN_PROCARGS2` reads and the `ps` fork.
+    static func processTable() -> [Proc] {
+        kinfoProcs().map { Proc(pid: $0.kp_proc.p_pid, ppid: $0.kp_eproc.e_ppid, argv: []) }
+    }
+
+    /// Read argv for a chosen few, reusing one buffer across the batch.
+    static func withArgv(_ procs: [Proc]) -> [Proc] {
+        guard !procs.isEmpty else { return [] }
+        var buffer = [CChar](repeating: 0, count: argMax)
+        return procs.map {
+            Proc(pid: $0.pid,
+                 ppid: $0.ppid,
+                 argv: argv(of: $0.pid, buffer: &buffer),
+                 residentBytes: $0.residentBytes)
+        }
+    }
+
+    private static func kinfoProcs() -> [kinfo_proc] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
+        return Array(procs.prefix(size / MemoryLayout<kinfo_proc>.stride))
+    }
+
+    /// `kern.argmax` is fixed for the life of the boot (1 MB on current macOS).
+    /// It used to be re-read on every `argv(of:)` call.
+    private static let argMax: Int = {
+        var value = 0
+        var mib: [Int32] = [CTL_KERN, KERN_ARGMAX]
+        var size = MemoryLayout<Int>.size
+        guard sysctl(&mib, 2, &value, &size, nil, 0) == 0, value > 0 else { return 256 * 1024 }
+        return value
+    }()
+
     /// Read a process's argv via KERN_PROCARGS2. Returns [] on failure.
     static func argv(of pid: Int32) -> [String] {
-        var argmax = 0
-        var mibMax: [Int32] = [CTL_KERN, KERN_ARGMAX]
-        var maxSize = MemoryLayout<Int>.size
-        guard sysctl(&mibMax, 2, &argmax, &maxSize, nil, 0) == 0, argmax > 0 else { return [] }
+        var buffer = [CChar](repeating: 0, count: argMax)
+        return argv(of: pid, buffer: &buffer)
+    }
 
-        var buf = [CChar](repeating: 0, count: argmax)
-        var size = argmax
+    /// Parses straight out of `buffer`. The previous version allocated a fresh
+    /// 1 MB zero-filled buffer per process and then copied the whole thing again
+    /// to reinterpret it as bytes — together the top entry of every CPU profile.
+    private static func argv(of pid: Int32, buffer: inout [CChar]) -> [String] {
+        var size = buffer.count
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
-        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0, size >= MemoryLayout<Int32>.size else { return [] }
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0,
+              size >= MemoryLayout<Int32>.size else { return [] }
+        let byteCount = size
+        return buffer.withUnsafeBufferPointer { raw in
+            guard let base = raw.baseAddress else { return [] }
+            return base.withMemoryRebound(to: UInt8.self, capacity: byteCount) {
+                parseProcArgs2($0, count: byteCount)
+            }
+        }
+    }
 
-        let bytes = buf.prefix(size).map { UInt8(bitPattern: $0) }
-        let argc = bytes.withUnsafeBytes { $0.load(as: Int32.self) }
-        // Layout: [argc:4][exec_path\0][padding\0...][argv0\0 argv1\0 ...]
+    /// Layout: `[argc:4][exec_path\0][padding\0...][argv0\0 argv1\0 ...]`.
+    private static func parseProcArgs2(_ bytes: UnsafePointer<UInt8>, count: Int) -> [String] {
+        let argc = Int(UnsafeRawPointer(bytes).loadUnaligned(as: Int32.self))
+        guard argc > 0 else { return [] }
         var result: [String] = []
         var i = MemoryLayout<Int32>.size
-        while i < bytes.count && bytes[i] != 0 { i += 1 }      // skip exec_path
-        while i < bytes.count && bytes[i] == 0 { i += 1 }      // skip padding NULs
-        var collected: Int32 = 0
-        while i < bytes.count && collected < argc {
+        while i < count && bytes[i] != 0 { i += 1 }      // skip exec_path
+        while i < count && bytes[i] == 0 { i += 1 }      // skip padding NULs
+        var collected = 0
+        while i < count && collected < argc {
             let start = i
-            while i < bytes.count && bytes[i] != 0 { i += 1 }
+            while i < count && bytes[i] != 0 { i += 1 }
             if i > start {
-                result.append(String(decoding: bytes[start..<i], as: UTF8.self))
+                result.append(String(decoding: UnsafeBufferPointer(start: bytes + start, count: i - start),
+                                     as: UTF8.self))
             }
             i += 1
             collected += 1
