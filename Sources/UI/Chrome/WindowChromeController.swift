@@ -106,6 +106,11 @@ final class WindowChromeController: NSViewController {
         }
     }
 
+    /// Resident memory of the focused pane's session tree, or nil to clear.
+    func updateTerminalMemory(_ bytes: UInt64?) {
+        terminalHeader.setPaneMemory(bytes)
+    }
+
     /// Drive the chrome title from a center overlay (file / changelog). Pass
     /// `nil` to restore the live pane title.
     func setOverlayTitle(_ title: String?) {

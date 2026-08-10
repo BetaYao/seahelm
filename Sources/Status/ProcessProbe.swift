@@ -216,6 +216,26 @@ enum ProcessProbe {
         kinfoProcs().map { Proc(pid: $0.kp_proc.p_pid, ppid: $0.kp_eproc.e_ppid, argv: []) }
     }
 
+    /// Resident bytes of one session's whole process tree, root included.
+    ///
+    /// Deliberately not `memory(rootPid:in:manifests:)`: that splits the total
+    /// into an agent share, which needs argv on every process to match manifests
+    /// — the read that used to pin a core. A headline figure only needs the tree
+    /// shape (sysctl) and an rss map (one `ps`), so this stays cheap enough to
+    /// sit on a UI refresh.
+    static func sessionResidentBytes(paneSessionKey: String, zmxListOutput: String) -> UInt64? {
+        guard let root = sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: zmxListOutput) else {
+            return nil
+        }
+        let rss = residentBytesByPid()
+        let table = processTable().map {
+            Proc(pid: $0.pid, ppid: $0.ppid, argv: [], residentBytes: rss[$0.pid])
+        }
+        let tree = (table.first { $0.pid == root }.map { [$0] } ?? []) + descendants(of: root, in: table)
+        guard !tree.isEmpty else { return nil }
+        return uniqueMemoryBytes(tree)
+    }
+
     /// Read argv for a chosen few, reusing one buffer across the batch.
     static func withArgv(_ procs: [Proc]) -> [Proc] {
         guard !procs.isEmpty else { return [] }

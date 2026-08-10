@@ -149,4 +149,28 @@ final class TerminalHeaderViewTests: XCTestCase {
         XCTAssertEqual(header.editTerminalStrip.clipOriginYForTesting, 0)
         XCTAssertTrue(header.editTerminalStrip.firstTabIsVisibleForTesting)
     }
+
+    // MARK: - Memory readout
+
+    /// The readout shares a row with a centred title, so it is formatted for a
+    /// stable narrow width rather than precision.
+    func testMemoryFormatting() {
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 512), "<1 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 340 * 1_048_576), "340 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 1023 * 1_048_576), "1023 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 1024 * 1_048_576), "1.0 GB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 2560 * 1_048_576), "2.5 GB")
+    }
+
+    /// Zero/nil means "not measured", which must read as blank rather than 0 MB.
+    func testMemoryLabelHiddenWithoutAValue() {
+        let header = makeHeader()
+        header.setPaneMemory(nil)
+        XCTAssertTrue(header.memoryLabelIsHiddenForTesting)
+        header.setPaneMemory(0)
+        XCTAssertTrue(header.memoryLabelIsHiddenForTesting)
+        header.setPaneMemory(340 * 1_048_576)
+        XCTAssertFalse(header.memoryLabelIsHiddenForTesting)
+        XCTAssertEqual(header.memoryTextForTesting, "340 MB")
+    }
 }

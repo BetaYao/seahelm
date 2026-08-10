@@ -1741,6 +1741,57 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
         windowChrome?.updateCabinContext(Self.cabinContext(repo: repo, sailor: agent))
+        refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
+    }
+
+    // MARK: - Header memory readout
+
+    private static let headerMemoryTTL: TimeInterval = 5
+    private let headerMemoryQueue = DispatchQueue(label: "seahelm.header-memory", qos: .utility)
+    private var headerMemoryCache: [String: UInt64] = [:]
+    private var headerMemoryProbedAt: [String: Date] = [:]
+    private var headerMemoryInFlight: Set<String> = []
+
+    private func focusedPaneSessionKey(worktreePath: String) -> String? {
+        let tree = terminalCoordinator.stationManager.tree(forPath: worktreePath)
+        guard let stationId = PaneTitleResolver.focusedStationId(in: tree) else { return nil }
+        return StationRegistry.shared.station(forId: stationId)?.paneSessionKey
+    }
+
+    /// Paint the cached figure at once, then re-probe at most every
+    /// `headerMemoryTTL` seconds. The probe forks `zmx list` and `ps`, so it runs
+    /// off the main thread and is rate-limited — this is called on every title
+    /// refresh, which includes the 5s chrome tick and every focus change.
+    private func refreshHeaderMemory(sessionKey: String?) {
+        guard let sessionKey, !sessionKey.isEmpty else {
+            windowChrome?.updateTerminalMemory(nil)
+            return
+        }
+        windowChrome?.updateTerminalMemory(headerMemoryCache[sessionKey])
+
+        let last = headerMemoryProbedAt[sessionKey] ?? .distantPast
+        guard Date().timeIntervalSince(last) >= Self.headerMemoryTTL,
+              !headerMemoryInFlight.contains(sessionKey) else { return }
+        headerMemoryInFlight.insert(sessionKey)
+        headerMemoryProbedAt[sessionKey] = Date()
+
+        headerMemoryQueue.async { [weak self] in
+            let bytes = ProcessRunner.output([ZmxLocator.executable(), "list"]).flatMap {
+                ProcessProbe.sessionResidentBytes(paneSessionKey: sessionKey, zmxListOutput: $0)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.headerMemoryInFlight.remove(sessionKey)
+                guard let bytes else { return }
+                self.headerMemoryCache[sessionKey] = bytes
+                // Focus may have moved while the probe ran; painting then would
+                // label the new pane with the old pane's number.
+                guard let agent = self.tabCoordinator.selectedSailor,
+                      self.focusedPaneSessionKey(worktreePath: agent.worktreePath) == sessionKey
+                else { return }
+                self.windowChrome?.updateTerminalMemory(bytes)
+            }
+        }
     }
 
     /// `repo · branch`, skipping either half when it is missing or would repeat the
