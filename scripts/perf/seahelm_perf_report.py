@@ -305,13 +305,16 @@ def render_text(report, rows):
 
     render = report.get("render") or {}
     out.append("DASHBOARD RENDER (DEBUG telemetry)")
-    out.append("  observed %sh   full %s (%s/h)   incremental %s (%s/h)   full share %s"
-               % (render.get("observed_hours"), render.get("full_renders"), render.get("full_per_hour"),
-                  render.get("incremental_updates"), render.get("incremental_per_hour"),
-                  fmt(render.get("full_share_pct"), "%")))
-    out.append("  last avg: full %s  incremental %s   max rows %s"
-               % (fmt(render.get("full_avg_ms_last"), "ms", digits=2),
-                  fmt(render.get("incr_avg_ms_last"), "ms", digits=2), render.get("rows_max")))
+    if not render.get("rows_max"):
+        out.append("  no renders seen yet — these counters only advance while the dashboard is on screen")
+    else:
+        out.append("  observed %sh   full %s (%s/h)   incremental %s (%s/h)   full share %s"
+                   % (render.get("observed_hours"), render.get("full_renders"),
+                      fmt(render.get("full_per_hour")), render.get("incremental_updates"),
+                      fmt(render.get("incremental_per_hour")), fmt(render.get("full_share_pct"), "%")))
+        out.append("  last avg: full %s  incremental %s   max rows %s"
+                   % (fmt(render.get("full_avg_ms_last"), "ms", digits=2),
+                      fmt(render.get("incr_avg_ms_last"), "ms", digits=2), render.get("rows_max")))
     out.append("")
 
     panes = report.get("panes") or {}
