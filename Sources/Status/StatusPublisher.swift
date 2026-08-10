@@ -225,6 +225,20 @@ class StatusPublisher {
     }
 
     private func pollAll(_ surfaceSnapshot: [String: Station], preferredPaths: Set<String>, pollCycle: Int, paths: [String: String]) {
+        // One `zmx list` fork and one process-table walk for the whole cycle,
+        // captured on first use so a cycle where every pane's probe is still
+        // fresh pays nothing at all. The failure is memoised too — a missing zmx
+        // must not have each pane retry the fork.
+        var captured: ProcessProbe.ProbeContext?
+        var didCapture = false
+        let probeContext: () -> ProcessProbe.ProbeContext? = {
+            if !didCapture {
+                didCapture = true
+                captured = ProcessProbe.ProbeContext.capture()
+            }
+            return captured
+        }
+
         for (terminalID, surface) in surfaceSnapshot {
             let worktreePath = paths[terminalID] ?? ""
             guard Self.shouldPollPath(worktreePath, preferredPaths: preferredPaths, pollCycle: pollCycle, nonPreferredStride: self.nonPreferredPollStride) else {
@@ -298,7 +312,8 @@ class StatusPublisher {
             // Prefer process-tree identification over screen-text scraping; it is
             // robust to wrappers (node→codex) and to agents that clear their name
             // off screen. Falls back to text detection when the probe is unsure.
-            let probe = probedSession(terminalID: terminalID, paneSessionKey: surface.paneSessionKey, pollCycle: pollCycle)
+            let probe = probedSession(terminalID: terminalID, paneSessionKey: surface.paneSessionKey,
+                                      pollCycle: pollCycle, context: probeContext)
             let probedType = probe.agentType
             let commandLine = probe.commandLine
             let detectedSailorType = probedType != .unknown ? probedType : SailorType.detect(fromLowercased: lowerContent)
@@ -377,7 +392,8 @@ class StatusPublisher {
     private func probedSession(
         terminalID: String,
         paneSessionKey: String?,
-        pollCycle: Int
+        pollCycle: Int,
+        context: () -> ProcessProbe.ProbeContext?
     ) -> (agentType: SailorType, commandLine: String?) {
         guard let paneSessionKey else { return (.unknown, nil) }
         lock.lock()
@@ -395,7 +411,10 @@ class StatusPublisher {
                 return (cachedType ?? .unknown, cachedCmd)
             }
         }
-        let probe = ProcessProbe.probeSession(paneSessionKey: paneSessionKey)
+        // No context means `zmx list` failed this cycle — the same miss the probe
+        // itself used to report, so fall through with the same bookkeeping.
+        let probe = context().map { ProcessProbe.probeSession(paneSessionKey: paneSessionKey, context: $0) }
+            ?? (agentId: nil, commandLine: nil)
         let type = SailorType.fromManifestId(probe.agentId)
         lock.lock()
         // Never downgrade a known identity to unknown on a transient probe miss.

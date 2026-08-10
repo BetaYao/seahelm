@@ -148,4 +148,40 @@ final class ProcessProbeTests: XCTestCase {
         let procs = [p(3, 2, ["/bin/zsh"]), p(4, 3, ["bash"])]
         XCTAssertNil(ProcessProbe.foregroundCommandLine(from: procs))
     }
+
+    // MARK: - Live sysctl reads
+    //
+    // `argv(of:)` parses the KERN_PROCARGS2 blob through a raw pointer now, so
+    // these run it against this very process — the one argv whose shape the test
+    // can predict.
+
+    func testArgvReadsOwnProcess() {
+        let argv = ProcessProbe.argv(of: getpid())
+        XCTAssertFalse(argv.isEmpty, "argv for the running test process must parse")
+        XCTAssertFalse(argv[0].isEmpty, "argv0 must not be blank")
+        XCTAssertEqual(argv, ProcessProbe.argv(of: getpid()), "parse must be stable across calls")
+    }
+
+    func testArgvIsStableWhenABufferIsReusedAcrossProcesses() {
+        // The batch path reuses one buffer, so a long argv followed by a short one
+        // must not leave the earlier process's bytes visible in the second result.
+        let table = ProcessProbe.processTable()
+        XCTAssertFalse(table.isEmpty)
+        let sampled = Array(table.prefix(40))
+        let batch = ProcessProbe.withArgv(sampled)
+        for proc in batch {
+            XCTAssertEqual(proc.argv, ProcessProbe.argv(of: proc.pid),
+                           "pid \(proc.pid) parsed differently in the batch than on its own")
+        }
+    }
+
+    func testProcessTableCarriesTreeShapeWithoutArgv() {
+        let table = ProcessProbe.processTable()
+        guard let own = table.first(where: { $0.pid == getpid() }) else {
+            return XCTFail("own pid missing from the process table")
+        }
+        XCTAssertEqual(own.ppid, getppid())
+        XCTAssertTrue(own.argv.isEmpty, "processTable must not pay for argv")
+        XCTAssertNil(own.residentBytes, "processTable must not fork ps for rss")
+    }
 }
