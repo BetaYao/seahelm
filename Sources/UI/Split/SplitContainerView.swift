@@ -174,6 +174,10 @@ class SplitContainerView: NSView, DividerDelegate {
                   let station = StationRegistry.shared.station(forId: leaf.stationId),
                   station.isAsleep else { continue }
             activeIds.insert(leaf.id)
+            // layoutTree skips delegate wiring for asleep leaves (no surfaceViews
+            // entry), so pin it here — Wake needs the container fallback when
+            // sleepContainer has gone stale.
+            station.delegate = self
             let view = asleepViews[leaf.id] ?? AsleepPaneView()
             if asleepViews[leaf.id] == nil {
                 asleepViews[leaf.id] = view
@@ -547,6 +551,11 @@ extension SplitContainerView: StationDelegate {
         surfaceViews.removeValue(forKey: station.id)
         layoutTree()
     }
+
+    /// Leaf views are added to this view (see `layoutTree`), so it is both the
+    /// container a pane slept in and the right substitute when that reference
+    /// has gone stale.
+    func stationContainer(for station: Station) -> NSView? { self }
 
     /// Swap in a recovered view for `stationId`, relayout (which reparents it into
     /// this container), and restore keyboard focus if that leaf was focused.

@@ -57,6 +57,8 @@ struct Config: Codable {
     var confirmBeforeQuit: Bool
     /// Protect the machine from runaway Claude/Codex process trees.
     var agentMemoryGuard: AgentMemoryGuardConfig
+    /// Reclaim the render cost of panes that have been off screen a while.
+    var autoSleep: AutoSleepConfig
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -94,6 +96,7 @@ struct Config: Codable {
         case notificationSound = "notification_sound"
         case confirmBeforeQuit = "confirm_before_quit"
         case agentMemoryGuard = "agent_memory_guard"
+        case autoSleep = "auto_sleep"
     }
 
     init() {
@@ -132,6 +135,7 @@ struct Config: Codable {
         notificationSound = "default"
         confirmBeforeQuit = true
         agentMemoryGuard = .default
+        autoSleep = .default
     }
 
     init(from decoder: Decoder) throws {
@@ -180,6 +184,7 @@ struct Config: Codable {
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
         confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true
         agentMemoryGuard = try container.decodeIfPresent(AgentMemoryGuardConfig.self, forKey: .agentMemoryGuard) ?? .default
+        autoSleep = try container.decodeIfPresent(AutoSleepConfig.self, forKey: .autoSleep) ?? .default
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -312,6 +317,30 @@ struct AgentMemoryGuardConfig: Codable, Equatable {
     var warnBytes: UInt64 { UInt64(max(0, warnMB)) * 1_048_576 }
     var stopBytes: UInt64 { UInt64(max(0, stopMB)) * 1_048_576 }
     var killBytes: UInt64 { UInt64(max(0, killMB)) * 1_048_576 }
+}
+
+/// Policy for reclaiming the render cost of panes nobody is looking at. Only
+/// the ghostty surface goes away (Metal drawables, screen buffer, the four
+/// per-surface threads) — the zmx session and the agent inside it keep running,
+/// and the pane comes back through the placeholder's Wake button.
+struct AutoSleepConfig: Codable, Equatable {
+    var enabled: Bool
+    /// How long a pane must stay off screen before it is eligible.
+    var afterSeconds: Double
+
+    /// Off by default: sleeping is visible (the pane becomes a placeholder), so
+    /// it should be something the user turns on, not something that surprises
+    /// them the first time they scroll back to an old worktree.
+    static let `default` = AutoSleepConfig(enabled: false, afterSeconds: 15 * 60)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case afterSeconds = "after_seconds"
+    }
+
+    /// Guards against a config that would sleep panes the moment they lose
+    /// focus, which reads as panes randomly dying.
+    var effectiveAfterSeconds: Double { max(60, afterSeconds) }
 }
 
 struct SailorDetectConfig: Codable {
