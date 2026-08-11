@@ -48,6 +48,27 @@ XC_HEADER="$REPO_ROOT/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.
 if [ -f "$XC_HEADER" ]; then
     cp "$XC_HEADER" "$REPO_ROOT/ghostty.h"
     echo "==> Synced ghostty.h from GhosttyKit.xcframework"
+
+    # Re-apply corrections to declarations upstream got wrong, because this sync
+    # would otherwise silently restore them. Upstream c5f921bb0 declares a
+    # surface parameter `ghostty_surface_free_text` does not take; calling it
+    # that way makes the free a no-op and leaks every read_text buffer (measured
+    # at 105 MB/h across 19 panes). Idempotent: matches only the upstream form.
+    /usr/bin/sed -i '' \
+        's|^void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s\*);|void ghostty_surface_free_text(ghostty_text_s*);|' \
+        "$REPO_ROOT/ghostty.h"
+    echo "==> Re-applied local ghostty.h declaration fixes"
+fi
+
+# The sync above is the moment a wrong upstream declaration enters the build, so
+# verify here rather than trusting it. Comparing headers would not help — the
+# framework ships the same wrong header — so this compares each declaration
+# against the Zig implementation it is supposed to describe.
+if [ -f "$REPO_ROOT/scripts/check-ghostty-abi.py" ]; then
+    if ! /usr/bin/python3 "$REPO_ROOT/scripts/check-ghostty-abi.py"; then
+        echo "==> ghostty.h disagrees with libghostty — see above. Setup aborted." >&2
+        exit 1
+    fi
 fi
 
 # Copy Ghostty resources for app bundle
