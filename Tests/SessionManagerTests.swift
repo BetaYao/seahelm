@@ -193,4 +193,52 @@ class SessionManagerTests: XCTestCase {
         XCTAssertTrue(SessionManager.parseZmxSessions(listOutput: "\n  \n").isEmpty)
     }
 
+    // MARK: - Orphan zmx client processes
+
+    private let daemons: Set<Int32> = [100, 200]
+
+    private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String = "/App/Contents/Resources/bin/zmx attach s") -> SessionManager.ZmxProcess {
+        SessionManager.ZmxProcess(pid: pid, ppid: ppid, command: cmd)
+    }
+
+    func testOrphanClientIsReaped() {
+        let pids = SessionManager.orphanZmxClientPids(processes: [proc(300, 1)], daemonPids: daemons)
+        XCTAssertEqual(pids, [300])
+    }
+
+    /// Session daemons are ppid 1 by design; reaping one ends the agent inside.
+    func testSessionDaemonIsNeverReaped() {
+        let pids = SessionManager.orphanZmxClientPids(processes: [proc(100, 1), proc(200, 1)], daemonPids: daemons)
+        XCTAssertEqual(pids, [])
+    }
+
+    func testClientWithLiveParentIsKept() {
+        let pids = SessionManager.orphanZmxClientPids(processes: [proc(300, 9478)], daemonPids: daemons)
+        XCTAssertEqual(pids, [])
+    }
+
+    /// Without a daemon list every daemon looks orphaned, so the sweep must
+    /// refuse rather than guess.
+    func testEmptyDaemonListReapsNothing() {
+        let pids = SessionManager.orphanZmxClientPids(processes: [proc(300, 1)], daemonPids: [])
+        XCTAssertEqual(pids, [])
+    }
+
+    /// The two worst offenders found were spinning against live sessions, so a
+    /// "target session is gone" test would have missed them entirely.
+    func testOrphanAgainstLiveSessionIsStillReaped() {
+        let live = proc(300, 1, "/App/Contents/Resources/bin/zmx attach seahelm-workspace-saas-mono")
+        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: [live], daemonPids: daemons), [300])
+    }
+
+    func testParsePsOutputPicksOnlyZmxBinaries() {
+        let ps = """
+          300     1 /Volumes/x/Seahelm.app/Contents/Resources/bin/zmx attach seahelm-a
+          301  9478 /Volumes/x/Seahelm.app/Contents/Resources/bin/zmx run seahelm-b /bin/zsh
+          302     1 /usr/bin/node --flag zmx-ish-name
+          303     1 claude --resume zmx
+        """
+        let parsed = SessionManager.parseZmxProcesses(psOutput: ps)
+        XCTAssertEqual(parsed.map(\.pid), [300, 301], "only the vendored zmx binary counts")
+    }
 }
