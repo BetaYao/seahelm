@@ -18,6 +18,11 @@ final class HostGatewayConfigTests: XCTestCase {
         XCTAssertEqual(hg.resolvedPublicURL, "wss://seahelm.example.com/ws")
     }
 
+    func testLegacyConfigLeavesHostGatewayNil() throws {
+        let config = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
+        XCTAssertNil(config.hostGateway)
+    }
+
     func testConfigDecodesHostGateway() throws {
         let json = Data(#"""
         {
