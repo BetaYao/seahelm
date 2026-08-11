@@ -117,6 +117,7 @@
 		4BBA37E55963FD4DBDC549E4 /* WorkspaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07FF7C768D8C4871A88AA48 /* WorkspaceManager.swift */; };
 		4C4E27C9EB285988BAF4FE61 /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */; };
 		4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */; };
+		4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */; };
 		4DE34773F233CE9EB7C2B854 /* GlobalKeymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */; };
 		4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */; };
 		506F03CBC8DB229C2F20E98F /* EventHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA02A8188B616E0F6F413FC1 /* EventHub.swift */; };
@@ -329,6 +330,7 @@
 		C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */; };
 		C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */; };
 		C7CB9AA977EF6E8B1C8F1F57 /* ChromeLayoutStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */; };
+		C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */; };
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
 		C981A067FAB19666146BEF3C /* CabinTaskStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3118149265ADEB08FD1F56E6 /* CabinTaskStoreTests.swift */; };
 		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
@@ -469,6 +471,7 @@
 		13C18BB4B4618D2F5F48B499 /* SeahelmCliInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstaller.swift; sourceTree = "<group>"; };
 		14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
 		159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestGuidanceWriter.swift; sourceTree = "<group>"; };
+		16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuthTests.swift; sourceTree = "<group>"; };
 		16F923AC4CC69AE72ABE17C5 /* ProcessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessProbe.swift; sourceTree = "<group>"; };
 		17489E23F295D1C7195B3E66 /* WeChatLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatLoginService.swift; sourceTree = "<group>"; };
 		176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarViewTests.swift; sourceTree = "<group>"; };
@@ -860,6 +863,7 @@
 		FC981A1D0F39B20BE16B2F93 /* OnboardingPermissionsStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingPermissionsStepView.swift; sourceTree = "<group>"; };
 		FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedFilePathResolutionTests.swift; sourceTree = "<group>"; };
 		FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderView.swift; sourceTree = "<group>"; };
+		FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuth.swift; sourceTree = "<group>"; };
 		FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSCProgressTests.swift; sourceTree = "<group>"; };
 		FFBF763CE6B932E7040E0DF7 /* MailHTMLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailHTMLTests.swift; sourceTree = "<group>"; };
 		FFC0FECE767CFF505D059C33 /* GitHubPR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPR.swift; sourceTree = "<group>"; };
@@ -952,6 +956,7 @@
 				B99782104F7A320C332326AC /* GmailOutboundMail.swift */,
 				F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */,
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
+				FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */,
 				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				47BB2DB0B6757C922D065765 /* IMessageChannel.swift */,
@@ -1316,6 +1321,7 @@
 				47F339357674536CA6736266 /* GlobalKeymapTests.swift */,
 				17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */,
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
+				16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */,
 				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
 				7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */,
@@ -1804,6 +1810,7 @@
 				5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */,
 				9F5D2E6010FDB991FA2F0B32 /* HTMLPreviewResourceTests.swift in Sources */,
 				6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */,
+				4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */,
 				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
 				3D08E49AA0DFCF40D705CD5C /* IMessageRuleCoalescerTests.swift in Sources */,
@@ -2025,6 +2032,7 @@
 				0334F26D1F43B1A6530D2D6A /* GrowingTextView.swift in Sources */,
 				F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */,
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,
+				C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */,
 				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
 				11D083414156821D443B9356 /* IMessageChannel.swift in Sources */,
 				81703C0A816662FB4E12B9CF /* IMessageChatDB.swift in Sources */,
