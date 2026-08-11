@@ -118,6 +118,7 @@
 		4C4E27C9EB285988BAF4FE61 /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */; };
 		4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */; };
 		4DE34773F233CE9EB7C2B854 /* GlobalKeymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */; };
+		4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */; };
 		506F03CBC8DB229C2F20E98F /* EventHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA02A8188B616E0F6F413FC1 /* EventHub.swift */; };
 		5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B953D23003F184833FA1CFBA /* PanelCoordinator.swift */; };
 		521E7261EC9F82ABA72C2FEC /* StatusPublisherThreadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B9E6C47E654692C3AC6D42 /* StatusPublisherThreadTests.swift */; };
@@ -417,6 +418,7 @@
 		FA7FE7F8722B6916762E68E3 /* TestViewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F67CBC84404085C3483C910 /* TestViewHelpers.swift */; };
 		FAA6371DC6AF759AC571414B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57EF78A5043DF5162290DDE4 /* StatusPublisher.swift */; };
 		FAD948DD9BEB093FFCE50C36 /* CabinGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820A365A7475031FEC815825 /* CabinGrouping.swift */; };
+		FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */; };
 		FB6A28074D9ADC1B5DB97F53 /* StationHealthCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C0F7D7F30A3F031DC191AFF /* StationHealthCheckTests.swift */; };
 		FC3680C2E8486D8066CCEE37 /* OnboardingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */; };
 		FC6620AFE070216CBEDBEB30 /* UsageSummaryFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22314B62F8F244CAE44DE94D /* UsageSummaryFormatterTests.swift */; };
@@ -752,6 +754,7 @@
 		BCEC0119082025691BCED456 /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
 		BD4237377AB298C49CC68D6D /* SuggestOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestOrderTests.swift; sourceTree = "<group>"; };
 		BD54528A1D3989383AC18319 /* ActivityEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventTests.swift; sourceTree = "<group>"; };
+		BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayConfigTests.swift; sourceTree = "<group>"; };
 		BE109A6863FFA98DF4B192C7 /* FirstMateActionPayloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateActionPayloadTests.swift; sourceTree = "<group>"; };
 		BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinatorTests.swift; sourceTree = "<group>"; };
 		BF428D142A48CAE9A9A6662C /* IMessageRuleCoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageRuleCoalescerTests.swift; sourceTree = "<group>"; };
@@ -778,6 +781,7 @@
 		CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProvider.swift; sourceTree = "<group>"; };
 		CF285507461CAA5C36AF8D90 /* OSCProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSCProgress.swift; sourceTree = "<group>"; };
 		CF6E8352A4B0C1AE47D7B49A /* FileSystemProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSystemProbe.swift; sourceTree = "<group>"; };
+		CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayConfig.swift; sourceTree = "<group>"; };
 		CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
 		D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffTests.swift; sourceTree = "<group>"; };
 		D18A2E8441934257374C57B2 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
@@ -948,6 +952,7 @@
 				B99782104F7A320C332326AC /* GmailOutboundMail.swift */,
 				F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */,
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
+				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				47BB2DB0B6757C922D065765 /* IMessageChannel.swift */,
 				65B33DFB88A7C2AFDA0FAA8D /* IMessageChatDB.swift */,
@@ -1311,6 +1316,7 @@
 				47F339357674536CA6736266 /* GlobalKeymapTests.swift */,
 				17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */,
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
+				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
 				7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */,
 				5D16F46555938EC971913798 /* IMessageBridgeTests.swift */,
@@ -1798,6 +1804,7 @@
 				5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */,
 				9F5D2E6010FDB991FA2F0B32 /* HTMLPreviewResourceTests.swift in Sources */,
 				6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */,
+				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
 				3D08E49AA0DFCF40D705CD5C /* IMessageRuleCoalescerTests.swift in Sources */,
 				DA8BCC5B96E62682BEBA2925 /* IMessageRuleTargetTests.swift in Sources */,
@@ -2018,6 +2025,7 @@
 				0334F26D1F43B1A6530D2D6A /* GrowingTextView.swift in Sources */,
 				F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */,
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,
+				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
 				11D083414156821D443B9356 /* IMessageChannel.swift in Sources */,
 				81703C0A816662FB4E12B9CF /* IMessageChatDB.swift in Sources */,
 				F9270DA52D3D8E5F8C70F8A4 /* IMessageConfig.swift in Sources */,
