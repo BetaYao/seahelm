@@ -121,6 +121,8 @@
 		4DE34773F233CE9EB7C2B854 /* GlobalKeymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */; };
 		4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */; };
 		506F03CBC8DB229C2F20E98F /* EventHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA02A8188B616E0F6F413FC1 /* EventHub.swift */; };
+		506FABB5322B42EDC75221F8 /* HostGatewayFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */; };
+		50C0E2D95435EA0741D4BFE4 /* HostGatewayFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */; };
 		5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B953D23003F184833FA1CFBA /* PanelCoordinator.swift */; };
 		521E7261EC9F82ABA72C2FEC /* StatusPublisherThreadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B9E6C47E654692C3AC6D42 /* StatusPublisherThreadTests.swift */; };
 		52CD930C527CB7F3B358EB6D /* FirstMateCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */; };
@@ -710,6 +712,7 @@
 		9F66DA28CC57BFA18891872D /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
 		A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHistoryBuffer.swift; sourceTree = "<group>"; };
 		A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
+		A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayFrame.swift; sourceTree = "<group>"; };
 		A4307D4828267A1F187FE65E /* SailorTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorTypeTests.swift; sourceTree = "<group>"; };
 		A49DE692E146DF04DADA3B50 /* WeChatChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatChannel.swift; sourceTree = "<group>"; };
 		A51B009382FE3586E735355D /* CodexHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetup.swift; sourceTree = "<group>"; };
@@ -777,6 +780,7 @@
 		C71C3A59719695387993016D /* FuzzyMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatch.swift; sourceTree = "<group>"; };
 		C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinnerDotView.swift; sourceTree = "<group>"; };
 		CA55CCCA9FF0DB650A2D0CDE /* GmailOAuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthCoordinator.swift; sourceTree = "<group>"; };
+		CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayFrameTests.swift; sourceTree = "<group>"; };
 		CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiExtensionInstaller.swift; sourceTree = "<group>"; };
 		CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
@@ -958,6 +962,7 @@
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
 				FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */,
 				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
+				A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				47BB2DB0B6757C922D065765 /* IMessageChannel.swift */,
 				65B33DFB88A7C2AFDA0FAA8D /* IMessageChatDB.swift */,
@@ -1323,6 +1328,7 @@
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
 				16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */,
 				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
+				CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
 				7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */,
 				5D16F46555938EC971913798 /* IMessageBridgeTests.swift */,
@@ -1812,6 +1818,7 @@
 				6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */,
 				4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */,
 				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
+				50C0E2D95435EA0741D4BFE4 /* HostGatewayFrameTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
 				3D08E49AA0DFCF40D705CD5C /* IMessageRuleCoalescerTests.swift in Sources */,
 				DA8BCC5B96E62682BEBA2925 /* IMessageRuleTargetTests.swift in Sources */,
@@ -2034,6 +2041,7 @@
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,
 				C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */,
 				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
+				506FABB5322B42EDC75221F8 /* HostGatewayFrame.swift in Sources */,
 				11D083414156821D443B9356 /* IMessageChannel.swift in Sources */,
 				81703C0A816662FB4E12B9CF /* IMessageChatDB.swift in Sources */,
 				F9270DA52D3D8E5F8C70F8A4 /* IMessageConfig.swift in Sources */,
