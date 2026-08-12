@@ -66,7 +66,10 @@ final class HostGatewaySession {
         case "pane.vt_open":
             let key = paneSessionKey(from: params)
             let result = vt.open(paneSessionKey: key)
-            openVTKeys.insert(key)
+            // Only route send_keys to VT when open actually succeeded.
+            if (result["ok"] as? Bool) != false {
+                openVTKeys.insert(key)
+            }
             return HostGatewayFrame.encode(.response(id: id, result: result, error: nil))
         case "pane.vt_close":
             let key = paneSessionKey(from: params)

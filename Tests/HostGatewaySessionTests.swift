@@ -27,7 +27,9 @@ private final class FakeVT: HostGatewayVTAttaching {
 
     func open(paneSessionKey: String) -> [String: Any] {
         opened.append(paneSessionKey)
-        openKeys.insert(paneSessionKey)
+        if (openResult["ok"] as? Bool) != false {
+            openKeys.insert(paneSessionKey)
+        }
         return openResult
     }
 
@@ -165,6 +167,18 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual(vt.keepalives, ["k1"])
         _ = s.handle(text: #"{"id":"10","method":"pane.vt_close","params":{"pane_session_key":"k1"}}"#)
         XCTAssertEqual(vt.closed, ["k1"])
+    }
+
+    func testFailedVtOpenFallsBackToControlRouterForSendKeys() {
+        let (s, ds, vt) = session()
+        ds.knownPanes = ["pane-1"]
+        vt.openResult = ["ok": false, "error": "spawn failed"]
+        _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"a","method":"pane.vt_open","params":{"pane_session_key":"pane-1"}}"#)
+        let out = s.handle(text: #"{"id":"b","method":"pane.send_keys","params":{"pane_id":"pane-1","keys":["a"]}}"#)
+        XCTAssertTrue(vt.sentKeys.isEmpty)
+        XCTAssertEqual(ds.sentKeys.count, 1)
+        XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["sent"] as? Bool, true)
     }
 
     func testVtNotifyQueued() {
