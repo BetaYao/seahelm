@@ -89,6 +89,9 @@ class CabinStatusAggregator {
         let effectivePrompt = lastUserPrompt.isEmpty ? (oldPaneState?.lastUserPrompt ?? "") : lastUserPrompt
         // Preserve a known agent type across updates that report .unknown.
         let effectiveType = agentType == .unknown ? (oldPaneState?.agentType ?? .unknown) : agentType
+        // Only a real status change advances `statusChangedAt`; the rollup picks
+        // the most recently changed pane, so message-only updates must not move it.
+        let statusChangedAt = statusChanged ? now : (oldPaneState?.statusChangedAt ?? now)
         let newPaneState = PaneStatus(
             paneIndex: paneIndex,
             terminalID: terminalID,
@@ -96,6 +99,7 @@ class CabinStatusAggregator {
             lastMessage: lastMessage,
             lastUserPrompt: effectivePrompt,
             lastUpdated: now,
+            statusChangedAt: statusChangedAt,
             agentType: effectiveType
         )
         paneStates[terminalID] = newPaneState
@@ -136,6 +140,7 @@ class CabinStatusAggregator {
                     lastMessage: pane.lastMessage,
                     lastUserPrompt: pane.lastUserPrompt,
                     lastUpdated: pane.lastUpdated,
+                    statusChangedAt: pane.statusChangedAt,
                     agentType: pane.agentType
                 )
                 paneStates[tid] = pane
@@ -145,10 +150,10 @@ class CabinStatusAggregator {
 
         guard !panes.isEmpty else { return }
 
-        // Representative pane = highest rollup rank (AI agents outrank shell tasks,
-        // then status priority). Status and message both come from it, so the tab
-        // badge and its message always describe the same pane.
-        let representative = panes.max { $0.rollupRank < $1.rollupRank } ?? panes[0]
+        // Representative pane = whichever changed status most recently. Status and
+        // message both come from it, so the tab badge and its message always
+        // describe the same pane.
+        let representative = panes.max { $0.statusChangedAt < $1.statusChangedAt } ?? panes[0]
 
         let ws = CabinStatus(
             worktreePath: worktreePath,

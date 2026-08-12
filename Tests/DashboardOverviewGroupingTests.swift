@@ -324,6 +324,7 @@ private func makeSailor(
         project: project,
         thread: "feature",
         paneStatuses: paneStatuses,
+        rolledUpStatus: paneStatuses.first ?? .unknown,
         mostRecentMessage: "Working",
         lastUserPrompt: "Implement grouping",
         mostRecentPaneIndex: 0,

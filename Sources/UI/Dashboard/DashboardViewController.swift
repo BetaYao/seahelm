@@ -33,7 +33,9 @@ struct SailorDisplayInfo {
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
-    let paneStatuses: [SailorStatus]     // per-pane statuses
+    let paneStatuses: [SailorStatus]     // per-pane statuses, in leaf order
+    /// Worktree-level status from the aggregator (most recently changed pane).
+    let rolledUpStatus: SailorStatus
     let mostRecentMessage: String       // message from most recently updated pane
     let lastUserPrompt: String          // most recent user prompt text
     let mostRecentPaneIndex: Int
@@ -56,12 +58,12 @@ struct SailorDisplayInfo {
     /// Per-pane rows for the expanded "Group by Sailor" mode (leaf order).
     var panes: [PaneDisplayInfo] = []
 
-    /// Rolled-up status for display/grouping: the highest-priority pane, so a
-    /// worktree whose first pane is idle but a later pane is running still reads
-    /// as running (waiting > error > exited > running > idle). Using `.first`
-    /// here made a multi-pane worktree show the first pane's state only.
+    /// Rolled-up status for display/grouping. Computed once by the aggregator —
+    /// the pane that changed status most recently — and carried here rather than
+    /// re-derived, so the dashboard row and the tab badge cannot disagree about
+    /// what the same worktree is doing.
     var status: String {
-        SailorStatus.highestPriority(paneStatuses).rawValue.lowercased()
+        rolledUpStatus.rawValue.lowercased()
     }
 
     /// Convenience: backward-compatible lastMessage
@@ -2224,7 +2226,7 @@ final class DashboardOverviewView: NSView {
     }
 
     private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
-        let running = sailors.filter { SailorStatus.highestPriority($0.paneStatuses) == .running }.count
+        let running = sailors.filter { $0.rolledUpStatus == .running }.count
         // Tight enough to survive the 300pt docked column next to two buttons:
         // total count, then only the running slice.
         headerSub.stringValue = running > 0 ? "\(sailors.count) · \(running) running" : "\(sailors.count)"
