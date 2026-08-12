@@ -56,11 +56,30 @@ def run(cmd, timeout=15):
 
 
 def app_pid():
+    """The process answering our probes.
+
+    More than one Seahelm can be alive at once — the `.build` app, an Xcode
+    DerivedData build, an XCTest host — and only one of them owns the control
+    socket. Resolving by socket owner keeps the ps metrics describing the same
+    process as `app.memory` and `pane.list`; `pgrep` ordering does not.
+    """
+    out = run(["lsof", "-t", SOCKET_PATH], timeout=15).strip()
+    if out:
+        return int(out.split()[0])
     for name in ("Seahelm", "seahelm"):
         out = run(["pgrep", "-x", name], timeout=5).strip()
         if out:
-            return int(out.split()[0])
+            # Prefer the .build bundle: that is what run.sh launches.
+            pids = [int(p) for p in out.split()]
+            for pid in pids:
+                if "/.build/" in run(["ps", "-o", "command=", "-p", str(pid)], timeout=5):
+                    return pid
+            return pids[0]
     return None
+
+
+def binary_path(pid):
+    return run(["ps", "-o", "command=", "-p", str(pid)], timeout=5).strip().split()[0] if pid else None
 
 
 def _seconds(value):
@@ -235,7 +254,10 @@ TELEMETRY_RE = re.compile(
 )
 
 
-def _render_window(window_s):
+def _render_window(window_s, pid):
+    # Scoped to the live app's pid on purpose: the XCTest host is also called
+    # "Seahelm", and each test builds a fresh DashboardOverviewView whose first
+    # render logs — a test run would otherwise masquerade as app render churn.
     out = run(
         [
             "/usr/bin/log",
@@ -245,14 +267,14 @@ def _render_window(window_s):
             "--style",
             "compact",
             "--predicate",
-            'process == "Seahelm" AND eventMessage CONTAINS "[DashboardOverview]"',
+            'processIdentifier == %d AND eventMessage CONTAINS "[DashboardOverview]"' % pid,
         ],
         timeout=60,
     )
     return TELEMETRY_RE.findall(out)
 
 
-def render_metrics(window_s, fallback_s=900):
+def render_metrics(window_s, pid, fallback_s=900):
     """Last DEBUG render telemetry line the app emitted inside the window.
 
     The app only logs when the overview actually renders, and at most once per
@@ -262,9 +284,9 @@ def render_metrics(window_s, fallback_s=900):
     rebuilt; the report treats a negative delta as a reset, not as progress.
     """
     stale = False
-    matches = _render_window(window_s)
+    matches = _render_window(window_s, pid)
     if not matches:
-        matches = _render_window(fallback_s)
+        matches = _render_window(fallback_s, pid)
         stale = True
     if not matches:
         return None
@@ -325,7 +347,8 @@ def stop_launchd_job():
 # ---------------------------------------------------------------- main
 
 
-def main():
+def sample_once():
+    """One pass. Returns True when the run has reached its deadline."""
     os.makedirs(PERF_DIR, exist_ok=True)
     now = time.time()
     state = load_state()
@@ -344,9 +367,10 @@ def main():
         if metrics is None:
             row["app_down"] = True
         else:
+            metrics["binary"] = binary_path(pid)
             row["app"] = metrics
             row.update(probe())
-            row["render"] = render_metrics(interval + 20)
+            row["render"] = render_metrics(interval + 20, pid)
 
     row["zmx"] = zmx_metrics()
     row["sys"] = system_metrics()
@@ -401,8 +425,44 @@ def main():
         with open(SAMPLES_PATH, "a") as handle:
             handle.write(json.dumps({"ts": row["ts"], "epoch": int(now), "event": "monitor_stopped"}) + "\n")
         stop_launchd_job()
-        return
+        return True
     save_state(state)
+    return False
+
+
+def loop(interval):
+    """Sample on a drift-corrected schedule until the deadline.
+
+    launchd's StartInterval turned out to be advisory: on a machine deep in swap
+    it coalesced 60s ticks into 3-minute ones. Owning the clock here keeps the
+    cadence honest and skips a python start-up per sample.
+    """
+    started = time.monotonic()
+    tick = 0
+    while True:
+        try:
+            if sample_once():
+                return 0
+        except Exception as exc:  # one bad pass must not end a 48h run
+            sys.stderr.write("sample failed: %s: %s\n" % (type(exc).__name__, exc))
+            sys.stderr.flush()
+        tick += 1
+        target = started + tick * interval
+        # After a system sleep the target may be far in the past; skip the
+        # missed ticks rather than firing a burst to catch up.
+        while target < time.monotonic():
+            tick += 1
+            target = started + tick * interval
+        time.sleep(max(0.0, target - time.monotonic()))
+
+
+def main():
+    if "--loop" in sys.argv:
+        index = sys.argv.index("--loop")
+        interval = float(sys.argv[index + 1]) if len(sys.argv) > index + 1 else 60.0
+        return loop(interval)
+    sample_once()
+    return 0
 
 
 if __name__ == "__main__":

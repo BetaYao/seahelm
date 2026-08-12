@@ -13,11 +13,18 @@ scripts/perf/perfmon.sh report --hours 6    # ...or just the recent window
 scripts/perf/perfmon.sh stop                # stop early
 ```
 
-Sampling is a launchd agent (`com.seahelm.perfmon`), not a foreground loop, so
-it survives closing the pane that started it, Seahelm restarts, and sleep/wake.
-The job removes itself when the deadline passes. Data lands in
-`~/Library/Logs/seahelm-perf/` (`SEAHELM_PERF_DIR` overrides): `samples.jsonl`
-one row per sample, previous runs archived as `samples-<stamp>.jsonl`.
+Sampling runs as a launchd agent (`com.seahelm.perfmon`), so it survives closing
+the pane that started it, Seahelm restarts, and sleep/wake; the job removes
+itself when the deadline passes. The agent keeps its own clock (`--loop N`)
+rather than using `StartInterval`, which launchd coalesced into ~3 minute ticks
+on a machine deep in swap; `KeepAlive` restarts the loop if it dies. Data lands
+in `~/Library/Logs/seahelm-perf/` (`SEAHELM_PERF_DIR` overrides):
+`samples.jsonl` one row per sample, previous runs archived as
+`samples-<stamp>.jsonl`.
+
+`reload` re-copies the sampler into the run's snapshot and restarts the loop
+without touching `state.json` or `samples.jsonl` — use it to fix the sampler
+mid-run, since `start` archives the samples and resets the deadline.
 
 ## What each signal is for
 
