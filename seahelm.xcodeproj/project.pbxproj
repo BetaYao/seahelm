@@ -105,6 +105,7 @@
 		4344E9AEB5D00D092883F299 /* KeyboardMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */; };
 		43BD24E5D16ABA5AC477E89C /* DashboardFocusControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA242C3631BD163C19CFDD38 /* DashboardFocusControllerTests.swift */; };
 		43EF6A61FC26F6221292A0A3 /* WebhookStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */; };
+		4411EA0166F5BF1C2B8EE3B3 /* ZmxVTAttachManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F55BBA5B4A26B7ACD60D859 /* ZmxVTAttachManager.swift */; };
 		459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */; };
 		466072F2F8768C44A206D990 /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */; };
 		4670998F86598F2E5C84ACD3 /* StationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F9565C3156144526A74B08 /* StationManager.swift */; };
@@ -209,6 +210,7 @@
 		8579DC09CEA0D01A125D5273 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */; };
 		859DBEFE2BAE0BA0C975FD3E /* TaskProgressParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */; };
 		862DDEDAF094D4C2523B632F /* ClaudeHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEFC2B75DCC01AF5F766AF1B /* ClaudeHooksSetupTests.swift */; };
+		8650FD8E9CFABA790A4BEAB4 /* ZmxVTAttachManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4914856A712CFC9ADFAB82E9 /* ZmxVTAttachManagerTests.swift */; };
 		865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401A403F90AAF10933AC1869 /* WeComFrameParser.swift */; };
 		88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19639EE57241F8A021EBD2 /* PaneStatus.swift */; };
 		88FC5A9FA39ABA172ED4FAD7 /* SessionLaunchCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */; };
@@ -413,6 +415,7 @@
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
 		F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */; };
 		F4980A324663FD9EF612E785 /* SailorChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A953BA5BA82E18C03F5294 /* SailorChannel.swift */; };
+		F609F16851D769F1513883D2 /* zmx-attach.py in Resources */ = {isa = PBXBuildFile; fileRef = 091FF7815D565EA0D1CD27E4 /* zmx-attach.py */; };
 		F62D784C6BDA373D99051F3A /* MailBodyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B463225AE9F973C259F06772 /* MailBodyTests.swift */; };
 		F684668DAD5AD32B13566824 /* SailorTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4307D4828267A1F187FE65E /* SailorTypeTests.swift */; };
 		F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15A95E0337AEDBCE9546B8F /* SemanticColors.swift */; };
@@ -461,6 +464,7 @@
 		063BC4CAFB28A7B7DEA60474 /* ZmxLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxLocatorTests.swift; sourceTree = "<group>"; };
 		070459AD623722BF9CDAEA36 /* ShipLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShipLog.swift; sourceTree = "<group>"; };
 		081CE1B8C53AC598217B30B7 /* KeyboardSubstateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSubstateController.swift; sourceTree = "<group>"; };
+		091FF7815D565EA0D1CD27E4 /* zmx-attach.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "zmx-attach.py"; sourceTree = "<group>"; };
 		092C7E1E287BA335DCA70204 /* ActivityEventExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventExtractorTests.swift; sourceTree = "<group>"; };
 		09698EDB6719D1778DF79D4B /* SeahelmControlDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmControlDataSource.swift; sourceTree = "<group>"; };
 		0A25DADE8C435CBAA6E78BAB /* ThemedBackgroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemedBackgroundView.swift; sourceTree = "<group>"; };
@@ -570,6 +574,7 @@
 		4808E81C577D8BF32131B574 /* PreviewSetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSetController.swift; sourceTree = "<group>"; };
 		4890F1362CCDACF15E685662 /* ChromeLayoutMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutMetricsTests.swift; sourceTree = "<group>"; };
 		4897B4E1D168C012F56E8C79 /* EditTabStripViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTabStripViewTests.swift; sourceTree = "<group>"; };
+		4914856A712CFC9ADFAB82E9 /* ZmxVTAttachManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxVTAttachManagerTests.swift; sourceTree = "<group>"; };
 		49437644810F143C24E9273B /* PaneTitleResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTitleResolverTests.swift; sourceTree = "<group>"; };
 		49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
 		49C0947BC2B69DF60F56F356 /* AddCabinPopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCabinPopoverController.swift; sourceTree = "<group>"; };
@@ -713,6 +718,7 @@
 		9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorActivityTests.swift; sourceTree = "<group>"; };
 		9E4048B5F3E4C7759600A8DD /* ChromeHeaderPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeHeaderPage.swift; sourceTree = "<group>"; };
 		9ED6D446FCFE8080F6C4AF05 /* SailorReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorReducer.swift; sourceTree = "<group>"; };
+		9F55BBA5B4A26B7ACD60D859 /* ZmxVTAttachManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxVTAttachManager.swift; sourceTree = "<group>"; };
 		9F66DA28CC57BFA18891872D /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
 		A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHistoryBuffer.swift; sourceTree = "<group>"; };
 		A09FCD7618004CFF5B04BF9A /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
@@ -1024,6 +1030,7 @@
 				B18B71C7A49633D6D41985CC /* WorktreeFileIndex.swift */,
 				C6F98DB046516F2EB312E63F /* ZmxChannel.swift */,
 				3737CB607E821B5D3EFDBDAF /* ZmxLocator.swift */,
+				9F55BBA5B4A26B7ACD60D859 /* ZmxVTAttachManager.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -1049,6 +1056,7 @@
 			isa = PBXGroup;
 			children = (
 				E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */,
+				091FF7815D565EA0D1CD27E4 /* zmx-attach.py */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -1434,6 +1442,7 @@
 				6C1E76E23951B9F8DB873E3C /* WorktreePathIndexTests.swift */,
 				03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */,
 				063BC4CAFB28A7B7DEA60474 /* ZmxLocatorTests.swift */,
+				4914856A712CFC9ADFAB82E9 /* ZmxVTAttachManagerTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -1720,6 +1729,7 @@
 				478A900B42820F9CAC0829BF /* ghostty in Resources */,
 				A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */,
 				E4C319ACAC1EE3D055B48264 /* licenses in Resources */,
+				F609F16851D769F1513883D2 /* zmx-attach.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1924,6 +1934,7 @@
 				831980CBE1E33D059A978E82 /* WorktreePathIndexTests.swift in Sources */,
 				28F64A45113C9031DE991377 /* WrappedPathAtClickTests.swift in Sources */,
 				5F7CEFC99E339F7621D6509A /* ZmxLocatorTests.swift in Sources */,
+				8650FD8E9CFABA790A4BEAB4 /* ZmxVTAttachManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2190,6 +2201,7 @@
 				0E3AA9FF166CC516F1B7264B /* ZmxChannel.swift in Sources */,
 				608A71AD329F3222B8668A1E /* ZmxLocator.swift in Sources */,
 				539E3AA254683CFEB1515713 /* ZmxSessionRecovery.swift in Sources */,
+				4411EA0166F5BF1C2B8EE3B3 /* ZmxVTAttachManager.swift in Sources */,
 				8BBCB395DA0D4E99A6407A59 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
