@@ -3,7 +3,7 @@ import Foundation
 struct PaneStatus: Equatable {
     let paneIndex: Int        // 1-based, follows SplitTree leaf order
     let terminalID: String    // Station.id
-    var status: SailorStatus
+    var status: AgentStatus
     var lastMessage: String
     var lastUserPrompt: String
     var lastUpdated: Date     // When status or message last changed
@@ -12,7 +12,7 @@ struct PaneStatus: Equatable {
     /// merely printing output must not take the badge from one that just went
     /// waiting.
     var statusChangedAt: Date
-    var agentType: SailorType = .unknown
+    var agentType: AgentType = .unknown
 }
 
 struct WorktreeStatus: Equatable {
@@ -22,7 +22,7 @@ struct WorktreeStatus: Equatable {
     var mostRecentMessage: String     // That pane's lastMessage
     var mostRecentUserPrompt: String  // That pane's lastUserPrompt
 
-    var statuses: [SailorStatus] {
+    var statuses: [AgentStatus] {
         panes.map(\.status)
     }
 
@@ -43,7 +43,7 @@ struct WorktreeStatus: Equatable {
         panes.max { $0.statusChangedAt < $1.statusChangedAt }
     }
 
-    var rolledUpStatus: SailorStatus {
+    var rolledUpStatus: AgentStatus {
         representative?.status ?? .unknown
     }
 }

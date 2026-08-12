@@ -10,7 +10,7 @@ import AppKit
 /// rather than happening invisibly.
 final class OnboardingAgentStepView: NSView {
     private var agents: [OnboardingAgentDetector.AgentInfo] = []
-    private var defaultType: SailorType = .claudeCode
+    private var defaultType: AgentType = .claudeCode
     private var showingMore = false
 
     private let columns = 3
@@ -33,7 +33,7 @@ final class OnboardingAgentStepView: NSView {
 
     /// SF Symbol per agent — the old grid gave every card the same `❯_` tile,
     /// which made the grid a wall of identical chips.
-    private static func symbol(for type: SailorType) -> String {
+    private static func symbol(for type: AgentType) -> String {
         switch type {
         case .claudeCode: return "asterisk"
         case .codex: return "chevron.left.forwardslash.chevron.right"
@@ -60,7 +60,7 @@ final class OnboardingAgentStepView: NSView {
 
     func configure(config: Config) {
         agents = OnboardingAgentDetector.scan()
-        defaultType = SailorType(rawValue: config.defaultAgent)
+        defaultType = AgentType(rawValue: config.defaultAgent)
             ?? OnboardingAgentDetector.preferredDefault(from: agents)
         yoloRow.isOn = config.agentYolo
         // Nothing was detected — open on the full list rather than an empty grid.
@@ -68,7 +68,7 @@ final class OnboardingAgentStepView: NSView {
         rebuildCards()
     }
 
-    func selectedDefaultAgent() -> SailorType { defaultType }
+    func selectedDefaultAgent() -> AgentType { defaultType }
 
     func selectedHookAgentIds() -> [String] {
         var types = Set(agents.filter(\.detected).map(\.type))

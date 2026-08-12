@@ -1,6 +1,6 @@
 import AppKit
 
-enum SailorDisplayHelpers {
+enum WorktreeRowHelpers {
     static func statusColor(_ status: String) -> NSColor {
         switch status {
         case "running": return SemanticColors.running

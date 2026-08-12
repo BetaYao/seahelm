@@ -18,24 +18,24 @@ protocol DashboardDelegate: AnyObject {
 
 // MARK: - PaneDisplayInfo
 
-/// One split pane, for the fully-expanded "Group by Sailor" fleet rows.
+/// One split pane, for the fully-expanded "Group by Pane" fleet rows.
 struct PaneDisplayInfo {
     let stationId: String   // Station.id — the leaf's surface
     let title: String       // per-pane title (PaneTitleResolver)
-    let status: SailorStatus
+    let status: AgentStatus
     let isFocused: Bool      // the worktree's last-focused pane
 }
 
-// MARK: - SailorDisplayInfo
+// MARK: - WorktreeRowInfo
 
-struct SailorDisplayInfo {
+struct WorktreeRowInfo {
     let id: String          // terminal ID (from Station.id)
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
-    let paneStatuses: [SailorStatus]     // per-pane statuses, in leaf order
+    let paneStatuses: [AgentStatus]     // per-pane statuses, in leaf order
     /// Worktree-level status from the aggregator (most recently changed pane).
-    let rolledUpStatus: SailorStatus
+    let rolledUpStatus: AgentStatus
     let mostRecentMessage: String       // message from most recently updated pane
     let lastUserPrompt: String          // most recent user prompt text
     let mostRecentPaneIndex: Int
@@ -55,7 +55,7 @@ struct SailorDisplayInfo {
     let currentPaneTitle: String
     /// Running / activity age for that focused pane (compact: `12s` / `3m`).
     let currentPaneRunTime: String
-    /// Per-pane rows for the expanded "Group by Sailor" mode (leaf order).
+    /// Per-pane rows for the expanded "Group by Pane" mode (leaf order).
     var panes: [PaneDisplayInfo] = []
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
@@ -107,7 +107,7 @@ class DashboardViewController: NSViewController {
     /// Set by MainWindowController — forwards split events to TerminalCoordinator
     weak var splitContainerDelegate: SplitContainerDelegate?
 
-    var selectedSailorId: String = ""
+    var selectedPaneId: String = ""
 
     /// Deprecated layout alias for chrome collapse (SSOT is `ChromeLayoutState`):
     /// - `.split` == sidebar expanded (`!chrome.isCollapsed`)
@@ -146,8 +146,8 @@ class DashboardViewController: NSViewController {
     /// Worktree paths idle > 8h — collapsed under the expander in the popover list.
     var idleWorktreePaths: Set<String> = []
 
-    var selectedSailorIndex: Int {
-        agents.firstIndex(where: { $0.id == selectedSailorId }) ?? 0
+    var selectedPaneIndex: Int {
+        agents.firstIndex(where: { $0.id == selectedPaneId }) ?? 0
     }
 
     /// Cached SplitContainerView per worktree path
@@ -157,7 +157,7 @@ class DashboardViewController: NSViewController {
     private(set) var activeSplitContainer: SplitContainerView?
 
     // Data
-    private(set) var agents: [SailorDisplayInfo] = []
+    private(set) var agents: [WorktreeRowInfo] = []
 
     // Left-Right layout
     private let leftRightContainer = NSView()
@@ -189,10 +189,10 @@ class DashboardViewController: NSViewController {
     private func currentPaneTitle(forWorktree path: String) -> String? {
         guard let tree = stationManager?.tree(forPath: path),
               let stationId = PaneTitleResolver.focusedStationId(in: tree),
-              let sailor = ShipLog.shared.sailors(forWorktree: path)
+              let pane = AgentRegistry.shared.panes(forWorktree: path)
                 .first(where: { $0.id == stationId })
         else { return nil }
-        return PaneTitleResolver.title(for: sailor)
+        return PaneTitleResolver.title(for: pane)
     }
 
     // Center overlay
@@ -238,7 +238,7 @@ class DashboardViewController: NSViewController {
     }
 
     private var currentWorktreePath: String? {
-        (agents.first(where: { $0.id == selectedSailorId }) ?? agents.first)?.worktreePath
+        (agents.first(where: { $0.id == selectedPaneId }) ?? agents.first)?.worktreePath
     }
 
     /// True when the selected worktree is showing the split edit layout.
@@ -314,7 +314,7 @@ class DashboardViewController: NSViewController {
         overviewView.onSelectWorktree = { [weak self] path in
             self?.handleWorktreeRowClick(path: path)
         }
-        // Pane row (expanded "Group by Sailor"): enter the worktree, then focus
+        // Pane row (expanded "Group by Pane"): enter the worktree, then focus
         // the specific pane once its split container is embedded.
         overviewView.onSelectPane = { [weak self] path, stationId in
             self?.handlePaneRowClick(path: path, stationId: stationId)
@@ -384,20 +384,20 @@ class DashboardViewController: NSViewController {
 
     /// `changedWorktreePath` narrows the in-place refresh to one card when the
     /// caller knows only that worktree's status changed; nil refreshes all cards.
-    func updateSailors(_ newSailors: [SailorDisplayInfo], changedWorktreePath: String? = nil) {
+    func updatePanes(_ newPanes: [WorktreeRowInfo], changedWorktreePath: String? = nil) {
         let oldIds = Set(agents.map { $0.id })
-        let newIds = Set(newSailors.map { $0.id })
+        let newIds = Set(newPanes.map { $0.id })
         let structureChanged = oldIds != newIds
 
         #if DEBUG
         if structureChanged, !oldIds.isEmpty {
             let added = newIds.subtracting(oldIds)
             let removed = oldIds.subtracting(newIds)
-            NSLog("DashboardVC.updateSailors: structureChanged — added=%@ removed=%@", "\(added)", "\(removed)")
+            NSLog("DashboardVC.updatePanes: structureChanged — added=%@ removed=%@", "\(added)", "\(removed)")
         }
         #endif
 
-        agents = newSailors
+        agents = newPanes
 
         // Refresh the overview whenever the First Mate side column is on screen.
         // Without this check, an open First Mate sidebar showed the fleet frozen
@@ -428,9 +428,9 @@ class DashboardViewController: NSViewController {
             leftRightContainer.isHidden = false
         }
 
-        // Validate selectedSailorId
-        if !agents.contains(where: { $0.id == selectedSailorId }) {
-            selectedSailorId = agents.first?.id ?? ""
+        // Validate selectedPaneId
+        if !agents.contains(where: { $0.id == selectedPaneId }) {
+            selectedPaneId = agents.first?.id ?? ""
         }
 
         if structureChanged {
@@ -444,7 +444,7 @@ class DashboardViewController: NSViewController {
     }
 
     private func syncSidePanelToSelection() {
-        let path = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+        let path = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
         sidePanelVC.setWorktree(path)
     }
 
@@ -454,7 +454,7 @@ class DashboardViewController: NSViewController {
     private func reembedSplitContainerIfDetached() {
         if activeSplitContainer == nil, view.window != nil,
            !(view.window?.firstResponder is GhosttyNSView) {
-            embedSplitContainerForSelectedSailor()
+            embedSplitContainerForSelectedPane()
         }
     }
 
@@ -473,8 +473,8 @@ class DashboardViewController: NSViewController {
     func commitWorktreeSelection(path: String, focusTerminal: Bool = false) {
         lastCommittedWorktreePath = path
         guard agents.contains(where: { $0.worktreePath == path }) else { return }
-        selectSailor(byWorktreePath: path, focusTerminal: focusTerminal)
-        overviewSelectedId = selectedSailorId
+        selectPane(byWorktreePath: path, focusTerminal: focusTerminal)
+        overviewSelectedId = selectedPaneId
         // Push the highlight onto the overview so a programmatic commit (e.g. launch
         // restore, chat steering) moves the selected row just like a click does.
         if !overviewView.isHidden {
@@ -483,15 +483,15 @@ class DashboardViewController: NSViewController {
         }
     }
 
-    func selectSailor(byWorktreePath path: String, focusTerminal: Bool = true) {
+    func selectPane(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
-        let changed = agent.id != selectedSailorId
+        let changed = agent.id != selectedPaneId
         if changed {
             dismissCenterOverlay()
         }
-        selectedSailorId = agent.id
+        selectedPaneId = agent.id
         detachTerminals()
-        embedSplitContainerForSelectedSailor(focusTerminal: focusTerminal)
+        embedSplitContainerForSelectedPane(focusTerminal: focusTerminal)
         syncSidePanelToSelection()
         if changed { notifySelectionChanged() }
     }
@@ -520,11 +520,11 @@ class DashboardViewController: NSViewController {
 
         if collapsed {
             if firstMateSideOpen { flushPendingPreview() }
-            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
                 ?? lastCommittedWorktreePath
             DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
                 guard let self, self.viewMode == .terminal else { return }
-                self.embedSplitContainerForSelectedSailor(focusTerminal: true)
+                self.embedSplitContainerForSelectedPane(focusTerminal: true)
             }
         } else {
             switch activePane {
@@ -538,14 +538,14 @@ class DashboardViewController: NSViewController {
                 openFirstMateColumn()
                 currentSide = .firstMate
             }
-            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
                 ?? lastCommittedWorktreePath
             // Same reasoning as the collapse branch — the first embed after a
             // cold start is the most expensive one there is.
             DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
                 guard let self, self.viewMode == .split else { return }
                 if self.activeSplitContainer == nil {
-                    self.embedSplitContainerForSelectedSailor(focusTerminal: false)
+                    self.embedSplitContainerForSelectedPane(focusTerminal: false)
                 }
                 self.view.window?.makeFirstResponder(self)
             }
@@ -628,7 +628,7 @@ class DashboardViewController: NSViewController {
             currentSide = .firstMate
         }
         if activeSplitContainer == nil, !agents.isEmpty {
-            embedSplitContainerForSelectedSailor(focusTerminal: false)
+            embedSplitContainerForSelectedPane(focusTerminal: false)
         }
         notifyActiveTool()
     }
@@ -648,14 +648,14 @@ class DashboardViewController: NSViewController {
     /// Clicking a row is what sets the overview's selection highlight.
     /// `⌃⇥` / `⌃⇧⇥`: switch to `path` and slide the fleet-list highlight onto it.
     ///
-    /// This used to go through `selectTab(forWorktree:)` → `selectSailor`, which
+    /// This used to go through `selectTab(forWorktree:)` → `selectPane`, which
     /// swaps the terminal content but never touches the overview's selection — so
     /// the content changed while the fleet list (and the First Mate panel showing
     /// it) stayed highlighted on the previous worktree. Everything the highlight
     /// needs is here: the row id, the focus ring's index, and the animation.
     func cycleToWorktree(path: String) {
-        selectSailor(byWorktreePath: path)
-        overviewSelectedId = selectedSailorId
+        selectPane(byWorktreePath: path)
+        overviewSelectedId = selectedPaneId
         if let index = overviewView.orderedRows.firstIndex(where: { $0.path == path }) {
             _ = overviewFocus.jumpToWorktree(index)
         }
@@ -670,8 +670,8 @@ class DashboardViewController: NSViewController {
     }
 
     func enterWorktree(byWorktreePath path: String) {
-        selectSailor(byWorktreePath: path)
-        overviewSelectedId = selectedSailorId
+        selectPane(byWorktreePath: path)
+        overviewSelectedId = selectedPaneId
         // If the overview is on screen (fleet full-screen, or docked as the First
         // Mate side panel), move its selection highlight to the clicked row.
         if !overviewView.isHidden {
@@ -710,7 +710,7 @@ class DashboardViewController: NSViewController {
                            repoPathsProvider: @escaping () -> [String],
                            onAddRepo: @escaping () -> Void,
                            onSubmitCommand: @escaping (String) -> Void,
-                           onCreate: @escaping (String, String, SailorType, Bool) -> Void) {
+                           onCreate: @escaping (String, String, AgentType, Bool) -> Void) {
         inlineCreateView.configure(repoPaths: repoPaths)
         inlineCreateView.repoPathsProvider = repoPathsProvider
         inlineCreateView.onAddRepo = onAddRepo
@@ -736,12 +736,12 @@ class DashboardViewController: NSViewController {
     // MARK: - Layout
 
     private func rebuildFocusLayout() {
-        if let selected = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first {
-            selectedSailorId = selected.id
+        if let selected = agents.first(where: { $0.id == selectedPaneId }) ?? agents.first {
+            selectedPaneId = selected.id
             // Only embed when the dashboard is visible to avoid stealing
             // surfaces from the active repo tab's split container.
             if view.window != nil {
-                embedSplitContainerForSelectedSailor()
+                embedSplitContainerForSelectedPane()
             }
         }
     }
@@ -952,8 +952,8 @@ class DashboardViewController: NSViewController {
     /// Embed the selected agent's split container into the focus panel.
     /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
     /// VC as first responder so arrow keys keep driving the nav ring.
-    func embedSplitContainerForSelectedSailor(focusTerminal: Bool = true) {
-        guard let agent = agents.first(where: { $0.id == selectedSailorId }) ?? agents.first else { return }
+    func embedSplitContainerForSelectedPane(focusTerminal: Bool = true) {
+        guard let agent = agents.first(where: { $0.id == selectedPaneId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
 
         // Attach/detach the edit container for THIS worktree's mode before we pick
@@ -1040,7 +1040,7 @@ class DashboardViewController: NSViewController {
         finalizeEditLayout(focusTerminal: focusTerminal, tree: tree)
     }
 
-    /// Shared tail for `embedSplitContainerForSelectedSailor`: applies zoom + tab
+    /// Shared tail for `embedSplitContainerForSelectedPane`: applies zoom + tab
     /// strips in edit mode (or restores the spatial split in focus mode), then
     /// takes keyboard focus when asked. Never re-enters embed (no recursion).
     private func finalizeEditLayout(focusTerminal: Bool, tree: SplitTree? = nil) {
@@ -1113,14 +1113,14 @@ class DashboardViewController: NSViewController {
 
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
-            focusedWorktreePath: agents.first(where: { $0.id == selectedSailorId })?.worktreePath
+            focusedWorktreePath: agents.first(where: { $0.id == selectedPaneId })?.worktreePath
         )
         focusController.captureSnapshot(snapshot)
 
         let cardIds = cruiseOrder.map(\.id)
         let initial = snapshot.focusedWorktreePath
             .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
-            ?? (selectedSailorId.isEmpty ? nil : selectedSailorId)
+            ?? (selectedPaneId.isEmpty ? nil : selectedPaneId)
         focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
 
         view.window?.makeFirstResponder(self)
@@ -1139,8 +1139,8 @@ class DashboardViewController: NSViewController {
         if restoreSnapshot,
            let path = snapshot?.focusedWorktreePath,
            let original = agents.first(where: { $0.worktreePath == path }),
-           original.id != selectedSailorId {
-            selectSailor(byWorktreePath: path)
+           original.id != selectedPaneId {
+            selectPane(byWorktreePath: path)
         }
 
         if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
@@ -1284,8 +1284,8 @@ class DashboardViewController: NSViewController {
             overviewView.update(agents)
             // Persist the highlighted row immediately so a quit during the
             // preview debounce still restores this worktree, not the previous one.
-            if selectionChanged || selectedSailorId != row.id {
-                selectedSailorId = row.id
+            if selectionChanged || selectedPaneId != row.id {
+                selectedPaneId = row.id
                 notifySelectionChanged()
             }
             if viewMode == .split { schedulePreview(path: row.path) }
@@ -1307,11 +1307,11 @@ class DashboardViewController: NSViewController {
     func handleWorktreeRowClickForTesting(path: String) { handleWorktreeRowClick(path: path) }
 
     /// What the fleet list — and the First Mate panel that renders it — is
-    /// currently highlighting, which is not always the selected sailor.
+    /// currently highlighting, which is not always the selected pane.
     var overviewSelectedIdForTesting: String { overviewView.selectedId }
     var hasCenterOverlayForTesting: Bool { centerOverlay != nil }
 
-    /// Pane row click in "Group by Sailor": drill into the worktree, then focus
+    /// Pane row click in "Group by Pane": drill into the worktree, then focus
     /// the clicked pane's leaf. The split container may still be settling, so the
     /// focus attempt is deferred (mirrors `focusActiveTerminalLeaf`).
     private func handlePaneRowClick(path: String, stationId: String) {
@@ -1397,10 +1397,10 @@ class DashboardViewController: NSViewController {
     /// updated (and persisted) by `applyOverviewEffect`; this only embeds.
     private func previewWorktree(path: String) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
-        selectedSailorId = agent.id
+        selectedPaneId = agent.id
         guard activeSplitWorktreePath != path else { return }
         detachTerminals()
-        embedSplitContainerForSelectedSailor(focusTerminal: false)
+        embedSplitContainerForSelectedPane(focusTerminal: false)
         syncSidePanelToSelection()
     }
 
@@ -1516,7 +1516,7 @@ extension DashboardViewController {
         previewSets.setEditMode(goingEdit, for: wt)
         // Re-embed retargets the split into the right container (prepare attaches/
         // detaches the edit shell). Don't steal terminal focus when entering edit.
-        embedSplitContainerForSelectedSailor(focusTerminal: !goingEdit)
+        embedSplitContainerForSelectedPane(focusTerminal: !goingEdit)
         if goingEdit {
             if let active = previewSets.activeFile(for: wt) { selectPreviewTab(active) }
         } else {
@@ -1652,7 +1652,7 @@ extension DashboardViewController {
         if previewSets.isEmpty(wt) {
             // Degrade to focus mode when the last preview closes.
             previewSets.setEditMode(false, for: wt)
-            embedSplitContainerForSelectedSailor(focusTerminal: true)
+            embedSplitContainerForSelectedPane(focusTerminal: true)
         } else {
             updatePreviewContent()
             refreshEditModeTabs()
@@ -1802,9 +1802,9 @@ extension DashboardViewController {
     }
 
     private func terminalTabTitle(leaf: SplitNode.LeafInfo, worktree: String) -> String {
-        if let sailor = ShipLog.shared.sailors(forWorktree: worktree)
+        if let pane = AgentRegistry.shared.panes(forWorktree: worktree)
             .first(where: { $0.id == leaf.stationId }) {
-            return PaneTitleResolver.title(for: sailor)
+            return PaneTitleResolver.title(for: pane)
         }
         return leaf.paneSessionKey
     }
@@ -1837,7 +1837,7 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
         previewSets.add(path, to: wt)
 
         if previewSets.isEditMode(for: wt) {
-            embedSplitContainerForSelectedSailor(focusTerminal: false)
+            embedSplitContainerForSelectedPane(focusTerminal: false)
             selectPreviewTab(path)
         } else {
             presentFileOverlay(path: path)
@@ -1898,7 +1898,7 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
     }
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
-        let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
+        let worktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath ?? ""
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let title = fileName.isEmpty ? "Changes" : fileName
         showCenterOverlay(
@@ -1933,7 +1933,7 @@ final class DashboardOverviewView: NSView {
     /// Resolves a worktree's current-pane title for order cards.
     var currentPaneTitleProvider: ((String) -> String?)?
     var onSelectWorktree: ((String) -> Void)?
-    /// A pane row was clicked in the expanded "Group by Sailor" mode. Args:
+    /// A pane row was clicked in the expanded "Group by Pane" mode. Args:
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
@@ -1979,7 +1979,7 @@ final class DashboardOverviewView: NSView {
     private let groupingPreference: WorktreeGroupingPreference
     private let now: () -> Date
     private var groupingMode: WorktreeGroupingMode
-    private var latestSailors: [SailorDisplayInfo] = []
+    private var latestPanes: [WorktreeRowInfo] = []
     private var rowViewsByID: [String: RowView] = [:]
     private var renderedGroupTitles: [String] = []
     /// Project title per "add worktree" button, indexed by the button's tag —
@@ -2144,7 +2144,7 @@ final class DashboardOverviewView: NSView {
             (.repository, "Group by Project"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
-            (.sailor, "Expand All Panes"),
+            (.pane, "Expand All Panes"),
         ]
         for (mode, title) in entries {
             let item = NSMenuItem(title: title, action: #selector(selectGroupingMode(_:)), keyEquivalent: "")
@@ -2171,7 +2171,7 @@ final class DashboardOverviewView: NSView {
         groupingMode = mode
         groupingPreference.save(mode)
         refreshGroupingMenuPresentation()
-        render(latestSailors, revealSelection: true)
+        render(latestPanes, revealSelection: true)
         onGroupingChanged?()
     }
 
@@ -2184,7 +2184,7 @@ final class DashboardOverviewView: NSView {
         case .repository: description = "Group worktrees by project"
         case .status: description = "Group worktrees by status"
         case .activityTime: description = "Group worktrees by time"
-        case .sailor: description = "Expand worktrees into sailors"
+        case .pane: description = "Expand worktrees into panes"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2207,7 +2207,7 @@ final class DashboardOverviewView: NSView {
     private(set) var orderedRows: [(id: String, path: String)] = []
     /// Indices into `orderedRows` where each rendered group starts — the boundaries
     /// `{` / `}` jump between. Pane rows never enter `orderedRows`, so cruising
-    /// stays at worktree level in `.sailor` mode too.
+    /// stays at worktree level in `.pane` mode too.
 
     /// Holds the row rebuild while an anchored form (the "+" create popover) is
     /// open, so the list doesn't churn under it on every 2s status poll. Data
@@ -2215,24 +2215,24 @@ final class DashboardOverviewView: NSView {
     var isRenderPaused = false {
         didSet {
             guard oldValue, !isRenderPaused else { return }
-            render(latestSailors, revealSelection: false)
+            render(latestPanes, revealSelection: false)
         }
     }
 
-    func update(_ sailors: [SailorDisplayInfo]) {
-        latestSailors = sailors
+    func update(_ panes: [WorktreeRowInfo]) {
+        latestPanes = panes
         guard !isRenderPaused else { return }
-        render(sailors, revealSelection: false)
+        render(panes, revealSelection: false)
     }
 
-    private func render(_ sailors: [SailorDisplayInfo], revealSelection: Bool) {
-        let running = sailors.filter { $0.rolledUpStatus == .running }.count
+    private func render(_ panes: [WorktreeRowInfo], revealSelection: Bool) {
+        let running = panes.filter { $0.rolledUpStatus == .running }.count
         // Tight enough to survive the 300pt docked column next to two buttons:
         // total count, then only the running slice.
-        headerSub.stringValue = running > 0 ? "\(sailors.count) · \(running) running" : "\(sailors.count)"
+        headerSub.stringValue = running > 0 ? "\(panes.count) · \(running) running" : "\(panes.count)"
 
-        let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
-        let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
+        let panesByPath = Dictionary(panes.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
+        let groupingItems = panes.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
         let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
 
         // A mode switch is an explicit navigation action. If its previous
@@ -2245,12 +2245,12 @@ final class DashboardOverviewView: NSView {
             selectedId = groups.first?.items.first?.id ?? ""
         }
 
-        let structureSignature = Self.structureSignature(for: groups, sailorsByPath: sailorsByPath, groupingMode: groupingMode)
+        let structureSignature = Self.structureSignature(for: groups, panesByPath: panesByPath, groupingMode: groupingMode)
         if !revealSelection, structureSignature == lastStructureSignature {
             #if DEBUG
             let start = DispatchTime.now().uptimeNanoseconds
             #endif
-            applyIncrementalUpdates(groups: groups, sailorsByPath: sailorsByPath)
+            applyIncrementalUpdates(groups: groups, panesByPath: panesByPath)
             #if DEBUG
             recordTelemetry(kind: "incremental",
                             elapsedMs: elapsedMilliseconds(since: start),
@@ -2283,8 +2283,8 @@ final class DashboardOverviewView: NSView {
             rowsBox.alignment = .leading
             rowsBox.translatesAutoresizingMaskIntoConstraints = false
             for groupedItem in group.items {
-                guard let sailor = sailorsByPath[groupedItem.path] else { continue }
-                let row = RowView(sailor: sailor,
+                guard let pane = panesByPath[groupedItem.path] else { continue }
+                let row = RowView(pane: pane,
                                   status: groupedItem.status,
                                   selected: groupedItem.id == selectedId,
                                   showsRepository: groupingMode != .repository)
@@ -2299,15 +2299,18 @@ final class DashboardOverviewView: NSView {
                 // Fully-expanded third level: one clickable row per pane. A
                 // single-pane worktree is already represented by its own row, so
                 // expanding it would just duplicate — only expand 2+ panes.
-                if groupingMode == .sailor, sailor.panes.count > 1 {
-                    for pane in sailor.panes {
-                        let paneRow = PaneRowView(pane: pane, worktreePath: sailor.worktreePath)
+                if groupingMode == .pane, pane.panes.count > 1 {
+                    // `paneInfo`, not `pane`: the enclosing `pane` is the
+                    // worktree row that owns these, and shadowing it here loses
+                    // the worktree path the child row needs.
+                    for paneInfo in pane.panes {
+                        let paneRow = PaneRowView(pane: paneInfo, worktreePath: pane.worktreePath)
                         paneRow.onTap = { [weak self] worktreePath, stationId in
                             self?.onSelectPane?(worktreePath, stationId)
                         }
                         rowsBox.addArrangedSubview(paneRow)
                         paneRow.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
-                        paneRowViewsByStationID[pane.stationId] = paneRow
+                        paneRowViewsByStationID[paneInfo.stationId] = paneRow
                     }
                 }
             }
@@ -2329,14 +2332,14 @@ final class DashboardOverviewView: NSView {
 
     private static func structureSignature(
         for groups: [WorktreeGroup],
-        sailorsByPath: [String: SailorDisplayInfo],
+        panesByPath: [String: WorktreeRowInfo],
         groupingMode: WorktreeGroupingMode
     ) -> String {
         groups.map { group in
             let rows = group.items.map { item in
                 let paneIDs: [String]
-                if groupingMode == .sailor, let sailor = sailorsByPath[item.path], sailor.panes.count > 1 {
-                    paneIDs = sailor.panes.map(\.stationId)
+                if groupingMode == .pane, let pane = panesByPath[item.path], pane.panes.count > 1 {
+                    paneIDs = pane.panes.map(\.stationId)
                 } else {
                     paneIDs = []
                 }
@@ -2348,21 +2351,21 @@ final class DashboardOverviewView: NSView {
 
     private func applyIncrementalUpdates(
         groups: [WorktreeGroup],
-        sailorsByPath: [String: SailorDisplayInfo]
+        panesByPath: [String: WorktreeRowInfo]
     ) {
         orderedRows = groups.flatMap { group in group.items.map { ($0.id, $0.path) } }
         renderedGroupTitles = groups.map(\.title)
 
         for group in groups {
             for item in group.items {
-                guard let sailor = sailorsByPath[item.path] else { continue }
+                guard let pane = panesByPath[item.path] else { continue }
                 if let row = rowViewsByID[item.id] {
-                    row.update(sailor: sailor, status: item.status, selected: item.id == selectedId)
+                    row.update(pane: pane, status: item.status, selected: item.id == selectedId)
                 }
-                if groupingMode == .sailor, sailor.panes.count > 1 {
-                    for pane in sailor.panes {
-                        paneRowViewsByStationID[pane.stationId]?
-                            .update(pane: pane, worktreePath: sailor.worktreePath)
+                if groupingMode == .pane, pane.panes.count > 1 {
+                    for paneInfo in pane.panes {
+                        paneRowViewsByStationID[paneInfo.stationId]?
+                            .update(pane: paneInfo, worktreePath: pane.worktreePath)
                     }
                 }
             }
@@ -2625,10 +2628,10 @@ final class DashboardOverviewView: NSView {
             return v
         }
 
-        init(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool,
+        init(pane: WorktreeRowInfo, status: AgentStatus, selected: Bool,
              showsRepository: Bool) {
-            self.path = sailor.worktreePath
-            self.isMainWorktree = sailor.isMainWorktree
+            self.path = pane.worktreePath
+            self.isMainWorktree = pane.isMainWorktree
             self.selected = selected
             self.showsRepository = showsRepository
             self.staticDot = Self.label(status.glyph, status.color, 8)
@@ -2636,17 +2639,17 @@ final class DashboardOverviewView: NSView {
             // now outlives the status it was built under (rows are reused across
             // incremental updates), so pin it to `.running`'s colour rather than
             // whatever status happened to be current at construction time.
-            self.runningDot = SpinnerDotView(color: SailorStatus.running.color)
-            self.titleLabel = Self.label(sailor.currentPaneTitle, DashboardOverviewView.ink, 12)
-            self.timeLabel = Self.label(sailor.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
-            let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+            self.runningDot = SpinnerDotView(color: AgentStatus.running.color)
+            self.titleLabel = Self.label(pane.currentPaneTitle, DashboardOverviewView.ink, 12)
+            self.timeLabel = Self.label(pane.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
+            let branch = pane.thread.isEmpty ? pane.name : pane.thread
             self.branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
             self.gitLabel = NSTextField(labelWithString: "")
-            self.paneCountLabel = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—",
+            self.paneCountLabel = Self.label(pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—",
                                              DashboardOverviewView.inkFaint, 10)
             if showsRepository {
-                let repo = Self.label(sailor.project.isEmpty ? "Unknown project" : sailor.project,
-                                      ProjectColor.color(for: sailor.project), 10, weight: .semibold)
+                let repo = Self.label(pane.project.isEmpty ? "Unknown project" : pane.project,
+                                      ProjectColor.color(for: pane.project), 10, weight: .semibold)
                 self.repositoryLabel = repo
             } else {
                 self.repositoryLabel = nil
@@ -2656,8 +2659,8 @@ final class DashboardOverviewView: NSView {
             layer?.cornerRadius = Self.cornerRadius
             layer?.masksToBounds = true
             setAccessibilityElement(true)
-            setAccessibilityIdentifier("chrome.worktreeRow.\(sailor.id)")
-            setAccessibilityLabel(sailor.name)
+            setAccessibilityIdentifier("chrome.worktreeRow.\(pane.id)")
+            setAccessibilityLabel(pane.name)
             applyBackground(hovered: false)
             // Both dots are plain `addSubview` children (not stack-arranged), so
             // the label-backed one has to opt out of autoresizing constraints by
@@ -2684,7 +2687,7 @@ final class DashboardOverviewView: NSView {
             branchLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-            gitLabel.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
+            gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
             gitLabel.translatesAutoresizingMaskIntoConstraints = false
             gitLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
             gitLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -2728,7 +2731,7 @@ final class DashboardOverviewView: NSView {
                 line1.widthAnchor.constraint(equalTo: textCol.widthAnchor),
                 line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
             ])
-            applyContent(sailor: sailor, status: status)
+            applyContent(pane: pane, status: status)
         }
         required init?(coder: NSCoder) { fatalError() }
 
@@ -2756,24 +2759,24 @@ final class DashboardOverviewView: NSView {
             return result
         }
 
-        func update(sailor: SailorDisplayInfo, status: SailorStatus, selected: Bool) {
-            path = sailor.worktreePath
-            isMainWorktree = sailor.isMainWorktree
+        func update(pane: WorktreeRowInfo, status: AgentStatus, selected: Bool) {
+            path = pane.worktreePath
+            isMainWorktree = pane.isMainWorktree
             setSelected(selected, animated: false)
-            setAccessibilityLabel(sailor.name)
-            applyContent(sailor: sailor, status: status)
+            setAccessibilityLabel(pane.name)
+            applyContent(pane: pane, status: status)
         }
 
         var runtimeTextForTesting: String { timeLabel.stringValue }
         var titleTextForTesting: String { titleLabel.stringValue }
         var titleFrameForTesting: NSRect { titleLabel.frame }
 
-        private func applyContent(sailor: SailorDisplayInfo, status: SailorStatus) {
-            let nextTitle = sailor.currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        private func applyContent(pane: WorktreeRowInfo, status: AgentStatus) {
+            let nextTitle = pane.currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextTitle.isEmpty {
                 titleLabel.stringValue = nextTitle
             } else if titleLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                titleLabel.stringValue = PaneTitleResolver.shortenPath(sailor.worktreePath)
+                titleLabel.stringValue = PaneTitleResolver.shortenPath(pane.worktreePath)
             }
 
             // Unlike the title, a duration must be allowed to disappear: it falls
@@ -2781,20 +2784,20 @@ final class DashboardOverviewView: NSView {
             // unknown. Holding the last value there would leave a dead pane
             // reading "12s" next to an idle dot. Only a *running* row keeps its
             // last known figure, so a live counter never blanks mid-flight.
-            let nextRuntime = sailor.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
+            let nextRuntime = pane.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextRuntime.isEmpty || status != .running {
                 timeLabel.stringValue = nextRuntime
             }
 
-            let nextBranch = (sailor.thread.isEmpty ? sailor.name : sailor.thread)
+            let nextBranch = (pane.thread.isEmpty ? pane.name : pane.thread)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextBranch.isEmpty {
                 branchLabel.stringValue = nextBranch
             }
-            gitLabel.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
-            paneCountLabel.stringValue = sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—"
+            gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
+            paneCountLabel.stringValue = pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—"
             if let repositoryLabel, showsRepository {
-                let project = sailor.project.isEmpty ? "Unknown project" : sailor.project
+                let project = pane.project.isEmpty ? "Unknown project" : pane.project
                 repositoryLabel.stringValue = project
                 repositoryLabel.textColor = ProjectColor.color(for: project)
             }
@@ -2902,9 +2905,9 @@ final class DashboardOverviewView: NSView {
         }
     }
 
-    // MARK: - Pane row (Group by Sailor)
+    // MARK: - Pane row (Group by Pane)
 
-    /// Third-level row under a worktree in the expanded "Group by Sailor" mode:
+    /// Third-level row under a worktree in the expanded "Group by Pane" mode:
     /// an indented, clickable pane. `● pane title`, dimmed unless focused.
     private final class PaneRowView: NSView {
         var onTap: ((String, String) -> Void)?

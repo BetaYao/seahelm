@@ -1,6 +1,6 @@
 import Foundation
 
-enum SailorType: String, Codable, CaseIterable {
+enum AgentType: String, Codable, CaseIterable {
     // AI Agents
     case claudeCode
     case codex
@@ -171,7 +171,7 @@ enum SailorType: String, Codable, CaseIterable {
     /// Reverse of `manifestId` for agents identifiable by process probe (those
     /// whose manifest declares a `process` block). The generic "agent" manifest
     /// has no process block, so the probe never returns it.
-    static func fromManifestId(_ id: String?) -> SailorType {
+    static func fromManifestId(_ id: String?) -> AgentType {
         switch id {
         case "claude":   return .claudeCode
         case "codex":    return .codex
@@ -191,7 +191,7 @@ enum SailorType: String, Codable, CaseIterable {
     /// Agent identity carried by a hook event's `source`. Sources are manifest ids
     /// (`OpenCodePluginInstaller` sends "opencode", `PiExtensionInstaller` "pi",
     /// the bridge "codex") except Claude, which identifies itself as "claude-code".
-    static func fromHookSource(_ source: String) -> SailorType {
+    static func fromHookSource(_ source: String) -> AgentType {
         source == "claude-code" ? .claudeCode : fromManifestId(source)
     }
 
@@ -227,7 +227,7 @@ enum SailorType: String, Codable, CaseIterable {
     // MARK: - AI Agent detection from terminal content
 
     // Ordered by specificity to avoid false matches (e.g., "opencode" before "code")
-    private static let detectionPatterns: [(pattern: String, type: SailorType)] = [
+    private static let detectionPatterns: [(pattern: String, type: AgentType)] = [
         ("opencode", .openCode),
         ("claude", .claudeCode),
         ("codex", .codex),
@@ -241,7 +241,7 @@ enum SailorType: String, Codable, CaseIterable {
     ]
 
     /// Detect agent type from lowercased terminal content (for AI agents)
-    static func detect(fromLowercased content: String) -> SailorType {
+    static func detect(fromLowercased content: String) -> AgentType {
         for (pattern, type) in detectionPatterns {
             if content.contains(pattern) {
                 return type
@@ -252,7 +252,7 @@ enum SailorType: String, Codable, CaseIterable {
 
     // MARK: - Shell command detection from command line
 
-    private static let commandMap: [String: SailorType] = [
+    private static let commandMap: [String: AgentType] = [
         "brew": .brew, "btop": .btop, "top": .top, "htop": .htop,
         "docker": .docker, "npm": .npm, "npx": .npm,
         "yarn": .yarn, "make": .make, "cargo": .cargo, "go": .go,
@@ -262,7 +262,7 @@ enum SailorType: String, Codable, CaseIterable {
 
     /// Detect shell task type from a command line string.
     /// Handles full paths (/usr/local/bin/brew) and env prefixes (ENV=val make).
-    static func detect(fromCommand command: String) -> SailorType {
+    static func detect(fromCommand command: String) -> AgentType {
         let tokens = command.split(separator: " ", maxSplits: 10)
         guard !tokens.isEmpty else { return .unknown }
 

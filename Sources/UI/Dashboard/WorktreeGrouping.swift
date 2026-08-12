@@ -7,7 +7,7 @@ enum WorktreeGroupingMode: String, CaseIterable {
     /// Fully-expanded three-level view: repository header → worktree row → pane
     /// rows. Groups by repository like `.repository`; the pane expansion is a
     /// render-time concern (see `DashboardOverviewView.render`).
-    case sailor
+    case pane
 }
 
 enum WorktreeActivityBucket: String, CaseIterable {
@@ -20,7 +20,7 @@ enum WorktreeActivityBucket: String, CaseIterable {
 
 enum WorktreeGroupID: Hashable {
     case repository(String)
-    case status(SailorStatus)
+    case status(AgentStatus)
     case activity(WorktreeActivityBucket)
 }
 
@@ -28,19 +28,19 @@ struct WorktreeGroupingItem: Equatable {
     let id: String
     let path: String
     let repository: String
-    let status: SailorStatus
+    let status: AgentStatus
     let lastActivityAt: Date?
     let isMainWorktree: Bool
     let creationDate: Date
 }
 
-extension SailorDisplayInfo {
+extension WorktreeRowInfo {
     func groupingItem(creationDate: Date) -> WorktreeGroupingItem {
         WorktreeGroupingItem(
             id: id,
             path: worktreePath,
             repository: project,
-            status: SailorStatus.highestPriority(paneStatuses),
+            status: AgentStatus.highestPriority(paneStatuses),
             lastActivityAt: lastActivityAt,
             isMainWorktree: isMainWorktree,
             creationDate: creationDate
@@ -51,7 +51,7 @@ extension SailorDisplayInfo {
 struct WorktreeGroup: Equatable {
     let id: WorktreeGroupID
     let title: String
-    let status: SailorStatus?
+    let status: AgentStatus?
     let items: [WorktreeGroupingItem]
 }
 
@@ -63,7 +63,7 @@ enum WorktreeGrouping {
         calendar: Calendar = .current
     ) -> [WorktreeGroup] {
         switch mode {
-        case .repository, .sailor:
+        case .repository, .pane:
             return repositoryGroups(items)
         case .status:
             return statusGroups(items)
@@ -95,7 +95,7 @@ enum WorktreeGrouping {
     }
 
     private static func statusGroups(_ items: [WorktreeGroupingItem]) -> [WorktreeGroup] {
-        let statuses: [(status: SailorStatus, title: String)] = [
+        let statuses: [(status: AgentStatus, title: String)] = [
             (.waiting, "Needs input"),
             (.running, "Running"),
             (.idle, "Idle"),

@@ -13,7 +13,7 @@ final class WorktreeGroupingTests: XCTestCase {
     private func item(
         _ path: String,
         repo: String,
-        status: SailorStatus = .idle,
+        status: AgentStatus = .idle,
         activity: Date? = nil,
         main: Bool = false,
         created: Date = .distantPast

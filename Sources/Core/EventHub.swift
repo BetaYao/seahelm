@@ -1,7 +1,7 @@
 import Foundation
 
 /// Fan-out broker for control-API event subscribers (mirrors herdr's EventHub).
-/// ShipLog publishes one event per ingest here; any number of socket subscribers
+/// AgentRegistry publishes one event per ingest here; any number of socket subscribers
 /// receive them. A bounded ring buffer keyed by the monotonic ingest `seq` lets a
 /// reconnecting subscriber replay what it missed via `events_after`.
 final class EventHub {

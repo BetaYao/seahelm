@@ -2,7 +2,7 @@ import XCTest
 @testable import seahelm
 
 final class IslandProjectGroupTests: XCTestCase {
-    private func row(_ project: String, _ branch: String, _ status: SailorStatus, path: String? = nil) -> IslandAgentRow {
+    private func row(_ project: String, _ branch: String, _ status: AgentStatus, path: String? = nil) -> IslandAgentRow {
         IslandAgentRow(
             id: path ?? "/\(project)/\(branch)",
             project: project,

@@ -1,13 +1,13 @@
 import XCTest
 @testable import seahelm
 
-final class ShipLogIngestTests: XCTestCase {
+final class AgentRegistryIngestTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        ShipLog.shared.onOutcome = nil
-        for agent in ShipLog.shared.allSailors() {
-            ShipLog.shared.unregister(terminalID: agent.id)
+        AgentRegistry.shared.onOutcome = nil
+        for agent in AgentRegistry.shared.allPanes() {
+            AgentRegistry.shared.unregister(terminalID: agent.id)
         }
     }
 
@@ -17,63 +17,63 @@ final class ShipLogIngestTests: XCTestCase {
         let drained = expectation(description: "main queue drained")
         DispatchQueue.main.async { drained.fulfill() }
         wait(for: [drained], timeout: 1)
-        ShipLog.shared.onOutcome = nil
-        for agent in ShipLog.shared.allSailors() {
-            ShipLog.shared.unregister(terminalID: agent.id)
+        AgentRegistry.shared.onOutcome = nil
+        for agent in AgentRegistry.shared.allPanes() {
+            AgentRegistry.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
     }
 
     func testIngestUpdatesStatus() {
-        ShipLog.shared.registerForTesting(
+        AgentRegistry.shared.registerForTesting(
             terminalID: "t-ingest-1",
             worktreePath: "/tmp/ingest-test",
             branch: "main",
             project: "IngestTest"
         )
-        ShipLog.shared.ingest(NormalizedEvent(
+        AgentRegistry.shared.ingest(NormalizedEvent(
             terminalID: "t-ingest-1", source: .scan,
             kind: .screenObserved(status: .waiting, message: "need input",
                                   activity: [], commandLine: nil, agentType: .unknown,
                                   roundDuration: 0, tasks: [])))
-        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-1")?.status, .waiting)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t-ingest-1")?.status, .waiting)
     }
 
     func testIngestUpdatesLastMessage() {
-        ShipLog.shared.registerForTesting(
+        AgentRegistry.shared.registerForTesting(
             terminalID: "t-ingest-2",
             worktreePath: "/tmp/ingest-test2",
             branch: "main",
             project: "IngestTest"
         )
-        ShipLog.shared.ingest(NormalizedEvent(
+        AgentRegistry.shared.ingest(NormalizedEvent(
             terminalID: "t-ingest-2", source: .scan,
             kind: .screenObserved(status: .running, message: "doing stuff",
                                   activity: [], commandLine: nil, agentType: .unknown,
                                   roundDuration: 0, tasks: [])))
-        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-2")?.lastMessage, "doing stuff")
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t-ingest-2")?.lastMessage, "doing stuff")
     }
 
     func testIngestForUnknownTerminalIsNoop() {
         // Should not crash for unregistered terminal
-        ShipLog.shared.ingest(NormalizedEvent(
+        AgentRegistry.shared.ingest(NormalizedEvent(
             terminalID: "t-nonexistent-99", source: .scan,
             kind: .screenObserved(status: .waiting, message: "hello",
                                   activity: [], commandLine: nil, agentType: .unknown,
                                   roundDuration: 0, tasks: [])))
-        XCTAssertNil(ShipLog.shared.sailor(for: "t-nonexistent-99"))
+        XCTAssertNil(AgentRegistry.shared.pane(for: "t-nonexistent-99"))
     }
 
     func testIngestLastUserPrompt() {
-        ShipLog.shared.registerForTesting(
+        AgentRegistry.shared.registerForTesting(
             terminalID: "t-ingest-3",
             worktreePath: "/tmp/ingest-test3",
             branch: "main",
             project: "IngestTest"
         )
-        ShipLog.shared.ingest(NormalizedEvent(
+        AgentRegistry.shared.ingest(NormalizedEvent(
             terminalID: "t-ingest-3", source: .hook("claude-code"),
             kind: .userPrompt("user asked something")))
-        XCTAssertEqual(ShipLog.shared.sailor(for: "t-ingest-3")?.lastUserPrompt, "user asked something")
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t-ingest-3")?.lastUserPrompt, "user asked something")
     }
 }

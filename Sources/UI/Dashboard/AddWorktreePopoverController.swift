@@ -11,7 +11,7 @@ final class AddWorktreePopoverController: NSViewController {
     /// (task, agentType). Worktrees always branch off the repo's main line, so
     /// the base is not a choice this form offers. The owner performs the create
     /// and then calls `reportFailure(_:)` if it fails.
-    var onCreate: ((String, SailorType) -> Void)?
+    var onCreate: ((String, AgentType) -> Void)?
 
     private let project: String
 
@@ -261,7 +261,7 @@ final class AddWorktreePopoverController: NSViewController {
 
     private func configureAgentPopup() {
         agentPopup.removeAllItems()
-        let defaultAgent = SailorType(rawValue: Config.load().defaultAgent) ?? .claudeCode
+        let defaultAgent = AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
         for choice in InlineWorktreeCreateView.agentChoices {
             let item = NSMenuItem(title: choice.displayName, action: nil, keyEquivalent: "")
             item.representedObject = choice.rawValue
@@ -273,9 +273,9 @@ final class AddWorktreePopoverController: NSViewController {
         agentPopup.setAccessibilityIdentifier("dashboard.addWorktree.agentPopup")
     }
 
-    private var selectedAgentType: SailorType {
+    private var selectedAgentType: AgentType {
         guard let raw = agentPopup.selectedItem?.representedObject as? String,
-              let type = SailorType(rawValue: raw) else { return .claudeCode }
+              let type = AgentType(rawValue: raw) else { return .claudeCode }
         return type
     }
 

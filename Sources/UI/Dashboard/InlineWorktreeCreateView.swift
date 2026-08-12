@@ -6,7 +6,7 @@ import QuartzCore
 /// target repo (tap to switch or add) plus the reuse-environment toggle.
 final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// (taskDescription, repoPath, agentType, reuseEnvironment)
-    var onCreate: ((String, String, SailorType, Bool) -> Void)?
+    var onCreate: ((String, String, AgentType, Bool) -> Void)?
     /// Requests an outer height constraint update. The dashboard owns the
     /// constraint so the sidebar can animate around the sticky creator.
     var onPreferredHeightChange: ((CGFloat, Bool) -> Void)?
@@ -23,9 +23,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// The full trimmed text (including the `/` prefix) is passed to the handler.
     var onSubmitCommand: ((String) -> Void)?
 
-    static let agentChoices = SailorType.allCases.filter { $0.isAIAgent }
-    var selectedSailorType: SailorType = {
-        SailorType(rawValue: Config.load().defaultAgent) ?? .claudeCode
+    static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
+    var selectedAgentType: AgentType = {
+        AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
     }()
 
     private let promptTextView = PromptTextView()
@@ -136,10 +136,10 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         // Agent chip: pick which AI agent to launch in the new worktree.
         agentChip.translatesAutoresizingMaskIntoConstraints = false
         agentChip.onClick = { [weak self] in self?.agentButtonClicked() }
-        agentChip.onKeyDown = { [weak self] event in self?.handleSailorChipKey(event) ?? false }
-        agentChip.setIcon(svgString: selectedSailorType.inlinePickerLogoSVG,
-                          symbolName: selectedSailorType.inlinePickerSymbolName,
-                          accessibilityLabel: selectedSailorType.displayName)
+        agentChip.onKeyDown = { [weak self] event in self?.handlePaneChipKey(event) ?? false }
+        agentChip.setIcon(svgString: selectedAgentType.inlinePickerLogoSVG,
+                          symbolName: selectedAgentType.inlinePickerSymbolName,
+                          accessibilityLabel: selectedAgentType.displayName)
         addSubview(agentChip)
 
         reuseEnvCheckbox.font = NSFont.systemFont(ofSize: 11)
@@ -182,28 +182,28 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     private func agentButtonClicked() {
         let menu = NSMenu()
         for type in Self.agentChoices {
-            let item = NSMenuItem(title: type.displayName, action: #selector(selectSailor(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: type.displayName, action: #selector(selectPane(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = type.rawValue
-            item.state = (type == selectedSailorType) ? .on : .off
+            item.state = (type == selectedAgentType) ? .on : .off
             menu.addItem(item)
         }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: agentChip.bounds.height + 4), in: agentChip)
     }
 
-    @objc private func selectSailor(_ sender: NSMenuItem) {
-        if let raw = sender.representedObject as? String, let type = SailorType(rawValue: raw) {
-            selectedSailorType = type
-            refreshSailorChip()
+    @objc private func selectPane(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let type = AgentType(rawValue: raw) {
+            selectedAgentType = type
+            refreshPaneChip()
         }
     }
 
-    /// Updates the agent chip icon/label from `selectedSailorType`. Shared by the
+    /// Updates the agent chip icon/label from `selectedAgentType`. Shared by the
     /// menu action and the arrow-key cycling path.
-    private func refreshSailorChip() {
-        agentChip.setIcon(svgString: selectedSailorType.inlinePickerLogoSVG,
-                          symbolName: selectedSailorType.inlinePickerSymbolName,
-                          accessibilityLabel: selectedSailorType.displayName)
+    private func refreshPaneChip() {
+        agentChip.setIcon(svgString: selectedAgentType.inlinePickerLogoSVG,
+                          symbolName: selectedAgentType.inlinePickerSymbolName,
+                          accessibilityLabel: selectedAgentType.displayName)
     }
 
     /// Updates the repo chip title from `selectedRepoPath`. Shared by the menu
@@ -263,7 +263,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             onFormEnd?()
         } else {
             guard let repo = selectedRepoPath else { return }
-            onCreate?(text, repo, selectedSailorType, reuseEnvCheckbox.state == .on)
+            onCreate?(text, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
             onFormEnd?()
         }
     }
@@ -477,10 +477,10 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func handleSailorChipKey(_ event: NSEvent) -> Bool {
+    private func handlePaneChipKey(_ event: NSEvent) -> Bool {
         switch event.keyCode {
-        case 123: cycleSailor(-1); return true  // Left
-        case 124: cycleSailor(+1); return true  // Right
+        case 123: cyclePane(-1); return true  // Left
+        case 124: cyclePane(+1); return true  // Right
         case 49, 36: agentButtonClicked(); return true  // Space/Return → menu
         default: return handleRingKey(event, on: agentChip)
         }
@@ -510,13 +510,13 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     /// Cycle the selected agent by `delta` with modular wraparound over the AI
     /// agent choices, then refresh the chip via the shared update path.
-    func cycleSailor(_ delta: Int) {
+    func cyclePane(_ delta: Int) {
         let all = Self.agentChoices
         guard !all.isEmpty else { return }
-        let current = all.firstIndex(of: selectedSailorType) ?? 0
+        let current = all.firstIndex(of: selectedAgentType) ?? 0
         let next = (current + delta + all.count) % all.count
-        selectedSailorType = all[next]
-        refreshSailorChip()
+        selectedAgentType = all[next]
+        refreshPaneChip()
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
@@ -676,7 +676,7 @@ private final class CompletionRowView: NSView {
     }
 }
 
-private extension SailorType {
+private extension AgentType {
     var inlinePickerLogoSVG: String? {
         switch self {
         case .claudeCode:

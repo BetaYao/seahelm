@@ -95,7 +95,7 @@ struct ClosedPillView: View {
 /// 8×8pt rounded tile colored by agent status; waiting pulses (phase shared
 /// across tiles, driven by ClosedPillView).
 private struct StatusTile: View {
-    let status: SailorStatus
+    let status: AgentStatus
     let pulsing: Bool
 
     var body: some View {

@@ -1,21 +1,21 @@
 import XCTest
 @testable import seahelm
 
-final class ShipLogIngestOutcomeTests: XCTestCase {
+final class AgentRegistryIngestOutcomeTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        ShipLog.shared.registerForTesting(terminalID: "t1", worktreePath: "/wt",
+        AgentRegistry.shared.registerForTesting(terminalID: "t1", worktreePath: "/wt",
                                           branch: "main", project: "proj")
     }
     override func tearDown() {
         // Stop receiving, then drain any async outcomes still queued on main so they
-        // cannot leak into the next test's onOutcome handler (ShipLog.shared is a singleton
+        // cannot leak into the next test's onOutcome handler (AgentRegistry.shared is a singleton
         // and notifyObservers delivers via DispatchQueue.main.async).
-        ShipLog.shared.onOutcome = nil
+        AgentRegistry.shared.onOutcome = nil
         let drain = expectation(description: "drain main queue")
         DispatchQueue.main.async { drain.fulfill() }
         wait(for: [drain], timeout: 1)
-        ShipLog.shared.unregister(terminalID: "t1")
+        AgentRegistry.shared.unregister(terminalID: "t1")
         super.tearDown()
     }
 
@@ -25,7 +25,7 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
     /// the spinner.
     func testCursorHookRunningPromotesOverScanIdle() {
         XCTAssertEqual(
-            ShipLog.arbitrate(scan: .idle, hook: .running, agentType: .cursor), .running,
+            AgentRegistry.arbitrate(scan: .idle, hook: .running, agentType: .cursor), .running,
             "cursor hooks are installed, so a hook running edge must beat a stale scan idle")
     }
 
@@ -38,24 +38,24 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
     /// The trailing edge still belongs to the screen: once the scan has seen a
     /// sustained idle past the grace window, a stale hook `.running` is dropped.
     func testCursorScanIdleReclaimsStaleHookRunningAfterGrace() {
-        ShipLog.hookRunningGrace = 0
+        AgentRegistry.hookRunningGrace = 0
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("cursor"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("cursor"),
                                               kind: .userPrompt("do the thing")))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
                                   commandLine: nil, agentType: .cursor,
                                   roundDuration: 0, tasks: [])))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .idle)
-        ShipLog.hookRunningGrace = 3.0
+        AgentRegistry.hookRunningGrace = 3.0
     }
 
     func testSessionOnlyHookRunningPromotesOverStaleScanIdle() {
@@ -63,18 +63,18 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         // immediately even while the scan still shows the pre-prompt idle prompt —
         // the spinner isn't on screen yet. Within the grace window scan idle does
         // NOT reclaim, so the card flips to running without waiting for the slow scan.
-        ShipLog.hookRunningGrace = 3.0
+        AgentRegistry.hookRunningGrace = 3.0
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .userPrompt("do the thing")))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
@@ -87,19 +87,19 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         // stopped, or Esc/interrupt fired no Stop hook), a scan idle reclaims the
         // status so it does not stick on "running" forever. Grace=0 exercises this
         // deterministically without a wall-clock wait.
-        ShipLog.hookRunningGrace = 0
-        defer { ShipLog.hookRunningGrace = 3.0 }
+        AgentRegistry.hookRunningGrace = 0
+        defer { AgentRegistry.hookRunningGrace = 3.0 }
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .userPrompt("do the thing")))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
@@ -113,15 +113,15 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .idle, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .awaitingInput("approve?")))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .waiting)
@@ -134,19 +134,19 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         // clear it — one undelivered clearing hook stranded the card forever.
         // A scan that positively sees the agent working must reclaim it, exactly
         // as a scan `.idle` reclaims a stale hook `.running`.
-        ShipLog.hookWaitingGrace = 0
-        defer { ShipLog.hookWaitingGrace = 3.0 }
+        AgentRegistry.hookWaitingGrace = 0
+        defer { AgentRegistry.hookWaitingGrace = 3.0 }
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
@@ -159,18 +159,18 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         // the question has replaced the spinner on screen, so the next scan can
         // still carry a pre-question "running" frame. Within the grace window that
         // stale frame must NOT clear the question.
-        ShipLog.hookWaitingGrace = 3.0
+        AgentRegistry.hookWaitingGrace = 3.0
         var callCount = 0
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 2 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
@@ -187,17 +187,17 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
         exp.assertForOverFulfill = false
-        ShipLog.shared.onOutcome = { o in
+        AgentRegistry.shared.onOutcome = { o in
             callCount += 1
             if callCount == 3 { captured = o; exp.fulfill() }
         }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
                                   roundDuration: 0, tasks: [])))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .question(prompt: "which repo?", options: ["a", "b"], followups: [])))
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .toolUse(ActivityEvent(tool: "Bash", detail: "grep",
                                                                            isError: false, timestamp: Date()))))
         wait(for: [exp], timeout: 2)
@@ -209,8 +209,8 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
         let stubTask = TaskItem(id: "t-1", subject: "Write tests", status: .inProgress)
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
-        ShipLog.shared.onOutcome = { o in captured = o; exp.fulfill() }
-        ShipLog.shared.ingest(NormalizedEvent(
+        AgentRegistry.shared.onOutcome = { o in captured = o; exp.fulfill() }
+        AgentRegistry.shared.ingest(NormalizedEvent(
             terminalID: "t1", source: .scan,
             kind: .screenObserved(status: .running, message: "", activity: [],
                                   commandLine: nil, agentType: .claudeCode,
@@ -224,8 +224,8 @@ final class ShipLogIngestOutcomeTests: XCTestCase {
     func testAgentStoppedFailureIsCompletionWithError() {
         var captured: IngestOutcome?
         let exp = expectation(description: "outcome")
-        ShipLog.shared.onOutcome = { o in captured = o; exp.fulfill() }
-        ShipLog.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+        AgentRegistry.shared.onOutcome = { o in captured = o; exp.fulfill() }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .agentStopped(success: false)))
         wait(for: [exp], timeout: 2)
         XCTAssertTrue(captured?.isCompletionSignal ?? false)

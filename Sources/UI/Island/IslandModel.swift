@@ -15,7 +15,7 @@ struct IslandAgentRow: Identifiable, Equatable {
     let id: String // worktreePath
     let project: String
     let branch: String
-    let status: SailorStatus
+    let status: AgentStatus
     let message: String
     /// Task description entered at worktree-creation time.
     let title: String
@@ -247,7 +247,7 @@ final class IslandModel {
         }
     }
 
-    static func statusRank(_ s: SailorStatus) -> Int {
+    static func statusRank(_ s: AgentStatus) -> Int {
         switch s {
         case .error: return 5
         case .waiting: return 4
@@ -258,5 +258,5 @@ final class IslandModel {
         }
     }
 
-    private func statusRank(_ s: SailorStatus) -> Int { Self.statusRank(s) }
+    private func statusRank(_ s: AgentStatus) -> Int { Self.statusRank(s) }
 }

@@ -8,7 +8,7 @@ final class DashboardViewControllerClickTests: XCTestCase {
     func testEnteringWorktreeKeepsExpandedSidebarExpanded() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
-        vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
+        vc.updatePanes([makePane(id: "agent-a", worktreePath: "/repo/a")])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
         var requestedCollapse: Bool?
         vc.onRequestSetChromeCollapsed = { requestedCollapse = $0 }
@@ -23,7 +23,7 @@ final class DashboardViewControllerClickTests: XCTestCase {
     func testEnteringWorktreeKeepsCollapsedSidebarCollapsed() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
-        vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
+        vc.updatePanes([makePane(id: "agent-a", worktreePath: "/repo/a")])
         vc.adoptChromeCollapse(true, activePane: .firstMate)
         var requestedCollapse: Bool?
         vc.onRequestSetChromeCollapsed = { requestedCollapse = $0 }
@@ -51,28 +51,28 @@ final class DashboardViewControllerClickTests: XCTestCase {
         let vc = DashboardViewController()
         vc.dashboardDelegate = DashboardDelegateSpy()
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.handleWorktreeRowClickForTesting(path: "/repo/b")
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
     }
 
     func testRowClickClosesEditorOverlayWhenSwitchingWorktrees() {
         let vc = DashboardViewController()
         vc.dashboardDelegate = DashboardDelegateSpy()
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.showCenterOverlay(NSView(), title: "file.env")
         XCTAssertTrue(vc.hasCenterOverlayForTesting)
 
         vc.handleWorktreeRowClickForTesting(path: "/repo/b")
 
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
         XCTAssertFalse(vc.hasCenterOverlayForTesting)
     }
 
@@ -91,15 +91,15 @@ final class DashboardViewControllerClickTests: XCTestCase {
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
         vc.handleWorktreeRowClickForTesting(path: "/repo/b")
         XCTAssertTrue(spy.didChangeSelectionCalled,
                       "First Mate row selection must notify so the path can be persisted")
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
     }
 
     /// Regression: split-mode row clicks used to live-preview with
@@ -110,16 +110,16 @@ final class DashboardViewControllerClickTests: XCTestCase {
         let vc = DashboardViewController()
         vc.dashboardDelegate = DashboardDelegateSpy()
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
         XCTAssertEqual(vc.viewMode, .split)
 
         vc.handleWorktreeRowClickForTesting(path: "/repo/b")
 
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-b")
     }
 
@@ -131,16 +131,16 @@ final class DashboardViewControllerClickTests: XCTestCase {
     func testCycleToWorktreeMovesTheOverviewHighlightWithTheContent() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
         vc.cycleToWorktree(path: "/repo/a")
 
         vc.cycleToWorktree(path: "/repo/b")
 
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-b",
                        "the fleet list is still highlighting the previous worktree")
     }
@@ -150,7 +150,7 @@ final class DashboardViewControllerClickTests: XCTestCase {
     func testCycleToWorktreeTracksSelectionWithoutARenderedRow() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
-        vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
+        vc.updatePanes([makePane(id: "agent-a", worktreePath: "/repo/a")])
 
         vc.cycleToWorktree(path: "/repo/a")
 
@@ -160,21 +160,21 @@ final class DashboardViewControllerClickTests: XCTestCase {
     func testCommitWorktreeSelectionRestoresOverviewHighlight() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
-        vc.updateSailors([
-            makeSailor(id: "agent-a", worktreePath: "/repo/a"),
-            makeSailor(id: "agent-b", worktreePath: "/repo/b"),
+        vc.updatePanes([
+            makePane(id: "agent-a", worktreePath: "/repo/a"),
+            makePane(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
         vc.commitWorktreeSelection(path: "/repo/b")
-        XCTAssertEqual(vc.selectedSailorId, "agent-b")
+        XCTAssertEqual(vc.selectedPaneId, "agent-b")
     }
 }
 
 // MARK: - Test helpers
 
-private func makeSailor(id: String, worktreePath: String) -> SailorDisplayInfo {
+private func makePane(id: String, worktreePath: String) -> WorktreeRowInfo {
     let surface = Station()
-    return SailorDisplayInfo(
+    return WorktreeRowInfo(
         id: id,
         name: id,
         project: "proj",

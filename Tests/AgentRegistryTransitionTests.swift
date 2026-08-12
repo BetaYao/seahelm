@@ -1,9 +1,9 @@
 import XCTest
 @testable import seahelm
 
-final class ShipLogTransitionTests: XCTestCase {
+final class AgentRegistryTransitionTests: XCTestCase {
     func testStatusChangeFiresOutcomeObserver() {
-        let head = ShipLog.shared
+        let head = AgentRegistry.shared
         let exp = expectation(description: "outcome fired")
         var captured: IngestOutcome?
         head.registerForTesting(terminalID: "tt", worktreePath: "/wt/z",

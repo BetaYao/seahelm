@@ -2,14 +2,14 @@ import Foundation
 
 /// Pure status reducer: old snapshot + applied inputs → new snapshot + change delta.
 /// No IO, no singletons. Mirrors the field-application logic formerly inline in
-/// ShipLog.updateStatus so it can be unit-tested and reused by ingest().
-enum SailorReducer {
-    static func apply(to info: SailorInfo,
-                      status: SailorStatus,
+/// AgentRegistry.updateStatus so it can be unit-tested and reused by ingest().
+enum PaneReducer {
+    static func apply(to info: PaneInfo,
+                      status: AgentStatus,
                       lastMessage: String,
                       roundDuration: TimeInterval,
                       tasks: [TaskItem],
-                      lastUserPrompt: String) -> (info: SailorInfo, changed: Bool, previousStatus: SailorStatus) {
+                      lastUserPrompt: String) -> (info: PaneInfo, changed: Bool, previousStatus: AgentStatus) {
         var next = info
         let previousStatus = info.status
         let changed = info.status != status

@@ -11,7 +11,7 @@ final class StatusDetectorTests: XCTestCase {
             processStatus: .exited,
             shellInfo: ShellPhaseInfo(phase: .running, lastExitCode: nil),
             content: "to interrupt",  // would match Running
-            agentDef: SailorDetectConfig.default.agents.first
+            agentDef: AgentDetectConfig.default.agents.first
         )
         XCTAssertEqual(result, .exited)
     }
@@ -81,7 +81,7 @@ final class StatusDetectorTests: XCTestCase {
     // MARK: - Text Pattern Fallback
 
     func testTextPattern_ClaudeRunning() {
-        let claude = SailorDetectConfig.default.agents.first!
+        let claude = AgentDetectConfig.default.agents.first!
         let result = detector.detect(
             processStatus: .running,
             shellInfo: nil,
@@ -92,7 +92,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_ClaudeWaiting() {
-        let claude = SailorDetectConfig.default.agents.first!
+        let claude = AgentDetectConfig.default.agents.first!
         let result = detector.detect(
             processStatus: .running,
             shellInfo: nil,
@@ -103,7 +103,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_ClaudeError() {
-        let claude = SailorDetectConfig.default.agents.first!
+        let claude = AgentDetectConfig.default.agents.first!
         let result = detector.detect(
             processStatus: .running,
             shellInfo: nil,
@@ -114,7 +114,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_ClaudeDefaultIdle() {
-        let claude = SailorDetectConfig.default.agents.first!
+        let claude = AgentDetectConfig.default.agents.first!
         let result = detector.detect(
             processStatus: .running,
             shellInfo: nil,
@@ -125,7 +125,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_ClaudeTaskProgressThinkingIsRunning() throws {
-        let claude = try XCTUnwrap(SailorDetectConfig.default.agents.first { $0.name == "claude" })
+        let claude = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "claude" })
         let content = """
         superpowers:code-reviewer(Code quality review Task 1)
         |_ Done (18 tool uses * 61.8k tokens * 1m 15s)
@@ -146,7 +146,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_ClaudeTaskTransitionIsRunning() throws {
-        let claude = try XCTUnwrap(SailorDetectConfig.default.agents.first { $0.name == "claude" })
+        let claude = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "claude" })
         let content = "Task 1 approved. Moving to Task 2."
 
         let result = detector.detect(
@@ -160,7 +160,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_CodexApprovalPromptIsWaiting() throws {
-        let codex = try XCTUnwrap(SailorDetectConfig.default.agents.first { $0.name == "codex" })
+        let codex = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "codex" })
         let content = """
         Would you like to run the following command?
 
@@ -184,7 +184,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_CodexTaskProgressThinkingIsRunning() throws {
-        let codex = try XCTUnwrap(SailorDetectConfig.default.agents.first { $0.name == "codex" })
+        let codex = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "codex" })
         let content = """
         Agent(Implement Task 2: insert_session_from_supabase)
         |_ Done (27 tool uses * 65.0k tokens * 3m 5s)
@@ -205,7 +205,7 @@ final class StatusDetectorTests: XCTestCase {
     }
 
     func testTextPattern_CodexTaskTransitionIsRunning() throws {
-        let codex = try XCTUnwrap(SailorDetectConfig.default.agents.first { $0.name == "codex" })
+        let codex = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "codex" })
         let content = "Task 1 approved. Moving to Task 2."
 
         let result = detector.detect(
@@ -304,59 +304,59 @@ final class DebouncedStatusTrackerTests: XCTestCase {
     }
 }
 
-// MARK: - SailorStatus Priority Tests
+// MARK: - AgentStatus Priority Tests
 
-final class SailorStatusTests: XCTestCase {
+final class AgentStatusTests: XCTestCase {
     func testPriorityOrder() {
         // `waiting` outranks even `error`: an agent blocked on the user is the
         // state most in need of attention, so it must win the worktree rollup
         // badge. (Reordered in "worktree status rollup — priority reorder".)
-        XCTAssertGreaterThan(SailorStatus.waiting.priority, SailorStatus.error.priority)
-        XCTAssertGreaterThan(SailorStatus.error.priority, SailorStatus.exited.priority)
-        XCTAssertGreaterThan(SailorStatus.exited.priority, SailorStatus.running.priority)
-        XCTAssertGreaterThan(SailorStatus.running.priority, SailorStatus.idle.priority)
-        XCTAssertGreaterThan(SailorStatus.idle.priority, SailorStatus.unknown.priority)
+        XCTAssertGreaterThan(AgentStatus.waiting.priority, AgentStatus.error.priority)
+        XCTAssertGreaterThan(AgentStatus.error.priority, AgentStatus.exited.priority)
+        XCTAssertGreaterThan(AgentStatus.exited.priority, AgentStatus.running.priority)
+        XCTAssertGreaterThan(AgentStatus.running.priority, AgentStatus.idle.priority)
+        XCTAssertGreaterThan(AgentStatus.idle.priority, AgentStatus.unknown.priority)
     }
 
     func testWaitingWinsTheRollupOverError() {
         // The point of the ordering above, stated as the behaviour it exists for.
-        XCTAssertEqual(SailorStatus.highestPriority([.error, .waiting, .running]), .waiting)
+        XCTAssertEqual(AgentStatus.highestPriority([.error, .waiting, .running]), .waiting)
     }
 
     func testHighestPriority() {
-        let result = SailorStatus.highestPriority([.idle, .running, .unknown])
+        let result = AgentStatus.highestPriority([.idle, .running, .unknown])
         XCTAssertEqual(result, .running)
     }
 
     func testHighestPriority_Empty() {
-        let result = SailorStatus.highestPriority([])
+        let result = AgentStatus.highestPriority([])
         XCTAssertEqual(result, .unknown)
     }
 
     func testIsUrgent() {
-        XCTAssertTrue(SailorStatus.error.isUrgent)
-        XCTAssertTrue(SailorStatus.waiting.isUrgent)
-        XCTAssertFalse(SailorStatus.running.isUrgent)
-        XCTAssertFalse(SailorStatus.idle.isUrgent)
+        XCTAssertTrue(AgentStatus.error.isUrgent)
+        XCTAssertTrue(AgentStatus.waiting.isUrgent)
+        XCTAssertFalse(AgentStatus.running.isUrgent)
+        XCTAssertFalse(AgentStatus.idle.isUrgent)
     }
 
     func testIsActive() {
-        XCTAssertTrue(SailorStatus.running.isActive)
-        XCTAssertTrue(SailorStatus.waiting.isActive)
-        XCTAssertFalse(SailorStatus.idle.isActive)
-        XCTAssertFalse(SailorStatus.error.isActive)
+        XCTAssertTrue(AgentStatus.running.isActive)
+        XCTAssertTrue(AgentStatus.waiting.isActive)
+        XCTAssertFalse(AgentStatus.idle.isActive)
+        XCTAssertFalse(AgentStatus.error.isActive)
     }
 }
 
-// MARK: - SailorDef Detection Tests
+// MARK: - AgentDef Detection Tests
 
-final class SailorDefTests: XCTestCase {
+final class AgentDefTests: XCTestCase {
     func testDetectStatus_FirstMatchWins() {
-        let agent = SailorDef(
+        let agent = AgentDef(
             name: "test",
             rules: [
-                SailorRule(status: "Running", patterns: ["working"]),
-                SailorRule(status: "Error", patterns: ["working error"]),
+                AgentRule(status: "Running", patterns: ["working"]),
+                AgentRule(status: "Error", patterns: ["working error"]),
             ],
             defaultStatus: "Idle",
             messageSkipPatterns: []
@@ -367,19 +367,19 @@ final class SailorDefTests: XCTestCase {
     }
 
     func testDetectStatus_CaseInsensitive() {
-        let agent = SailorDetectConfig.default.agents.first!
+        let agent = AgentDetectConfig.default.agents.first!
         let result = agent.detectStatus(from: "TO INTERRUPT")
         XCTAssertEqual(result, .running)
     }
 
     func testDetectStatus_DefaultStatus() {
-        let agent = SailorDetectConfig.default.agents.first!
+        let agent = AgentDetectConfig.default.agents.first!
         let result = agent.detectStatus(from: "nothing special here")
         XCTAssertEqual(result, .idle)
     }
 
     func testExtractLastMessage_SkipsChrome() {
-        let agent = SailorDef(
+        let agent = AgentDef(
             name: "test",
             rules: [],
             defaultStatus: "Idle",
@@ -391,7 +391,7 @@ final class SailorDefTests: XCTestCase {
     }
 
     func testExtractLastMessage_Truncation() {
-        let agent = SailorDef(name: "test", rules: [], defaultStatus: "Idle", messageSkipPatterns: [])
+        let agent = AgentDef(name: "test", rules: [], defaultStatus: "Idle", messageSkipPatterns: [])
         let content = "This is a very long message that should be truncated"
         let msg = agent.extractLastMessage(from: content, maxLen: 20)
         XCTAssertTrue(msg.count <= 20)

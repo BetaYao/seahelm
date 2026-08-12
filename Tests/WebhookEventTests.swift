@@ -143,13 +143,13 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.data?["tool_name"] as? String, "Bash")
     }
 
-    func testHookSourceMapsToSailorType() {
-        XCTAssertEqual(SailorType.fromHookSource("claude-code"), .claudeCode)
-        XCTAssertEqual(SailorType.fromHookSource("codex"), .codex)
-        XCTAssertEqual(SailorType.fromHookSource("opencode"), .openCode)
-        XCTAssertEqual(SailorType.fromHookSource("pi"), .pi)
-        XCTAssertEqual(SailorType.fromHookSource("cursor"), .cursor)
-        XCTAssertEqual(SailorType.fromHookSource("nope"), .unknown)
+    func testHookSourceMapsToAgentType() {
+        XCTAssertEqual(AgentType.fromHookSource("claude-code"), .claudeCode)
+        XCTAssertEqual(AgentType.fromHookSource("codex"), .codex)
+        XCTAssertEqual(AgentType.fromHookSource("opencode"), .openCode)
+        XCTAssertEqual(AgentType.fromHookSource("pi"), .pi)
+        XCTAssertEqual(AgentType.fromHookSource("cursor"), .cursor)
+        XCTAssertEqual(AgentType.fromHookSource("nope"), .unknown)
     }
 
     func testParseCodexNativeSessionStart() throws {
@@ -233,9 +233,9 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(ref.sessionId, "15264009-b835-46b6-90fe-6ec5c818da81")
     }
 
-    // MARK: - Event → SailorStatus mapping
+    // MARK: - Event → AgentStatus mapping
 
-    func testEventToSailorStatus() {
+    func testEventToAgentStatus() {
         XCTAssertEqual(WebhookEventType.sessionStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseEnd.agentStatus(data: nil), .running)

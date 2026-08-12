@@ -17,14 +17,14 @@ final class AddWorktreePopoverTests: XCTestCase {
 
     func testSubmitPassesTaskAndAgentThenLocksTheForm() {
         let controller = makeLoadedController()
-        var submitted: (task: String, agent: SailorType)?
+        var submitted: (task: String, agent: AgentType)?
         controller.onCreate = { task, agent in submitted = (task, agent) }
         controller.setTaskForTesting("  wire up the popover  ")
 
         controller.submitForTesting()
 
         XCTAssertEqual(submitted?.task, "wire up the popover")
-        let defaultAgent = SailorType(rawValue: Config.load().defaultAgent) ?? .claudeCode
+        let defaultAgent = AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
         XCTAssertEqual(submitted?.agent, defaultAgent)
         XCTAssertTrue(controller.isCreatingForTesting)
 

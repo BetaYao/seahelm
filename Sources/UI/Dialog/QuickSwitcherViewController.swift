@@ -14,9 +14,9 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
 
     private var allWorktrees: [WorktreeInfo] = []
     private var filteredWorktrees: [WorktreeInfo] = []
-    private var statuses: [String: SailorStatus] = [:]
+    private var statuses: [String: AgentStatus] = [:]
 
-    init(worktrees: [WorktreeInfo], statuses: [String: SailorStatus]) {
+    init(worktrees: [WorktreeInfo], statuses: [String: AgentStatus]) {
         self.allWorktrees = worktrees
         self.filteredWorktrees = worktrees
         self.statuses = statuses

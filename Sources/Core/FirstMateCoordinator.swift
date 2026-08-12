@@ -51,7 +51,7 @@ final class FirstMateCoordinator {
     /// answered. Runs *after* routing on purpose — routing still gets to fire the
     /// green-zone "exited" notification, and sweeping last means a suggestion
     /// arriving in the same outcome as the exit can't survive it.
-    private func clearIfPaneIsGone(status: SailorStatus, terminalID: String) {
+    private func clearIfPaneIsGone(status: AgentStatus, terminalID: String) {
         guard status == .exited else { return }
         queue.resolvePane(terminalID: terminalID)
     }

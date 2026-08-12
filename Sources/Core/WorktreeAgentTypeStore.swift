@@ -4,20 +4,20 @@ import Foundation
 /// path, so the card badge reflects the user's pick immediately — instead of
 /// waiting for seahelm to detect the agent from terminal output. Stored as JSON
 /// alongside config.json (`~/.config/seahelm/worktree-agents.json`).
-final class WorktreeSailorTypeStore {
-    static let shared = WorktreeSailorTypeStore()
+final class WorktreeAgentTypeStore {
+    static let shared = WorktreeAgentTypeStore()
 
     private let store = PersistedStringMap(fileName: "worktree-agents.json")
 
     private init() {}
 
     /// The agent type the user picked when creating this worktree, if recorded.
-    func agentType(forWorktree path: String) -> SailorType? {
-        store[path].flatMap { SailorType(rawValue: $0) }
+    func agentType(forWorktree path: String) -> AgentType? {
+        store[path].flatMap { AgentType(rawValue: $0) }
     }
 
     /// Record (and persist) the chosen agent type for a worktree path.
-    func set(_ type: SailorType, forWorktree path: String) {
+    func set(_ type: AgentType, forWorktree path: String) {
         store.set(type.rawValue, forKey: path)
     }
 }

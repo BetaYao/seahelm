@@ -27,7 +27,7 @@ class WebhookStatusProvider {
     struct SessionState {
         let sessionId: String
         let worktreePath: String
-        var status: SailorStatus
+        var status: AgentStatus
         var lastEvent: Date
         var lastMessage: String?
         var lastUserPrompt: String?
@@ -148,13 +148,13 @@ class WebhookStatusProvider {
         }
     }
 
-    func status(for worktreePath: String) -> SailorStatus {
+    func status(for worktreePath: String) -> AgentStatus {
         queue.sync {
             let canon = canonicalize(worktreePath)
             let sessionStatuses = sessions.values
                 .filter { $0.worktreePath == canon }
                 .map { $0.status }
-            return SailorStatus.highestPriority(sessionStatuses)
+            return AgentStatus.highestPriority(sessionStatuses)
         }
     }
 

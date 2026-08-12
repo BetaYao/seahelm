@@ -22,11 +22,11 @@ class StatusDetector {
         processStatus: ProcessStatus,
         shellInfo: ShellPhaseInfo?,
         content: String,
-        agentDef: SailorDef?,
+        agentDef: AgentDef?,
         manifest: CompiledManifest? = nil,
         osc: (title: String, progress: String) = ("", ""),
         lowercasedContent: String? = nil
-    ) -> SailorStatus {
+    ) -> AgentStatus {
         // Priority 1: Process lifecycle overrides everything
         switch processStatus {
         case .exited: return .exited
@@ -50,7 +50,7 @@ class StatusDetector {
             }
         }
 
-        // Priority 3: Manifest rule engine (preferred), else legacy SailorDef rules.
+        // Priority 3: Manifest rule engine (preferred), else legacy AgentDef rules.
         if !content.isEmpty {
             let lower = lowercasedContent ?? content.lowercased()
             if let manifest {
@@ -152,16 +152,16 @@ class StatusDetector {
     }
 }
 
-// MARK: - SailorDef status detection
+// MARK: - AgentDef status detection
 
 
-extension SailorDef {
+extension AgentDef {
     /// Lowercased rules/skip-patterns, cached per def name. detectStatus and
     /// extractLastMessage run on every poll of a legacy (manifest-less) pane, so
     /// re-lowercasing the whole rule set each call adds up. The cache validates
     /// against the source rules, so a config reload with edited rules recomputes.
     private struct LoweredCache {
-        let sourceRules: [SailorRule]
+        let sourceRules: [AgentRule]
         let sourceSkip: [String]
         let rules: [(status: String, patterns: [String])]
         let skip: [String]
@@ -191,23 +191,23 @@ extension SailorDef {
     private var lowercasedSkipPatterns: [String] { lowered.skip }
 
     /// Apply rules in order; first match wins
-    func detectStatus(from content: String) -> SailorStatus {
+    func detectStatus(from content: String) -> AgentStatus {
         return detectStatus(fromLowercased: content.lowercased())
     }
 
     /// Apply rules using pre-lowercased content to avoid redundant lowercasing.
     /// Only scans the last ~10 lines to avoid false positives from old command output
     /// (e.g. "0 errors" from a successful cargo build triggering Error status).
-    func detectStatus(fromLowercased lower: String) -> SailorStatus {
+    func detectStatus(fromLowercased lower: String) -> AgentStatus {
         let tail = Self.lastLines(of: lower, count: 10)
         for (status, patterns) in lowercasedRules {
             for pattern in patterns {
                 if tail.contains(pattern) {
-                    return SailorStatus(rawValue: status) ?? .unknown
+                    return AgentStatus(rawValue: status) ?? .unknown
                 }
             }
         }
-        return SailorStatus(rawValue: defaultStatus) ?? .idle
+        return AgentStatus(rawValue: defaultStatus) ?? .idle
     }
 
     /// Extract the last N lines from a string efficiently (no array allocation).
@@ -278,7 +278,7 @@ extension SailorDef {
 /// ~= one poll cycle). A `visibleIdle` signal (process exit, OSC133 prompt, an
 /// explicit visible_idle rule) bypasses the hold and commits immediately.
 class DebouncedStatusTracker {
-    private(set) var currentStatus: SailorStatus = .unknown
+    private(set) var currentStatus: AgentStatus = .unknown
 
     /// Consecutive plain-idle observations required to leave `running`.
     var pendingIdleConfirmations = 2
@@ -286,7 +286,7 @@ class DebouncedStatusTracker {
 
     /// Update with detected status. Returns true if status changed.
     @discardableResult
-    func update(status: SailorStatus, visibleIdle: Bool = true) -> Bool {
+    func update(status: AgentStatus, visibleIdle: Bool = true) -> Bool {
         // Unknown means "no data" — don't change.
         guard status != .unknown else { return false }
 
@@ -303,7 +303,7 @@ class DebouncedStatusTracker {
         return true
     }
 
-    func forceStatus(_ status: SailorStatus) {
+    func forceStatus(_ status: AgentStatus) {
         currentStatus = status
         pendingIdleCount = 0
     }
@@ -314,9 +314,9 @@ class DebouncedStatusTracker {
     }
 }
 
-// MARK: - SailorStatus extensions
+// MARK: - AgentStatus extensions
 
-extension SailorStatus {
+extension AgentStatus {
     /// Rollup priority. `waiting` (agent blocked on the user) ranks highest so it
     /// bubbles to the worktree badge — it is the state most in need of attention.
     var priority: UInt8 {
@@ -338,7 +338,7 @@ extension SailorStatus {
         self == .running || self == .waiting
     }
 
-    static func highestPriority(_ statuses: [SailorStatus]) -> SailorStatus {
+    static func highestPriority(_ statuses: [AgentStatus]) -> AgentStatus {
         statuses.max(by: { $0.priority < $1.priority }) ?? .unknown
     }
 }

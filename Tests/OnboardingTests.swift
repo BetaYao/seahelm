@@ -5,7 +5,7 @@ final class OnboardingConfigTests: XCTestCase {
     func testFreshConfigStartsOnboardingIncomplete() {
         let config = Config()
         XCTAssertFalse(config.onboardingCompleted)
-        XCTAssertEqual(config.defaultAgent, SailorType.claudeCode.rawValue)
+        XCTAssertEqual(config.defaultAgent, AgentType.claudeCode.rawValue)
         XCTAssertFalse(config.agentYolo)
         XCTAssertTrue(config.enabledHookAgents.isEmpty)
         XCTAssertEqual(config.notificationSound, "default")
@@ -44,14 +44,14 @@ final class OnboardingConfigTests: XCTestCase {
     func testOnboardingFieldsRoundTrip() throws {
         var original = Config()
         original.onboardingCompleted = true
-        original.defaultAgent = SailorType.openCode.rawValue
+        original.defaultAgent = AgentType.openCode.rawValue
         original.agentYolo = true
         original.enabledHookAgents = ["opencode"]
         original.notificationSound = "defaultCritical"
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Config.self, from: data)
         XCTAssertEqual(decoded.onboardingCompleted, true)
-        XCTAssertEqual(decoded.defaultAgent, SailorType.openCode.rawValue)
+        XCTAssertEqual(decoded.defaultAgent, AgentType.openCode.rawValue)
         XCTAssertTrue(decoded.agentYolo)
         XCTAssertEqual(decoded.enabledHookAgents, ["opencode"])
         XCTAssertEqual(decoded.notificationSound, "defaultCritical")
@@ -168,18 +168,18 @@ final class GhosttyConfigImporterTests: XCTestCase {
 
 final class AgentYoloLaunchTests: XCTestCase {
     func testClaudeYoloFlagAppended() {
-        let cmd = SailorType.claudeCode.launchCommand(withTask: "hi", agentYolo: true)!
+        let cmd = AgentType.claudeCode.launchCommand(withTask: "hi", agentYolo: true)!
         XCTAssertTrue(cmd.contains("--dangerously-skip-permissions"))
         XCTAssertTrue(cmd.contains("'hi'") || cmd.contains("hi"))
     }
 
     func testYoloOffOmitsFlag() {
-        let cmd = SailorType.claudeCode.launchCommand(withTask: "", agentYolo: false)!
+        let cmd = AgentType.claudeCode.launchCommand(withTask: "", agentYolo: false)!
         XCTAssertFalse(cmd.contains("--dangerously-skip-permissions"))
     }
 
     func testCodexYoloFlag() {
-        let cmd = SailorType.codex.launchCommand(withTask: "", agentYolo: true)!
+        let cmd = AgentType.codex.launchCommand(withTask: "", agentYolo: true)!
         XCTAssertTrue(cmd.contains("--dangerously-bypass-approvals-and-sandbox"))
     }
 }

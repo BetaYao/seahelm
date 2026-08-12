@@ -52,9 +52,9 @@ final class PaneProgressBar: NSView {
         // here as it does on the pane's status dot.
         let color: NSColor
         switch progress.state {
-        case .error:   color = SailorStatus.error.color
-        case .pause:   color = SailorStatus.waiting.color
-        default:       color = SailorStatus.running.color
+        case .error:   color = AgentStatus.error.color
+        case .pause:   color = AgentStatus.waiting.color
+        default:       color = AgentStatus.running.color
         }
 
         // Progress updates arrive per-chunk from the running command; implicit

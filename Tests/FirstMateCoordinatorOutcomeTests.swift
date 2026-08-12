@@ -3,8 +3,8 @@ import XCTest
 
 final class FirstMateCoordinatorOutcomeTests: XCTestCase {
     private func outcome(kind: NormalizedEventKind, changed: Bool, completion: Bool,
-                         newStatus: SailorStatus) -> IngestOutcome {
-        let info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
+                         newStatus: AgentStatus) -> IngestOutcome {
+        let info = PaneInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
                               project: "p", branch: "b", status: newStatus, lastMessage: "",
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())

@@ -79,7 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // constructs them any more. iMessage is the phone-side transport now.
         if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
             let channel = IMessageChannel(config: imessageConfig)
-            ShipLog.shared.registerChannel(channel)
+            AgentRegistry.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] iMessage bridge connecting (\(imessageConfig.allowedHandles.count) allowed handles)")
         }

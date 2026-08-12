@@ -1,12 +1,12 @@
 import Foundation
 
-struct SailorInfo {
+struct PaneInfo {
     let id: String                     // terminal ID (Station.id)
     let worktreePath: String           // associated worktree path
-    var agentType: SailorType           // detected from terminal content
+    var agentType: AgentType           // detected from terminal content
     let project: String                // repo display name
     let branch: String                 // git branch
-    var status: SailorStatus            // current status
+    var status: AgentStatus            // current status
     var lastMessage: String            // latest message (may be a scanned command line)
     /// The agent's final prose (Stop hook `last_assistant_message`). Set only by
     /// noteAssistantMessage and never overwritten by screen scans, so suggestion
@@ -17,12 +17,12 @@ struct SailorInfo {
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
     weak var station: Station? // weak ref, MainWindowController owns
-    var channel: SailorChannel?         // communication channel (strong ref, ShipLog owns)
+    var channel: AgentChannel?         // communication channel (strong ref, AgentRegistry owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
     var activityEvents: [ActivityEvent] = []
-    var scanStatus: SailorStatus = .unknown   // latest screen-scan observation (component)
-    var hookStatus: SailorStatus = .unknown   // webhook-accumulated inference (component)
+    var scanStatus: AgentStatus = .unknown   // latest screen-scan observation (component)
+    var hookStatus: AgentStatus = .unknown   // webhook-accumulated inference (component)
 
     /// Total duration computed live from startedAt
     var totalDuration: TimeInterval {

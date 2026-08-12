@@ -1,9 +1,9 @@
 import XCTest
 @testable import seahelm
 
-final class SailorReducerTests: XCTestCase {
-    private func makeInfo(status: SailorStatus = .unknown, message: String = "") -> SailorInfo {
-        SailorInfo(id: "t1", worktreePath: "/wt", agentType: .unknown,
+final class PaneReducerTests: XCTestCase {
+    private func makeInfo(status: AgentStatus = .unknown, message: String = "") -> PaneInfo {
+        PaneInfo(id: "t1", worktreePath: "/wt", agentType: .unknown,
                    project: "proj", branch: "main", status: status, lastMessage: message,
                    commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                    channel: nil, taskProgress: TaskProgress())
@@ -11,7 +11,7 @@ final class SailorReducerTests: XCTestCase {
 
     func testApplyDetectsStatusChange() {
         let info = makeInfo(status: .idle, message: "old")
-        let out = SailorReducer.apply(to: info, status: .running, lastMessage: "new",
+        let out = PaneReducer.apply(to: info, status: .running, lastMessage: "new",
                                       roundDuration: 5, tasks: [], lastUserPrompt: "")
         XCTAssertTrue(out.changed)
         XCTAssertEqual(out.previousStatus, .idle)
@@ -22,7 +22,7 @@ final class SailorReducerTests: XCTestCase {
 
     func testApplyNoChangeWhenIdentical() {
         let info = makeInfo(status: .running, message: "same")
-        let out = SailorReducer.apply(to: info, status: .running, lastMessage: "same",
+        let out = PaneReducer.apply(to: info, status: .running, lastMessage: "same",
                                       roundDuration: 0, tasks: [], lastUserPrompt: "")
         XCTAssertFalse(out.changed)
     }
@@ -30,7 +30,7 @@ final class SailorReducerTests: XCTestCase {
     func testApplyKeepsExistingUserPromptWhenBlank() {
         var info = makeInfo()
         info.lastUserPrompt = "keep me"
-        let out = SailorReducer.apply(to: info, status: .running, lastMessage: "m",
+        let out = PaneReducer.apply(to: info, status: .running, lastMessage: "m",
                                       roundDuration: 0, tasks: [], lastUserPrompt: "")
         XCTAssertEqual(out.info.lastUserPrompt, "keep me")
     }

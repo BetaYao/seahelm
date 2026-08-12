@@ -48,7 +48,7 @@ final class TabCoordinatorTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusAggregator = WorktreeStatusAggregator()
-        let infos = coordinator.buildSailorDisplayInfos()
+        let infos = coordinator.buildWorktreeRowInfos()
         XCTAssertTrue(infos.isEmpty)
     }
 

@@ -1,6 +1,6 @@
 import AppKit
 
-enum SailorStatus: String, Codable {
+enum AgentStatus: String, Codable {
     case running = "Running"
     case idle = "Idle"
     case waiting = "Waiting"
@@ -34,7 +34,7 @@ enum SailorStatus: String, Codable {
         }
     }
 
-    /// Text glyph for notifications, the island, and ShipLog markdown — plain
+    /// Text glyph for notifications, the island, and AgentRegistry markdown — plain
     /// characters that read well inline (distinct from the dashboard `glyph`).
     var icon: String {
         switch self {

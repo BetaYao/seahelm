@@ -21,11 +21,11 @@ struct AgentRef: Equatable {
     let title: String
     /// Carried so a listing can show state without a second lookup. Defaulted
     /// because the desktop paths that only select never read them.
-    let status: SailorStatus
+    let status: AgentStatus
     let lastMessage: String
 
     init(id: String, project: String, branch: String, type: String, title: String,
-         status: SailorStatus = .unknown, lastMessage: String = "") {
+         status: AgentStatus = .unknown, lastMessage: String = "") {
         self.id = id
         self.project = project
         self.branch = branch

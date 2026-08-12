@@ -507,7 +507,7 @@ enum Bare {
 
     /// (glyph, short name, colour) for the agent owning a worktree.
     static func agent(worktreePath: String) -> (glyph: String, name: String, color: NSColor) {
-        let type = ShipLog.shared.sailor(forWorktree: worktreePath)?.agentType
+        let type = AgentRegistry.shared.pane(forWorktree: worktreePath)?.agentType
         let glyph = type?.tabGlyph ?? "✻"
         let name: String
         switch type {
@@ -774,17 +774,17 @@ final class OrderCardView: NSTableCellView {
 
         // Header: repo (colored tag) · status dot · this pane's session title.
         // No agent-type glyph/name — the repo + session title identify the order.
-        let sailor = ShipLog.shared.sailor(forWorktree: order.action.worktreePath)
+        let pane = AgentRegistry.shared.pane(forWorktree: order.action.worktreePath)
         glyphLabel.stringValue = order.action.project
         glyphLabel.textColor = ProjectColor.color(for: order.action.project)
         glyphLabel.isHidden = order.action.project.isEmpty
 
         agentLabel.stringValue = "\u{25CF}"
-        agentLabel.textColor = (sailor?.status ?? .unknown).color
+        agentLabel.textColor = (pane?.status ?? .unknown).color
 
         let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: order.action.worktreePath)
         let branch = order.action.branch.isEmpty ? order.action.project : order.action.branch
-        taskLabel.stringValue = [currentPaneTitle, cachedTitle, sailor?.lastUserPrompt].compactMap { $0 }
+        taskLabel.stringValue = [currentPaneTitle, cachedTitle, pane?.lastUserPrompt].compactMap { $0 }
             .first(where: { !$0.isEmpty }) ?? branch
 
         let dangerous = BridgePanelViewController.dangerousKinds.contains(order.action.kind)

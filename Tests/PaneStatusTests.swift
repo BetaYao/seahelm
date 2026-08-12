@@ -5,9 +5,9 @@ final class PaneStatusTests: XCTestCase {
 
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    private func pane(_ index: Int, _ id: String, _ status: SailorStatus,
+    private func pane(_ index: Int, _ id: String, _ status: AgentStatus,
                       message: String = "", changedAt: Date,
-                      agentType: SailorType = .unknown) -> PaneStatus {
+                      agentType: AgentType = .unknown) -> PaneStatus {
         PaneStatus(paneIndex: index, terminalID: id, status: status, lastMessage: message,
                    lastUserPrompt: "", lastUpdated: changedAt, statusChangedAt: changedAt,
                    agentType: agentType)

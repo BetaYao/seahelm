@@ -1,17 +1,17 @@
 import Foundation
 
-protocol ShipLogDelegate: AnyObject {
-    func agentDidUpdate(_ info: SailorInfo)
+protocol AgentRegistryDelegate: AnyObject {
+    func agentDidUpdate(_ info: PaneInfo)
 }
 
 /// Single source of truth for all agent information.
-/// Consumers query ShipLog instead of assembling data from multiple sources.
+/// Consumers query AgentRegistry instead of assembling data from multiple sources.
 /// Also manages communication channels for each agent.
 /// Primary key: terminal ID (Station.id).
-class ShipLog {
-    static let shared = ShipLog()
+class AgentRegistry {
+    static let shared = AgentRegistry()
 
-    weak var delegate: ShipLogDelegate?
+    weak var delegate: AgentRegistryDelegate?
 
     /// Single output stream: one IngestOutcome per recorded event, delivered on the main thread.
     var onOutcome: ((IngestOutcome) -> Void)?
@@ -41,13 +41,13 @@ class ShipLog {
     /// `var` so tests can drive the reclaim deterministically.
     static var hookWaitingGrace: TimeInterval = 3.0
 
-    private var agents: [String: SailorInfo] = [:]       // keyed by terminal ID
+    private var agents: [String: PaneInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
     /// Strong references to channels (keyed by terminal ID)
-    private var channels: [String: SailorChannel] = [:]
+    private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
     /// External channels (WeCom, future: Slack, etc.) — keyed by channelId
     private var externalChannels: [String: ExternalChannel] = [:]
@@ -63,7 +63,7 @@ class ShipLog {
     /// Test helper: register an agent entry without a real Station.
     func registerForTesting(terminalID: String, worktreePath: String, branch: String, project: String) {
         lock.lock(); defer { lock.unlock() }
-        agents[terminalID] = SailorInfo(
+        agents[terminalID] = PaneInfo(
             id: terminalID, worktreePath: worktreePath, agentType: .unknown,
             project: project, branch: branch, status: .unknown, lastMessage: "",
             commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
@@ -84,14 +84,14 @@ class ShipLog {
         let terminalID = station.id
 
         // Create a default channel if we have a session name
-        var channel: SailorChannel?
+        var channel: AgentChannel?
         if let paneSessionKey = paneSessionKey {
             channel = ZmxChannel(paneSessionKey: paneSessionKey)
             channels[terminalID] = channel
         }
         backendsByPath[worktreePath] = backend
 
-        let info = SailorInfo(
+        let info = PaneInfo(
             id: terminalID,
             worktreePath: worktreePath,
             agentType: .unknown,
@@ -181,7 +181,7 @@ class ShipLog {
 
     // MARK: - Updates
 
-    func updateStatus(terminalID: String, status: SailorStatus,
+    func updateStatus(terminalID: String, status: AgentStatus,
                       lastMessage: String, roundDuration: TimeInterval,
                       tasks: [TaskItem] = [], lastUserPrompt: String = "") {
         lock.lock()
@@ -189,7 +189,7 @@ class ShipLog {
             lock.unlock()
             return
         }
-        let reduced = SailorReducer.apply(to: current, status: status,
+        let reduced = PaneReducer.apply(to: current, status: status,
                                           lastMessage: lastMessage, roundDuration: roundDuration,
                                           tasks: tasks, lastUserPrompt: lastUserPrompt)
         let info = reduced.info
@@ -213,23 +213,23 @@ class ShipLog {
     ///   - screen_only / unknown: screen only.
     /// An urgent state (waiting/error) from either source always surfaces — never
     /// hide a blocked or errored agent behind an authority rule.
-    static func arbitrate(scan: SailorStatus, hook: SailorStatus, agentType: SailorType) -> SailorStatus {
+    static func arbitrate(scan: AgentStatus, hook: AgentStatus, agentType: AgentType) -> AgentStatus {
         arbitrateDetailed(scan: scan, hook: hook, agentType: agentType).status
     }
 
     /// Whether the agent's manifest makes the screen authoritative (hooks only fill
     /// gaps). Defaults to true when no manifest is registered.
-    static func isSessionOnly(_ agentType: SailorType) -> Bool {
+    static func isSessionOnly(_ agentType: AgentType) -> Bool {
         let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
         return authority == "session_only"
     }
 
     /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
     /// `screen`) and the pane's authority — for `pane.explain`.
-    static func arbitrateDetailed(scan: SailorStatus, hook: SailorStatus, agentType: SailorType)
-        -> (status: SailorStatus, decidedBy: String, authority: String) {
+    static func arbitrateDetailed(scan: AgentStatus, hook: AgentStatus, agentType: AgentType)
+        -> (status: AgentStatus, decidedBy: String, authority: String) {
         let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
-        let urgent = SailorStatus.highestPriority([scan, hook].filter { $0.isUrgent })
+        let urgent = AgentStatus.highestPriority([scan, hook].filter { $0.isUrgent })
         if urgent.isUrgent { return (urgent, "urgent", authority) }
         switch authority {
         case "full_lifecycle": return hook != .unknown ? (hook, "hook", authority) : (scan, "screen", authority)
@@ -377,7 +377,7 @@ class ShipLog {
     }
 
     /// Whether two snapshots agree on every field an observer can render.
-    private static func displayedStateUnchanged(_ a: SailorInfo, _ b: SailorInfo) -> Bool {
+    private static func displayedStateUnchanged(_ a: PaneInfo, _ b: PaneInfo) -> Bool {
         a.status == b.status
             && a.lastMessage == b.lastMessage
             && a.lastUserPrompt == b.lastUserPrompt
@@ -498,7 +498,7 @@ class ShipLog {
     /// - shell task (isShellTask) → any type allowed
     /// - AI agent (isAIAgent) → only another AI agent allowed (no demotion)
     /// When type supports hooks, upgrades backend channel → HooksChannel.
-    func updateDetection(terminalID: String, commandLine: String?, agentType: SailorType) {
+    func updateDetection(terminalID: String, commandLine: String?, agentType: AgentType) {
         lock.lock()
         guard var info = agents[terminalID] else {
             lock.unlock()
@@ -712,7 +712,7 @@ class ShipLog {
     }
 
     /// Get the channel for a specific agent (for direct access)
-    func channel(for terminalID: String) -> SailorChannel? {
+    func channel(for terminalID: String) -> AgentChannel? {
         lock.lock()
         defer { lock.unlock() }
         return channels[terminalID]
@@ -744,7 +744,7 @@ class ShipLog {
         // must fall back to cwd matching.
         if let paneTid, let paneStation, agents[paneTid] == nil,
            let sibling = matchingTIDs?.first.flatMap({ agents[$0] }) {
-            agents[paneTid] = SailorInfo(
+            agents[paneTid] = PaneInfo(
                 id: paneTid, worktreePath: sibling.worktreePath, agentType: .unknown,
                 project: sibling.project, branch: sibling.branch, status: .unknown,
                 lastMessage: "", commandLine: nil, roundDuration: 0, startedAt: nil,
@@ -784,7 +784,7 @@ class ShipLog {
 
         // Every hook source that names a known agent types the pane — previously
         // only claude-code/codex did, so opencode and pi hooks set nothing.
-        let hookAgentType = SailorType.fromHookSource(event.source)
+        let hookAgentType = AgentType.fromHookSource(event.source)
         if hookAgentType != .unknown {
             updateDetection(terminalID: tid, commandLine: nil, agentType: hookAgentType)
         }
@@ -886,15 +886,15 @@ class ShipLog {
 
     // MARK: - Queries
 
-    func allSailors() -> [SailorInfo] {
+    func allPanes() -> [PaneInfo] {
         lock.lock()
         defer { lock.unlock() }
 
         return orderedIDs.compactMap { agents[$0] }
     }
 
-    /// Look up sailor by terminal ID
-    func sailor(for terminalID: String) -> SailorInfo? {
+    /// Look up pane by terminal ID
+    func pane(for terminalID: String) -> PaneInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -902,7 +902,7 @@ class ShipLog {
     }
 
     /// Convenience lookup by worktree path via reverse index
-    func sailor(forWorktree worktreePath: String) -> SailorInfo? {
+    func pane(forWorktree worktreePath: String) -> PaneInfo? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -912,14 +912,14 @@ class ShipLog {
 
     /// Every agent in a worktree, in registration order. A worktree holds one
     /// agent per split pane, which is what `/agents` lists.
-    func sailors(forWorktree worktreePath: String) -> [SailorInfo] {
+    func panes(forWorktree worktreePath: String) -> [PaneInfo] {
         lock.lock()
         defer { lock.unlock() }
 
         return (worktreeIndex[worktreePath] ?? []).compactMap { agents[$0] }
     }
 
-    func sailorsForProject(_ project: String) -> [SailorInfo] {
+    func panesForProject(_ project: String) -> [PaneInfo] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -936,7 +936,7 @@ class ShipLog {
     ///   - StopFailure → "failed"
     ///   - SubagentStart → update progress
     func updateTodoFromWebhook(_ event: WebhookEvent) {
-        // Not yet implemented — will be filled when ShipLog status
+        // Not yet implemented — will be filled when AgentRegistry status
         // pipeline is connected to TodoStore.
     }
 
@@ -984,7 +984,7 @@ class ShipLog {
     /// that used to exist (`/send` here vs `/order` there, and so on).
     ///
     /// Injected by MainWindowController because routing needs the worktree list
-    /// and the repo paths, which live up there — ShipLog stays free of UI. Returns
+    /// and the repo paths, which live up there — AgentRegistry stays free of UI. Returns
     /// false for a verb it doesn't own, leaving the chat-only verbs below (`/status`,
     /// `/idea`) to handle it: those have no cockpit equivalent because on the
     /// desktop you just look at the dashboard.
@@ -1101,7 +1101,7 @@ class ShipLog {
             reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")
 
         case "status":
-            let agents = allSailors()
+            let agents = allPanes()
             if agents.isEmpty {
                 reply(to: cmd.rawMessage, content: "No agents running.")
                 return

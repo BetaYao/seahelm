@@ -8,15 +8,15 @@ final class PaneTitleResolverTests: XCTestCase {
             return XCTFail("expected valid AgentSessionRef")
         }
         station.agentSessionRef = ref
-        var sailor = makeSailor(
+        var pane = makePane(
             agentType: .claudeCode,
             prompt: "old prompt",
             branch: "feat/x",
             commandLine: nil
         )
-        sailor.station = station
+        pane.station = station
         let title = PaneTitleResolver.title(
-            for: sailor,
+            for: pane,
             sessionTitle: { _, _ in "Fix login flake" }
         )
         XCTAssertEqual(title, "Fix login flake")
@@ -30,11 +30,11 @@ final class PaneTitleResolverTests: XCTestCase {
             return XCTFail("expected valid AgentSessionRef")
         }
         station.agentSessionRef = ref
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x", commandLine: nil)
-        sailor.station = station
+        var pane = makePane(agentType: .claudeCode, prompt: "", branch: "feat/x", commandLine: nil)
+        pane.station = station
 
         let title = PaneTitleResolver.title(
-            for: sailor,
+            for: pane,
             sessionTitle: { _, _ in "  Plan mode\n\n<options>\n\t<option>Option 1</option>\n</options>  " }
         )
 
@@ -43,7 +43,7 @@ final class PaneTitleResolverTests: XCTestCase {
     }
 
     func testMultiLineShellCommandCollapsesToOneLine() {
-        let sailor = makeSailor(
+        let pane = makePane(
             agentType: .shellCommand,
             prompt: "",
             branch: "main",
@@ -51,20 +51,20 @@ final class PaneTitleResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "git commit -m 'first second'"
         )
     }
 
     func testShellPrefersCommandOverBranch() {
-        let sailor = makeSailor(
+        let pane = makePane(
             agentType: .shellCommand,
             prompt: "",
             branch: "main",
             commandLine: "brew update"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "brew update"
         )
     }
@@ -72,9 +72,9 @@ final class PaneTitleResolverTests: XCTestCase {
     func testAgentWithoutSessionOrOscFallsBackToBranch() {
         // Prompt is no longer a per-pane title source — an agent with no session
         // title and no OSC title reads as its branch.
-        let sailor = makeSailor(agentType: .claudeCode, prompt: "Do the thing", branch: "feat/x")
+        let pane = makePane(agentType: .claudeCode, prompt: "Do the thing", branch: "feat/x")
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "feat/x"
         )
     }
@@ -86,10 +86,10 @@ final class PaneTitleResolverTests: XCTestCase {
         let station = Station()
         station.persistedTitle = "Add grouping mode"
         station.titleBridgeActive = true
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
-        sailor.station = station
+        var pane = makePane(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "Add grouping mode"
         )
     }
@@ -102,10 +102,10 @@ final class PaneTitleResolverTests: XCTestCase {
         let station = Station()
         station.persistedTitle = "Add grouping mode"
         station.titleBridgeActive = false
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
-        sailor.station = station
+        var pane = makePane(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "feat/x"
         )
     }
@@ -116,10 +116,10 @@ final class PaneTitleResolverTests: XCTestCase {
         let station = Station()
         station.titleBridgeActive = true
         station.setOscTitle("✳ Wire up the resolver")
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x",
+        var pane = makePane(agentType: .claudeCode, prompt: "", branch: "feat/x",
                                 worktreePath: "/Users/me/proj")
-        sailor.station = station
-        _ = PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil })
+        pane.station = station
+        _ = PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil })
         XCTAssertFalse(station.titleBridgeActive)
         XCTAssertEqual(station.persistedTitle, "Wire up the resolver")
     }
@@ -127,26 +127,26 @@ final class PaneTitleResolverTests: XCTestCase {
     func testStrongTitleWritesBackToPersistedTitle() {
         let station = Station()
         station.setOscTitle("✳ Wire up the resolver")
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "", branch: "main")
-        sailor.station = station
-        _ = PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil })
+        var pane = makePane(agentType: .claudeCode, prompt: "", branch: "main")
+        pane.station = station
+        _ = PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil })
         XCTAssertEqual(station.persistedTitle, "Wire up the resolver")
     }
 
     func testFallsBackToRepoThenPath() {
         let station = Station()
         station.setPwd("/Users/me/.cursor/plugins/cache/foo")
-        var sailor = makeSailor(
+        var pane = makePane(
             agentType: .shellCommand,
             prompt: "",
             branch: "",
             commandLine: nil,
             worktreePath: "/Users/me/proj"
         )
-        sailor.station = station
+        pane.station = station
         // Repo name wins as the default before falling through to the path.
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "proj"
         )
     }
@@ -157,16 +157,16 @@ final class PaneTitleResolverTests: XCTestCase {
         // must win, not the path.
         let station = Station()
         station.setOscTitle("matt.chow@host:/tmp/wt")
-        var sailor = makeSailor(
+        var pane = makePane(
             agentType: .claudeCode,
             prompt: "",
             branch: "main",
             commandLine: "brew update",
             worktreePath: "/tmp/wt"
         )
-        sailor.station = station
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "brew update"
         )
     }
@@ -179,16 +179,16 @@ final class PaneTitleResolverTests: XCTestCase {
         let station = Station()
         station.setOscTitle("matt.chow@host:/tmp/wt")
         station.persistedTitle = "Add grouping mode"
-        var sailor = makeSailor(
+        var pane = makePane(
             agentType: .claudeCode,
             prompt: "",
             branch: "main",
             commandLine: nil,
             worktreePath: "/tmp/wt"
         )
-        sailor.station = station
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "main"
         )
     }
@@ -206,14 +206,14 @@ final class PaneTitleResolverTests: XCTestCase {
     }
 
     func testAgentIgnoresShellCommandLine() {
-        let sailor = makeSailor(
+        let pane = makePane(
             agentType: .cursor,
             prompt: "",
             branch: "ops/rds-cpu-degrade",
             commandLine: "cd ~/.cursor/plugins/cache"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "ops/rds-cpu-degrade"
         )
     }
@@ -221,14 +221,14 @@ final class PaneTitleResolverTests: XCTestCase {
     func testShellUsesCommandLineEvenWhenSiblingIsAgent() {
         // Per-pane: shellCommand must win over branch even if an agent shares
         // the worktree (isAgentPane must not use worktree-scoped agent type).
-        let sailor = makeSailor(
+        let pane = makePane(
             agentType: .shellCommand,
             prompt: "",
             branch: "main",
             commandLine: "brew update"
         )
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "brew update"
         )
     }
@@ -254,10 +254,10 @@ final class PaneTitleResolverTests: XCTestCase {
     func testAgentPrefersOscTitleOverWorktreeSessionTitle() {
         let station = Station()
         station.setOscTitle("✳ 修复重启后的onboarding重复弹出")
-        var sailor = makeSailor(agentType: .claudeCode, prompt: "old prompt", branch: "main")
-        sailor.station = station
+        var pane = makePane(agentType: .claudeCode, prompt: "old prompt", branch: "main")
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "修复重启后的onboarding重复弹出"
         )
     }
@@ -268,10 +268,10 @@ final class PaneTitleResolverTests: XCTestCase {
         for raw in titles {
             let station = Station()
             station.setOscTitle(raw)
-            var sailor = makeSailor(agentType: .claudeCode, prompt: "p", branch: "main")
-            sailor.station = station
+            var pane = makePane(agentType: .claudeCode, prompt: "p", branch: "main")
+            pane.station = station
             XCTAssertEqual(
-                PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+                PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
                 "Update title",
                 "failed for \(raw)"
             )
@@ -282,7 +282,7 @@ final class PaneTitleResolverTests: XCTestCase {
         // Shell panes keep using the command line.
         let shellStation = Station()
         shellStation.setOscTitle("some-shell-title")
-        var shell = makeSailor(
+        var shell = makePane(
             agentType: .shellCommand, prompt: "", branch: "main", commandLine: "brew update"
         )
         shell.station = shellStation
@@ -294,7 +294,7 @@ final class PaneTitleResolverTests: XCTestCase {
         // An agent parking the cwd in the title falls through to the real chain.
         let agentStation = Station()
         agentStation.setOscTitle("/tmp/wt")
-        var agent = makeSailor(agentType: .claudeCode, prompt: "", branch: "feat/x")
+        var agent = makePane(agentType: .claudeCode, prompt: "", branch: "feat/x")
         agent.station = agentStation
         XCTAssertEqual(
             PaneTitleResolver.title(for: agent, sessionTitle: { _, _ in nil }),
@@ -311,13 +311,13 @@ final class PaneTitleResolverTests: XCTestCase {
         let station = Station()
         station.setOscTitle("seahelm")
         station.setPwd("/Volumes/openbeta/workspace/seahelm")
-        var sailor = makeSailor(
+        var pane = makePane(
             agentType: .codex, prompt: "", branch: "task/cloud-probe-jiang-za",
             commandLine: nil,
             worktreePath: "/Volumes/openbeta/workspace/saas-mono-worktrees/task/cloud-probe-jiang-za")
-        sailor.station = station
+        pane.station = station
         XCTAssertEqual(
-            PaneTitleResolver.title(for: sailor, sessionTitle: { _, _ in nil }),
+            PaneTitleResolver.title(for: pane, sessionTitle: { _, _ in nil }),
             "task/cloud-probe-jiang-za")
     }
 
@@ -359,14 +359,14 @@ final class PaneTitleResolverTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeSailor(
-        agentType: SailorType,
+    private func makePane(
+        agentType: AgentType,
         prompt: String,
         branch: String,
         commandLine: String? = nil,
         worktreePath: String = "/tmp/wt"
-    ) -> SailorInfo {
-        SailorInfo(
+    ) -> PaneInfo {
+        PaneInfo(
             id: UUID().uuidString,
             worktreePath: worktreePath,
             agentType: agentType,

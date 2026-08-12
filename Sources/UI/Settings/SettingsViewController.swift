@@ -313,7 +313,7 @@ class SettingsViewController: NSViewController {
         return [
             SettingsGroupView(title: "Projects", rows: [
                 SettingsRow.stacked(nil,
-                                    subtitle: "Repositories seahelm watches. Each becomes a project; its worktrees become worktrees.",
+                                    subtitle: "Repositories seahelm watches. Each becomes a project; its git worktrees are listed under it.",
                                     content: SettingsControls.surface(pathScrollView), height: 140),
                 SettingsRow.actions([addButton, removeButton]),
             ]),
@@ -950,7 +950,7 @@ class SettingsViewController: NSViewController {
         // Parse agent detection JSON
         let jsonString = ruleTextView.string
         if let data = jsonString.data(using: .utf8),
-           let agentConfig = try? JSONDecoder().decode(SailorDetectConfig.self, from: data) {
+           let agentConfig = try? JSONDecoder().decode(AgentDetectConfig.self, from: data) {
             config.agentDetect = agentConfig
         }
 

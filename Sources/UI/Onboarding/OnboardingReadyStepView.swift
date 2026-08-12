@@ -36,7 +36,7 @@ final class OnboardingReadyStepView: NSView {
         summaryStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         installStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        let agent = SailorType(rawValue: config.defaultAgent)?.displayName ?? config.defaultAgent
+        let agent = AgentType(rawValue: config.defaultAgent)?.displayName ?? config.defaultAgent
         let theme = (ThemeMode(rawValue: config.themeMode) ?? .system).rawValue.capitalized
         summaryStack.addArrangedSubview(makeSummaryChip(label: "Default agent", value: agent))
         summaryStack.addArrangedSubview(makeSummaryChip(label: "Appearance", value: theme))

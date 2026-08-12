@@ -1,10 +1,10 @@
 import Foundation
 
-/// Communication channel between ShipLog and a sub-agent.
+/// Communication channel between AgentRegistry and a sub-agent.
 /// Each agent gets one channel based on its type and capabilities.
-protocol SailorChannel: AnyObject {
+protocol AgentChannel: AnyObject {
     /// The type of channel (for diagnostics and logging)
-    var channelType: SailorChannelType { get }
+    var channelType: AgentChannelType { get }
 
     /// Send a text command to the agent's terminal
     func sendCommand(_ command: String)
@@ -16,11 +16,11 @@ protocol SailorChannel: AnyObject {
     var supportsStructuredEvents: Bool { get }
 }
 
-enum SailorChannelType: String {
+enum AgentChannelType: String {
     case zmx        // Default: read/write via zmx commands
     case hooks      // Claude Code hooks: structured events via webhook + backend input channel
 }
 
-extension SailorChannel {
+extension AgentChannel {
     var supportsStructuredEvents: Bool { false }
 }
