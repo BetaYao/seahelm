@@ -11,6 +11,22 @@ final class DirectoryWatcher {
     private let onChange: ([String]) -> Void
     private let queue = DispatchQueue(label: "seahelm.filetree.watcher")
 
+    /// Directories whose churn can never change what the tree should show, and
+    /// which produce most of the events in a worktree being built in. A single
+    /// `npm install` or `xcodebuild` writes tens of thousands of files into
+    /// these; the tree only needs to know that something outside them changed.
+    static let ignoredDirectories = [".git", "node_modules", ".build", "DerivedData"]
+
+    /// Whether a batch of changed paths contains anything the tree should redraw
+    /// for. Pure so the filter can be tested without a live stream.
+    static func hasRelevantChange(in paths: [String]) -> Bool {
+        paths.contains { path in
+            !ignoredDirectories.contains { dir in
+                path.contains("/\(dir)/") || path.hasSuffix("/\(dir)")
+            }
+        }
+    }
+
     /// Returns nil if the FSEvents stream could not be created.
     init?(path: String, onChange: @escaping ([String]) -> Void) {
         self.onChange = onChange
@@ -20,16 +36,20 @@ final class DirectoryWatcher {
             info: Unmanaged.passUnretained(self).toOpaque(),
             retain: nil, release: nil, copyDescription: nil
         )
+        // Directory granularity, not `kFSEventStreamCreateFlagFileEvents`. The
+        // tree reloads a directory as a unit, so per-file events bought nothing
+        // and cost one event per file written — with a build running in the
+        // worktree that is the difference between a handful of events and tens
+        // of thousands, all of which fseventsd has to record and deliver.
         let flags = UInt32(
-            kFSEventStreamCreateFlagFileEvents
-            | kFSEventStreamCreateFlagNoDefer
+            kFSEventStreamCreateFlagNoDefer
             | kFSEventStreamCreateFlagUseCFTypes
         )
         let callback: FSEventStreamCallback = { _, info, numEvents, eventPaths, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<DirectoryWatcher>.fromOpaque(info).takeUnretainedValue()
             let paths = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
-            guard numEvents > 0 else { return }
+            guard numEvents > 0, DirectoryWatcher.hasRelevantChange(in: paths) else { return }
             watcher.onChange(paths)
         }
         guard let stream = FSEventStreamCreate(
@@ -237,11 +257,9 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         watcher?.stop()
         watcher = nil
         guard let path else { return }
-        watcher = DirectoryWatcher(path: path) { [weak self] paths in
-            // Ignore pure-.git churn (index/commit writes) — it would otherwise
-            // reload the tree constantly with no user-visible change.
-            let relevant = paths.contains { !$0.contains("/.git/") && !$0.hasSuffix("/.git") }
-            guard relevant else { return }
+        watcher = DirectoryWatcher(path: path) { [weak self] _ in
+            // The watcher already dropped batches that were only build or .git
+            // churn, so anything arriving here is worth a redraw.
             self?.scheduleExternalRefresh()
         }
     }
