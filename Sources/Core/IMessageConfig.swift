@@ -15,7 +15,7 @@ struct IMessageConfig: Codable, Equatable {
     /// every inbound message.
     var allowedHandles: [String]
 
-    /// Where `ShipLog.broadcast` (agent-finished notifications) is sent. Falls
+    /// Where `AgentRegistry.broadcast` (agent-finished notifications) is sent. Falls
     /// back to the first allowed handle so the common single-user setup needs
     /// no extra field.
     var defaultRecipient: String?

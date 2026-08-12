@@ -138,9 +138,9 @@ final class WindowChromeController: NSViewController {
     }
 
     /// `repo · branch` for the columns on screen. Only surfaces in edit mode, where
-    /// the per-column tab strips already name the panes but nothing names the cabin.
-    func updateCabinContext(_ context: String) {
-        terminalHeader.setCabinContext(context)
+    /// the per-column tab strips already name the panes but nothing names the worktree.
+    func updateWorktreeContext(_ context: String) {
+        terminalHeader.setWorktreeContext(context)
     }
 
     /// Edit mode's column tab strips live on the header row, so the two-column

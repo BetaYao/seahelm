@@ -260,7 +260,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
     }()
 
     // Status detection
-    private let statusAggregator = CabinStatusAggregator()
+    private let statusAggregator = WorktreeStatusAggregator()
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.aggregator = statusAggregator
@@ -270,13 +270,13 @@ class MainWindowController: NSWindowController, MailCommandContext {
         // so a phone hears "agent finished" without seahelm owning a transport or
         // push certificate. No-op until a channel is registered.
         NotificationManager.shared.onDeliverExternal = { status, title, subtitle, body in
-            ShipLog.shared.broadcast(
+            AgentRegistry.shared.broadcast(
                 "\(status.icon) **\(title)**\n\(subtitle)\n\n\(body)",
                 format: .markdown
             )
         }
-        ShipLog.shared.chatCommandRoute = makeChatCommandRoute()
-        ShipLog.shared.ruleTriggerRoute = { [weak self] prompt, target in
+        AgentRegistry.shared.chatCommandRoute = makeChatCommandRoute()
+        AgentRegistry.shared.ruleTriggerRoute = { [weak self] prompt, target in
             self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
         }
         statusAggregator.delegate = self
@@ -623,8 +623,8 @@ class MainWindowController: NSWindowController, MailCommandContext {
     }
 
     private func refreshChromeWorktreeContextEnabled() {
-        let hasSelection = tabCoordinator.selectedSailor != nil
-            || !(dashboardVC?.selectedSailorId.isEmpty ?? true)
+        let hasSelection = tabCoordinator.selectedPane != nil
+            || !(dashboardVC?.selectedPaneId.isEmpty ?? true)
         windowChrome?.setWorktreeContextEnabled(hasSelection)
     }
 
@@ -971,12 +971,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// The "+" on a fleet project header: an anchored create form for that deck.
-    /// Same landing as the helm's `/worktree` — create, staff, enter the cabin.
+    /// The "+" on a fleet project header: an anchored create form for that project.
+    /// Same landing as the helm's `/worktree` — create, staff, enter the worktree.
     private func presentAddWorktreePopover(project: String, rect: NSRect, anchor: NSView) {
         guard let repoPath = tabCoordinator.repoPath(forProject: project) else { NSSound.beep(); return }
         let popover = NSPopover()
-        let creator = AddCabinPopoverController(project: project)
+        let creator = AddWorktreePopoverController(project: project)
         // No base picker: worktrees always branch off the repo's main line, which
         // is what `performWorktreeCreate` picks when no base is passed.
         creator.onCreate = { [weak self, weak popover, weak creator] task, agentType in
@@ -1000,10 +1000,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// thread with the new worktree's path on success, or nil on failure —
     /// lets the caller (e.g. the Helm cockpit) drop its loading state and
     /// dismiss once the new tab is ready.
-    private func performWorktreeCreate(task: String, repoPath: String, agentType: SailorType, reuseEnv: Bool,
+    private func performWorktreeCreate(task: String, repoPath: String, agentType: AgentType, reuseEnv: Bool,
                                        onError: ((String) -> Void)? = nil,
                                        onComplete: ((String?) -> Void)? = nil) {
-        let currentPath = tabCoordinator.selectedSailor?.worktreePath
+        let currentPath = tabCoordinator.selectedPane?.worktreePath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let branches = WorktreeCreator.listBranches(repoPath: repoPath)
@@ -1011,8 +1011,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             do {
                 let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
                 let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
-                CabinSailorTypeStore.shared.set(agentType, forWorktree: info.path)
-                CabinTaskStore.shared.set(task, forWorktree: info.path)
+                WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
+                WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
                     let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
@@ -1050,9 +1050,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// every worktree, not just the staffed ones, so an idle tree is still
     /// reachable and still sweepable. Both surfaces read this, which is what
     /// keeps their numbering identical.
-    private func currentWorktreeRefs() -> [CabinRef] {
+    private func currentWorktreeRefs() -> [WorktreeRef] {
         tabCoordinator.allWorktrees.map {
-            CabinRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
                         branch: $0.info.branch,
                         path: $0.info.path)
         }
@@ -1079,7 +1079,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let repos = tabCoordinator.config.workspacePaths.map {
                 (URL(fileURLWithPath: $0).lastPathComponent, "repo · \($0)")
             }
-            let worktrees = ShipLog.shared.allSailors().map { ($0.branch, "worktree · \($0.project)") }
+            let worktrees = AgentRegistry.shared.allPanes().map { ($0.branch, "worktree · \($0.project)") }
             pool = repos + worktrees
         case "#":
             // The codes `/worktree #x` and `/pane #x` take, in the order the
@@ -1106,18 +1106,18 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// answer a sheet, so routing chat through them would park a dialog on the
     /// desktop and read as a hang. These execute and report back in the reply.
     ///
-    /// Returns false for verbs it doesn't own, so ShipLog's chat-only ones still run.
+    /// Returns false for verbs it doesn't own, so AgentRegistry's chat-only ones still run.
     private func makeChatCommandRoute() -> (String, @escaping (String) -> Void) -> Bool {
         { [weak self] text, reply in
             guard let self else { return false }
 
             // Bare prose steers the worktree you last worked in. NOT the cockpit's
-            // meaning (create a worktree and staff it) — see ShipLog.handleInbound.
+            // meaning (create a worktree and staff it) — see AgentRegistry.handleInbound.
             guard text.hasPrefix("/") else {
                 guard let path = self.dashboardVC?.lastCommittedWorktreePath,
-                      let sailor = ShipLog.shared.sailor(forWorktree: path) else { return false }
-                ShipLog.shared.sendCommand(to: sailor.id, command: text)
-                reply("→ **\(sailor.project)** [\(sailor.branch)]")
+                      let pane = AgentRegistry.shared.pane(forWorktree: path) else { return false }
+                AgentRegistry.shared.sendCommand(to: pane.id, command: text)
+                reply("→ **\(pane.project)** [\(pane.branch)]")
                 return true
             }
 
@@ -1148,7 +1148,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// panes. Empty when nothing is current.
     private func currentWorktreeAgentRefs() -> [AgentRef] {
         guard let path = dashboardVC?.lastCommittedWorktreePath else { return [] }
-        return ShipLog.shared.sailors(forWorktree: path).map {
+        return AgentRegistry.shared.panes(forWorktree: path).map {
             AgentRef(id: $0.id,
                      project: $0.project,
                      branch: $0.branch,
@@ -1163,7 +1163,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Chat surfaces select from this rather than from the current worktree: a
     /// phone and a mail thread have no tab bar to say which worktree is meant.
     func fleetAgentRefs() -> [AgentRef] {
-        ShipLog.shared.allSailors()
+        AgentRegistry.shared.allPanes()
             .sorted { ($0.project, $0.branch) < ($1.project, $1.branch) }
             .map {
                 AgentRef(id: $0.id,
@@ -1180,15 +1180,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Recent tool activity for one pane, as plain lines.
     func fleetActivity(forPaneID paneID: String) -> [String] {
-        guard let sailor = ShipLog.shared.sailor(for: paneID) else { return [] }
-        return sailor.activityEvents.map {
+        guard let pane = AgentRegistry.shared.pane(for: paneID) else { return [] }
+        return pane.activityEvents.map {
             "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
         }
     }
 
     /// Title for one agent/pane — see `PaneTitleResolver`.
-    private static func agentTitle(for sailor: SailorInfo) -> String {
-        PaneTitleResolver.title(for: sailor)
+    private static func agentTitle(for pane: PaneInfo) -> String {
+        PaneTitleResolver.title(for: pane)
     }
 
     private static func describeChatError(_ err: BridgeCommandError) -> String {
@@ -1222,7 +1222,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         case .selectWorktree(let path):
             dashboardVC?.commitWorktreeSelection(path: path)
             let branch = currentWorktreeRefs().first { $0.path == path }?.branch ?? path
-            if let s = ShipLog.shared.sailor(forWorktree: path) {
+            if let s = AgentRegistry.shared.pane(forWorktree: path) {
                 reply("Now on **\(s.project)** [\(branch)]")
             } else {
                 reply("Now on [\(branch)] — no agent there yet. `/worktree <description>` to start one.")
@@ -1234,31 +1234,31 @@ dashboard.stationManager = terminalCoordinator.stationManager
             reply(BridgeCommandFormatter.fleetList(
                 fleetAgentRefs(),
                 currentId: dashboardVC?.lastCommittedWorktreePath
-                    .flatMap { ShipLog.shared.sailor(forWorktree: $0)?.id }))
+                    .flatMap { AgentRegistry.shared.pane(forWorktree: $0)?.id }))
 
         case .selectAgent(let id):
             guard let agent = fleetAgentRefs().first(where: { $0.id == id }),
-                  let sailor = ShipLog.shared.sailor(for: id) else {
+                  let pane = AgentRegistry.shared.pane(for: id) else {
                 reply("That agent is gone. `/pane` to see what's left.")
                 return
             }
             // Opening a pane is also steering it — reading it and then having to
             // say so again is a round-trip this surface can't afford.
-            dashboardVC?.commitWorktreeSelection(path: sailor.worktreePath)
+            dashboardVC?.commitWorktreeSelection(path: pane.worktreePath)
             reply(BridgeCommandFormatter.paneDetail(
                 agent, activity: fleetActivity(forPaneID: id),
-                transcript: ZmxChannel(paneSessionKey: sailor.station?.paneSessionKey ?? "").recentTranscript(lines: 60),
+                transcript: ZmxChannel(paneSessionKey: pane.station?.paneSessionKey ?? "").recentTranscript(lines: 60),
                 joined: "Now steering **\(agent.project)** [\(agent.branch)] — reply to send it anything."))
 
         case .orderAgent(let id, let task):
-            guard let s = ShipLog.shared.sailor(for: id) else { reply("No such agent."); return }
-            ShipLog.shared.sendCommand(to: s.id, command: task)
+            guard let s = AgentRegistry.shared.pane(for: id) else { reply("No such agent."); return }
+            AgentRegistry.shared.sendCommand(to: s.id, command: task)
             reply("→ **\(s.project)** [\(s.branch)]")
 
         case .broadcast(let task):
-            let all = ShipLog.shared.allSailors()
+            let all = AgentRegistry.shared.allPanes()
             guard !all.isEmpty else { reply("No agents running."); return }
-            for s in all { ShipLog.shared.sendCommand(to: s.id, command: task) }
+            for s in all { AgentRegistry.shared.sendCommand(to: s.id, command: task) }
             reply("Sent to \(all.count) agent\(all.count == 1 ? "" : "s").")
 
         case .addRepo:
@@ -1286,7 +1286,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         case .removeWorktree(let path):
             let branch = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info.branch ?? ""
-            if ShipLog.shared.sailor(forWorktree: path)?.status == .running {
+            if AgentRegistry.shared.pane(forWorktree: path)?.status == .running {
                 reply("**\(branch)** has an agent running — leaving it alone.")
                 return
             }
@@ -1321,7 +1321,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 self?.dashboardVC?.commitWorktreeSelection(path: path)
             },
             selectAgent: { [weak self] id in
-                guard let path = ShipLog.shared.sailor(for: id)?.worktreePath else { return }
+                guard let path = AgentRegistry.shared.pane(for: id)?.worktreePath else { return }
                 self?.dashboardVC?.commitWorktreeSelection(path: path)
             },
             showOverview: { [weak self] in
@@ -1329,7 +1329,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 self?.tabCoordinator.switchToTab(0)
             },
             orderAgent: { id, task in
-                ShipLog.shared.sendCommand(to: id, command: task)
+                AgentRegistry.shared.sendCommand(to: id, command: task)
             },
             removeAll: { [weak self] in
                 guard let self else { return }
@@ -1363,9 +1363,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
             flagIssue: { [weak self] title in
                 self?.openGitHubIssue(title: title)
             },
-            activeSailorCount: { ShipLog.shared.allSailors().count },
-            branchForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.branch ?? "" },
-            projectForPath: { path in ShipLog.shared.sailor(forWorktree: path)?.project ?? "" }
+            activePaneCount: { AgentRegistry.shared.allPanes().count },
+            branchForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.branch ?? "" },
+            projectForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.project ?? "" }
         )
     }
 
@@ -1379,19 +1379,19 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let repoCache = tabCoordinator.worktreeRepoCache
         let queue = tabCoordinator.pendingOrders
         let coordinator = terminalCoordinator
-        let sailor = ShipLog.shared.sailor(forWorktree: path)
+        let pane = AgentRegistry.shared.pane(forWorktree: path)
 
         // A worktree with a live agent must never be reaped by /remove: neither
         // deleted outright nor carded for "Force remove". Leave it untouched.
-        if sailor?.status == .running {
+        if pane?.status == .running {
             onDone?()
             return
         }
 
-        let branch = sailor?.branch
+        let branch = pane?.branch
             ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
             ?? URL(fileURLWithPath: path).lastPathComponent
-        let project = sailor?.project
+        let project = pane?.project
             ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
             ?? ""
 
@@ -1658,7 +1658,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         refreshIdleWorktreePaths()
         updateChromeTitle()
         updatePrimaryCapsuleNotification()
-        // Sailors load / auto-select land here — keep Files/Changes enablement in sync.
+        // Panes load / auto-select land here — keep Files/Changes enablement in sync.
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
     }
@@ -1668,13 +1668,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private static let tabIdleCollapseInterval: TimeInterval = 8 * 3600
 
     private func refreshIdleWorktreePaths() {
-        let selectedPath = tabCoordinator.selectedSailor?.worktreePath
+        let selectedPath = tabCoordinator.selectedPane?.worktreePath
         let now = Date()
         var idle: Set<String> = []
         for entry in tabCoordinator.allWorktrees {
             let path = entry.info.path
             let isSelected = path == selectedPath
-            let agent = ShipLog.shared.sailor(forWorktree: path)
+            let agent = AgentRegistry.shared.pane(forWorktree: path)
             let lastActivity = statusAggregator.lastActivity(for: path) ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
             if isIdle && !isSelected && !entry.info.isMainWorktree {
@@ -1692,11 +1692,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Click→title fast path: the clicked pane's live OSC title goes straight to
     /// the chrome header, synchronously with the focus click. The resolver path
     /// below still runs afterwards (via the focus delegate) and repaints with the
-    /// full fallback chain, but it reads ShipLog snapshots that trail the 2s
+    /// full fallback chain, but it reads AgentRegistry snapshots that trail the 2s
     /// poll — without this the title visibly lagged rapid pane switching.
     @objc private func handlePaneDidAcquireFocus(_ note: Notification) {
         guard let station = note.object as? Station else { return }
-        let path = tabCoordinator.selectedSailor?.worktreePath ?? ""
+        let path = tabCoordinator.selectedPane?.worktreePath ?? ""
         // Prefer the live OSC title; on a fresh launch it hasn't arrived yet, so
         // fall back to the pane's persisted (last-known) title instead of leaving
         // the header stale.
@@ -1710,37 +1710,37 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Drive the terminal chrome header: `Repo · pane title`.
     private func updateChromeTitle() {
-        guard let agent = tabCoordinator.selectedSailor else {
+        guard let agent = tabCoordinator.selectedPane else {
             windowChrome?.updateTerminalTitle(repo: "", pane: "")
             return
         }
         let path = agent.worktreePath
-        let info = ShipLog.shared.sailor(forWorktree: path)
+        let info = AgentRegistry.shared.pane(forWorktree: path)
         let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 }
             ?? tabCoordinator.repoName(forWorktree: path)
 
         let paneTitle: String
-        let worktreeSailors = ShipLog.shared.sailors(forWorktree: path)
-        if let info, !worktreeSailors.isEmpty {
+        let worktreePanes = AgentRegistry.shared.panes(forWorktree: path)
+        if let info, !worktreePanes.isEmpty {
             // Current (focused) pane, or the most-recently-active pane otherwise.
             let tree = terminalCoordinator.stationManager.tree(forPath: path)
-            let focusedSailor = PaneTitleResolver.representativeSailor(
+            let focusedPane = PaneTitleResolver.representativePane(
                 focusedStationId: PaneTitleResolver.focusedStationId(in: tree),
-                among: worktreeSailors,
+                among: worktreePanes,
                 fallback: info
             )
-            paneTitle = PaneTitleResolver.title(for: focusedSailor)
+            paneTitle = PaneTitleResolver.title(for: focusedPane)
         } else if let info {
             paneTitle = PaneTitleResolver.title(for: info)
         } else {
-            paneTitle = CabinTitleResolver.resolve(
+            paneTitle = WorktreeTitleResolver.resolve(
                 worktreePath: path,
                 lastUserPrompt: "",
                 branch: ""
             )
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
-        windowChrome?.updateCabinContext(Self.cabinContext(repo: repo, sailor: agent))
+        windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, pane: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }
 
@@ -1786,7 +1786,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 self.headerMemoryCache[sessionKey] = bytes
                 // Focus may have moved while the probe ran; painting then would
                 // label the new pane with the old pane's number.
-                guard let agent = self.tabCoordinator.selectedSailor,
+                guard let agent = self.tabCoordinator.selectedPane,
                       self.focusedPaneSessionKey(worktreePath: agent.worktreePath) == sessionKey
                 else { return }
                 self.windowChrome?.updateTerminalMemory(bytes)
@@ -1796,8 +1796,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// `repo · branch`, skipping either half when it is missing or would repeat the
     /// other — the fleet row builds its branch label the same way.
-    static func cabinContext(repo: String, sailor: SailorDisplayInfo) -> String {
-        let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
+    static func worktreeContext(repo: String, pane: WorktreeRowInfo) -> String {
+        let branch = pane.thread.isEmpty ? pane.name : pane.thread
         let parts = [repo, branch]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -1862,12 +1862,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Keyboard cycle through worktrees (Ctrl+Tab / Ctrl+Shift+Tab).
     func selectAdjacentWorktree(forward: Bool) {
         // Cycle in the order the fleet list is actually showing, so ⌃⇥ agrees with
-        // the eye under every `CabinGroupingMode`. Discovery order is the fallback
+        // the eye under every `WorktreeGroupingMode`. Discovery order is the fallback
         // for before the overview has rendered.
         let displayed = tabCoordinator.dashboardVC?.cruiseOrderPaths ?? []
         let paths = displayed.isEmpty ? tabCoordinator.allWorktrees.map(\.info.path) : displayed
-        let current = tabCoordinator.selectedSailor?.worktreePath
-        guard let path = CabinPathNavigation.adjacentPath(
+        let current = tabCoordinator.selectedPane?.worktreePath
+        guard let path = WorktreePathNavigation.adjacentPath(
             paths: paths, from: current, forward: forward
         ) else { return }
         tabCoordinator.cycleTab(toWorktree: path)
@@ -2070,13 +2070,13 @@ extension MainWindowController: NSWindowDelegate {
         // Everything else runs through the very closure iMessage uses.
         if case .success(.selectAgent(let id)) = BridgeCommandParser.parse(text, worktrees: [], agents: fleet) {
             guard let agent = fleet.first(where: { $0.id == id }),
-                  let sailor = ShipLog.shared.sailor(for: id) else {
+                  let pane = AgentRegistry.shared.pane(for: id) else {
                 return .reply("That pane is gone. `/pane` to see what's left.")
             }
-            let sessionKey = sailor.station?.paneSessionKey ?? ""
-            return .bind(paneID: sailor.id,
+            let sessionKey = pane.station?.paneSessionKey ?? ""
+            return .bind(paneID: pane.id,
                          sessionKey: sessionKey,
-                         worktreePath: sailor.worktreePath,
+                         worktreePath: pane.worktreePath,
                          reply: BridgeCommandFormatter.paneDetail(
                             agent, activity: fleetActivity(forPaneID: id),
                             transcript: ZmxChannel(paneSessionKey: sessionKey).recentTranscript(lines: 60),
@@ -2085,7 +2085,7 @@ extension MainWindowController: NSWindowDelegate {
 
         var answer: String?
         // The shared grammar answers synchronously for every verb it owns.
-        let owned = ShipLog.shared.chatCommandRoute?(text, { answer = $0 }) ?? false
+        let owned = AgentRegistry.shared.chatCommandRoute?(text, { answer = $0 }) ?? false
         guard owned, let answer else { return .reply("Unknown command.\n\n\(MailSignature.commands)") }
         return .reply(answer)
     }
@@ -2095,7 +2095,7 @@ extension MainWindowController: NSWindowDelegate {
         var answer: String?
         // The same closure that routes bare prose from iMessage, so an unbound
         // mail thread behaves exactly like a phone conversation.
-        guard ShipLog.shared.chatCommandRoute?(text, { answer = $0 }) ?? false else { return nil }
+        guard AgentRegistry.shared.chatCommandRoute?(text, { answer = $0 }) ?? false else { return nil }
         return answer
     }
 
@@ -2370,14 +2370,14 @@ extension MainWindowController: NewBranchDialogDelegate {
     }
 }
 
-// MARK: - CabinStatusDelegate
+// MARK: - WorktreeStatusDelegate
 
-extension MainWindowController: CabinStatusDelegate {
-    func worktreeStatusDidUpdate(_ status: CabinStatus) {
+extension MainWindowController: WorktreeStatusDelegate {
+    func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
         tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
-    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
+    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
         tabCoordinator.handlePaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex, oldStatus: oldStatus, newStatus: newStatus, lastMessage: lastMessage)
     }
 }
@@ -2483,35 +2483,35 @@ extension MainWindowController {
         // it is a "what's happening now" surface, not the full fleet list.
         let activityCutoff = Date().addingTimeInterval(-24 * 60 * 60)
         var byWorktree: [String: IslandAgentRow] = [:]
-        for sailor in ShipLog.shared.allSailors() {
-            let lastActivity = statusAggregator.lastActivity(for: sailor.worktreePath) ?? sailor.startedAt
+        for pane in AgentRegistry.shared.allPanes() {
+            let lastActivity = statusAggregator.lastActivity(for: pane.worktreePath) ?? pane.startedAt
             guard let lastActivity, lastActivity >= activityCutoff else { continue }
             // Same resolver as the dashboard cards, but via the shared TTL
             // cache — a direct resolve() reads session JSONL from disk, and
-            // this runs on main for every sailor on every island refresh.
+            // this runs on main for every pane on every island refresh.
             // Warm the cache off-main; the next tick picks up the result.
-            CabinTitleCache.shared.title(
-                worktreePath: sailor.worktreePath,
-                lastUserPrompt: sailor.lastUserPrompt,
-                branch: sailor.branch
+            WorktreeTitleCache.shared.title(
+                worktreePath: pane.worktreePath,
+                lastUserPrompt: pane.lastUserPrompt,
+                branch: pane.branch
             ) { _ in }
-            let cachedTitle = CabinTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
+            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: pane.worktreePath)
             let row = IslandAgentRow(
-                id: sailor.worktreePath,
-                project: sailor.project,
-                branch: sailor.branch,
-                status: sailor.status,
-                message: sailor.lastAssistantMessage.isEmpty ? sailor.lastMessage : sailor.lastAssistantMessage,
+                id: pane.worktreePath,
+                project: pane.project,
+                branch: pane.branch,
+                status: pane.status,
+                message: pane.lastAssistantMessage.isEmpty ? pane.lastMessage : pane.lastAssistantMessage,
                 // The island row already renders the branch separately — drop a
                 // title that is just the branch fallback.
-                title: (cachedTitle == sailor.branch ? "" : cachedTitle) ?? sailor.lastUserPrompt
+                title: (cachedTitle == pane.branch ? "" : cachedTitle) ?? pane.lastUserPrompt
             )
-            if let existing = byWorktree[sailor.worktreePath] {
+            if let existing = byWorktree[pane.worktreePath] {
                 if Self.notificationPriorityScoreForIsland(row.status) > Self.notificationPriorityScoreForIsland(existing.status) {
-                    byWorktree[sailor.worktreePath] = row
+                    byWorktree[pane.worktreePath] = row
                 }
             } else {
-                byWorktree[sailor.worktreePath] = row
+                byWorktree[pane.worktreePath] = row
             }
         }
         // Branch alone ties for every "main" worktree, and dictionary order plus
@@ -2542,7 +2542,7 @@ extension MainWindowController {
         islandController.updateVisibility()
     }
 
-    private static func notificationPriorityScoreForIsland(_ status: SailorStatus) -> Int {
+    private static func notificationPriorityScoreForIsland(_ status: AgentStatus) -> Int {
         switch status {
         case .error, .exited: return 4
         case .waiting: return 3
@@ -2715,7 +2715,7 @@ extension MainWindowController: SettingsDelegate {
 
         // Hot-reload the iMessage bridge on config change.
         if oldIMessage != config.imessage {
-            ShipLog.shared.unregisterChannel(imessageChannel?.channelId ?? "imessage")
+            AgentRegistry.shared.unregisterChannel(imessageChannel?.channelId ?? "imessage")
             imessageChannel = nil
 
             if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
@@ -2726,7 +2726,7 @@ extension MainWindowController: SettingsDelegate {
                     // otherwise the channel is just silently dead.
                     if case .error(let msg) = state { self?.presentIMessageError(msg) }
                 }
-                ShipLog.shared.registerChannel(channel)
+                AgentRegistry.shared.registerChannel(channel)
                 channel.connect()
                 imessageChannel = channel
                 NSLog("[Settings] iMessage bridge reconnecting")
@@ -2796,7 +2796,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
-        // Sweep the cabin's cards before the UI drops it: deleting a worktree
+        // Sweep the worktree's cards before the UI drops it: deleting a worktree
         // takes every pane with it, so worktree-scoped cards (returnToPort in
         // particular, which is usually what triggered the delete) are stale too.
         tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
@@ -2821,7 +2821,7 @@ extension MainWindowController {
         if order.action.kind == .returnToPort {
             // Guard against a stale card: if the agent started running after the
             // card was enqueued, refuse the reap and drop the card.
-            if ShipLog.shared.sailor(forWorktree: order.action.worktreePath)?.status == .running {
+            if AgentRegistry.shared.pane(forWorktree: order.action.worktreePath)?.status == .running {
                 NSSound.beep()
                 tabCoordinator.pendingOrders.resolve(id: order.id)
                 return
@@ -2841,7 +2841,7 @@ extension MainWindowController {
                 let selectedIndex = StationRegistry.shared.station(forId: order.action.terminalID)
                     .flatMap { $0.readViewportText() }
                     .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) } ?? 0
-                ShipLog.shared.answerChoiceByArrows(
+                AgentRegistry.shared.answerChoiceByArrows(
                     to: order.action.terminalID, index: idx, from: selectedIndex)
             }
         } else if order.action.payload == FirstMateAction.askUserQuestionPayload {
@@ -2851,10 +2851,10 @@ extension MainWindowController {
             // opencode's question TUI has no digit shortcuts (a digit would land
             // in the custom-answer field), so drive it with arrow keys instead.
             if let idx = order.action.options?.firstIndex(of: optionText) {
-                if ShipLog.shared.sailor(for: order.action.terminalID)?.agentType == .openCode {
-                    ShipLog.shared.answerChoiceByArrows(to: order.action.terminalID, index: idx)
+                if AgentRegistry.shared.pane(for: order.action.terminalID)?.agentType == .openCode {
+                    AgentRegistry.shared.answerChoiceByArrows(to: order.action.terminalID, index: idx)
                 } else {
-                    ShipLog.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
+                    AgentRegistry.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
                 }
             }
             // Multi-question call: the TUI advances to the next question, so the
@@ -2870,7 +2870,7 @@ extension MainWindowController {
                 return
             }
         } else {
-            ShipLog.shared.sendCommand(to: order.action.terminalID, command: optionText)
+            AgentRegistry.shared.sendCommand(to: order.action.terminalID, command: optionText)
         }
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }
@@ -2882,15 +2882,15 @@ extension MainWindowController {
             // worktree here would pick its *first* pane, so a suggestion from a
             // split pane got answered in a sibling.
             let worktreePath = order.action.worktreePath
-            guard let task = CabinTaskStore.shared.task(forWorktree: worktreePath) else { return }
+            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
             let terminalID = order.action.terminalID.isEmpty
-                ? ShipLog.shared.sailor(forWorktree: worktreePath)?.id
+                ? AgentRegistry.shared.pane(forWorktree: worktreePath)?.id
                 : order.action.terminalID
             guard let terminalID else { return }
-            ShipLog.shared.sendCommand(to: terminalID, command: task)
+            AgentRegistry.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             // Never reap a worktree whose agent is now running.
-            if ShipLog.shared.sailor(forWorktree: order.action.worktreePath)?.status == .running {
+            if AgentRegistry.shared.pane(forWorktree: order.action.worktreePath)?.status == .running {
                 NSSound.beep()
                 break
             }
@@ -2900,8 +2900,8 @@ extension MainWindowController {
             )
         case .broadcastOrder:
             guard let task = order.action.payload else { return }
-            for agent in ShipLog.shared.allSailors() {
-                ShipLog.shared.sendCommand(to: agent.id, command: task)
+            for agent in AgentRegistry.shared.allPanes() {
+                AgentRegistry.shared.sendCommand(to: agent.id, command: task)
             }
         default:
             break

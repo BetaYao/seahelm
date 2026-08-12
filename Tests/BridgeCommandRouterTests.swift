@@ -20,7 +20,7 @@ final class BridgeCommandRouterTests: XCTestCase {
                             removeAll: removeAll, addRepo: addRepo, removeRepo: removeRepo,
                             removeWorktree: removeWorktree,
                             flagIssue: flagIssue,
-                            activeSailorCount: agentCount,
+                            activePaneCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
     }
 

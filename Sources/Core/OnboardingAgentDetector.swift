@@ -3,7 +3,7 @@ import Foundation
 /// PATH detection for AI agents shown in the first-launch onboarding wizard.
 enum OnboardingAgentDetector {
     struct AgentInfo: Equatable {
-        let type: SailorType
+        let type: AgentType
         let command: String
         let detected: Bool
     }
@@ -12,7 +12,7 @@ enum OnboardingAgentDetector {
     static func scan(
         commandExists: (String) -> Bool = ProcessRunner.commandExists
     ) -> [AgentInfo] {
-        SailorType.allCases
+        AgentType.allCases
             .filter(\.isAIAgent)
             .compactMap { type in
                 guard let command = type.launchCommand else { return nil }
@@ -25,7 +25,7 @@ enum OnboardingAgentDetector {
     }
 
     /// Prefer Claude when detected; otherwise the first detected agent; else Claude.
-    static func preferredDefault(from agents: [AgentInfo]) -> SailorType {
+    static func preferredDefault(from agents: [AgentInfo]) -> AgentType {
         if let claude = agents.first(where: { $0.type == .claudeCode && $0.detected }) {
             return claude.type
         }

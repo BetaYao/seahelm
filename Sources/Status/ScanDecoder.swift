@@ -8,10 +8,10 @@ struct ScanDecoder: SignalDecoder {
     let processStatus: ProcessStatus
     let shellInfo: ShellPhaseInfo?
     let content: String
-    let agentDef: SailorDef?
+    let agentDef: AgentDef?
     var manifest: CompiledManifest? = nil
     let commandLine: String?
-    let agentType: SailorType
+    let agentType: AgentType
     let roundDuration: TimeInterval
     let tasks: [TaskItem]
 

@@ -19,16 +19,20 @@ final class ShortcutHintBar: NSView {
     /// Most-used first, read left-to-right then wrapped. Keep the key glyphs in
     /// sync with `GlobalKeymap` and the labels with `KeyboardHelpOverlay`.
     ///
-    /// The cabin cycle leads: with the bare-key nav ring gone it is the only way
-    /// to move between cabins from the keyboard, so it has to be the first thing
+    /// The worktree cycle leads: with the bare-key nav ring gone it is the only way
+    /// to move between worktrees from the keyboard, so it has to be the first thing
     /// the strip says.
     ///
     /// Six is the ceiling — the strip is budgeted at two lines of three (see
     /// `ShortcutHintBarTests`), so making room for the cycle cost `⇧⌘D`, the one
     /// chord a reader can guess from the `⌘D` sitting next to it.
     private static let items: [(key: String, label: String)] = [
-        ("\u{2303}\u{21E5}", "Cabin+"),
-        ("\u{2303}\u{21E7}\u{21E5}", "Cabin-"),
+        // "Next"/"Prev" rather than "Worktree+/-": the strip is budgeted at two
+        // rows of three (ShortcutHintBarTests) and the longer word drops it to
+        // two per row, i.e. three rows and past its height budget. The `?`
+        // overlay carries the full "Next / previous worktree" wording.
+        ("\u{2303}\u{21E5}", "Next"),
+        ("\u{2303}\u{21E7}\u{21E5}", "Prev"),
         ("\u{2318}P", "Command"),
         ("\u{2318}W", "Close"),
         ("\u{2318}D", "Split"),

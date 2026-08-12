@@ -3,7 +3,7 @@ import XCTest
 
 final class OverviewFocusModelTests: XCTestCase {
 
-    // MARK: - Vertical ring (the cabin list, and nothing below it)
+    // MARK: - Vertical ring (the worktree list, and nothing below it)
 
     func testMoveDownWalksWorktreesAndStopsAtTheLast() {
         var m = OverviewFocusModel(worktreeCount: 2)

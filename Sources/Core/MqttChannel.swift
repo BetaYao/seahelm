@@ -11,7 +11,7 @@ import CocoaMQTTWebSocket
 /// `docs/remote-clients-design.md` §15. The executable reference for the wire
 /// behavior is `clients/seahelm-web/devbroker/mock-seahelm.js`.
 ///
-/// Conforms to `ExternalChannel` so registering it with `ShipLog` also mirrors
+/// Conforms to `ExternalChannel` so registering it with `AgentRegistry` also mirrors
 /// desktop notifications for free (`send(_:)`), and reconnect/backoff mirrors
 /// `WeComBotChannel`.
 ///
@@ -258,7 +258,7 @@ final class MqttChannel: NSObject, ExternalChannel {
         // History = the agent's real final message per turn. Only a completion event
         // carries `final_message` (the Stop hook's last_assistant_message); status-
         // settle `last_message` is often a scanned tool/file line, so we no longer
-        // key on it. See ShipLog.event(from:). Keyed by the stable slot.
+        // key on it. See AgentRegistry.event(from:). Keyed by the stable slot.
         if (event["is_completion"] as? Bool) == true,
            let text = event["final_message"] as? String, !text.isEmpty {
             history.append(paneId: key, entry: ["seq": Int(seq), "kind": "agent", "text": text])
@@ -289,7 +289,7 @@ final class MqttChannel: NSObject, ExternalChannel {
             pendLock.lock(); pendingEvents[key] = options; pendLock.unlock()
             publish(tPaneEvent(key), ["type": "suggest", "pane_id": pid, "pane_session_key": sname,
                                       "options": options, "seq": seq], retained: true)
-        } else if let st = event["status"] as? String, st != SailorStatus.waiting.rawValue {
+        } else if let st = event["status"] as? String, st != AgentStatus.waiting.rawValue {
             clearDecision(key)
         }
     }
@@ -336,7 +336,7 @@ final class MqttChannel: NSObject, ExternalChannel {
 
     /// Single-focus selection: the one thing most worth showing now (§5).
     private func publishFocus(from panes: [PaneSnapshot]) {
-        func count(_ s: SailorStatus) -> Int { panes.filter { $0.status == s.rawValue }.count }
+        func count(_ s: AgentStatus) -> Int { panes.filter { $0.status == s.rawValue }.count }
         let focus = panes.min { focusRank($0.status) < focusRank($1.status) }
         var dict: [String: Any] = [
             "counts": ["running": count(.running), "waiting": count(.waiting),
@@ -355,7 +355,7 @@ final class MqttChannel: NSObject, ExternalChannel {
 
     /// Attention priority: lower = more worth showing (waiting > error > running …).
     private func focusRank(_ raw: String) -> Int {
-        switch SailorStatus(rawValue: raw) ?? .unknown {
+        switch AgentStatus(rawValue: raw) ?? .unknown {
         case .waiting: return 0
         case .error:   return 1
         case .running: return 2
@@ -365,16 +365,16 @@ final class MqttChannel: NSObject, ExternalChannel {
         }
     }
     private func focusKind(_ raw: String) -> String {
-        switch SailorStatus(rawValue: raw) ?? .unknown {
+        switch AgentStatus(rawValue: raw) ?? .unknown {
         case .waiting, .error: return "blocked"
         case .running:         return "working"
         case .exited:          return "say"
         default:               return "idle"
         }
     }
-    private func rolledStatus(_ list: [PaneSnapshot]) -> SailorStatus {
+    private func rolledStatus(_ list: [PaneSnapshot]) -> AgentStatus {
         let top = list.min { focusRank($0.status) < focusRank($1.status) }
-        return SailorStatus(rawValue: top?.status ?? "") ?? .unknown
+        return AgentStatus(rawValue: top?.status ?? "") ?? .unknown
     }
 
     // MARK: - Inbound commands / history

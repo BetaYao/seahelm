@@ -4,7 +4,7 @@ import AppKit
 ///
 /// The old wizard opened on "Choose your default agent", which asks a config
 /// question before the user knows what they're configuring. This step teaches
-/// the Ship ⊃ Deck ⊃ Cabin ⊃ Sailor hierarchy the rest of the app's language
+/// the AgentRegistry ⊃ Project ⊃ Worktree ⊃ Pane hierarchy the rest of the app's language
 /// leans on, then names the three things Seahelm does for you.
 final class OnboardingWelcomeStepView: NSView {
     private struct Tier {
@@ -14,10 +14,10 @@ final class OnboardingWelcomeStepView: NSView {
     }
 
     private static let tiers = [
-        Tier(symbol: "sailboat.fill", term: "Ship", gloss: "Seahelm"),
-        Tier(symbol: "square.stack.3d.up.fill", term: "Deck", gloss: "a repo"),
-        Tier(symbol: "door.left.hand.closed", term: "Cabin", gloss: "a worktree"),
-        Tier(symbol: "person.fill", term: "Sailor", gloss: "an agent"),
+        Tier(symbol: "sailboat.fill", term: "AgentRegistry", gloss: "Seahelm"),
+        Tier(symbol: "square.stack.3d.up.fill", term: "Project", gloss: "a repo"),
+        Tier(symbol: "door.left.hand.closed", term: "Worktree", gloss: "a worktree"),
+        Tier(symbol: "person.fill", term: "Pane", gloss: "an agent"),
     ]
 
     private struct Promise {
@@ -30,12 +30,12 @@ final class OnboardingWelcomeStepView: NSView {
         Promise(
             symbol: "rectangle.split.2x2.fill",
             title: "Run agents side by side",
-            body: "Every cabin is its own git worktree and terminal, so parallel agents never trip over each other."
+            body: "Every worktree is its own git worktree and terminal, so parallel agents never trip over each other."
         ),
         Promise(
             symbol: "bell.badge.fill",
             title: "Know which one needs you",
-            body: "Seahelm watches every sailor and tells you the moment one finishes, stalls, or asks a question."
+            body: "Seahelm watches every pane and tells you the moment one finishes, stalls, or asks a question."
         ),
         Promise(
             symbol: "arrow.clockwise.circle.fill",
@@ -71,7 +71,7 @@ final class OnboardingWelcomeStepView: NSView {
         ])
     }
 
-    /// The nesting chain, read left to right: Ship › Deck › Cabin › Sailor.
+    /// The nesting chain, read left to right: AgentRegistry › Project › Worktree › Pane.
     private func makeHierarchyCard() -> NSView {
         let card = OnboardingPanel()
         card.showsSelectionGlow = false
@@ -96,7 +96,7 @@ final class OnboardingWelcomeStepView: NSView {
         }
 
         let caption = OnboardingStyle.label(
-            "Each one nests in the last. You steer the ship; the sailors do the work.",
+            "Each one nests in the last. You steer the ship; the panes do the work.",
             size: 12, color: OnboardingStyle.textFaint
         )
 

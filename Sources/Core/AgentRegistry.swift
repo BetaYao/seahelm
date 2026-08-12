@@ -1,0 +1,1157 @@
+import Foundation
+
+protocol AgentRegistryDelegate: AnyObject {
+    func agentDidUpdate(_ info: PaneInfo)
+}
+
+/// Single source of truth for all agent information.
+/// Consumers query AgentRegistry instead of assembling data from multiple sources.
+/// Also manages communication channels for each agent.
+/// Primary key: terminal ID (Station.id).
+class AgentRegistry {
+    static let shared = AgentRegistry()
+
+    weak var delegate: AgentRegistryDelegate?
+
+    /// Single output stream: one IngestOutcome per recorded event, delivered on the main thread.
+    var onOutcome: ((IngestOutcome) -> Void)?
+
+    /// Tracks when each terminal entered its current status (for holdSeconds calculation).
+    private var statusEnteredAt: [String: Date] = [:]
+
+    /// When each terminal's hook last asserted `.running` (a UserPrompt / PreToolUse
+    /// leading edge). For session_only agents this lets a hook run promote over a
+    /// stale scan `.idle` immediately, while a later scan `.idle` observed *after*
+    /// the grace window reclaims it — so an Esc/interrupt that fires no Stop hook
+    /// still self-heals instead of sticking on "running".
+    private var hookRunningSince: [String: Date] = [:]
+    /// Grace before a scan `.idle` is allowed to clear a hook-asserted `.running`.
+    /// Long enough for the agent to start rendering its spinner after a prompt.
+    /// `var` so tests can drive the trailing-edge reclaim deterministically.
+    static var hookRunningGrace: TimeInterval = 3.0
+
+    /// When each terminal's hook last asserted `.waiting` (an AskUserQuestion /
+    /// awaiting-input edge). `.waiting` is urgent, so it outranks *any* scan —
+    /// without a reclaim, a single lost clearing hook pins the card on "Needs
+    /// input" forever while the screen plainly shows the agent working again.
+    private var hookWaitingSince: [String: Date] = [:]
+    /// Grace before a scan `.running` is allowed to clear a hook-asserted
+    /// `.waiting`. Long enough that the question prompt has replaced the spinner
+    /// on screen, so the pre-question scan can't reclaim its own stale frame.
+    /// `var` so tests can drive the reclaim deterministically.
+    static var hookWaitingGrace: TimeInterval = 3.0
+
+    private var agents: [String: PaneInfo] = [:]       // keyed by terminal ID
+    private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
+    private var orderedIDs: [String] = []
+    /// Reverse index: worktree path → terminal IDs (1:N)
+    private var worktreeIndex: [String: [String]] = [:]
+    /// Strong references to channels (keyed by terminal ID)
+    private var channels: [String: AgentChannel] = [:]
+    private var backendsByPath: [String: String] = [:]
+    /// External channels (WeCom, future: Slack, etc.) — keyed by channelId
+    private var externalChannels: [String: ExternalChannel] = [:]
+    private let lock = NSLock()
+
+    /// Monotonic event sequence, incremented under `lock` on every ingest.
+    /// Stamped onto each IngestOutcome for ordering / future subscriber replay.
+    private var globalSeq: UInt64 = 0
+
+    private init() {}
+
+    #if DEBUG
+    /// Test helper: register an agent entry without a real Station.
+    func registerForTesting(terminalID: String, worktreePath: String, branch: String, project: String) {
+        lock.lock(); defer { lock.unlock() }
+        agents[terminalID] = PaneInfo(
+            id: terminalID, worktreePath: worktreePath, agentType: .unknown,
+            project: project, branch: branch, status: .unknown, lastMessage: "",
+            commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
+            channel: nil, taskProgress: TaskProgress())
+        worktreeIndex[worktreePath, default: []].append(terminalID)
+        if !orderedIDs.contains(terminalID) { orderedIDs.append(terminalID) }
+    }
+    #endif
+
+    // MARK: - Registration
+
+    func register(station: Station, worktreePath: String, branch: String,
+                  project: String, startedAt: Date?,
+                  paneSessionKey: String? = nil, backend: String = "zmx") {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let terminalID = station.id
+
+        // Create a default channel if we have a session name
+        var channel: AgentChannel?
+        if let paneSessionKey = paneSessionKey {
+            channel = ZmxChannel(paneSessionKey: paneSessionKey)
+            channels[terminalID] = channel
+        }
+        backendsByPath[worktreePath] = backend
+
+        let info = PaneInfo(
+            id: terminalID,
+            worktreePath: worktreePath,
+            agentType: .unknown,
+            project: project,
+            branch: branch,
+            status: .unknown,
+            lastMessage: "",
+            commandLine: nil,
+            roundDuration: 0,
+            startedAt: startedAt,
+            station: station,
+            channel: channel,
+            taskProgress: TaskProgress()
+        )
+        agents[terminalID] = info
+        var ids = worktreeIndex[worktreePath] ?? []
+        if !ids.contains(terminalID) {
+            ids.append(terminalID)
+        }
+        worktreeIndex[worktreePath] = ids
+        if !orderedIDs.contains(terminalID) {
+            orderedIDs.append(terminalID)
+        }
+    }
+
+    func unregister(terminalID: String) {
+        lock.lock()
+
+        let closed = agents[terminalID]
+        if let info = closed {
+            worktreeIndex[info.worktreePath]?.removeAll { $0 == terminalID }
+            if worktreeIndex[info.worktreePath]?.isEmpty == true {
+                worktreeIndex.removeValue(forKey: info.worktreePath)
+            }
+            backendsByPath.removeValue(forKey: info.worktreePath)
+        }
+        agents.removeValue(forKey: terminalID)
+        channels.removeValue(forKey: terminalID)
+        orderedIDs.removeAll { $0 == terminalID }
+        statusEnteredAt.removeValue(forKey: terminalID)
+        hookRunningSince.removeValue(forKey: terminalID)
+        hookWaitingSince.removeValue(forKey: terminalID)
+        eventLog.removeValue(forKey: terminalID)
+        globalSeq += 1
+        let seq = globalSeq
+        lock.unlock()
+
+        // Announce the close so remote mirrors (MqttChannel) can drop the pane's
+        // retained slot topic instead of leaving a ghost. Off the lock, on main.
+        guard let info = closed else { return }
+        let event: [String: Any] = [
+            "type": "pane.closed",
+            "seq": seq,
+            "pane_id": terminalID,
+            "pane_session_key": info.station?.paneSessionKey ?? "",
+            "worktree_path": info.worktreePath,
+        ]
+        DispatchQueue.main.async { EventHub.shared.publish(seq: seq, event: event) }
+    }
+
+    // MARK: - Worktree Index (1:N)
+
+    func registerTerminalID(_ terminalID: String, forWorktree worktreePath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        var ids = worktreeIndex[worktreePath] ?? []
+        if !ids.contains(terminalID) {
+            ids.append(terminalID)
+        }
+        worktreeIndex[worktreePath] = ids
+    }
+
+    func unregisterTerminalID(_ terminalID: String, forWorktree worktreePath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        worktreeIndex[worktreePath]?.removeAll { $0 == terminalID }
+        if worktreeIndex[worktreePath]?.isEmpty == true {
+            worktreeIndex.removeValue(forKey: worktreePath)
+        }
+    }
+
+    func terminalIDs(forWorktree worktreePath: String) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return worktreeIndex[worktreePath] ?? []
+    }
+
+    // MARK: - Updates
+
+    func updateStatus(terminalID: String, status: AgentStatus,
+                      lastMessage: String, roundDuration: TimeInterval,
+                      tasks: [TaskItem] = [], lastUserPrompt: String = "") {
+        lock.lock()
+        guard let current = agents[terminalID] else {
+            lock.unlock()
+            return
+        }
+        let reduced = PaneReducer.apply(to: current, status: status,
+                                          lastMessage: lastMessage, roundDuration: roundDuration,
+                                          tasks: tasks, lastUserPrompt: lastUserPrompt)
+        let info = reduced.info
+        let changed = reduced.changed
+        agents[terminalID] = info
+        lock.unlock()
+
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.agentDidUpdate(info)
+            }
+        }
+    }
+
+    /// THE single write entry. Faithfully record, then reduce to a station snapshot + outcome.
+    /// Combine the two status sources (screen scan vs agent hook) into one, using
+    /// the pane's manifest `authority` (herdr's single-authority-per-pane model):
+    ///   - full_lifecycle: hook is authoritative; screen only fills an unknown.
+    ///   - session_only (claude/codex): screen is authoritative (hooks miss
+    ///     permission/escape transitions); hook only fills an unknown.
+    ///   - screen_only / unknown: screen only.
+    /// An urgent state (waiting/error) from either source always surfaces — never
+    /// hide a blocked or errored agent behind an authority rule.
+    static func arbitrate(scan: AgentStatus, hook: AgentStatus, agentType: AgentType) -> AgentStatus {
+        arbitrateDetailed(scan: scan, hook: hook, agentType: agentType).status
+    }
+
+    /// Whether the agent's manifest makes the screen authoritative (hooks only fill
+    /// gaps). Defaults to true when no manifest is registered.
+    static func isSessionOnly(_ agentType: AgentType) -> Bool {
+        let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        return authority == "session_only"
+    }
+
+    /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
+    /// `screen`) and the pane's authority — for `pane.explain`.
+    static func arbitrateDetailed(scan: AgentStatus, hook: AgentStatus, agentType: AgentType)
+        -> (status: AgentStatus, decidedBy: String, authority: String) {
+        let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        let urgent = AgentStatus.highestPriority([scan, hook].filter { $0.isUrgent })
+        if urgent.isUrgent { return (urgent, "urgent", authority) }
+        switch authority {
+        case "full_lifecycle": return hook != .unknown ? (hook, "hook", authority) : (scan, "screen", authority)
+        case "screen_only":    return (scan, "screen", authority)
+        default:
+            // session_only: screen is authoritative EXCEPT a hook `.running` edge
+            // promotes over a scan `.idle`, so the leading edge (prompt submitted,
+            // spinner not yet on screen) surfaces immediately instead of waiting for
+            // the next slow scan. `ingest` clears a stale hook `.running` once scan
+            // sees a sustained idle, so the trailing edge stays screen-authoritative.
+            if scan == .idle && hook == .running { return (hook, "hook", authority) }
+            return scan != .unknown ? (scan, "screen", authority) : (hook, "hook", authority)
+        }
+    }
+
+    func ingest(_ event: NormalizedEvent) {
+        lock.lock()
+        globalSeq &+= 1
+        let seq = globalSeq
+        appendToRingBufferLog(event)
+        guard let current = agents[event.terminalID] else { lock.unlock(); return }
+
+        var next = current
+        var isCompletion = false
+        var message = current.lastMessage
+        let now = Date()
+
+        switch event.kind {
+        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType, let roundDuration, let tasks):
+            next.scanStatus = status
+            next.roundDuration = roundDuration
+            if !tasks.isEmpty { next.tasks = tasks }
+            if !msg.isEmpty { message = msg }
+            if let cl = commandLine { next.commandLine = cl }
+            if agentType != .unknown { next.agentType = agentType }
+            if !activity.isEmpty { next.activityEvents = activity }
+            // Trailing-edge reclaim: once scan sees a sustained idle (past the grace
+            // window since the hook's running edge), drop a stale hook `.running` so
+            // an Esc/interrupt that fires no Stop hook doesn't stick on "running".
+            if status == .idle, next.hookStatus == .running,
+               let since = hookRunningSince[event.terminalID],
+               now.timeIntervalSince(since) >= Self.hookRunningGrace,
+               Self.isSessionOnly(next.agentType) {
+                next.hookStatus = .unknown
+                hookRunningSince[event.terminalID] = nil
+            }
+            // Same reclaim for a stale hook `.waiting`: the question has been
+            // answered and the agent is visibly working again. Only a hook could
+            // otherwise clear `.waiting` (it is urgent, so it outranks the scan),
+            // which strands the card on "Needs input" whenever a clearing hook is
+            // never delivered.
+            if status == .running, next.hookStatus == .waiting,
+               let since = hookWaitingSince[event.terminalID],
+               now.timeIntervalSince(since) >= Self.hookWaitingGrace,
+               Self.isSessionOnly(next.agentType) {
+                next.hookStatus = .unknown
+                hookWaitingSince[event.terminalID] = nil
+            }
+        case .sessionStarted(let label):
+            next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
+            message = label
+        case .userPrompt(let text):
+            next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
+            next.lastUserPrompt = text
+        case .toolUse(let ev):
+            next.hookStatus = .running
+            if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
+            hookWaitingSince[event.terminalID] = nil
+            Self.upsertLatest(&next.activityEvents, event: ev, maxSize: 20)
+            message = ev.detail.isEmpty ? message : ev.detail
+        case .awaitingInput(let text):
+            next.hookStatus = .waiting
+            hookRunningSince[event.terminalID] = nil
+            if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
+            message = text
+        case .question(let prompt, _, _):
+            // Hook-native questions own hook status. Viewport-discovered choices
+            // own scan status so the next screen frame can clear them naturally.
+            if case .scan = event.source {
+                next.scanStatus = .waiting
+            } else {
+                next.hookStatus = .waiting
+                hookRunningSince[event.terminalID] = nil
+                if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
+            }
+            message = prompt
+        case .agentStopped(let success):
+            next.hookStatus = success ? .idle : .error
+            hookRunningSince[event.terminalID] = nil
+            hookWaitingSince[event.terminalID] = nil
+            next.activityEvents.removeAll()
+            isCompletion = true
+        case .notification(let level, let text):
+            // Intentionally preserves prior hookStatus for neutral notifications (old code returned .unknown, losing context).
+            switch level {
+            case "error": next.hookStatus = .error
+            case "warning":
+                next.hookStatus = .waiting
+                if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
+            default: break
+            }
+            if !text.isEmpty { message = text }
+        case .taskUpdate(let items):
+            next.tasks = items
+        case .suggest:
+            // Intentionally preserves prior hookStatus; suggest events carry options only, not status.
+            break   // does not touch status; passed through via outcome.event
+        }
+
+        next.lastMessage = message
+        let oldStatus = current.status
+        let newStatus = Self.arbitrate(scan: next.scanStatus, hook: next.hookStatus,
+                                       agentType: next.agentType)
+        next.status = newStatus
+        agents[event.terminalID] = next
+
+        let statusChanged = oldStatus != newStatus
+        var hold: Double = 0
+        if statusChanged {
+            let entered = statusEnteredAt[event.terminalID] ?? now
+            hold = now.timeIntervalSince(entered)
+            statusEnteredAt[event.terminalID] = now
+        }
+        lock.unlock()
+
+        // Screen scans re-fire every poll while an agent is active (the OSC
+        // spinner busts the viewport hash), so a scan that changed nothing the
+        // UI shows would still force a main-queue hop + full delegate fan-out
+        // every 2s per pane. Drop those. Hook/lifecycle events are edges and
+        // always pass through.
+        if case .screenObserved = event.kind,
+           !statusChanged, Self.displayedStateUnchanged(current, next) {
+            return
+        }
+
+        let outcome = IngestOutcome(info: next, statusChanged: statusChanged,
+                                    oldStatus: oldStatus, newStatus: newStatus,
+                                    holdSeconds: hold, isCompletionSignal: isCompletion,
+                                    event: event, seq: seq)
+        notifyObservers(outcome)
+    }
+
+    /// Whether two snapshots agree on every field an observer can render.
+    private static func displayedStateUnchanged(_ a: PaneInfo, _ b: PaneInfo) -> Bool {
+        a.status == b.status
+            && a.lastMessage == b.lastMessage
+            && a.lastUserPrompt == b.lastUserPrompt
+            && a.commandLine == b.commandLine
+            // roundDuration deliberately excluded: it ticks every poll for any
+            // running pane, which forced a full delegate fan-out every 2s just to
+            // advance a clock. Elapsed-time labels are refreshed by the slow
+            // dashboard tick in TabCoordinator instead.
+            && a.agentType == b.agentType
+            && a.scanStatus == b.scanStatus
+            && a.hookStatus == b.hookStatus
+            && a.tasks == b.tasks
+            && a.activityEvents == b.activityEvents
+    }
+
+    /// Shape an ingest outcome into a control-API event dict for EventHub.
+    static func event(from o: IngestOutcome) -> [String: Any] {
+        var dict: [String: Any] = [
+            "type": o.statusChanged ? "pane.status_changed" : "pane.updated",
+            "seq": o.seq,
+            "pane_id": o.info.id,
+            "pane_session_key": o.info.station?.paneSessionKey ?? "",
+            "status": o.newStatus.rawValue,
+            "old_status": o.oldStatus.rawValue,
+            "agent_type": o.info.agentType.rawValue,
+            "worktree_path": o.info.worktreePath,
+            "last_message": o.info.lastMessage,
+        ]
+        // Only a completion (`.agentStopped`) carries the agent's real final prose;
+        // gate emission on the outcome flag so unrelated events never re-send a stale
+        // `lastAssistantMessage` that lingers on the snapshot. Backs the MQTT history feed.
+        if o.isCompletionSignal {
+            dict["is_completion"] = true
+            let final = o.info.lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !final.isEmpty { dict["final_message"] = final }
+        }
+        // A user_prompt event carries what the user typed — surfaced so remote
+        // history can show both sides of the conversation (user + assistant).
+        if case .userPrompt(let text) = o.event.kind {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { dict["user_prompt"] = trimmed }
+        }
+        // Open decisions — surfaced so remote clients (Watch) can show/answer them
+        // (`pane/{slot}/event`). MqttChannel publishes these retained and clears
+        // them when the pane leaves `.waiting`.
+        switch o.event.kind {
+        case .question(let prompt, let options, _):
+            dict["question"] = ["prompt": prompt, "options": options]
+        case .suggest(let options):
+            dict["suggest"] = ["options": options]
+        default: break
+        }
+        return dict
+    }
+
+    /// All observer delivery hops to main for ordering. Subscribers never run on the scan queue.
+    ///
+    /// Chat-channel fan-out deliberately does NOT happen here. It used to, gated
+    /// on `statusChanged && (waiting || error)` — which never fired on completion
+    /// (the thing you most want to hear about from your phone) and had none of
+    /// NotificationManager's edge/cooldown/stability gating, so it re-sent on
+    /// every flicker. It now hangs off that type's delivery instead, which makes
+    /// the phone a mirror of the desktop banner. See `onDeliverExternal`.
+    private func notifyObservers(_ outcome: IngestOutcome) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.agentDidUpdate(outcome.info)
+            self.onOutcome?(outcome)
+            EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
+        }
+    }
+
+    private func appendToRingBufferLog(_ event: NormalizedEvent) {
+        var log = eventLog[event.terminalID] ?? []
+        log.insert(event, at: 0)
+        if log.count > 50 { log.removeLast() }
+        eventLog[event.terminalID] = log
+    }
+
+    /// Ring-buffer upsert used by reduce for .toolUse (mirrors upsertLatestActivityEvent).
+    static func upsertLatest(_ buffer: inout [ActivityEvent], event: ActivityEvent, maxSize: Int) {
+        if let latest = buffer.first, latest.tool == event.tool, latest.detail == event.detail {
+            buffer[0] = event
+        } else {
+            appendToRingBuffer(&buffer, event: event, maxSize: maxSize)
+        }
+    }
+
+    /// Update task progress for an agent
+    func updateTaskProgress(terminalID: String, totalTasks: Int,
+                            completedTasks: Int, currentTask: String?) {
+        lock.lock()
+        guard var info = agents[terminalID] else {
+            lock.unlock()
+            return
+        }
+        let changed = info.taskProgress.totalTasks != totalTasks
+            || info.taskProgress.completedTasks != completedTasks
+            || info.taskProgress.currentTask != currentTask
+        info.taskProgress = TaskProgress(
+            totalTasks: totalTasks,
+            completedTasks: completedTasks,
+            currentTask: currentTask
+        )
+        agents[terminalID] = info
+        lock.unlock()
+
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.agentDidUpdate(info)
+            }
+        }
+    }
+
+    /// Update detection results for an agent (command line and/or agent type).
+    /// Type update rules:
+    /// - .unknown → any type allowed
+    /// - shell task (isShellTask) → any type allowed
+    /// - AI agent (isAIAgent) → only another AI agent allowed (no demotion)
+    /// When type supports hooks, upgrades backend channel → HooksChannel.
+    func updateDetection(terminalID: String, commandLine: String?, agentType: AgentType) {
+        lock.lock()
+        guard var info = agents[terminalID] else {
+            lock.unlock()
+            return
+        }
+
+        let worktreePath = info.worktreePath
+
+        // Upgrade channel for supported hook-based agents.
+        if agentType == .claudeCode || agentType == .codex {
+            let backend = backendsByPath[worktreePath] ?? "zmx"
+            if let zmx = channels[terminalID] as? ZmxChannel {
+                let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey, backend: backend)
+                channels[terminalID] = hooks
+                info.channel = hooks
+            }
+        }
+
+        var changed = false
+
+        // Update command line if provided
+        if let cl = commandLine, info.commandLine != cl {
+            info.commandLine = cl
+            changed = true
+        }
+
+        // Apply type update rules
+        if agentType != .unknown {
+            let currentType = info.agentType
+            let allowed: Bool
+            if currentType == .unknown {
+                allowed = true
+            } else if currentType.isShellTask {
+                allowed = true
+            } else if currentType.isAIAgent {
+                allowed = agentType.isAIAgent
+            } else {
+                allowed = true
+            }
+
+            if allowed && currentType != agentType {
+                info.agentType = agentType
+                changed = true
+
+                // Upgrade channel for supported hook-based agents.
+                if (agentType == .claudeCode || agentType == .codex),
+                   let zmx = channels[terminalID] as? ZmxChannel {
+                    let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey)
+                    channels[terminalID] = hooks
+                    info.channel = hooks
+                }
+            }
+        }
+
+        agents[terminalID] = info
+        lock.unlock()
+
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.agentDidUpdate(info)
+            }
+        }
+    }
+
+    // MARK: - Channel Communication
+
+    /// Record the agent's final prose (Stop hook `last_assistant_message`) for a worktree
+    /// WITHOUT changing status — used to give suggestion cards a summary line. Resolves
+    /// pane → terminal the same way `handleWebhookEvent` does: the exact pane wins,
+    /// cwd's first pane is the fallback.
+    /// Returns the terminal id that was updated, so callers can refresh a pending
+    /// suggest card that was queued before this prose arrived.
+    @discardableResult
+    func noteAssistantMessage(cwd: String, paneId: String? = nil, message: String) -> String? {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let paneTid = paneId.flatMap { StationRegistry.shared.station(forSessionName: $0)?.id }
+        lock.lock()
+        let tid = (paneTid.flatMap { agents[$0] != nil ? $0 : nil })
+            ?? worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
+        guard let tid, var info = agents[tid] else { lock.unlock(); return nil }
+        info.lastMessage = trimmed
+        info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
+        agents[tid] = info
+        lock.unlock()
+        DispatchQueue.main.async { [weak self] in self?.delegate?.agentDidUpdate(info) }
+        return tid
+    }
+
+    // MARK: - Background-task tracking (for suggestion gating)
+
+    /// Worktree paths that currently have background work running (subagent / shell / cron).
+    /// While busy, agent suggestions are suppressed — the agent will auto-resume, so it's
+    /// not a real end-of-turn. Source of truth: the Stop/SubagentStop `background_tasks` field,
+    /// plus SubagentStart (which precedes any voluntary seahelm-suggest call).
+    private var backgroundBusy: Set<String> = []
+
+    /// Update background-busy state from any incoming webhook event.
+    func updateBackgroundBusy(from event: WebhookEvent) {
+        switch event.event {
+        case .subagentStart:
+            setBackgroundBusy(cwd: event.cwd, busy: true)
+        case .agentStop, .subagentStop:
+            setBackgroundBusy(cwd: event.cwd, busy: StopHookResponder.hasRunningBackgroundTask(event.data))
+        default:
+            break
+        }
+    }
+
+    /// True if the worktree owning `cwd` currently has background work running.
+    func isBackgroundBusy(cwd: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return false }
+        return backgroundBusy.contains(path)
+    }
+
+    private func setBackgroundBusy(cwd: String, busy: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        guard let path = worktreePathLocked(forCwd: cwd) else { return }
+        if busy { backgroundBusy.insert(path) } else { backgroundBusy.remove(path) }
+    }
+
+    /// Resolve a cwd to the worktree path it belongs to. Caller must hold `lock`.
+    private func worktreePathLocked(forCwd cwd: String) -> String? {
+        worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.key
+    }
+
+    /// Send a command to a specific agent.
+    /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
+    /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,
+    /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
+    /// only when the surface isn't available (e.g. pane not currently rendered).
+    func sendCommand(to terminalID: String, command: String) {
+        let station = StationRegistry.shared.station(forId: terminalID)
+        // `canDeliverInput`, not merely "a Station exists" — the two come apart
+        // for any pane whose tab has not been opened in this run, and that gap
+        // is what silently swallowed every message sent to a backgrounded pane
+        // from iMessage, mail, and the control socket alike.
+        if let station, station.canDeliverInput {
+            // Send the text first, then the Enter as a separate write. Agent TUIs
+            // (Claude Code, codex) treat a `\r` arriving in the same burst as the
+            // pasted text as a literal newline (multiline input) instead of a
+            // submit, so the order text lands but never sends. A short gap lets the
+            // TUI finish ingesting the paste before the Return submits it.
+            DispatchQueue.main.async {
+                station.sendText(command)
+                // Submit via a real Return key event (not "\r" text), after a beat
+                // so the TUI finishes ingesting the pasted text first.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
+                    station.sendEnterKey()
+                }
+            }
+            return
+        }
+
+        let sessionKey = station?.paneSessionKey ?? ""
+        lock.lock()
+        let channel = channels[terminalID]
+        lock.unlock()
+        // Channel sends spawn a subprocess (zmx/tmux) and wait for it — callers
+        // are mostly main-thread interaction sites, so keep it off-thread.
+        DispatchQueue.global(qos: .userInitiated).async {
+            // `zmx send` in preference to the registered channel's `zmx run`,
+            // which appends a ZMX_TASK_COMPLETED marker that ends up typed into
+            // the command line verbatim.
+            if !sessionKey.isEmpty, ZmxChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
+            channel?.sendCommand(command)
+        }
+    }
+
+    /// Answer an on-screen choice dialog by arrow keys: Down × index, then Return.
+    /// For agent TUIs without digit shortcuts (opencode's question tool) — their
+    /// `selectedIndex` defaults to the first row for native question tools, while
+    /// viewport-discovered prompts pass their currently highlighted row.
+    func answerChoiceByArrows(to terminalID: String, index: Int, from selectedIndex: Int = 0) {
+        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
+        let offset = index - selectedIndex
+        let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
+
+        // Same surface-versus-session split as `sendCommand`: answering a prompt
+        // in a pane whose tab was never opened would otherwise move no
+        // selection and press nothing, while looking like it worked.
+        guard station.canDeliverInput else {
+            let sessionKey = station.paneSessionKey ?? ""
+            guard !sessionKey.isEmpty else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let channel = ZmxChannel(paneSessionKey: sessionKey)
+                guard channel.sendRaw(String(repeating: arrow, count: abs(offset))) else { return }
+                Thread.sleep(forTimeInterval: Station.enterSubmitDelay)
+                _ = channel.submit()
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            for _ in 0..<abs(offset) { station.sendText(arrow) }
+            // Same beat as sendCommand: let the TUI ingest the arrows first.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
+                station.sendEnterKey()
+            }
+        }
+    }
+
+    /// Read recent output from a specific agent
+    func readOutput(from terminalID: String, lines: Int = 50) -> String? {
+        lock.lock()
+        let channel = channels[terminalID]
+        lock.unlock()
+
+        return channel?.readOutput(lines: lines)
+    }
+
+    /// Get the channel for a specific agent (for direct access)
+    func channel(for terminalID: String) -> AgentChannel? {
+        lock.lock()
+        defer { lock.unlock() }
+        return channels[terminalID]
+    }
+
+    /// Route a webhook event to the appropriate HooksChannel. The exact pane the
+    /// hook ran under (SEAHELM_PANE_ID → station session name) wins; cwd matching
+    /// is the fallback. Resolving by cwd alone always picked the worktree's FIRST
+    /// pane, so a suggestion raised in a split pane was attributed to — and its
+    /// picked option sent into — a sibling pane.
+    ///
+    /// Pane resolution must be *stable*: a pane id that resolves to a live station
+    /// always wins, even if that pane has no `agents` entry yet — we adopt it into
+    /// the index instead. It used to require a pre-existing entry, so the same pane
+    /// resolved to itself or to the worktree's first pane depending on registration
+    /// timing. A suggestion filed under one id and the `UserPromptSubmit` that
+    /// should clear it filed under the other never matched, and the card stuck.
+    func handleWebhookEvent(_ event: WebhookEvent) {
+        let paneStation = event.paneId.flatMap { StationRegistry.shared.station(forSessionName: $0) }
+        let paneTid = paneStation?.id
+        lock.lock()
+        // Find the agent whose worktree path matches the event's cwd
+        let matchingTIDs = worktreeIndex.first { (worktreePath, _) in
+            event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
+        }?.value
+        // Adopt a live-but-unregistered pane, inheriting worktree/branch/project from
+        // a sibling in the same worktree, so the guard in `ingest` doesn't drop its
+        // events. Without a sibling to inherit from we have no worktree for it and
+        // must fall back to cwd matching.
+        if let paneTid, let paneStation, agents[paneTid] == nil,
+           let sibling = matchingTIDs?.first.flatMap({ agents[$0] }) {
+            agents[paneTid] = PaneInfo(
+                id: paneTid, worktreePath: sibling.worktreePath, agentType: .unknown,
+                project: sibling.project, branch: sibling.branch, status: .unknown,
+                lastMessage: "", commandLine: nil, roundDuration: 0, startedAt: nil,
+                station: paneStation, channel: nil, taskProgress: TaskProgress())
+            worktreeIndex[sibling.worktreePath, default: []].append(paneTid)
+            if !orderedIDs.contains(paneTid) { orderedIDs.append(paneTid) }
+            NSLog("[hook] adopted unregistered pane — paneId=\(event.paneId ?? "nil") tid=\(paneTid) worktree=\(sibling.worktreePath)")
+        }
+        let resolvedTid: String? = {
+            if let paneTid, agents[paneTid] != nil { return paneTid }
+            return matchingTIDs?.first
+        }()
+        // The pane id was supposed to identify the exact pane but didn't resolve, so
+        // this event is about to be attributed to the worktree's *first* pane. When
+        // that misroutes a turn's clearing hook, the question's own pane keeps its
+        // `.waiting` and the card sticks on "Needs input" — so make the fallback
+        // visible instead of silently guessing.
+        let fellBackFromPaneId = event.paneId != nil && resolvedTid != paneTid
+        guard let tid = resolvedTid else {
+            let known = Array(worktreeIndex.keys)
+            lock.unlock()
+            if fellBackFromPaneId {
+                NSLog("[hook] pane-unresolved and cwd-unresolved — event=\(event.event) paneId=\(event.paneId ?? "nil") cwd=\(event.cwd)")
+            }
+            if event.event == .suggest {
+                NSLog("[suggest] DROP cwd-unresolved — cwd=\(event.cwd) knownWorktrees=\(known)")
+            }
+            return
+        }
+        lock.unlock()
+        if fellBackFromPaneId {
+            NSLog("[hook] pane-unresolved, attributing to first pane of worktree — event=\(event.event) paneId=\(event.paneId ?? "nil") fallbackTid=\(tid) cwd=\(event.cwd)")
+        }
+        if event.event == .suggest {
+            NSLog("[suggest] pass gate2 (cwd→tid=\(tid)) — cwd=\(event.cwd)")
+        }
+
+        // Every hook source that names a known agent types the pane — previously
+        // only claude-code/codex did, so opencode and pi hooks set nothing.
+        let hookAgentType = AgentType.fromHookSource(event.source)
+        if hookAgentType != .unknown {
+            updateDetection(terminalID: tid, commandLine: nil, agentType: hookAgentType)
+        }
+
+        // cwd_changed only updates routing (handled above via worktreeIndex); no station event.
+        guard let event2 = HookDecoder(terminalID: tid, event: event).decode() else { return }
+        // A Stop carries the agent's final prose in `last_assistant_message`. Stash it
+        // on the resolved agent (sentinel-stripped) *before* ingest so the completion
+        // IngestOutcome emits it — this is the only clean "final text" signal (screen
+        // scans leave `lastMessage` on a tool/file line). Covers every Stop path,
+        // including a plain stop that TabCoordinator's suggestion dance never notes.
+        if event.event == .agentStop,
+           let raw = event.data?["last_assistant_message"] as? String {
+            let text = StopHookResponder.stripSentinel(from: raw)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                lock.lock(); agents[tid]?.lastAssistantMessage = text; lock.unlock()
+            }
+        }
+        ingest(event2)
+        if let hooks = channel(for: tid) as? HooksChannel {
+            hooks.handleWebhookEvent(event)
+        }
+    }
+
+    // MARK: - Activity Events
+
+    /// Ring buffer helper: insert at front, cap at maxSize.
+    /// Exposed as static for testability.
+    static func appendToRingBuffer(_ buffer: inout [ActivityEvent], event: ActivityEvent, maxSize: Int) {
+        buffer.insert(event, at: 0)
+        if buffer.count > maxSize {
+            buffer.removeLast()
+        }
+    }
+
+    /// Append an activity event for a terminal's agent.
+    func appendActivityEvent(_ event: ActivityEvent, forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        Self.appendToRingBuffer(&agents[tid]!.activityEvents, event: event, maxSize: 20)
+        lock.unlock()
+    }
+
+    /// Append or replace the newest activity event when the incoming event refers to the same tool/detail.
+    func upsertLatestActivityEvent(_ event: ActivityEvent, forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        if let latest = agents[tid]!.activityEvents.first,
+           latest.tool == event.tool,
+           latest.detail == event.detail {
+            agents[tid]!.activityEvents[0] = event
+        } else {
+            Self.appendToRingBuffer(&agents[tid]!.activityEvents, event: event, maxSize: 20)
+        }
+        lock.unlock()
+    }
+
+    /// Replace activity events for a terminal (used by text-based extraction).
+    func updateActivityEvents(_ events: [ActivityEvent], forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        agents[tid]!.activityEvents = events
+        lock.unlock()
+    }
+
+    /// Clear activity events for a terminal (on agent stop).
+    func clearActivityEvents(forTerminalID tid: String) {
+        lock.lock()
+        agents[tid]?.activityEvents.removeAll()
+        lock.unlock()
+    }
+
+    // MARK: - Ordering
+
+    /// Reorder agents to match card ordering from config.
+    /// Accepts worktree paths (for config persistence) and maps internally via worktreeIndex.
+    func reorder(paths: [String]) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        orderedIDs.sort { a, b in
+            let pathA = agents[a]?.worktreePath ?? ""
+            let pathB = agents[b]?.worktreePath ?? ""
+            let ai = paths.firstIndex(of: pathA) ?? Int.max
+            let bi = paths.firstIndex(of: pathB) ?? Int.max
+            return ai < bi
+        }
+    }
+
+    // MARK: - Queries
+
+    func allPanes() -> [PaneInfo] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return orderedIDs.compactMap { agents[$0] }
+    }
+
+    /// Look up pane by terminal ID
+    func pane(for terminalID: String) -> PaneInfo? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return agents[terminalID]
+    }
+
+    /// Convenience lookup by worktree path via reverse index
+    func pane(forWorktree worktreePath: String) -> PaneInfo? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let tid = worktreeIndex[worktreePath]?.first else { return nil }
+        return agents[tid]
+    }
+
+    /// Every agent in a worktree, in registration order. A worktree holds one
+    /// agent per split pane, which is what `/agents` lists.
+    func panes(forWorktree worktreePath: String) -> [PaneInfo] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return (worktreeIndex[worktreePath] ?? []).compactMap { agents[$0] }
+    }
+
+    func panesForProject(_ project: String) -> [PaneInfo] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return orderedIDs.compactMap { agents[$0] }.filter { $0.project == project }
+    }
+
+    // MARK: - TODO Status Updates (Future)
+
+    /// Stub for future webhook-driven TODO status updates.
+    /// Future logic: match event.cwd → worktree path → branch name → TodoItem.branch,
+    /// then update status based on event type:
+    ///   - SessionStart → "running"
+    ///   - Stop (end_turn) → "completed"
+    ///   - StopFailure → "failed"
+    ///   - SubagentStart → update progress
+    func updateTodoFromWebhook(_ event: WebhookEvent) {
+        // Not yet implemented — will be filled when AgentRegistry status
+        // pipeline is connected to TodoStore.
+    }
+
+    // MARK: - External Channel Management
+
+    /// Register an external channel (WeCom, Slack, etc.)
+    func registerChannel(_ channel: ExternalChannel) {
+        lock.lock()
+        externalChannels[channel.channelId] = channel
+        lock.unlock()
+
+        channel.onMessage = { [weak self] message in
+            self?.handleInbound(message)
+        }
+    }
+
+    /// Unregister and disconnect an external channel
+    func unregisterChannel(_ channelId: String) {
+        lock.lock()
+        let channel = externalChannels.removeValue(forKey: channelId)
+        lock.unlock()
+
+        channel?.disconnect()
+    }
+
+    /// Remove all external channels (for testing)
+    func unregisterAllExternalChannels() {
+        lock.lock()
+        let channels = externalChannels
+        externalChannels.removeAll()
+        lock.unlock()
+
+        for (_, channel) in channels {
+            channel.disconnect()
+        }
+    }
+
+    // MARK: - Inbound Message Handling
+
+    /// Process an inbound message from an external channel.
+    /// Phase 1: slash command routing.
+    /// Phase 2 (future): LLM intent understanding.
+    /// Routes chat text through the cockpit's own command language, so a phone
+    /// and the desktop speak the same verbs instead of the two divergent sets
+    /// that used to exist (`/send` here vs `/order` there, and so on).
+    ///
+    /// Injected by MainWindowController because routing needs the worktree list
+    /// and the repo paths, which live up there — AgentRegistry stays free of UI. Returns
+    /// false for a verb it doesn't own, leaving the chat-only verbs below (`/status`,
+    /// `/idea`) to handle it: those have no cockpit equivalent because on the
+    /// desktop you just look at the dashboard.
+    ///
+    /// Nil in tests and headless runs, where only the chat-only verbs answer.
+    var chatCommandRoute: ((_ text: String, _ reply: @escaping (String) -> Void) -> Bool)?
+
+    /// Injects a rule-matched prompt into the pane a target names. Set by
+    /// `MainWindowController`, which owns the pane list. Returns false when the
+    /// target resolves to nothing.
+    var ruleTriggerRoute: ((_ prompt: String, _ target: IMessageRuleTarget) -> Bool)?
+
+    /// Merges rapid rule hits aimed at the same pane (Aliyun multi-threshold
+    /// SMS, etc.) into one inject. Owned here so every inbound path — live
+    /// bridge, tests — gets the same window without MainWindow wiring it.
+    let ruleCoalescer = IMessageRuleCoalescer()
+
+    func handleInbound(_ message: InboundMessage) {
+        // Channels deliver from their own poll threads, and `chatCommandRoute`
+        // reads the dashboard's selection and moves it. Hop to main before any
+        // of that touches AppKit.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.handleInbound(message) }
+            return
+        }
+
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        // A rule-matched signal is dispatch, not conversation: inject and stay
+        // silent. Replying would text an alerting service back — at best noise,
+        // at worst an SMS to a shortcode that charges for it.
+        //
+        // Hits for one pane are coalesced for 30s so a same-second 80%+90%
+        // alert burst becomes one agent turn instead of two overlapping ones.
+        if let target = message.metadata?["ruleTarget"] as? IMessageRuleTarget {
+            let ruleName = message.metadata?["ruleName"] as? String ?? "?"
+            ruleCoalescer.enqueue(prompt: text, target: target, ruleName: ruleName) { [weak self] combined, t in
+                if self?.ruleTriggerRoute?(combined, t) != true {
+                    NSLog("[iMessage] Rule '\(ruleName)' matched but target \(t.kind.rawValue)=\(t.value) resolved to no pane")
+                }
+            }
+            return
+        }
+
+        // Bare prose steers the worktree you last worked in — the phone equivalent
+        // of typing into its pane. It deliberately does NOT mean what it means in
+        // the desktop cockpit (create a worktree and staff it): a stray line in a
+        // group chat must not spawn worktrees.
+        if !text.hasPrefix("/") {
+            let handled = chatCommandRoute?(text) { [weak self] r in
+                self?.reply(to: message, content: r, format: .markdown)
+            } ?? false
+            if !handled {
+                reply(to: message, content: "No agent to steer. Use `/new <task>` to start one.")
+            }
+            return
+        }
+
+        if chatCommandRoute?(text, { [weak self] r in
+            self?.reply(to: message, content: r, format: .markdown)
+        }) == true {
+            return
+        }
+
+        if let cmd = CommandParser.parse(message) {
+            executeCommand(cmd)
+        } else {
+            reply(to: message, content: "Use /help to see supported commands")
+        }
+    }
+
+    private func executeCommand(_ cmd: ParsedCommand) {
+        switch cmd.command {
+        case "help":
+            // The cockpit verbs come first because they are the shared language;
+            // the rest are chat-only (the desktop reads them off the dashboard).
+            let help = """
+            **Seahelm Commands**
+
+            _Same as the desktop cockpit:_
+            `<anything>` — Steer the current agent
+            `/worktree` — List worktrees, numbered
+            `/worktree [@repo] <description>` — Start a worktree and switch to it
+            `/worktree #<code|name>` — Switch to that worktree
+            `/pane` — List this worktree's panes, numbered
+            `/pane #<code|name>` — Steer that pane
+            `/order #<code|name> <task>` — Send to one pane without switching
+            `/broadcast <task>` — Send a task to every pane
+            `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
+            `/add` — Desktop only (needs a file picker)
+            `/feedback <description>` — Open a GitHub issue for seahelm
+
+            _Chat only:_
+            `/status` — Status of all agents
+            `/idea <description>` — Capture an idea
+            `/help` — This help
+            """
+            reply(to: cmd.rawMessage, content: help, format: .markdown)
+
+        case "idea":
+            guard !cmd.args.isEmpty else {
+                reply(to: cmd.rawMessage, content: "Usage: `/idea <description>`")
+                return
+            }
+            let item = IdeaStore.shared.add(
+                text: cmd.args,
+                project: "external",
+                // Channel id, not a hardcoded platform — an idea texted in over
+                // iMessage was being filed as "wecom:".
+                source: "\(cmd.rawMessage.channelId):\(cmd.rawMessage.senderId)",
+                tags: []
+            )
+            reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")
+
+        case "status":
+            let agents = allPanes()
+            if agents.isEmpty {
+                reply(to: cmd.rawMessage, content: "No agents running.")
+                return
+            }
+            var lines = ["**Agent Status**", ""]
+            for a in agents {
+                lines.append("\(a.status.icon) **\(a.project)** [\(a.branch)] — \(a.status.rawValue): \(a.lastMessage)")
+            }
+            reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
+
+        default:
+            reply(to: cmd.rawMessage, content: "Unknown command: /\(cmd.command)\nUse /help to see supported commands")
+        }
+    }
+
+    /// Send a reply back through the same external channel
+    private func reply(to message: InboundMessage, content: String, format: MessageFormat = .text) {
+        let outbound = OutboundMessage(
+            channelId: message.channelId,
+            targetChatId: message.chatId,
+            targetUserId: message.chatId == nil ? message.senderId : nil,
+            content: content,
+            format: format,
+            replyToMessageId: message.messageId
+        )
+        pushToChannel(message.channelId, message: outbound)
+    }
+
+    /// Push a message to a specific external channel
+    func pushToChannel(_ channelId: String, message: OutboundMessage) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        channel?.send(message)
+    }
+
+    /// Broadcast a message to all registered external channels
+    func broadcast(_ content: String, format: MessageFormat = .text) {
+        lock.lock()
+        let channels = Array(externalChannels.values)
+        lock.unlock()
+
+        for channel in channels {
+            let message = OutboundMessage(
+                channelId: channel.channelId,
+                content: content,
+                format: format
+            )
+            channel.send(message)
+        }
+    }
+}

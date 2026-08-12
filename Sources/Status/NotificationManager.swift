@@ -6,7 +6,7 @@ extension Notification.Name {
     static let navigateToWorktree = Notification.Name("seahelm.navigateToWorktree")
     static let repoViewDidChangeFocusedPane = Notification.Name("seahelm.repoViewDidChangeFocusedPane")
     /// Posted by `GhosttyNSView.becomeFirstResponder` with the `Station` as
-    /// object — the synchronous click→title path, independent of ShipLog polling.
+    /// object — the synchronous click→title path, independent of AgentRegistry polling.
     static let paneDidAcquireFocus = Notification.Name("seahelm.paneDidAcquireFocus")
 }
 
@@ -30,7 +30,7 @@ class NotificationManager: NSObject {
 
     /// Latest observed status per key, updated on *every* edge (not just
     /// qualifying ones) so a pending fire can tell the agent moved on.
-    private var latestStatus: [String: SailorStatus] = [:]
+    private var latestStatus: [String: AgentStatus] = [:]
     /// In-flight stability timers, keyed by cooldownKey.
     private var pendingFires: [String: Timer] = [:]
 
@@ -136,7 +136,7 @@ class NotificationManager: NSObject {
     /// only when a notification is actually *delivered* (`recordDelivery`), so a
     /// notification held by the stability gate and then dropped does not burn the
     /// cooldown window.
-    func shouldNotify(cooldownKey: String, oldStatus: SailorStatus, newStatus: SailorStatus,
+    func shouldNotify(cooldownKey: String, oldStatus: AgentStatus, newStatus: AgentStatus,
                       now: Date = Date()) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
@@ -149,7 +149,7 @@ class NotificationManager: NSObject {
     /// Whether a pending (delayed) notification for `targetStatus` should still
     /// fire, given the latest observed status for its key. Pure — extracted so the
     /// stability-gate decision is unit-testable without a live Timer.
-    static func shouldDeliverPending(targetStatus: SailorStatus, latestStatus: SailorStatus?) -> Bool {
+    static func shouldDeliverPending(targetStatus: AgentStatus, latestStatus: AgentStatus?) -> Bool {
         latestStatus == targetStatus
     }
 
@@ -159,7 +159,7 @@ class NotificationManager: NSObject {
         terminalID.isEmpty ? "wt:\(worktreePath)" : "tid:\(terminalID)"
     }
 
-    static func formatTitle(status: SailorStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
+    static func formatTitle(status: AgentStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
         let target = displayTarget(workspaceName: workspaceName, branch: branch)
         let base: String
         switch status {
@@ -175,7 +175,7 @@ class NotificationManager: NSObject {
     }
 
     static func formatTitle(
-        status: SailorStatus,
+        status: AgentStatus,
         workspaceName: String,
         branch: String,
         paneIndex: Int,
@@ -205,7 +205,7 @@ class NotificationManager: NSObject {
     }
 
     static func formatBody(
-        status: SailorStatus,
+        status: AgentStatus,
         workspaceName: String,
         branch: String,
         lastMessage: String,
@@ -356,16 +356,16 @@ class NotificationManager: NSObject {
     /// a transport, a relay, or push certificates — the IM app already has all
     /// three.
     ///
-    /// Hung off `deliver` rather than off ShipLog's ingest so the chat message
+    /// Hung off `deliver` rather than off AgentRegistry's ingest so the chat message
     /// inherits this type's gating: the running → done edge, the per-key
     /// cooldown, and the stability delay that swallows an idle flicker mid-turn.
-    /// The ShipLog broadcast this replaced had none of those, and never fired on
+    /// The AgentRegistry broadcast this replaced had none of those, and never fired on
     /// completion at all.
     ///
     /// Set by MainWindowController; nil in tests and headless runs.
-    var onDeliverExternal: ((_ status: SailorStatus, _ title: String, _ subtitle: String, _ body: String) -> Void)?
+    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String) -> Void)?
 
-    static func formatSystemTitle(status: SailorStatus) -> String {
+    static func formatSystemTitle(status: AgentStatus) -> String {
         switch status {
         case .idle:
             return "Finished successfully"
@@ -390,7 +390,7 @@ class NotificationManager: NSObject {
         return target
     }
 
-    static func formatSystemBody(status: SailorStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "", lastAssistantMessage: String = "") -> String {
+    static func formatSystemBody(status: AgentStatus, workspaceName: String, branch: String, lastMessage: String, lastUserPrompt: String = "", lastAssistantMessage: String = "") -> String {
         // The agent's own final prose is the most informative line — placeholder
         // hook labels ("Processing prompt") in lastMessage carry nothing.
         let trimmedAssistant = lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -428,8 +428,8 @@ class NotificationManager: NSObject {
         paneIndex: Int = 1,
         paneCount: Int = 1,
         terminalID: String = "",
-        oldStatus: SailorStatus,
-        newStatus: SailorStatus,
+        oldStatus: AgentStatus,
+        newStatus: AgentStatus,
         lastMessage: String,
         lastUserPrompt: String = "",
         lastAssistantMessage: String = "",
@@ -493,7 +493,7 @@ class NotificationManager: NSObject {
         branch: String,
         paneIndex: Int,
         paneCount: Int,
-        newStatus: SailorStatus,
+        newStatus: AgentStatus,
         lastMessage: String,
         lastUserPrompt: String,
         lastAssistantMessage: String,

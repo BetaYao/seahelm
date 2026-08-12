@@ -15,7 +15,7 @@ struct IslandAgentRow: Identifiable, Equatable {
     let id: String // worktreePath
     let project: String
     let branch: String
-    let status: SailorStatus
+    let status: AgentStatus
     let message: String
     /// Task description entered at worktree-creation time.
     let title: String
@@ -29,8 +29,8 @@ struct IslandAgentRow: Identifiable, Equatable {
     }
 }
 
-/// Repo (= deck) bucket for the opened island list.
-struct IslandDeckGroup: Identifiable, Equatable {
+/// Repo (= project) bucket for the opened island list.
+struct IslandProjectGroup: Identifiable, Equatable {
     let id: String // project name
     let project: String
     let rows: [IslandAgentRow]
@@ -214,13 +214,13 @@ final class IslandModel {
     }
 
     /// Opened list: group by repo, attention-first within each group.
-    /// Decks themselves sort by their hottest status so a flaming seahelm
+    /// Projects themselves sort by their hottest status so a flaming seahelm
     /// group floats above a quiet saas-mono block.
-    var deckGroups: [IslandDeckGroup] {
-        Self.groupedByDeck(rows)
+    var projectGroups: [IslandProjectGroup] {
+        Self.groupedByProject(rows)
     }
 
-    static func groupedByDeck(_ rows: [IslandAgentRow]) -> [IslandDeckGroup] {
+    static func groupedByProject(_ rows: [IslandAgentRow]) -> [IslandProjectGroup] {
         var order: [String] = []
         var buckets: [String: [IslandAgentRow]] = [:]
         for row in rows {
@@ -230,14 +230,14 @@ final class IslandModel {
             }
             buckets[row.project, default: []].append(row)
         }
-        let groups = order.map { project -> IslandDeckGroup in
+        let groups = order.map { project -> IslandProjectGroup in
             let sorted = (buckets[project] ?? []).sorted {
                 if statusRank($0.status) != statusRank($1.status) {
                     return statusRank($0.status) > statusRank($1.status)
                 }
                 return ($0.branch, $0.id) < ($1.branch, $1.id)
             }
-            return IslandDeckGroup(id: project, project: project, rows: sorted)
+            return IslandProjectGroup(id: project, project: project, rows: sorted)
         }
         return groups.sorted {
             let lhs = $0.rows.map { statusRank($0.status) }.max() ?? 0
@@ -247,7 +247,7 @@ final class IslandModel {
         }
     }
 
-    static func statusRank(_ s: SailorStatus) -> Int {
+    static func statusRank(_ s: AgentStatus) -> Int {
         switch s {
         case .error: return 5
         case .waiting: return 4
@@ -258,5 +258,5 @@ final class IslandModel {
         }
     }
 
-    private func statusRank(_ s: SailorStatus) -> Int { Self.statusRank(s) }
+    private func statusRank(_ s: AgentStatus) -> Int { Self.statusRank(s) }
 }

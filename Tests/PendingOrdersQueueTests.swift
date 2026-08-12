@@ -162,7 +162,7 @@ final class PendingOrdersQueueTests: XCTestCase {
 
     func testResolvePaneSparesWorktreeScopedCards() {
         // returnToPort carries no terminalID because it belongs to the whole
-        // cabin; one pane closing must not sweep it away.
+        // worktree; one pane closing must not sweep it away.
         let q = PendingOrdersQueue()
         q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/x",
                                   branch: "b", project: "p", terminalID: "", message: "m"))

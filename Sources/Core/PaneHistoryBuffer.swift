@@ -2,7 +2,7 @@ import Foundation
 
 /// Per-pane message ring buffer with JSONL persistence, backing the MQTT
 /// `history/request` reply (`docs/remote-clients-design.md` §15.3). The app
-/// otherwise keeps only the *latest* message per pane (`SailorInfo.lastMessage`);
+/// otherwise keeps only the *latest* message per pane (`PaneInfo.lastMessage`);
 /// this accumulates a bounded recent history so a client can scroll back.
 ///
 /// One append-only `<paneId>.jsonl` file per pane under

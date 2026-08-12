@@ -58,14 +58,14 @@ final class ProcessProbeTests: XCTestCase {
 
     func testBundledManifestsAllLoadAndIdentify() {
         // Every AI agent must have a loadable manifest with a process block, and
-        // the probe must map it back to the right SailorType.
+        // the probe must map it back to the right AgentType.
         let store = ManifestStore.shared
         for id in ["claude", "codex", "opencode", "gemini", "cline", "goose", "amp", "aider", "cursor", "kiro"] {
             guard let cm = store.manifest(for: id) else {
                 XCTFail("missing manifest \(id)"); continue
             }
             XCTAssertNotNil(cm.manifest.process, "\(id) has no process block")
-            XCTAssertNotEqual(SailorType.fromManifestId(id), .unknown, "\(id) has no SailorType")
+            XCTAssertNotEqual(AgentType.fromManifestId(id), .unknown, "\(id) has no AgentType")
         }
     }
 

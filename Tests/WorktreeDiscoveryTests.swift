@@ -131,7 +131,7 @@ final class WorktreeDiscoveryTests: XCTestCase {
     func testDisplayName_MainWorktree() {
         // The branch wins whenever there is one, main worktree included — the
         // directory name is only the fallback for a detached checkout. This
-        // matches how the quick switcher labels cabins (branch first).
+        // matches how the quick switcher labels worktrees (branch first).
         let info = WorktreeInfo(path: "/Users/dev/project", branch: "main", commitHash: "abc", isMainWorktree: true)
         XCTAssertEqual(info.displayName, "main")
     }

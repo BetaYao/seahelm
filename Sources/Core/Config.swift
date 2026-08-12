@@ -5,7 +5,7 @@ struct Config: Codable {
     var workspacePaths: [String]
     var activeWorkspaceIndex: Int
     var terminalRowCacheSize: Int
-    var agentDetect: SailorDetectConfig
+    var agentDetect: AgentDetectConfig
     var webhook: WebhookConfig
     var autoUpdate: UpdateConfig
     var cardOrder: [String]
@@ -45,7 +45,7 @@ struct Config: Codable {
     /// First-launch wizard gate. New installs start `false`; legacy configs that
     /// omit the key decode as `true` so existing users never see the wizard.
     var onboardingCompleted: Bool
-    /// Primary AI agent chosen during onboarding (`SailorType.rawValue`).
+    /// Primary AI agent chosen during onboarding (`AgentType.rawValue`).
     var defaultAgent: String
     /// When true, agent launch commands append skip-permission / yolo flags.
     var agentYolo: Bool
@@ -103,7 +103,7 @@ struct Config: Codable {
         workspacePaths = []
         activeWorkspaceIndex = 0
         terminalRowCacheSize = 200
-        agentDetect = SailorDetectConfig.default
+        agentDetect = AgentDetectConfig.default
         webhook = WebhookConfig()
         autoUpdate = UpdateConfig()
         cardOrder = []
@@ -129,7 +129,7 @@ struct Config: Codable {
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
         onboardingCompleted = false
-        defaultAgent = SailorType.claudeCode.rawValue
+        defaultAgent = AgentType.claudeCode.rawValue
         agentYolo = false
         enabledHookAgents = []
         notificationSound = "default"
@@ -143,8 +143,8 @@ struct Config: Codable {
         workspacePaths = try container.decodeIfPresent([String].self, forKey: .workspacePaths) ?? []
         activeWorkspaceIndex = try container.decodeIfPresent(Int.self, forKey: .activeWorkspaceIndex) ?? 0
         terminalRowCacheSize = try container.decodeIfPresent(Int.self, forKey: .terminalRowCacheSize) ?? 200
-        agentDetect = (try container.decodeIfPresent(SailorDetectConfig.self, forKey: .agentDetect) ?? .default)
-            .includingMissingDefaultSailors()
+        agentDetect = (try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default)
+            .includingMissingDefaultPanes()
         webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
         autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
@@ -178,7 +178,7 @@ struct Config: Codable {
             onboardingCompleted = true
         }
         defaultAgent = try container.decodeIfPresent(String.self, forKey: .defaultAgent)
-            ?? SailorType.claudeCode.rawValue
+            ?? AgentType.claudeCode.rawValue
         agentYolo = try container.decodeIfPresent(Bool.self, forKey: .agentYolo) ?? false
         enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
@@ -343,53 +343,53 @@ struct AutoSleepConfig: Codable, Equatable {
     var effectiveAfterSeconds: Double { max(60, afterSeconds) }
 }
 
-struct SailorDetectConfig: Codable {
-    var agents: [SailorDef]
+struct AgentDetectConfig: Codable {
+    var agents: [AgentDef]
 
-    static let `default` = SailorDetectConfig(agents: [
-        SailorDef(name: "claude", rules: [
-            SailorRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
-            SailorRule(status: "Error", patterns: ["ERROR", "error:"]),
-            SailorRule(status: "Waiting", patterns: ["?", "(y/n)", "(yes/no)"]),
+    static let `default` = AgentDetectConfig(agents: [
+        AgentDef(name: "claude", rules: [
+            AgentRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
+            AgentRule(status: "Error", patterns: ["ERROR", "error:"]),
+            AgentRule(status: "Waiting", patterns: ["?", "(y/n)", "(yes/no)"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["shift+tab", "accept edits", "to interrupt"]),
-        SailorDef(name: "codex", rules: [
-            SailorRule(status: "Waiting", patterns: [
+        AgentDef(name: "codex", rules: [
+            AgentRule(status: "Waiting", patterns: [
                 "would you like to run the following command?",
                 "would you like to proceed?",
                 "yes, proceed",
                 "don't ask again",
                 "tell codex what to do differently",
             ]),
-            SailorRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
-            SailorRule(status: "Error", patterns: ["error:"]),
+            AgentRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
+            AgentRule(status: "Error", patterns: ["error:"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["tip", "shortcuts", "switch layout"]),
-        SailorDef(name: "agent", rules: [
-            SailorRule(status: "Running", patterns: [
+        AgentDef(name: "agent", rules: [
+            AgentRule(status: "Running", patterns: [
                 "ctrl+c to stop", "to interrupt", "esc to abort",
             ]),
-            SailorRule(status: "Error", patterns: ["error"]),
-            SailorRule(status: "Waiting", patterns: ["?", "> "]),
+            AgentRule(status: "Error", patterns: ["error"]),
+            AgentRule(status: "Waiting", patterns: ["?", "> "]),
         ], defaultStatus: "Idle", messageSkipPatterns: [
             "shift+tab", "accept edits", "to interrupt", "ctrl+c to stop",
         ]),
     ])
 
-    func includingMissingDefaultSailors() -> SailorDetectConfig {
+    func includingMissingDefaultPanes() -> AgentDetectConfig {
         var merged = self
-        for defaultSailor in Self.default.agents {
-            if let index = merged.agents.firstIndex(where: { $0.name == defaultSailor.name }) {
-                merged.agents[index].mergeMissingDefaults(from: defaultSailor)
+        for defaultPane in Self.default.agents {
+            if let index = merged.agents.firstIndex(where: { $0.name == defaultPane.name }) {
+                merged.agents[index].mergeMissingDefaults(from: defaultPane)
             } else {
-                merged.agents.append(defaultSailor)
+                merged.agents.append(defaultPane)
             }
         }
         return merged
     }
 }
 
-struct SailorDef: Codable {
+struct AgentDef: Codable {
     var name: String
-    var rules: [SailorRule]
+    var rules: [AgentRule]
     var defaultStatus: String
     var messageSkipPatterns: [String]
 
@@ -400,25 +400,25 @@ struct SailorDef: Codable {
     }
 }
 
-struct SailorRule: Codable, Equatable {
+struct AgentRule: Codable, Equatable {
     var status: String
     var patterns: [String]
 }
 
-private extension SailorDef {
-    mutating func mergeMissingDefaults(from defaultSailor: SailorDef) {
-        for defaultRule in defaultSailor.rules {
+private extension AgentDef {
+    mutating func mergeMissingDefaults(from defaultPane: AgentDef) {
+        for defaultRule in defaultPane.rules {
             if let index = rules.firstIndex(where: { $0.status.lowercased() == defaultRule.status.lowercased() }) {
                 rules[index].appendMissingPatterns(defaultRule.patterns)
             } else {
                 rules.append(defaultRule)
             }
         }
-        messageSkipPatterns.appendMissingCaseInsensitive(defaultSailor.messageSkipPatterns)
+        messageSkipPatterns.appendMissingCaseInsensitive(defaultPane.messageSkipPatterns)
     }
 }
 
-private extension SailorRule {
+private extension AgentRule {
     mutating func appendMissingPatterns(_ defaults: [String]) {
         patterns.appendMissingCaseInsensitive(defaults)
     }

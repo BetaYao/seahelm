@@ -78,7 +78,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `Settings/`, `Onboarding/` — Tabbed settings window and the first-run wizard
 
 3. **Core Services** (`Sources/Core/`, `Sources/Status/`)
-   - `ShipLog` — Single source of truth for all agent state; delegates notify UI of changes
+   - `AgentRegistry` — Single source of truth for all agent state; delegates notify UI of changes
    - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
    - `StatusDetector` — Authoritative status detector. Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown. Its text-pattern tier consults a `CompiledManifest` from the manifest engine (see below); the manifest layer augments, it does not replace, this ladder.
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
@@ -102,7 +102,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 **Terminal persistence:** `runtimeBackend` is `"zmx"` (default) or `"local"` — there is no user-facing backend choice and no tmux backend. `MainWindowController` starts optimistically at `"zmx"` so early tree restore attaches persistent sessions before the async availability check lands, then falls back to `"local"` if zmx is missing. `local` panes are plain processes with no persistence (`SessionManager` guards `backend == "zmx"`). zmx sessions are named `seahelm-<parent>-<name>` (`.` and `:` replaced with `_`, truncated past `maxSessionNameLength`) and created per split leaf; a health check runs 3s after creation (`Station.recoveryDelay`) and stale sessions trigger `recoverZmxSession` (destroy + recreate). Split layouts are serialized to config for restore on relaunch.
 
-**Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `ShipLog` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
+**Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `AgentRegistry` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
 
 **Auto-update:** Sparkle 2 (`Sources/Update/UpdateDriver.swift`, `Sources/App/UpdateCoordinator.swift`). `UpdateDriver` implements `SPUUserDriver` so updates render in the inline `UpdateBanner` instead of Sparkle's modals; it stashes each pending Sparkle reply block until the matching banner button is clicked. There is one appcast per CPU arch (we ship arch-specific zips and Sparkle has no arch filtering), so the feed URL is supplied at runtime by `UpdateCoordinator.feedURLString` rather than baked into Info.plist. `SUPublicEDKey` comes from the `SPARKLE_PUBLIC_ED_KEY` build setting; empty means Sparkle refuses to start. `scripts/package_release.sh` signs Sparkle's nested helpers (Autoupdate, Updater.app, `Downloader.xpc`, `Installer.xpc`) inside-out, then generates and signs `dist/appcast-<arch>.xml` from the final notarized zip using `SPARKLE_PRIVATE_KEY`.
 
@@ -114,18 +114,11 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 ## Agent Orchestration ("the fleet")
 
-Seahelm frames the whole app with a nautical metaphor worth knowing before reading this code. You (the app / user) are the **Captain** of one **Ship**, and the structural hierarchy nests physically:
+The structure is plain: one app ⊃ many **projects** (repos) ⊃ many **worktrees** ⊃ many **panes**, each pane running an **agent**. `AgentRegistry.shared` is the app-wide source of truth across all panes. (Note: `Station` is taken for the surface wrapper, so it names none of these tiers.)
 
-| Concept | Term | Relationship |
-|---------|------|--------------|
-| the app / user | **Ship** (Captain) | top level, singular |
-| repo | **Deck** | a Ship has many Decks |
-| worktree | **Cabin** | a Deck has many Cabins |
-| pane / agent | **Sailor** | a Cabin has many Sailors doing the work |
+This used to be a nautical metaphor — Ship / Deck / Cabin / Sailor for app / repo / worktree / pane — and older commits, branch names and issues still speak it. The rename dropped it because `Sailor` in particular had come to mean two things at once, the pane and the agent inside it, which is why the types below split along that line rather than mapping one-to-one onto the old names.
 
-So: one Ship ⊃ many Decks (repos) ⊃ many Cabins (worktrees) ⊃ many Sailors (panes/agents). `ShipLog.shared` is the Ship-wide source of truth across all Sailors. (Note: `Station` is already taken for the surface wrapper, so it is deliberately not used for any tier above.)
-
-- **Sailor model** (`Sources/Core/Sailor*.swift`): `SailorType` = agent kind (claudeCode, codex, openCode, gemini, cline…), `SailorStatus` = state enum (owns the status-dot color), `SailorInfo` = per-pane snapshot, `SailorReducer` = pure `(old + inputs) → (new snapshot + delta)` (extracted from `ShipLog.updateStatus`), `SailorChannel` = protocol for talking to a sailor's terminal (`ZmxChannel` is the universal fallback via the `zmx` CLI; `HooksChannel` is the richer path for agents that report structured events).
+- **Pane / agent model** (`Sources/Core/`): `AgentType` = agent kind (claudeCode, codex, openCode, gemini, cline…), `AgentStatus` = state enum (owns the status-dot color), `PaneInfo` = per-pane snapshot, `PaneReducer` = pure `(old + inputs) → (new snapshot + delta)` (extracted from `AgentRegistry.updateStatus`), `AgentChannel` = protocol for talking to a pane's terminal (`ZmxChannel` is the universal fallback via the `zmx` CLI; `HooksChannel` is the richer path for agents that report structured events). Note `PaneStatus` is a different type: the per-pane snapshot the worktree rollup consumes, in `Sources/Status/`.
 
 - **Manifest engine** (`Sources/Status/`): data-driven detection ported from a sibling project. `AgentManifest` is a JSON schema of priority-ordered regex rules/gates/process matchers (bundled under `Sources/Status/Manifests/`, overridable at `~/.config/seahelm/agents/<id>.json` — user override wins by id/alias). `ManifestStore` compiles them; `ManifestEngine` evaluates a terminal snapshot. The `*Decoder` files are the newer "signalman" seam: `SignalDecoder` translates one raw source into a unified `NormalizedEvent`; `ScanDecoder` wraps `StatusDetector` (screen-scan channel), `HookDecoder` maps webhook events. These feed the reducer/ingest pipeline broadcast through `EventHub`.
 
@@ -150,7 +143,7 @@ So: one Ship ⊃ many Decks (repos) ⊃ many Cabins (worktrees) ⊃ many Sailors
 - Delegate pattern used throughout (not Combine/async-await for UI updates)
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
 - `StationRegistry.shared` is the global surface lookup table (surface ID → Station)
-- `ShipLog.shared` is the single source of truth for agent state (status, messages, activity events)
+- `AgentRegistry.shared` is the single source of truth for agent state (status, messages, activity events)
 - Tests use XCTest with `@testable import seahelm`; test files in `Tests/` directory; no external test dependencies
 - Config uses `decodeIfPresent()` throughout for backward compatibility with older config files
 - `ghostty/` directory contains the vendored Ghostty source (read-only reference, not built from here)

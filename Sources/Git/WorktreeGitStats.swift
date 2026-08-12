@@ -53,7 +53,7 @@ enum WorktreeGitStatsProvider {
 }
 
 /// Short-TTL cache so the dashboard shares one git-stats read across cards and
-/// resolves off the main thread on a miss/stale. Mirrors CabinTitleCache.
+/// resolves off the main thread on a miss/stale. Mirrors WorktreeTitleCache.
 final class WorktreeGitStatsCache {
     static let shared = WorktreeGitStatsCache()
 

@@ -6,12 +6,12 @@ struct NotificationEntry: Identifiable, Codable, Equatable {
     let workspaceName: String
     let branch: String
     let worktreePath: String
-    let status: SailorStatus
+    let status: AgentStatus
     let message: String
     var isRead: Bool
     let paneIndex: Int?  // nil for single-pane worktrees
 
-    init(workspaceName: String = "", branch: String, worktreePath: String, status: SailorStatus, message: String, paneIndex: Int? = nil) {
+    init(workspaceName: String = "", branch: String, worktreePath: String, status: AgentStatus, message: String, paneIndex: Int? = nil) {
         self.id = UUID()
         self.timestamp = Date()
         self.workspaceName = workspaceName

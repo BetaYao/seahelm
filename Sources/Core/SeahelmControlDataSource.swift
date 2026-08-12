@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bridges the control API to seahelm's live state: ShipLog for pane inventory
+/// Bridges the control API to seahelm's live state: AgentRegistry for pane inventory
 /// and StationRegistry for terminal reads.
 final class SeahelmControlDataSource: ControlDataSource {
 
@@ -45,7 +45,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         // the same two snapshots.
         let memoryBySessionKey = includingMemory ? sessionMemoryBySessionKey() : [:]
 
-        return ShipLog.shared.allSailors().map { s in
+        return AgentRegistry.shared.allPanes().map { s in
             let station = StationRegistry.shared.station(forId: s.id)
             let osc = station?.oscTitle ?? ""
             let title = osc.isEmpty ? (station?.persistedTitle ?? "") : osc
@@ -175,7 +175,7 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func paneStatus(paneId: String) -> String? {
         guard let sid = station(for: paneId)?.id else { return nil }
-        return ShipLog.shared.sailor(for: sid)?.status.rawValue
+        return AgentRegistry.shared.pane(for: sid)?.status.rawValue
     }
 
     func paneOptions(paneId: String) -> [[String: Any]]? {
@@ -238,8 +238,8 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func explainPane(paneId: String) -> [String: Any]? {
         guard let station = station(for: paneId) else { return nil }
-        let sailor = ShipLog.shared.sailor(for: station.id)
-        let agentType = sailor?.agentType ?? .unknown
+        let pane = AgentRegistry.shared.pane(for: station.id)
+        let agentType = pane?.agentType ?? .unknown
         let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
 
         let content = station.readViewportText() ?? ""
@@ -250,8 +250,8 @@ final class SeahelmControlDataSource: ControlDataSource {
         let scan = StatusDetector().detectDetailed(
             processStatus: station.processStatus, shellInfo: nil, content: content,
             manifest: manifest, osc: osc)
-        let hookStatus = sailor?.hookStatus ?? .unknown
-        let decided = ShipLog.arbitrateDetailed(scan: scan.state, hook: hookStatus, agentType: agentType)
+        let hookStatus = pane?.hookStatus ?? .unknown
+        let decided = AgentRegistry.arbitrateDetailed(scan: scan.state, hook: hookStatus, agentType: agentType)
 
         var result: [String: Any] = [
             "pane_id": station.id,

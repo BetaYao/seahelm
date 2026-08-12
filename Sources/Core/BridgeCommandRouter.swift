@@ -21,7 +21,7 @@ struct BridgeCommandRouter {
     let removeWorktree: (String) -> Void
     /// Open a pre-filled GitHub issue in the browser.
     let flagIssue: (String) -> Void
-    let activeSailorCount: () -> Int
+    let activePaneCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
 
@@ -50,7 +50,7 @@ struct BridgeCommandRouter {
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",
-                                          message: "Broadcast to \(activeSailorCount()) agents", payload: task))
+                                          message: "Broadcast to \(activePaneCount()) agents", payload: task))
         }
     }
 }

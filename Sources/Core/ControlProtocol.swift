@@ -75,7 +75,7 @@ protocol ControlDataSource: AnyObject {
     /// Deliver a sequence of named keys/combos (enter, esc, tab, arrows,
     /// ctrl+<letter>, single chars) to a pane. False if the pane is unknown.
     func sendKeys(paneId: String, keys: [String]) -> Bool
-    /// Current rolled-up status of a pane (SailorStatus raw value), or nil if unknown.
+    /// Current rolled-up status of a pane (AgentStatus raw value), or nil if unknown.
     func paneStatus(paneId: String) -> String?
     /// Split a pane (nil = the focused pane) in the given direction
     /// (right|left|down|up). Returns the new pane's id, or nil if the pane can't
@@ -439,7 +439,7 @@ final class ControlRouter {
     }
 
     /// `done` is an alias for a finished pane (idle or exited); otherwise compare
-    /// the SailorStatus raw value case-insensitively.
+    /// the AgentStatus raw value case-insensitively.
     static func statusMatches(_ status: String, want: String) -> Bool {
         if want == "done" { return status == "idle" || status == "exited" }
         return status == want

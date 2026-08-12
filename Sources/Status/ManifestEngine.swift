@@ -6,7 +6,7 @@ import Foundation
 /// flags used for publish gating / debounce bypass, plus the matched rule id for
 /// explainability (`agent explain`).
 struct Detection: Equatable {
-    var state: SailorStatus
+    var state: AgentStatus
     var visibleIdle: Bool = false
     var visibleBlocker: Bool = false
     var visibleWorking: Bool = false
@@ -51,7 +51,7 @@ final class CompiledManifest {
             let text = Self.regionText(cr.region, input)
             guard cr.gate.matches(text) else { continue }
             return Detection(
-                state: SailorStatus.fromManifest(cr.rule.state),
+                state: AgentStatus.fromManifest(cr.rule.state),
                 visibleIdle: cr.rule.visibleIdle,
                 visibleBlocker: cr.rule.visibleBlocker,
                 visibleWorking: cr.rule.visibleWorking,
@@ -63,7 +63,7 @@ final class CompiledManifest {
     }
 
     /// Default fallback when no rule matched a known agent.
-    var defaultStatus: SailorStatus { SailorStatus.fromManifest(manifest.defaultStatus) }
+    var defaultStatus: AgentStatus { AgentStatus.fromManifest(manifest.defaultStatus) }
 
     /// Explainability: the winning rule plus the region text it matched against
     /// (evidence), or nil if no rule matched. Same evaluation order as `evaluate`.

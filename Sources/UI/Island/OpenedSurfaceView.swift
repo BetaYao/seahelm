@@ -61,8 +61,8 @@ struct OpenedSurfaceView: View {
                 } else {
                     if !model.rows.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(model.deckGroups) { group in
-                                deckSection(group)
+                            ForEach(model.projectGroups) { group in
+                                projectSection(group)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
@@ -268,7 +268,7 @@ struct OpenedSurfaceView: View {
         .animation(.easeInOut(duration: 0.25), value: model.usageReadouts)
     }
 
-    private func deckSection(_ group: IslandDeckGroup) -> some View {
+    private func projectSection(_ group: IslandProjectGroup) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(group.project)

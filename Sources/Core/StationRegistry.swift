@@ -3,7 +3,7 @@ import Foundation
 /// Global registry mapping station IDs to live Station instances.
 ///
 /// Accessed from several threads: the main thread registers/unregisters as panes
-/// are created, restored and closed, while hook events (`ShipLog.handleWebhookEvent`,
+/// are created, restored and closed, while hook events (`AgentRegistry.handleWebhookEvent`,
 /// on the event-sink queue) and control-socket requests (one thread per connection)
 /// look stations up. A Swift Dictionary is not thread-safe, so every access is
 /// serialized here — an unsynchronized read racing a register can miss a live

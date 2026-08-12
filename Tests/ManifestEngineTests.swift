@@ -324,8 +324,8 @@ final class ManifestEngineTests: XCTestCase {
     }
 
     func testStatusMapping() {
-        XCTAssertEqual(SailorStatus.fromManifest("working"), .running)
-        XCTAssertEqual(SailorStatus.fromManifest("blocked"), .waiting)
-        XCTAssertEqual(SailorStatus.fromManifest("IDLE"), .idle)
+        XCTAssertEqual(AgentStatus.fromManifest("working"), .running)
+        XCTAssertEqual(AgentStatus.fromManifest("blocked"), .waiting)
+        XCTAssertEqual(AgentStatus.fromManifest("IDLE"), .idle)
     }
 }

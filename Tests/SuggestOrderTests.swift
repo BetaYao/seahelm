@@ -5,7 +5,7 @@ final class SuggestOrderTests: XCTestCase {
     /// `terminalID` defaults to "t1"; pass a second one to model a split pane —
     /// two panes of the same worktree share `worktreePath` but never a terminal.
     private func suggestOutcome(options: [String], terminalID: String = "t1") -> IngestOutcome {
-        let info = SailorInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
+        let info = PaneInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
                               project: "p", branch: "b", status: .idle, lastMessage: "",
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())
@@ -56,7 +56,7 @@ final class SuggestOrderTests: XCTestCase {
     }
 
     private func userPromptOutcome(terminalID: String) -> IngestOutcome {
-        let info = SailorInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
+        let info = PaneInfo(id: terminalID, worktreePath: "/wt", agentType: .claudeCode,
                               project: "p", branch: "b", status: .idle, lastMessage: "",
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())

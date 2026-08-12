@@ -29,11 +29,11 @@ enum NormalizedEventKind {
     // carries the remaining questions in `followups` (prompts pre-tagged "(i/N)")
     // so the card can advance as each one is answered.
     case question(prompt: String, options: [String], followups: [QuestionSpec])
-    case screenObserved(status: SailorStatus,
+    case screenObserved(status: AgentStatus,
                         message: String,
                         activity: [ActivityEvent],
                         commandLine: String?,
-                        agentType: SailorType,
+                        agentType: AgentType,
                         roundDuration: TimeInterval,
                         tasks: [TaskItem])
 }

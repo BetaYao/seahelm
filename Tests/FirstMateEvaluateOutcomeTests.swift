@@ -7,11 +7,11 @@ import XCTest
 final class FirstMateEvaluateOutcomeTests: XCTestCase {
     private func outcome(kind: NormalizedEventKind, source: EventSource = .hook("claude-code"),
                          changed: Bool = false,
-                         completion: Bool = false, newStatus: SailorStatus = .running,
+                         completion: Bool = false, newStatus: AgentStatus = .running,
                          hold: Double = 0,
                          lastMessage: String = "",
                          lastAssistantMessage: String = "") -> IngestOutcome {
-        var info = SailorInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
+        var info = PaneInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode,
                               project: "p", branch: "b", status: newStatus, lastMessage: lastMessage,
                               commandLine: nil, roundDuration: 0, startedAt: nil, station: nil,
                               channel: nil, taskProgress: TaskProgress())
