@@ -50,10 +50,12 @@ final class CabinStatusAggregatorTests: XCTestCase {
         let ws = mockDelegate.lastUpdatedStatus!
         XCTAssertEqual(ws.panes.count, 2)
         XCTAssertEqual(ws.statuses, [.running, .idle])
-        // Representative pane = highest rollup rank (running t1 beats idle t2),
-        // so status/message/index all describe that pane.
-        XCTAssertEqual(ws.mostRecentMessage, "building")
-        XCTAssertEqual(ws.mostRecentPaneIndex, 1)
+        // Representative pane = the one that changed status most recently, so
+        // t2 speaks even though t1 is the busier of the two. Status, message and
+        // index all describe that same pane.
+        XCTAssertEqual(ws.rolledUpStatus, .idle)
+        XCTAssertEqual(ws.mostRecentMessage, "done")
+        XCTAssertEqual(ws.mostRecentPaneIndex, 2)
     }
 
     func testStatusChangeFiresPaneCallback() {

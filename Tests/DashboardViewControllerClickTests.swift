@@ -180,6 +180,7 @@ private func makeSailor(id: String, worktreePath: String) -> SailorDisplayInfo {
         project: "proj",
         thread: "main",
         paneStatuses: [.idle],
+        rolledUpStatus: .idle,
         mostRecentMessage: "No active task.",
         lastUserPrompt: "",
         mostRecentPaneIndex: 1,

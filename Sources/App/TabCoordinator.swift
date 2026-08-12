@@ -344,12 +344,14 @@ class TabCoordinator {
             } ?? [station]
 
             let ws = statusAggregator.status(for: agent.worktreePath)
-            // Roll up EVERY pane's ShipLog status for this worktree (authoritative,
-            // arbitrated). A multi-pane worktree must reflect its busiest pane, so
-            // don't collapse to the aggregator's list or a single sailor here.
+            // Every pane's ShipLog status, in leaf order — these draw the per-pane
+            // dots. The worktree's own status is NOT derived from them here: the
+            // aggregator already picked the most recently changed pane, and
+            // re-deriving it would let the row and the tab badge disagree.
             let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
+            let rolledUpStatus = ws?.rolledUpStatus ?? agent.status
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
@@ -432,6 +434,7 @@ class TabCoordinator {
                 project: agent.project,
                 thread: worktreeName,
                 paneStatuses: paneStatuses,
+                rolledUpStatus: rolledUpStatus,
                 mostRecentMessage: mostRecentMessage,
                 lastUserPrompt: mostRecentUserPrompt,
                 mostRecentPaneIndex: mostRecentPaneIndex,
