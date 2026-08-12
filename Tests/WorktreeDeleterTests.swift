@@ -110,8 +110,12 @@ final class WorktreeDeleterTests: XCTestCase {
             switch delError {
             case .isMainWorktree:
                 break // Expected
-            case .gitFailed(let msg) where msg.contains("main working tree"):
-                break // Also acceptable — git caught it
+            case .gitFailed(let msg) where msg.contains("main worktree"):
+                // Fallback only. This used to match git's raw "is a main working
+                // tree", which classifyWorktreeRemoveError had already rewritten,
+                // so the case never fired and the guard's symlink bug hid behind
+                // an "Unexpected error" instead of being reported as one.
+                XCTFail("guard should have caught this before git: \(msg)")
             default:
                 XCTFail("Unexpected error: \(delError)")
             }
@@ -255,5 +259,25 @@ final class WorktreeDeleterTests: XCTestCase {
 
     private func lastPathComponent(_ path: String) -> String {
         URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    /// The guard compared path strings, so any caller holding a path that
+    /// reaches the repo through a symlink — every macOS temp dir, since /var is
+    /// /private/var — slipped past it and was caught by git instead.
+    func testSamePathResolvesSymlinks() {
+        // Real directories on purpose: resolvingSymlinksInPath leaves a path
+        // that does not exist untouched, so a fabricated /var vs /private/var
+        // pair would test nothing and pass for the wrong reason.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("samepath-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let viaSymlink = dir.path                    // /var/folders/...
+        let real = "/private" + dir.path             // /private/var/folders/...
+        XCTAssertTrue(FileManager.default.fileExists(atPath: real), "precondition: /var is /private/var")
+        XCTAssertTrue(WorktreeDeleter.samePath(viaSymlink, real),
+                      "git reports the real path; a caller may hold the symlinked one")
+        XCTAssertTrue(WorktreeDeleter.samePath(viaSymlink, viaSymlink))
+        XCTAssertFalse(WorktreeDeleter.samePath(viaSymlink, dir.deletingLastPathComponent().path))
     }
 }
