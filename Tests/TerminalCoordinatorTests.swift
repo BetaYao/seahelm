@@ -61,6 +61,43 @@ final class TerminalCoordinatorTests: XCTestCase {
         XCTAssertNil(plan.offscreenSince["a"], "a slept pane's clock is meaningless")
     }
 
+    /// `Station.sleep()` frees a Metal surface on the main thread; doing a batch
+    /// in one pass measured 13-20s of main-thread stall, which reads as a hang.
+    func testOnlyOnePaneSleepsPerTick() {
+        let plan = TerminalCoordinator.autoSleepPlan(
+            visible: [], sleepable: ["a", "b", "c", "d"],
+            offscreenSince: ["a": t0, "b": t0, "c": t0, "d": t0],
+            idleAfter: 600, now: t0.addingTimeInterval(6000))
+        XCTAssertEqual(plan.sleep.count, 1, "a backlog must drain one pane per tick")
+    }
+
+    /// Oldest first, so a backlog drains in a defined order rather than whatever
+    /// the dictionary happens to yield.
+    func testOldestOffscreenPaneSleepsFirst() {
+        let plan = TerminalCoordinator.autoSleepPlan(
+            visible: [], sleepable: ["new", "old", "mid"],
+            offscreenSince: ["new": t0.addingTimeInterval(200),
+                             "old": t0,
+                             "mid": t0.addingTimeInterval(100)],
+            idleAfter: 600, now: t0.addingTimeInterval(6000))
+        XCTAssertEqual(plan.sleep, ["old"])
+    }
+
+    /// The panes not chosen keep their clocks, or a backlog would restart its
+    /// timer every tick and never drain.
+    func testUnchosenPanesKeepTheirClocks() {
+        let plan = TerminalCoordinator.autoSleepPlan(
+            visible: [], sleepable: ["a", "b"], offscreenSince: ["a": t0, "b": t0],
+            idleAfter: 600, now: t0.addingTimeInterval(6000))
+        let remaining = plan.sleep == ["a"] ? "b" : "a"
+        XCTAssertEqual(plan.offscreenSince[remaining], t0, "the queue must not reset")
+
+        let next = TerminalCoordinator.autoSleepPlan(
+            visible: [], sleepable: [remaining], offscreenSince: plan.offscreenSince,
+            idleAfter: 600, now: t0.addingTimeInterval(6060))
+        XCTAssertEqual(next.sleep, [remaining], "and it drains on the following tick")
+    }
+
     /// The reason the clock is stored rather than accumulated: a pane the user
     /// keeps returning to must never reach the threshold by adding up gaps.
     func testReturningToScreenResetsTheClock() {

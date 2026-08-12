@@ -418,20 +418,32 @@ class TerminalCoordinator {
         var since = offscreenSince
         for id in visible { since.removeValue(forKey: id) }
 
-        var sleepIds: [String] = []
+        var due: [(id: String, firstSeen: Date)] = []
         for id in sleepable where !visible.contains(id) {
             guard let firstSeen = since[id] else {
                 since[id] = now
                 continue
             }
             if now.timeIntervalSince(firstSeen) >= idleAfter {
-                sleepIds.append(id)
-                since.removeValue(forKey: id)
+                due.append((id, firstSeen))
             }
         }
+
+        // One per tick. `Station.sleep()` frees a Metal surface on the main
+        // thread, and sleeping a batch in a single pass produced 13-20s of main
+        // thread stall — the app looks dead. The threshold is minutes, so a
+        // backlog drains a pane every tick with nobody waiting on it. Oldest
+        // first, so the queue is deterministic rather than dictionary order.
+        guard let chosen = due.min(by: { $0.firstSeen < $1.firstSeen })?.id else {
+            let known = visible.union(sleepable)
+            return ([], since.filter { known.contains($0.key) })
+        }
+        // Only the chosen pane's clock is cleared; the rest stay due and are
+        // picked up on following ticks.
+        since.removeValue(forKey: chosen)
         // Closed panes would otherwise keep their entry forever.
         let known = visible.union(sleepable)
-        return (sleepIds, since.filter { known.contains($0.key) })
+        return ([chosen], since.filter { known.contains($0.key) })
     }
 
     /// Sleep panes that have stayed off screen past `idleAfter`. Main thread.
