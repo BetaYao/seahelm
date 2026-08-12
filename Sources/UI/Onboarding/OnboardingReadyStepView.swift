@@ -13,7 +13,7 @@ final class OnboardingReadyStepView: NSView {
     }
 
     private static let shortcuts = [
-        Shortcut(keys: "⌘P", what: "Jump to any cabin, deck or command"),
+        Shortcut(keys: "⌘P", what: "Jump to any worktree, project or command"),
         Shortcut(keys: "⌘D", what: "Split the current pane"),
         Shortcut(keys: "Space", what: "Leader key — opens the which-key menu"),
     ]

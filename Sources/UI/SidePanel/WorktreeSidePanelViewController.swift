@@ -67,16 +67,16 @@ enum ChangeTreeBuilder {
     }
 }
 
-protocol CabinSidePanelDelegate: AnyObject {
-    func sidePanel(_ vc: CabinSidePanelViewController, didSelectFile path: String)
-    func sidePanel(_ vc: CabinSidePanelViewController, didSelectChange path: String)
+protocol WorktreeSidePanelDelegate: AnyObject {
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String)
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String)
 }
 
-final class CabinSidePanelViewController: NSViewController {
+final class WorktreeSidePanelViewController: NSViewController {
     private var worktreePath: String?
     private var selectedTab: SidePanelTab
 
-    weak var delegate: CabinSidePanelDelegate?
+    weak var delegate: WorktreeSidePanelDelegate?
 
     /// Resolves a worktree's current-pane title for First Mate cards.
     var currentPaneTitleProvider: ((String) -> String?)?
@@ -776,7 +776,7 @@ final class CabinSidePanelViewController: NSViewController {
 
 // MARK: - File search
 
-extension CabinSidePanelViewController: NSTextFieldDelegate {
+extension WorktreeSidePanelViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, field === fileSearchField else { return }
         fileTreeController?.filterText = field.stringValue
@@ -785,7 +785,7 @@ extension CabinSidePanelViewController: NSTextFieldDelegate {
 
 // MARK: - NSTableViewDataSource / Delegate (Changes tab)
 
-extension CabinSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
+extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
         changedFiles.count
     }
@@ -798,7 +798,7 @@ extension CabinSidePanelViewController: NSTableViewDataSource, NSTableViewDelega
 
 // MARK: - NSOutlineViewDataSource / Delegate (Changes tree)
 
-extension CabinSidePanelViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
+extension WorktreeSidePanelViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         if let node = item as? ChangeTreeNode { return node.children.count }
         return changeTreeRoots.count
@@ -822,7 +822,7 @@ extension CabinSidePanelViewController: NSOutlineViewDataSource, NSOutlineViewDe
 
 // MARK: - Changes cell helpers
 
-private extension CabinSidePanelViewController {
+private extension WorktreeSidePanelViewController {
     func makeChangeTreeCell(in outlineView: NSOutlineView, node: ChangeTreeNode) -> NSTableCellView {
         let id = NSUserInterfaceItemIdentifier("ChangeTreeCell")
         let cellView: NSTableCellView

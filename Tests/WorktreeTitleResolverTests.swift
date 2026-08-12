@@ -1,9 +1,9 @@
 import XCTest
 @testable import seahelm
 
-final class CabinTitleResolverTests: XCTestCase {
+final class WorktreeTitleResolverTests: XCTestCase {
     func testFallsBackToPromptWhenNoSummary() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/nonexistent/path",
             lastUserPrompt: "Fix the login bug",
             branch: "feature/login",
@@ -14,7 +14,7 @@ final class CabinTitleResolverTests: XCTestCase {
     }
 
     func testPrefersSessionTitle() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "prompt",
             branch: "br",
@@ -25,7 +25,7 @@ final class CabinTitleResolverTests: XCTestCase {
     }
 
     func testFallsBackToBranchWhenEmpty() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "",
             branch: "feature/x",
@@ -36,7 +36,7 @@ final class CabinTitleResolverTests: XCTestCase {
     }
 
     func testPrefersTaskOverPromptAndBranch() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "some detected prompt",
             branch: "feature/x",
@@ -47,7 +47,7 @@ final class CabinTitleResolverTests: XCTestCase {
     }
 
     func testSummaryStillWinsOverTask() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "prompt",
             branch: "br",
@@ -58,7 +58,7 @@ final class CabinTitleResolverTests: XCTestCase {
     }
 
     func testFallsThroughEmptyTaskToPrompt() {
-        let title = CabinTitleResolver.resolve(
+        let title = WorktreeTitleResolver.resolve(
             worktreePath: "/p",
             lastUserPrompt: "the prompt",
             branch: "br",

@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class IslandDeckGroupTests: XCTestCase {
+final class IslandProjectGroupTests: XCTestCase {
     private func row(_ project: String, _ branch: String, _ status: SailorStatus, path: String? = nil) -> IslandAgentRow {
         IslandAgentRow(
             id: path ?? "/\(project)/\(branch)",
@@ -13,7 +13,7 @@ final class IslandDeckGroupTests: XCTestCase {
         )
     }
 
-    func testGroupsByProjectAndSurfacesHotDecksFirst() {
+    func testGroupsByProjectAndSurfacesHotProjectsFirst() {
         let rows = [
             row("saas-mono", "main", .idle),
             row("seahelm", "main", .idle),
@@ -21,7 +21,7 @@ final class IslandDeckGroupTests: XCTestCase {
             row("teamclaw", "fix/y", .running),
             row("teamclaw", "main", .idle),
         ]
-        let groups = IslandModel.groupedByDeck(rows)
+        let groups = IslandModel.groupedByProject(rows)
         XCTAssertEqual(groups.map(\.project), ["seahelm", "teamclaw", "saas-mono"])
         XCTAssertEqual(groups[0].rows.map(\.branch), ["feat/x", "main"])
         XCTAssertEqual(groups[1].rows.map(\.branch), ["fix/y", "main"])
@@ -43,7 +43,7 @@ final class IslandDeckGroupTests: XCTestCase {
     }
 }
 
-/// Mirrors OpenedSurfaceView's deck-header copy so a rename can't drift silently.
+/// Mirrors OpenedSurfaceView's project-header copy so a rename can't drift silently.
 private func worktreeCountLabel(_ count: Int) -> String {
     "\(count) worktree\(count == 1 ? "" : "s")"
 }

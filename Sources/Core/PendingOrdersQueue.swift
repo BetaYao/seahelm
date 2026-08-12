@@ -129,7 +129,7 @@ final class PendingOrdersQueue {
         if orders.count != before { notify() }
     }
 
-    /// Drop every card for a worktree that is gone. Used when a whole cabin is
+    /// Drop every card for a worktree that is gone. Used when a whole worktree is
     /// deleted, which takes all of its panes with it — including the
     /// worktree-scoped cards `resolvePane` deliberately spares.
     func resolveWorktree(path: String) {

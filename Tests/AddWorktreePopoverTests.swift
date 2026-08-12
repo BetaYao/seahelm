@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class AddCabinPopoverTests: XCTestCase {
+final class AddWorktreePopoverTests: XCTestCase {
 
     func testEmptyTaskReportsAnErrorAndDoesNotCreate() {
         let controller = makeLoadedController()
@@ -92,11 +92,11 @@ final class AddCabinPopoverTests: XCTestCase {
     func testAgentChoicesAreTheAIAgents() {
         let controller = makeLoadedController()
         XCTAssertEqual(controller.agentChoiceTitlesForTesting,
-                       InlineCabinCreateView.agentChoices.map(\.displayName))
+                       InlineWorktreeCreateView.agentChoices.map(\.displayName))
     }
 
-    private func makeLoadedController() -> AddCabinPopoverController {
-        let controller = AddCabinPopoverController(project: "seahelm")
+    private func makeLoadedController() -> AddWorktreePopoverController {
+        let controller = AddWorktreePopoverController(project: "seahelm")
         _ = controller.view
         return controller
     }

@@ -1,11 +1,11 @@
-// Tests/CabinSidePanelViewControllerTests.swift
+// Tests/WorktreeSidePanelViewControllerTests.swift
 import XCTest
 import AppKit
 @testable import seahelm
 
-final class CabinSidePanelViewControllerTests: XCTestCase {
-    private func makeVC(worktreePath: String?) -> CabinSidePanelViewController {
-        CabinSidePanelViewController(worktreePath: worktreePath)
+final class WorktreeSidePanelViewControllerTests: XCTestCase {
+    private func makeVC(worktreePath: String?) -> WorktreeSidePanelViewController {
+        WorktreeSidePanelViewController(worktreePath: worktreePath)
     }
 
     func testInitHoldsWorktreePath() {
@@ -52,7 +52,7 @@ final class CabinSidePanelViewControllerTests: XCTestCase {
         XCTAssertTrue(first?.isHidden == false)
     }
 
-    /// Mounted state belongs to a worktree — switching cabins must discard it,
+    /// Mounted state belongs to a worktree — switching worktrees must discard it,
     /// otherwise a tab would show another worktree's files.
     func testChangingWorktreeDiscardsMountedTabs() {
         let vc = makeVC(worktreePath: "/tmp/wt-a")

@@ -53,7 +53,7 @@ class TabCoordinator {
     // References provided by MainWindowController
     var terminalCoordinator: TerminalCoordinator!
     var statusPublisher: StatusPublisher!
-    var statusAggregator: CabinStatusAggregator!
+    var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
     let pendingTransfers = PendingTransferTracker()
 
@@ -379,7 +379,7 @@ class TabCoordinator {
 
             // Warm the shared title cache (session summary → task → prompt) so
             // both the cards and the overview rows can read cachedTitle synchronously.
-            CabinTitleCache.shared.title(worktreePath: agent.worktreePath,
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath,
                                             lastUserPrompt: mostRecentUserPrompt,
                                             branch: worktreeName) { _ in }
 
@@ -965,7 +965,7 @@ class TabCoordinator {
         return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
     }
 
-    private func performPaneTransfer(transfer: PendingCabinTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
+    private func performPaneTransfer(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
         let sourcePath = transfer.sourceWorktreePath
         // Capture the source's own info before step 2 drops it. Step 6 restores the
         // source from `allDiscoveredWorktrees`, but that list only covers `repoRoot`
@@ -1062,7 +1062,7 @@ class TabCoordinator {
         for terminalID in ShipLog.shared.terminalIDs(forWorktree: info.path) {
             ShipLog.shared.unregister(terminalID: terminalID)
         }
-        CabinTitleCache.shared.evict(worktreePath: info.path)
+        WorktreeTitleCache.shared.evict(worktreePath: info.path)
         WorktreeGitStatsCache.shared.evict(worktreePath: info.path)
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updateSailors(buildSailorDisplayInfos())
@@ -1089,7 +1089,7 @@ class TabCoordinator {
             } else {
                 for id in ids { ShipLog.shared.unregister(terminalID: id) }
             }
-            CabinTitleCache.shared.evict(worktreePath: worktree.path)
+            WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
             WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)
             if runtimeBackend != "local" {
                 let paneSessionKey = SessionManager.persistentSessionName(for: worktree.path)
@@ -1331,7 +1331,7 @@ class TabCoordinator {
 
     // MARK: - Status Update Forwarding
 
-    func handleWorktreeStatusUpdate(_ status: CabinStatus) {
+    func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
         dashboardVC?.updateSailors(buildSailorDisplayInfos(changedWorktreePath: status.worktreePath),
                                    changedWorktreePath: status.worktreePath)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -1452,7 +1452,7 @@ class TabCoordinator {
     }
 
     /// `⌃⇥` / `⌃⇧⇥`. Same as `selectTab(forWorktree:)` plus the fleet-list
-    /// highlight, which `selectSailor` alone leaves on the previous cabin.
+    /// highlight, which `selectSailor` alone leaves on the previous worktree.
     func cycleTab(toWorktree path: String) {
         dashboardVC?.enterWorktree(byWorktreePath: path)
         saveSelectedWorktree()

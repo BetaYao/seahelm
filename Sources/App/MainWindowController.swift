@@ -260,7 +260,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
     }()
 
     // Status detection
-    private let statusAggregator = CabinStatusAggregator()
+    private let statusAggregator = WorktreeStatusAggregator()
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.aggregator = statusAggregator
@@ -971,12 +971,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// The "+" on a fleet project header: an anchored create form for that deck.
-    /// Same landing as the helm's `/worktree` — create, staff, enter the cabin.
+    /// The "+" on a fleet project header: an anchored create form for that project.
+    /// Same landing as the helm's `/worktree` — create, staff, enter the worktree.
     private func presentAddWorktreePopover(project: String, rect: NSRect, anchor: NSView) {
         guard let repoPath = tabCoordinator.repoPath(forProject: project) else { NSSound.beep(); return }
         let popover = NSPopover()
-        let creator = AddCabinPopoverController(project: project)
+        let creator = AddWorktreePopoverController(project: project)
         // No base picker: worktrees always branch off the repo's main line, which
         // is what `performWorktreeCreate` picks when no base is passed.
         creator.onCreate = { [weak self, weak popover, weak creator] task, agentType in
@@ -1011,8 +1011,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             do {
                 let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
                 let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
-                CabinSailorTypeStore.shared.set(agentType, forWorktree: info.path)
-                CabinTaskStore.shared.set(task, forWorktree: info.path)
+                WorktreeSailorTypeStore.shared.set(agentType, forWorktree: info.path)
+                WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 if let agentCommandLine = agentType.launchCommand(withTask: task) {
                     let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
@@ -1050,9 +1050,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// every worktree, not just the staffed ones, so an idle tree is still
     /// reachable and still sweepable. Both surfaces read this, which is what
     /// keeps their numbering identical.
-    private func currentWorktreeRefs() -> [CabinRef] {
+    private func currentWorktreeRefs() -> [WorktreeRef] {
         tabCoordinator.allWorktrees.map {
-            CabinRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
                         branch: $0.info.branch,
                         path: $0.info.path)
         }
@@ -1733,14 +1733,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
         } else if let info {
             paneTitle = PaneTitleResolver.title(for: info)
         } else {
-            paneTitle = CabinTitleResolver.resolve(
+            paneTitle = WorktreeTitleResolver.resolve(
                 worktreePath: path,
                 lastUserPrompt: "",
                 branch: ""
             )
         }
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
-        windowChrome?.updateCabinContext(Self.cabinContext(repo: repo, sailor: agent))
+        windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, sailor: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }
 
@@ -1796,7 +1796,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// `repo · branch`, skipping either half when it is missing or would repeat the
     /// other — the fleet row builds its branch label the same way.
-    static func cabinContext(repo: String, sailor: SailorDisplayInfo) -> String {
+    static func worktreeContext(repo: String, sailor: SailorDisplayInfo) -> String {
         let branch = sailor.thread.isEmpty ? sailor.name : sailor.thread
         let parts = [repo, branch]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1862,12 +1862,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Keyboard cycle through worktrees (Ctrl+Tab / Ctrl+Shift+Tab).
     func selectAdjacentWorktree(forward: Bool) {
         // Cycle in the order the fleet list is actually showing, so ⌃⇥ agrees with
-        // the eye under every `CabinGroupingMode`. Discovery order is the fallback
+        // the eye under every `WorktreeGroupingMode`. Discovery order is the fallback
         // for before the overview has rendered.
         let displayed = tabCoordinator.dashboardVC?.cruiseOrderPaths ?? []
         let paths = displayed.isEmpty ? tabCoordinator.allWorktrees.map(\.info.path) : displayed
         let current = tabCoordinator.selectedSailor?.worktreePath
-        guard let path = CabinPathNavigation.adjacentPath(
+        guard let path = WorktreePathNavigation.adjacentPath(
             paths: paths, from: current, forward: forward
         ) else { return }
         tabCoordinator.cycleTab(toWorktree: path)
@@ -2370,10 +2370,10 @@ extension MainWindowController: NewBranchDialogDelegate {
     }
 }
 
-// MARK: - CabinStatusDelegate
+// MARK: - WorktreeStatusDelegate
 
-extension MainWindowController: CabinStatusDelegate {
-    func worktreeStatusDidUpdate(_ status: CabinStatus) {
+extension MainWindowController: WorktreeStatusDelegate {
+    func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
         tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
@@ -2490,12 +2490,12 @@ extension MainWindowController {
             // cache — a direct resolve() reads session JSONL from disk, and
             // this runs on main for every sailor on every island refresh.
             // Warm the cache off-main; the next tick picks up the result.
-            CabinTitleCache.shared.title(
+            WorktreeTitleCache.shared.title(
                 worktreePath: sailor.worktreePath,
                 lastUserPrompt: sailor.lastUserPrompt,
                 branch: sailor.branch
             ) { _ in }
-            let cachedTitle = CabinTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
+            let cachedTitle = WorktreeTitleCache.shared.cachedTitle(worktreePath: sailor.worktreePath)
             let row = IslandAgentRow(
                 id: sailor.worktreePath,
                 project: sailor.project,
@@ -2796,7 +2796,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
-        // Sweep the cabin's cards before the UI drops it: deleting a worktree
+        // Sweep the worktree's cards before the UI drops it: deleting a worktree
         // takes every pane with it, so worktree-scoped cards (returnToPort in
         // particular, which is usually what triggered the delete) are stale too.
         tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
@@ -2882,7 +2882,7 @@ extension MainWindowController {
             // worktree here would pick its *first* pane, so a suggestion from a
             // split pane got answered in a sibling.
             let worktreePath = order.action.worktreePath
-            guard let task = CabinTaskStore.shared.task(forWorktree: worktreePath) else { return }
+            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
             let terminalID = order.action.terminalID.isEmpty
                 ? ShipLog.shared.sailor(forWorktree: worktreePath)?.id
                 : order.action.terminalID

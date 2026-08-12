@@ -1,9 +1,9 @@
 import XCTest
 @testable import seahelm
 
-final class InlineCabinCreateViewTests: XCTestCase {
+final class InlineWorktreeCreateViewTests: XCTestCase {
     func testSubmitInvokesCallbackWithTaskDescriptionAndValues() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/Users/me/repoA", "/Users/me/repoB"])
         var captured: (String, String, SailorType, Bool)?
         view.onCreate = { task, repo, agentType, reuse in captured = (task, repo, agentType, reuse) }
@@ -19,7 +19,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testBlankNameDoesNotSubmit() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
         var called = false
         view.onCreate = { _, _, _, _ in called = true }
@@ -29,7 +29,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testExpandedStateTogglesOnFocus() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
         XCTAssertFalse(view.isExpandedForTesting)
         view.setExpandedForTesting(true)
@@ -37,7 +37,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testCollapsedStateUsesCompactAgentIconPicker() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
 
         XCTAssertEqual(view.preferredHeightForTesting, 84)
@@ -51,9 +51,9 @@ final class InlineCabinCreateViewTests: XCTestCase {
     // MARK: - Agent chip cycling (Phase 6)
 
     func testCycleAgentForwardAdvancesThroughChoices() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
-        let choices = InlineCabinCreateView.agentChoices
+        let choices = InlineWorktreeCreateView.agentChoices
         XCTAssertGreaterThan(choices.count, 1, "need >1 AI agent for a meaningful cycle test")
 
         // Start pinned to the first choice, then step forward one at a time.
@@ -65,18 +65,18 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testCycleSailorForwardWrapsAtEnd() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
-        let choices = InlineCabinCreateView.agentChoices
+        let choices = InlineWorktreeCreateView.agentChoices
         view.selectedSailorType = choices[choices.count - 1]
         view.cycleSailor(1)
         XCTAssertEqual(view.selectedSailorType, choices[0])
     }
 
     func testCycleAgentBackwardWrapsAtStart() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
-        let choices = InlineCabinCreateView.agentChoices
+        let choices = InlineWorktreeCreateView.agentChoices
         view.selectedSailorType = choices[0]
         view.cycleSailor(-1)
         XCTAssertEqual(view.selectedSailorType, choices[choices.count - 1])
@@ -85,7 +85,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     // MARK: - Repo chip cycling (Phase 6)
 
     func testCycleRepoForwardWrapsAround() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/a", "/b", "/c"])
         XCTAssertEqual(view.selectedRepoPath, "/a")
         view.cycleRepo(1)
@@ -97,7 +97,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testCycleRepoBackwardWrapsAtStart() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/a", "/b", "/c"])
         XCTAssertEqual(view.selectedRepoPath, "/a")
         view.cycleRepo(-1)  // wraps to last
@@ -105,7 +105,7 @@ final class InlineCabinCreateViewTests: XCTestCase {
     }
 
     func testFocusRequestsTallerInputHeightThenRestoresOnBlur() {
-        let view = InlineCabinCreateView()
+        let view = InlineWorktreeCreateView()
         view.configure(repoPaths: ["/r"])
         var requestedHeights: [CGFloat] = []
         view.onPreferredHeightChange = { height, _ in requestedHeights.append(height) }

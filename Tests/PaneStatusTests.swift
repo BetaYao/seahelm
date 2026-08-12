@@ -13,8 +13,8 @@ final class PaneStatusTests: XCTestCase {
                    agentType: agentType)
     }
 
-    private func worktree(_ panes: [PaneStatus]) -> CabinStatus {
-        CabinStatus(worktreePath: "/repo/main", panes: panes, mostRecentPaneIndex: 1,
+    private func worktree(_ panes: [PaneStatus]) -> WorktreeStatus {
+        WorktreeStatus(worktreePath: "/repo/main", panes: panes, mostRecentPaneIndex: 1,
                     mostRecentMessage: "", mostRecentUserPrompt: "")
     }
 

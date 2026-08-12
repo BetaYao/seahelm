@@ -44,7 +44,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testStoredStatusLoadsAsTheOnlyCheckedMode() {
         withDefaults { defaults in
-            defaults.set("status", forKey: CabinGroupingPreference.key)
+            defaults.set("status", forKey: WorktreeGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -55,7 +55,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testInvalidStoredModeFallsBackToRepository() {
         withDefaults { defaults in
-            defaults.set("not-a-mode", forKey: CabinGroupingPreference.key)
+            defaults.set("not-a-mode", forKey: WorktreeGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -86,7 +86,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
             view.selectGroupingModeForTesting(.status)
 
-            XCTAssertEqual(defaults.string(forKey: CabinGroupingPreference.key), "status")
+            XCTAssertEqual(defaults.string(forKey: WorktreeGroupingPreference.key), "status")
             XCTAssertEqual(view.renderedGroupTitlesForTesting, ["Needs input", "Running", "Idle"])
             XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
             XCTAssertEqual(view.selectedId, "run")
@@ -127,15 +127,15 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by deck")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by project")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group cabins by deck")
+                           "Group worktrees by project")
 
             view.selectGroupingModeForTesting(.activityTime)
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by time")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by time")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group cabins by time")
+                           "Group worktrees by time")
         }
     }
 

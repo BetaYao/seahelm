@@ -21,10 +21,10 @@ final class TerminalHeaderView: NSView {
 
     /// Whether edit mode is currently on (drives the icon's active tint).
     private var editModeOn = false
-    /// Latest pane title and cabin context; which one the label shows depends on
+    /// Latest pane title and worktree context; which one the label shows depends on
     /// edit mode, so both are kept rather than read back off the label.
     private var paneTitle = ""
-    private var cabinContext = ""
+    private var worktreeContext = ""
     /// Kept rather than read back off the label, so collapse/expand can re-render
     /// it without the caller having to push the value again.
     private var paneMemoryBytes: UInt64?
@@ -388,9 +388,9 @@ final class TerminalHeaderView: NSView {
         refreshImmersion()
     }
 
-    /// Which cabin the columns belong to (`repo · branch`). Shown only in edit mode.
-    func setCabinContext(_ context: String) {
-        cabinContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Which worktree the columns belong to (`repo · branch`). Shown only in edit mode.
+    func setWorktreeContext(_ context: String) {
+        worktreeContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
         applyTitleText()
     }
 
@@ -454,11 +454,11 @@ final class TerminalHeaderView: NSView {
     /// panes, so a single centered pane title is redundant at best and names the
     /// wrong column at worst. The band itself has to stay — it carries the traffic
     /// lights — so rather than leaving it blank, it shows the one thing no strip
-    /// says: which cabin you are in.
+    /// says: which worktree you are in.
     private func applyTitleText() {
         // The strips occupy the whole row when hoisted; nothing else fits.
         titleLabel.isHidden = hasHoistedStrips
-        let text = editModeOn ? cabinContext : paneTitle
+        let text = editModeOn ? worktreeContext : paneTitle
         titleLabel.stringValue = text
         // A file path loses the part that identifies it — the filename — to tail
         // truncation, so paths give up their middle instead.

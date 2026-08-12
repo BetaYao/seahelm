@@ -22,7 +22,7 @@ enum GlobalKeymap {
     /// require `hasSplitContext`. Returns nil when nothing matches (event passes through).
     ///
     /// Precedence mirrors the original handler: split shortcuts first (gated), then the
-    /// always-available cabin cycle, sidebar toggle, and palette.
+    /// always-available worktree cycle, sidebar toggle, and palette.
     static func resolve(
         chars: String?,
         keyCode: UInt16,

@@ -47,7 +47,7 @@ final class TabCoordinatorTests: XCTestCase {
     func testBuildAgentDisplayInfosEmptyByDefault() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
         let infos = coordinator.buildSailorDisplayInfos()
         XCTAssertTrue(infos.isEmpty)
     }
@@ -56,7 +56,7 @@ final class TabCoordinatorTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
         let info = WorktreeInfo(path: "/tmp/test-wt", branch: "feature", commitHash: "", isMainWorktree: false)
         let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", stationId: "surface-1", paneSessionKey: "test")
         coordinator.allWorktrees.append((info: info, tree: tree))
@@ -86,7 +86,7 @@ final class TabCoordinatorTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
         let deleted = WorktreeInfo(path: "/repo/.worktrees/feature", branch: "feature", commitHash: "def67890", isMainWorktree: false)
@@ -113,7 +113,7 @@ final class TabCoordinatorTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
 
         // Real directories — the guard's evidence is the filesystem, not the string.
         let repoDir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -144,7 +144,7 @@ final class TabCoordinatorTests: XCTestCase {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
         let deleted = WorktreeInfo(path: "/repo/.worktrees/deleted", branch: "deleted", commitHash: "def67890", isMainWorktree: false)

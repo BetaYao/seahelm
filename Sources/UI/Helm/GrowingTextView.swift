@@ -1,7 +1,7 @@
 import AppKit
 
 // Extracted from the former `CommandInputView` when the fleet column's
-// composer was removed in favor of the island. `AddCabinPopoverController`
+// composer was removed in favor of the island. `AddWorktreePopoverController`
 // is now the only user.
 
 /// Multi-line text view that reports focus changes, draws a placeholder while

@@ -4,8 +4,8 @@ import Foundation
 /// worktree path, so the card/capsule title can show the user's task
 /// immediately (before the agent has written its own session summary). Stored
 /// as JSON alongside config.json (`~/.config/seahelm/worktree-tasks.json`).
-final class CabinTaskStore {
-    static let shared = CabinTaskStore()
+final class WorktreeTaskStore {
+    static let shared = WorktreeTaskStore()
 
     private let store = PersistedStringMap(fileName: "worktree-tasks.json")
 

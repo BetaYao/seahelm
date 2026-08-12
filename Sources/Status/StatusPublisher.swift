@@ -15,7 +15,7 @@ class StatusPublisher {
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
-    var aggregator: CabinStatusAggregator?
+    var aggregator: WorktreeStatusAggregator?
     private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0

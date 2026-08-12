@@ -38,7 +38,7 @@ final class OnboardingViewController: NSViewController {
                 return "A terminal built for the way agents are actually used: several at once, "
                     + "each in its own worktree, all of them watched."
             case .agent:
-                return "Seahelm launches this one in every new cabin, and wires it to report its "
+                return "Seahelm launches this one in every new worktree, and wires it to report its "
                     + "status back. You can still run anything else in any pane."
             case .appearance:
                 return "The wizard re-themes as you choose — what you see here is what the app looks like."

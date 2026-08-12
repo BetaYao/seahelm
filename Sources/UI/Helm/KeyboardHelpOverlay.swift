@@ -18,7 +18,7 @@ final class KeyboardHelpOverlay: NSView {
     private static let keyBg    = NSColor(srgbRed: 0x78/255, green: 0xd2/255, blue: 0xe1/255, alpha: 0.045)
 
     private static let normalKeys: [(String, String)] = [
-        ("⌃⇥ / ⌃⇧⇥", "Next / previous cabin"),
+        ("⌃⇥ / ⌃⇧⇥", "Next / previous worktree"),
         ("⇥", "Cycle region: panes → sidebar → header → island"),
         ("?", "Keyboard shortcuts"),
     ]

@@ -15,7 +15,7 @@ struct PaneStatus: Equatable {
     var agentType: SailorType = .unknown
 }
 
-struct CabinStatus: Equatable {
+struct WorktreeStatus: Equatable {
     let worktreePath: String
     var panes: [PaneStatus]           // Ordered by SplitTree leaf position
     var mostRecentPaneIndex: Int      // Pane whose lastMessage is displayed

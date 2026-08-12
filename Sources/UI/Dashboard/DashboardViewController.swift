@@ -165,7 +165,7 @@ class DashboardViewController: NSViewController {
     // The inline worktree creator is no longer shown (the cockpit `/new` command
     // replaces it); the object is kept only so the existing setup/report wiring
     // in MainWindowController still compiles.
-    private let inlineCreateView = InlineCabinCreateView()
+    private let inlineCreateView = InlineWorktreeCreateView()
 
     // Left column content host — overview + side panel swap (no outer width/collapse;
     // WindowChromeController owns column chrome). Exposed for MainWindow embedding.
@@ -173,8 +173,8 @@ class DashboardViewController: NSViewController {
     /// Terminal / focus-panel host for the chrome terminal slot.
     let terminalHostView = NSView()
     private var leftColumnContainer: NSView { navigatorHostView }
-    private(set) lazy var sidePanelVC: CabinSidePanelViewController = {
-        let vc = CabinSidePanelViewController(worktreePath: nil, initialTab: .files)
+    private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
+        let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
         // First Mate titles follow the worktree's current pane, same as the
         // terminal chrome header.
@@ -338,7 +338,7 @@ class DashboardViewController: NSViewController {
             syncOverviewFocusCounts()
         }
         // "+" on a project group header: the anchored create form, scoped to that
-        // deck. The window owns the create itself (it holds the repo map and the
+        // project. The window owns the create itself (it holds the repo map and the
         // worktree-create path), so forward the click with its anchor view.
         overviewView.onAddWorktree = { [weak self] project, rect, anchor in
             self?.onAddWorktreeToProject?(project, rect, anchor)
@@ -651,9 +651,9 @@ class DashboardViewController: NSViewController {
     /// This used to go through `selectTab(forWorktree:)` → `selectSailor`, which
     /// swaps the terminal content but never touches the overview's selection — so
     /// the content changed while the fleet list (and the First Mate panel showing
-    /// it) stayed highlighted on the previous cabin. Everything the highlight
+    /// it) stayed highlighted on the previous worktree. Everything the highlight
     /// needs is here: the row id, the focus ring's index, and the animation.
-    func cycleToCabin(path: String) {
+    func cycleToWorktree(path: String) {
         selectSailor(byWorktreePath: path)
         overviewSelectedId = selectedSailorId
         if let index = overviewView.orderedRows.firstIndex(where: { $0.path == path }) {
@@ -780,7 +780,7 @@ class DashboardViewController: NSViewController {
         emptyStateView.addSubview(label)
 
         emptyStateGuideRows = [
-            EmptyStateGuideRow(marker: "1.", command: "Add a deck", detail: "pick a folder above"),
+            EmptyStateGuideRow(marker: "1.", command: "Add a project", detail: "pick a folder above"),
             EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a project"),
             EmptyStateGuideRow(marker: "3.", command: "/order @branch", detail: "give the agent an order"),
             EmptyStateGuideRow(marker: "4.", command: "/remove", detail: "clean up finished work"),
@@ -1205,7 +1205,7 @@ class DashboardViewController: NSViewController {
 
     /// The dashboard answers only three bare keys now: `?` for the cheat-sheet,
     /// Esc to close an overlay / leave the focus ring, and the `/ @ #` command
-    /// prefixes (in `handleNavKey`). Cabin movement is `⌃⇥` / `⌃⇧⇥` at the window
+    /// prefixes (in `handleNavKey`). Worktree movement is `⌃⇥` / `⌃⇧⇥` at the window
     /// level — the old `hjkl` / `{}` / `1–9` / `i d c f m n` ring is gone, so
     /// everything else falls through to the responder chain.
     override func keyDown(with event: NSEvent) {
@@ -1232,7 +1232,7 @@ class DashboardViewController: NSViewController {
     /// The D-state card ring, in fleet-list display order.
     ///
     /// The ring used to be `agents.map(\.id)` — discovery order — while the list on
-    /// screen is grouped and sorted by `CabinGroupingMode`. Under any grouping but
+    /// screen is grouped and sorted by `WorktreeGroupingMode`. Under any grouping but
     /// the default that made `hjkl` and `1–9` walk an order the eye can't see. The
     /// rendered order is the only one that matches, so it is the ring; the raw
     /// agent order survives only as a fallback for before the overview first
@@ -1243,7 +1243,7 @@ class DashboardViewController: NSViewController {
             : overviewView.orderedRows
     }
 
-    /// Worktree paths in display order, for the window-level `⌃⇥` cabin cycle.
+    /// Worktree paths in display order, for the window-level `⌃⇥` worktree cycle.
     var cruiseOrderPaths: [String] { cruiseOrder.map(\.path) }
 
     // MARK: - Overview (fleet) keyboard handling
@@ -1251,9 +1251,9 @@ class DashboardViewController: NSViewController {
     /// Keyboard handling while the overview drives the keyboard (modes 1 & 2).
     ///
     /// The vertical nav ring that used to live here (↑↓ / `jk` walking rows,
-    /// `⏎`/`→` committing forward, `{}` group jumps, `1–9`) is gone: cabins move
+    /// `⏎`/`→` committing forward, `{}` group jumps, `1–9`) is gone: worktrees move
     /// with the window-level `⌃⇥` / `⌃⇧⇥` cycle, and rows are still clickable.
-    /// What stays is what isn't cabin movement — Tab's region cycle, `?`, and the
+    /// What stays is what isn't worktree movement — Tab's region cycle, `?`, and the
     /// island's command prefixes.
     private func handleNavKey(_ event: NSEvent) {
         if event.keyCode == 53 {  // Esc closes overlays (help, …)
@@ -1817,10 +1817,10 @@ extension DashboardViewController {
     }
 }
 
-// MARK: - CabinSidePanelDelegate
+// MARK: - WorktreeSidePanelDelegate
 
-extension DashboardViewController: CabinSidePanelDelegate {
-    func sidePanel(_ vc: CabinSidePanelViewController, didSelectFile path: String) {
+extension DashboardViewController: WorktreeSidePanelDelegate {
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
         openFile(path: path)
     }
 
@@ -1897,7 +1897,7 @@ extension DashboardViewController: CabinSidePanelDelegate {
         }
     }
 
-    func sidePanel(_ vc: CabinSidePanelViewController, didSelectChange path: String) {
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
         let worktreePath = agents.first(where: { $0.id == selectedSailorId })?.worktreePath ?? ""
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let title = fileName.isEmpty ? "Changes" : fileName
@@ -1976,9 +1976,9 @@ final class DashboardOverviewView: NSView {
     // Bottom shortcut cheat-strip (replaced the composer).
     private let hintBar = ShortcutHintBar()
 
-    private let groupingPreference: CabinGroupingPreference
+    private let groupingPreference: WorktreeGroupingPreference
     private let now: () -> Date
-    private var groupingMode: CabinGroupingMode
+    private var groupingMode: WorktreeGroupingMode
     private var latestSailors: [SailorDisplayInfo] = []
     private var rowViewsByID: [String: RowView] = [:]
     private var renderedGroupTitles: [String] = []
@@ -1998,7 +1998,7 @@ final class DashboardOverviewView: NSView {
     #endif
 
     override init(frame frameRect: NSRect) {
-        let preference = CabinGroupingPreference(defaults: .standard)
+        let preference = WorktreeGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
         groupingMode = preference.load()
@@ -2006,7 +2006,7 @@ final class DashboardOverviewView: NSView {
         setup()
     }
     required init?(coder: NSCoder) {
-        let preference = CabinGroupingPreference(defaults: .standard)
+        let preference = WorktreeGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
         groupingMode = preference.load()
@@ -2015,7 +2015,7 @@ final class DashboardOverviewView: NSView {
     }
 
     init(frame frameRect: NSRect, defaults: UserDefaults, now: @escaping () -> Date) {
-        let preference = CabinGroupingPreference(defaults: defaults)
+        let preference = WorktreeGroupingPreference(defaults: defaults)
         groupingPreference = preference
         self.now = now
         groupingMode = preference.load()
@@ -2098,7 +2098,7 @@ final class DashboardOverviewView: NSView {
     /// Header: add a whole repo via the folder picker.
     ///
     /// Deliberately *not* a bare "+" — the per-project group headers already use
-    /// that for "add one worktree inside this deck", and two identical glyphs on
+    /// that for "add one worktree inside this project", and two identical glyphs on
     /// one screen made the two scopes indistinguishable. `folder.badge.plus` says
     /// "pick a folder", which is literally what this opens, and matches the
     /// empty-state add-project button.
@@ -2140,7 +2140,7 @@ final class DashboardOverviewView: NSView {
         groupingButton.target = self
         groupingButton.action = #selector(showGroupingMenu(_:))
 
-        let entries: [(CabinGroupingMode, String)] = [
+        let entries: [(WorktreeGroupingMode, String)] = [
             (.repository, "Group by Project"),
             (.status, "Group by Status"),
             (.activityTime, "Group by Time"),
@@ -2163,11 +2163,11 @@ final class DashboardOverviewView: NSView {
 
     @objc private func selectGroupingMode(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
-              let mode = CabinGroupingMode(rawValue: rawValue) else { return }
+              let mode = WorktreeGroupingMode(rawValue: rawValue) else { return }
         applyGroupingMode(mode)
     }
 
-    private func applyGroupingMode(_ mode: CabinGroupingMode) {
+    private func applyGroupingMode(_ mode: WorktreeGroupingMode) {
         groupingMode = mode
         groupingPreference.save(mode)
         refreshGroupingMenuPresentation()
@@ -2181,10 +2181,10 @@ final class DashboardOverviewView: NSView {
         }
         let description: String
         switch groupingMode {
-        case .repository: description = "Group cabins by deck"
-        case .status: description = "Group cabins by status"
-        case .activityTime: description = "Group cabins by time"
-        case .sailor: description = "Expand cabins into sailors"
+        case .repository: description = "Group worktrees by project"
+        case .status: description = "Group worktrees by status"
+        case .activityTime: description = "Group worktrees by time"
+        case .sailor: description = "Expand worktrees into sailors"
         }
         groupingButton.toolTip = description
         groupingButton.setAccessibilityLabel(description)
@@ -2233,7 +2233,7 @@ final class DashboardOverviewView: NSView {
 
         let sailorsByPath = Dictionary(sailors.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
         let groupingItems = sailors.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
-        let groups = CabinGrouping.groups(groupingItems, mode: groupingMode, now: now())
+        let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
 
         // A mode switch is an explicit navigation action. If its previous
         // identity is stale, land on the first row in the new ordering before
@@ -2328,9 +2328,9 @@ final class DashboardOverviewView: NSView {
     }
 
     private static func structureSignature(
-        for groups: [CabinGroup],
+        for groups: [WorktreeGroup],
         sailorsByPath: [String: SailorDisplayInfo],
-        groupingMode: CabinGroupingMode
+        groupingMode: WorktreeGroupingMode
     ) -> String {
         groups.map { group in
             let rows = group.items.map { item in
@@ -2347,7 +2347,7 @@ final class DashboardOverviewView: NSView {
     }
 
     private func applyIncrementalUpdates(
-        groups: [CabinGroup],
+        groups: [WorktreeGroup],
         sailorsByPath: [String: SailorDisplayInfo]
     ) {
         orderedRows = groups.flatMap { group in group.items.map { ($0.id, $0.path) } }
@@ -2434,13 +2434,13 @@ final class DashboardOverviewView: NSView {
     var selectedId: String = ""
 
     // Focused AppKit contract exposed to unit tests without leaking mutable UI.
-    var groupingModeForTesting: CabinGroupingMode { groupingMode }
+    var groupingModeForTesting: WorktreeGroupingMode { groupingMode }
     var groupingMenuTitlesForTesting: [String] { groupingMenu.items.map(\.title) }
     var groupingMenuKeyEquivalentsForTesting: [String] { groupingMenu.items.map(\.keyEquivalent) }
-    var checkedGroupingModesForTesting: [CabinGroupingMode] {
+    var checkedGroupingModesForTesting: [WorktreeGroupingMode] {
         groupingMenu.items.compactMap { item in
             guard item.state == .on, let rawValue = item.representedObject as? String else { return nil }
-            return CabinGroupingMode(rawValue: rawValue)
+            return WorktreeGroupingMode(rawValue: rawValue)
         }
     }
     var renderedGroupTitlesForTesting: [String] { renderedGroupTitles }
@@ -2462,7 +2462,7 @@ final class DashboardOverviewView: NSView {
     var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
     var groupingButtonAccessibilityLabelForTesting: String? { groupingButton.accessibilityLabel() }
     var groupingButtonRefusesFirstResponderForTesting: Bool { groupingButton.refusesFirstResponder }
-    func selectGroupingModeForTesting(_ mode: CabinGroupingMode) { applyGroupingMode(mode) }
+    func selectGroupingModeForTesting(_ mode: WorktreeGroupingMode) { applyGroupingMode(mode) }
 
     private func pin(_ v: NSView) {
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -2470,7 +2470,7 @@ final class DashboardOverviewView: NSView {
         v.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -15).isActive = true
     }
 
-    private func makeGroupHeader(group: CabinGroup, topGap: CGFloat) -> NSView {
+    private func makeGroupHeader(group: WorktreeGroup, topGap: CGFloat) -> NSView {
         var views: [NSView] = []
         if let status = group.status {
             if status == .running {
@@ -2645,8 +2645,8 @@ final class DashboardOverviewView: NSView {
             self.paneCountLabel = Self.label(sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—",
                                              DashboardOverviewView.inkFaint, 10)
             if showsRepository {
-                let repo = Self.label(sailor.project.isEmpty ? "Unknown deck" : sailor.project,
-                                      DeckColor.color(for: sailor.project), 10, weight: .semibold)
+                let repo = Self.label(sailor.project.isEmpty ? "Unknown project" : sailor.project,
+                                      ProjectColor.color(for: sailor.project), 10, weight: .semibold)
                 self.repositoryLabel = repo
             } else {
                 self.repositoryLabel = nil
@@ -2794,9 +2794,9 @@ final class DashboardOverviewView: NSView {
             gitLabel.attributedStringValue = Self.gitInfoAttributed(sailor.gitStats)
             paneCountLabel.stringValue = sailor.paneCount > 0 ? "\(sailor.paneCount) sailors" : "—"
             if let repositoryLabel, showsRepository {
-                let project = sailor.project.isEmpty ? "Unknown deck" : sailor.project
+                let project = sailor.project.isEmpty ? "Unknown project" : sailor.project
                 repositoryLabel.stringValue = project
-                repositoryLabel.textColor = DeckColor.color(for: project)
+                repositoryLabel.textColor = ProjectColor.color(for: project)
             }
             staticDot.stringValue = status.glyph
             staticDot.textColor = status.color
@@ -2836,7 +2836,7 @@ final class DashboardOverviewView: NSView {
         }
 
         @objc private func openInEditorAction() {
-            if !CabinShellActions.openInEditor(path) {
+            if !WorktreeShellActions.openInEditor(path) {
                 let alert = NSAlert()
                 alert.messageText = "No supported editor found"
                 alert.informativeText = "Install VS Code, Cursor, Zed, or Xcode to use Open in Editor."
@@ -2844,9 +2844,9 @@ final class DashboardOverviewView: NSView {
             }
         }
 
-        @objc private func revealInFinderAction() { CabinShellActions.revealInFinder(path) }
+        @objc private func revealInFinderAction() { WorktreeShellActions.revealInFinder(path) }
 
-        @objc private func copyPathAction() { CabinShellActions.copyPath(path) }
+        @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
 
         @objc private func deleteAction() { onDelete?(path) }
 
@@ -2868,11 +2868,11 @@ final class DashboardOverviewView: NSView {
 
         /// Move the selection highlight on or off this row.
         ///
-        /// `⌃⇥` cycles cabins one row at a time, and repainting instantly made the
+        /// `⌃⇥` cycles worktrees one row at a time, and repainting instantly made the
         /// highlight teleport — with the fleet list re-rendered underneath it, the
         /// jump read as the list blinking rather than as a move. Cross-fading the
         /// two rows' fills over one short beat is what makes it read as the
-        /// highlight travelling to the next / previous cabin.
+        /// highlight travelling to the next / previous worktree.
         func setSelected(_ isSelected: Bool, animated: Bool) {
             guard selected != isSelected else { return }
             selected = isSelected

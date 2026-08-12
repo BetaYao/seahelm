@@ -1,13 +1,13 @@
 import XCTest
 @testable import seahelm
 
-final class CabinStatusAggregatorTests: XCTestCase {
+final class WorktreeStatusAggregatorTests: XCTestCase {
 
-    class MockDelegate: CabinStatusDelegate {
-        var lastUpdatedStatus: CabinStatus?
+    class MockDelegate: WorktreeStatusDelegate {
+        var lastUpdatedStatus: WorktreeStatus?
         var paneChanges: [(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String)] = []
 
-        func worktreeStatusDidUpdate(_ status: CabinStatus) {
+        func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
             lastUpdatedStatus = status
         }
 
@@ -17,7 +17,7 @@ final class CabinStatusAggregatorTests: XCTestCase {
     }
 
     func testSinglePaneUpdate() {
-        let aggregator = CabinStatusAggregator()
+        let aggregator = WorktreeStatusAggregator()
         let mockDelegate = MockDelegate()
         aggregator.delegate = mockDelegate
 
@@ -37,7 +37,7 @@ final class CabinStatusAggregatorTests: XCTestCase {
     }
 
     func testMultiPaneUpdate() {
-        let aggregator = CabinStatusAggregator()
+        let aggregator = WorktreeStatusAggregator()
         let mockDelegate = MockDelegate()
         aggregator.delegate = mockDelegate
 
@@ -59,7 +59,7 @@ final class CabinStatusAggregatorTests: XCTestCase {
     }
 
     func testStatusChangeFiresPaneCallback() {
-        let aggregator = CabinStatusAggregator()
+        let aggregator = WorktreeStatusAggregator()
         let mockDelegate = MockDelegate()
         aggregator.delegate = mockDelegate
 
@@ -76,7 +76,7 @@ final class CabinStatusAggregatorTests: XCTestCase {
     }
 
     func testNoChangeDoesNotFireCallbacks() {
-        let aggregator = CabinStatusAggregator()
+        let aggregator = WorktreeStatusAggregator()
         let mockDelegate = MockDelegate()
         aggregator.delegate = mockDelegate
 
@@ -93,7 +93,7 @@ final class CabinStatusAggregatorTests: XCTestCase {
     }
 
     func testReindexOnPaneRemoval() {
-        let aggregator = CabinStatusAggregator()
+        let aggregator = WorktreeStatusAggregator()
         let mockDelegate = MockDelegate()
         aggregator.delegate = mockDelegate
 

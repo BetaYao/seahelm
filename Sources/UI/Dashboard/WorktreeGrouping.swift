@@ -1,6 +1,6 @@
 import Foundation
 
-enum CabinGroupingMode: String, CaseIterable {
+enum WorktreeGroupingMode: String, CaseIterable {
     case repository
     case status
     case activityTime
@@ -10,7 +10,7 @@ enum CabinGroupingMode: String, CaseIterable {
     case sailor
 }
 
-enum CabinActivityBucket: String, CaseIterable {
+enum WorktreeActivityBucket: String, CaseIterable {
     case recentHour
     case today
     case recentSevenDays
@@ -18,13 +18,13 @@ enum CabinActivityBucket: String, CaseIterable {
     case noActivity
 }
 
-enum CabinGroupID: Hashable {
+enum WorktreeGroupID: Hashable {
     case repository(String)
     case status(SailorStatus)
-    case activity(CabinActivityBucket)
+    case activity(WorktreeActivityBucket)
 }
 
-struct CabinGroupingItem: Equatable {
+struct WorktreeGroupingItem: Equatable {
     let id: String
     let path: String
     let repository: String
@@ -35,8 +35,8 @@ struct CabinGroupingItem: Equatable {
 }
 
 extension SailorDisplayInfo {
-    func groupingItem(creationDate: Date) -> CabinGroupingItem {
-        CabinGroupingItem(
+    func groupingItem(creationDate: Date) -> WorktreeGroupingItem {
+        WorktreeGroupingItem(
             id: id,
             path: worktreePath,
             repository: project,
@@ -48,20 +48,20 @@ extension SailorDisplayInfo {
     }
 }
 
-struct CabinGroup: Equatable {
-    let id: CabinGroupID
+struct WorktreeGroup: Equatable {
+    let id: WorktreeGroupID
     let title: String
     let status: SailorStatus?
-    let items: [CabinGroupingItem]
+    let items: [WorktreeGroupingItem]
 }
 
-enum CabinGrouping {
+enum WorktreeGrouping {
     static func groups(
-        _ items: [CabinGroupingItem],
-        mode: CabinGroupingMode,
+        _ items: [WorktreeGroupingItem],
+        mode: WorktreeGroupingMode,
         now: Date,
         calendar: Calendar = .current
-    ) -> [CabinGroup] {
+    ) -> [WorktreeGroup] {
         switch mode {
         case .repository, .sailor:
             return repositoryGroups(items)
@@ -72,12 +72,12 @@ enum CabinGrouping {
         }
     }
 
-    private static func repositoryGroups(_ items: [CabinGroupingItem]) -> [CabinGroup] {
+    private static func repositoryGroups(_ items: [WorktreeGroupingItem]) -> [WorktreeGroup] {
         var repositoryOrder: [String] = []
-        var groupedItems: [String: [CabinGroupingItem]] = [:]
+        var groupedItems: [String: [WorktreeGroupingItem]] = [:]
 
         for item in items {
-            let repository = item.repository.isEmpty ? "Unknown deck" : item.repository
+            let repository = item.repository.isEmpty ? "Unknown project" : item.repository
             if groupedItems[repository] == nil {
                 repositoryOrder.append(repository)
             }
@@ -85,7 +85,7 @@ enum CabinGrouping {
         }
 
         return repositoryOrder.map { repository in
-            CabinGroup(
+            WorktreeGroup(
                 id: .repository(repository),
                 title: repository,
                 status: nil,
@@ -94,7 +94,7 @@ enum CabinGrouping {
         }
     }
 
-    private static func statusGroups(_ items: [CabinGroupingItem]) -> [CabinGroup] {
+    private static func statusGroups(_ items: [WorktreeGroupingItem]) -> [WorktreeGroup] {
         let statuses: [(status: SailorStatus, title: String)] = [
             (.waiting, "Needs input"),
             (.running, "Running"),
@@ -107,7 +107,7 @@ enum CabinGrouping {
         return statuses.compactMap { status, title in
             let matchingItems = items.filter { $0.status == status }
             guard !matchingItems.isEmpty else { return nil }
-            return CabinGroup(
+            return WorktreeGroup(
                 id: .status(status),
                 title: title,
                 status: status,
@@ -117,18 +117,18 @@ enum CabinGrouping {
     }
 
     private static func activityGroups(
-        _ items: [CabinGroupingItem],
+        _ items: [WorktreeGroupingItem],
         now: Date,
         calendar: Calendar
-    ) -> [CabinGroup] {
-        let buckets: [(bucket: CabinActivityBucket, title: String)] = [
+    ) -> [WorktreeGroup] {
+        let buckets: [(bucket: WorktreeActivityBucket, title: String)] = [
             (.recentHour, "Recent hour"),
             (.today, "Today"),
             (.recentSevenDays, "Recent 7 days"),
             (.earlier, "Earlier"),
             (.noActivity, "No activity"),
         ]
-        var groupedItems: [CabinActivityBucket: [CabinGroupingItem]] = [:]
+        var groupedItems: [WorktreeActivityBucket: [WorktreeGroupingItem]] = [:]
 
         for item in items {
             let bucket = activityBucket(for: item.lastActivityAt, now: now, calendar: calendar)
@@ -137,7 +137,7 @@ enum CabinGrouping {
 
         return buckets.compactMap { bucket, title in
             guard let matchingItems = groupedItems[bucket], !matchingItems.isEmpty else { return nil }
-            return CabinGroup(
+            return WorktreeGroup(
                 id: .activity(bucket),
                 title: title,
                 status: nil,
@@ -150,7 +150,7 @@ enum CabinGrouping {
         for activity: Date?,
         now: Date,
         calendar: Calendar
-    ) -> CabinActivityBucket {
+    ) -> WorktreeActivityBucket {
         guard let activity else { return .noActivity }
         let age = max(0, now.timeIntervalSince(activity))
         if age < 3_600 { return .recentHour }
@@ -160,8 +160,8 @@ enum CabinGrouping {
     }
 
     private static func repositoryRowComesFirst(
-        _ lhs: CabinGroupingItem,
-        _ rhs: CabinGroupingItem
+        _ lhs: WorktreeGroupingItem,
+        _ rhs: WorktreeGroupingItem
     ) -> Bool {
         if lhs.isMainWorktree != rhs.isMainWorktree {
             return lhs.isMainWorktree
@@ -173,8 +173,8 @@ enum CabinGrouping {
     }
 
     private static func activityRowComesFirst(
-        _ lhs: CabinGroupingItem,
-        _ rhs: CabinGroupingItem
+        _ lhs: WorktreeGroupingItem,
+        _ rhs: WorktreeGroupingItem
     ) -> Bool {
         switch (lhs.lastActivityAt, rhs.lastActivityAt) {
         case let (left?, right?) where left != right:
@@ -189,7 +189,7 @@ enum CabinGrouping {
     }
 }
 
-struct CabinGroupingPreference {
+struct WorktreeGroupingPreference {
     static let key = "seahelm.dashboard.worktreeGroupingMode"
 
     let defaults: UserDefaults
@@ -198,15 +198,15 @@ struct CabinGroupingPreference {
         self.defaults = defaults
     }
 
-    func load() -> CabinGroupingMode {
+    func load() -> WorktreeGroupingMode {
         guard let rawValue = defaults.string(forKey: Self.key),
-              let mode = CabinGroupingMode(rawValue: rawValue) else {
+              let mode = WorktreeGroupingMode(rawValue: rawValue) else {
             return .repository
         }
         return mode
     }
 
-    func save(_ mode: CabinGroupingMode) {
+    func save(_ mode: WorktreeGroupingMode) {
         defaults.set(mode.rawValue, forKey: Self.key)
     }
 }

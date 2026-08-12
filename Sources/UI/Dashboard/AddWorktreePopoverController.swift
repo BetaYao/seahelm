@@ -1,13 +1,13 @@
 import AppKit
 
 /// The "+" on a project group header opens this: a small anchored form that
-/// creates one worktree in that deck. The repo is already decided by the header
+/// creates one worktree in that project. The repo is already decided by the header
 /// that was clicked, so the form only asks for what a create actually needs —
 /// the task, who staffs it, and what to branch from.
 ///
 /// Equivalent to the helm's `/worktree <task> @<repo>`, and it lands the same
-/// way: create, staff, then enter the new cabin.
-final class AddCabinPopoverController: NSViewController {
+/// way: create, staff, then enter the new worktree.
+final class AddWorktreePopoverController: NSViewController {
     /// (task, agentType). Worktrees always branch off the repo's main line, so
     /// the base is not a choice this form offers. The owner performs the create
     /// and then calls `reportFailure(_:)` if it fails.
@@ -262,7 +262,7 @@ final class AddCabinPopoverController: NSViewController {
     private func configureAgentPopup() {
         agentPopup.removeAllItems()
         let defaultAgent = SailorType(rawValue: Config.load().defaultAgent) ?? .claudeCode
-        for choice in InlineCabinCreateView.agentChoices {
+        for choice in InlineWorktreeCreateView.agentChoices {
             let item = NSMenuItem(title: choice.displayName, action: nil, keyEquivalent: "")
             item.representedObject = choice.rawValue
             agentPopup.menu?.addItem(item)
@@ -338,7 +338,7 @@ final class AddCabinPopoverController: NSViewController {
     func submitForTesting() { submit() }
 }
 
-extension AddCabinPopoverController: NSTextViewDelegate {
+extension AddWorktreePopoverController: NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):

@@ -313,7 +313,7 @@ class SettingsViewController: NSViewController {
         return [
             SettingsGroupView(title: "Projects", rows: [
                 SettingsRow.stacked(nil,
-                                    subtitle: "Repositories seahelm watches. Each becomes a deck; its worktrees become cabins.",
+                                    subtitle: "Repositories seahelm watches. Each becomes a project; its worktrees become worktrees.",
                                     content: SettingsControls.surface(pathScrollView), height: 140),
                 SettingsRow.actions([addButton, removeButton]),
             ]),

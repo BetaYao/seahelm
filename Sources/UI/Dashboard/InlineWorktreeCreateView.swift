@@ -4,7 +4,7 @@ import QuartzCore
 /// ChatGPT-style sticky worktree creator at the bottom of the sidebar: a tall
 /// rounded prompt box with the name field on top and a bottom row showing the
 /// target repo (tap to switch or add) plus the reuse-environment toggle.
-final class InlineCabinCreateView: NSView, NSTextViewDelegate {
+final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// (taskDescription, repoPath, agentType, reuseEnvironment)
     var onCreate: ((String, String, SailorType, Bool) -> Void)?
     /// Requests an outer height constraint update. The dashboard owns the
@@ -226,7 +226,7 @@ final class InlineCabinCreateView: NSView, NSTextViewDelegate {
             menu.addItem(item)
         }
         if !paths.isEmpty { menu.addItem(.separator()) }
-        let add = NSMenuItem(title: "Add deck…", action: #selector(addRepoClicked), keyEquivalent: "")
+        let add = NSMenuItem(title: "Add project…", action: #selector(addRepoClicked), keyEquivalent: "")
         add.target = self
         menu.addItem(add)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: repoChip.bounds.height + 4), in: repoChip)
@@ -286,10 +286,10 @@ final class InlineCabinCreateView: NSView, NSTextViewDelegate {
     }
 
     private static let commandCompletions: [CommandItem] = [
-        CommandItem(name: "new",       args: "<task>",            desc: "Create a cabin and assign a task"),
-        CommandItem(name: "order",     args: "<branch> <task>",   desc: "Assign a task to an existing cabin"),
+        CommandItem(name: "new",       args: "<task>",            desc: "Create a worktree and assign a task"),
+        CommandItem(name: "order",     args: "<branch> <task>",   desc: "Assign a task to an existing worktree"),
         CommandItem(name: "commit",    args: "<branch>",          desc: "Commit changes"),
-        CommandItem(name: "return",    args: "<branch>",          desc: "Return to port · delete cabin"),
+        CommandItem(name: "return",    args: "<branch>",          desc: "Return to port · delete worktree"),
         CommandItem(name: "broadcast", args: "<task>",            desc: "Broadcast to all agents"),
     ]
 
@@ -604,7 +604,7 @@ private final class CompletionRowView: NSView {
         didSet { updateBackground() }
     }
 
-    init(item: InlineCabinCreateView.CommandItem, height: CGFloat, action: @escaping () -> Void) {
+    init(item: InlineWorktreeCreateView.CommandItem, height: CGFloat, action: @escaping () -> Void) {
         self.action = action
 
         nameLabel = NSTextField(labelWithString: "/\(item.name)")

@@ -123,12 +123,12 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-b")
     }
 
-    // MARK: - ⌃⇥ cabin cycle
+    // MARK: - ⌃⇥ worktree cycle
 
     /// The bug this fixes: `⌃⇥` swapped the terminal content but left the fleet
-    /// list — and the First Mate panel showing it — highlighting the cabin it
+    /// list — and the First Mate panel showing it — highlighting the worktree it
     /// just left, so the two disagreed about where you were.
-    func testCycleToCabinMovesTheOverviewHighlightWithTheContent() {
+    func testCycleToWorktreeMovesTheOverviewHighlightWithTheContent() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
         vc.updateSailors([
@@ -136,23 +136,23 @@ final class DashboardViewControllerClickTests: XCTestCase {
             makeSailor(id: "agent-b", worktreePath: "/repo/b"),
         ])
         vc.adoptChromeCollapse(false, activePane: .firstMate)
-        vc.cycleToCabin(path: "/repo/a")
+        vc.cycleToWorktree(path: "/repo/a")
 
-        vc.cycleToCabin(path: "/repo/b")
+        vc.cycleToWorktree(path: "/repo/b")
 
         XCTAssertEqual(vc.selectedSailorId, "agent-b")
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-b",
-                       "the fleet list is still highlighting the previous cabin")
+                       "the fleet list is still highlighting the previous worktree")
     }
 
-    /// Cycling to a cabin that has no row yet (the list hasn't rendered) must
+    /// Cycling to a worktree that has no row yet (the list hasn't rendered) must
     /// still leave the highlight pointing at it, so the next render agrees.
-    func testCycleToCabinTracksSelectionWithoutARenderedRow() {
+    func testCycleToWorktreeTracksSelectionWithoutARenderedRow() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
         vc.updateSailors([makeSailor(id: "agent-a", worktreePath: "/repo/a")])
 
-        vc.cycleToCabin(path: "/repo/a")
+        vc.cycleToWorktree(path: "/repo/a")
 
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "agent-a")
     }

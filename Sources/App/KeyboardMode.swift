@@ -13,5 +13,5 @@ enum KeyboardSubstate: Equatable {
 
 /// Still the vocabulary for split-pane focus/resize (`GlobalKeymap`), which is
 /// the only place directions survive: the fleet list no longer has a bare-key
-/// nav ring — `⌃⇥` / `⌃⇧⇥` cycle cabins and the mouse does the rest.
+/// nav ring — `⌃⇥` / `⌃⇧⇥` cycle worktrees and the mouse does the rest.
 enum FocusDirection: Equatable { case left, right, up, down }
