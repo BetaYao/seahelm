@@ -167,6 +167,69 @@ enum SessionManager {
         }
     }
 
+    // MARK: - Orphan zmx client processes
+
+    /// One `zmx` process as the client sweep sees it.
+    struct ZmxProcess: Equatable {
+        let pid: Int32
+        let ppid: Int32
+        let command: String
+    }
+
+    /// `zmx attach`/`run` clients that no longer have anyone to serve.
+    ///
+    /// These do not exit when Seahelm dies — they spin at 20-70% CPU forever,
+    /// and every restart leaves a few more (20 were found holding 4.3 cores
+    /// after a day of restarts). The test is deliberately *not* "does the target
+    /// session still exist": the two worst offenders found were spinning against
+    /// sessions that were perfectly alive, and `zmx list` showed `clients=1`,
+    /// i.e. they had never attached at all. What identifies them is having no
+    /// live parent while not being a session daemon themselves.
+    static func orphanZmxClientPids(processes: [ZmxProcess], daemonPids: Set<Int32>) -> [Int32] {
+        // Without a daemon list every session daemon looks like an orphan, and
+        // killing those ends the agents inside them. Refuse rather than guess.
+        guard !daemonPids.isEmpty else { return [] }
+        return processes.compactMap { proc in
+            guard !daemonPids.contains(proc.pid) else { return nil }   // session daemon
+            guard proc.ppid == 1 else { return nil }                   // has a live parent
+            return proc.pid
+        }
+    }
+
+    /// Parse `ps -axo pid=,ppid=,command=` down to the zmx processes.
+    static func parseZmxProcesses(psOutput: String) -> [ZmxProcess] {
+        psOutput.components(separatedBy: .newlines).compactMap { line in
+            let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+            guard parts.count == 3,
+                  let pid = Int32(parts[0]),
+                  let ppid = Int32(parts[1]) else { return nil }
+            let command = String(parts[2])
+            // Match the vendored binary's path, not a bare "zmx": an agent's own
+            // command line can mention zmx without being one.
+            guard command.contains("/bin/zmx ") || command.hasSuffix("/bin/zmx") else { return nil }
+            return ZmxProcess(pid: pid, ppid: ppid, command: command)
+        }
+    }
+
+    /// Kill orphaned zmx clients. Returns the pids reaped. Safe to call at
+    /// startup: sessions and their daemons are left alone.
+    @discardableResult
+    static func cleanupOrphanZmxClients(listOutput: String? = nil, psOutput: String? = nil) -> [Int32] {
+        let list = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        let daemonPids = Set(list.components(separatedBy: .newlines).compactMap { line -> Int32? in
+            guard let value = zmxListField(line, "pid=") else { return nil }
+            return Int32(value)
+        })
+        let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
+        let orphans = orphanZmxClientPids(processes: parseZmxProcesses(psOutput: ps), daemonPids: daemonPids)
+        for pid in orphans {
+            // SIGKILL, not SIGTERM: the spin loop never reaches a signal handler,
+            // so a terminate is simply ignored.
+            kill(pid, SIGKILL)
+        }
+        return orphans
+    }
+
     /// Extract a `key=value` field (value runs up to the next whitespace) from a
     /// `zmx list` line, or nil if absent.
     private static func zmxListField(_ line: String, _ key: String) -> String? {
