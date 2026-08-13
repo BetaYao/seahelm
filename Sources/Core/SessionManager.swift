@@ -169,11 +169,17 @@ enum SessionManager {
 
     // MARK: - Orphan zmx client processes
 
-    /// One `zmx` process as the client sweep sees it.
+    /// One process row as the client sweep sees it.
     struct ZmxProcess: Equatable {
         let pid: Int32
         let ppid: Int32
         let command: String
+
+        /// The vendored binary's path, not a bare "zmx": an agent's own command
+        /// line can mention zmx without being one.
+        var isZmxBinary: Bool {
+            command.contains("/bin/zmx ") || command.hasSuffix("/bin/zmx")
+        }
     }
 
     /// `zmx attach`/`run` clients that no longer have anyone to serve.
@@ -185,29 +191,62 @@ enum SessionManager {
     /// sessions that were perfectly alive, and `zmx list` showed `clients=1`,
     /// i.e. they had never attached at all. What identifies them is having no
     /// live parent while not being a session daemon themselves.
-    static func orphanZmxClientPids(processes: [ZmxProcess], daemonPids: Set<Int32>) -> [Int32] {
-        // Without a daemon list every session daemon looks like an orphan, and
-        // killing those ends the agents inside them. Refuse rather than guess.
-        guard !daemonPids.isEmpty else { return [] }
+    ///
+    /// Which makes telling a daemon from a client the whole job, and it cannot be
+    /// done from `zmx list` pids alone: `pid=` names the *process inside* the
+    /// session (the shell, or the agent), never the zmx process hosting it. A
+    /// set of those pids therefore never intersects the zmx processes being
+    /// swept, so excluding it protected nothing and this sweep reaped every
+    /// surviving daemon of the previous instance — killing all 8 live sessions
+    /// about five minutes after each restart. The daemon is found by walking up
+    /// from the reported pid to the nearest zmx-binary ancestor instead; the walk
+    /// starts at the pid itself so a future zmx that does report the daemon pid
+    /// stays correct. Any session whose daemon cannot be resolved that way
+    /// abandons the whole sweep — reaping nothing costs CPU, guessing costs
+    /// agents.
+    static func orphanZmxClientPids(processes: [ZmxProcess], sessionPids: Set<Int32>) -> [Int32] {
+        // Without session pids every daemon looks like an orphan. Refuse to guess.
+        guard !sessionPids.isEmpty else { return [] }
+        let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        var daemonPids: Set<Int32> = []
+        for sessionPid in sessionPids {
+            guard let daemon = zmxDaemonPid(hosting: sessionPid, byPid: byPid) else { return [] }
+            daemonPids.insert(daemon)
+        }
         return processes.compactMap { proc in
+            guard proc.isZmxBinary else { return nil }
             guard !daemonPids.contains(proc.pid) else { return nil }   // session daemon
             guard proc.ppid == 1 else { return nil }                   // has a live parent
             return proc.pid
         }
     }
 
-    /// Parse `ps -axo pid=,ppid=,command=` down to the zmx processes.
+    /// The zmx process hosting `sessionPid`: itself if it is one, else its
+    /// nearest zmx-binary ancestor. Note the client that *created* a session is
+    /// also an ancestor of it (`login` → client → daemon → shell), so only the
+    /// nearest one may be treated as the daemon — stopping at the first hit is
+    /// what keeps the outer client reapable.
+    private static func zmxDaemonPid(hosting sessionPid: Int32, byPid: [Int32: ZmxProcess]) -> Int32? {
+        var current: Int32? = sessionPid
+        // Bounded: a ps snapshot can disagree with itself about parentage.
+        for _ in 0..<16 {
+            guard let pid = current, pid > 1, let proc = byPid[pid] else { return nil }
+            if proc.isZmxBinary { return proc.pid }
+            current = proc.ppid
+        }
+        return nil
+    }
+
+    /// Parse `ps -axo pid=,ppid=,command=`. Every row is kept, not just the zmx
+    /// ones: resolving a session's daemon means walking parents through the
+    /// non-zmx processes (`login`, the session's own shell) in between.
     static func parseZmxProcesses(psOutput: String) -> [ZmxProcess] {
         psOutput.components(separatedBy: .newlines).compactMap { line in
             let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
             guard parts.count == 3,
                   let pid = Int32(parts[0]),
                   let ppid = Int32(parts[1]) else { return nil }
-            let command = String(parts[2])
-            // Match the vendored binary's path, not a bare "zmx": an agent's own
-            // command line can mention zmx without being one.
-            guard command.contains("/bin/zmx ") || command.hasSuffix("/bin/zmx") else { return nil }
-            return ZmxProcess(pid: pid, ppid: ppid, command: command)
+            return ZmxProcess(pid: pid, ppid: ppid, command: String(parts[2]))
         }
     }
 
@@ -216,13 +255,18 @@ enum SessionManager {
     @discardableResult
     static func cleanupOrphanZmxClients(listOutput: String? = nil, psOutput: String? = nil) -> [Int32] {
         let list = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
-        let daemonPids = Set(list.components(separatedBy: .newlines).compactMap { line -> Int32? in
+        let sessionPids = Set(list.components(separatedBy: .newlines).compactMap { line -> Int32? in
             guard let value = zmxListField(line, "pid=") else { return nil }
             return Int32(value)
         })
         let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
-        let orphans = orphanZmxClientPids(processes: parseZmxProcesses(psOutput: ps), daemonPids: daemonPids)
+        let processes = parseZmxProcesses(psOutput: ps)
+        let orphans = orphanZmxClientPids(processes: processes, sessionPids: sessionPids)
+        let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         for pid in orphans {
+            // Log the command line before killing: the one bug this sweep has had
+            // was invisible in a bare pid count.
+            NSLog("[SessionManager] Reaping orphan zmx client %d: %@", pid, byPid[pid]?.command ?? "?")
             // SIGKILL, not SIGTERM: the spin loop never reaches a signal handler,
             // so a terminate is simply ignored.
             kill(pid, SIGKILL)
