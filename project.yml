@@ -147,6 +147,7 @@ targets:
         type: group
       - path: Resources/Fonts
       - path: Resources/ghostty.conf
+      - path: Resources/zmx-attach.py
       - path: Assets.xcassets
       - path: Resources/licenses
         type: folder

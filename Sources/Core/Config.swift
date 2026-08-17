@@ -32,6 +32,7 @@ struct Config: Codable {
     /// Gmail email channel configuration. OAuth credentials are held separately
     /// in Keychain, so this remains safe to serialize to config.json.
     var gmailMail: GmailMailConfig?
+    var hostGateway: HostGatewayConfig?
     var firstMate: FirstMateConfig
     var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
@@ -83,6 +84,7 @@ struct Config: Codable {
         case mqtt
         case imessage
         case gmailMail = "gmail_mail"
+        case hostGateway = "host_gateway"
         case firstMate
         case notifications
         case islandEnabled = "island_enabled"
@@ -122,6 +124,7 @@ struct Config: Codable {
         mqtt = nil
         imessage = nil
         gmailMail = nil
+        hostGateway = nil
         firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
@@ -163,6 +166,7 @@ struct Config: Codable {
         mqtt = try container.decodeIfPresent(MqttConfig.self, forKey: .mqtt)
         imessage = try container.decodeIfPresent(IMessageConfig.self, forKey: .imessage)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
+        hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true

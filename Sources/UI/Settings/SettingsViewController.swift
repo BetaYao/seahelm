@@ -559,14 +559,15 @@ class SettingsViewController: NSViewController {
             return [
                 SettingsGroupView(title: "Remote clients", rows: [
                     SettingsRow.stacked("Pairing unavailable",
-                                        subtitle: "MQTT is not configured, so there is no payload to hand a client yet.",
+                                        subtitle: "Enable Host Gateway or MQTT in config, then reopen Settings to mint a pairing link.",
                                         content: NSView()),
                 ]),
             ]
         }
 
         let pane = PairingPaneView(rootSecret: context.secret,
-                                   brokerURL: context.mqtt.resolvedClientBrokerURL,
+                                   brokerURL: HostGatewayPairing.clientEntryURL(
+                                       hostGateway: config.hostGateway, mqtt: context.mqtt),
                                    macId: context.mqtt.macId ?? MqttChannel.deriveMacId(),
                                    qrSide: 180)
         pane.onShortCode = { [weak self] code, ttl in

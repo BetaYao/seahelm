@@ -15,6 +15,8 @@ class TabCoordinator {
 
     /// MQTT remote-client backend (Watch / web / ESP32), if `config.mqtt` enabled.
     private var mqttChannel: MqttChannel?
+    private var hostGatewayServer: HostGatewayServer?
+    private var zmxVTAttachManager: ZmxVTAttachManager?
     /// Retained so the channel can be torn down and rebuilt on pairing (E2EE).
     /// The live control data source. Also the pane lookup + write channel the
     /// iMessage rule engine dispatches through, so it is not MQTT-private.
@@ -790,6 +792,7 @@ class TabCoordinator {
                         // mirrors notifications. docs/remote-clients-design.md.
                         self.mqttDataSource = controlDataSource
                         self.setupMqttChannel(dataSource: controlDataSource)
+                        self.setupHostGateway(dataSource: controlDataSource)
                     }
                 }
             }
@@ -810,6 +813,47 @@ class TabCoordinator {
         channel.connect()
         mqttChannel = channel
         NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId)) broker=\(mqttConfig.host):\(mqttConfig.resolvedPort) pair=\(mqttConfig.resolvedClientBrokerURL)")
+    }
+
+    /// Localhost WebSocket gateway for browser clients when `config.hostGateway` is enabled.
+    private func setupHostGateway(dataSource: ControlDataSource) {
+        guard config.hostGateway?.resolvedEnabled == true else { return }
+        guard hostGatewayServer == nil else { return }
+        guard let hgConfig = config.hostGateway else { return }
+
+        MqttConfig.normalizeForEdgeStack(&config.mqtt)
+        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
+        let mqtt = config.mqtt!
+        let macId = mqtt.macId ?? MqttChannel.deriveMacId()
+        let rootB64 = mqtt.rootSecret ?? ""
+
+        let vt = ZmxVTAttachManager()
+        zmxVTAttachManager = vt
+        let server = HostGatewayServer(
+            config: hgConfig,
+            router: ControlRouter(dataSource: dataSource),
+            expectedMacId: macId,
+            rootSecretBase64url: rootB64,
+            vt: vt)
+        server.start()
+        hostGatewayServer = server
+        NSLog("[TabCoordinator] Host Gateway started port=\(hgConfig.resolvedPort) pair=\(hgConfig.resolvedPublicURL)")
+    }
+
+    private func stopHostGateway() {
+        hostGatewayServer?.stop()
+        hostGatewayServer = nil
+        zmxVTAttachManager = nil
+    }
+
+    func teardownRemoteBackends() {
+        stopHostGateway()
+    }
+
+    /// Rebuild the gateway after pairing mints a new root secret.
+    private func reloadHostGateway() {
+        stopHostGateway()
+        if let ds = mqttDataSource { setupHostGateway(dataSource: ds) }
     }
 
     /// Apply a freshly-minted pairing secret to the *live* config and reconnect the
@@ -834,7 +878,10 @@ class TabCoordinator {
             AgentRegistry.shared.unregisterChannel(old.channelId)
             mqttChannel = nil
         }
-        if let ds = mqttDataSource { setupMqttChannel(dataSource: ds) }
+        if let ds = mqttDataSource {
+            setupMqttChannel(dataSource: ds)
+            reloadHostGateway()
+        }
     }
 
     // MARK: - Shared Worktree Integration
