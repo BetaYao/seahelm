@@ -122,6 +122,63 @@ def slope_per_hour(points):
     return num / den * 3600
 
 
+def fsevents_analysis(rows):
+    """Does fseventsd's floor climb while Seahelm runs?
+
+    Seahelm subscribes to FSEvents for the file tree, so the question is whether
+    that subscription contributes to this daemon reaching 12GB over weeks. The
+    floor is the right signal for the same reason it is for the app: fseventsd's
+    resident size swings with how much of its working set is currently paged in,
+    but a genuine accumulation raises the minimum it returns to.
+
+    Segmented on pid: launchd restarts fseventsd immediately when it is killed,
+    and the new process starts near zero. Splicing that drop into one series
+    would read as a spontaneous reclaim.
+    """
+    runs, current, pid = [], [], None
+    for row in rows:
+        row_pid = dig(row, "fsevents", "pid")
+        mem = dig(row, "fsevents", "mem_mb")
+        if row_pid is None or mem is None:
+            continue
+        if pid is not None and row_pid != pid:
+            runs.append(current)
+            current = []
+        pid = row_pid
+        current.append((row["epoch"], mem, row))
+    if current:
+        runs.append(current)
+    if not runs:
+        return {"samples": 0}
+
+    longest = max(runs, key=len)
+    points = [(epoch, mem) for epoch, mem, _ in longest]
+    buckets = floor_buckets(points)
+    last = longest[-1][2]
+    out = {
+        "samples": len(points),
+        "restarts": len(runs) - 1,
+        "pid": dig(last, "fsevents", "pid"),
+        "up_hours": round((dig(last, "fsevents", "up_s") or 0) / 3600.0, 1),
+        "mem_mb_last": points[-1][1],
+        "mem_mb_max": max(v for _, v in points),
+        "rss_mb_last": dig(last, "fsevents", "rss_mb"),
+        "slope_mb_per_hour": slope_per_hour(points),
+        "floor_buckets": buckets,
+    }
+    if len(buckets) >= 2:
+        out["floor_first_mb"] = buckets[0]["floor_mb"]
+        out["floor_last_mb"] = buckets[-1]["floor_mb"]
+        span = buckets[-1]["hours_in"] - buckets[0]["hours_in"]
+        if span > 0:
+            out["floor_mb_per_hour"] = round(
+                (buckets[-1]["floor_mb"] - buckets[0]["floor_mb"]) / span, 2)
+        out["floor_declines"] = sum(
+            1 for a, b in zip(buckets, buckets[1:]) if b["floor_mb"] < a["floor_mb"])
+        out["floor_buckets_count"] = len(buckets)
+    return out
+
+
 def analyse(rows):
     live = [r for r in rows if dig(r, "app")]
     report = {"samples": len(rows), "samples_with_app": len(live)}
@@ -270,6 +327,7 @@ def analyse(rows):
         "zmx_procs_last": dig(rows[-1], "zmx", "procs"),
         "zmx_rss_mb_last": dig(rows[-1], "zmx", "rss_mb"),
     }
+    report["fsevents"] = fsevents_analysis(rows)
 
     report["captures"] = [
         {"ts": r["ts"], "reasons": dig(r, "capture", "reasons"), "sample": dig(r, "capture", "sample")}
@@ -357,6 +415,31 @@ def render_text(report, rows):
             out.append("  +%5.1fh  %6.0f  %6.0f  %6.0f   (n=%d)"
                        % (bucket["hours_in"], bucket["floor_mb"], bucket["median_mb"],
                           bucket["ceiling_mb"], bucket["samples"]))
+        out.append("")
+
+    fse = report.get("fsevents") or {}
+    if fse.get("samples"):
+        out.append("FSEVENTSD (top MEM, which counts compressed pages; ps RSS shown for contrast)")
+        out.append("  pid %s up %sh   now %s (rss %s)   max %s   restarts seen %s"
+                   % (fse.get("pid"), fse.get("up_hours"),
+                      fmt(fse.get("mem_mb_last"), "MB", digits=0),
+                      fmt(fse.get("rss_mb_last"), "MB", digits=0),
+                      fmt(fse.get("mem_mb_max"), "MB", digits=0),
+                      fse.get("restarts")))
+        fbuckets = fse.get("floor_buckets") or []
+        if len(fbuckets) >= 2:
+            declines = fse.get("floor_declines", 0)
+            count = fse.get("floor_buckets_count", 0)
+            verdict = ("accumulating — the floor almost never falls"
+                       if declines <= max(1, count // 10)
+                       else "floor falls back, so this reads as load, not accumulation")
+            out.append("  floor %s → %s (%s per hour, %d/%d buckets fell) — %s"
+                       % (fmt(fse.get("floor_first_mb"), "MB", digits=0),
+                          fmt(fse.get("floor_last_mb"), "MB", digits=0),
+                          fmt(fse.get("floor_mb_per_hour"), "MB", digits=2),
+                          declines, max(0, count - 1), verdict))
+        else:
+            out.append("  not enough buckets yet — needs ~3h to say anything about the floor")
         out.append("")
 
     cpu = report.get("cpu") or {}
