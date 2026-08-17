@@ -29,6 +29,13 @@ final class FakeVTAttachedProcess: VTAttachedProcess {
         terminationHandler = nil
     }
 
+    /// Fires the attach-exit callback the same way `Process.terminationHandler` does.
+    func fireTermination() {
+        let handler = terminationHandler
+        terminationHandler = nil
+        handler?()
+    }
+
     func emit(_ bytes: Data) {
         stdoutHandler?(bytes)
     }
@@ -69,7 +76,8 @@ final class ZmxVTAttachManagerTests: XCTestCase {
     private func makeManager(
         spawner: RecordingVTProcessSpawner,
         sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { _ in (rows: 40, cols: 100) },
-        leaseTTL: TimeInterval = 5
+        leaseTTL: TimeInterval = 5,
+        queue: DispatchQueue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.test")
     ) -> ZmxVTAttachManager {
         let mgr = ZmxVTAttachManager(
             processSpawner: spawner,
@@ -77,7 +85,8 @@ final class ZmxVTAttachManagerTests: XCTestCase {
             attachScriptPath: { "/fake/zmx-attach.py" },
             sessionSize: sessionSize,
             now: { [unowned self] in self.fakeClock },
-            leaseTTL: leaseTTL)
+            leaseTTL: leaseTTL,
+            queue: queue)
         mgr.onNotify = { [unowned self] method, params in
             self.notifications.append((method, params))
         }
@@ -210,6 +219,44 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         XCTAssertTrue(first.terminated)
         XCTAssertFalse(second.terminated)
         XCTAssertEqual(spawner.requests.count, 2)
+    }
+
+    func testDeinitFromManagerQueueDoesNotTrap() {
+        let queue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.deinit-test")
+        let spawner = RecordingVTProcessSpawner()
+        spawner.nextProcess = FakeVTAttachedProcess()
+        var mgr: ZmxVTAttachManager? = makeManager(spawner: spawner, queue: queue)
+        weak var weakMgr = mgr
+        _ = mgr!.open(paneSessionKey: "p1")
+
+        let deallocated = expectation(description: "manager released on its own queue")
+        queue.async {
+            mgr = nil
+            XCTAssertNil(weakMgr)
+            deallocated.fulfill()
+        }
+        wait(for: [deallocated], timeout: 2)
+        XCTAssertNil(mgr)
+        XCTAssertNil(weakMgr)
+    }
+
+    func testDeinitAfterAttachExitOnQueueDoesNotTrap() {
+        let queue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.exit-deinit-test")
+        let spawner = RecordingVTProcessSpawner()
+        let fake = FakeVTAttachedProcess()
+        spawner.nextProcess = fake
+        var mgr: ZmxVTAttachManager? = makeManager(spawner: spawner, queue: queue)
+        weak var weakMgr = mgr
+        _ = mgr!.open(paneSessionKey: "p1")
+        fake.fireTermination()
+        mgr = nil
+
+        let drained = expectation(description: "queue drained after attach exit")
+        queue.async {
+            XCTAssertNil(weakMgr)
+            drained.fulfill()
+        }
+        wait(for: [drained], timeout: 2)
     }
 
     func testSessionPidParsing() {

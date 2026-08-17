@@ -175,28 +175,28 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         }
     }
 
-    private func syncOnQueue(_ body: () -> Void) {
+    @discardableResult
+    private func syncOnQueue<T>(_ body: () -> T) -> T {
         if DispatchQueue.getSpecific(key: queueKey) != nil {
-            body()
-        } else {
-            queue.sync(execute: body)
+            return body()
         }
+        return queue.sync(execute: body)
     }
 
     func open(paneSessionKey: String) -> [String: Any] {
-        queue.sync {
+        syncOnQueue {
             openLocked(paneSessionKey: paneSessionKey)
         }
     }
 
     func close(paneSessionKey: String) {
-        queue.sync {
+        syncOnQueue {
             tearDown(key: paneSessionKey, reason: "closed")
         }
     }
 
     func keepalive(paneSessionKey: String) {
-        queue.sync {
+        syncOnQueue {
             guard var st = streams[paneSessionKey] else { return }
             st.lastSeen = now()
             streams[paneSessionKey] = st
@@ -204,7 +204,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     }
 
     func sendKeys(paneSessionKey: String, utf8: Data) -> Bool {
-        queue.sync {
+        syncOnQueue {
             guard let st = streams[paneSessionKey], let stdin = st.proc.stdin, !utf8.isEmpty else {
                 return false
             }
@@ -220,25 +220,25 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     // MARK: Test hooks
 
     func test_emitPendingSnapshot(paneSessionKey: String) {
-        queue.sync {
+        syncOnQueue {
             closeSnapshot(key: paneSessionKey)
         }
     }
 
     func test_flushLiveData(paneSessionKey: String) {
-        queue.sync {
+        syncOnQueue {
             flushLive(key: paneSessionKey)
         }
     }
 
     func test_reapLeases(now overrideNow: Date) {
-        queue.sync {
+        syncOnQueue {
             reapLeases(now: overrideNow)
         }
     }
 
     func test_drain() {
-        queue.sync { }
+        syncOnQueue { }
     }
 
     // MARK: Geometry
@@ -343,9 +343,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
                 flushLive(key: key)
             } else if st.flushWorkItem == nil {
                 let work = DispatchWorkItem { [weak self] in
-                    self?.queue.async {
-                        self?.flushLive(key: key)
-                    }
+                    self?.flushLive(key: key)
                 }
                 st.flushWorkItem = work
                 streams[key] = st
@@ -358,16 +356,12 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         guard var st = streams[key], st.phase == .snapshot else { return }
         st.snapshotIdleWorkItem?.cancel()
         let idleWork = DispatchWorkItem { [weak self] in
-            self?.queue.async {
-                self?.closeSnapshot(key: key)
-            }
+            self?.closeSnapshot(key: key)
         }
         st.snapshotIdleWorkItem = idleWork
         if st.snapshotCapWorkItem == nil {
             let capWork = DispatchWorkItem { [weak self] in
-                self?.queue.async {
-                    self?.closeSnapshot(key: key)
-                }
+                self?.closeSnapshot(key: key)
             }
             st.snapshotCapWorkItem = capWork
             queue.asyncAfter(deadline: .now() + snapshotMax, execute: capWork)
