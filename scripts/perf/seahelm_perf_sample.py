@@ -133,6 +133,51 @@ def zmx_metrics():
     return {"procs": procs, "rss_mb": round(rss_kb / 1024.0, 1)}
 
 
+def _top_mem_mb(value):
+    """Parse top's MEM column ("4240K", "720M", "12G") into MB."""
+    match = re.match(r"^([\d.]+)([BKMGT]?)\+?$", value.strip())
+    if not match:
+        return None
+    scale = {"": 1 / 1048576.0, "B": 1 / 1048576.0, "K": 1 / 1024.0,
+             "M": 1.0, "G": 1024.0, "T": 1048576.0}[match.group(2)]
+    return round(float(match.group(1)) * scale, 1)
+
+
+def fseventsd_metrics():
+    """fseventsd's real memory, which `ps` RSS does not reveal.
+
+    This daemon sits idle while holding an enormous dirty working set, so nearly
+    all of its pages end up compressed or swapped out and RSS only counts what is
+    still resident. On 2026-08-16, after 49 days up, `ps` reported 7-8MB (swinging
+    to 921MB and back between samples) while `top` reported 12G for the same pid —
+    on a 16GB machine. Killing it released 8.1GB of swap. RSS is what made it look
+    like a 720MB nuisance twice; top's MEM column is the number that counts the
+    compressed pages, so that is the one sampled here.
+
+    `pid` is recorded because launchd restarts fseventsd immediately on kill, and
+    a restart resets the floor — the report has to segment on it rather than read
+    the drop as a reclaim.
+    """
+    pid_out = run(["pgrep", "-x", "fseventsd"], timeout=10).strip()
+    if not pid_out:
+        return {"running": False}
+    pid = int(pid_out.split()[0])
+    row = {"running": True, "pid": pid}
+
+    top_out = run(["top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"], timeout=20)
+    match = re.search(r"^\s*%d\s+(\S+)" % pid, top_out, re.MULTILINE)
+    row["mem_mb"] = _top_mem_mb(match.group(1)) if match else None
+
+    ps_out = run(["ps", "-o", "etime=,rss=,%cpu=", "-p", str(pid)], timeout=10).strip()
+    if ps_out:
+        etime, rss_kb, pcpu = ps_out.split()
+        row["up_s"] = round(_seconds(etime), 1)
+        # Kept alongside mem_mb precisely so the gap between them stays visible.
+        row["rss_mb"] = round(int(rss_kb) / 1024.0, 1)
+        row["cpu_pct_ps"] = float(pcpu)
+    return row
+
+
 # ---------------------------------------------------------------- socket probes
 
 
@@ -373,6 +418,7 @@ def sample_once():
             row["render"] = render_metrics(interval + 20, pid)
 
     row["zmx"] = zmx_metrics()
+    row["fsevents"] = fseventsd_metrics()
     row["sys"] = system_metrics()
 
     reasons = []
