@@ -55,7 +55,7 @@ class TabCoordinator {
     // References provided by MainWindowController
     var terminalCoordinator: TerminalCoordinator!
     var statusPublisher: StatusPublisher!
-    var statusAggregator: CabinStatusAggregator!
+    var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
     let pendingTransfers = PendingTransferTracker()
 
@@ -70,9 +70,9 @@ class TabCoordinator {
         return f
     }()
 
-    var selectedSailor: SailorDisplayInfo? {
+    var selectedPane: WorktreeRowInfo? {
         guard let dashboard = dashboardVC else { return nil }
-        let index = dashboard.selectedSailorIndex
+        let index = dashboard.selectedPaneIndex
         let agents = dashboard.agents
         guard index < agents.count else { return nil }
         return agents[index]
@@ -115,7 +115,7 @@ class TabCoordinator {
                 self?.runFirstMateInspection(action)
             }
         )
-        ShipLog.shared.onOutcome = { [weak self] outcome in
+        AgentRegistry.shared.onOutcome = { [weak self] outcome in
             guard let self else { return }
             switch outcome.event.source {
             case .scan:
@@ -125,7 +125,7 @@ class TabCoordinator {
             }
             self.firstMate?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
-            // Feed the worktree aggregator from ShipLog's arbitrated status
+            // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
             // static (agent thinking; only the OSC-title spinner animates).
@@ -152,7 +152,7 @@ class TabCoordinator {
         }
     }
 
-    deinit { ShipLog.shared.onOutcome = nil }
+    deinit { AgentRegistry.shared.onOutcome = nil }
 
     // MARK: - Tab Switching
 
@@ -164,7 +164,7 @@ class TabCoordinator {
 
         if let dashboard = dashboardVC {
             delegate?.tabCoordinator(self, embedViewController: dashboard)
-            dashboard.updateSailors(buildSailorDisplayInfos())
+            dashboard.updatePanes(buildWorktreeRowInfos())
         }
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -262,7 +262,7 @@ class TabCoordinator {
         }
         if configChanged { saveConfig() }
 
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
@@ -323,8 +323,8 @@ class TabCoordinator {
     /// - Parameter changedWorktreePath: when set (single-worktree status change),
     ///   only that worktree kicks an async git-stats refresh; every card still
     ///   reads its cached stats. A full rebuild (nil) refreshes all.
-    func buildSailorDisplayInfos(changedWorktreePath: String? = nil) -> [SailorDisplayInfo] {
-        let agents = ShipLog.shared.allSailors()
+    func buildWorktreeRowInfos(changedWorktreePath: String? = nil) -> [WorktreeRowInfo] {
+        let agents = AgentRegistry.shared.allPanes()
         // Index once — the per-agent loop below used to re-filter the full agent
         // list and re-scan allWorktrees for every worktree (O(N²) per rebuild,
         // and this rebuilds on every single-worktree status change).
@@ -332,7 +332,7 @@ class TabCoordinator {
         let worktreeInfoByPath = Dictionary(allWorktrees.map { ($0.info.path, $0.info) },
                                             uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
-        var result: [SailorDisplayInfo] = []
+        var result: [WorktreeRowInfo] = []
 
         for agent in agents {
             guard let station = agent.station else { continue }
@@ -346,12 +346,14 @@ class TabCoordinator {
             } ?? [station]
 
             let ws = statusAggregator.status(for: agent.worktreePath)
-            // Roll up EVERY pane's ShipLog status for this worktree (authoritative,
-            // arbitrated). A multi-pane worktree must reflect its busiest pane, so
-            // don't collapse to the aggregator's list or a single sailor here.
+            // Every pane's AgentRegistry status, in leaf order — these draw the per-pane
+            // dots. The worktree's own status is NOT derived from them here: the
+            // aggregator already picked the most recently changed pane, and
+            // re-deriving it would let the row and the tab badge disagree.
             let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
+            let rolledUpStatus = ws?.rolledUpStatus ?? agent.status
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
@@ -366,9 +368,9 @@ class TabCoordinator {
 
             // "Last activity" age: seconds since the aggregator last saw a real
             // status/message change for this worktree (persisted across launches),
-            // falling back to the sailor's start time.
+            // falling back to the pane's start time.
             let lastActivity = statusAggregator.lastActivity(for: agent.worktreePath) ?? agent.startedAt
-            let lastActivityAge = SailorDisplayHelpers.relativeAge(since: lastActivity)
+            let lastActivityAge = WorktreeRowHelpers.relativeAge(since: lastActivity)
 
             // Git summary (diff size + ahead/behind). Served from an 8s cache;
             // kick an off-main refresh so the next build has fresh numbers.
@@ -379,38 +381,38 @@ class TabCoordinator {
 
             // Warm the shared title cache (session summary → task → prompt) so
             // both the cards and the overview rows can read cachedTitle synchronously.
-            CabinTitleCache.shared.title(worktreePath: agent.worktreePath,
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath,
                                             lastUserPrompt: mostRecentUserPrompt,
                                             branch: worktreeName) { _ in }
 
             // Worktree title = the current (focused) pane, or the most recently
             // active pane when this worktree has no genuine focus.
             let focusedStationId = PaneTitleResolver.focusedStationId(in: tree)
-            let focusedSailor = PaneTitleResolver.representativeSailor(
+            let focusedPane = PaneTitleResolver.representativePane(
                 focusedStationId: focusedStationId,
                 among: agentsByWorktree[agent.worktreePath] ?? [],
                 fallback: agent
             )
-            let currentPaneTitle = PaneTitleResolver.title(for: focusedSailor)
+            let currentPaneTitle = PaneTitleResolver.title(for: focusedPane)
             let currentPaneRunTime: String = {
-                if focusedSailor.status == .running, focusedSailor.roundDuration > 0 {
-                    return SailorDisplayHelpers.compactDuration(
-                        SailorDisplayHelpers.formatDuration(focusedSailor.roundDuration))
+                if focusedPane.status == .running, focusedPane.roundDuration > 0 {
+                    return WorktreeRowHelpers.compactDuration(
+                        WorktreeRowHelpers.formatDuration(focusedPane.roundDuration))
                 }
                 return lastActivityAge
             }()
 
-            // Per-pane rows for the expanded "Group by Sailor" mode. Aligned to
+            // Per-pane rows for the expanded "Group by Pane" mode. Aligned to
             // paneStations (leaf order); title/status come from each pane's own
-            // ShipLog sailor, so sibling panes read distinctly.
-            let worktreeSailors = agentsByWorktree[agent.worktreePath] ?? []
+            // AgentRegistry pane, so sibling panes read distinctly.
+            let worktreePanes = agentsByWorktree[agent.worktreePath] ?? []
             let panes: [PaneDisplayInfo] = paneStations.map { paneStation in
-                let paneSailor = worktreeSailors.first(where: { $0.id == paneStation.id })
+                let panePane = worktreePanes.first(where: { $0.id == paneStation.id })
                 return PaneDisplayInfo(
                     stationId: paneStation.id,
-                    title: paneSailor.map { PaneTitleResolver.title(for: $0) }
+                    title: panePane.map { PaneTitleResolver.title(for: $0) }
                         ?? PaneTitleResolver.shortenPath(agent.worktreePath),
-                    status: paneSailor?.status ?? .unknown,
+                    status: panePane?.status ?? .unknown,
                     isFocused: paneStation.id == focusedStationId
                 )
             }
@@ -428,17 +430,18 @@ class TabCoordinator {
                 }
             }
 
-            result.append(SailorDisplayInfo(
+            result.append(WorktreeRowInfo(
                 id: agent.id,
                 name: worktreeName,
                 project: agent.project,
                 thread: worktreeName,
                 paneStatuses: paneStatuses,
+                rolledUpStatus: rolledUpStatus,
                 mostRecentMessage: mostRecentMessage,
                 lastUserPrompt: mostRecentUserPrompt,
                 mostRecentPaneIndex: mostRecentPaneIndex,
-                totalDuration: SailorDisplayHelpers.formatDuration(agent.totalDuration),
-                roundDuration: SailorDisplayHelpers.formatDuration(agent.roundDuration),
+                totalDuration: WorktreeRowHelpers.formatDuration(agent.totalDuration),
+                roundDuration: WorktreeRowHelpers.formatDuration(agent.roundDuration),
                 station: station,
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
@@ -561,7 +564,7 @@ class TabCoordinator {
 
                 self.allWorktrees = allWorktreeInfos
 
-                // Register all agents with ShipLog
+                // Register all agents with AgentRegistry
                 for (info, _) in allWorktreeInfos {
                     let repo = self.worktreeRepoCache[info.path] ?? WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
@@ -570,10 +573,10 @@ class TabCoordinator {
                     self.registerPanes(of: info, project: proj, startedAt: started)
                 }
                 if !cardOrder.isEmpty {
-                    ShipLog.shared.reorder(paths: cardOrder)
+                    AgentRegistry.shared.reorder(paths: cardOrder)
                 }
 
-                self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
+                self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
                 self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
                 if allWorktreeInfos.isEmpty {
@@ -636,10 +639,10 @@ class TabCoordinator {
                             sessionSuggestedAt.removeValue(forKey: turnKey)
                         }
                         // Track per-worktree background-task state (subagent/shell/cron).
-                        ShipLog.shared.updateBackgroundBusy(from: event)
+                        AgentRegistry.shared.updateBackgroundBusy(from: event)
                         // Drop a (voluntary) suggestion while background work is still running —
                         // the agent will auto-resume, so it isn't a real end-of-turn yet.
-                        if event.event == .suggest, ShipLog.shared.isBackgroundBusy(cwd: event.cwd) {
+                        if event.event == .suggest, AgentRegistry.shared.isBackgroundBusy(cwd: event.cwd) {
                             NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
                             return nil
                         }
@@ -659,7 +662,7 @@ class TabCoordinator {
                         if event.event == .assistantResponse,
                            let text = event.data?["text"] as? String {
                             let prose = StopHookResponder.stripSentinel(from: text)
-                            if let tid = ShipLog.shared.noteAssistantMessage(
+                            if let tid = AgentRegistry.shared.noteAssistantMessage(
                                 cwd: event.cwd, paneId: event.paneId, message: prose) {
                                 self.pendingOrders.refreshSuggestMessage(
                                     terminalID: tid, message: prose)
@@ -670,7 +673,7 @@ class TabCoordinator {
                                     event: .suggest, cwd: event.cwd, timestamp: nil,
                                     data: ["options": options], paneId: event.paneId)
                                 self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
-                                ShipLog.shared.handleWebhookEvent(suggestEvent)
+                                AgentRegistry.shared.handleWebhookEvent(suggestEvent)
                                 sessionSuggestedAt[turnKey] = Date()
                             }
                         }
@@ -690,7 +693,7 @@ class TabCoordinator {
                             // call — so the answer prose is never left before a trailing
                             // tool_use for the TUI to swallow. Surface the buttons here, then
                             // let the Stop fall through to normal completion below.
-                            ShipLog.shared.noteAssistantMessage(
+                            AgentRegistry.shared.noteAssistantMessage(
                                 cwd: event.cwd, paneId: event.paneId,
                                 message: StopHookResponder.stripSentinel(from: msg))
                             let suggestEvent = WebhookEvent(
@@ -698,7 +701,7 @@ class TabCoordinator {
                                 event: .suggest, cwd: event.cwd, timestamp: nil,
                                 data: ["options": options], paneId: event.paneId)
                             self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
-                            ShipLog.shared.handleWebhookEvent(suggestEvent)
+                            AgentRegistry.shared.handleWebhookEvent(suggestEvent)
                             sessionSuggestedAt[turnKey] = Date()
                         } else if event.event == .agentStop,
                            let blockedAt = sessionBlockedAt[turnKey],
@@ -713,14 +716,14 @@ class TabCoordinator {
                             // stash the agent's final message so the suggestion card can show it.
                             sessionBlockedAt[turnKey] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
-                                ShipLog.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
+                                AgentRegistry.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
                             }
                             return block
                         }
                         self.statusPublisher.webhookProvider.handleEvent(event)
-                        ShipLog.shared.handleWebhookEvent(event)
+                        AgentRegistry.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
-                        // ShipLog.shared.updateTodoFromWebhook(event)
+                        // AgentRegistry.shared.updateTodoFromWebhook(event)
                         return nil
                       }
                     }
@@ -785,7 +788,7 @@ class TabCoordinator {
                         control.start()
                         self.terminalCoordinator.controlSocketServer = control
                         // Remote-client backend (MQTT). Shares the control
-                        // socket's dataSource; registered with ShipLog so it also
+                        // socket's dataSource; registered with AgentRegistry so it also
                         // mirrors notifications. docs/remote-clients-design.md.
                         self.mqttDataSource = controlDataSource
                         self.setupMqttChannel(dataSource: controlDataSource)
@@ -806,7 +809,7 @@ class TabCoordinator {
         config.save()   // persist retarget (e.g. emqxsl → 127.0.0.1 + client_broker)
         let channel = MqttChannel(config: mqttConfig)
         channel.dataSource = dataSource
-        ShipLog.shared.registerChannel(channel)
+        AgentRegistry.shared.registerChannel(channel)
         channel.connect()
         mqttChannel = channel
         NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId)) broker=\(mqttConfig.host):\(mqttConfig.resolvedPort) pair=\(mqttConfig.resolvedClientBrokerURL)")
@@ -872,7 +875,7 @@ class TabCoordinator {
     func reloadMqttChannel() {
         if let old = mqttChannel {
             old.disconnect()
-            ShipLog.shared.unregisterChannel(old.channelId)
+            AgentRegistry.shared.unregisterChannel(old.channelId)
             mqttChannel = nil
         }
         if let ds = mqttDataSource {
@@ -928,7 +931,7 @@ class TabCoordinator {
         }
         if configChanged { saveConfig() }
 
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -1009,7 +1012,7 @@ class TabCoordinator {
         return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
     }
 
-    private func performPaneTransfer(transfer: PendingCabinTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
+    private func performPaneTransfer(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
         let sourcePath = transfer.sourceWorktreePath
         // Capture the source's own info before step 2 drops it. Step 6 restores the
         // source from `allDiscoveredWorktrees`, but that list only covers `repoRoot`
@@ -1038,10 +1041,10 @@ class TabCoordinator {
         allWorktrees.append((info: newInfo, tree: transferredTree))
         worktreeRepoCache[newInfo.path] = repoRoot
 
-        // 3. Re-register transferred surfaces in ShipLog under new worktree
+        // 3. Re-register transferred surfaces in AgentRegistry under new worktree
         // Unregister all old agents for the source path first
-        while let oldAgent = ShipLog.shared.sailor(forWorktree: sourcePath) {
-            ShipLog.shared.unregister(terminalID: oldAgent.id)
+        while let oldAgent = AgentRegistry.shared.pane(forWorktree: sourcePath) {
+            AgentRegistry.shared.unregister(terminalID: oldAgent.id)
         }
         for leaf in transferredTree.allLeaves {
             if let station = StationRegistry.shared.station(forId: leaf.stationId) {
@@ -1050,7 +1053,7 @@ class TabCoordinator {
                 // newInfo.path), which would build a channel to a nonexistent session
                 // and let the orphan-reaper reap the live one.
                 let paneSessionKey = runtimeBackend == "local" ? nil : leaf.paneSessionKey
-                ShipLog.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
+                AgentRegistry.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
             }
         }
 
@@ -1080,7 +1083,7 @@ class TabCoordinator {
                 ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
             let paneSessionKey = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
             if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
-                ShipLog.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
+                AgentRegistry.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
             }
             terminalCoordinator.saveSplitLayout(freshTree)
         }
@@ -1103,13 +1106,13 @@ class TabCoordinator {
         }
         // Unregister EVERY pane of the worktree (split worktrees have N agents;
         // taking just the first leaked the rest for the app's lifetime).
-        for terminalID in ShipLog.shared.terminalIDs(forWorktree: info.path) {
-            ShipLog.shared.unregister(terminalID: terminalID)
+        for terminalID in AgentRegistry.shared.terminalIDs(forWorktree: info.path) {
+            AgentRegistry.shared.unregister(terminalID: terminalID)
         }
-        CabinTitleCache.shared.evict(worktreePath: info.path)
+        WorktreeTitleCache.shared.evict(worktreePath: info.path)
         WorktreeGitStatsCache.shared.evict(worktreePath: info.path)
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -1126,14 +1129,14 @@ class TabCoordinator {
             let primaryStation = terminalCoordinator.stationManager.primaryStation(forPath: worktree.path)
             terminalCoordinator.stationManager.removeTree(forPath: worktree.path)
 
-            // Unregister EVERY pane of the worktree, not just the first sailor.
-            let ids = ShipLog.shared.terminalIDs(forWorktree: worktree.path)
+            // Unregister EVERY pane of the worktree, not just the first pane.
+            let ids = AgentRegistry.shared.terminalIDs(forWorktree: worktree.path)
             if ids.isEmpty, let primaryStation {
-                ShipLog.shared.unregister(terminalID: primaryStation.id)
+                AgentRegistry.shared.unregister(terminalID: primaryStation.id)
             } else {
-                for id in ids { ShipLog.shared.unregister(terminalID: id) }
+                for id in ids { AgentRegistry.shared.unregister(terminalID: id) }
             }
-            CabinTitleCache.shared.evict(worktreePath: worktree.path)
+            WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
             WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)
             if runtimeBackend != "local" {
                 let paneSessionKey = SessionManager.persistentSessionName(for: worktree.path)
@@ -1153,7 +1156,7 @@ class TabCoordinator {
         activeTabIndex = -1
         delegate?.tabCoordinatorRequestClearContentContainer(self)
 
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         switchToTab(0)
@@ -1188,9 +1191,9 @@ class TabCoordinator {
 
     private var branchRefreshTick = 0
     /// Every 2nd tick of the 5s timer, i.e. 10s. This is the *only* thing that
-    /// advances the seconds-resolution elapsed labels (ShipLog stopped fanning
+    /// advances the seconds-resolution elapsed labels (AgentRegistry stopped fanning
     /// out on roundDuration ticks), so a slower cadence reads as a frozen
-    /// counter. `buildSailorDisplayInfos` is cache-served and the render it
+    /// counter. `buildWorktreeRowInfos` is cache-served and the render it
     /// feeds is now incremental, so the tick is cheap enough to keep at 10s.
     private static let elapsedRefreshEveryTicks = 2
 
@@ -1207,12 +1210,12 @@ class TabCoordinator {
             self.refreshBranches()
             // Re-evaluate worktree-tab idle collapse even when nothing changed.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
-            // ShipLog no longer fans out on roundDuration ticks (see
+            // AgentRegistry no longer fans out on roundDuration ticks (see
             // displayedStateUnchanged), so elapsed-time and activity-age labels
             // are advanced here at a gentle cadence while anything is running.
             if Self.shouldRefreshDashboardElapsedTime(tick: self.branchRefreshTick),
-               ShipLog.shared.allSailors().contains(where: { $0.status == .running }) {
-                self.dashboardVC?.updateSailors(self.buildSailorDisplayInfos())
+               AgentRegistry.shared.allPanes().contains(where: { $0.status == .running }) {
+                self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
             }
             // Rides this timer rather than starting its own: the policy only
             // needs to notice minutes-scale absences, and a 5s tick is already
@@ -1296,7 +1299,7 @@ class TabCoordinator {
         }
 
         workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
-        dashboardVC?.updateSailors(buildSailorDisplayInfos())
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         return true
@@ -1311,7 +1314,7 @@ class TabCoordinator {
     }
 
     func saveSelectedWorktree() {
-        if let agent = selectedSailor {
+        if let agent = selectedPane {
             config.selectedWorktreePath = agent.worktreePath
             saveConfig()
         }
@@ -1319,8 +1322,8 @@ class TabCoordinator {
 
     func restoreSessionState() {
         // Restore selected agent card from config. Use commitWorktreeSelection
-        // (not selectSailor) so the left "First mate" overview selection stays in
-        // sync with the right-hand terminal — selectSailor moves only the terminal,
+        // (not selectPane) so the left "First mate" overview selection stays in
+        // sync with the right-hand terminal — selectPane moves only the terminal,
         // leaving the overview highlight on the first row and mismatched on launch.
         if let savedPath = config.selectedWorktreePath {
             dashboardVC?.commitWorktreeSelection(path: savedPath, focusTerminal: true)
@@ -1346,14 +1349,14 @@ class TabCoordinator {
     }
 
     func dashboardDidRequestDelete(_ terminalID: String, window: NSWindow?) {
-        guard let agent = ShipLog.shared.sailor(for: terminalID) else { return }
+        guard let agent = AgentRegistry.shared.pane(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)
     }
 
     func dashboardDidRequestDeleteWithBranch(_ terminalID: String, window: NSWindow?) {
-        guard let agent = ShipLog.shared.sailor(for: terminalID) else { return }
+        guard let agent = AgentRegistry.shared.pane(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window, preferredDeleteBranch: true)
@@ -1370,18 +1373,18 @@ class TabCoordinator {
         integrateNewWorktrees(repoRoot: repoPath, allDiscovered: allDiscovered, newWorktrees: [info])
 
         // Focus the newly created worktree's minicard
-        dashboardVC?.selectSailor(byWorktreePath: info.path)
+        dashboardVC?.selectPane(byWorktreePath: info.path)
     }
 
     // MARK: - Status Update Forwarding
 
-    func handleWorktreeStatusUpdate(_ status: CabinStatus) {
-        dashboardVC?.updateSailors(buildSailorDisplayInfos(changedWorktreePath: status.worktreePath),
+    func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
+        dashboardVC?.updatePanes(buildWorktreeRowInfos(changedWorktreePath: status.worktreePath),
                                    changedWorktreePath: status.worktreePath)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
-    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus, newStatus: SailorStatus, lastMessage: String) {
+    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
         // Cache miss means a synchronous `git rev-parse` (up to 5s on a wedged
         // repo) — resolve off-thread, then deliver the notification on main.
         guard let repoPath = worktreeRepoCache[worktreePath] else {
@@ -1402,8 +1405,8 @@ class TabCoordinator {
                                 lastMessage: lastMessage, repoPath: repoPath)
     }
 
-    private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: SailorStatus,
-                                         newStatus: SailorStatus, lastMessage: String, repoPath: String) {
+    private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus,
+                                         newStatus: AgentStatus, lastMessage: String, repoPath: String) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
@@ -1415,7 +1418,7 @@ class TabCoordinator {
         // The agent's final prose (Stop hook) — the most informative body line;
         // without it completed panes surface placeholder labels like
         // "Processing prompt".
-        let lastAssistantMessage = ShipLog.shared.sailor(for: terminalID)?.lastAssistantMessage ?? ""
+        let lastAssistantMessage = AgentRegistry.shared.pane(for: terminalID)?.lastAssistantMessage ?? ""
 
         // A pending order card (AskUserQuestion / suggestion) for this pane
         // already surfaces the "needs input" state in the island and cockpit —
@@ -1449,9 +1452,9 @@ class TabCoordinator {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
     }
 
-    /// Register every pane of a worktree's tree with ShipLog — not just the first.
+    /// Register every pane of a worktree's tree with AgentRegistry — not just the first.
     /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID
-    /// (`ShipLog.handleWebhookEvent` only accepts a station that is a known agent),
+    /// (`AgentRegistry.handleWebhookEvent` only accepts a station that is a known agent),
     /// so its events — and any suggestion chip tapped for it — silently fall back
     /// to the worktree's FIRST pane. Restored splits are the common case: every
     /// pane comes back through here on launch, not through the split path.
@@ -1461,7 +1464,7 @@ class TabCoordinator {
         guard let tree = terminalCoordinator.stationManager.tree(forPath: info.path) else { return }
         for leaf in tree.allLeaves {
             guard let station = StationRegistry.shared.station(forId: leaf.stationId) else { continue }
-            ShipLog.shared.register(
+            AgentRegistry.shared.register(
                 station: station, worktreePath: info.path, branch: info.branch,
                 project: project, startedAt: startedAt,
                 paneSessionKey: runtimeBackend == "local" ? nil : leaf.paneSessionKey,
@@ -1490,13 +1493,13 @@ class TabCoordinator {
     }
 
     func selectTab(forWorktree path: String) {
-        dashboardVC?.selectSailor(byWorktreePath: path)
+        dashboardVC?.selectPane(byWorktreePath: path)
         saveSelectedWorktree()
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
     /// `⌃⇥` / `⌃⇧⇥`. Same as `selectTab(forWorktree:)` plus the fleet-list
-    /// highlight, which `selectSailor` alone leaves on the previous cabin.
+    /// highlight, which `selectPane` alone leaves on the previous worktree.
     func cycleTab(toWorktree path: String) {
         dashboardVC?.enterWorktree(byWorktreePath: path)
         saveSelectedWorktree()
@@ -1543,8 +1546,8 @@ class TabCoordinator {
         if workspaceManager.tabs.contains(where: { tab in
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
-            dashboardVC?.updateSailors(buildSailorDisplayInfos())
-            // enterWorktree (not selectSailor): it also moves the overview
+            dashboardVC?.updatePanes(buildWorktreeRowInfos())
+            // enterWorktree (not selectPane): it also moves the overview
             // list's selection highlight to the target row.
             dashboardVC?.enterWorktree(byWorktreePath: worktreePath)
             saveSelectedWorktree()

@@ -92,7 +92,7 @@ class StationManager {
         return tree
     }
 
-    // MARK: - Primary station accessor (for ShipLog / backward compat)
+    // MARK: - Primary station accessor (for AgentRegistry / backward compat)
 
     /// Returns the primary (first) station for the given worktree path, if any.
     func primaryStation(forPath path: String) -> Station? {

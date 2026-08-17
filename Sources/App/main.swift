@@ -6,8 +6,23 @@ import AppKit
 // Ghostty surface inherits it. `zmx attach <name>` silently prefers
 // $ZMX_SESSION over its argument, so a leaked value makes every pane attach
 // to the wrong (often dead) session: layout restores, content doesn't.
+//
+// The same shell is usually an agent's, which leaks that agent's session
+// identity the same way — and an agent inheriting it disables its own
+// transcript saving ("Transcript saving is off — inherited
+// CLAUDE_CODE_CHILD_SESSION"), so the pane's conversation is silently lost on
+// exit and cannot be resumed. The messaging socket/token are worse than stale:
+// they point a fresh agent at the relaunching agent's channel. CLAUDE_CODE_EXECPATH
+// is left alone — it names a binary, not a session, and a pane may legitimately
+// want the same one.
+//
 // Scrub before anything can spawn a child.
-for leaked in ["ZMX_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID"] {
+let leakedSessionEnv = [
+    "ZMX_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID",
+    "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+]
+for leaked in leakedSessionEnv {
     unsetenv(leaked)
 }
 

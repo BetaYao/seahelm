@@ -3,7 +3,7 @@ import XCTest
 
 /// StationRegistry is read from threads that never touch the main thread: hook
 /// events resolve `paneId → station` on the event-sink queue
-/// (`ShipLog.handleWebhookEvent`), and control-socket requests resolve stations on
+/// (`AgentRegistry.handleWebhookEvent`), and control-socket requests resolve stations on
 /// one detached thread per connection — while the main thread registers and
 /// unregisters stations as panes are created, restored and closed.
 ///

@@ -20,7 +20,7 @@ enum WebhookEventType: String {
     /// `text`). Not a status signal; used to harvest inline `::seahelm-suggest::`.
     case assistantResponse = "assistant_response"
 
-    func agentStatus(data: [String: Any]?) -> SailorStatus {
+    func agentStatus(data: [String: Any]?) -> AgentStatus {
         switch self {
         case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .subagentStop, .userPrompt, .toolUseFailed:
             // A subagent finishing does NOT mean the main agent is idle — it usually resumes.

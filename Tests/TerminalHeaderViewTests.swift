@@ -21,11 +21,11 @@ final class TerminalHeaderViewTests: XCTestCase {
 
     /// Edit mode gives each column its own tab strip, so the pane title duplicates
     /// one strip's selected tab and mislabels the other. The band still has to hold
-    /// the traffic lights, so it shows the cabin instead of going blank.
-    func testEditModeSwapsPaneTitleForCabinContext() {
+    /// the traffic lights, so it shows the worktree instead of going blank.
+    func testEditModeSwapsPaneTitleForWorktreeContext() {
         let header = makeHeader()
         header.setPaneTitle("AGENTS.md")
-        header.setCabinContext("seahelm · feat/palette")
+        header.setWorktreeContext("seahelm · feat/palette")
         XCTAssertEqual(header.titleTextForTesting, "AGENTS.md")
 
         header.setEditMode(available: true, isOn: true)
@@ -46,18 +46,18 @@ final class TerminalHeaderViewTests: XCTestCase {
     /// A pane title arriving mid-edit-mode must not displace the context.
     func testPaneTitleUpdateDoesNotOverrideContext() {
         let header = makeHeader()
-        header.setCabinContext("seahelm · main")
+        header.setWorktreeContext("seahelm · main")
         header.setEditMode(available: true, isOn: true)
         header.setPaneTitle("AGENTS.md")
         XCTAssertEqual(header.titleTextForTesting, "seahelm · main")
     }
 
     /// …and a context arriving while edit mode is on must land immediately, since
-    /// the cabin can change under an open edit layout.
+    /// the worktree can change under an open edit layout.
     func testContextUpdateAppliesWhileEditModeIsOn() {
         let header = makeHeader()
         header.setEditMode(available: true, isOn: true)
-        header.setCabinContext("teamclaw · fix/thing")
+        header.setWorktreeContext("teamclaw · fix/thing")
         XCTAssertEqual(header.titleTextForTesting, "teamclaw · fix/thing")
     }
 
@@ -148,5 +148,29 @@ final class TerminalHeaderViewTests: XCTestCase {
         header.layoutSubtreeIfNeeded()
         XCTAssertEqual(header.editTerminalStrip.clipOriginYForTesting, 0)
         XCTAssertTrue(header.editTerminalStrip.firstTabIsVisibleForTesting)
+    }
+
+    // MARK: - Memory readout
+
+    /// The readout shares a row with a centred title, so it is formatted for a
+    /// stable narrow width rather than precision.
+    func testMemoryFormatting() {
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 512), "<1 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 340 * 1_048_576), "340 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 1023 * 1_048_576), "1023 MB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 1024 * 1_048_576), "1.0 GB")
+        XCTAssertEqual(TerminalHeaderView.formatMemory(bytes: 2560 * 1_048_576), "2.5 GB")
+    }
+
+    /// Zero/nil means "not measured", which must read as blank rather than 0 MB.
+    func testMemoryLabelHiddenWithoutAValue() {
+        let header = makeHeader()
+        header.setPaneMemory(nil)
+        XCTAssertTrue(header.memoryLabelIsHiddenForTesting)
+        header.setPaneMemory(0)
+        XCTAssertTrue(header.memoryLabelIsHiddenForTesting)
+        header.setPaneMemory(340 * 1_048_576)
+        XCTAssertFalse(header.memoryLabelIsHiddenForTesting)
+        XCTAssertEqual(header.memoryTextForTesting, "340 MB")
     }
 }

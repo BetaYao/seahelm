@@ -72,4 +72,42 @@ final class FileTreeOutlineControllerTests: XCTestCase {
         controller.restoreExpansion(["/definitely/not/in/this/tree"])
         XCTAssertEqual(controller.currentExpandedPaths(), [])
     }
+
+    // MARK: - Watcher filtering
+
+    /// The tree reloads a directory as a unit, so the stream asks for directory
+    /// granularity and drops batches that only touch build output. A worktree
+    /// being built in produces tens of thousands of such events, all of which
+    /// fseventsd has to record and deliver.
+    func testWatcherIgnoresBuildAndGitChurn() {
+        XCTAssertFalse(DirectoryWatcher.hasRelevantChange(in: [
+            "/wt/.git/index",
+            "/wt/node_modules/foo/package.json",
+            "/wt/.build/Debug/thing.o",
+            "/wt/DerivedData/Build/x",
+        ]))
+    }
+
+    func testWatcherReportsRealChanges() {
+        XCTAssertTrue(DirectoryWatcher.hasRelevantChange(in: ["/wt/Sources/App.swift"]))
+    }
+
+    /// One real edit inside a noisy batch must still redraw — the filter drops
+    /// batches, not paths.
+    func testWatcherReportsMixedBatch() {
+        XCTAssertTrue(DirectoryWatcher.hasRelevantChange(in: [
+            "/wt/node_modules/a", "/wt/README.md", "/wt/.git/HEAD",
+        ]))
+    }
+
+    /// The directory itself, not just paths beneath it.
+    func testWatcherIgnoresTheDirectoryEntryItself() {
+        XCTAssertFalse(DirectoryWatcher.hasRelevantChange(in: ["/wt/node_modules"]))
+    }
+
+    /// A name that merely contains an ignored word is a normal file.
+    func testWatcherDoesNotIgnoreLookalikeNames() {
+        XCTAssertTrue(DirectoryWatcher.hasRelevantChange(in: ["/wt/Sources/node_modules_helper.swift"]))
+        XCTAssertTrue(DirectoryWatcher.hasRelevantChange(in: ["/wt/my.build.log"]))
+    }
 }

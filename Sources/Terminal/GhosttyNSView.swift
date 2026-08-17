@@ -440,7 +440,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
         // Click→title fast path: announce from the view itself so every host
         // (repo tab, dashboard focus panel) hears it — `onFocusAcquired` is only
-        // wired by SplitContainerView, and the ShipLog path trails the 2s poll.
+        // wired by SplitContainerView, and the AgentRegistry path trails the 2s poll.
         if let station {
             NotificationCenter.default.post(name: .paneDidAcquireFocus, object: station)
         }
@@ -620,7 +620,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         guard ghostty_surface_has_selection(surface) else { return nil }
         var text = ghostty_text_s()
         guard ghostty_surface_read_selection(surface, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
+        defer { ghostty_surface_free_text(&text) }
         guard let cString = text.text else { return nil }
         let s = String(cString: cString)
         return s.isEmpty ? nil : s
@@ -883,7 +883,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             rectangle: false
         )
         guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
+        defer { ghostty_surface_free_text(&text) }
         guard let cString = text.text else { return nil }
         return String(cString: cString)
     }
@@ -994,9 +994,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return 0
     }
 
-    /// The worktree this pane belongs to, if ShipLog knows one.
+    /// The worktree this pane belongs to, if AgentRegistry knows one.
     private var worktreeRoot: String? {
-        guard let station, let path = ShipLog.shared.sailor(for: station.id)?.worktreePath,
+        guard let station, let path = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
               !path.isEmpty else { return nil }
         return path
     }
@@ -1024,7 +1024,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     /// Directories a relative path is resolved against, most specific first.
     private func pathResolutionBases() -> [String?] {
-        let worktreePath = station.map { ShipLog.shared.sailor(for: $0.id)?.worktreePath } ?? nil
+        let worktreePath = station.map { AgentRegistry.shared.pane(for: $0.id)?.worktreePath } ?? nil
         return [station?.pwd, worktreePath, station?.initialWorkingDirectory]
     }
 

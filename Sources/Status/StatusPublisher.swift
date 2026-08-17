@@ -11,11 +11,11 @@ class StatusPublisher {
     private var surfaces: [String: Station] = [:]         // keyed by terminal ID
     /// Reverse mapping: terminal ID → worktree path (for delegate callbacks and webhook provider)
     private var worktreePaths: [String: String] = [:]
-    private var agentConfig: SailorDetectConfig
+    private var agentConfig: AgentDetectConfig
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
-    var aggregator: CabinStatusAggregator?
+    var aggregator: WorktreeStatusAggregator?
     private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0
@@ -27,7 +27,7 @@ class StatusPublisher {
     /// id-derived offset so they don't all fork on the same tick.
     private let backendCaptureStride: Int = 3
     /// Even a stable viewport is periodically decoded again. This bounds how
-    /// long a missed cache invalidation can leave ShipLog on a stale scan state.
+    /// long a missed cache invalidation can leave AgentRegistry on a stale scan state.
     private let unchangedFrameRecheckStride = 15
     private var preferredPaths: Set<String> = []
     private var pollCycle: Int = 0
@@ -42,21 +42,21 @@ class StatusPublisher {
     /// last refreshed on. Re-probed every `probeRefreshStride` cycles since the
     /// sysctl walk is comparatively expensive. Command line is refreshed on the
     /// same walk so shell pane titles stay in sync with the foreground job.
-    private var probedTypes: [String: SailorType] = [:]
+    private var probedTypes: [String: AgentType] = [:]
     private var probedCommandLines: [String: String] = [:]
     private var probedAtCycle: [String: Int] = [:]
     private let probeRefreshStride = 5
     // Pre-lowercased agent names for faster matching
-    private var lowercasedSailorNames: [(name: String, def: SailorDef)] = []
+    private var lowercasedPaneNames: [(name: String, def: AgentDef)] = []
 
-    init(agentConfig: SailorDetectConfig = .default) {
+    init(agentConfig: AgentDetectConfig = .default) {
         self.agentConfig = agentConfig
-        rebuildSailorNameCache()
+        rebuildPaneNameCache()
         // webhook status changes are now handled via handleWebhookEvent → ingest
     }
 
-    private func rebuildSailorNameCache() {
-        lowercasedSailorNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
+    private func rebuildPaneNameCache() {
+        lowercasedPaneNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
     }
 
     func start(trees: [String: SplitTree]) {
@@ -176,7 +176,7 @@ class StatusPublisher {
         schedulePoll()
     }
 
-    /// Hook/lifecycle events can change ShipLog's arbitration while the terminal
+    /// Hook/lifecycle events can change AgentRegistry's arbitration while the terminal
     /// frame stays unchanged. Force that pane through detection on the next poll
     /// instead of letting the viewport hash preserve an obsolete scan component.
     func invalidateScanCache(terminalID: String) {
@@ -281,7 +281,7 @@ class StatusPublisher {
             let committedScanStatus = trackers[terminalID]?.currentStatus
             lock.unlock()
 
-            let publishedScanStatus = ShipLog.shared.sailor(for: terminalID)?.scanStatus
+            let publishedScanStatus = AgentRegistry.shared.pane(for: terminalID)?.scanStatus
             let forceRecheck = Self.shouldBackendCapture(
                 pollCycle: pollCycle,
                 offset: Int(truncatingIfNeeded: terminalID.stableHash),
@@ -306,8 +306,8 @@ class StatusPublisher {
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
-            let existingSailorType = ShipLog.shared.sailor(for: terminalID)?.agentType ?? .unknown
-            let agentDef = findSailorDef(inLowercased: lowerContent, existingSailorType: existingSailorType)
+            let existingAgentType = AgentRegistry.shared.pane(for: terminalID)?.agentType ?? .unknown
+            let agentDef = findAgentDef(inLowercased: lowerContent, existingAgentType: existingAgentType)
 
             // Prefer process-tree identification over screen-text scraping; it is
             // robust to wrappers (node→codex) and to agents that clear their name
@@ -316,11 +316,11 @@ class StatusPublisher {
                                       pollCycle: pollCycle, context: probeContext)
             let probedType = probe.agentType
             let commandLine = probe.commandLine
-            let detectedSailorType = probedType != .unknown ? probedType : SailorType.detect(fromLowercased: lowerContent)
-            var agentType = detectedSailorType == .unknown ? existingSailorType : detectedSailorType
+            let detectedAgentType = probedType != .unknown ? probedType : AgentType.detect(fromLowercased: lowerContent)
+            var agentType = detectedAgentType == .unknown ? existingAgentType : detectedAgentType
             // Shell jobs (brew, make, …) are not in AI manifests — classify from argv.
             if let commandLine, !agentType.isAIAgent {
-                let fromCmd = SailorType.detect(fromCommand: commandLine)
+                let fromCmd = AgentType.detect(fromCommand: commandLine)
                 if fromCmd != .unknown { agentType = fromCmd }
             }
             let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
@@ -334,7 +334,7 @@ class StatusPublisher {
             let activityEvents = detector.extractActivityEvents(from: content)
             // Agent type only here — commandLine must land via ingest so the
             // displayed-state gate sees nil→cmd and notifies observers.
-            ShipLog.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
+            AgentRegistry.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
 
             // Rich detection gives us the visible_idle signal for debounce.
             let osc = (title: surface.oscTitle, progress: surface.oscProgress)
@@ -347,7 +347,7 @@ class StatusPublisher {
             let oldStatus = tracker.currentStatus
             let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle)
             // The debounced/committed status drives both pipelines, so a held
-            // running→idle flip does not leak into ShipLog either.
+            // running→idle flip does not leak into AgentRegistry either.
             let committedStatus = tracker.currentStatus
             let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             lastMessages[terminalID] = lastMessage
@@ -366,7 +366,7 @@ class StatusPublisher {
                 kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
                                       commandLine: commandLine, agentType: agentType,
                                       roundDuration: roundDur, tasks: webhookTasks))
-            ShipLog.shared.ingest(normalized)
+            AgentRegistry.shared.ingest(normalized)
 
             // Agent permission dialogs are rendered by the TUI rather than sent
             // through Codex/Claude hooks. Surface their numbered choices through
@@ -378,9 +378,9 @@ class StatusPublisher {
                     kind: .question(
                         prompt: "\(agentType.displayName) requires approval",
                         options: choices.map(\.label), followups: []))
-                ShipLog.shared.ingest(question)
+                AgentRegistry.shared.ingest(question)
             }
-            // The worktree aggregator is now fed from ShipLog outcomes (arbitrated
+            // The worktree aggregator is now fed from AgentRegistry outcomes (arbitrated
             // scan+hook+OSC) in TabCoordinator, not directly here — the scan path
             // is viewport-hash-gated and would push a stale idle while an agent is
             // thinking. Registration still happens via aggregator.registerTerminal.
@@ -394,7 +394,7 @@ class StatusPublisher {
         paneSessionKey: String?,
         pollCycle: Int,
         context: () -> ProcessProbe.ProbeContext?
-    ) -> (agentType: SailorType, commandLine: String?) {
+    ) -> (agentType: AgentType, commandLine: String?) {
         guard let paneSessionKey else { return (.unknown, nil) }
         lock.lock()
         let cachedType = probedTypes[terminalID]
@@ -415,7 +415,7 @@ class StatusPublisher {
         // itself used to report, so fall through with the same bookkeeping.
         let probe = context().map { ProcessProbe.probeSession(paneSessionKey: paneSessionKey, context: $0) }
             ?? (agentId: nil, commandLine: nil)
-        let type = SailorType.fromManifestId(probe.agentId)
+        let type = AgentType.fromManifestId(probe.agentId)
         lock.lock()
         // Never downgrade a known identity to unknown on a transient probe miss.
         if type != .unknown { probedTypes[terminalID] = type }
@@ -431,21 +431,21 @@ class StatusPublisher {
     }
 
     /// Find agent definition using pre-lowercased content and names
-    private func findSailorDef(inLowercased lowerContent: String, existingSailorType: SailorType) -> SailorDef? {
-        Self.findSailorDef(
+    private func findAgentDef(inLowercased lowerContent: String, existingAgentType: AgentType) -> AgentDef? {
+        Self.findAgentDef(
             inLowercased: lowerContent,
-            existingSailorType: existingSailorType,
-            candidates: lowercasedSailorNames
+            existingAgentType: existingAgentType,
+            candidates: lowercasedPaneNames
         )
     }
 
-    static func findSailorDef(
+    static func findAgentDef(
         inLowercased lowerContent: String,
-        existingSailorType: SailorType,
-        candidates: [(name: String, def: SailorDef)]
-    ) -> SailorDef? {
-        if existingSailorType.isAIAgent {
-            let name = existingSailorType.displayName.lowercased()
+        existingAgentType: AgentType,
+        candidates: [(name: String, def: AgentDef)]
+    ) -> AgentDef? {
+        if existingAgentType.isAIAgent {
+            let name = existingAgentType.displayName.lowercased()
             if let def = candidates.first(where: { $0.name == name })?.def {
                 return def
             }
@@ -459,7 +459,7 @@ class StatusPublisher {
         return nil
     }
 
-    func status(for terminalID: String) -> SailorStatus {
+    func status(for terminalID: String) -> AgentStatus {
         lock.lock()
         defer { lock.unlock() }
         return trackers[terminalID]?.currentStatus ?? .unknown
@@ -503,8 +503,8 @@ class StatusPublisher {
     static func shouldSkipUnchangedFrame(
         lastHash: UInt64?,
         contentHash: UInt64,
-        committedScanStatus: SailorStatus?,
-        publishedScanStatus: SailorStatus?,
+        committedScanStatus: AgentStatus?,
+        publishedScanStatus: AgentStatus?,
         forceRecheck: Bool
     ) -> Bool {
         guard lastHash == contentHash, !forceRecheck else { return false }

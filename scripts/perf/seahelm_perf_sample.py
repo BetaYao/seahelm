@@ -56,11 +56,30 @@ def run(cmd, timeout=15):
 
 
 def app_pid():
+    """The process answering our probes.
+
+    More than one Seahelm can be alive at once — the `.build` app, an Xcode
+    DerivedData build, an XCTest host — and only one of them owns the control
+    socket. Resolving by socket owner keeps the ps metrics describing the same
+    process as `app.memory` and `pane.list`; `pgrep` ordering does not.
+    """
+    out = run(["lsof", "-t", SOCKET_PATH], timeout=15).strip()
+    if out:
+        return int(out.split()[0])
     for name in ("Seahelm", "seahelm"):
         out = run(["pgrep", "-x", name], timeout=5).strip()
         if out:
-            return int(out.split()[0])
+            # Prefer the .build bundle: that is what run.sh launches.
+            pids = [int(p) for p in out.split()]
+            for pid in pids:
+                if "/.build/" in run(["ps", "-o", "command=", "-p", str(pid)], timeout=5):
+                    return pid
+            return pids[0]
     return None
+
+
+def binary_path(pid):
+    return run(["ps", "-o", "command=", "-p", str(pid)], timeout=5).strip().split()[0] if pid else None
 
 
 def _seconds(value):
@@ -112,6 +131,51 @@ def zmx_metrics():
         procs += 1
         rss_kb += int(parts[1])
     return {"procs": procs, "rss_mb": round(rss_kb / 1024.0, 1)}
+
+
+def _top_mem_mb(value):
+    """Parse top's MEM column ("4240K", "720M", "12G") into MB."""
+    match = re.match(r"^([\d.]+)([BKMGT]?)\+?$", value.strip())
+    if not match:
+        return None
+    scale = {"": 1 / 1048576.0, "B": 1 / 1048576.0, "K": 1 / 1024.0,
+             "M": 1.0, "G": 1024.0, "T": 1048576.0}[match.group(2)]
+    return round(float(match.group(1)) * scale, 1)
+
+
+def fseventsd_metrics():
+    """fseventsd's real memory, which `ps` RSS does not reveal.
+
+    This daemon sits idle while holding an enormous dirty working set, so nearly
+    all of its pages end up compressed or swapped out and RSS only counts what is
+    still resident. On 2026-08-16, after 49 days up, `ps` reported 7-8MB (swinging
+    to 921MB and back between samples) while `top` reported 12G for the same pid —
+    on a 16GB machine. Killing it released 8.1GB of swap. RSS is what made it look
+    like a 720MB nuisance twice; top's MEM column is the number that counts the
+    compressed pages, so that is the one sampled here.
+
+    `pid` is recorded because launchd restarts fseventsd immediately on kill, and
+    a restart resets the floor — the report has to segment on it rather than read
+    the drop as a reclaim.
+    """
+    pid_out = run(["pgrep", "-x", "fseventsd"], timeout=10).strip()
+    if not pid_out:
+        return {"running": False}
+    pid = int(pid_out.split()[0])
+    row = {"running": True, "pid": pid}
+
+    top_out = run(["top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"], timeout=20)
+    match = re.search(r"^\s*%d\s+(\S+)" % pid, top_out, re.MULTILINE)
+    row["mem_mb"] = _top_mem_mb(match.group(1)) if match else None
+
+    ps_out = run(["ps", "-o", "etime=,rss=,%cpu=", "-p", str(pid)], timeout=10).strip()
+    if ps_out:
+        etime, rss_kb, pcpu = ps_out.split()
+        row["up_s"] = round(_seconds(etime), 1)
+        # Kept alongside mem_mb precisely so the gap between them stays visible.
+        row["rss_mb"] = round(int(rss_kb) / 1024.0, 1)
+        row["cpu_pct_ps"] = float(pcpu)
+    return row
 
 
 # ---------------------------------------------------------------- socket probes
@@ -235,7 +299,10 @@ TELEMETRY_RE = re.compile(
 )
 
 
-def _render_window(window_s):
+def _render_window(window_s, pid):
+    # Scoped to the live app's pid on purpose: the XCTest host is also called
+    # "Seahelm", and each test builds a fresh DashboardOverviewView whose first
+    # render logs — a test run would otherwise masquerade as app render churn.
     out = run(
         [
             "/usr/bin/log",
@@ -245,14 +312,14 @@ def _render_window(window_s):
             "--style",
             "compact",
             "--predicate",
-            'process == "Seahelm" AND eventMessage CONTAINS "[DashboardOverview]"',
+            'processIdentifier == %d AND eventMessage CONTAINS "[DashboardOverview]"' % pid,
         ],
         timeout=60,
     )
     return TELEMETRY_RE.findall(out)
 
 
-def render_metrics(window_s, fallback_s=900):
+def render_metrics(window_s, pid, fallback_s=900):
     """Last DEBUG render telemetry line the app emitted inside the window.
 
     The app only logs when the overview actually renders, and at most once per
@@ -262,9 +329,9 @@ def render_metrics(window_s, fallback_s=900):
     rebuilt; the report treats a negative delta as a reset, not as progress.
     """
     stale = False
-    matches = _render_window(window_s)
+    matches = _render_window(window_s, pid)
     if not matches:
-        matches = _render_window(fallback_s)
+        matches = _render_window(fallback_s, pid)
         stale = True
     if not matches:
         return None
@@ -325,7 +392,8 @@ def stop_launchd_job():
 # ---------------------------------------------------------------- main
 
 
-def main():
+def sample_once():
+    """One pass. Returns True when the run has reached its deadline."""
     os.makedirs(PERF_DIR, exist_ok=True)
     now = time.time()
     state = load_state()
@@ -344,11 +412,13 @@ def main():
         if metrics is None:
             row["app_down"] = True
         else:
+            metrics["binary"] = binary_path(pid)
             row["app"] = metrics
             row.update(probe())
-            row["render"] = render_metrics(interval + 20)
+            row["render"] = render_metrics(interval + 20, pid)
 
     row["zmx"] = zmx_metrics()
+    row["fsevents"] = fseventsd_metrics()
     row["sys"] = system_metrics()
 
     reasons = []
@@ -401,8 +471,44 @@ def main():
         with open(SAMPLES_PATH, "a") as handle:
             handle.write(json.dumps({"ts": row["ts"], "epoch": int(now), "event": "monitor_stopped"}) + "\n")
         stop_launchd_job()
-        return
+        return True
     save_state(state)
+    return False
+
+
+def loop(interval):
+    """Sample on a drift-corrected schedule until the deadline.
+
+    launchd's StartInterval turned out to be advisory: on a machine deep in swap
+    it coalesced 60s ticks into 3-minute ones. Owning the clock here keeps the
+    cadence honest and skips a python start-up per sample.
+    """
+    started = time.monotonic()
+    tick = 0
+    while True:
+        try:
+            if sample_once():
+                return 0
+        except Exception as exc:  # one bad pass must not end a 48h run
+            sys.stderr.write("sample failed: %s: %s\n" % (type(exc).__name__, exc))
+            sys.stderr.flush()
+        tick += 1
+        target = started + tick * interval
+        # After a system sleep the target may be far in the past; skip the
+        # missed ticks rather than firing a burst to catch up.
+        while target < time.monotonic():
+            tick += 1
+            target = started + tick * interval
+        time.sleep(max(0.0, target - time.monotonic()))
+
+
+def main():
+    if "--loop" in sys.argv:
+        index = sys.argv.index("--loop")
+        interval = float(sys.argv[index + 1]) if len(sys.argv) > index + 1 else 60.0
+        return loop(interval)
+    sample_once()
+    return 0
 
 
 if __name__ == "__main__":

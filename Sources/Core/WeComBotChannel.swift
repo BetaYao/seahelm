@@ -1,7 +1,7 @@
 import Foundation
 
 /// WeCom smart bot channel — connects to enterprise WeChat via WebSocket long connection.
-/// Pure protocol adapter: receives WeCom frames → translates to InboundMessage → forwards to ShipLog.
+/// Pure protocol adapter: receives WeCom frames → translates to InboundMessage → forwards to AgentRegistry.
 /// Outbound: OutboundMessage → WeCom frame → sends via WebSocket.
 class WeComBotChannel: ExternalChannel {
     let channelId: String

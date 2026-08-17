@@ -24,6 +24,7 @@ usage() {
 Usage: perfmon.sh <command> [options]
 
   start [--hours N] [--interval S]   start a monitored run (default 48h, 60s)
+  reload                             apply sampler edits, keep window + samples
   stop                               stop early
   status                             job state, deadline, latest sample
   report [--hours H] [--last N] [--json]
@@ -83,11 +84,17 @@ PY
   <array>
     <string>$PYTHON</string>
     <string>$run_sampler</string>
+    <string>--loop</string>
+    <string>$interval</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict><key>SEAHELM_PERF_DIR</key><string>$PERF_DIR</string></dict>
-  <key>StartInterval</key><integer>$interval</integer>
+  <!-- The sampler owns its own clock: launchd's StartInterval coalesced 60s
+       ticks into ~3min ones while the machine was swapping. KeepAlive just
+       restarts the loop if it ever dies. -->
+  <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
   <key>Nice</key><integer>5</integer>
   <key>LowPriorityIO</key><true/>
   <key>StandardOutPath</key><string>$PERF_DIR/monitor.log</string>
@@ -103,6 +110,22 @@ EOF
   echo "==> monitoring every ${interval}s for ${hours}h (until $(date -r "$deadline" '+%Y-%m-%d %H:%M'))"
   echo "    samples: $SAMPLES"
   echo "    report:  $SCRIPT_DIR/perfmon.sh report"
+}
+
+cmd_reload() {
+  # Apply sampler changes to a run already in flight. Unlike `start` this leaves
+  # state.json and samples.jsonl alone, so the window and its history survive.
+  if [[ ! -f "$STATE" ]]; then
+    echo "no run in flight — use start" >&2
+    exit 1
+  fi
+  mkdir -p "$PERF_DIR/bin"
+  cp "$SAMPLER" "$PERF_DIR/bin/seahelm_perf_sample.py"
+  cp "$REPORTER" "$PERF_DIR/bin/seahelm_perf_report.py"
+  chmod +x "$PERF_DIR/bin/"*.py
+  launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1 || {
+    echo "failed to restart $LABEL" >&2; exit 1; }
+  echo "==> reloaded sampler, window and samples preserved"
 }
 
 cmd_stop() {
@@ -160,6 +183,7 @@ PY
 
 case "${1:-}" in
   start) shift; cmd_start "$@" ;;
+  reload) cmd_reload ;;
   stop) cmd_stop ;;
   status) cmd_status ;;
   report) shift; "$PYTHON" "$REPORTER" "$@" ;;

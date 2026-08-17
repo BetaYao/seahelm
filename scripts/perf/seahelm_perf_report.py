@@ -80,6 +80,34 @@ def segments(rows):
     return out
 
 
+def floor_buckets(points, bucket_seconds=1800):
+    """Per-bucket (hours_in, floor, median, ceiling) for a footprint series.
+
+    Footprint swings by hundreds of MB with load — inside one hour this run has
+    seen 216MB and 1250MB — so a fit over the raw samples largely measures how
+    busy the machine was. A leak instead raises the *minimum* the process ever
+    returns to, and load noise cannot lift a floor. So the floor is the honest
+    growth signal and the raw slope is the noisy one.
+    """
+    if len(points) < 6:
+        return []
+    start = points[0][0]
+    buckets = {}
+    for epoch, value in points:
+        buckets.setdefault(int((epoch - start) // bucket_seconds), []).append(value)
+    out = []
+    for key in sorted(buckets):
+        values = sorted(buckets[key])
+        out.append({
+            "hours_in": round(key * bucket_seconds / 3600.0, 2),
+            "floor_mb": values[0],
+            "median_mb": values[len(values) // 2],
+            "ceiling_mb": values[-1],
+            "samples": len(values),
+        })
+    return out
+
+
 def slope_per_hour(points):
     """Least-squares slope of value over time, in units per hour."""
     if len(points) < 3:
@@ -92,6 +120,63 @@ def slope_per_hour(points):
     if den == 0:
         return None
     return num / den * 3600
+
+
+def fsevents_analysis(rows):
+    """Does fseventsd's floor climb while Seahelm runs?
+
+    Seahelm subscribes to FSEvents for the file tree, so the question is whether
+    that subscription contributes to this daemon reaching 12GB over weeks. The
+    floor is the right signal for the same reason it is for the app: fseventsd's
+    resident size swings with how much of its working set is currently paged in,
+    but a genuine accumulation raises the minimum it returns to.
+
+    Segmented on pid: launchd restarts fseventsd immediately when it is killed,
+    and the new process starts near zero. Splicing that drop into one series
+    would read as a spontaneous reclaim.
+    """
+    runs, current, pid = [], [], None
+    for row in rows:
+        row_pid = dig(row, "fsevents", "pid")
+        mem = dig(row, "fsevents", "mem_mb")
+        if row_pid is None or mem is None:
+            continue
+        if pid is not None and row_pid != pid:
+            runs.append(current)
+            current = []
+        pid = row_pid
+        current.append((row["epoch"], mem, row))
+    if current:
+        runs.append(current)
+    if not runs:
+        return {"samples": 0}
+
+    longest = max(runs, key=len)
+    points = [(epoch, mem) for epoch, mem, _ in longest]
+    buckets = floor_buckets(points)
+    last = longest[-1][2]
+    out = {
+        "samples": len(points),
+        "restarts": len(runs) - 1,
+        "pid": dig(last, "fsevents", "pid"),
+        "up_hours": round((dig(last, "fsevents", "up_s") or 0) / 3600.0, 1),
+        "mem_mb_last": points[-1][1],
+        "mem_mb_max": max(v for _, v in points),
+        "rss_mb_last": dig(last, "fsevents", "rss_mb"),
+        "slope_mb_per_hour": slope_per_hour(points),
+        "floor_buckets": buckets,
+    }
+    if len(buckets) >= 2:
+        out["floor_first_mb"] = buckets[0]["floor_mb"]
+        out["floor_last_mb"] = buckets[-1]["floor_mb"]
+        span = buckets[-1]["hours_in"] - buckets[0]["hours_in"]
+        if span > 0:
+            out["floor_mb_per_hour"] = round(
+                (buckets[-1]["floor_mb"] - buckets[0]["floor_mb"]) / span, 2)
+        out["floor_declines"] = sum(
+            1 for a, b in zip(buckets, buckets[1:]) if b["floor_mb"] < a["floor_mb"])
+        out["floor_buckets_count"] = len(buckets)
+    return out
 
 
 def analyse(rows):
@@ -161,6 +246,19 @@ def analyse(rows):
     # it is only reported once a run is long enough to mean something.
     growth = slope_per_hour(seg_foots) if span_hours >= 1.0 else None
     mem["growth_mb_per_hour"] = round(growth, 2) if growth is not None else None
+
+    buckets = floor_buckets(seg_foots)
+    mem["floor_buckets"] = buckets
+    if len(buckets) >= 3:
+        mem["floor_first_mb"] = buckets[0]["floor_mb"]
+        mem["floor_last_mb"] = buckets[-1]["floor_mb"]
+        floor_slope = slope_per_hour([(b["hours_in"] * 3600, b["floor_mb"]) for b in buckets])
+        mem["floor_mb_per_hour"] = round(floor_slope, 2) if floor_slope is not None else None
+        # A floor that only ever rises is the signature; one that comes back down
+        # is the allocator returning memory, i.e. load rather than a leak.
+        falls = sum(1 for a, b in zip(buckets, buckets[1:]) if b["floor_mb"] < a["floor_mb"])
+        mem["floor_declines"] = falls
+        mem["floor_buckets_count"] = len(buckets)
     threads = [dig(r, "app", "threads") for r in live]
     threads = [t for t in threads if t]
     mem["threads_first"] = threads[0] if threads else None
@@ -229,6 +327,7 @@ def analyse(rows):
         "zmx_procs_last": dig(rows[-1], "zmx", "procs"),
         "zmx_rss_mb_last": dig(rows[-1], "zmx", "rss_mb"),
     }
+    report["fsevents"] = fsevents_analysis(rows)
 
     report["captures"] = [
         {"ts": r["ts"], "reasons": dig(r, "capture", "reasons"), "sample": dig(r, "capture", "sample")}
@@ -288,13 +387,60 @@ def render_text(report, rows):
     out.append("  first %s   last %s   max %s" % (fmt(mem.get("first_mb"), "MB"), fmt(mem.get("last_mb"), "MB"),
                                                   fmt(mem.get("max_mb"), "MB")))
     if mem.get("growth_mb_per_hour") is None:
-        out.append("  growth: needs >=1h in one run to trend (longest so far %sh)"
+        out.append("  raw fit: needs >=1h in one run to trend (longest so far %sh)"
                    % mem.get("growth_window_hours"))
     else:
-        out.append("  growth %s per hour over the longest single run (%sh)"
+        out.append("  raw fit %s per hour over the longest single run (%sh) — noisy, see floor"
                    % (fmt(mem.get("growth_mb_per_hour"), "MB", digits=2), mem.get("growth_window_hours")))
+
+    if mem.get("floor_mb_per_hour") is None:
+        out.append("  floor: needs >=3 half-hour buckets in one run")
+    else:
+        declines = mem.get("floor_declines", 0)
+        count = mem.get("floor_buckets_count", 0)
+        verdict = ("ratcheting — the floor almost never falls" if declines <= max(1, count // 10)
+                   else "floor falls back, so this reads as load, not a leak")
+        out.append("  floor %s → %s (%s per hour, %d/%d buckets fell) — %s"
+                   % (fmt(mem.get("floor_first_mb"), "MB", digits=0),
+                      fmt(mem.get("floor_last_mb"), "MB", digits=0),
+                      fmt(mem.get("floor_mb_per_hour"), "MB", digits=1),
+                      declines, max(0, count - 1), verdict))
     out.append("  threads %s → max %s" % (mem.get("threads_first"), mem.get("threads_max")))
     out.append("")
+
+    buckets = mem.get("floor_buckets") or []
+    if len(buckets) >= 3:
+        out.append("MEMORY FLOOR (30-min buckets of the longest run: floor / median / ceiling)")
+        for bucket in buckets:
+            out.append("  +%5.1fh  %6.0f  %6.0f  %6.0f   (n=%d)"
+                       % (bucket["hours_in"], bucket["floor_mb"], bucket["median_mb"],
+                          bucket["ceiling_mb"], bucket["samples"]))
+        out.append("")
+
+    fse = report.get("fsevents") or {}
+    if fse.get("samples"):
+        out.append("FSEVENTSD (top MEM, which counts compressed pages; ps RSS shown for contrast)")
+        out.append("  pid %s up %sh   now %s (rss %s)   max %s   restarts seen %s"
+                   % (fse.get("pid"), fse.get("up_hours"),
+                      fmt(fse.get("mem_mb_last"), "MB", digits=0),
+                      fmt(fse.get("rss_mb_last"), "MB", digits=0),
+                      fmt(fse.get("mem_mb_max"), "MB", digits=0),
+                      fse.get("restarts")))
+        fbuckets = fse.get("floor_buckets") or []
+        if len(fbuckets) >= 2:
+            declines = fse.get("floor_declines", 0)
+            count = fse.get("floor_buckets_count", 0)
+            verdict = ("accumulating — the floor almost never falls"
+                       if declines <= max(1, count // 10)
+                       else "floor falls back, so this reads as load, not accumulation")
+            out.append("  floor %s → %s (%s per hour, %d/%d buckets fell) — %s"
+                       % (fmt(fse.get("floor_first_mb"), "MB", digits=0),
+                          fmt(fse.get("floor_last_mb"), "MB", digits=0),
+                          fmt(fse.get("floor_mb_per_hour"), "MB", digits=2),
+                          declines, max(0, count - 1), verdict))
+        else:
+            out.append("  not enough buckets yet — needs ~3h to say anything about the floor")
+        out.append("")
 
     cpu = report.get("cpu") or {}
     out.append("CPU (interval average from cumulative time)")
@@ -305,13 +451,16 @@ def render_text(report, rows):
 
     render = report.get("render") or {}
     out.append("DASHBOARD RENDER (DEBUG telemetry)")
-    out.append("  observed %sh   full %s (%s/h)   incremental %s (%s/h)   full share %s"
-               % (render.get("observed_hours"), render.get("full_renders"), render.get("full_per_hour"),
-                  render.get("incremental_updates"), render.get("incremental_per_hour"),
-                  fmt(render.get("full_share_pct"), "%")))
-    out.append("  last avg: full %s  incremental %s   max rows %s"
-               % (fmt(render.get("full_avg_ms_last"), "ms", digits=2),
-                  fmt(render.get("incr_avg_ms_last"), "ms", digits=2), render.get("rows_max")))
+    if not render.get("rows_max"):
+        out.append("  no renders seen yet — these counters only advance while the dashboard is on screen")
+    else:
+        out.append("  observed %sh   full %s (%s/h)   incremental %s (%s/h)   full share %s"
+                   % (render.get("observed_hours"), render.get("full_renders"),
+                      fmt(render.get("full_per_hour")), render.get("incremental_updates"),
+                      fmt(render.get("incremental_per_hour")), fmt(render.get("full_share_pct"), "%")))
+        out.append("  last avg: full %s  incremental %s   max rows %s"
+                   % (fmt(render.get("full_avg_ms_last"), "ms", digits=2),
+                      fmt(render.get("incr_avg_ms_last"), "ms", digits=2), render.get("rows_max")))
     out.append("")
 
     panes = report.get("panes") or {}

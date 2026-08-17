@@ -47,7 +47,7 @@ enum MailCommandResult: Equatable {
 /// surfaces cannot drift. Only the *binding* is mail's own, because "the pane I
 /// am talking to" is a thread here and a focused pane on the desktop.
 ///
-/// Called on the main thread — `MailPaneRouter` hops — because it walks ShipLog.
+/// Called on the main thread — `MailPaneRouter` hops — because it walks AgentRegistry.
 protocol MailCommandContext: AnyObject {
     func interpret(_ text: String) -> MailCommandResult?
     /// Prose in a thread that never ran `/pane <n>`. Goes wherever iMessage's
@@ -160,7 +160,7 @@ final class MailPaneRouter {
     }
 
     /// `MailPaneRouter` runs on a per-thread serial queue; every context read
-    /// walks ShipLog, which belongs to main.
+    /// walks AgentRegistry, which belongs to main.
     private func onMain<T>(_ work: @escaping () -> T) -> T {
         if Thread.isMainThread { return work() }
         var result: T?

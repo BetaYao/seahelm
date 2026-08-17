@@ -56,8 +56,15 @@ echo "==> Killing existing Seahelm..."
 # PRODUCT_NAME is Seahelm; kill both casings.
 # Do NOT pkill `zmx attach` processes here: SIGTERM to an attach client kills
 # its session daemon (and the agent running inside) — that was the "restart
-# loses all pane content" bug. Orphaned attach clients are harmless; the app
-# re-attaches alongside them.
+# loses all pane content" bug.
+#
+# The clients left behind are NOT harmless, as this comment used to claim. They
+# never exit; launchd adopts them and they spin at 20-70% CPU forever, so every
+# restart adds a few more (20 were found holding ~4.3 cores after a day of
+# restarts). They cannot be reaped from here either — this script has no way to
+# tell an orphan from the attach client of a session that is still in use.
+# `SessionManager.cleanupOrphanZmxClients` does it at app startup instead, where
+# `zmx list` identifies the session daemons that must survive. See #44.
 killall Seahelm seahelm 2>/dev/null || true
 sleep 1
 

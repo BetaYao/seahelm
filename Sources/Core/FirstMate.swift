@@ -59,8 +59,8 @@ struct StatusTransition {
     let branch: String
     let project: String
     let terminalID: String
-    let oldStatus: SailorStatus
-    let newStatus: SailorStatus
+    let oldStatus: AgentStatus
+    let newStatus: AgentStatus
     let holdSeconds: Double
     let isCompletionSignal: Bool
 }
@@ -147,9 +147,9 @@ enum FirstMate {
         if trimmed.localizedCaseInsensitiveContains("seahelm-suggest") { return true }
         let lower = trimmed.lowercased()
         if ["shell", "bash", "zsh", "tool", "command"].contains(lower) { return true }
-        // Non-AI sailor display names ("Shell", "Docker", …) show up when the
+        // Non-AI pane display names ("Shell", "Docker", …) show up when the
         // scanner latches onto a tool header in Cursor's TUI.
-        if SailorType.allCases.contains(where: {
+        if AgentType.allCases.contains(where: {
             !$0.isAIAgent && $0.displayName.caseInsensitiveCompare(trimmed) == .orderedSame
         }) {
             return true

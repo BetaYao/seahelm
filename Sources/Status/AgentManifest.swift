@@ -239,10 +239,10 @@ extension AgentManifest {
 
 // MARK: - Status mapping
 
-extension SailorStatus {
+extension AgentStatus {
     /// Parse a manifest `state` string, accepting herdr's vocabulary
     /// (working/blocked) and our own (running/waiting), case-insensitively.
-    static func fromManifest(_ raw: String) -> SailorStatus {
+    static func fromManifest(_ raw: String) -> AgentStatus {
         switch raw.lowercased() {
         case "working", "running":  return .running
         case "blocked", "waiting":  return .waiting

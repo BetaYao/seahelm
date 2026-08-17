@@ -79,7 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // constructs them any more. iMessage is the phone-side transport now.
         if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
             let channel = IMessageChannel(config: imessageConfig)
-            ShipLog.shared.registerChannel(channel)
+            AgentRegistry.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] iMessage bridge connecting (\(imessageConfig.allowedHandles.count) allowed handles)")
         }
@@ -125,6 +125,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
             if !cleaned.isEmpty {
                 NSLog("[App] Cleaned %d orphan zmx session(s)", cleaned.count)
+            }
+            // Separate from the session sweep above: these are client processes,
+            // not sessions. They survive the app that spawned them and spin at
+            // 20-70% CPU indefinitely, so each restart adds a few more.
+            let clients = SessionManager.cleanupOrphanZmxClients()
+            if !clients.isEmpty {
+                NSLog("[App] Killed %d orphan zmx client process(es)", clients.count)
             }
         }
     }

@@ -10,6 +10,10 @@ final class TerminalHeaderView: NSView {
     let trafficLightSlot = NSView()
 
     private let titleLabel = NSTextField(labelWithString: "")
+    /// Focused pane's session memory. Pinned to the leading edge rather than
+    /// trailing the title: the title is centred and truncates from the tail, so
+    /// a suffix would both drift as the title changes and be the first thing cut.
+    private let memoryLabel = NSTextField(labelWithString: "")
     private let iconCluster = ChromeIconClusterView()
     private let expandButton = ChromeIconButton()
     private let editModeButton = ChromeIconButton()
@@ -17,10 +21,13 @@ final class TerminalHeaderView: NSView {
 
     /// Whether edit mode is currently on (drives the icon's active tint).
     private var editModeOn = false
-    /// Latest pane title and cabin context; which one the label shows depends on
+    /// Latest pane title and worktree context; which one the label shows depends on
     /// edit mode, so both are kept rather than read back off the label.
     private var paneTitle = ""
-    private var cabinContext = ""
+    private var worktreeContext = ""
+    /// Kept rather than read back off the label, so collapse/expand can re-render
+    /// it without the caller having to push the value again.
+    private var paneMemoryBytes: UInt64?
 
     /// Edit mode's two column tab strips live here permanently rather than being
     /// moved up from the columns: reparenting a strip left its clip view seated at a
@@ -80,6 +87,35 @@ final class TerminalHeaderView: NSView {
         applyTitleText()
     }
 
+    /// Resident memory of the focused pane's session tree, or nil to clear.
+    func setPaneMemory(_ bytes: UInt64?) {
+        paneMemoryBytes = bytes
+        applyMemoryText()
+    }
+
+    /// Short by design — this shares a row with a centred title, so it trades
+    /// precision for a width that does not move as the number changes.
+    static func formatMemory(bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb < 1 { return "<1 MB" }
+        if mb < 1024 { return String(format: "%.0f MB", mb) }
+        return String(format: "%.1f GB", mb / 1024)
+    }
+
+    var memoryLabelIsHiddenForTesting: Bool { memoryLabel.isHidden }
+    var memoryTextForTesting: String { memoryLabel.stringValue }
+
+    private func applyMemoryText() {
+        // Collapsed puts traffic lights, icons and the title on this row already;
+        // there is no leading space left to hold a number steady.
+        guard !isCollapsed, let bytes = paneMemoryBytes, bytes > 0 else {
+            memoryLabel.isHidden = true
+            return
+        }
+        memoryLabel.stringValue = Self.formatMemory(bytes: bytes)
+        memoryLabel.isHidden = false
+    }
+
     /// `animated` is passed through from the chrome's collapse animation so the
     /// icons this header owns while collapsed fade across the hand-off with the
     /// sidebar instead of popping in at frame 0.
@@ -128,6 +164,19 @@ final class TerminalHeaderView: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
+        memoryLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        memoryLabel.textColor = Theme.textSecondary
+        memoryLabel.maximumNumberOfLines = 1
+        memoryLabel.cell?.usesSingleLineMode = true
+        // Never steals width from the title, and never gets compressed itself —
+        // a half-rendered number is worse than none.
+        memoryLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        memoryLabel.setContentHuggingPriority(.required, for: .horizontal)
+        memoryLabel.setAccessibilityIdentifier("chrome.terminalMemory")
+        memoryLabel.translatesAutoresizingMaskIntoConstraints = false
+        memoryLabel.isHidden = true
+        addSubview(memoryLabel)
+
         configureExpandButton()
         addSubview(expandButton)
 
@@ -154,11 +203,17 @@ final class TerminalHeaderView: NSView {
             editModeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        // Expanded: true horizontal center in the terminal column.
+        // Expanded: true horizontal center in the terminal column. The memory
+        // readout sits at the leading edge and the title's minimum-leading now
+        // clears it, so a long title is truncated rather than overlapping it —
+        // the title keeps its exact centring while it fits.
         expandedConstraints = [
+            memoryLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            memoryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: memoryLabel.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editModeButton.leadingAnchor, constant: -8),
             editModeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ]
@@ -248,6 +303,7 @@ final class TerminalHeaderView: NSView {
     private func applyCollapsedState(animated: Bool = false) {
         stripLeadingCollapsed?.isActive = isCollapsed
         stripLeadingExpanded?.isActive = !isCollapsed
+        applyMemoryText()
         if isCollapsed {
             NSLayoutConstraint.deactivate(expandedConstraints)
             NSLayoutConstraint.activate(collapsedConstraints)
@@ -332,9 +388,9 @@ final class TerminalHeaderView: NSView {
         refreshImmersion()
     }
 
-    /// Which cabin the columns belong to (`repo · branch`). Shown only in edit mode.
-    func setCabinContext(_ context: String) {
-        cabinContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Which worktree the columns belong to (`repo · branch`). Shown only in edit mode.
+    func setWorktreeContext(_ context: String) {
+        worktreeContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
         applyTitleText()
     }
 
@@ -398,11 +454,11 @@ final class TerminalHeaderView: NSView {
     /// panes, so a single centered pane title is redundant at best and names the
     /// wrong column at worst. The band itself has to stay — it carries the traffic
     /// lights — so rather than leaving it blank, it shows the one thing no strip
-    /// says: which cabin you are in.
+    /// says: which worktree you are in.
     private func applyTitleText() {
         // The strips occupy the whole row when hoisted; nothing else fits.
         titleLabel.isHidden = hasHoistedStrips
-        let text = editModeOn ? cabinContext : paneTitle
+        let text = editModeOn ? worktreeContext : paneTitle
         titleLabel.stringValue = text
         // A file path loses the part that identifies it — the filename — to tail
         // truncation, so paths give up their middle instead.

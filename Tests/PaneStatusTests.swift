@@ -3,106 +3,101 @@ import XCTest
 
 final class PaneStatusTests: XCTestCase {
 
-    func testWorktreeStatusStatuses() {
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "building", lastUserPrompt: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .idle, lastMessage: "done", lastUserPrompt: "", lastUpdated: Date()),
-            ],
-            mostRecentPaneIndex: 1,
-            mostRecentMessage: "building",
-            mostRecentUserPrompt: ""
-        )
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    private func pane(_ index: Int, _ id: String, _ status: AgentStatus,
+                      message: String = "", changedAt: Date,
+                      agentType: AgentType = .unknown) -> PaneStatus {
+        PaneStatus(paneIndex: index, terminalID: id, status: status, lastMessage: message,
+                   lastUserPrompt: "", lastUpdated: changedAt, statusChangedAt: changedAt,
+                   agentType: agentType)
+    }
+
+    private func worktree(_ panes: [PaneStatus]) -> WorktreeStatus {
+        WorktreeStatus(worktreePath: "/repo/main", panes: panes, mostRecentPaneIndex: 1,
+                    mostRecentMessage: "", mostRecentUserPrompt: "")
+    }
+
+    func testStatusesFollowLeafOrder() {
+        let ws = worktree([
+            pane(1, "t1", .running, changedAt: t0),
+            pane(2, "t2", .idle, changedAt: t0),
+        ])
         XCTAssertEqual(ws.statuses, [.running, .idle])
     }
 
-    func testRepresentativeIsAgentOverBusyShell() {
-        // Shell pane (npm) running forever must not mask a blocked AI agent.
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "shell", status: .running, lastMessage: "webpack…",
-                           lastUserPrompt: "", lastUpdated: Date(), agentType: .npm),
-                PaneStatus(paneIndex: 2, terminalID: "agent", status: .waiting, lastMessage: "approve?",
-                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
-            ],
-            mostRecentPaneIndex: 1, mostRecentMessage: "webpack…", mostRecentUserPrompt: ""
-        )
-        XCTAssertEqual(ws.highestPriority, .waiting)
+    // MARK: - Rollup: most recently changed pane
+
+    func testRepresentativeIsTheMostRecentlyChangedPane() {
+        let ws = worktree([
+            pane(1, "old", .waiting, changedAt: t0),
+            pane(2, "new", .running, changedAt: t0.addingTimeInterval(60)),
+        ])
         XCTAssertEqual(ws.representative?.paneIndex, 2)
+        XCTAssertEqual(ws.rolledUpStatus, .running)
     }
 
-    func testRepresentativeStatusAndMessageSamePane() {
-        // Higher-priority pane owns both the badge status and the message.
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "a", status: .idle, lastMessage: "idle msg",
-                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
-                PaneStatus(paneIndex: 2, terminalID: "b", status: .error, lastMessage: "boom",
-                           lastUserPrompt: "", lastUpdated: Date(), agentType: .claudeCode),
-            ],
-            mostRecentPaneIndex: 1, mostRecentMessage: "idle msg", mostRecentUserPrompt: ""
-        )
+    /// Deliberate change of behaviour: the rollup used to rank an AI agent's
+    /// state above a shell task's, so a blocked agent held the badge against a
+    /// long-running `npm run dev`. Recency replaced that — the shell pane wins
+    /// here purely because it changed later.
+    func testABusyShellCanNowOutrankAWaitingAgent() {
+        let ws = worktree([
+            pane(1, "agent", .waiting, changedAt: t0, agentType: .claudeCode),
+            pane(2, "shell", .running, changedAt: t0.addingTimeInterval(1), agentType: .npm),
+        ])
+        XCTAssertEqual(ws.rolledUpStatus, .running)
+    }
+
+    /// The badge and the text must describe the same pane, or the row reads as
+    /// one pane's status next to another pane's output.
+    func testStatusAndMessageComeFromTheSamePane() {
+        let ws = worktree([
+            pane(1, "a", .idle, message: "idle msg", changedAt: t0),
+            pane(2, "b", .error, message: "boom", changedAt: t0.addingTimeInterval(5)),
+        ])
         XCTAssertEqual(ws.representative?.status, .error)
         XCTAssertEqual(ws.representative?.lastMessage, "boom")
     }
 
-    func testWorktreeStatusHasUrgent() {
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .error, lastMessage: "failed", lastUserPrompt: "", lastUpdated: Date()),
-            ],
-            mostRecentPaneIndex: 2,
-            mostRecentMessage: "failed",
-            mostRecentUserPrompt: ""
-        )
+    /// `statusChangedAt` exists so output churn cannot steal the badge: pane 1
+    /// is printing constantly (`lastUpdated` is newest) but its status has not
+    /// moved since t0, so pane 2's later status change still speaks.
+    func testMessageOnlyUpdatesDoNotStealTheBadge() {
+        let chatty = PaneStatus(paneIndex: 1, terminalID: "chatty", status: .running,
+                                lastMessage: "line 900", lastUserPrompt: "",
+                                lastUpdated: t0.addingTimeInterval(300),
+                                statusChangedAt: t0)
+        let ws = worktree([chatty, pane(2, "b", .waiting, changedAt: t0.addingTimeInterval(10))])
+        XCTAssertEqual(ws.rolledUpStatus, .waiting)
+        XCTAssertEqual(ws.representative?.paneIndex, 2)
+    }
+
+    func testEmptyWorktreeHasUnknownStatus() {
+        XCTAssertEqual(worktree([]).rolledUpStatus, .unknown)
+    }
+
+    // MARK: - Urgency is independent of the rollup
+
+    /// `hasUrgent` still scans every pane, so an error stays visible even when a
+    /// later-changed pane owns the badge.
+    func testHasUrgentSeesAPaneTheRollupDidNotPick() {
+        let ws = worktree([
+            pane(1, "t1", .error, message: "failed", changedAt: t0),
+            pane(2, "t2", .running, changedAt: t0.addingTimeInterval(60)),
+        ])
+        XCTAssertEqual(ws.rolledUpStatus, .running)
         XCTAssertTrue(ws.hasUrgent)
     }
 
-    func testWorktreeStatusNotUrgent() {
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
-            ],
-            mostRecentPaneIndex: 1,
-            mostRecentMessage: "",
-            mostRecentUserPrompt: ""
-        )
-        XCTAssertFalse(ws.hasUrgent)
+    func testNotUrgentWhenNoPaneIs() {
+        XCTAssertFalse(worktree([pane(1, "t1", .running, changedAt: t0)]).hasUrgent)
     }
 
-    func testWorktreeStatusHighestPriority() {
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .idle, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .waiting, lastMessage: "?", lastUserPrompt: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 3, terminalID: "t3", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
-            ],
-            mostRecentPaneIndex: 2,
-            mostRecentMessage: "?",
-            mostRecentUserPrompt: ""
-        )
-        XCTAssertEqual(ws.highestPriority, .waiting)
-    }
-
-    func testSinglePaneWorktreeStatus() {
-        let ws = CabinStatus(
-            worktreePath: "/repo/main",
-            panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "working", lastUserPrompt: "", lastUpdated: Date()),
-            ],
-            mostRecentPaneIndex: 1,
-            mostRecentMessage: "working",
-            mostRecentUserPrompt: ""
-        )
+    func testSinglePaneWorktree() {
+        let ws = worktree([pane(1, "t1", .running, message: "working", changedAt: t0)])
         XCTAssertEqual(ws.statuses.count, 1)
-        XCTAssertEqual(ws.highestPriority, .running)
+        XCTAssertEqual(ws.rolledUpStatus, .running)
         XCTAssertFalse(ws.hasUrgent)
     }
 }

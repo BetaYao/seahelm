@@ -62,7 +62,13 @@ enum WorktreeDeleter {
         if let firstLine = listOutput.components(separatedBy: "\n").first,
            firstLine.hasPrefix("worktree ") {
             let mainPath = String(firstLine.dropFirst("worktree ".count))
-            if worktreePath == mainPath {
+            // Compare resolved paths: git reports the real path while a caller
+            // can hold one that reaches it through a symlink (any path under
+            // /var, which is /private/var, and every macOS temporary directory).
+            // String equality let those through to git, which rejects them too —
+            // but with a message this class then has to pattern-match back into
+            // meaning, and only after attempting the delete.
+            if Self.samePath(worktreePath, mainPath) {
                 throw WorktreeDeleterError.isMainWorktree
             }
         }
@@ -237,6 +243,16 @@ enum WorktreeDeleter {
             result.stderr.trimmingCharacters(in: .whitespacesAndNewlines),
             result.stdout
         )
+    }
+
+    /// Whether two paths name the same directory once symlinks are resolved.
+    /// Pure and internal so the symlink case can be tested without a repo.
+    static func samePath(_ lhs: String, _ rhs: String) -> Bool {
+        guard lhs != rhs else { return true }
+        let resolve = { (p: String) in
+            URL(fileURLWithPath: p).resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        return resolve(lhs) == resolve(rhs)
     }
 
     private static func classifyWorktreeRemoveError(_ stderr: String, path: String) -> String {

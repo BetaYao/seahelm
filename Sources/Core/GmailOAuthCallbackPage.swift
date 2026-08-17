@@ -87,7 +87,7 @@ enum GmailOAuthCallbackPage {
             font: 400 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
             -webkit-font-smoothing: antialiased;
           }
-          /* Ship's wheel — the app's namesake, kept at watermark strength so it
+          /* AgentRegistry's wheel — the app's namesake, kept at watermark strength so it
              sets the scene without competing with the message. Sized so the rim
              clears the card: any smaller and the card covers the rim and hub,
              leaving eight disconnected spokes that read as an artifact. */

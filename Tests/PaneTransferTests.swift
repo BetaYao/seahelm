@@ -4,7 +4,7 @@ import XCTest
 
 final class PaneTransferTests: XCTestCase {
 
-    // MARK: - PendingCabinTransfer Tests
+    // MARK: - PendingWorktreeTransfer Tests
 
     func testRecordAndMatch() {
         let tracker = PendingTransferTracker()
@@ -47,19 +47,19 @@ final class PaneTransferTests: XCTestCase {
     /// survive: it is absent from repo B's discovery, and losing it here strands the
     /// worktree with no card and no terminal until the app is relaunched.
     func testCrossRepoNameCollisionKeepsSourceWorktree() {
-        // ShipLog is a global singleton; drop anything this test registers so it
-        // can't leak sailors into tests that assert on an empty ShipLog.
+        // AgentRegistry is a global singleton; drop anything this test registers so it
+        // can't leak panes into tests that assert on an empty AgentRegistry.
         defer {
             for path in ["/repo-a", "/repo-b", "/repo-b-worktrees/collide"] {
-                for id in ShipLog.shared.terminalIDs(forWorktree: path) {
-                    ShipLog.shared.unregister(terminalID: id)
+                for id in AgentRegistry.shared.terminalIDs(forWorktree: path) {
+                    AgentRegistry.shared.unregister(terminalID: id)
                 }
             }
         }
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = CabinStatusAggregator()
+        coordinator.statusAggregator = WorktreeStatusAggregator()
 
         // Repo A — the source pane's repo. Its main worktree is what must survive.
         let aMain = WorktreeInfo(path: "/repo-a", branch: "main", commitHash: "aaaa1111", isMainWorktree: true)

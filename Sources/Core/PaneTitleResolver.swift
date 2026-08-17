@@ -23,14 +23,14 @@ enum PaneTitleResolver {
     /// Steps 1–2 write the resolved title back to `Station.persistedTitle` so it
     /// survives a relaunch (saved into the split layout).
     static func title(
-        for sailor: SailorInfo,
+        for pane: PaneInfo,
         sessionTitle: (String, String) -> String? = { path, sid in
             SessionTitleLookup.title(worktreePath: path, sessionId: sid)
                 ?? CursorSessionTitleLookup.title(worktreePath: path, sessionId: sid)
         },
         pathDisplay: (String) -> String = { shortenPath($0) }
     ) -> String {
-        singleLine(resolvedTitle(for: sailor, sessionTitle: sessionTitle, pathDisplay: pathDisplay))
+        singleLine(resolvedTitle(for: pane, sessionTitle: sessionTitle, pathDisplay: pathDisplay))
     }
 
     /// Flatten to one line. Several sources are free-form user text — a Claude
@@ -43,7 +43,7 @@ enum PaneTitleResolver {
     }
 
     private static func resolvedTitle(
-        for sailor: SailorInfo,
+        for pane: PaneInfo,
         sessionTitle: (String, String) -> String?,
         pathDisplay: (String) -> String
     ) -> String {
@@ -51,25 +51,25 @@ enum PaneTitleResolver {
         // at a shell right now — even if its agent type is stale (an agent that
         // exited back to a shell keeps `claudeCode`/`codex`). Treat it as a shell
         // so its command line wins instead of the agent session/OSC title.
-        let atShellPrompt = isShellPromptTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath)
-        let treatAsAgent = isAgentPane(sailor) && !atShellPrompt
+        let atShellPrompt = isShellPromptTitle(pane.station?.oscTitle, worktreePath: pane.worktreePath)
+        let treatAsAgent = isAgentPane(pane) && !atShellPrompt
 
         // 1. Per-session agent title — two agents in one tree must not share it.
-        if treatAsAgent, let ref = sailor.station?.agentSessionRef, ref.kind == .id,
-           let title = sessionTitle(sailor.worktreePath, ref.sessionId)?
+        if treatAsAgent, let ref = pane.station?.agentSessionRef, ref.kind == .id,
+           let title = sessionTitle(pane.worktreePath, ref.sessionId)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
-            sailor.station?.persistedTitle = title
-            sailor.station?.titleBridgeActive = false
+            pane.station?.persistedTitle = title
+            pane.station?.titleBridgeActive = false
             return title
         }
 
         // 2. The terminal's own OSC title — the only per-pane source that updates
         // live, so it wins for agent panes. (Shell-prompt titles are already
         // rejected by displayOscTitle, so this never yields a bare path.)
-        if treatAsAgent, let osc = oscTitle(for: sailor) {
-            sailor.station?.persistedTitle = osc
-            sailor.station?.titleBridgeActive = false
+        if treatAsAgent, let osc = oscTitle(for: pane) {
+            pane.station?.persistedTitle = osc
+            pane.station?.titleBridgeActive = false
             return osc
         }
 
@@ -77,9 +77,9 @@ enum PaneTitleResolver {
         // have dropped back to a shell prompt. Guarded off for live agents so a
         // cursor-agent tool `cd` can't steal the title.
         if !treatAsAgent,
-           let cmd = sailor.commandLine?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let cmd = pane.commandLine?.trimmingCharacters(in: .whitespacesAndNewlines),
            !cmd.isEmpty {
-            sailor.station?.titleBridgeActive = false
+            pane.station?.titleBridgeActive = false
             return cmd
         }
 
@@ -93,40 +93,40 @@ enum PaneTitleResolver {
         // session started in the same pane (after `/clear` or an agent restart),
         // where the stale title would duplicate the sibling pane's. Also skipped
         // at a live shell prompt — proof the agent has exited back to a shell.
-        if sailor.station?.titleBridgeActive == true, !atShellPrompt,
-           let persisted = sailor.station?.persistedTitle?
+        if pane.station?.titleBridgeActive == true, !atShellPrompt,
+           let persisted = pane.station?.persistedTitle?
             .trimmingCharacters(in: .whitespacesAndNewlines), !persisted.isEmpty {
             return persisted
         }
 
         // 5. Branch (the worktree default).
-        let branch = sailor.branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = pane.branch.trimmingCharacters(in: .whitespacesAndNewlines)
         if !branch.isEmpty { return branch }
 
         // 6. Repo name, else the worktree path.
-        let project = sailor.project.trimmingCharacters(in: .whitespacesAndNewlines)
+        let project = pane.project.trimmingCharacters(in: .whitespacesAndNewlines)
         if !project.isEmpty { return project }
-        return pathDisplay(displayPath(for: sailor))
+        return pathDisplay(displayPath(for: pane))
     }
 
     /// The pane whose title represents the whole worktree: the current (focused)
-    /// pane when it maps to a live sailor, otherwise the most-recently-active
+    /// pane when it maps to a live pane, otherwise the most-recently-active
     /// pane (by `activityEvents`, then `startedAt`). `fallback` is returned only
     /// when the worktree has no panes at all.
-    static func representativeSailor(
+    static func representativePane(
         focusedStationId: String?,
-        among sailors: [SailorInfo],
-        fallback: SailorInfo
-    ) -> SailorInfo {
+        among panes: [PaneInfo],
+        fallback: PaneInfo
+    ) -> PaneInfo {
         if let focusedStationId,
-           let focused = sailors.first(where: { $0.id == focusedStationId }) {
+           let focused = panes.first(where: { $0.id == focusedStationId }) {
             return focused
         }
-        return sailors.max(by: { lastActivity($0) < lastActivity($1) }) ?? fallback
+        return panes.max(by: { lastActivity($0) < lastActivity($1) }) ?? fallback
     }
 
-    private static func lastActivity(_ sailor: SailorInfo) -> Date {
-        sailor.activityEvents.map(\.timestamp).max() ?? sailor.startedAt ?? .distantPast
+    private static func lastActivity(_ pane: PaneInfo) -> Date {
+        pane.activityEvents.map(\.timestamp).max() ?? pane.startedAt ?? .distantPast
     }
 
     /// Last-selected leaf in the tree, else the first leaf, else `nil`.
@@ -155,7 +155,7 @@ enum PaneTitleResolver {
     /// or when the title is just the pane's directory.
     ///
     /// Public because the click→title fast path resolves straight from a
-    /// `Station` (no ShipLog round-trip — its snapshots trail the poll cycle).
+    /// `Station` (no AgentRegistry round-trip — its snapshots trail the poll cycle).
     static func displayOscTitle(_ raw: String?, worktreePath: String, pwd: String = "") -> String? {
         guard let raw else { return nil }
         let stripped = raw.drop { ch in
@@ -192,24 +192,24 @@ enum PaneTitleResolver {
         return raw.contains(worktreePath) || raw.contains(shortenPath(worktreePath))
     }
 
-    private static func oscTitle(for sailor: SailorInfo) -> String? {
-        displayOscTitle(sailor.station?.oscTitle, worktreePath: sailor.worktreePath,
-                        pwd: sailor.station?.pwd ?? "")
+    private static func oscTitle(for pane: PaneInfo) -> String? {
+        displayOscTitle(pane.station?.oscTitle, worktreePath: pane.worktreePath,
+                        pwd: pane.station?.pwd ?? "")
     }
 
     /// Per-pane only — a worktree-scoped agent pick must not make shell siblings
     /// skip `commandLine` (they'd fall through to branch).
-    private static func isAgentPane(_ sailor: SailorInfo) -> Bool {
-        if sailor.agentType.isAIAgent { return true }
-        if sailor.station?.agentSessionRef != nil { return true }
+    private static func isAgentPane(_ pane: PaneInfo) -> Bool {
+        if pane.agentType.isAIAgent { return true }
+        if pane.station?.agentSessionRef != nil { return true }
         return false
     }
 
     /// Prefer the worktree root over a tool-use cwd that wandered outside it
     /// (e.g. `~/.cursor/plugins/cache/...` during Cursor skill reads).
-    private static func displayPath(for sailor: SailorInfo) -> String {
-        let root = sailor.worktreePath
-        if let station = sailor.station {
+    private static func displayPath(for pane: PaneInfo) -> String {
+        let root = pane.worktreePath
+        if let station = pane.station {
             let pwd = station.pwd.trimmingCharacters(in: .whitespacesAndNewlines)
             if !pwd.isEmpty, pwd == root || pwd.hasPrefix(root + "/") {
                 return pwd

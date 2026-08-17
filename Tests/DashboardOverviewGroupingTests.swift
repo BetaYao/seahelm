@@ -8,7 +8,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
     func testGroupingItemCarriesIdentityRepositoryStatusAndActivityDate() {
         let lastActivityAt = Date(timeIntervalSince1970: 1_721_234_567)
         let creationDate = Date(timeIntervalSince1970: 1_700_000_000)
-        let sailor = makeSailor(
+        let pane = makePane(
             id: "station-42",
             project: "seahelm",
             worktreePath: "/tmp/seahelm-feature",
@@ -17,7 +17,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             lastActivityAt: lastActivityAt
         )
 
-        let item = sailor.groupingItem(creationDate: creationDate)
+        let item = pane.groupingItem(creationDate: creationDate)
 
         XCTAssertEqual(item.id, "station-42")
         XCTAssertEqual(item.path, "/tmp/seahelm-feature")
@@ -44,7 +44,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testStoredStatusLoadsAsTheOnlyCheckedMode() {
         withDefaults { defaults in
-            defaults.set("status", forKey: CabinGroupingPreference.key)
+            defaults.set("status", forKey: WorktreeGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -55,7 +55,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
     func testInvalidStoredModeFallsBackToRepository() {
         withDefaults { defaults in
-            defaults.set("not-a-mode", forKey: CabinGroupingPreference.key)
+            defaults.set("not-a-mode", forKey: WorktreeGroupingPreference.key)
 
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
@@ -71,13 +71,13 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              now: { self.now })
             view.selectedId = "run"
             view.update([
-                makeSailor(id: "idle", project: "charlie", worktreePath: "/idle",
+                makePane(id: "idle", project: "charlie", worktreePath: "/idle",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-300)),
-                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(id: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
@@ -86,7 +86,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
             view.selectGroupingModeForTesting(.status)
 
-            XCTAssertEqual(defaults.string(forKey: CabinGroupingPreference.key), "status")
+            XCTAssertEqual(defaults.string(forKey: WorktreeGroupingPreference.key), "status")
             XCTAssertEqual(view.renderedGroupTitlesForTesting, ["Needs input", "Running", "Idle"])
             XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
             XCTAssertEqual(view.selectedId, "run")
@@ -103,13 +103,13 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              now: { self.now })
             view.selectedId = "removed"
             view.update([
-                makeSailor(id: "idle", project: "charlie", worktreePath: "/idle",
+                makePane(id: "idle", project: "charlie", worktreePath: "/idle",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-300)),
-                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(id: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
@@ -127,15 +127,15 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: .zero, defaults: defaults, now: { self.now })
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by deck")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by project")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group cabins by deck")
+                           "Group worktrees by project")
 
             view.selectGroupingModeForTesting(.activityTime)
 
-            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group cabins by time")
+            XCTAssertEqual(view.groupingButtonToolTipForTesting, "Group worktrees by time")
             XCTAssertEqual(view.groupingButtonAccessibilityLabelForTesting,
-                           "Group cabins by time")
+                           "Group worktrees by time")
         }
     }
 
@@ -145,17 +145,17 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(id: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
 
             XCTAssertEqual(view.addWorktreeProjectsForTesting, ["alpha", "bravo"])
 
-            view.selectGroupingModeForTesting(.sailor)
+            view.selectGroupingModeForTesting(.pane)
             XCTAssertEqual(view.addWorktreeProjectsForTesting, ["alpha", "bravo"])
 
             view.selectGroupingModeForTesting(.status)
@@ -169,7 +169,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
             ])
@@ -178,10 +178,10 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             // rebuild them out from under it.
             view.isRenderPaused = true
             view.update([
-                makeSailor(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makeSailor(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(id: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
@@ -198,7 +198,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(id: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneRunTime: "10s"),
@@ -208,7 +208,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "10s")
 
             view.update([
-                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(id: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-10),
                            currentPaneRunTime: "20s"),
@@ -225,7 +225,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(id: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneTitle: "Initial title"),
@@ -233,7 +233,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             XCTAssertEqual(view.rowTitleTextForTesting(id: "run"), "Initial title")
 
             view.update([
-                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(id: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-10),
                            currentPaneTitle: "   "),
@@ -250,9 +250,9 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                                              defaults: defaults,
                                              now: { self.now })
-            func push(_ status: SailorStatus, runtime: String) {
+            func push(_ status: AgentStatus, runtime: String) {
                 view.update([
-                    makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                    makePane(id: "run", project: "alpha", worktreePath: "/run",
                                paneStatuses: [status], isMainWorktree: false,
                                lastActivityAt: now.addingTimeInterval(-10),
                                currentPaneRunTime: runtime),
@@ -284,7 +284,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makeSailor(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(id: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneTitle: "claude — building"),
@@ -307,23 +307,24 @@ final class DashboardOverviewGroupingTests: XCTestCase {
     }
 }
 
-private func makeSailor(
+private func makePane(
     id: String,
     project: String,
     worktreePath: String,
-    paneStatuses: [SailorStatus],
+    paneStatuses: [AgentStatus],
     isMainWorktree: Bool,
     lastActivityAt: Date?,
     currentPaneTitle: String? = nil,
     currentPaneRunTime: String = "30s"
-) -> SailorDisplayInfo {
+) -> WorktreeRowInfo {
     let surface = Station()
-    return SailorDisplayInfo(
+    return WorktreeRowInfo(
         id: id,
         name: id,
         project: project,
         thread: "feature",
         paneStatuses: paneStatuses,
+        rolledUpStatus: paneStatuses.first ?? .unknown,
         mostRecentMessage: "Working",
         lastUserPrompt: "Implement grouping",
         mostRecentPaneIndex: 0,

@@ -3,11 +3,11 @@ import Foundation
 /// Communication channel for Claude Code via Hooks.
 /// Receives structured events through the control socket,
 /// sends commands via backend channel (zmx by default).
-class HooksChannel: SailorChannel {
-    let channelType: SailorChannelType = .hooks
+class HooksChannel: AgentChannel {
+    let channelType: AgentChannelType = .hooks
     let supportsStructuredEvents = true
 
-    private let transport: SailorChannel
+    private let transport: AgentChannel
     private let lock = NSLock()
 
     /// Accumulated hook events for this agent session
@@ -17,7 +17,7 @@ class HooksChannel: SailorChannel {
         self.transport = ZmxChannel(paneSessionKey: paneSessionKey)
     }
 
-    // MARK: - SailorChannel
+    // MARK: - AgentChannel
 
     /// Send command via backend channel (hooks don't provide an input channel)
     func sendCommand(_ command: String) {
@@ -31,7 +31,7 @@ class HooksChannel: SailorChannel {
 
     // MARK: - Hook Events
 
-    /// Called by ShipLog when a WebhookEvent arrives for this agent
+    /// Called by AgentRegistry when a WebhookEvent arrives for this agent
     func handleWebhookEvent(_ event: WebhookEvent) {
         let hookEvent = HookEvent(
             timestamp: Date(),

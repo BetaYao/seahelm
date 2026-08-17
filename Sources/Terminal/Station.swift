@@ -22,7 +22,7 @@ extension StationDelegate {
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
 /// Each worktree gets one Station instance.
 class Station {
-    /// Unique identifier for this terminal instance (used as primary key in ShipLog)
+    /// Unique identifier for this terminal instance (used as primary key in AgentRegistry)
     let id: String = UUID().uuidString
 
     /// The NSView that Ghostty renders into (layer-backed, Metal)
@@ -457,7 +457,14 @@ class Station {
                         bytes = Array(UnsafeBufferPointer(start: $0, count: Int(text.text_len)))
                     }
                 }
-                ghostty_surface_free_text(surface, &text)
+                // No surface argument: libghostty implements this as
+                // `free_text(ptr: *Text)` and reads the struct straight out of
+                // x0, so the surface-first form upstream's header declares made
+                // it dereference the surface, find nothing to free, and return.
+                // This poll runs per pane every 2s, so that no-op leaked a
+                // viewport buffer each time — 105 MB/h across 19 panes.
+                // scripts/check-ghostty-abi.py guards the declaration.
+                ghostty_surface_free_text(&text)
             }
         }
         ghosttyLock.unlock()

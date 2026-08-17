@@ -67,15 +67,15 @@ class TerminalCoordinator {
 
     // MARK: - Split Pane Operations
 
-    /// Enrol a freshly split pane in ShipLog. StationRegistry alone is not enough:
-    /// `ShipLog.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
+    /// Enrol a freshly split pane in AgentRegistry. StationRegistry alone is not enough:
+    /// `AgentRegistry.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
     /// and then requires that station to be a known agent, so a pane missing here
     /// silently falls back to the worktree's *first* pane — every hook, and every
     /// suggestion chip tapped for this pane, lands in a sibling.
     /// Branch/project come from a sibling in the same worktree, which shares both.
     private func registerSplitStation(_ station: Station, worktreePath: String, paneSessionKey: String) {
-        let sibling = ShipLog.shared.sailor(forWorktree: worktreePath)
-        ShipLog.shared.register(
+        let sibling = AgentRegistry.shared.pane(forWorktree: worktreePath)
+        AgentRegistry.shared.register(
             station: station,
             worktreePath: worktreePath,
             branch: sibling?.branch ?? "",
@@ -186,7 +186,7 @@ class TerminalCoordinator {
     /// it and the pane keeps painting at the old width until the user focuses
     /// it and hits Enter. They take the resize immediately.
     private static func defersPtyResize(_ stationId: String) -> Bool {
-        !(ShipLog.shared.sailor(for: stationId)?.agentType.isAIAgent ?? false)
+        !(AgentRegistry.shared.pane(for: stationId)?.agentType.isAIAgent ?? false)
     }
 
     /// Create the new leaf and relayout without mid-create SIGWINCH storms on
@@ -276,7 +276,7 @@ class TerminalCoordinator {
     private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
         switch node {
         case let .leaf(_, stationId, paneSessionKey):
-            let agent = ShipLog.shared.sailor(for: stationId)?.agentType
+            let agent = AgentRegistry.shared.pane(for: stationId)?.agentType
             let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
             return .pane(label: paneSessionKey, command: agent?.launchCommand, agent: named, cwd: nil)
         case let .split(_, axis, ratio, first, second):
@@ -332,7 +332,7 @@ class TerminalCoordinator {
             station.destroy()
         }
         StationRegistry.shared.unregister(closed.stationId)
-        ShipLog.shared.unregister(terminalID: closed.stationId)
+        AgentRegistry.shared.unregister(terminalID: closed.stationId)
         delegate?.terminalCoordinator(self, didClosePane: closed.stationId)
         container.surfaceViews.removeValue(forKey: closed.stationId)
 
@@ -418,20 +418,32 @@ class TerminalCoordinator {
         var since = offscreenSince
         for id in visible { since.removeValue(forKey: id) }
 
-        var sleepIds: [String] = []
+        var due: [(id: String, firstSeen: Date)] = []
         for id in sleepable where !visible.contains(id) {
             guard let firstSeen = since[id] else {
                 since[id] = now
                 continue
             }
             if now.timeIntervalSince(firstSeen) >= idleAfter {
-                sleepIds.append(id)
-                since.removeValue(forKey: id)
+                due.append((id, firstSeen))
             }
         }
+
+        // One per tick. `Station.sleep()` frees a Metal surface on the main
+        // thread, and sleeping a batch in a single pass produced 13-20s of main
+        // thread stall — the app looks dead. The threshold is minutes, so a
+        // backlog drains a pane every tick with nobody waiting on it. Oldest
+        // first, so the queue is deterministic rather than dictionary order.
+        guard let chosen = due.min(by: { $0.firstSeen < $1.firstSeen })?.id else {
+            let known = visible.union(sleepable)
+            return ([], since.filter { known.contains($0.key) })
+        }
+        // Only the chosen pane's clock is cleared; the rest stay due and are
+        // picked up on following ticks.
+        since.removeValue(forKey: chosen)
         // Closed panes would otherwise keep their entry forever.
         let known = visible.union(sleepable)
-        return (sleepIds, since.filter { known.contains($0.key) })
+        return ([chosen], since.filter { known.contains($0.key) })
     }
 
     /// Sleep panes that have stayed off screen past `idleAfter`. Main thread.
