@@ -15,6 +15,8 @@
 
 ## 0. 架构总览
 
+> **Web 浏览器 VT(2026-08):** `clients/seahelm-web` 的**生产路径**是 Mac 内嵌 **Host Gateway**(WSS,经 Cloudflare Tunnel 公网可达),**不是**本文 MQTT topic 树。配对仍用 `seahelm://pair?b=&m=&k=`;`b=` 为 Gateway WSS。详见 `docs/superpowers/specs/2026-08-10-web-host-gateway-design.md`。本文 MQTT 主干仍服务 Watch / ESP32 / Flutter 手机(状态 + 短命令)。
+
 > **v1 部署决策(2026-07-23):** 直接用 **EMQX Cloud** 作唯一 broker,**公网可达 + MQTT over WSS/TLS**。
 > 不先跑本地 NanoMQ、不做 bridge —— Seahelm 与所有客户端从第一天起都连云端。因此**安全(§6)不再是
 > "public 前"的门槛,而是 v1 强制项**。本地 NanoMQ 仅作可选的开发期自托管(见 §11)。

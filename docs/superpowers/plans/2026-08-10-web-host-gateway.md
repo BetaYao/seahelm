@@ -10,6 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-10-web-host-gateway-design.md`
 
+**Status (2026-08-17):** P0 complete. Tunnel UX / same-origin static hosting deferred to P1 (see bottom).
+
+## P0 done when
+
+Matches spec [§4.4 success criteria](../specs/2026-08-10-web-host-gateway-design.md#44-success-criteria):
+
+- [x] **URL alone cannot control Seahelm** — Gateway rejects snapshot, VT, and send_* before successful `auth`.
+- [x] **After pairing: real fleet list + live VT** — `session.snapshot` fills First Mate; `pane.vt_open` + notify `vt.snapshot`/`vt.data` + `pane.send_keys` yield a faithful terminal in the browser.
+- [x] **Rotate pairing key invalidates old browsers** — new `mqtt.root_secret` → old HKDF auth tokens fail; Gateway drops stale sessions on restart.
+- [x] **No devbroker required for production** — live Mac + Host Gateway + paired `seahelm-web`; `devbroker` / `mock:zmx` remain dev-only (`?mqtt=1`).
+
 ## Global Constraints
 
 - Pairing URI shape stays `seahelm://pair?b=&m=&k=` (`MqttCrypto.pairURI`); only the meaning of `b=` changes to Gateway WSS.
@@ -475,9 +486,9 @@ Settings: change “MQTT is not configured” empty state to still allow pairing
 - Modify: `clients/seahelm-web/README.md` (if not done in Task 8)
 - Optional: short note in `docs/remote-clients-design.md` §0 that **web VT production path is Host Gateway**, MQTT remains Watch/ESP
 
-- [ ] **Step 1: Add a “P0 done when” checklist** matching spec §4.4 success criteria into the plan doc or README
+- [x] **Step 1: Add a “P0 done when” checklist** matching spec §4.4 success criteria into the plan doc or README
 
-- [ ] **Step 2: Commit** `docs: point web remote control at Host Gateway`
+- [x] **Step 2: Commit** `docs: point web remote control at Host Gateway`
 
 ---
 

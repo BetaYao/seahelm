@@ -1,13 +1,14 @@
 # Web remote control via Host Gateway (design)
 
-> **Status:** Approved for planning (2026-08-10 brainstorm)  
+> **Status:** **P0 implemented** (2026-08-17). In-app Host Gateway (pair auth, ControlProtocol, `zmx attach` VT) is wired; `seahelm-web` defaults to Gateway WSS. **P1 remaining:** Cloudflare Tunnel Settings UX, same-origin static hosting, rotate-key UI polish.  
 > **Goal:** Control a running Seahelm on your Mac from any public browser, with a real VT terminal (not status-only).  
 > **Supersedes for the web path:** treating `clients/seahelm-web` + `devbroker` / `mock:zmx` / `live-bridge` as the production remote-control story; VT-over-MQTT for the browser.
 
 Related docs (still valid for other clients):
 
-- `docs/remote-clients-design.md` — MQTT trunk for Watch / ESP32 / status+short commands  
-- `clients/seahelm-web/README.md` — local MQTT debug bench + VT PoC notes (dev-only after this)
+- `docs/remote-clients-design.md` — MQTT trunk for Watch / ESP32 / status+short commands (web VT uses Host Gateway, not MQTT)  
+- `clients/seahelm-web/README.md` — Gateway-first browser client; `devbroker` for local MQTT debug only  
+- `docs/superpowers/plans/2026-08-10-web-host-gateway.md` — implementation plan + P0 checklist
 
 ---
 
