@@ -134,6 +134,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     private let snapshotMax: TimeInterval
     private let flushInterval: TimeInterval
     private let queue: DispatchQueue
+    private let queueKey = DispatchSpecificKey<UInt8>()
     private var streams: [String: StreamState] = [:]
     private var leaseTimer: DispatchSourceTimer?
 
@@ -159,15 +160,26 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         self.snapshotMax = snapshotMax
         self.flushInterval = flushInterval
         self.queue = queue
+        queue.setSpecific(key: queueKey, value: 1)
         startLeaseTimer()
     }
 
     deinit {
         leaseTimer?.cancel()
-        queue.sync {
-            for key in streams.keys {
+        // Last retain can be dropped by a work item already on `queue`
+        // (nested async captures). `queue.sync` from that thread traps.
+        syncOnQueue {
+            for key in Array(streams.keys) {
                 tearDown(key: key, reason: "shutdown")
             }
+        }
+    }
+
+    private func syncOnQueue(_ body: () -> Void) {
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            body()
+        } else {
+            queue.sync(execute: body)
         }
     }
 
@@ -302,14 +314,16 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
 
     private func wireProcess(key: String, proc: VTAttachedProcess) {
         proc.setStdoutHandler { [weak self] chunk in
-            self?.queue.async {
+            guard let self else { return }
+            self.queue.async { [weak self] in
                 self?.handleStdout(key: key, chunk: chunk)
             }
         }
         proc.setTerminationHandler { [weak self] in
-            self?.queue.async {
-                guard self?.streams[key]?.proc === proc else { return }
-                self?.tearDown(key: key, reason: "attach exited")
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                guard let self, self.streams[key]?.proc === proc else { return }
+                self.tearDown(key: key, reason: "attach exited")
             }
         }
     }

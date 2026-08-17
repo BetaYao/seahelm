@@ -23,7 +23,10 @@ final class FakeVTAttachedProcess: VTAttachedProcess {
 
     func terminate() {
         terminated = true
-        terminationHandler?()
+        // Match Process.terminate(): the handler is not invoked synchronously
+        // on the caller. Firing it here while ZmxVTAttachManager holds queue.sync
+        // re-enters the serial queue and can deinit on that thread.
+        terminationHandler = nil
     }
 
     func emit(_ bytes: Data) {
