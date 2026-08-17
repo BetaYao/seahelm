@@ -168,16 +168,10 @@ final class PairingWindowController: NSWindowController {
     /// View-only: the caller (`MainWindowController.showPairing`) owns minting +
     /// persisting the secret on the *live* config and reconnecting the channel;
     /// this window just renders the QR / link / short code for the given secret.
-    convenience init(secret: Data, mqtt: MqttConfig) {
+    convenience init(secret: Data, hostGateway: HostGatewayConfig?, mqtt: MqttConfig) {
         self.init(rootSecret: secret,
-                  brokerURL: Self.clientBrokerURL(mqtt),
+                  brokerURL: HostGatewayPairing.clientEntryURL(hostGateway: hostGateway, mqtt: mqtt),
                   macId: mqtt.macId ?? MqttChannel.deriveMacId())
-    }
-
-    /// The WS(S) endpoint clients dial — prefers `mqtt.client_broker`, else
-    /// derives from host/port (e.g. `wss://gw.seahelm.dev/mqtt`).
-    private static func clientBrokerURL(_ m: MqttConfig) -> String {
-        m.resolvedClientBrokerURL
     }
 
     init(rootSecret: Data, brokerURL: String, macId: String) {

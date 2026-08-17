@@ -449,7 +449,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
     /// Held strongly so it survives past this call. See `PairingWindowController`.
     @objc func showPairing() {
         let (secret, mqtt) = mintPairingContext()
-        let wc = PairingWindowController(secret: secret, mqtt: mqtt)
+        let wc = PairingWindowController(secret: secret, hostGateway: config.hostGateway, mqtt: mqtt)
         wc.onShortCode = { [weak self] code, ttl in self?.tabCoordinator.setMqttPairingCode(code, ttl: ttl) }
         wc.showWindow(nil)
         wc.window?.center()
@@ -1976,6 +1976,7 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
+        tabCoordinator.teardownRemoteBackends()
         terminalCoordinator.cleanup()
     }
 

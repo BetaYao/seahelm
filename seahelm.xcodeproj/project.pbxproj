@@ -110,6 +110,7 @@
 		466072F2F8768C44A206D990 /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */; };
 		4670998F86598F2E5C84ACD3 /* StationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F9565C3156144526A74B08 /* StationManager.swift */; };
 		476D67C49BFE7D8093D880F3 /* QuitConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */; };
+		4783FC9B272C628F79A218AF /* HostGatewayPairingURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */; };
 		478A900B42820F9CAC0829BF /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = 3C22FD399E95F8A453F40C3A /* ghostty */; };
 		489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */; };
 		498DDC59CBB6DB32CB865CDC /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */; };
@@ -213,6 +214,7 @@
 		8650FD8E9CFABA790A4BEAB4 /* ZmxVTAttachManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4914856A712CFC9ADFAB82E9 /* ZmxVTAttachManagerTests.swift */; };
 		865D7441D1C630BD73850210 /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401A403F90AAF10933AC1869 /* WeComFrameParser.swift */; };
 		88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19639EE57241F8A021EBD2 /* PaneStatus.swift */; };
+		88CCF79393F2D978227B95E9 /* HostGatewayPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */; };
 		88FC5A9FA39ABA172ED4FAD7 /* SessionLaunchCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA54BB7C78ECA381712451D9 /* SessionLaunchCommandTests.swift */; };
 		89A6025BEEB8CC143CD40664 /* AgentManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */; };
 		89C41D7167472A785EA66D4F /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 669FC11510A48A9E8656C26A /* JetBrainsMono-Bold.ttf */; };
@@ -479,6 +481,7 @@
 		12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorOutcomeTests.swift; sourceTree = "<group>"; };
 		1300118EBD67FF59FD7D8BF5 /* GmailOAuthAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthAuthorization.swift; sourceTree = "<group>"; };
 		13C18BB4B4618D2F5F48B499 /* SeahelmCliInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstaller.swift; sourceTree = "<group>"; };
+		148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayPairingURLTests.swift; sourceTree = "<group>"; };
 		14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
 		159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestGuidanceWriter.swift; sourceTree = "<group>"; };
 		16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuthTests.swift; sourceTree = "<group>"; };
@@ -493,6 +496,7 @@
 		1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySessionTests.swift; sourceTree = "<group>"; };
 		1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewController.swift; sourceTree = "<group>"; };
 		1E7D509CBBC0E7A5A275DC5F /* SailorDisplayHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SailorDisplayHelpers.swift; sourceTree = "<group>"; };
+		1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayPairing.swift; sourceTree = "<group>"; };
 		201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		20388FC5D9797A091BADCF95 /* MqttCryptoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttCryptoTests.swift; sourceTree = "<group>"; };
 		20427901C2E74CC423AE520B /* MqttCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MqttCrypto.swift; sourceTree = "<group>"; };
@@ -977,6 +981,7 @@
 				FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */,
 				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
 				A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */,
+				1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */,
 				AE7778575158B23A9C90C792 /* HostGatewayServer.swift */,
 				7842E00A1A18C4FAD50AF0ED /* HostGatewaySession.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
@@ -1347,6 +1352,7 @@
 				16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */,
 				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
 				CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */,
+				148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */,
 				A7F8EA0DFCBD7F74049EA635 /* HostGatewayServerTests.swift */,
 				1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
@@ -1841,6 +1847,7 @@
 				4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */,
 				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
 				50C0E2D95435EA0741D4BFE4 /* HostGatewayFrameTests.swift in Sources */,
+				4783FC9B272C628F79A218AF /* HostGatewayPairingURLTests.swift in Sources */,
 				9684C23FB2CD701D95E47EDA /* HostGatewayServerTests.swift in Sources */,
 				71206C48591B67FF56E51E8E /* HostGatewaySessionTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
@@ -2067,6 +2074,7 @@
 				C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */,
 				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
 				506FABB5322B42EDC75221F8 /* HostGatewayFrame.swift in Sources */,
+				88CCF79393F2D978227B95E9 /* HostGatewayPairing.swift in Sources */,
 				C2733167BB2AB84E425AC1D1 /* HostGatewayServer.swift in Sources */,
 				0302EB911AF4960365D33FB1 /* HostGatewaySession.swift in Sources */,
 				11D083414156821D443B9356 /* IMessageChannel.swift in Sources */,
