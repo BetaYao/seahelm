@@ -16,6 +16,8 @@ final class HostGatewaySession {
     private var authenticated = false
     private var openVTKeys: Set<String> = []
     private var pendingNotifications: [HostGatewayOutbound] = []
+    /// Called after a notify is queued (e.g. server drains and sends on the connection).
+    var onPendingOutbound: (() -> Void)?
 
     init(router: ControlRouter,
          expectedMacId: String,
@@ -27,6 +29,7 @@ final class HostGatewaySession {
         self.vt = vt
         vt.onNotify = { [weak self] method, params in
             self?.pendingNotifications.append(.notify(method: method, params: params))
+            self?.onPendingOutbound?()
         }
     }
 
