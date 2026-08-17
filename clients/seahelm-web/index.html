@@ -302,7 +302,8 @@
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const S = {
-  client:null, mac:'testmac',
+  client:null, mac:'testmac', transport:null,   // transport: null | 'mqtt' | 'gateway'
+  gw:null,   // gateway WebSocket state when transport === 'gateway'
   panes:new Map(), worktrees:new Map(),
   focus:null, dnd:null, events:new Map(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
@@ -365,16 +366,37 @@ const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;',
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
-// Edge stack (https://gw.seahelm.dev/): always use same-origin WSS.
-// Pair links still carry Mac's historical `b=` (often EMQX Cloud); ignore that
-// when we're already on the gateway host so Connect doesn't bounce to the old URL.
+// Edge stack (https://gw.seahelm.dev/): same-origin Host Gateway WSS.
+// Pair links may still carry a legacy MQTT `b=`; ignore that on the gateway host.
 function edgeBroker() {
   if (location.protocol === 'https:' && /\.(seahelm\.dev|ucar\.cc)$/i.test(location.hostname)) {
-    return `wss://${location.host}/mqtt`;
+    return `wss://${location.host}/ws`;
   }
   return null;
 }
 if ($('broker') && edgeBroker()) $('broker').value = edgeBroker();
+
+// Host Gateway (WSS /ws) vs MQTT devbroker. Force MQTT with ?mqtt=1 or localhost:28083.
+function useGatewayTransport(url) {
+  if (new URLSearchParams(location.search).get('mqtt') === '1') return false;
+  try {
+    const u = new URL(String(url).replace(/^ws/i, 'http'));
+    if (u.hostname === 'localhost' && u.port === '28083') return false;
+    if (u.pathname === '/ws' || u.pathname.endsWith('/ws')) return true;
+  } catch { /* fall through */ }
+  const q = new URLSearchParams(location.search).get('transport');
+  const ls = localStorage.getItem('seahelm_transport');
+  return q === 'gateway' || ls === 'gateway';
+}
+function isLinked(){
+  if (S.transport === 'gateway') return !!(S.gw && S.gw.ready && S.gw.ws && S.gw.ws.readyState === WebSocket.OPEN);
+  return !!S.client;
+}
+function disconnectAll(){
+  if (S.gw && S.gw.ws) { S.gw.ws.close(); S.gw = null; }
+  if (S.client) { S.client.end(true); S.client = null; }
+  S.transport = null;
+}
 
 // ── logging ───────────────────────────────────────────────────────────────
 function log(dir, topic, payload){
@@ -395,11 +417,89 @@ function setStatus(on, txt){ const s=$('status'); s.textContent=txt; s.className
 
 // ── connect ───────────────────────────────────────────────────────────────
 function connect(){
-  if (S.client) { S.client.end(true); S.client=null; }
+  disconnectAll();
   S.mac = $('mac').value.trim() || 'testmac';
   const edge = edgeBroker();
   if (edge) $('broker').value = edge;
   const url = $('broker').value.trim();
+  if (useGatewayTransport(url)) connectGateway(url);
+  else connectMqtt(url);
+}
+
+function connectGateway(url){
+  if (!S.authPass) return alert('Host Gateway 需要先配对(seahelm://pair?…)');
+  S.transport = 'gateway';
+  log('sys', '(connect)', url + ' [Gateway]');
+  const ws = new WebSocket(url);
+  S.gw = { ws, ready: false, req: new Map(), n: 0 };
+  ws.onopen = () => {
+    gwSend('auth', { mac_id: S.mac, token: S.authPass }, (r, err) => {
+      if (err || !r || r.ok === false) {
+        setStatus(false, '认证失败');
+        log('sys', '(auth-fail)', err ? JSON.stringify(err) : JSON.stringify(r));
+        ws.close();
+        return;
+      }
+      S.gw.ready = true;
+      setStatus(true, '已连接');
+      gwSend('session.snapshot', {}, (snap) => {
+        if (snap && snap.panes) applySessionSnapshot(snap);
+      });
+    });
+  };
+  ws.onmessage = (ev) => { try { onGatewayFrame(JSON.parse(ev.data)); } catch {} };
+  ws.onclose = () => { setStatus(false, '离线'); S.gw = null; S.transport = null; };
+  ws.onerror = () => setStatus(false, '错误');
+}
+
+function gwSend(method, params, onReply){
+  if (!S.gw || !S.gw.ws || S.gw.ws.readyState !== WebSocket.OPEN) return;
+  const id = 'g' + (++S.gw.n);
+  const frame = { id, method, params };
+  if (onReply) S.gw.req.set(id, onReply);
+  S.gw.ws.send(JSON.stringify(frame));
+  log('tx', method, frame);
+}
+
+function onGatewayFrame(msg){
+  if (msg.type === 'notify') {
+    const p = msg.params || {};
+    const elide = p.b64 ? `${msg.method} ${b64ToBytes(p.b64).length}B (payload elided)` : msg.params;
+    log('rx', msg.method, elide);
+    onGatewayNotify(msg.method, p);
+    return;
+  }
+  const cb = msg.id && S.gw && S.gw.req.get(msg.id);
+  if (cb) {
+    S.gw.req.delete(msg.id);
+    log('rx', msg.id, msg.error || msg.result);
+    cb(msg.result, msg.error || null);
+    return;
+  }
+  log('rx', '(frame)', msg);
+}
+
+function onGatewayNotify(method, params){
+  if (method === 'vt.snapshot' || method === 'vt.data') {
+    const key = params.pane_session_key || params.pane_id;
+    handleVT(key, {
+      type: method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data',
+      b64: params.b64, cols: params.cols, rows: params.rows,
+    });
+  }
+}
+
+function applySessionSnapshot(result){
+  S.panes.clear();
+  for (const p of (result.panes || [])) {
+    const key = p.pane_session_key || p.pane_id;
+    if (key) S.panes.set(key, p);
+  }
+  renderTree();
+}
+
+function connectMqtt(url){
+  S.transport = 'mqtt';
   // Paired → broker creds are HKDF-derived (username = mac_id, password = hex).
   // Self-hosted EMQX currently allows any user/pass (no authenticator yet).
   const opts = { clean:true, connectTimeout:6000, reconnectPeriod:2000,
@@ -487,28 +587,8 @@ function onMessage(topic, raw){
   if (seg[0]==='pane' && seg[2]==='vt'){
     let v; try { v = JSON.parse(raw); } catch { return; }
     if (!v) return;
-    // A snapshot may legitimately carry no bytes — an idle pane can replay
-    // nothing — but it still carries the geometry, and dropping it for an empty
-    // payload left the terminal on its default grid while live data poured in at
-    // the wrong size. Only `vt.data` is worthless when empty.
-    const bytes = v.b64 ? b64ToBytes(v.b64) : new Uint8Array(0);
-    if (v.type !== 'vt.snapshot' && !bytes.length) return;
-    log('rx', topic, `${v.type||'vt.data'} ${bytes.length}B (payload elided)`);
-    if (S.vt.open !== seg[1]) return;      // stale stream from a pane we left
-    const t = ensureTerm();
-    if (v.type === 'vt.snapshot'){
-      // Resize before interpreting the replay, never after.
-      if (v.cols && v.rows && (t.cols !== v.cols || t.rows !== v.rows)){
-        t.resize(v.cols, v.rows);
-        log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
-      }
-      t.reset();
-      if (bytes.length) t.write(bytes, () => fitTermFont());  // measure once rendered
-      else fitTermFont();
-      updateToBottom();
-      return;
-    }
-    t.write(bytes);
+    log('rx', topic, `${v.type||'vt.data'} ${v.b64 ? b64ToBytes(v.b64).length : 0}B (payload elided)`);
+    handleVT(seg[1], v);
     return;
   }
   log('rx', topic, raw);
@@ -802,6 +882,26 @@ function b64ToBytes(b64){
   for (let i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
   return a;
 }
+/** Shared VT path for MQTT topic payloads and Gateway notify frames. */
+function handleVT(paneKey, v){
+  if (!v) return;
+  const bytes = v.b64 ? b64ToBytes(v.b64) : new Uint8Array(0);
+  if (v.type !== 'vt.snapshot' && !bytes.length) return;
+  if (S.vt.open !== paneKey) return;
+  const t = ensureTerm();
+  if (v.type === 'vt.snapshot'){
+    if (v.cols && v.rows && (t.cols !== v.cols || t.rows !== v.rows)){
+      t.resize(v.cols, v.rows);
+      log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
+    }
+    t.reset();
+    if (bytes.length) t.write(bytes, () => fitTermFont());
+    else fitTermFont();
+    updateToBottom();
+    return;
+  }
+  t.write(bytes);
+}
 function bytesToB64(bytes){
   let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
   return btoa(s);
@@ -888,7 +988,7 @@ function fitTermFont(){
   }
 }
 function openTerm(pid){
-  if (!S.client) return alert('未连接');
+  if (!isLinked()) return alert('未连接');
   if (S.vt.open === pid) return;
   closeTerm();
   const t = ensureTerm();
@@ -902,7 +1002,7 @@ function openTerm(pid){
 }
 function closeTerm(){
   if (!S.vt.open) return;
-  if (S.client) sendCommand('pane.vt_close', { pane_session_key: S.vt.open });
+  if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: S.vt.open });
   S.vt.open = null;
 }
 // An attach client is a real client of the zmx session, so leaving one behind is
@@ -910,25 +1010,28 @@ function closeTerm(){
 // the bridge's lease sweep covers a crash, where neither of these ever runs.
 window.addEventListener('pagehide', closeTerm);
 setInterval(() => {
-  if (S.vt.open && S.client) sendCommand('pane.vt_keepalive', { pane_session_key: S.vt.open });
+  if (S.vt.open && isLinked()) sendCommand('pane.vt_keepalive', { pane_session_key: S.vt.open });
 }, 20000);
 // ── outbound (commands) ─────────────────────────────────────────────────────
 let corrN=0;
 const cmdReq = new Map();    // corr → onReply, for commands whose result we need
 function sendCommand(method, params, onReply){
+  if (S.transport === 'gateway') {
+    if (!isLinked()) { alert('未连接'); return; }
+    gwSend(method, params, (result, error) => {
+      if (!onReply) return;
+      onReply(error ? { ok: false, error } : { ok: true, result: result ?? {} });
+    });
+    return;
+  }
   if(!S.client){ alert('未连接'); return; }
   const corr = 'w'+(++corrN);
   const reply_to = `${base()}/reply/web/${corr}`;
   const payload = { method, params, reply_to, corr };
   if (onReply) {
     cmdReq.set(corr, onReply);
-    // A command that never gets answered would otherwise sit here forever.
     if (cmdReq.size > 200) cmdReq.delete(cmdReq.keys().next().value);
   }
-  // No per-command subscribe: the `${base()}/#` taken at connect already covers
-  // every reply topic. Subscribing here as well leaked one subscription per
-  // command with no matching unsubscribe — typing a paragraph into the terminal
-  // is one command per keystroke, so it ran to hundreds within a minute.
   S.client.publish(`${base()}/command`, JSON.stringify(payload), {qos:1});
   log('tx', `${base()}/command`, payload);
 }
@@ -939,6 +1042,7 @@ function toggleDnd(){
 
 // ── mock publisher (drive UI without Seahelm) ────────────────────────────────
 function pubMock(){
+  if (S.transport === 'gateway') return alert('mock 快照仅 MQTT 调试模式可用(?mqtt=1)');
   if(!S.client) return alert('未连接');
   const b=base();
   const pub=(t,o,retain=true)=>{ S.client.publish(`${b}/${t}`, JSON.stringify(o), {qos:1, retain}); log('tx',`${b}/${t}`,o); };
