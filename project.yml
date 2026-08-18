@@ -232,7 +232,11 @@ targets:
         LIBRARY_SEARCH_PATHS:
           - "$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64"
         OTHER_LDFLAGS:
-          - "-lghostty"
+          # Linked by path, not `-lghostty`: upstream renamed the archive to
+          # `ghostty-internal.a` (to distinguish it from the newer public
+          # `libghostty-vt`), and without a `lib` prefix there is no `-l` form
+          # for it that Apple's linker accepts.
+          - "$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a"
           - "-lc++"
           - "-framework"
           - Metal

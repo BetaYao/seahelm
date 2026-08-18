@@ -457,14 +457,11 @@ class Station {
                         bytes = Array(UnsafeBufferPointer(start: $0, count: Int(text.text_len)))
                     }
                 }
-                // No surface argument: libghostty implements this as
-                // `free_text(ptr: *Text)` and reads the struct straight out of
-                // x0, so the surface-first form upstream's header declares made
-                // it dereference the surface, find nothing to free, and return.
-                // This poll runs per pane every 2s, so that no-op leaked a
-                // viewport buffer each time — 105 MB/h across 19 panes.
-                // scripts/check-ghostty-abi.py guards the declaration.
-                ghostty_surface_free_text(&text)
+                // Freeing this matters: the poll runs per pane every 2s, and a
+                // free that does not land leaks a viewport buffer each time —
+                // 105 MB/h across 19 panes when the header and implementation
+                // disagreed about this signature. check-ghostty-abi.py guards it.
+                ghostty_surface_free_text(surface, &text)
             }
         }
         ghosttyLock.unlock()
