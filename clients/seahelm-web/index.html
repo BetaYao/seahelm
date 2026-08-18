@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Seahelm · cockpit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e2d37'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%231fc8da' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%231fc8da'/%3E%3C/svg%3E" />
 <!-- 普通静态页(非 Artifact):可直连 WSS/WS broker。mqtt.js 本地 vendored,离线可用。 -->
 <script src="./mqtt.min.js?v=20260724"></script>
 <style>
@@ -156,6 +157,22 @@
   .col h2:not(:first-child){margin-top:18px}
   .detail-head{display:flex;align-items:center;gap:8px;margin:2px 0 10px;flex:none}
   .detail-head h2{margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Keys the browser will not give us. Cmd+W closes the tab and cannot be
+     intercepted by any page, so for those the button is not a convenience — it
+     is the only way to reach the action at all. */
+  .renderer-badge{flex:none;background:var(--panel);color:var(--muted);
+    border:1px solid var(--line-12);border-radius:var(--r);padding:3px 7px;
+    font-family:var(--mono);font-size:10px;letter-spacing:.04em;cursor:pointer}
+  .renderer-badge:hover{border-color:var(--accent);color:var(--accent)}
+  .renderer-badge.alt{color:var(--attention);border-color:var(--attention-12)}
+  .term-keys{display:flex;gap:4px;flex:none;align-items:center;overflow-x:auto;max-width:55%}
+  .term-keys button{flex:none;background:var(--panel);color:var(--muted);
+    border:1px solid var(--line-12);border-radius:var(--r);padding:3px 7px;
+    font-family:var(--mono);font-size:11px;line-height:1.2;cursor:pointer;white-space:nowrap}
+  .term-keys button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .term-keys button:disabled{opacity:.35;cursor:default}
+  .term-keys button.danger:hover:not(:disabled){border-color:var(--danger);color:var(--danger)}
+  .term-keys .sep{width:1px;height:14px;background:var(--line-20);flex:none;margin:0 2px}
   .detail-head button{flex:none;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
     border-radius:var(--r);padding:5px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600}
   .detail-head button:hover{border-color:var(--accent);color:var(--accent)}
@@ -303,6 +320,8 @@
     <div class="col" id="midcol">
       <div class="detail-head">
         <h2 id="detailHead">终端</h2>
+        <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
+        <span class="term-keys" id="termKeys"></span>
       </div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="回到最新输出">↓ 最新</button>
@@ -322,6 +341,7 @@
 
 <link rel="stylesheet" href="./xterm.css" />
 <script src="./xterm.js"></script>
+<script src="./xterm-addon-webgl.js"></script>
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
@@ -929,6 +949,155 @@ function tickTimes(){
 }
 setInterval(tickTimes, 1000);
 
+// ── Renderer (spike) ────────────────────────────────────────────────────────
+// `?renderer=ghostty` swaps xterm.js for ghostty-web, which runs Ghostty's own
+// VT parser compiled to wasm and draws with Canvas 2D. Worth evaluating here
+// specifically because this client is a *mirror*: the Mac parses the same PTY
+// bytes with libghostty, so any disagreement between the two parsers is a
+// correctness bug in the mirror rather than a matter of taste.
+//
+// Not a swap — a switch. ghostty-web has no touch handlers at all, so mobile is
+// a known regression, and it is young enough that the comparison has to be made
+// on real panes before anything is decided.
+const RENDERER = (() => {
+  const q = new URLSearchParams(location.search).get('renderer');
+  if (q === 'ghostty' || q === 'xterm'){ localStorage.setItem('seahelm_renderer', q); return q; }
+  return localStorage.getItem('seahelm_renderer') || 'xterm';
+})();
+
+let TerminalCtor = null;
+let rendererReady = null;
+
+/** Resolve the terminal implementation once. Both expose the xterm.js surface. */
+function ensureRenderer(){
+  if (rendererReady) return rendererReady;
+  if (RENDERER !== 'ghostty'){
+    TerminalCtor = window.Terminal;
+    rendererReady = Promise.resolve('xterm');
+    return rendererReady;
+  }
+  rendererReady = import('./vendor/ghostty-web.js')
+    .then(async (mod) => {
+      await mod.init();                 // wasm is inlined; nothing is fetched
+      TerminalCtor = mod.Terminal;
+      log('sys', '(renderer)', 'ghostty-web — Ghostty VT parser (wasm) + Canvas 2D');
+      return 'ghostty';
+    })
+    .catch((e) => {
+      // Falling back is the right failure mode for a spike: an experimental
+      // renderer that will not load must not take the client down with it.
+      TerminalCtor = window.Terminal;
+      log('sys', '(renderer failed)', `ghostty-web 加载失败,回退 xterm.js: ${e && e.message}`);
+      return 'xterm';
+    });
+  return rendererReady;
+}
+
+function renderRendererBadge(active){
+  const el = $('rendererBadge');
+  if (!el) return;
+  el.textContent = active === 'ghostty' ? 'ghostty-web' : 'xterm.js';
+  el.title = active === 'ghostty'
+    ? 'Ghostty VT parser (wasm) + Canvas 2D — 点击切回 xterm.js'
+    : 'xterm.js — 点击试用 ghostty-web';
+  el.className = 'renderer-badge' + (active === 'ghostty' ? ' alt' : '');
+  el.onclick = () => {
+    const next = active === 'ghostty' ? 'xterm' : 'ghostty';
+    location.search = new URLSearchParams({ renderer: next }).toString();
+  };
+}
+
+// Resolve the renderer once the declarations above exist: `rendererReady` is a
+// `let`, so any call placed earlier in the file hits its temporal dead zone.
+ensureRenderer().then(renderRendererBadge);
+
+// ── Shortcut bar ────────────────────────────────────────────────────────────
+// Some keys never reach a web page. Cmd+W closes the tab and is unpreventable
+// in every major browser; Cmd+D is the bookmark shortcut. Neither can be bound
+// here, and both are real seahelm actions (split / close a pane), so the only
+// way to offer them is a button that calls the control API directly.
+//
+// The terminal keys beside them are a different case — they do reach xterm and
+// work when a pane holds focus. They are here because focus is easy to lose in
+// a browser (click the list, and Esc or ^C go nowhere), and because on a phone
+// there is no Ctrl key at all.
+
+/** Raw bytes: what a real key press would have produced. */
+const TERM_KEYS = [
+  { label: 'Esc',  bytes: '\x1b',     title: 'Escape — 中断 Claude 的当前输出' },
+  { label: '^C',   bytes: '\x03',     title: 'Ctrl+C — 中断前台进程' },
+  { label: '^D',   bytes: '\x04',     title: 'Ctrl+D — EOF' },
+  { label: '⇥',    bytes: '\t',       title: 'Tab — 补全(浏览器会拿 Tab 切焦点)' },
+  { label: '⇧⇥',   bytes: '\x1b[Z',   title: 'Shift+Tab — Claude Code 切换权限模式' },
+  { label: '↑',    bytes: '\x1b[A',   title: '上箭头 — 历史命令' },
+];
+
+function renderTermKeys(){
+  const bar = $('termKeys');
+  if (!bar) return;
+  bar.innerHTML = '';
+  const focused = S.vt.focus;
+  const live = !!(focused && S.vt.panes.has(focused) && isLinked());
+
+  for (const k of TERM_KEYS){
+    const b = document.createElement('button');
+    b.textContent = k.label;
+    b.title = k.title;
+    b.disabled = !live;
+    b.onclick = () => sendRawKey(k.bytes);
+    bar.appendChild(b);
+  }
+
+  const sep = document.createElement('span');
+  sep.className = 'sep';
+  bar.appendChild(sep);
+
+  const split = document.createElement('button');
+  split.textContent = '⌘D';
+  split.title = '分屏 — 在 Mac 上把这个 pane 一分为二';
+  split.disabled = !live;
+  split.onclick = () => paneAction('pane.split', { direction: 'right', focus: false });
+  bar.appendChild(split);
+
+  const close = document.createElement('button');
+  close.textContent = '⌘W';
+  close.className = 'danger';
+  close.title = '关闭这个 pane';
+  close.disabled = !live;
+  close.onclick = () => {
+    const name = (S.panes.get(S.vt.focus) || {}).title || S.vt.focus;
+    // Closing takes a running agent with it, and the button is one click from
+    // every other button on this bar.
+    if (!confirm(`关闭 pane「${name}」?其中正在运行的进程会被终止。`)) return;
+    paneAction('pane.close', {});
+  };
+  bar.appendChild(close);
+}
+
+function sendRawKey(bytes){
+  const key = S.vt.focus;
+  if (!key || !isLinked()) return;
+  sendCommand('pane.send_keys',
+    { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(bytes)) });
+  const entry = S.vt.panes.get(key);
+  if (entry) { try { entry.term.focus(); } catch (e) {} }   // hand the keyboard back
+}
+
+/** Structural changes happen on the Mac; we re-read the tree rather than guess. */
+function paneAction(method, extra){
+  const key = S.vt.focus;
+  if (!key || !isLinked()) return;
+  sendCommand(method, Object.assign({ pane_id: key }, extra), (r) => {
+    if (r && r.ok === false){
+      log('sys', '(pane action failed)', JSON.stringify(r.error || r));
+      return;
+    }
+    const path = S.sel;
+    S.vt.worktree = null;        // force a remount of the changed layout
+    if (path) requestLayout(path);
+  });
+}
+
 // ── Mirrored pane layout ────────────────────────────────────────────────────
 // The mid column shows the whole worktree, not one pane: the Mac ships its live
 // split tree (`layout.live`) and we rebuild it here as nested flex boxes. Two
@@ -946,6 +1115,7 @@ function renderDetail(){
     head.textContent = '终端';
     wrap.classList.add('empty');
     wrap.innerHTML = '<div class="muted">选择一个 worktree</div>';
+    renderTermKeys();
     return;
   }
   const row = buildFleet().find(r => r.path === S.sel);
@@ -964,12 +1134,16 @@ function requestLayout(path){
   sendCommand('layout.live', { worktree_path: path }, (r) => {
     if (S.sel !== path) return;                    // selection moved while in flight
     const root = r && r.ok !== false && r.result && r.result.root;
-    if (!root){
-      // No live tree (worktree closed on the Mac) — stack what we know of it.
-      mountPanes(stackedTreeFor(path), null, path);
-      return;
-    }
-    mountPanes(root, r.result.focused_pane_session_key || null, path);
+    ensureRenderer().then((active) => {
+      if (S.sel !== path) return;
+      renderRendererBadge(active);
+      if (!root){
+        // No live tree (worktree closed on the Mac) — stack what we know of it.
+        mountPanes(stackedTreeFor(path), null, path);
+        return;
+      }
+      mountPanes(root, r.result.focused_pane_session_key || null, path);
+    });
   });
 }
 
@@ -1011,6 +1185,7 @@ function unmountPanes(){
   S.vt.panes.clear();
   S.vt.focus = null;
   S.vt.worktree = null;
+  renderTermKeys();
 }
 
 function buildLayoutNode(node){
@@ -1046,12 +1221,13 @@ function buildLayoutLeaf(node){
   host.className = 'vt-host';
   el.appendChild(bar); el.appendChild(host);
 
-  const t = new Terminal({
+  const t = new TerminalCtor({
     cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:5000,
     fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
     theme:{ background:'#05090c', foreground:'#c8d6d5' },
   });
   t.open(host);
+  attachWebglRenderer(t);
   const entry = { term:t, el, host, pending:'', flushT:null };
   S.vt.panes.set(key, entry);
 
@@ -1073,12 +1249,38 @@ function buildLayoutLeaf(node){
   return el;
 }
 
+/**
+ * Draw with the GPU where we can. The DOM renderer emits a span per cell, and
+ * the mirrored layout multiplied the terminals on screen — the cost that used
+ * to be paid once is now paid per pane, every frame.
+ *
+ * Every failure path here falls back rather than throws. Browsers cap live WebGL
+ * contexts (Chrome around 16), so a big enough layout will legitimately run out,
+ * and a lost context leaves a blank canvas behind if the addon stays attached.
+ * A pane rendering by DOM is slower; a pane rendering nothing is broken.
+ */
+function attachWebglRenderer(term){
+  if (RENDERER === 'ghostty') return;              // ghostty-web draws its own canvas
+  if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) return;
+  try {
+    const addon = new WebglAddon.WebglAddon();
+    addon.onContextLoss(() => {
+      log('sys', '(webgl)', 'context lost — 该面板回退到 DOM 渲染');
+      try { addon.dispose(); } catch (e) {}
+    });
+    term.loadAddon(addon);
+  } catch (e) {
+    log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
+  }
+}
+
 function focusPane(key){
   S.vt.focus = key;
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
   const entry = key && S.vt.panes.get(key);
   if (entry) { try { entry.term.focus(); } catch (e) {} }
   updateToBottom();
+  renderTermKeys();
 }
 
 function fitAllPanes(){
