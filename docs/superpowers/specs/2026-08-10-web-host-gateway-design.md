@@ -1,6 +1,8 @@
 # Web remote control via Host Gateway (design)
 
-> **Status:** **P0 implemented** (2026-08-17). In-app Host Gateway (pair auth, ControlProtocol, `zmx attach` VT) is wired; `seahelm-web` defaults to Gateway WSS. **P1 remaining:** Cloudflare Tunnel Settings UX, same-origin static hosting, rotate-key UI polish.  
+> **Status:** **P0 + same-origin hosting implemented** (2026-08-18). In-app Host Gateway (pair auth, ControlProtocol, `zmx attach` VT) is wired; `seahelm-web` defaults to Gateway WSS and is now **served by the Gateway itself** on the same port as `/ws` (#56). The browser client mirrors the desktop: live split layout via `layout.live`, the dashboard's own grouping via `fleet.groups` (#56, #58).  
+> **P1 remaining:** rotate-key UI polish.  
+> **Dropped from P1:** *Cloudflare Tunnel Settings UX*. The tunnel is deliberately **not** coupled to the app — an integration that started and stopped `cloudflared` with the Gateway was built and then removed, because a tunnel outliving the app leaves a public hostname resolving to a dead port, and one tied to the app makes seahelm responsible for a process it does not own. Run the tunnel however you like; the Gateway only serves its port.  
 > **Goal:** Control a running Seahelm on your Mac from any public browser, with a real VT terminal (not status-only).  
 > **Supersedes for the web path:** treating `clients/seahelm-web` + `devbroker` / `mock:zmx` / `live-bridge` as the production remote-control story; VT-over-MQTT for the browser.
 
@@ -59,10 +61,34 @@ Related docs (still valid for other clients):
 ### 2.1 User path
 
 1. Install/login Cloudflare Tunnel once.  
-2. Configure Seahelm so the tunnel targets the Host Gateway local port (Settings guidance in P1).  
+2. Point the tunnel's ingress at the Gateway's local port. One rule covers both
+   the page and the socket, since they share an origin:
+
+   ```yaml
+   ingress:
+     - hostname: gw.example.dev
+       service: http://127.0.0.1:2783
+     - service: http_status:404
+   ```  
 3. Launch Seahelm → Gateway listens → tunnel publishes a public HTTPS/WSS origin.  
 4. Settings → Pairing: scan QR or copy the long link.  
-5. On another device, open the web UI (prefer **same-origin** static hosting through the tunnel) → paste pair link → connect.
+5. On another device, open the web UI (**served by the Gateway itself**, same origin as `/ws`) → paste pair link → connect.
+
+> **Same-origin is a hard requirement, not a preference.** `SubtleCrypto` — which
+> derives the pairing token — exists only in a [secure context], so a page served
+> over plain HTTP from a LAN address cannot compute its own auth token: `e2ee.js`
+> throws while loading and the client fails with `Can't find variable: E2EE`. The
+> page therefore has to arrive over whatever secures the socket. In practice that
+> means `https://` through the tunnel, or `http://127.0.0.1` (localhost is a
+> secure context by definition); an SSH tunnel to loopback works too.
+>
+> Serving both from one port needs a demux: `NWProtocolWebSocket` never answers a
+> plain `GET`, so the public port runs bare TCP, reads the request head, and either
+> answers it as a static file or proxies the bytes to an internal loopback listener
+> that keeps the real WebSocket stack (`HostGatewayServer`). The framework still
+> owns every frame.
+
+[secure context]: https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts
 
 ### 2.2 Pair URI (reuse wire shape)
 
@@ -164,9 +190,14 @@ Authenticated: Control-tier remote (full terminal). Optional v1.1: first remote 
 
 ### 4.2 Tunnel
 
-- Cloudflare Tunnel (or equivalent) runs on the Mac (or under Seahelm’s supervision in P1).  
-- Points at Gateway local HTTP/WSS. Prefer serving `seahelm-web` static assets from the same origin as WSS to avoid mixed-content and awkward file:// pairing.  
-- When Seahelm or the tunnel stops, remote access stops. No cloud broker required for this path.
+- Cloudflare Tunnel (or equivalent) runs on the Mac, **independently of Seahelm**. It is
+  not started, stopped, or supervised by the app; see the status note above for why.  
+- Points at the Gateway's local port, which serves both the page and `/ws`. Same origin is
+  required, not merely preferred — see §2 on secure contexts.  
+- When Seahelm or the tunnel stops, remote access stops. No cloud broker required for this path.  
+- The tunnel provides reachability only. Put an authorization layer in front of it
+  (e.g. Cloudflare Access) if the hostname is public: the Gateway's token stops an
+  unauthenticated caller, but anyone holding the token holds every pane.
 
 ### 4.3 Implementation phases
 
@@ -175,7 +206,8 @@ Authenticated: Control-tier remote (full terminal). Optional v1.1: first remote 
 | **P0** | In-app Host Gateway: pair auth + snapshot + send_keys | Production VT-over-MQTT |
 | **P0** | `vt_open` / data / close + in-process zmx attach | Ghostty feed |
 | **P0** | Reuse Settings pairing; `b=` → Gateway URL | Second QR protocol |
-| **P1** | Tunnel setup UX/docs; same-origin web hosting | Mandatory `seahelm-stack` for web |
+| **P1** | ~~Tunnel setup UX~~ — dropped; tunnel stays uncoupled | Seahelm supervising `cloudflared` |
+| **P1** | ✅ Same-origin web hosting (#56) | Hosting the client anywhere else |
 | **P1** | Rotate key + drop old sessions | Short-code Watch PAKE |
 | **P2** | Watch via MQTT if still desired | Treat `live-bridge` / `mock:zmx` as production |
 
