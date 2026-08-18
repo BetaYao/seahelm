@@ -203,3 +203,21 @@ indirect enum CodableSplitNode: Codable {
         }
     }
 }
+
+extension CodableSplitNode {
+    /// Wire shape for remote clients mirroring this window's layout.
+    ///
+    /// Leaves carry `pane_session_key` — the same key `pane.vt_open` takes — so a
+    /// client can lay the tree out and attach each pane without a second lookup.
+    var dict: [String: Any] {
+        switch self {
+        case let .leaf(paneSessionKey, title):
+            var d: [String: Any] = ["type": "leaf", "pane_session_key": paneSessionKey]
+            if let title, !title.isEmpty { d["title"] = title }
+            return d
+        case let .split(axis, ratio, first, second):
+            return ["type": "split", "axis": axis, "ratio": ratio,
+                    "first": first.dict, "second": second.dict]
+        }
+    }
+}

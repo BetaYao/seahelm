@@ -59,6 +59,12 @@ protocol ControlDataSource: AnyObject {
     /// means one `zmx list` plus a full process-table walk (argv included) —
     /// far too costly to put on every `pane.list`, which agents poll.
     func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot]
+    /// Live split trees keyed by worktree path, so a remote client can mirror
+    /// this window's arrangement instead of inventing one. nil = nothing to mirror.
+    func liveLayouts() -> [String: [String: Any]]?
+    /// The dashboard's own worktree groups for `mode`, already computed Mac-side
+    /// so a remote client cannot drift from the desktop.
+    func worktreeGroups(mode: String) -> [[String: Any]]?
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
@@ -304,6 +310,25 @@ final class ControlRouter {
             guard ok else { return .error(code: ControlError.notFound, message: "pane not found: \(paneId)") }
             return .ok([method == "pane.close" ? "closed" : "focused": true])
 
+        case "layout.live":
+            guard let layouts = dataSource?.liveLayouts() else {
+                return .error(code: ControlError.notFound, message: "no live layout")
+            }
+            if let path = params["worktree_path"] as? String {
+                guard let one = layouts[path] else {
+                    return .error(code: ControlError.notFound, message: "unknown worktree")
+                }
+                return .ok(one)
+            }
+            return .ok(["layouts": layouts])
+
+        case "fleet.groups":
+            let groupingMode = (params["mode"] as? String) ?? "repository"
+            guard let groups = dataSource?.worktreeGroups(mode: groupingMode) else {
+                return .error(code: ControlError.notFound, message: "no grouping available")
+            }
+            return .ok(["mode": groupingMode, "groups": groups])
+
         case "layout.export":
             guard let layout = dataSource?.exportLayout() else {
                 return .error(code: ControlError.notFound, message: "no active layout")
@@ -501,4 +526,13 @@ final class ControlRouter {
     static func encodeParseError() -> String {
         "{\"id\":\"\",\"error\":{\"code\":\(ControlError.parse),\"message\":\"invalid JSON\"}}\n"
     }
+}
+
+// MARK: - Optional remote-mirroring surface
+
+/// Defaults keep existing conformers — including test fakes — compiling: a data
+/// source with no window to mirror simply reports nothing to mirror.
+extension ControlDataSource {
+    func liveLayouts() -> [String: [String: Any]]? { nil }
+    func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
 }
