@@ -134,4 +134,72 @@ final class HostGatewayServerTests: XCTestCase {
 
         task.cancel(with: .goingAway, reason: nil)
     }
+
+    /// The page has to come off the same port as `/ws`, or the browser client is
+    /// left on a foreign origin where `crypto.subtle` does not exist.
+    func testStaticPageServedFromSamePort() throws {
+        let webRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gateway-web-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: webRoot, withIntermediateDirectories: true)
+        try Data("<html>cockpit</html>".utf8).write(to: webRoot.appendingPathComponent("index.html"))
+        defer { try? FileManager.default.removeItem(at: webRoot) }
+
+        let server = HostGatewayServer(
+            config: HostGatewayConfig(enabled: true, port: testPort, webRoot: webRoot.path),
+            router: ControlRouter(dataSource: ServerFakeDataSource()),
+            expectedMacId: macId,
+            rootSecretBase64url: MqttCrypto.base64url(root),
+            vt: ServerFakeVT())
+        defer { server.stop() }
+
+        waitUntilListening(server)
+
+        let exp = expectation(description: "http get")
+        var status = -1
+        var body = ""
+        var contentType = ""
+        let task = URLSession.shared.dataTask(
+            with: URL(string: "http://127.0.0.1:\(testPort)/")!
+        ) { data, response, error in
+            if let error { XCTFail("GET failed: \(error)") }
+            if let http = response as? HTTPURLResponse {
+                status = http.statusCode
+                contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            }
+            body = String(decoding: data ?? Data(), as: UTF8.self)
+            exp.fulfill()
+        }
+        task.resume()
+        wait(for: [exp], timeout: 10)
+
+        XCTAssertEqual(status, 200)
+        XCTAssertEqual(body, "<html>cockpit</html>")
+        XCTAssertTrue(contentType.hasPrefix("text/html"), "got \(contentType)")
+    }
+
+    /// Static hosting must not become a file server for the rest of the disk.
+    func testUnknownPathIs404() throws {
+        let server = HostGatewayServer(
+            config: HostGatewayConfig(enabled: true, port: testPort, webRoot: NSTemporaryDirectory()),
+            router: ControlRouter(dataSource: ServerFakeDataSource()),
+            expectedMacId: macId,
+            rootSecretBase64url: MqttCrypto.base64url(root),
+            vt: ServerFakeVT())
+        defer { server.stop() }
+
+        waitUntilListening(server)
+
+        let exp = expectation(description: "http 404")
+        var status = -1
+        let task = URLSession.shared.dataTask(
+            with: URL(string: "http://127.0.0.1:\(testPort)/definitely-not-here.js")!
+        ) { _, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            exp.fulfill()
+        }
+        task.resume()
+        wait(for: [exp], timeout: 10)
+
+        XCTAssertEqual(status, 404)
+    }
 }

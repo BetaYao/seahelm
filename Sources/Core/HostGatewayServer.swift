@@ -1,20 +1,37 @@
 import Foundation
 import Network
 
-/// Localhost WebSocket server for browser / web clients (`ws://127.0.0.1:PORT/ws`).
+/// WebSocket + static-page server for browser clients (`http://HOST:PORT/`, `ws://HOST:PORT/ws`).
+///
+/// One port serves both, which `NWProtocolWebSocket` cannot do on its own — with the
+/// WebSocket protocol in the stack a plain `GET /` is never answered at all. So the
+/// public port runs a bare TCP listener that reads the request head and demultiplexes:
+/// a WebSocket upgrade is proxied byte-for-byte to an internal loopback listener that
+/// keeps the real WebSocket stack, anything else is answered as a static file. The
+/// framework still owns every frame; the front door only decides which door it is.
 final class HostGatewayServer {
     private let config: HostGatewayConfig
     private let router: ControlRouter
     private let expectedMacId: String
     private let rootSecretBase64url: String
     private let vt: HostGatewayVTAttaching
+    private let staticFiles: HostGatewayStaticFiles
     private let queue = DispatchQueue(label: "seahelm.hostgateway", qos: .userInitiated)
 
-    private var listener: NWListener?
+    /// Public port: static files plus the upgrade demux.
+    private var frontListener: NWListener?
+    /// Loopback-only port carrying the WebSocket protocol stack.
+    private var wsListener: NWListener?
+    private var wsPort: UInt16 = 0
+
     private var connections: [ObjectIdentifier: ConnectionState] = [:]
+    private var proxied: [ObjectIdentifier: NWConnection] = [:]
     private var readyHandlers: [() -> Void] = []
     private let stateLock = NSLock()
     private var _isListening = false
+
+    /// Request head cap: real browser heads are ~1KB, so this only bounds abuse.
+    private static let maxRequestHeadBytes = 16 * 1024
 
     private(set) var isListening: Bool {
         get {
@@ -44,6 +61,8 @@ final class HostGatewayServer {
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
         self.vt = vt
+        self.staticFiles = HostGatewayStaticFiles(
+            root: HostGatewayStaticFiles.resolveRoot(override: config.webRoot))
     }
 
     func start(onReady: (() -> Void)? = nil) {
@@ -51,60 +70,11 @@ final class HostGatewayServer {
             if let onReady {
                 self.readyHandlers.append(onReady)
             }
-            guard self.listener == nil else {
+            guard self.frontListener == nil, self.wsListener == nil else {
                 if self.isListening { self.fireReadyHandlers() }
                 return
             }
-
-            let parameters = NWParameters(tls: nil)
-            parameters.allowLocalEndpointReuse = true
-            parameters.acceptLocalOnly = true
-            parameters.includePeerToPeer = false
-
-            let wsOptions = NWProtocolWebSocket.Options()
-            wsOptions.autoReplyPing = true
-            wsOptions.setClientRequestHandler(self.queue) { _, headers in
-                let path = headers.first { $0.name.lowercased() == ":path" }?.value
-                    ?? headers.first { $0.name.lowercased() == "path" }?.value
-                if let path, path != "/ws" {
-                    return NWProtocolWebSocket.Response(status: .reject, subprotocol: nil, additionalHeaders: [])
-                }
-                return NWProtocolWebSocket.Response(status: .accept, subprotocol: nil, additionalHeaders: [])
-            }
-            parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
-
-            guard let port = NWEndpoint.Port(rawValue: self.config.resolvedPort) else {
-                self.isListening = false
-                self.fireReadyHandlers()
-                return
-            }
-
-            do {
-                let listener = try NWListener(using: parameters, on: port)
-                self.listener = listener
-                listener.stateUpdateHandler = { [weak self] state in
-                    guard let self else { return }
-                    switch state {
-                    case .ready:
-                        self.isListening = true
-                        self.fireReadyHandlers()
-                    case .failed, .cancelled:
-                        self.isListening = false
-                        self.listener = nil
-                    default:
-                        break
-                    }
-                }
-                listener.newConnectionHandler = { [weak self] connection in
-                    self?.accept(connection)
-                }
-                listener.start(queue: self.queue)
-            } catch {
-                NSLog("[HostGateway] listener failed: \(error.localizedDescription)")
-                self.isListening = false
-                self.listener = nil
-                self.fireReadyHandlers()
-            }
+            self.startWebSocketListener()
         }
     }
 
@@ -114,20 +84,267 @@ final class HostGatewayServer {
                 state.connection.cancel()
             }
             connections.removeAll()
-            listener?.cancel()
-            listener = nil
+            for connection in proxied.values {
+                connection.cancel()
+            }
+            proxied.removeAll()
+            frontListener?.cancel()
+            frontListener = nil
+            wsListener?.cancel()
+            wsListener = nil
+            wsPort = 0
             isListening = false
             readyHandlers.removeAll()
         }
     }
 
-    // MARK: - Connection handling
+    // MARK: - Listeners
+
+    /// Internal listener: the real WebSocket stack, reachable only over loopback.
+    private func startWebSocketListener() {
+        let parameters = NWParameters(tls: nil)
+        parameters.allowLocalEndpointReuse = true
+        parameters.includePeerToPeer = false
+        // Bind loopback on an ephemeral port: only the front door can reach it.
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .any)
+
+        let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.autoReplyPing = true
+        wsOptions.setClientRequestHandler(queue) { _, headers in
+            let path = headers.first { $0.name.lowercased() == ":path" }?.value
+                ?? headers.first { $0.name.lowercased() == "path" }?.value
+            if let path, Self.requestPath(path) != "/ws" {
+                return NWProtocolWebSocket.Response(status: .reject, subprotocol: nil, additionalHeaders: [])
+            }
+            return NWProtocolWebSocket.Response(status: .accept, subprotocol: nil, additionalHeaders: [])
+        }
+        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+
+        do {
+            let listener = try NWListener(using: parameters)
+            wsListener = listener
+            listener.stateUpdateHandler = { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    self.wsPort = listener.port?.rawValue ?? 0
+                    self.startFrontListener()
+                case .failed, .cancelled:
+                    self.failStart("websocket listener \(state)")
+                default:
+                    break
+                }
+            }
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.accept(connection)
+            }
+            listener.start(queue: queue)
+        } catch {
+            NSLog("[HostGateway] websocket listener failed: \(error.localizedDescription)")
+            failStart("websocket listener error")
+        }
+    }
+
+    /// Public listener: bare TCP, so a plain `GET` reaches us instead of stalling.
+    private func startFrontListener() {
+        guard frontListener == nil else { return }
+        guard let port = NWEndpoint.Port(rawValue: config.resolvedPort) else {
+            failStart("invalid port \(config.resolvedPort)")
+            return
+        }
+
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        parameters.acceptLocalOnly = true
+        parameters.includePeerToPeer = false
+
+        do {
+            let listener = try NWListener(using: parameters, on: port)
+            frontListener = listener
+            listener.stateUpdateHandler = { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    self.isListening = true
+                    self.fireReadyHandlers()
+                case .failed, .cancelled:
+                    self.failStart("front listener \(state)")
+                default:
+                    break
+                }
+            }
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.acceptFront(connection)
+            }
+            listener.start(queue: queue)
+        } catch {
+            NSLog("[HostGateway] front listener failed: \(error.localizedDescription)")
+            failStart("front listener error")
+        }
+    }
+
+    private func failStart(_ reason: String) {
+        NSLog("[HostGateway] not listening: \(reason)")
+        isListening = false
+        frontListener?.cancel()
+        frontListener = nil
+        wsListener?.cancel()
+        wsListener = nil
+        wsPort = 0
+        fireReadyHandlers()
+    }
 
     private func fireReadyHandlers() {
         let handlers = readyHandlers
         readyHandlers.removeAll()
         handlers.forEach { $0() }
     }
+
+    // MARK: - Front door: read the head, then pick a door
+
+    private func acceptFront(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            if case .ready = state {
+                self.readRequestHead(on: connection, buffered: Data())
+            } else if case .failed = state {
+                connection.cancel()
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    private func readRequestHead(on connection: NWConnection, buffered: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            var buffer = buffered
+            if let data { buffer.append(data) }
+
+            if error != nil {
+                connection.cancel()
+                return
+            }
+            if let terminator = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                let head = String(decoding: buffer[buffer.startIndex..<terminator.lowerBound], as: UTF8.self)
+                self.route(connection, head: head, rawRequest: buffer)
+                return
+            }
+            if isComplete || buffer.count > Self.maxRequestHeadBytes {
+                connection.cancel()
+                return
+            }
+            self.readRequestHead(on: connection, buffered: buffer)
+        }
+    }
+
+    private func route(_ connection: NWConnection, head: String, rawRequest: Data) {
+        if Self.isWebSocketUpgrade(head: head) {
+            proxyToWebSocket(connection, initial: rawRequest)
+            return
+        }
+        let (method, target) = Self.requestLine(head: head)
+        let response = staticFiles.response(method: method, target: target)
+        let payload = HostGatewayStaticFiles.serialize(response, includeBody: method != "HEAD")
+        connection.send(content: payload, isComplete: true, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    // MARK: - Upgrade proxy
+
+    /// Replay the client's handshake to the internal listener, then pump bytes both
+    /// ways. Nothing here understands WebSocket framing — that stays the framework's.
+    private func proxyToWebSocket(_ client: NWConnection, initial: Data) {
+        guard wsPort != 0, let port = NWEndpoint.Port(rawValue: wsPort) else {
+            client.cancel()
+            return
+        }
+        let upstream = NWConnection(host: .ipv4(.loopback), port: port, using: .tcp)
+        proxied[ObjectIdentifier(client)] = upstream
+
+        upstream.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                upstream.send(content: initial, isComplete: true, completion: .contentProcessed { [weak self] error in
+                    guard let self else { return }
+                    if error != nil {
+                        self.teardown(client, upstream)
+                        return
+                    }
+                    self.pump(from: client, to: upstream)
+                    self.pump(from: upstream, to: client)
+                })
+            case .failed, .cancelled:
+                self.teardown(client, upstream)
+            default:
+                break
+            }
+        }
+        upstream.start(queue: queue)
+    }
+
+    private func pump(from source: NWConnection, to destination: NWConnection) {
+        source.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let data, !data.isEmpty {
+                destination.send(content: data, isComplete: true, completion: .contentProcessed { [weak self] sendError in
+                    guard let self else { return }
+                    if sendError != nil {
+                        self.teardown(source, destination)
+                        return
+                    }
+                    self.pump(from: source, to: destination)
+                })
+                return
+            }
+            if error != nil || isComplete {
+                self.teardown(source, destination)
+                return
+            }
+            self.pump(from: source, to: destination)
+        }
+    }
+
+    private func teardown(_ first: NWConnection, _ second: NWConnection) {
+        first.cancel()
+        second.cancel()
+        proxied.removeValue(forKey: ObjectIdentifier(first))
+        proxied.removeValue(forKey: ObjectIdentifier(second))
+    }
+
+    // MARK: - Request parsing
+
+    static func isWebSocketUpgrade(head: String) -> Bool {
+        for line in head.split(separator: "\r\n", omittingEmptySubsequences: true).dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            guard name == "upgrade" else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces).lowercased()
+            if value.contains("websocket") { return true }
+        }
+        return false
+    }
+
+    static func requestLine(head: String) -> (method: String, target: String) {
+        guard let first = head.split(separator: "\r\n", omittingEmptySubsequences: true).first else {
+            return ("GET", "/")
+        }
+        let parts = first.split(separator: " ", omittingEmptySubsequences: true)
+        let method = parts.first.map { String($0).uppercased() } ?? "GET"
+        let target = parts.count > 1 ? String(parts[1]) : "/"
+        return (method, target)
+    }
+
+    /// Path portion of a request target, so `/ws?token=x` still routes as `/ws`.
+    static func requestPath(_ target: String) -> String {
+        if let cut = target.firstIndex(where: { $0 == "?" || $0 == "#" }) {
+            return String(target[target.startIndex..<cut])
+        }
+        return target
+    }
+
+    // MARK: - WebSocket sessions (internal listener)
 
     private func accept(_ connection: NWConnection) {
         let session = HostGatewaySession(
