@@ -126,6 +126,20 @@
   #termWrap{flex:1 1 auto;min-height:0;background:#05090c;
     border:1px solid var(--line-12);border-radius:var(--r);padding:6px;overflow:auto}
   #term{width:100%;height:100%}
+  /* Mirrored split tree. Slots are flex shares of the Mac's ratios; there are
+     deliberately no drag handles — this is a mirror, and the panes belong to
+     the machine that owns them. */
+  .vt-split{display:flex;width:100%;height:100%;gap:5px;min-width:0;min-height:0}
+  .vt-slot{display:flex;min-width:0;min-height:0}
+  .vt-slot>*{flex:1 1 auto;min-width:0;min-height:0}
+  .vt-leaf{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+    border:1px solid var(--line-12);border-radius:var(--r);background:#05090c}
+  .vt-leaf.on{border-color:var(--accent-20)}
+  .vt-leaf-title{flex:none;font-size:10px;letter-spacing:.06em;color:var(--muted);
+    padding:3px 7px;background:var(--panel);border-bottom:1px solid var(--line-12);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vt-leaf.on .vt-leaf-title{color:var(--accent)}
+  .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden}
   #termWrap.empty{display:flex;align-items:center;justify-content:center}
   /* Scrolled back in a live terminal, there is otherwise no way home but to
      swipe all the way down — and new output keeps arriving below you. */
@@ -167,6 +181,11 @@
   .fm-add{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;
     font-family:var(--mono);font-size:13px;line-height:1;padding:0 2px;border-radius:3px}
   .fm-add:hover{color:var(--accent)}
+  .fm-modes{display:flex;gap:4px;margin:0 0 10px}
+  .fm-modes button{flex:1;background:var(--panel);color:var(--muted);
+    border:1px solid var(--line-12);border-radius:var(--r);padding:4px 0;
+    font-family:var(--mono);font-size:11px;cursor:pointer}
+  .fm-modes button.on{background:var(--accent-12);border-color:var(--line-38);color:var(--accent)}
   .fm-rows{display:flex;flex-direction:column;gap:4px}
   .fm-row{display:flex;gap:7px;padding:8px 10px;border-radius:8px;cursor:pointer;
     transition:background .12s}
@@ -272,6 +291,11 @@
         <span class="fm-title">First mate</span>
         <span class="fm-sub" id="fmSub">0 projects · 0 running</span>
       </div>
+      <div class="fm-modes" id="fmModes">
+        <button data-mode="repository">项目</button>
+        <button data-mode="status">状态</button>
+        <button data-mode="activity">时间</button>
+      </div>
       <div class="fm-scroll">
         <div id="tree"></div>
       </div>
@@ -310,18 +334,25 @@ const S = {
   sel:null, selPane:null,
   encKey:null, authPass:null,   // set once a seahelm:// pair link is applied (E2EE on)
   // VT terminal: `open` is the pane key currently streaming
-  vt:{ term:null, open:null, pending:'', flushT:null },
+  // One entry per mirrored pane, keyed by paneSessionKey; `focus` is the pane
+  // keystrokes reach, `worktree` is the layout currently mounted.
+  vt:{ panes:new Map(), focus:null, worktree:null },
+  // Groups are computed Mac-side (fleet.groups) so the browser cannot drift
+  // from the dashboard; `groups` is null until the first reply lands.
+  grouping:{ mode: localStorage.getItem('seahelm_grouping') || 'repository', groups:null },
 };
 // Opening size only. zmx reports no geometry and has no resize verb, so the
 // bridge reads the session's real grid from outside (pid → tty → `stty size`)
 // and ships it with the snapshot; we resize to that before replaying. These
 // numbers just give the terminal a sane box for the moment before it lands.
-// Sizing stays one-way — the remote adapts by scaling the font (fitTermFont),
-// it cannot make the Mac-side pane a different shape.
+// Sizing stays one-way — we mirror the Mac's split tree and scale each pane's
+// font to its slot (fitPaneFont); we cannot reshape a Mac-side pane.
 const VT_COLS = 120, VT_ROWS = 32;
-// The size the terminal renders at when the grid fits; fitTermFont scales down
-// from here and never past it. VT_FONT_MIN is where shrinking stops being worth
-// it — below this you cannot read the pane anyway, so we pan instead.
+// The size a pane renders at when its grid fits. fitPaneFont only ever scales
+// DOWN from here: mirroring the Mac's layout already gives each slot roughly the
+// shape of the grid inside it, so the base size is the intended size rather than
+// a floor to grow off. VT_FONT_MIN is where shrinking stops being worth it —
+// below this you cannot read the pane anyway, so we pan instead.
 const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
 // SailorStatus.color, 1:1 with Sources/Core/SailorStatus.swift (dark values).
 // `waiting` is the amber attention accent, NOT the blue one — the Mac routes
@@ -489,13 +520,37 @@ function onGatewayNotify(method, params){
   }
 }
 
+/** Ask the Mac to group the fleet the way its dashboard would. */
+function refreshGroups(){
+  if (S.transport !== 'gateway' || !isLinked()) { renderTree(); return; }
+  const mode = S.grouping.mode;
+  sendCommand('fleet.groups', { mode }, (r) => {
+    if (S.grouping.mode !== mode) return;            // mode changed while in flight
+    S.grouping.groups = (r && r.ok !== false && r.result && r.result.groups) || null;
+    renderTree();
+  });
+}
+function setGroupingMode(mode){
+  S.grouping.mode = mode;
+  localStorage.setItem('seahelm_grouping', mode);
+  syncModeButtons();
+  refreshGroups();
+}
+function syncModeButtons(){
+  for (const b of document.querySelectorAll('#fmModes button'))
+    b.classList.toggle('on', b.dataset.mode === S.grouping.mode);
+}
+for (const b of document.querySelectorAll('#fmModes button'))
+  b.onclick = () => setGroupingMode(b.dataset.mode);
+syncModeButtons();
+
 function applySessionSnapshot(result){
   S.panes.clear();
   for (const p of (result.panes || [])) {
     const key = p.pane_session_key || p.pane_id;
     if (key) S.panes.set(key, p);
   }
-  renderTree();
+  refreshGroups();
 }
 
 function connectMqtt(url){
@@ -747,37 +802,56 @@ function buildFleet(){
   return rows;
 }
 
+/**
+ * Groups to draw. The Mac's own grouping (fleet.groups) wins, so the list shows
+ * exactly what the dashboard shows — including "Needs input" or "Recent hour"
+ * headers this side never computes. The local fallback is repository order, the
+ * mode the desktop also starts in, for MQTT/offline sessions.
+ */
+function groupsToRender(rows){
+  const byPath = new Map(rows.map(r => [r.path, r]));
+  const server = S.grouping.groups;
+  if (server && server.length){
+    return server.map(g => ({
+      title: g.title,
+      status: g.status || null,
+      isRepo: String(g.id || '').startsWith('repository:'),
+      rows: (g.items || []).map(i => byPath.get(i.worktree_path)).filter(Boolean),
+    })).filter(g => g.rows.length);
+  }
+  const local = new Map();
+  for (const r of rows){
+    if (!local.has(r.project)) local.set(r.project, []);
+    local.get(r.project).push(r);
+  }
+  for (const list of local.values()) list.sort((a,b) => (b.startedAt||0) - (a.startedAt||0));
+  return [...local.entries()].sort((a,b) => a[0].localeCompare(b[0]))
+    .map(([title, list]) => ({ title, status:null, isRepo:true, rows:list }));
+}
+
 function renderTree(){
   const t = $('tree'); t.innerHTML='';
   const rows = buildFleet();
   updateFirstMateHeader(rows);
   if (!rows.length){ t.innerHTML='<div class="muted">无 pane</div>'; renderSuggestions(); return; }
 
-  // Repository groups, most recently started worktree first inside each.
-  const groups = new Map();
-  for (const r of rows){
-    if (!groups.has(r.project)) groups.set(r.project, []);
-    groups.get(r.project).push(r);
-  }
-  for (const list of groups.values()){
-    list.sort((a,b) => (b.startedAt||0) - (a.startedAt||0));
-  }
-
-  for (const [project, list] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){
+  for (const group of groupsToRender(rows)){
     const g = document.createElement('div'); g.className='fm-group';
     const head = document.createElement('div'); head.className='fm-group-head';
-    head.innerHTML = `<span class="fm-deck">${esc(project)}</span>`
-      + `<button class="fm-add" title="新建 worktree">+</button>`;
+    head.innerHTML = (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
+      + `<span class="fm-deck">${esc(group.title)}</span>`
+      + (group.isRepo ? `<button class="fm-add" title="新建 worktree">+</button>` : '');
     // The Mac opens the helm prefilled with `/worktree @<project>`; the web has
     // no helm, so this is deliberately inert rather than pretending to work.
-    head.querySelector('.fm-add').onclick = (e) => {
+    const add = head.querySelector('.fm-add');
+    if (add) add.onclick = (e) => {
       e.stopPropagation();
-      log('sys','(not wired)', `新建 worktree @${project} —— web 端暂未接`);
+      log('sys','(not wired)', `新建 worktree @${group.title} —— web 端暂未接`);
     };
     g.appendChild(head);
 
     const box = document.createElement('div'); box.className='fm-rows';
-    for (const r of list){
+    for (const r of group.rows){
       const sel = S.sel === r.path;
       const row = document.createElement('div');
       row.className = 'fm-row' + (sel ? ' sel' : '');
@@ -840,9 +914,9 @@ function selectPaneByKey(key){
   if (row) selectWorktree(row, key);
 }
 
-// The grid is fixed by the remote, so the only thing a window resize can change
-// is how big we draw it.
-window.addEventListener('resize', () => { if (S.vt.term) fitTermFont(); });
+// Every pane is drawn at whatever size its slot in the mirrored layout gives it,
+// so a window resize means refitting all of them, not one.
+window.addEventListener('resize', fitAllPanes);
 
 /** Retick the elapsed labels in place — no re-render, no scroll jump. */
 function tickTimes(){
@@ -854,163 +928,246 @@ function tickTimes(){
   }
 }
 setInterval(tickTimes, 1000);
-/** The mid column is the terminal. Selecting a pane is the only thing that fills it. */
+
+// ── Mirrored pane layout ────────────────────────────────────────────────────
+// The mid column shows the whole worktree, not one pane: the Mac ships its live
+// split tree (`layout.live`) and we rebuild it here as nested flex boxes. Two
+// reasons this beats picking a pane and scaling it up. It is the same window the
+// user already knows, and — less obviously — a slot in the mirrored tree has
+// roughly the aspect ratio of the pane that lives in it, so fitting a grid into
+// it stops being a fight. Dividers are deliberately inert: this is a mirror, and
+// resizing belongs to the machine that owns the panes.
+
+/** The mid column is the worktree. Selecting one mounts its whole layout. */
 function renderDetail(){
-  const key = S.selPane; const head = $('detailHead'); const wrap = $('termWrap');
-  // A terminal belongs to one pane; switching panes tears the old stream down.
-  if (S.vt.open && S.vt.open !== key) closeTerm();
-  if (!key){
+  const head = $('detailHead'), wrap = $('termWrap');
+  if (!S.sel){
+    unmountPanes();
     head.textContent = '终端';
     wrap.classList.add('empty');
-    if (!S.vt.term) wrap.innerHTML = '<div id="term"></div>';
+    wrap.innerHTML = '<div class="muted">选择一个 worktree</div>';
     return;
   }
-  const p = S.panes.get(key) || {};
   const row = buildFleet().find(r => r.path === S.sel);
-  head.textContent = [row && row.project, row && row.branch, (p.title||key)]
-    .filter(Boolean).join(' · ');
+  head.textContent = [row && row.project, row && row.branch].filter(Boolean).join(' · ') || S.sel;
   wrap.classList.remove('empty');
-  if (S.vt.open !== key) openTerm(key);
+  // Already mirroring this worktree — a click inside it only moves focus.
+  if (S.vt.worktree === S.sel){
+    if (S.selPane && S.vt.panes.has(S.selPane)) focusPane(S.selPane);
+    return;
+  }
+  requestLayout(S.sel);
 }
 
-// ── VT terminal ─────────────────────────────────────────────────────────────
-// Renders the raw PTY byte stream a `zmx tail` produces. Nothing here knows
-// about Ghostty — in a browser xterm.js *is* the renderer, which is the whole
-// reason this PoC can validate the transport without touching libghostty.
+/** Fetch the worktree's live tree; fall back to a stack if the Mac has none. */
+function requestLayout(path){
+  sendCommand('layout.live', { worktree_path: path }, (r) => {
+    if (S.sel !== path) return;                    // selection moved while in flight
+    const root = r && r.ok !== false && r.result && r.result.root;
+    if (!root){
+      // No live tree (worktree closed on the Mac) — stack what we know of it.
+      mountPanes(stackedTreeFor(path), null, path);
+      return;
+    }
+    mountPanes(root, r.result.focused_pane_session_key || null, path);
+  });
+}
+
+/** Fallback shape: every known pane of the worktree, stacked top to bottom. */
+function stackedTreeFor(path){
+  const row = buildFleet().find(r => r.path === path);
+  const keys = (row ? row.panes : []).map(([k]) => k).filter(Boolean);
+  if (!keys.length) return null;
+  return keys.map(k => ({ type:'leaf', pane_session_key:k }))
+             .reduce((a, b) => ({ type:'split', axis:'vertical', ratio:0.5, first:a, second:b }));
+}
+
+function mountPanes(tree, focusKey, path){
+  unmountPanes();
+  const wrap = $('termWrap');
+  wrap.innerHTML = '';
+  if (!tree){
+    wrap.classList.add('empty');
+    wrap.innerHTML = '<div class="muted">无 pane</div>';
+    return;
+  }
+  S.vt.worktree = path;
+  wrap.appendChild(buildLayoutNode(tree));
+  for (const key of S.vt.panes.keys()){
+    sendCommand('pane.vt_open', { pane_session_key: key, cols: VT_COLS, rows: VT_ROWS }, (r) => {
+      if (r && r.ok === false) log('sys','(vt open failed)', JSON.stringify(r.error||r));
+    });
+  }
+  focusPane(focusKey || S.selPane || S.vt.panes.keys().next().value || null);
+  fitAllPanes();
+}
+
+function unmountPanes(){
+  for (const [key, entry] of S.vt.panes){
+    if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: key });
+    if (entry.flushT) clearTimeout(entry.flushT);
+    try { entry.term.dispose(); } catch (e) {}
+  }
+  S.vt.panes.clear();
+  S.vt.focus = null;
+  S.vt.worktree = null;
+}
+
+function buildLayoutNode(node){
+  if (!node) return document.createElement('div');
+  if (node.type === 'leaf') return buildLayoutLeaf(node);
+  const el = document.createElement('div');
+  el.className = 'vt-split';
+  // horizontal = left | right, vertical = top / bottom (SplitAxis in SplitNode.swift).
+  el.style.flexDirection = node.axis === 'horizontal' ? 'row' : 'column';
+  const ratio = Math.min(0.9, Math.max(0.1, Number(node.ratio) || 0.5));
+  for (const [child, share] of [[node.first, ratio], [node.second, 1 - ratio]]){
+    const slot = document.createElement('div');
+    slot.className = 'vt-slot';
+    slot.style.flex = share + ' 1 0';
+    slot.appendChild(buildLayoutNode(child));
+    el.appendChild(slot);
+  }
+  return el;
+}
+
+function buildLayoutLeaf(node){
+  const key = node.pane_session_key;
+  const el = document.createElement('div');
+  el.className = 'vt-leaf';
+  el.dataset.key = key;
+
+  const bar = document.createElement('div');
+  bar.className = 'vt-leaf-title';
+  const known = S.panes.get(key) || {};
+  bar.textContent = node.title || known.title || key;
+
+  const host = document.createElement('div');
+  host.className = 'vt-host';
+  el.appendChild(bar); el.appendChild(host);
+
+  const t = new Terminal({
+    cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:5000,
+    fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
+    theme:{ background:'#05090c', foreground:'#c8d6d5' },
+  });
+  t.open(host);
+  const entry = { term:t, el, host, pending:'', flushT:null };
+  S.vt.panes.set(key, entry);
+
+  // xterm only fires onData for the terminal that actually holds focus, so each
+  // pane can own its own outbound path — no routing table, no focus bookkeeping.
+  t.onData((data) => {
+    entry.pending += data;
+    if (entry.flushT) return;
+    entry.flushT = setTimeout(() => {
+      entry.flushT = null;
+      const buf = entry.pending; entry.pending = '';
+      if (!buf || !isLinked()) return;
+      sendCommand('pane.send_keys',
+        { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(buf)) });
+    }, 10);
+  });
+  t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
+  el.addEventListener('mousedown', () => focusPane(key));
+  return el;
+}
+
+function focusPane(key){
+  S.vt.focus = key;
+  for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
+  const entry = key && S.vt.panes.get(key);
+  if (entry) { try { entry.term.focus(); } catch (e) {} }
+  updateToBottom();
+}
+
+function fitAllPanes(){
+  for (const entry of S.vt.panes.values()) fitPaneFont(entry);
+}
+
+/**
+ * Scale one pane's font so its grid fills its slot.
+ * The grid is dictated by the Mac side and cannot be renegotiated, so the only
+ * free variable is how big we draw it — down from VT_FONT_BASE, never past it.
+ * Constrains on BOTH axes and takes the tighter one: width alone lets a tall
+ * session run off the bottom, height alone lets a wide one spill out the side.
+ */
+function fitPaneFont(entry){
+  const t = entry.term;
+  const screen = entry.host.querySelector('.xterm-screen');
+  if (!screen) return;
+  const box = screen.getBoundingClientRect();
+  const availW = entry.host.clientWidth - 4, availH = entry.host.clientHeight - 4;
+  if (!box.width || !box.height || availW <= 0 || availH <= 0) return;
+
+  const scale = Math.min(availW / box.width, availH / box.height);
+  let size = Math.max(VT_FONT_MIN, Math.min(VT_FONT_BASE, Math.floor(t.options.fontSize * scale)));
+  if (size !== t.options.fontSize) t.options.fontSize = size;
+
+  // xterm rounds cell metrics to whole pixels, so cell size is a step function of
+  // font size and the linear guess can still overflow. Step down until it really
+  // fits — but never past the readable floor, below which panning is the honest
+  // answer rather than smaller type.
+  for (let i = 0; i < 8 && size > VT_FONT_MIN; i++){
+    const el = entry.host.querySelector('.xterm-screen');
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= availW && rect.height <= availH) break;
+    size -= 1;
+    t.options.fontSize = size;
+  }
+}
+
 function b64ToBytes(b64){
   const s = atob(b64); const a = new Uint8Array(s.length);
   for (let i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
   return a;
 }
+function bytesToB64(bytes){
+  let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
 /** Shared VT path for MQTT topic payloads and Gateway notify frames. */
 function handleVT(paneKey, v){
   if (!v) return;
+  const entry = S.vt.panes.get(paneKey);
+  if (!entry) return;                       // a pane we are not mirroring right now
   const bytes = v.b64 ? b64ToBytes(v.b64) : new Uint8Array(0);
   if (v.type !== 'vt.snapshot' && !bytes.length) return;
-  if (S.vt.open !== paneKey) return;
-  const t = ensureTerm();
+  const t = entry.term;
   if (v.type === 'vt.snapshot'){
     if (v.cols && v.rows && (t.cols !== v.cols || t.rows !== v.rows)){
       t.resize(v.cols, v.rows);
       log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
     }
     t.reset();
-    if (bytes.length) t.write(bytes, () => fitTermFont());
-    else fitTermFont();
-    updateToBottom();
+    if (bytes.length) t.write(bytes, () => fitPaneFont(entry));
+    else fitPaneFont(entry);
+    if (S.vt.focus === paneKey) updateToBottom();
     return;
   }
   t.write(bytes);
 }
-function bytesToB64(bytes){
-  let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
-  return btoa(s);
-}
-function ensureTerm(){
-  if (S.vt.term) return S.vt.term;
-  const t = new Terminal({
-    cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:5000,
-    fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
-    theme:{ background:'#05090c', foreground:'#c8d6d5' },
-  });
-  t.open($('term'));
-  // Keystrokes go out as base64 of the UTF-8 bytes: the bridge feeds them
-  // straight to `zmx send`, so control bytes and escapes survive intact.
-  // Coalesced over a frame — one message per burst of typing rather than per
-  // character. The bridge also serializes sends, which is what actually
-  // guarantees order; this just keeps the message count sane.
-  t.onData((data) => {
-    if (!S.vt.open) return;
-    S.vt.pending += data;
-    if (S.vt.flushT) return;
-    S.vt.flushT = setTimeout(() => {
-      S.vt.flushT = null;
-      const buf = S.vt.pending; S.vt.pending = '';
-      if (!buf || !S.vt.open) return;
-      sendCommand('pane.send_keys',
-        { pane_session_key:S.vt.open, b64: bytesToB64(new TextEncoder().encode(buf)) });
-    }, 10);
-  });
-  // Scrolled away from the live edge, offer the way back — new output keeps
-  // landing below you and xterm deliberately holds your position.
-  t.onScroll(() => updateToBottom());
-  S.vt.term = t;
-  return t;
-}
+
+/** The "back to live" affordance tracks whichever pane has focus. */
 function updateToBottom(){
-  const t = S.vt.term, btn = $('toBottom');
+  const btn = $('toBottom');
   if (!btn) return;
-  if (!t || !S.vt.open) { btn.classList.remove('on'); return; }
-  const b = t.buffer.active;
+  const entry = S.vt.focus ? S.vt.panes.get(S.vt.focus) : null;
+  if (!entry){ btn.classList.remove('on'); return; }
+  const b = entry.term.buffer.active;
   btn.classList.toggle('on', b.viewportY < b.baseY);
 }
-/**
- * Scale the font so the session's rows fit the column.
- * The grid size is dictated by the Mac side and cannot be renegotiated, so the
- * only free variable is how big we draw it. Measures a real rendered row rather
- * than assuming a line-height ratio, then clamps to something still readable.
- */
-function fitTermFont(){
-  const t = S.vt.term, wrap = $('termWrap');
-  if (!t || !wrap) return;
-  const screen = document.querySelector('#term .xterm-screen');
-  if (!screen) return;
-  const box = screen.getBoundingClientRect();
-  if (!box.width || !box.height) return;
 
-  // Constrain on BOTH axes and take the tighter one. Fitting height alone let a
-  // wide session (128 cols) spill ~118px past the column, so the right-hand edge
-  // of the terminal was only reachable by scrolling sideways.
-  const availW = wrap.clientWidth - 14;                  // padding + border
-  if (availW <= 0) return;
-
-  // Fit on WIDTH, not on both axes. Two reasons: broken/clipped columns ruin a
-  // TUI far more than a bit of vertical scrolling does, and leaving the vertical
-  // axis alone keeps it free for xterm's own scrollback scroller, so the two
-  // never fight over the same gesture. Clamp up to the base size but never past
-  // it — this also runs after the debug panel is hidden, and the terminal should
-  // grow back into the space it gained.
-  const desired = availW * t.options.fontSize / box.width;
-  let size = Math.max(VT_FONT_MIN, Math.min(VT_FONT_BASE, Math.floor(desired)));
-  if (size !== t.options.fontSize) t.options.fontSize = size;
-
-  // xterm rounds cell metrics to whole pixels, so cell size is a step function of
-  // font size and the linear guess can still overflow (measured: 128 cols still
-  // spilled 60px). Step down until it genuinely fits — but never past the
-  // readable floor. 128 columns cannot be legible on a 390px phone at any size,
-  // so below the floor panning is the honest answer, not smaller type.
-  for (let i = 0; i < 8 && size > VT_FONT_MIN; i++){
-    const el = document.querySelector('#term .xterm-screen');
-    if (!el) return;
-    if (el.getBoundingClientRect().width <= availW) break;
-    size -= 1;
-    t.options.fontSize = size;
-  }
-}
-function openTerm(pid){
-  if (!isLinked()) return alert('未连接');
-  if (S.vt.open === pid) return;
-  closeTerm();
-  const t = ensureTerm();
-  t.reset();
-  S.vt.open = pid;
-  // Geometry is applied from the snapshot message (it lands first); the reply is
-  // only useful for surfacing a failure.
-  sendCommand('pane.vt_open', { pane_session_key: pid, cols: VT_COLS, rows: VT_ROWS }, (r) => {
-    if (r && r.ok === false) log('sys','(vt open failed)', JSON.stringify(r.error||r));
-  });
-}
-function closeTerm(){
-  if (!S.vt.open) return;
-  if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: S.vt.open });
-  S.vt.open = null;
-}
 // An attach client is a real client of the zmx session, so leaving one behind is
-// not harmless. vt_close covers the tidy exits; this covers closing the tab, and
-// the bridge's lease sweep covers a crash, where neither of these ever runs.
-window.addEventListener('pagehide', closeTerm);
+// not harmless — and mirroring a layout opens one per pane, which multiplies the
+// cost of getting this wrong. vt_close covers the tidy exits; pagehide covers
+// closing the tab; the bridge's lease sweep covers a crash, where neither runs.
+window.addEventListener('pagehide', unmountPanes);
 setInterval(() => {
-  if (S.vt.open && isLinked()) sendCommand('pane.vt_keepalive', { pane_session_key: S.vt.open });
+  if (!isLinked()) return;
+  for (const key of S.vt.panes.keys()) sendCommand('pane.vt_keepalive', { pane_session_key: key });
 }, 20000);
 // ── outbound (commands) ─────────────────────────────────────────────────────
 let corrN=0;
@@ -1067,7 +1224,11 @@ $('connectBtn').onclick=connect;
 $('dndBtn').onclick=toggleDnd;
 $('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
 $('scrim').onclick=()=>setDrawer(false);
-$('toBottom').onclick=()=>{ if (S.vt.term) S.vt.term.scrollToBottom(); updateToBottom(); };
+$('toBottom').onclick=()=>{
+  const e = S.vt.focus && S.vt.panes.get(S.vt.focus);
+  if (e) e.term.scrollToBottom();
+  updateToBottom();
+};
 // Debug panel is a developer surface — remembered per browser so it stays out
 // of the way once you've dismissed it.
 function applyLogVisibility(){
@@ -1076,7 +1237,7 @@ function applyLogVisibility(){
   const btn = $('logBtn');
   btn.classList.toggle('on', !off);
   btn.title = off ? '显示报文日志' : '隐藏报文日志';
-  if (S.vt.term) setTimeout(fitTermFont, 200);   // the terminal just got wider
+  setTimeout(fitAllPanes, 200);   // the panes just got wider
 }
 $('logBtn').onclick = () => {
   const off = localStorage.getItem('seahelm_log_off') === '1';

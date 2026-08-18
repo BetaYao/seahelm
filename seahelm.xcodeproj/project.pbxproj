@@ -33,6 +33,7 @@
 		1063EE7F5505310F9DEE6E07 /* SuggestGuidanceWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */; };
 		10D70ABC6FF1371989A62258 /* ClaudeUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 258A1C3E5F11466A79C1CAF3 /* ClaudeUsageSummaryProvider.swift */; };
 		11D083414156821D443B9356 /* IMessageChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB2DB0B6757C922D065765 /* IMessageChannel.swift */; };
+		12348F72590729F9B44FC244 /* HostGatewayStaticFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAB7F280D7925E9A0CD660C /* HostGatewayStaticFiles.swift */; };
 		12702A1B7B7DD78FD49D65D5 /* AppFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E9418C39C2F95AA6193F67 /* AppFont.swift */; };
 		12B626905E1B75F6419CD452 /* ChromeLayoutMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4890F1362CCDACF15E685662 /* ChromeLayoutMetricsTests.swift */; };
 		13005279CEAF281DCBE08040 /* NotificationManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D0B8A444B60E3445EC7977 /* NotificationManagerTests.swift */; };
@@ -182,6 +183,7 @@
 		71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D16F46555938EC971913798 /* IMessageBridgeTests.swift */; };
 		71937D0C72752C62DFBB63C1 /* WorktreeAgentTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999DBD13511B3A8C4F4D4B8E /* WorktreeAgentTypeStore.swift */; };
 		7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */; };
+		72897701FB2E01A0DA5305D1 /* HostGatewayStaticFilesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB735C1E5E1238DE2F51758B /* HostGatewayStaticFilesTests.swift */; };
 		72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */; };
 		731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */; };
 		73225618467620F782EF0465 /* KeyboardSubstateControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AAEF167452AD3BAB184D84 /* KeyboardSubstateControllerTests.swift */; };
@@ -416,6 +418,7 @@
 		EFF4E2636CB1CE5070B69163 /* BridgeCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7622ADBA243E87D1CA94C7BD /* BridgeCommandParserTests.swift */; };
 		F0A5FE9C41E1E500E1B441E5 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 105CE82C3D2CBF90259D60A2 /* Sparkle */; };
 		F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */; };
+		F0F527252C6EC20636C126EA /* RemoteMirroringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4CA714BD0B18293FBD6216 /* RemoteMirroringTests.swift */; };
 		F11D0C88B5897BAFBB1BC8F0 /* AgentRegistryTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF44014C31BB9F7833218FB4 /* AgentRegistryTransitionTests.swift */; };
 		F18B943680E61083D1FD04D8 /* OSCProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */; };
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
@@ -736,7 +739,9 @@
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManifest.swift; sourceTree = "<group>"; };
+		ADAB7F280D7925E9A0CD660C /* HostGatewayStaticFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayStaticFiles.swift; sourceTree = "<group>"; };
 		ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEventDecoderTests.swift; sourceTree = "<group>"; };
+		AE4CA714BD0B18293FBD6216 /* RemoteMirroringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteMirroringTests.swift; sourceTree = "<group>"; };
 		AE7778575158B23A9C90C792 /* HostGatewayServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayServer.swift; sourceTree = "<group>"; };
 		AEC631B07301756615C755E6 /* AgentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentType.swift; sourceTree = "<group>"; };
 		AEF6A7F6ECFDABB135EC6D4C /* WorktreeRowHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeRowHelpers.swift; sourceTree = "<group>"; };
@@ -766,6 +771,7 @@
 		BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEvent.swift; sourceTree = "<group>"; };
 		BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstallerTests.swift; sourceTree = "<group>"; };
 		BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeDividerView.swift; sourceTree = "<group>"; };
+		BB735C1E5E1238DE2F51758B /* HostGatewayStaticFilesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayStaticFilesTests.swift; sourceTree = "<group>"; };
 		BB9854E3679A7AF9524F5077 /* LayoutNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNode.swift; sourceTree = "<group>"; };
 		BBA707703AD383C078C3DFC3 /* SeahelmSkillInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSkillInstallerTests.swift; sourceTree = "<group>"; };
 		BBBA75436246C615D345870B /* SessionMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMonitorView.swift; sourceTree = "<group>"; };
@@ -983,6 +989,7 @@
 				1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */,
 				AE7778575158B23A9C90C792 /* HostGatewayServer.swift */,
 				7842E00A1A18C4FAD50AF0ED /* HostGatewaySession.swift */,
+				ADAB7F280D7925E9A0CD660C /* HostGatewayStaticFiles.swift */,
 				B5512F73C560C4BEA3AA8424 /* IdeaStore.swift */,
 				47BB2DB0B6757C922D065765 /* IMessageChannel.swift */,
 				65B33DFB88A7C2AFDA0FAA8D /* IMessageChatDB.swift */,
@@ -1358,6 +1365,7 @@
 				148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */,
 				A7F8EA0DFCBD7F74049EA635 /* HostGatewayServerTests.swift */,
 				1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */,
+				BB735C1E5E1238DE2F51758B /* HostGatewayStaticFilesTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
 				7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */,
 				5D16F46555938EC971913798 /* IMessageBridgeTests.swift */,
@@ -1394,6 +1402,7 @@
 				9626FD6C7EE99EAEC76D6443 /* PRURLParsingTests.swift */,
 				97C4FA6FDE7FEC53DDB662BD /* PtyGridAbsorbTests.swift */,
 				82C1E60B8144F4FB489FADD2 /* RegionFocusControllerTests.swift */,
+				AE4CA714BD0B18293FBD6216 /* RemoteMirroringTests.swift */,
 				5B4CB5436AAB9C042D5AF800 /* ReturnToPortTests.swift */,
 				46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */,
 				BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */,
@@ -1628,6 +1637,7 @@
 				21283461340CBF88A3E68FC9 /* Resources */,
 				B903EB00832368C62C8A20D8 /* Frameworks */,
 				05920B5863E0906DAF2B66D4 /* Mirror terminfo beside ghostty resources */,
+				A1B7C31390E40E55B8E529C7 /* Bundle seahelm-web client */,
 			);
 			buildRules = (
 			);
@@ -1786,6 +1796,25 @@
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\nRES=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin\"\n\"${SRCROOT}/scripts/fetch-zmx.sh\" \"${RES}/zmx\"\nif [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  # Release builds need a secure timestamp for notarization; skip it in\n  # Debug so local builds don't pay a network round-trip per sign.\n  TS=\"--timestamp\"\n  [ \"${CONFIGURATION:-Debug}\" = \"Debug\" ] && TS=\"--timestamp=none\"\n  codesign --force --options runtime $TS \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \"${RES}/zmx\"\nfi\n";
 		};
+		A1B7C31390E40E55B8E529C7 /* Bundle seahelm-web client */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle seahelm-web client";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nSRC=\"${SRCROOT}/clients/seahelm-web\"\nDEST=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/seahelm-web\"\nrm -rf \"${DEST}\"\nmkdir -p \"${DEST}\"\nrsync -a \\\n  --exclude 'devbroker' --exclude '.gitignore' --exclude 'README.md' \\\n  \"${SRC}/\" \"${DEST}/\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -1853,6 +1882,7 @@
 				4783FC9B272C628F79A218AF /* HostGatewayPairingURLTests.swift in Sources */,
 				9684C23FB2CD701D95E47EDA /* HostGatewayServerTests.swift in Sources */,
 				71206C48591B67FF56E51E8E /* HostGatewaySessionTests.swift in Sources */,
+				72897701FB2E01A0DA5305D1 /* HostGatewayStaticFilesTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
 				3D08E49AA0DFCF40D705CD5C /* IMessageRuleCoalescerTests.swift in Sources */,
 				DA8BCC5B96E62682BEBA2925 /* IMessageRuleTargetTests.swift in Sources */,
@@ -1888,6 +1918,7 @@
 				8BB5F6D554A6F5BE68613FBA /* ProcessRunnerTests.swift in Sources */,
 				844747226335348450B94EEA /* PtyGridAbsorbTests.swift in Sources */,
 				8AB6456ED364F85D037EBE00 /* RegionFocusControllerTests.swift in Sources */,
+				F0F527252C6EC20636C126EA /* RemoteMirroringTests.swift in Sources */,
 				C309311CA5316E705F68CA77 /* ReturnToPortTests.swift in Sources */,
 				65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */,
 				D63952B04D839AFBF04F5FC1 /* SeahelmCliInstallerTests.swift in Sources */,
@@ -2071,6 +2102,7 @@
 				88CCF79393F2D978227B95E9 /* HostGatewayPairing.swift in Sources */,
 				C2733167BB2AB84E425AC1D1 /* HostGatewayServer.swift in Sources */,
 				0302EB911AF4960365D33FB1 /* HostGatewaySession.swift in Sources */,
+				12348F72590729F9B44FC244 /* HostGatewayStaticFiles.swift in Sources */,
 				11D083414156821D443B9356 /* IMessageChannel.swift in Sources */,
 				81703C0A816662FB4E12B9CF /* IMessageChatDB.swift in Sources */,
 				F9270DA52D3D8E5F8C70F8A4 /* IMessageConfig.swift in Sources */,
