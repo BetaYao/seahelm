@@ -679,3 +679,24 @@ class TerminalCoordinator {
         stationManager.removeAll()
     }
 }
+
+// MARK: - Remote layout mirroring
+
+extension TerminalCoordinator {
+    /// Every live split tree, keyed by worktree path.
+    ///
+    /// A remote client needs this to mirror the window rather than invent its own
+    /// arrangement: the tree is the layout, and its leaves are already keyed by
+    /// the `paneSessionKey` that `pane.vt_open` attaches to.
+    func liveLayouts() -> [String: [String: Any]] {
+        var out: [String: [String: Any]] = [:]
+        for tree in stationManager.allTrees {
+            var entry: [String: Any] = ["root": tree.toCodable().dict]
+            if let focused = tree.allLeaves.first(where: { $0.id == tree.focusedId }) {
+                entry["focused_pane_session_key"] = focused.paneSessionKey
+            }
+            out[tree.worktreePath] = entry
+        }
+        return out
+    }
+}

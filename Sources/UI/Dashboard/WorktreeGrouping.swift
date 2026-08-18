@@ -210,3 +210,66 @@ struct WorktreeGroupingPreference {
         defaults.set(mode.rawValue, forKey: Self.key)
     }
 }
+
+// MARK: - Wire format
+
+/// Remote clients render the same groups the dashboard does. Grouping stays a
+/// Mac-side computation and travels as data, so the browser cannot drift from
+/// the desktop the way a re-implementation would.
+extension WorktreeGroupingMode {
+    init(wire: String) {
+        switch wire.lowercased() {
+        case "status": self = .status
+        case "activity", "activitytime", "time": self = .activityTime
+        case "pane": self = .pane
+        default: self = .repository
+        }
+    }
+
+    var wire: String {
+        switch self {
+        case .repository: return "repository"
+        case .status: return "status"
+        case .activityTime: return "activity"
+        case .pane: return "pane"
+        }
+    }
+}
+
+extension WorktreeGroupID {
+    var wire: String {
+        switch self {
+        case let .repository(name): return "repository:\(name)"
+        case let .status(status): return "status:\(status.rawValue)"
+        case let .activity(bucket): return "activity:\(bucket.rawValue)"
+        }
+    }
+}
+
+extension WorktreeGroupingItem {
+    var dict: [String: Any] {
+        var d: [String: Any] = [
+            "id": id,
+            "worktree_path": path,
+            "repository": repository,
+            "status": status.rawValue,
+            "is_main_worktree": isMainWorktree,
+        ]
+        if let lastActivityAt {
+            d["last_activity_at"] = lastActivityAt.timeIntervalSince1970
+        }
+        return d
+    }
+}
+
+extension WorktreeGroup {
+    var dict: [String: Any] {
+        var d: [String: Any] = [
+            "id": id.wire,
+            "title": title,
+            "items": items.map(\.dict),
+        ]
+        if let status { d["status"] = status.rawValue }
+        return d
+    }
+}

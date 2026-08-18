@@ -771,6 +771,12 @@ class TabCoordinator {
                     controlDataSource.wakeHandler = { [weak self] stationId in
                         self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
                     }
+                    controlDataSource.liveLayoutsHandler = { [weak self] in
+                        self?.terminalCoordinator.liveLayouts() ?? [:]
+                    }
+                    controlDataSource.worktreeGroupsHandler = { [weak self] mode in
+                        self?.worktreeGroups(mode: mode) ?? []
+                    }
                     controlDataSource.exportLayoutHandler = { [weak self] in
                         self?.terminalCoordinator.exportLayout()
                     }
@@ -1681,4 +1687,21 @@ extension TabCoordinator {
 
 private extension String {
     var shellQuoted: String { "'\(self.replacingOccurrences(of: "'", with: "'\\''"))'" }
+}
+
+// MARK: - Remote grouping
+
+extension TabCoordinator {
+    /// The dashboard's own grouping, computed here and shipped as data.
+    ///
+    /// Remote clients render these groups verbatim; re-implementing the rules on
+    /// the far side is what would let the browser and the desktop disagree.
+    func worktreeGroups(mode: String) -> [[String: Any]] {
+        let items = buildWorktreeRowInfos().map {
+            $0.groupingItem(creationDate: DashboardOverviewView.creationDate($0.worktreePath))
+        }
+        return WorktreeGrouping
+            .groups(items, mode: WorktreeGroupingMode(wire: mode), now: Date())
+            .map(\.dict)
+    }
 }

@@ -24,6 +24,10 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// main thread. Each returns the ids actually affected.
     var sleepHandler: ((String?) -> [String])?
     var wakeHandler: ((String?) -> [String])?
+    /// Owner-set window mirroring, run on the main thread: the live split trees
+    /// and the dashboard's grouping for a given mode.
+    var liveLayoutsHandler: (() -> [String: [String: Any]])?
+    var worktreeGroupsHandler: ((String) -> [[String: Any]])?
 
     init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
         self.hookSink = hookSink
@@ -318,5 +322,23 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// request on its own background thread.
     private func runOnMain(_ block: @escaping () -> Void) {
         if Thread.isMainThread { block() } else { DispatchQueue.main.sync(execute: block) }
+    }
+}
+
+// MARK: - Window mirroring
+
+extension SeahelmControlDataSource {
+    func liveLayouts() -> [String: [String: Any]]? {
+        guard let h = liveLayoutsHandler else { return nil }
+        var out: [String: [String: Any]] = [:]
+        runOnMain { out = h() }
+        return out
+    }
+
+    func worktreeGroups(mode: String) -> [[String: Any]]? {
+        guard let h = worktreeGroupsHandler else { return nil }
+        var out: [[String: Any]] = []
+        runOnMain { out = h(mode) }
+        return out
     }
 }

@@ -2425,7 +2425,8 @@ final class DashboardOverviewView: NSView {
     /// Worktree directory creation date, cached — the sort key inside a repo
     /// group. Missing/unreadable paths sort first (distantPast).
     private static var creationDateCache: [String: Date] = [:]
-    private static func creationDate(_ path: String) -> Date {
+    /// Also used to build grouping items for remote clients (TabCoordinator).
+    static func creationDate(_ path: String) -> Date {
         if let cached = creationDateCache[path] { return cached }
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
         let date = attrs?[.creationDate] as? Date ?? .distantPast
