@@ -46,11 +46,23 @@ jobs:
           key: ghosttykit-${{ steps.ghostty.outputs.sha }}
           restore-keys: ghosttykit-
 
+      # Read the version Ghostty itself requires rather than pinning one here.
+      # A submodule bump that raises the minimum otherwise fails the release with
+      # a zig error that looks like a Ghostty bug — which is exactly how v2.0.46
+      # broke.
+      - name: Resolve required Zig version
+        id: zigver
+        run: |
+          v=$(sed -n 's/.*minimum_zig_version = "\([^"]*\)".*/\1/p' ghostty/build.zig.zon | head -1)
+          [ -n "$v" ] || { echo "no minimum_zig_version in ghostty/build.zig.zon" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "ghostty requires zig $v"
+
       - name: Install Zig
         if: steps.cache.outputs.cache-hit != 'true'
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: ${{ steps.zigver.outputs.version }}
 
       - name: Build GhosttyKit.xcframework
         if: steps.cache.outputs.cache-hit != 'true'
