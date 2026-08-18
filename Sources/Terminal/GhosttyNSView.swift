@@ -620,7 +620,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         guard ghostty_surface_has_selection(surface) else { return nil }
         var text = ghostty_text_s()
         guard ghostty_surface_read_selection(surface, &text) else { return nil }
-        defer { ghostty_surface_free_text(&text) }
+        defer { ghostty_surface_free_text(surface, &text) }
         guard let cString = text.text else { return nil }
         let s = String(cString: cString)
         return s.isEmpty ? nil : s
@@ -883,7 +883,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             rectangle: false
         )
         guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
-        defer { ghostty_surface_free_text(&text) }
+        defer { ghostty_surface_free_text(surface, &text) }
         guard let cString = text.text else { return nil }
         return String(cString: cString)
     }

@@ -2295,9 +2295,9 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.44;
+				MARKETING_VERSION = 2.0.45;
 				OTHER_LDFLAGS = (
-					"-lghostty",
+					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
 					"-framework",
 					Metal,
@@ -2533,9 +2533,9 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.44;
+				MARKETING_VERSION = 2.0.45;
 				OTHER_LDFLAGS = (
-					"-lghostty",
+					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
 					"-framework",
 					Metal,

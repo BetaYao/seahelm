@@ -20,10 +20,35 @@ CACHED_XCFRAMEWORK="$CACHE_DIR/$GHOSTTY_SHA/GhosttyKit.xcframework"
 
 echo "==> Ghostty commit: $GHOSTTY_SHA"
 
+# Preflight only matters when we are about to build; a cache hit needs neither
+# toolchain. Both of these fail deep inside `zig build` with errors that read as
+# Ghostty bugs rather than missing prerequisites, which is why they are checked
+# here with the fix spelled out.
+preflight_build_tools() {
+    local want zig_have
+    want="$(sed -n 's/.*minimum_zig_version = "\([^"]*\)".*/\1/p' "$GHOSTTY_DIR/build.zig.zon" | head -1)"
+    if ! command -v zig >/dev/null 2>&1; then
+        echo "ERROR: zig not found; Ghostty needs at least ${want:-the pinned version}." >&2
+        echo "       brew install zig" >&2
+        exit 1
+    fi
+    zig_have="$(zig version)"
+    echo "==> zig $zig_have (ghostty wants >= ${want:-?})"
+
+    # Xcode 26 split the Metal compiler out of the main install, so a machine
+    # that builds everything else still cannot compile Ghostty's shaders.
+    if ! xcrun -sdk macosx metal --version >/dev/null 2>&1; then
+        echo "ERROR: the Metal compiler is unavailable, so Ghostty's shaders cannot build." >&2
+        echo "       xcodebuild -downloadComponent MetalToolchain   # ~690MB, once" >&2
+        exit 1
+    fi
+}
+
 # Check if we have a cached build
 if [ -d "$CACHED_XCFRAMEWORK" ]; then
     echo "==> Using cached GhosttyKit.xcframework"
 else
+    preflight_build_tools
     echo "==> Building GhosttyKit.xcframework (this may take a few minutes)..."
     cd "$GHOSTTY_DIR"
     # -Demit-macos-app=false: emit-macos-app defaults to emit-xcframework, and we
@@ -49,15 +74,15 @@ if [ -f "$XC_HEADER" ]; then
     cp "$XC_HEADER" "$REPO_ROOT/ghostty.h"
     echo "==> Synced ghostty.h from GhosttyKit.xcframework"
 
-    # Re-apply corrections to declarations upstream got wrong, because this sync
-    # would otherwise silently restore them. Upstream c5f921bb0 declares a
-    # surface parameter `ghostty_surface_free_text` does not take; calling it
-    # that way makes the free a no-op and leaks every read_text buffer (measured
-    # at 105 MB/h across 19 panes). Idempotent: matches only the upstream form.
-    /usr/bin/sed -i '' \
-        's|^void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s\*);|void ghostty_surface_free_text(ghostty_text_s*);|' \
-        "$REPO_ROOT/ghostty.h"
-    echo "==> Re-applied local ghostty.h declaration fixes"
+    # No local corrections are applied any more. We used to rewrite
+    # `ghostty_surface_free_text` to drop the surface parameter its
+    # implementation did not take — a mismatch that made the free a no-op and
+    # leaked every read_text buffer (105 MB/h across 19 panes). Upstream fixed
+    # it from the other side in 12967b68f by giving the implementation the
+    # parameter, so re-applying our rewrite here would now break the ABI in the
+    # opposite, worse direction: a one-argument call into a two-argument
+    # function dereferences whatever x1 happens to hold.
+    # scripts/check-ghostty-abi.py below is what keeps either form honest.
 fi
 
 # The sync above is the moment a wrong upstream declaration enters the build, so
