@@ -110,7 +110,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 **Thread safety:** `ghosttyLock` (NSLock) serializes all Ghostty C API calls between the background status poll and main-thread input. Key input deliberately does NOT hold the lock (Ghostty is internally thread-safe for keys, and holding it would deadlock on synchronous callbacks).
 
-**Window key handling:** `SeahelmWindow.performKeyEquivalent` handles split pane shortcuts (Cmd+D split, Cmd+Shift+Arrow move focus, Cmd+Ctrl+Arrow resize) before menu key equivalents. `sendEvent` intercepts Escape.
+**Window key handling:** `SeahelmWindow.performKeyEquivalent` handles split pane shortcuts (Cmd+D / Cmd+Shift+D split, Cmd+Option+Arrow move split focus, Cmd+Ctrl+Arrow resize) before menu key equivalents. `sendEvent` intercepts Escape.
 
 ## Agent Orchestration ("the fleet")
 
