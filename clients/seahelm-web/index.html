@@ -1048,6 +1048,13 @@ function renderTermKeys(){
     bar.appendChild(b);
   }
 
+  const copy = document.createElement('button');
+  copy.textContent = '⧉';
+  copy.title = '复制选区(手机上没有 ⌘C)';
+  copy.disabled = !live;
+  copy.onclick = () => copySelection();
+  bar.appendChild(copy);
+
   const sep = document.createElement('span');
   sep.className = 'sep';
   bar.appendChild(sep);
@@ -1072,6 +1079,19 @@ function renderTermKeys(){
     paneAction('pane.close', {});
   };
   bar.appendChild(close);
+}
+
+/** Button path: no `copy` event to hijack, so write the clipboard directly. */
+function copySelection(){
+  const entry = S.vt.focus ? S.vt.panes.get(S.vt.focus) : null;
+  if (!entry) return;
+  const text = entry.term.getSelection();
+  if (!text){ log('sys', '(copy)', '没有选中内容'); return; }
+  // Requires a secure context, which the page already needs for pairing anyway.
+  navigator.clipboard.writeText(text)
+    .then(() => log('sys', '(copy)', `已复制 ${text.length} 字符`))
+    .catch((e) => log('sys', '(copy failed)', String(e && e.message)));
+  try { entry.term.focus(); } catch (e) {}
 }
 
 function sendRawKey(bytes){
@@ -1246,6 +1266,19 @@ function buildLayoutLeaf(node){
   });
   t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
   el.addEventListener('mousedown', () => focusPane(key));
+
+  // xterm paints its selection onto the canvas, so the browser has no DOM range
+  // covering it. A native copy therefore falls back to whatever the browser does
+  // consider selected — xterm's hidden helper textarea, which holds one row — and
+  // the result is a multi-line selection that copies a single line. Feed the
+  // clipboard the terminal's own selection instead. Covers ⌘C and the context
+  // menu alike, since both raise `copy`.
+  el.addEventListener('copy', (e) => {
+    const text = t.getSelection();
+    if (!text) return;
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+  });
   return el;
 }
 
