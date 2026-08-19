@@ -24,8 +24,13 @@ final class ShortcutHintBar: NSView {
     /// the strip says.
     ///
     /// Six is the ceiling — the strip is budgeted at two lines of three (see
-    /// `ShortcutHintBarTests`), so making room for the cycle cost `⇧⌘D`, the one
-    /// chord a reader can guess from the `⌘D` sitting next to it.
+    /// `ShortcutHintBarTests`), so every addition is a trade. Making room for the
+    /// cycle cost `⇧⌘D`, the one chord a reader can guess from the `⌘D` beside it;
+    /// making room for split focus cost `?`.
+    ///
+    /// Dropping `?` costs more than the slot: it was the advertisement for the
+    /// help overlay, which is where every chord that does not fit here lives. The
+    /// key still works — nothing on screen says so any more.
     private static let items: [(key: String, label: String)] = [
         // "Next"/"Prev" rather than "Worktree+/-": the strip is budgeted at two
         // rows of three (ShortcutHintBarTests) and the longer word drops it to
@@ -34,9 +39,11 @@ final class ShortcutHintBar: NSView {
         ("\u{2303}\u{21E5}", "Next"),
         ("\u{2303}\u{21E7}\u{21E5}", "Prev"),
         ("\u{2318}P", "Command"),
-        ("\u{2318}W", "Close"),
+        // Arrows shown as ←→ only, for width; the `?` overlay carries the full
+        // "⌘⌥ ← → ↑ ↓" along with every chord that did not fit here.
+        ("\u{2318}\u{2325}\u{2190}\u{2192}", "Focus"),
         ("\u{2318}D", "Split"),
-        ("?", "Keys"),
+        ("\u{2318}W", "Close"),
     ]
 
     private static let chipBg = NSColor(name: nil) { appearance in
