@@ -147,12 +147,16 @@ final class HostGatewaySession {
             queueDecisionCleared(sKey)
             return encodeControlResult(id: id, result: picked)
         case "decision.dismiss":
-            // Dismissing has to reach the store, not just the client that asked:
-            // a decision left open is replayed on the next authentication, so a
-            // local-only hide would come straight back on reload.
+            // Two stores hold the same suggestion: this one, which feeds remote
+            // clients, and FirstMate's pending orders, which the desktop island
+            // draws. Declining has to reach both, or the card the user just
+            // dismissed is still standing on the Mac.
             let dKey = paneSessionKey(from: params)
             decisions.clear(paneSessionKey: dKey)
+            // Replayed on the next authentication if left open, so clearing the
+            // local store is what stops a dismissal from coming back on reload.
             queueDecisionCleared(dKey)
+            _ = router.handle(method: "decision.dismiss", params: ["pane_id": dKey])
             return HostGatewayFrame.encode(.response(id: id, result: ["dismissed": true], error: nil))
         case "pane.send_keys":
             if let key = vtKey(from: params), openVTKeys.contains(key),

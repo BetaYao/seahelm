@@ -137,3 +137,24 @@ extension HostGatewayDecisionsTests {
         XCTAssertNil(HostGatewayDecisions.notifyParams(for: open)["message"])
     }
 }
+
+final class PendingOrdersDismissTests: XCTestCase {
+    private func suggestion(terminalID: String) -> FirstMateAction {
+        FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: "/wt",
+                        branch: "main", project: "p", terminalID: terminalID,
+                        message: "done", options: ["a", "b"])
+    }
+
+    func testDismissDropsOnlyThatPanesSuggestion() {
+        let q = PendingOrdersQueue()
+        q.enqueue(suggestion(terminalID: "t1"))
+        q.enqueue(suggestion(terminalID: "t2"))
+        XCTAssertTrue(q.dismissSuggestion(terminalID: "t1"))
+        XCTAssertEqual(q.all().map(\.action.terminalID), ["t2"])
+    }
+
+    func testDismissingNothingReportsNothing() {
+        // The caller uses this to tell "declined" from "already gone".
+        XCTAssertFalse(PendingOrdersQueue().dismissSuggestion(terminalID: "t1"))
+    }
+}

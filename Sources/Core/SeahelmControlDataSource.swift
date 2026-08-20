@@ -28,6 +28,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// and the dashboard's grouping for a given mode.
     var liveLayoutsHandler: (() -> [String: [String: Any]])?
     var worktreeGroupsHandler: ((String) -> [[String: Any]])?
+    /// Decline a pane's pending suggestion (main thread — it is UI state).
+    var dismissDecisionHandler: ((String) -> Bool)?
 
     init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
         self.hookSink = hookSink
@@ -340,5 +342,14 @@ extension SeahelmControlDataSource {
         var out: [[String: Any]] = []
         runOnMain { out = h(mode) }
         return out
+    }
+}
+
+extension SeahelmControlDataSource {
+    func dismissDecision(paneId: String) -> Bool {
+        guard let h = dismissDecisionHandler else { return false }
+        var ok = false
+        runOnMain { ok = h(paneId) }
+        return ok
     }
 }
