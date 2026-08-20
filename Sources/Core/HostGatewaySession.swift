@@ -146,6 +146,14 @@ final class HostGatewaySession {
             decisions.clear(paneSessionKey: sKey)
             queueDecisionCleared(sKey)
             return encodeControlResult(id: id, result: picked)
+        case "decision.dismiss":
+            // Dismissing has to reach the store, not just the client that asked:
+            // a decision left open is replayed on the next authentication, so a
+            // local-only hide would come straight back on reload.
+            let dKey = paneSessionKey(from: params)
+            decisions.clear(paneSessionKey: dKey)
+            queueDecisionCleared(dKey)
+            return HostGatewayFrame.encode(.response(id: id, result: ["dismissed": true], error: nil))
         case "pane.send_keys":
             if let key = vtKey(from: params), openVTKeys.contains(key),
                let utf8 = utf8Payload(from: params) {

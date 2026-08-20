@@ -290,11 +290,15 @@
   /* ── event / suggestion cards ───────────────────────────── */
   .ev{background:var(--panel);border:1px solid var(--attention);
     border-radius:var(--r);padding:10px;margin-bottom:8px}
-  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;letter-spacing:.16em}
+  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;
+    letter-spacing:.16em;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .ev .ev-meta{font-size:10px;color:var(--muted);margin-top:2px}
   /* The dock floats over the terminal, so an agent that wrote three paragraphs
      before its options must not bury the thing it is asking. Clamped, with the
      full text one tap away in the pane itself. */
+  .ev-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
+    line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
+  .ev-x:hover{color:var(--danger);background:var(--danger-14)}
   .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45;white-space:pre-wrap;
     display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .ev .opt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line-20);
@@ -844,12 +848,21 @@ function renderSuggestCard(pid, e){
   const label = (p.title||'').trim() || shortId(p.pane_id||pid);
   const meta = [p.project, p.branch].filter(Boolean).join(' · ');
   const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
-  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}</div>`
+  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}`
+    + `<button class="ev-x" title="放弃这条建议">✕</button></div>`
     + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
     + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
   // Tapping the card jumps to the pane that asked, so you can see the context
   // before answering.
   box.onclick=(ev)=>{ if (ev.target.closest('button')) return; selectPaneByKey(pid); };
+  // The dock floats over the terminal, so without this the only way out is to
+  // pick an option — which types into the pane. Declining has to be free.
+  box.querySelector('.ev-x').onclick=(ev)=>{
+    ev.stopPropagation();
+    S.events.delete(pid);          // optimistic: the card goes now
+    renderSuggestions();
+    sendCommand('decision.dismiss', { pane_session_key: pid });
+  };
   (e.options||[]).forEach((opt,i)=>{
     const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${esc(opt)}`;
     b.onclick=(ev)=>{ ev.stopPropagation();
