@@ -662,6 +662,14 @@ function applySessionSnapshot(result){
 }
 
 function connectMqtt(url){
+  // A restored session has no E2EE key — it is never persisted — so the MQTT
+  // path would silently fall back to plaintext. Re-pair instead: quietly
+  // downgrading someone's encryption is worse than asking for the link again.
+  if (S.authPass && !S.encKey){
+    log('sys', '(mqtt)', '恢复的会话没有 E2EE 密钥,请重新配对后再用 MQTT');
+    setStatus(false, '需重新配对');
+    return;
+  }
   S.transport = 'mqtt';
   // Paired → broker creds are HKDF-derived (username = mac_id, password = hex).
   // Self-hosted EMQX currently allows any user/pass (no authenticator yet).
@@ -702,15 +710,41 @@ function wrapClient(c){
 // ── pairing ─────────────────────────────────────────────────────────────────
 // Apply a `seahelm://pair?...` link: derive broker creds + E2EE key, fill fields,
 // persist for next load. This is the whole "login" — no account, no session.
+// What survives a reload is the *derived* gateway credential, never the pair
+// link. The link carries the root secret, and the root secret is the thing that
+// can mint every other key — for this gateway and for whatever a future version
+// derives. Anything running on this origin can read localStorage, so keeping the
+// root there means one injected script (a Cloudflare beacon, an extension, an
+// XSS) walks away with permanent, total control of every pane.
+//
+// The auth token is scoped: it opens this gateway and nothing else, and rotating
+// the pairing invalidates it. The E2EE key is not stored at all — WebCrypto
+// imports it non-extractable, which is the right default and one we do not fight.
+const CREDS_KEY = 'seahelm_creds';
+try { localStorage.removeItem('seahelm_pair'); } catch (e) {}   // drop the old plaintext
+
 async function applyPair(link){
   const p = E2EE.parsePairURI(link);
   const { password, encKey } = await E2EE.deriveKeys(p.rootBytes);
   S.encKey = encKey; S.authPass = password; S.mac = p.mac;
   $('broker').value = edgeBroker() || p.broker; $('mac').value = p.mac;
   $('user').value = p.mac; $('pass').value = '';
-  localStorage.setItem('seahelm_pair', link);
+  try {
+    localStorage.setItem(CREDS_KEY, JSON.stringify({ b: p.broker, m: p.mac, t: password }));
+  } catch (e) {}
   log('sys', '(paired)', `${p.mac} · E2EE on`);
   renderGate();
+}
+
+/** Restore without the root secret: enough to authenticate, not to re-derive. */
+function restoreCreds(){
+  let c;
+  try { c = JSON.parse(localStorage.getItem(CREDS_KEY) || 'null'); } catch (e) { c = null; }
+  if (!c || !c.t || !c.m) return false;
+  S.authPass = c.t; S.mac = c.m; S.encKey = null;
+  $('broker').value = edgeBroker() || c.b || ''; $('mac').value = c.m;
+  $('user').value = c.m; $('pass').value = '';
+  return true;
 }
 function pairPrompt(){
   const link = prompt('粘贴 macOS 配对界面的长链接(seahelm://pair?…):', '');
@@ -719,7 +753,8 @@ function pairPrompt(){
 }
 function clearPair(){
   S.encKey = null; S.authPass = null;
-  localStorage.removeItem('seahelm_pair');
+  localStorage.removeItem(CREDS_KEY);
+  localStorage.removeItem('seahelm_pair');   // pre-migration installs
   log('sys', '(unpaired)', '回到明文/手填模式');
   renderGate();
 }
@@ -1742,8 +1777,7 @@ function pubMock(){
 renderGate();   // the gate is the page until a connection exists
 // Restore a saved pairing so a reload stays logged in (creds derived, not stored raw).
 (function restorePair(){
-  const saved = localStorage.getItem('seahelm_pair');
-  if (saved) applyPair(saved).catch(()=>localStorage.removeItem('seahelm_pair'));
+  if (restoreCreds()) renderGate();
 })();
 $('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
 $('scrim').onclick=()=>setDrawer(false);
