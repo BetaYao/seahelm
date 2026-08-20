@@ -24,6 +24,10 @@ final class HostGatewayServer {
     private var wsListener: NWListener?
     private var wsPort: UInt16 = 0
 
+    /// Open questions/suggestions, shared by every session: one client answering
+    /// resolves it for all of them, and a client arriving late needs the backlog.
+    private let decisions = HostGatewayDecisions()
+    private var eventToken: Int?
     private var connections: [ObjectIdentifier: ConnectionState] = [:]
     private var proxied: [ObjectIdentifier: NWConnection] = [:]
     private var readyHandlers: [() -> Void] = []
@@ -74,7 +78,27 @@ final class HostGatewayServer {
                 if self.isListening { self.fireReadyHandlers() }
                 return
             }
+            self.subscribeToAgentEvents()
             self.startWebSocketListener()
+        }
+    }
+
+    /// AgentRegistry → EventHub → every authenticated session.
+    ///
+    /// EventHub is already the fan-out seam the control socket and MQTT use, so
+    /// the gateway subscribes rather than growing a second path out of the
+    /// registry. Events arrive on main; everything here belongs to `queue`.
+    private func subscribeToAgentEvents() {
+        guard eventToken == nil else { return }
+        eventToken = EventHub.shared.subscribe { [weak self] _, event in
+            guard let self else { return }
+            self.queue.async {
+                let change = self.decisions.apply(event: event)
+                if case .none = change { return }
+                for state in self.connections.values {
+                    state.session.pushDecision(change)
+                }
+            }
         }
     }
 
@@ -84,6 +108,8 @@ final class HostGatewayServer {
                 state.connection.cancel()
             }
             connections.removeAll()
+            if let eventToken { EventHub.shared.unsubscribe(eventToken) }
+            eventToken = nil
             for connection in proxied.values {
                 connection.cancel()
             }
@@ -351,7 +377,8 @@ final class HostGatewayServer {
             router: router,
             expectedMacId: expectedMacId,
             rootSecretBase64url: rootSecretBase64url,
-            vt: vt)
+            vt: vt,
+            decisions: decisions)
         let key = ObjectIdentifier(connection)
         let state = ConnectionState(connection: connection, session: session)
         connections[key] = state

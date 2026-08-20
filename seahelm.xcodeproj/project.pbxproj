@@ -147,6 +147,7 @@
 		5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */; };
 		5BFD525836B15C48CC54A5D8 /* WatchFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0982B809334A31181947736 /* WatchFeed.swift */; };
 		5D6CF18A7384A74B640EFAAC /* WorktreeStatusAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4775959C72857610AC1F12DC /* WorktreeStatusAggregator.swift */; };
+		5E77C3E6AA55F970F5DD877E /* HostGatewayDecisions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 399B19A39BB25DDA3D401B60 /* HostGatewayDecisions.swift */; };
 		5F16B6F4A4D85F5E6F515A4E /* WebhookSuggestEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54322E1FB43B65F94D1AAC20 /* WebhookSuggestEventTests.swift */; };
 		5F1EAF9EF49C5686FF50F689 /* CommandParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98B43315E436E0794D28C474 /* CommandParser.swift */; };
 		5F7CEFC99E339F7621D6509A /* ZmxLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063BC4CAFB28A7B7DEA60474 /* ZmxLocatorTests.swift */; };
@@ -195,6 +196,7 @@
 		75772A087B197B7F7050BC43 /* WorktreeShellActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1FA2EB699654E9A701124D1 /* WorktreeShellActions.swift */; };
 		75DF92B7A3EDC695B4BA5E9B /* WorktreeTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BDC0C3284F3CAF4BD18C62 /* WorktreeTitleResolverTests.swift */; };
 		7839409D46CC0B8E4810B869 /* WorktreeCreatorEnvCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */; };
+		785DB0B4417DD04E94CD58AD /* HostGatewayDecisionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */; };
 		79F532FA70B21691FB226AF8 /* GitHubDiffAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3492399099DDDAE527C6CA /* GitHubDiffAdapter.swift */; };
 		7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */; };
 		7AD64F51F6EE5BA663EEF30D /* AgentRegistryWebhookPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4985A21CB0E9D8B4708E26 /* AgentRegistryWebhookPathTests.swift */; };
@@ -548,6 +550,7 @@
 		376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewFocusModelTests.swift; sourceTree = "<group>"; };
 		37A61F49272C1D9D5FAF19F2 /* ChromeCollapseUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeCollapseUITests.swift; sourceTree = "<group>"; };
 		38FD43578EB5A227077BAA11 /* ChromeCollapseAnimationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeCollapseAnimationTests.swift; sourceTree = "<group>"; };
+		399B19A39BB25DDA3D401B60 /* HostGatewayDecisions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayDecisions.swift; sourceTree = "<group>"; };
 		39DD3FFFF216C576CFDC7683 /* XCUIElementExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUIElementExtensions.swift; sourceTree = "<group>"; };
 		3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorTheme+Seahelm.swift"; sourceTree = "<group>"; };
 		3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorTests.swift; sourceTree = "<group>"; };
@@ -813,6 +816,7 @@
 		CF9A024C6CD76762DD132684 /* AgentRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistry.swift; sourceTree = "<group>"; };
 		CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayConfig.swift; sourceTree = "<group>"; };
 		CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
+		D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayDecisionsTests.swift; sourceTree = "<group>"; };
 		D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffTests.swift; sourceTree = "<group>"; };
 		D18A2E8441934257374C57B2 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		D2343249B5B46DF1CACF3E11 /* EmailAttachmentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAttachmentStore.swift; sourceTree = "<group>"; };
@@ -985,6 +989,7 @@
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
 				FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */,
 				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
+				399B19A39BB25DDA3D401B60 /* HostGatewayDecisions.swift */,
 				A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */,
 				1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */,
 				AE7778575158B23A9C90C792 /* HostGatewayServer.swift */,
@@ -1361,6 +1366,7 @@
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
 				16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */,
 				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
+				D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */,
 				CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */,
 				148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */,
 				A7F8EA0DFCBD7F74049EA635 /* HostGatewayServerTests.swift */,
@@ -1878,6 +1884,7 @@
 				6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */,
 				4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */,
 				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
+				785DB0B4417DD04E94CD58AD /* HostGatewayDecisionsTests.swift in Sources */,
 				50C0E2D95435EA0741D4BFE4 /* HostGatewayFrameTests.swift in Sources */,
 				4783FC9B272C628F79A218AF /* HostGatewayPairingURLTests.swift in Sources */,
 				9684C23FB2CD701D95E47EDA /* HostGatewayServerTests.swift in Sources */,
@@ -2098,6 +2105,7 @@
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,
 				C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */,
 				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
+				5E77C3E6AA55F970F5DD877E /* HostGatewayDecisions.swift in Sources */,
 				506FABB5322B42EDC75221F8 /* HostGatewayFrame.swift in Sources */,
 				88CCF79393F2D978227B95E9 /* HostGatewayPairing.swift in Sources */,
 				C2733167BB2AB84E425AC1D1 /* HostGatewayServer.swift in Sources */,
@@ -2295,7 +2303,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.45;
+				MARKETING_VERSION = 2.0.47;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2533,7 +2541,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.45;
+				MARKETING_VERSION = 2.0.47;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",

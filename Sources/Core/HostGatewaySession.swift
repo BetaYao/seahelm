@@ -13,6 +13,8 @@ final class HostGatewaySession {
     private let expectedMacId: String
     private let rootSecretBase64url: String
     private let vt: HostGatewayVTAttaching
+    /// Shared with the server, which feeds it EventHub and fans out the results.
+    private let decisions: HostGatewayDecisions
     private var authenticated = false
     private var openVTKeys: Set<String> = []
     private var pendingNotifications: [HostGatewayOutbound] = []
@@ -22,15 +24,40 @@ final class HostGatewaySession {
     init(router: ControlRouter,
          expectedMacId: String,
          rootSecretBase64url: String,
-         vt: HostGatewayVTAttaching) {
+         vt: HostGatewayVTAttaching,
+         decisions: HostGatewayDecisions = HostGatewayDecisions()) {
         self.router = router
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
         self.vt = vt
+        self.decisions = decisions
         vt.onNotify = { [weak self] method, params in
             self?.pendingNotifications.append(.notify(method: method, params: params))
             self?.onPendingOutbound?()
         }
+    }
+
+    /// Server → session: an event that opened or closed a decision.
+    func pushDecision(_ change: HostGatewayDecisions.Change) {
+        guard authenticated else { return }
+        switch change {
+        case .opened(let d):
+            pendingNotifications.append(
+                .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d)))
+        case .cleared(let key):
+            pendingNotifications.append(
+                .notify(method: "pane.event", params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))
+        case .none:
+            return
+        }
+        onPendingOutbound?()
+    }
+
+    /// Answering locally clears it for everyone; other clients must be told.
+    private func queueDecisionCleared(_ key: String) {
+        pendingNotifications.append(
+            .notify(method: "pane.event", params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))
+        onPendingOutbound?()
     }
 
     func drainNotifications() -> [String] {
@@ -61,7 +88,16 @@ final class HostGatewaySession {
             macId: macId, token: token,
             expectedMacId: expectedMacId, rootSecretBase64url: rootSecretBase64url)
         if ok { authenticated = true }
-        return [HostGatewayFrame.encode(.response(id: id, result: ["ok": ok], error: nil))]
+        var out = [HostGatewayFrame.encode(.response(id: id, result: ["ok": ok], error: nil))]
+        if ok {
+            // Replay what is already open. Without this a client that connects a
+            // second after a question is raised waits for an event it has missed.
+            for d in decisions.pending() {
+                out.append(HostGatewayFrame.encode(
+                    .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d))))
+            }
+        }
+        return out
     }
 
     private func handleAuthenticated(id: String, method: String, params: [String: Any]) -> String {
@@ -83,6 +119,33 @@ final class HostGatewaySession {
             let key = paneSessionKey(from: params)
             vt.keepalive(paneSessionKey: key)
             return HostGatewayFrame.encode(.response(id: id, result: ["ok": true], error: nil))
+        case "question.answer":
+            // The on-screen prompt is navigated, not addressed: move down `index`
+            // times, then Return. Same shape MqttChannel drives for the Watch.
+            let qKey = paneSessionKey(from: params)
+            let qIndex = max(0, params["index"] as? Int ?? 0)
+            var keys = Array(repeating: "down", count: qIndex)
+            keys.append("enter")
+            let answered = router.handle(method: "pane.send_keys",
+                                         params: ["pane_id": qKey, "keys": keys])
+            decisions.clear(paneSessionKey: qKey)
+            queueDecisionCleared(qKey)
+            return encodeControlResult(id: id, result: answered)
+        case "suggest.pick":
+            // A suggestion is text, so the chosen option is typed verbatim — the
+            // index only means something next to the options we pushed.
+            let sKey = paneSessionKey(from: params)
+            let sIndex = max(0, params["index"] as? Int ?? 0)
+            let opts = decisions.options(forPaneSessionKey: sKey)
+            guard sIndex < opts.count else {
+                return encodeError(id: id, code: ControlError.invalidParams,
+                                   message: "no such suggestion")
+            }
+            let picked = router.handle(method: "pane.send_text",
+                                       params: ["pane_id": sKey, "text": opts[sIndex], "enter": true])
+            decisions.clear(paneSessionKey: sKey)
+            queueDecisionCleared(sKey)
+            return encodeControlResult(id: id, result: picked)
         case "pane.send_keys":
             if let key = vtKey(from: params), openVTKeys.contains(key),
                let utf8 = utf8Payload(from: params) {
