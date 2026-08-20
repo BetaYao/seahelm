@@ -114,3 +114,26 @@ extension HostGatewayDecisionsTests {
                        .cleared(paneSessionKey: "k1"))
     }
 }
+
+extension HostGatewayDecisionsTests {
+    /// Three buttons with no text above them answer a question the user cannot
+    /// see. The prose that authored the options travels with them.
+    func testSuggestCarriesTheMessageThatAuthoredIt() {
+        let d = HostGatewayDecisions()
+        guard case .opened(let open) = d.apply(event: [
+            "pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+            "suggest": ["options": ["a", "b"], "message": "全部收敛了。剩两个问题。"],
+        ]) else { return XCTFail() }
+        let p = HostGatewayDecisions.notifyParams(for: open)
+        XCTAssertEqual(p["message"] as? String, "全部收敛了。剩两个问题。")
+        XCTAssertNil(p["prompt"], "a suggestion reports; it does not prompt")
+    }
+
+    func testSuggestWithoutProseOmitsTheField() {
+        let d = HostGatewayDecisions()
+        guard case .opened(let open) = d.apply(event: [
+            "pane_session_key": "k1", "seq": 1, "suggest": ["options": ["a"]],
+        ]) else { return XCTFail() }
+        XCTAssertNil(HostGatewayDecisions.notifyParams(for: open)["message"])
+    }
+}

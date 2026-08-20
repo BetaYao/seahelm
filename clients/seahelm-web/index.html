@@ -292,7 +292,11 @@
     border-radius:var(--r);padding:10px;margin-bottom:8px}
   .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;letter-spacing:.16em}
   .ev .ev-meta{font-size:10px;color:var(--muted);margin-top:2px}
-  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45}
+  /* The dock floats over the terminal, so an agent that wrote three paragraphs
+     before its options must not bury the thing it is asking. Clamped, with the
+     full text one tap away in the pane itself. */
+  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45;white-space:pre-wrap;
+    display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .ev .opt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line-20);
     color:var(--text);border-radius:var(--r);padding:7px 10px;margin-top:5px;cursor:pointer;font-size:12px;
     font-family:var(--mono);transition:border-color .1s}

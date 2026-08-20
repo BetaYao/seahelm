@@ -57,8 +57,11 @@ final class HostGatewayDecisions {
             return .opened(d)
         }
         if let s = event["suggest"] as? [String: Any] {
+            // Carried in `prompt`: it is the text the options answer, which is the
+            // same role a question's prompt plays. The wire keeps them distinct.
             let d = Decision(paneSessionKey: key, paneId: paneId, kind: "suggest",
-                             prompt: "", options: s["options"] as? [String] ?? [], seq: seq)
+                             prompt: s["message"] as? String ?? "",
+                             options: s["options"] as? [String] ?? [], seq: seq)
             lock.lock(); open[key] = d; lock.unlock()
             return .opened(d)
         }
@@ -115,6 +118,10 @@ final class HostGatewayDecisions {
         if d.kind == "question" {
             p["prompt"] = d.prompt
             p["danger"] = isDanger(d.prompt)
+        } else if !d.prompt.isEmpty {
+            // `message` rather than `prompt`: a suggestion is not asking, it is
+            // reporting — and the client renders the two the same way anyway.
+            p["message"] = d.prompt
         }
         return p
     }
