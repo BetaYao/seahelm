@@ -77,6 +77,29 @@
     border-radius:var(--r);margin-left:auto;text-transform:uppercase}
   .st-off{background:var(--danger-14);color:var(--danger)}
   .st-on{background:var(--running-14);color:var(--running)}
+  /* ── connection gate ────────────────────────────────────── */
+  .gate{position:fixed;top:0;left:0;right:0;bottom:0;z-index:90;
+    display:flex;align-items:center;justify-content:center;padding:24px;
+    background:var(--bg);
+    background-image:radial-gradient(120% 80% at 50% -10%, #0c303a 0%, var(--bg) 55%)}
+  .gate[hidden]{display:none}
+  .gate-card{width:min(440px,100%);display:flex;flex-direction:column;gap:12px;text-align:center}
+  .gate-title{font-size:15px;font-weight:600;letter-spacing:.02em}
+  .gate-hint{font-size:12px;color:var(--muted);line-height:1.5}
+  .gate-input{width:100%;background:var(--panel);border:1px solid var(--line-20);
+    color:var(--text);border-radius:var(--r);padding:10px;font-family:var(--mono);
+    font-size:12px;outline:none;resize:vertical}
+  .gate-input:focus{border-color:var(--accent)}
+  .gate-primary{background:var(--accent);color:#042028;border:0;border-radius:var(--r);
+    padding:11px 16px;font-weight:600;font-size:13px;font-family:var(--mono);cursor:pointer}
+  .gate-primary:hover{filter:brightness(1.08)}
+  .gate-link{background:none;border:0;color:var(--muted);font-family:var(--mono);
+    font-size:11px;cursor:pointer;padding:4px}
+  .gate-link:hover{color:var(--danger)}
+  .gate-mac{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    font-size:13px;color:var(--text)}
+  .gate-error{color:var(--danger);font-size:12px;line-height:1.5;text-align:left}
+  .gate-error[hidden]{display:none}
   /* ── layout ─────────────────────────────────────────────── */
   main{flex:1;display:grid;grid-template-columns:300px 1fr 360px;overflow:hidden;
     transition:grid-template-columns .16s ease}
@@ -106,7 +129,6 @@
   @media (max-width:760px){
     main, main.nolog{grid-template-columns:1fr}
     #drawerBtn{display:inline-flex}
-    #dndBtn{display:none}
     #leftcol{position:fixed;top:0;bottom:0;left:0;z-index:80;
       width:min(86vw,320px);background:var(--bg);
       border-right:1px solid var(--line-20);box-shadow:0 0 40px rgba(0,0,0,.55);
@@ -141,6 +163,18 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vt-leaf.on .vt-leaf-title{color:var(--accent)}
   .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden}
+  /* Single-pane fallback: the strip stands in for the panes we stopped drawing,
+     so the layout is still legible even though only one of them is on screen. */
+  .vt-single{flex:1 1 auto;min-height:0;min-width:0;display:flex}
+  .vt-single>*{flex:1 1 auto;min-width:0;min-height:0}
+  #termWrap:has(.vt-single){display:flex;flex-direction:column;gap:6px}
+  .pane-strip{flex:none;display:flex;gap:4px;overflow-x:auto;padding-bottom:2px}
+  .pane-chip{flex:none;display:inline-flex;align-items:center;gap:5px;
+    background:var(--panel);color:var(--muted);border:1px solid var(--line-12);
+    border-radius:var(--r);padding:4px 9px;font-family:var(--mono);font-size:11px;
+    cursor:pointer;white-space:nowrap;max-width:46vw;overflow:hidden}
+  .pane-chip.on{background:var(--accent-12);border-color:var(--line-38);color:var(--accent)}
+  .pane-chip span{overflow:hidden;text-overflow:ellipsis}
   #termWrap.empty{display:flex;align-items:center;justify-content:center}
   /* Scrolled back in a live terminal, there is otherwise no way home but to
      swipe all the way down — and new output keeps arriving below you. */
@@ -256,9 +290,17 @@
   /* ── event / suggestion cards ───────────────────────────── */
   .ev{background:var(--panel);border:1px solid var(--attention);
     border-radius:var(--r);padding:10px;margin-bottom:8px}
-  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;letter-spacing:.16em}
+  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;
+    letter-spacing:.16em;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .ev .ev-meta{font-size:10px;color:var(--muted);margin-top:2px}
-  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45}
+  /* The dock floats over the terminal, so an agent that wrote three paragraphs
+     before its options must not bury the thing it is asking. Clamped, with the
+     full text one tap away in the pane itself. */
+  .ev-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
+    line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
+  .ev-x:hover{color:var(--danger);background:var(--danger-14)}
+  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45;white-space:pre-wrap;
+    display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .ev .opt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line-20);
     color:var(--text);border-radius:var(--r);padding:7px 10px;margin-top:5px;cursor:pointer;font-size:12px;
     font-family:var(--mono);transition:border-color .1s}
@@ -295,12 +337,11 @@
       <input class="sm" id="pass" placeholder="pass" type="password" value="" />
       <input class="sm" id="mac" value="live" title="mac_id" />
     </span>
-    <span id="pairZone" class="pairzone"></span>
-    <button id="connectBtn">连接</button>
-    <button class="ghost" id="dndBtn" title="切换专注勿扰(Do Not Disturb)">DND</button>
-    <button class="ghost" id="logBtn" title="隐藏报文日志">日志</button>
     <span id="status" class="st-off">离线</span>
+    <button class="ghost" id="logBtn" title="隐藏报文日志">日志</button>
+    <button class="ghost" id="disconnectBtn" title="断开连接">断开</button>
   </header>
+  <div id="gate" class="gate" hidden></div>
   <main>
     <div class="col" id="leftcol">
       <div class="fm-header">
@@ -331,6 +372,7 @@
       <div class="toolbar">
         <button id="clearLog">清空</button>
         <button id="pubMock">发 mock 快照</button>
+        <button id="logVtBtn">VT 帧</button>
       </div>
       <div id="log"></div>
     </div>
@@ -345,6 +387,16 @@
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
+const GEOM_KEY = 'seahelm_pane_geometry';
+function loadGeom(){
+  try { return new Map(Object.entries(JSON.parse(localStorage.getItem(GEOM_KEY) || '{}'))); }
+  catch (e) { return new Map(); }
+}
+function saveGeom(){
+  try { localStorage.setItem(GEOM_KEY, JSON.stringify(Object.fromEntries(S.geom))); }
+  catch (e) {}   // private mode, quota — the cache is an optimisation, not state
+}
+
 const S = {
   client:null, mac:'testmac', transport:null,   // transport: null | 'mqtt' | 'gateway'
   gw:null,   // gateway WebSocket state when transport === 'gateway'
@@ -356,7 +408,13 @@ const S = {
   // VT terminal: `open` is the pane key currently streaming
   // One entry per mirrored pane, keyed by paneSessionKey; `focus` is the pane
   // keystrokes reach, `worktree` is the layout currently mounted.
-  vt:{ panes:new Map(), focus:null, worktree:null },
+  vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror' },
+  // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
+  // the next mount can decide its layout without attaching first. Persisted
+  // because that decision happens *before* anything attaches: on a cold visit
+  // the prior is a guess, and a wrong guess in the conservative direction would
+  // otherwise stick until the window happened to be resized.
+  geom:loadGeom(),
   // Groups are computed Mac-side (fleet.groups) so the browser cannot drift
   // from the dashboard; `groups` is null until the first reply lands.
   grouping:{ mode: localStorage.getItem('seahelm_grouping') || 'repository', groups:null },
@@ -450,7 +508,22 @@ function disconnectAll(){
 }
 
 // ── logging ───────────────────────────────────────────────────────────────
+// VT frames arrive per keystroke and per screen update, so leaving them in
+// drowns everything worth reading — the log was a wall of `RX vt.data`. Filtered
+// by default, with a switch for when the terminal stream is the thing you are
+// debugging.
+const VT_METHODS = new Set(['vt.data', 'vt.snapshot', 'pane.send_keys', 'pane.vt_keepalive']);
+let showVTFrames = localStorage.getItem('seahelm_log_vt') === '1';
+
+function setShowVTFrames(on){
+  showVTFrames = on;
+  localStorage.setItem('seahelm_log_vt', on ? '1' : '0');
+  const btn = $('logVtBtn');
+  if (btn){ btn.classList.toggle('on', on); btn.title = on ? '隐藏 VT 帧' : '显示 VT 帧'; }
+}
+
 function log(dir, topic, payload){
+  if (!showVTFrames && VT_METHODS.has(String(topic))) return;
   const el = document.createElement('div');
   el.className = 'logline ' + dir;
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -464,7 +537,12 @@ function log(dir, topic, payload){
   el.appendChild(head); el.appendChild(bd);
   $('log').prepend(el);   // newest on top (reverse-chronological)
 }
-function setStatus(on, txt){ const s=$('status'); s.textContent=txt; s.className = on?'st-on':'st-off'; }
+function setStatus(on, txt){
+  const s = $('status'); s.textContent = txt; s.className = on ? 'st-on' : 'st-off';
+  // The gate is a function of connection state, so it re-renders wherever that
+  // state is set — including the paths that drop the socket without asking.
+  renderGate();
+}
 
 // ── connect ───────────────────────────────────────────────────────────────
 function connect(){
@@ -531,6 +609,16 @@ function onGatewayFrame(msg){
 }
 
 function onGatewayNotify(method, params){
+  // Open questions / suggestions. MQTT delivered these as retained topics; over
+  // the socket the Mac pushes them and replays whatever is open on auth.
+  if (method === 'pane.event') {
+    const key = params.pane_session_key || params.pane_id;
+    if (!key) return;
+    if (params.cleared) S.events.delete(key);
+    else S.events.set(key, params);
+    renderSuggestions();
+    return;
+  }
   if (method === 'vt.snapshot' || method === 'vt.data') {
     const key = params.pane_session_key || params.pane_id;
     handleVT(key, {
@@ -622,7 +710,7 @@ async function applyPair(link){
   $('user').value = p.mac; $('pass').value = '';
   localStorage.setItem('seahelm_pair', link);
   log('sys', '(paired)', `${p.mac} · E2EE on`);
-  renderPairZone();
+  renderGate();
 }
 function pairPrompt(){
   const link = prompt('粘贴 macOS 配对界面的长链接(seahelm://pair?…):', '');
@@ -633,23 +721,71 @@ function clearPair(){
   S.encKey = null; S.authPass = null;
   localStorage.removeItem('seahelm_pair');
   log('sys', '(unpaired)', '回到明文/手填模式');
-  renderPairZone();
+  renderGate();
 }
 // Reflect pairing state in the header: chip when paired, 配对 button when not.
-function renderPairZone(){
-  const z = $('pairZone');
-  if (S.authPass){
-    z.innerHTML = `<span class="chip"><span class="lock">🔒</span><b>${esc(S.mac)}</b>`
-      + `<span class="e2ee">E2EE</span>`
-      + `<button class="chip-x" id="unpairBtn" title="解除配对">✕</button></span>`;
-    $('unpairBtn').onclick = clearPair;
-  } else {
-    z.innerHTML = `<button id="pairBtn" class="pair-primary" title="粘贴 seahelm:// 配对链接">配对</button>`;
-    $('pairBtn').onclick = pairPrompt;
+/**
+ * Connection gate. Pairing and connecting used to be two buttons in a corner,
+ * which asked the user to know they were two steps — the first one exactly once,
+ * and never again. Now the page has three states and shows only the one you are
+ * in: paste a link, or press connect, or get out of the way entirely.
+ */
+function renderGate(){
+  const gate = $('gate');
+  if (!gate) return;
+
+  if (isLinked()){                       // connected — the fleet is the page
+    gate.hidden = true;
+    gate.innerHTML = '';
+    return;
   }
+  gate.hidden = false;
+
+  if (S.authPass){                       // paired, disconnected
+    gate.innerHTML = `
+      <div class="gate-card">
+        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b><span class="e2ee">E2EE</span></div>
+        <button class="gate-primary" id="gateConnect">连接</button>
+        <button class="gate-link" id="gateUnpair">解除配对</button>
+      </div>`;
+    $('gateConnect').onclick = () => { connect(); renderGate(); };
+    $('gateUnpair').onclick = () => { clearPair(); };
+    return;
+  }
+
+  gate.innerHTML = `
+    <div class="gate-card">
+      <div class="gate-title">配对这台 Mac</div>
+      <div class="gate-hint">粘贴 Seahelm 设置里的配对链接(seahelm://pair?…)</div>
+      <textarea class="gate-input" id="gateLink" rows="3" spellcheck="false"
+                placeholder="seahelm://pair?b=…&amp;m=…&amp;k=…"></textarea>
+      <button class="gate-primary" id="gatePair">配对并连接</button>
+      <div class="gate-error" id="gateError" hidden></div>
+    </div>`;
+  const input = $('gateLink'), err = $('gateError');
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+
+  const go = async () => {
+    const link = (input.value || '').trim();
+    if (!link) return fail('请先粘贴配对链接');
+    err.hidden = true;
+    try {
+      await applyPair(link);
+      connect();                         // one action, not two
+      renderGate();
+    } catch (e) {
+      // The usual cause is a page served without a secure context, where
+      // SubtleCrypto does not exist and e2ee.js never finished loading.
+      fail(typeof E2EE === 'undefined'
+        ? '此页面不在安全上下文中,无法计算配对密钥 —— 请用 https:// 或 http://127.0.0.1 打开'
+        : '配对失败:' + (e && e.message));
+    }
+  };
+  $('gatePair').onclick = go;
+  input.onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) go(); };
+  setTimeout(() => input.focus(), 0);
 }
 
-// ── inbound routing ────────────────────────────────────────────────────────
 function onMessage(topic, raw){
   const parts = topic.split('/');
   const seg = parts.slice(2);
@@ -711,19 +847,29 @@ function renderSuggestCard(pid, e){
   const p = S.panes.get(pid)||{};
   const label = (p.title||'').trim() || shortId(p.pane_id||pid);
   const meta = [p.project, p.branch].filter(Boolean).join(' · ');
-  const rid = e.question_id || e.suggest_id || '';
   const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
-  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}</div>`
+  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}`
+    + `<button class="ev-x" title="放弃这条建议">✕</button></div>`
     + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
     + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
   // Tapping the card jumps to the pane that asked, so you can see the context
   // before answering.
   box.onclick=(ev)=>{ if (ev.target.closest('button')) return; selectPaneByKey(pid); };
+  // The dock floats over the terminal, so without this the only way out is to
+  // pick an option — which types into the pane. Declining has to be free.
+  box.querySelector('.ev-x').onclick=(ev)=>{
+    ev.stopPropagation();
+    S.events.delete(pid);          // optimistic: the card goes now
+    renderSuggestions();
+    sendCommand('decision.dismiss', { pane_session_key: pid });
+  };
   (e.options||[]).forEach((opt,i)=>{
     const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${esc(opt)}`;
     b.onclick=(ev)=>{ ev.stopPropagation();
       selectPaneByKey(pid);
-      sendCommand(method, e.type==='question'?{question_id:rid,index:i}:{suggest_id:rid,index:i});
+      // Addressed by pane: a question is answered by driving that pane's prompt,
+      // a suggestion by typing the option we were shown.
+      sendCommand(method, { pane_session_key: pid, index: i });
     };
     box.appendChild(b);
   });
@@ -936,7 +1082,22 @@ function selectPaneByKey(key){
 
 // Every pane is drawn at whatever size its slot in the mirrored layout gives it,
 // so a window resize means refitting all of them, not one.
-window.addEventListener('resize', fitAllPanes);
+window.addEventListener('resize', handleViewportResize);
+
+/** Rotating a phone or dragging a window can cross the mirror/single threshold. */
+function handleViewportResize(){
+  const wrap = $('termWrap');
+  if (S.vt.tree && wrap){
+    const want = layoutFitsMirror(S.vt.tree, wrap.clientWidth) ? 'mirror' : 'single';
+    if (want !== S.vt.mode){
+      const keep = S.vt.focus, tree = S.vt.tree, path = S.vt.worktree;
+      unmountPanes();
+      mountPanes(tree, keep, path);
+      return;
+    }
+  }
+  fitAllPanes();
+}
 
 /** Retick the elapsed labels in place — no re-render, no scroll jump. */
 function tickTimes(){
@@ -1176,6 +1337,53 @@ function stackedTreeFor(path){
              .reduce((a, b) => ({ type:'split', axis:'vertical', ratio:0.5, first:a, second:b }));
 }
 
+// A terminal grid cannot reflow — the Mac fixes its column count — so a slot
+// too narrow for that many columns does not wrap, it clips. Mirroring the
+// desktop is right up until the point where every pane is showing half a line,
+// which is what a 2-up split does on a phone: measured here, a pane in a
+// 3-way split is 69 columns, and a 390px phone holds ~72 at the readable floor.
+// One pane fits almost exactly; any split does not.
+//
+// So the trigger is the constraint itself rather than a device width: can every
+// leaf show its columns at VT_FONT_MIN? A narrow window on a laptop degrades for
+// the same reason a phone does, which is the honest generalisation.
+const CELL_RATIO = 0.6;          // monospace advance ÷ font size, near enough
+const ASSUMED_COLS = 80;         // prior before a pane has ever reported geometry
+
+function treeLeaves(node, out){
+  out = out || [];
+  if (!node) return out;
+  if (node.type === 'leaf') { out.push(node); return out; }
+  treeLeaves(node.first, out);
+  treeLeaves(node.second, out);
+  return out;
+}
+
+/** Narrowest fraction of the container any leaf ends up with. */
+function narrowestLeafFraction(node, share){
+  share = share === undefined ? 1 : share;
+  if (!node || node.type === 'leaf') return share;
+  const ratio = Math.min(0.9, Math.max(0.1, Number(node.ratio) || 0.5));
+  // Only a horizontal split divides width; a vertical one costs rows, and rows
+  // are the axis a terminal is allowed to lose — it scrolls in that direction.
+  const [a, b] = node.axis === 'horizontal'
+    ? [share * ratio, share * (1 - ratio)]
+    : [share, share];
+  return Math.min(narrowestLeafFraction(node.first, a),
+                  narrowestLeafFraction(node.second, b));
+}
+
+function layoutFitsMirror(tree, containerWidth){
+  if (!tree || tree.type === 'leaf') return true;
+  const leaves = treeLeaves(tree);
+  const widestCols = leaves.reduce((m, leaf) => {
+    const g = S.geom.get(leaf.pane_session_key);
+    return Math.max(m, (g && g.cols) || ASSUMED_COLS);
+  }, 0);
+  const needed = widestCols * VT_FONT_MIN * CELL_RATIO;
+  return narrowestLeafFraction(tree) * containerWidth >= needed;
+}
+
 function mountPanes(tree, focusKey, path){
   unmountPanes();
   const wrap = $('termWrap');
@@ -1186,14 +1394,82 @@ function mountPanes(tree, focusKey, path){
     return;
   }
   S.vt.worktree = path;
+  S.vt.tree = tree;
+  S.vt.mode = layoutFitsMirror(tree, wrap.clientWidth) ? 'mirror' : 'single';
+
+  if (S.vt.mode === 'single'){
+    const leaves = treeLeaves(tree);
+    const wanted = leaves.find(l => l.pane_session_key === (focusKey || S.selPane)) || leaves[0];
+    mountSinglePane(wanted && wanted.pane_session_key);
+    return;
+  }
+
   wrap.appendChild(buildLayoutNode(tree));
+  openMountedPanes();
+  focusPane(focusKey || S.selPane || S.vt.panes.keys().next().value || null);
+  fitAllPanes();
+}
+
+/** Attach every pane the DOM now holds. */
+function openMountedPanes(){
   for (const key of S.vt.panes.keys()){
     sendCommand('pane.vt_open', { pane_session_key: key, cols: VT_COLS, rows: VT_ROWS }, (r) => {
       if (r && r.ok === false) log('sys','(vt open failed)', JSON.stringify(r.error||r));
     });
   }
-  focusPane(focusKey || S.selPane || S.vt.panes.keys().next().value || null);
+}
+
+/**
+ * One pane, full width, plus a strip to move between them.
+ *
+ * Only the visible pane is attached. That is not just tidiness: each attach is a
+ * real client of the zmx session (#44), and the layouts that trigger this mode
+ * are the ones on the weakest devices.
+ */
+function mountSinglePane(key){
+  const wrap = $('termWrap');
+  const leaves = treeLeaves(S.vt.tree);
+  if (!key && leaves.length) key = leaves[0].pane_session_key;
+  const leaf = leaves.find(l => l.pane_session_key === key) || leaves[0];
+  if (!leaf) return;
+
+  // Drop the previous terminal first — its attach client goes with it.
+  for (const [k, entry] of S.vt.panes){
+    if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: k });
+    if (entry.flushT) clearTimeout(entry.flushT);
+    try { entry.term.dispose(); } catch (e) {}
+  }
+  S.vt.panes.clear();
+
+  wrap.innerHTML = '';
+  wrap.appendChild(renderPaneStrip(leaf.pane_session_key));
+  const holder = document.createElement('div');
+  holder.className = 'vt-single';
+  holder.appendChild(buildLayoutLeaf(leaf));
+  wrap.appendChild(holder);
+
+  openMountedPanes();
+  focusPane(leaf.pane_session_key);
   fitAllPanes();
+}
+
+/** Tap targets standing in for the panes we are no longer drawing. */
+function renderPaneStrip(activeKey){
+  const strip = document.createElement('div');
+  strip.className = 'pane-strip';
+  for (const leaf of treeLeaves(S.vt.tree)){
+    const key = leaf.pane_session_key;
+    const known = S.panes.get(key) || {};
+    const chip = document.createElement('button');
+    chip.className = 'pane-chip' + (key === activeKey ? ' on' : '');
+    chip.innerHTML = statusDotHTML(known.status || 'unknown', 'pdot')
+      + `<span>${esc(leaf.title || known.title || shortId(known.pane_id || key))}</span>`;
+    // Explicit tap, not a swipe: a horizontal drag belongs to whatever TUI is
+    // running, and mis-swiping away from the pane you are reading is expensive.
+    chip.onclick = () => { if (key !== S.vt.focus) mountSinglePane(key); };
+    strip.appendChild(chip);
+  }
+  return strip;
 }
 
 function unmountPanes(){
@@ -1205,6 +1481,7 @@ function unmountPanes(){
   S.vt.panes.clear();
   S.vt.focus = null;
   S.vt.worktree = null;
+  S.vt.tree = null;
   renderTermKeys();
 }
 
@@ -1372,9 +1649,21 @@ function handleVT(paneKey, v){
   if (v.type !== 'vt.snapshot' && !bytes.length) return;
   const t = entry.term;
   if (v.type === 'vt.snapshot'){
-    if (v.cols && v.rows && (t.cols !== v.cols || t.rows !== v.rows)){
-      t.resize(v.cols, v.rows);
-      log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
+    if (v.cols && v.rows){
+      const was = S.geom.get(paneKey);
+      if (!was || was.cols !== v.cols || was.rows !== v.rows){
+        S.geom.set(paneKey, { cols: v.cols, rows: v.rows });
+        saveGeom();
+        // Learning a pane is wider than assumed can invalidate a mirror already
+        // on screen; re-check rather than leave it clipping. Deferred a tick:
+        // re-checking can dispose this very terminal, and the snapshot below
+        // still has to be written to it.
+        setTimeout(handleViewportResize, 0);
+      }
+      if (t.cols !== v.cols || t.rows !== v.rows){
+        t.resize(v.cols, v.rows);
+        log('sys','(vt resize)', `${v.cols}x${v.rows} — matched session geometry`);
+      }
     }
     t.reset();
     if (bytes.length) t.write(bytes, () => fitPaneFont(entry));
@@ -1427,10 +1716,11 @@ function sendCommand(method, params, onReply){
   S.client.publish(`${base()}/command`, JSON.stringify(payload), {qos:1});
   log('tx', `${base()}/command`, payload);
 }
-function toggleDnd(){
-  const on = !(S.dnd && S.dnd.on);
-  sendCommand('dnd.set', {on, minutes:25});
-}
+// DND was an MQTT-era control: `dnd.set` is implemented in MqttChannel and
+// deliberately kept out of ControlRouter, so it cannot be reached over the Host
+// Gateway the web client now uses. The button is gone rather than silently
+// inert; `S.dnd` still tracks the retained MQTT topic for the devbroker path,
+// and is what a gateway-side implementation would render from.
 
 // ── mock publisher (drive UI without Seahelm) ────────────────────────────────
 function pubMock(){
@@ -1449,14 +1739,12 @@ function pubMock(){
 }
 
 // ── wire ─────────────────────────────────────────────────────────────────────
-renderPairZone();   // pairing-first: 配对 button (or paired chip) is the primary control
-$('connectBtn').onclick=connect;
+renderGate();   // the gate is the page until a connection exists
 // Restore a saved pairing so a reload stays logged in (creds derived, not stored raw).
 (function restorePair(){
   const saved = localStorage.getItem('seahelm_pair');
   if (saved) applyPair(saved).catch(()=>localStorage.removeItem('seahelm_pair'));
 })();
-$('dndBtn').onclick=toggleDnd;
 $('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
 $('scrim').onclick=()=>setDrawer(false);
 $('toBottom').onclick=()=>{
@@ -1466,20 +1754,38 @@ $('toBottom').onclick=()=>{
 };
 // Debug panel is a developer surface — remembered per browser so it stays out
 // of the way once you've dismissed it.
+// Stored as "shown", absent meaning hidden. The previous key recorded the
+// opposite and every browser that had ever touched the toggle carried a value
+// for it, so flipping the default alone changed nothing for exactly the people
+// who had used the thing. A new key is how a default actually moves.
+const LOG_SHOWN_KEY = 'seahelm_log_shown';
+try { localStorage.removeItem('seahelm_log_off'); } catch (e) {}
+
+function logShown(){ return localStorage.getItem(LOG_SHOWN_KEY) === '1'; }
+
 function applyLogVisibility(){
-  const off = localStorage.getItem('seahelm_log_off') === '1';
+  // Hidden by default: it is a developer surface, and since the mirrored layout
+  // it also costs the terminals ~380px — enough to push a worktree from a
+  // mirrored split down to one pane at a time.
+  const off = !logShown();
   document.querySelector('main').classList.toggle('nolog', off);
   const btn = $('logBtn');
   btn.classList.toggle('on', !off);
   btn.title = off ? '显示报文日志' : '隐藏报文日志';
   setTimeout(fitAllPanes, 200);   // the panes just got wider
 }
+$('disconnectBtn').onclick = () => {
+  disconnectAll();
+  unmountPanes();
+  setStatus(false, '离线');
+};
 $('logBtn').onclick = () => {
-  const off = localStorage.getItem('seahelm_log_off') === '1';
-  localStorage.setItem('seahelm_log_off', off ? '0' : '1');
+  localStorage.setItem(LOG_SHOWN_KEY, logShown() ? '0' : '1');
   applyLogVisibility();
 };
 applyLogVisibility();
+$('logVtBtn').onclick = () => setShowVTFrames(!showVTFrames);
+setShowVTFrames(showVTFrames);
 $('clearLog').onclick=()=>$('log').innerHTML='';
 $('pubMock').onclick=pubMock;
 </script>

@@ -771,6 +771,13 @@ class TabCoordinator {
                     controlDataSource.wakeHandler = { [weak self] stationId in
                         self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
                     }
+                    controlDataSource.dismissDecisionHandler = { [weak self] paneId in
+                        // Station id or the stable session key — the queue keys off the
+                        // former, remote callers usually hold the latter.
+                        guard let self else { return false }
+                        let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
+                        return self.pendingOrders.dismissSuggestion(terminalID: stationId)
+                    }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]
                     }

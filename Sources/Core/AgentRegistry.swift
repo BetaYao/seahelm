@@ -427,7 +427,15 @@ class AgentRegistry {
         case .question(let prompt, let options, _):
             dict["question"] = ["prompt": prompt, "options": options]
         case .suggest(let options):
-            dict["suggest"] = ["options": options]
+            var payload: [String: Any] = ["options": options]
+            // The completion gate above exists to stop unrelated events resending
+            // stale prose. A suggestion is the exception it does not cover: the
+            // options were authored *inside* this very message, so shipping it
+            // here is shipping the thing the options are about. Without it a
+            // remote client gets three buttons and no idea what they answer.
+            let prose = o.info.lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prose.isEmpty { payload["message"] = prose }
+            dict["suggest"] = payload
         default: break
         }
         return dict

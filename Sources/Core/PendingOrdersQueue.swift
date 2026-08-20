@@ -85,6 +85,17 @@ final class PendingOrdersQueue {
         if changed { notify() }
     }
 
+    /// Drop a pane's open suggestion without acting on it. Returns whether
+    /// anything went, so a remote caller can tell "declined" from "already gone".
+    @discardableResult
+    func dismissSuggestion(terminalID: String) -> Bool {
+        let before = orders.count
+        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
+        guard orders.count != before else { return false }
+        notify()
+        return true
+    }
+
     func all() -> [PendingOrder] { orders }
 
     func resolve(id: String) {

@@ -65,6 +65,8 @@ protocol ControlDataSource: AnyObject {
     /// The dashboard's own worktree groups for `mode`, already computed Mac-side
     /// so a remote client cannot drift from the desktop.
     func worktreeGroups(mode: String) -> [[String: Any]]?
+    /// Decline a pane's open suggestion. False if there was nothing to decline.
+    func dismissDecision(paneId: String) -> Bool
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
@@ -310,6 +312,14 @@ final class ControlRouter {
             guard ok else { return .error(code: ControlError.notFound, message: "pane not found: \(paneId)") }
             return .ok([method == "pane.close" ? "closed" : "focused": true])
 
+        case "decision.dismiss":
+            let paneRef = (params["pane_id"] as? String)
+                ?? (params["pane_session_key"] as? String) ?? ""
+            guard !paneRef.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane required")
+            }
+            return .ok(["dismissed": dataSource?.dismissDecision(paneId: paneRef) ?? false])
+
         case "layout.live":
             guard let layouts = dataSource?.liveLayouts() else {
                 return .error(code: ControlError.notFound, message: "no live layout")
@@ -533,6 +543,7 @@ final class ControlRouter {
 /// Defaults keep existing conformers — including test fakes — compiling: a data
 /// source with no window to mirror simply reports nothing to mirror.
 extension ControlDataSource {
+    func dismissDecision(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }
     func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
 }
