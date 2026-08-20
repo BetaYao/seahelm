@@ -62,11 +62,27 @@ final class HostGatewayDecisions {
             lock.lock(); open[key] = d; lock.unlock()
             return .opened(d)
         }
-        // A pane that has left `waiting` is no longer asking anything. Anything
-        // else (running → running, message updates) must not clear a live prompt.
-        if let status = event["status"] as? String, status != AgentStatus.waiting.rawValue {
-            lock.lock(); let had = open.removeValue(forKey: key) != nil; lock.unlock()
-            return had ? .cleared(paneSessionKey: key) : .none
+        // Only a *question* dies when its pane stops waiting: the prompt it
+        // belongs to is gone from the screen, so answering it would key nothing.
+        //
+        // A suggestion is the opposite. It is raised as the agent *finishes* — the
+        // Stop hook is what emits `::seahelm-suggest::` — so the pane is already
+        // idle when the options arrive. Clearing on "not waiting" therefore killed
+        // every suggestion one status poll after it appeared, which is why the
+        // desktop island could hold a card the browser never saw. A suggestion
+        // ends when it is picked, replaced, or the pane starts working again.
+        if let status = event["status"] as? String {
+            lock.lock()
+            let existing = open[key]
+            let expired: Bool
+            switch existing?.kind {
+            case "question": expired = status != AgentStatus.waiting.rawValue
+            case "suggest":  expired = status == AgentStatus.running.rawValue
+            default:         expired = false
+            }
+            if expired { open.removeValue(forKey: key) }
+            lock.unlock()
+            return expired ? .cleared(paneSessionKey: key) : .none
         }
         return .none
     }

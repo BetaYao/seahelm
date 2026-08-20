@@ -84,3 +84,33 @@ final class HostGatewayDecisionsTests: XCTestCase {
         XCTAssertNil(p["danger"])
     }
 }
+
+extension HostGatewayDecisionsTests {
+    /// The bug this file exists to prevent recurring: `::seahelm-suggest::` fires
+    /// from the Stop hook, so the pane is idle the moment the options arrive.
+    /// Treating "not waiting" as expiry deleted every suggestion one poll later.
+    func testSuggestSurvivesAnIdlePane() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+                            "suggest": ["options": ["a", "b"]]])
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.idle.rawValue]), .none)
+        XCTAssertEqual(d.options(forPaneSessionKey: "k1"), ["a", "b"],
+                       "an idle pane is where a suggestion lives, not where it dies")
+    }
+
+    func testSuggestEndsWhenThePaneGoesBackToWork() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+                            "suggest": ["options": ["a"]]])
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue]),
+                       .cleared(paneSessionKey: "k1"))
+    }
+
+    func testQuestionStillDiesWithItsPrompt() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+                            "question": ["prompt": "?", "options": ["y", "n"]]])
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.idle.rawValue]),
+                       .cleared(paneSessionKey: "k1"))
+    }
+}
