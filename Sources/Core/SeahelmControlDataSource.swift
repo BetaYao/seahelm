@@ -257,7 +257,9 @@ final class SeahelmControlDataSource: ControlDataSource {
             processStatus: station.processStatus, shellInfo: nil, content: content,
             manifest: manifest, osc: osc)
         let hookStatus = pane?.hookStatus ?? .unknown
-        let decided = AgentRegistry.arbitrateDetailed(scan: scan.state, hook: hookStatus, agentType: agentType)
+        let hookIdleFresh = AgentRegistry.shared.hookIdleIsFresh(terminalID: station.id)
+        let decided = AgentRegistry.arbitrateDetailed(scan: scan.state, hook: hookStatus,
+                                                      agentType: agentType, hookIdleFresh: hookIdleFresh)
 
         var result: [String: Any] = [
             "pane_id": station.id,
@@ -273,6 +275,9 @@ final class SeahelmControlDataSource: ControlDataSource {
             // default — the screen is saying nothing, not saying "idle".
             "scan_defaulted": scan.isDefaulted,
             "hook_status": hookStatus.rawValue,
+            // True while a Stop is still inside its trailing-edge window, where a
+            // hook `.idle` outranks a screen that has not gone quiet yet.
+            "hook_idle_fresh": hookIdleFresh,
             "process_status": "\(station.processStatus)",
             "osc_title": osc.title,
             "osc_progress": osc.progress,

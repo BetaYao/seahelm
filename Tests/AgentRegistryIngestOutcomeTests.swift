@@ -231,4 +231,72 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
         XCTAssertTrue(captured?.isCompletionSignal ?? false)
         XCTAssertEqual(captured?.newStatus, .error)
     }
+
+    // MARK: - Trailing edge (hook stop vs a screen that hasn't gone quiet)
+
+    func testFreshHookIdlePromotesOverScanRunning() {
+        XCTAssertEqual(
+            AgentRegistry.arbitrate(scan: .running, hook: .idle, agentType: .claudeCode,
+                                    hookIdleFresh: true), .idle,
+            "the agent said it stopped; its TUI simply has not caught up")
+    }
+
+    func testStaleHookIdleLeavesAuthorityWithTheScreen() {
+        XCTAssertEqual(
+            AgentRegistry.arbitrate(scan: .running, hook: .idle, agentType: .claudeCode,
+                                    hookIdleFresh: false), .running,
+            "past the window a working pane must never be pinned at idle")
+    }
+
+    func testFreshHookIdleNeverOutranksAnUrgentScreen() {
+        XCTAssertEqual(
+            AgentRegistry.arbitrate(scan: .waiting, hook: .idle, agentType: .claudeCode,
+                                    hookIdleFresh: true), .waiting,
+            "a blocked agent outranks a completion from either source")
+    }
+
+    /// End to end: the completion this whole path exists for. A Stop arrives while
+    /// the scan still reports running — the normal state of a TUI at the instant a
+    /// turn ends — and must still produce an Idle outcome to notify on.
+    func testStopWhileScreenStillRunningYieldsIdleOutcome() {
+        var captured: [IngestOutcome] = []
+        let exp = expectation(description: "stop outcome")
+        exp.assertForOverFulfill = false
+        AgentRegistry.shared.onOutcome = { o in
+            captured.append(o)
+            if o.newStatus == .idle { exp.fulfill() }
+        }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                   kind: .userPrompt("do the thing")))
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .running, message: "", activity: [],
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 0, tasks: [])))
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                   kind: .agentStopped(success: true)))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured.last?.newStatus, .idle)
+        XCTAssertEqual(captured.last?.oldStatus, .running, "and it is a running -> idle edge, which is what notifies")
+    }
+
+    /// The window is what keeps the promotion honest: once it lapses, the next scan
+    /// frame showing work in progress takes the pane back to running.
+    func testScreenReclaimsRunningOnceTheIdleWindowLapses() {
+        AgentRegistry.hookIdleGrace = 0
+        defer { AgentRegistry.hookIdleGrace = 3.0 }
+        var captured: IngestOutcome?
+        let exp = expectation(description: "reclaim")
+        exp.assertForOverFulfill = false
+        AgentRegistry.shared.onOutcome = { o in
+            if o.newStatus == .running { captured = o; exp.fulfill() }
+        }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                   kind: .agentStopped(success: true)))
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+            kind: .screenObserved(status: .running, message: "", activity: [],
+                                  commandLine: nil, agentType: .claudeCode,
+                                  roundDuration: 0, tasks: [])))
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(captured?.newStatus, .running)
+    }
 }

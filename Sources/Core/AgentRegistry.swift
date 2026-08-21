@@ -30,6 +30,21 @@ class AgentRegistry {
     /// `var` so tests can drive the trailing-edge reclaim deterministically.
     static var hookRunningGrace: TimeInterval = 3.0
 
+    /// When each terminal's hook last asserted `.idle` (a Stop). The trailing-edge
+    /// counterpart to `hookRunningSince`: for a grace window after the agent says
+    /// it stopped, that beats a screen that has not gone quiet yet. Without it a
+    /// session_only agent's completion was simply dropped whenever its TUI still
+    /// had a spinner line in the scanned region — which is the normal case at the
+    /// instant a turn ends, and the whole reason "agent finished" arrived late or
+    /// never at all.
+    private var hookIdleSince: [String: Date] = [:]
+    /// How long a hook-asserted `.idle` outranks a scan `.running`. Deliberately
+    /// short: past it the screen takes authority back, so a stale hook `.idle`
+    /// can never pin a visibly-working pane at idle — and an agent that resumes
+    /// (e.g. to answer a blocking Stop) is shown as running again within seconds.
+    /// `var` so tests can drive the window deterministically.
+    static var hookIdleGrace: TimeInterval = 3.0
+
     /// When each terminal's hook last asserted `.waiting` (an AskUserQuestion /
     /// awaiting-input edge). `.waiting` is urgent, so it outranks *any* scan —
     /// without a reclaim, a single lost clearing hook pins the card on "Needs
@@ -213,8 +228,25 @@ class AgentRegistry {
     ///   - screen_only / unknown: screen only.
     /// An urgent state (waiting/error) from either source always surfaces — never
     /// hide a blocked or errored agent behind an authority rule.
-    static func arbitrate(scan: AgentStatus, hook: AgentStatus, agentType: AgentType) -> AgentStatus {
-        arbitrateDetailed(scan: scan, hook: hook, agentType: agentType).status
+    static func arbitrate(scan: AgentStatus, hook: AgentStatus, agentType: AgentType,
+                          hookIdleFresh: Bool = false) -> AgentStatus {
+        arbitrateDetailed(scan: scan, hook: hook, agentType: agentType,
+                          hookIdleFresh: hookIdleFresh).status
+    }
+
+    /// Whether this pane's hook `.idle` is still inside its trailing-edge window.
+    /// Caller must hold `lock`.
+    private func hookIdleIsFreshLocked(_ terminalID: String, now: Date) -> Bool {
+        guard let since = hookIdleSince[terminalID] else { return false }
+        return now.timeIntervalSince(since) < Self.hookIdleGrace
+    }
+
+    /// Same question from outside the lock — for `pane.explain`, so the diagnostic
+    /// reports the arbitration the pipeline would actually make right now.
+    func hookIdleIsFresh(terminalID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hookIdleIsFreshLocked(terminalID, now: Date())
     }
 
     /// Whether the agent's manifest makes the screen authoritative (hooks only fill
@@ -226,7 +258,8 @@ class AgentRegistry {
 
     /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
     /// `screen`) and the pane's authority — for `pane.explain`.
-    static func arbitrateDetailed(scan: AgentStatus, hook: AgentStatus, agentType: AgentType)
+    static func arbitrateDetailed(scan: AgentStatus, hook: AgentStatus, agentType: AgentType,
+                                  hookIdleFresh: Bool = false)
         -> (status: AgentStatus, decidedBy: String, authority: String) {
         let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
         let urgent = AgentStatus.highestPriority([scan, hook].filter { $0.isUrgent })
@@ -235,12 +268,23 @@ class AgentRegistry {
         case "full_lifecycle": return hook != .unknown ? (hook, "hook", authority) : (scan, "screen", authority)
         case "screen_only":    return (scan, "screen", authority)
         default:
-            // session_only: screen is authoritative EXCEPT a hook `.running` edge
-            // promotes over a scan `.idle`, so the leading edge (prompt submitted,
-            // spinner not yet on screen) surfaces immediately instead of waiting for
-            // the next slow scan. `ingest` clears a stale hook `.running` once scan
-            // sees a sustained idle, so the trailing edge stays screen-authoritative.
+            // session_only: screen is authoritative EXCEPT at the two edges, where
+            // the hook knows first and the screen lags.
+            //
+            // Leading edge: a hook `.running` promotes over a scan `.idle`, so a
+            // submitted prompt surfaces immediately instead of waiting for the
+            // spinner to reach the screen and the next slow scan to find it.
             if scan == .idle && hook == .running { return (hook, "hook", authority) }
+            // Trailing edge: a *fresh* hook `.idle` (see `hookIdleGrace`) promotes
+            // over a scan `.running`. The agent has stated it stopped; its TUI has
+            // not caught up, and typically still carries a spinner line in the
+            // scanned region at that exact moment — so screen authority alone
+            // dropped the completion entirely, which is why banners for finished
+            // agents arrived late or never. Time-boxed, so the screen reclaims
+            // authority the moment the window lapses and a stale hook `.idle` can
+            // never pin a working pane at idle. (`ingest` still reclaims a stale
+            // hook `.running` from the other direction.)
+            if hookIdleFresh && hook == .idle && scan == .running { return (hook, "hook", authority) }
             return scan != .unknown ? (scan, "screen", authority) : (hook, "hook", authority)
         }
     }
@@ -324,6 +368,9 @@ class AgentRegistry {
             next.hookStatus = success ? .idle : .error
             hookRunningSince[event.terminalID] = nil
             hookWaitingSince[event.terminalID] = nil
+            // Fresh trailing edge — overwritten by each Stop, since every one of
+            // them is the agent stating anew that it finished.
+            hookIdleSince[event.terminalID] = now
             next.activityEvents.removeAll()
             isCompletion = true
         case .notification(let level, let text):
@@ -346,7 +393,8 @@ class AgentRegistry {
         next.lastMessage = message
         let oldStatus = current.status
         let newStatus = Self.arbitrate(scan: next.scanStatus, hook: next.hookStatus,
-                                       agentType: next.agentType)
+                                       agentType: next.agentType,
+                                       hookIdleFresh: hookIdleIsFreshLocked(event.terminalID, now: now))
         next.status = newStatus
         agents[event.terminalID] = next
 
