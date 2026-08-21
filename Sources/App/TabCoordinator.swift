@@ -1355,6 +1355,8 @@ class TabCoordinator {
 
         integrateNewWorktrees(repoRoot: repoPath, allDiscovered: allDiscovered, newWorktrees: [info])
 
+        Analytics.trackWorktreeCreated(totalCount: allWorktrees.count)
+
         // Focus the newly created worktree's minicard
         dashboardVC?.selectPane(byWorktreePath: info.path)
     }

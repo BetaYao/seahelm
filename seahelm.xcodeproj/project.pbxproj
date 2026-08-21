@@ -40,6 +40,7 @@
 		132C344775FE1F50E1CD4C2B /* OpenedSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBEC0B8D9CEC4A93075C660 /* OpenedSurfaceView.swift */; };
 		15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */; };
 		161353FA0DCF4D6A3505490D /* GmailOutboundMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99782104F7A320C332326AC /* GmailOutboundMail.swift */; };
+		16F8BAF43220432D8AEC04BD /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 7EA0376D0607F1CA3B3D97ED /* Aptabase */; };
 		17ADA7E8FA55FF54C6622F97 /* AgentRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9A024C6CD76762DD132684 /* AgentRegistry.swift */; };
 		18FF3BD4B6093BD5B1E4552C /* RegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8F0A0F456C94284935BE32 /* RegressionTests.swift */; };
 		19A26EE54A5CE77EB9A5A51B /* IdeaStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */; };
@@ -421,6 +422,7 @@
 		F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15A95E0337AEDBCE9546B8F /* SemanticColors.swift */; };
 		F822A1F30137CB7940F82296 /* PRListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF331BF96A89F1DC3E9C1BD /* PRListView.swift */; };
 		F88018C1DE074B7B23AABDA3 /* SplitPaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D06307CBEFF44025C8E9AD3 /* SplitPaneTests.swift */; };
+		F8E50AFAEFE6FB68CF09D75A /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF702127762EBDF898385B56 /* Analytics.swift */; };
 		F9270DA52D3D8E5F8C70F8A4 /* IMessageConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8CD5E438686EF96609A1FD /* IMessageConfig.swift */; };
 		F9C679963A114DDEAE7A9861 /* FuzzyMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71C3A59719695387993016D /* FuzzyMatch.swift */; };
 		F9F0C36BE9EDF1F4B6D49AD8 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */; };
@@ -772,6 +774,7 @@
 		BED96B2C073E855EC245CD3A /* AgentRegistryActivityEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryActivityEventTests.swift; sourceTree = "<group>"; };
 		BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinatorTests.swift; sourceTree = "<group>"; };
 		BF428D142A48CAE9A9A6662C /* IMessageRuleCoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageRuleCoalescerTests.swift; sourceTree = "<group>"; };
+		BF702127762EBDF898385B56 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
 		BFFAE60D0EF11A5DC22B2B73 /* SessionRestoreConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreConfigTests.swift; sourceTree = "<group>"; };
 		C09670C63C69A22AF3AE348B /* IslandProjectGroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandProjectGroupTests.swift; sourceTree = "<group>"; };
 		C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorEnvCopyTests.swift; sourceTree = "<group>"; };
@@ -893,6 +896,7 @@
 				4C4E27C9EB285988BAF4FE61 /* CodeEditTextView in Frameworks */,
 				BBE067F3493F03DFD4EB56D5 /* CodeEditLanguages in Frameworks */,
 				F0A5FE9C41E1E500E1B441E5 /* Sparkle in Frameworks */,
+				16F8BAF43220432D8AEC04BD /* Aptabase in Frameworks */,
 				26C985212F717B41F6439476 /* SwiftUI.framework in Frameworks */,
 				619695CCD02199EC32866D47 /* AVKit.framework in Frameworks */,
 				8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */,
@@ -931,6 +935,7 @@
 				E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */,
 				055E765E62830F8CD924C76F /* AgentStatus.swift */,
 				AEC631B07301756615C755E6 /* AgentType.swift */,
+				BF702127762EBDF898385B56 /* Analytics.swift */,
 				DE6B0C9F2013F74108B7422B /* BridgeCommand.swift */,
 				2DD9055EFF7EFEF4058A1AD0 /* BridgeCommandRouter.swift */,
 				2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */,
@@ -1627,6 +1632,7 @@
 				4C51BACC63FB7BF5BEF7C288 /* CodeEditTextView */,
 				E7FEB5E0573C88C33B3BC123 /* CodeEditLanguages */,
 				105CE82C3D2CBF90259D60A2 /* Sparkle */,
+				7EA0376D0607F1CA3B3D97ED /* Aptabase */,
 			);
 			productName = seahelm;
 			productReference = 7C1D507BEBD483B978CC2DBC /* seahelm.app */;
@@ -1696,6 +1702,7 @@
 			mainGroup = CEA8ADE11886D7325B867734;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				6AD670325F1FCA294AABC168 /* XCRemoteSwiftPackageReference "aptabase-swift" */,
 				2F3EFE65E8440A84CD063ABD /* XCRemoteSwiftPackageReference "CodeEditLanguages" */,
 				AFC63521AAE2DCF8B01B885F /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
 				9F58A30C40AB456F590C96E0 /* XCRemoteSwiftPackageReference "CodeEditTextView" */,
@@ -2001,6 +2008,7 @@
 				DF435FEBFAFFAB058E34A71C /* AgentSessionRef.swift in Sources */,
 				4106001E365F2AFE29B0F586 /* AgentStatus.swift in Sources */,
 				E3D53ACF213C8B44EA10A45D /* AgentType.swift in Sources */,
+				F8E50AFAEFE6FB68CF09D75A /* Analytics.swift in Sources */,
 				33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */,
 				12702A1B7B7DD78FD49D65D5 /* AppFont.swift in Sources */,
 				B2A3720360222C93BA542DF0 /* BridgeCommand.swift in Sources */,
@@ -2579,6 +2587,14 @@
 				version = 0.1.20;
 			};
 		};
+		6AD670325F1FCA294AABC168 /* XCRemoteSwiftPackageReference "aptabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/aptabase/aptabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.3.4;
+			};
+		};
 		6CCB65F6E41FFC5FC44A02BF /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -2615,6 +2631,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 9F58A30C40AB456F590C96E0 /* XCRemoteSwiftPackageReference "CodeEditTextView" */;
 			productName = CodeEditTextView;
+		};
+		7EA0376D0607F1CA3B3D97ED /* Aptabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6AD670325F1FCA294AABC168 /* XCRemoteSwiftPackageReference "aptabase-swift" */;
+			productName = Aptabase;
 		};
 		D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */ = {
 			isa = XCSwiftPackageProductDependency;

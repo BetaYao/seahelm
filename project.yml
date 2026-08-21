@@ -48,6 +48,11 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.0
+  # Privacy-first product analytics (aptabase.com). US cloud key lives in
+  # Sources/Core/Analytics.swift — events are opt-in by us calling trackEvent.
+  Aptabase:
+    url: https://github.com/aptabase/aptabase-swift
+    from: 0.3.4
 
 targets:
   seahelm:
@@ -96,6 +101,8 @@ targets:
         product: CodeEditLanguages
       - package: Sparkle
         product: Sparkle
+      - package: Aptabase
+        product: Aptabase
       # Media preview backends. AVKit auto-links SwiftUICore, which can only be
       # linked through SwiftUI — so SwiftUI must be explicit here or the link
       # fails with "not an allowed client of it".
