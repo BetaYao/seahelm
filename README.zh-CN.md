@@ -4,6 +4,12 @@
 
 [English](README.md)
 
+## Demo
+
+![Seahelm demo](assets/tour.gif)
+
+完整演示：[YouTube](https://youtu.be/WUUcuglx_Ks)
+
 ## 为什么选择 Seahelm
 
 - **简洁** — 没有复杂的代码编辑和 diff review,一切都交给 agent,界面不挡路。
