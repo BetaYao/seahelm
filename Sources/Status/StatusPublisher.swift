@@ -345,7 +345,8 @@ class StatusPublisher {
 
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle)
+            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle,
+                                               defaulted: detection.isDefaulted)
             // The debounced/committed status drives both pipelines, so a held
             // running→idle flip does not leak into AgentRegistry either.
             let committedStatus = tracker.currentStatus

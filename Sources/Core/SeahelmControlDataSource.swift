@@ -269,6 +269,9 @@ final class SeahelmControlDataSource: ControlDataSource {
             "status": decided.status.rawValue,
             "decided_by": decided.decidedBy,
             "scan_status": scan.state.rawValue,
+            // True when no rule matched and `scan_status` is just the manifest's
+            // default — the screen is saying nothing, not saying "idle".
+            "scan_defaulted": scan.isDefaulted,
             "hook_status": hookStatus.rawValue,
             "process_status": "\(station.processStatus)",
             "osc_title": osc.title,

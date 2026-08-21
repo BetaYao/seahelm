@@ -12,6 +12,10 @@ struct Detection: Equatable {
     var visibleWorking: Bool = false
     var skipStateUpdate: Bool = false
     var matchedRuleId: String? = nil
+    /// No rule matched — `state` is the manifest's `default_status` filling the
+    /// gap, not something observed on screen. Callers must treat it as weaker
+    /// than a matched rule: see `DebouncedStatusTracker.update`.
+    var isDefaulted: Bool = false
 
     static let unknown = Detection(state: .unknown)
 }

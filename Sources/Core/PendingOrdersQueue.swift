@@ -5,6 +5,51 @@ struct PendingOrder: Equatable, Identifiable {
     let action: FirstMateAction
 }
 
+/// Remembers which suggestion cards a surface (the island, the First Mate
+/// sidebar) has already shown, so it can pop for a genuinely new ask and stay
+/// quiet for one already on screen.
+///
+/// Ids alone cannot answer that. `PendingOrdersQueue.key` is stable per pane, so
+/// a second suggestion from the same pane reuses the id: `upsert` swaps the card's
+/// contents in place and an id-set comparison sees nothing new — the surface stayed
+/// collapsed for every suggestion after the first, until the user happened to
+/// resolve one. Fingerprinting what the card actually *shows* is what fixes that.
+struct SuggestionSeenSet {
+    struct Fingerprint: Equatable {
+        let message: String
+        let options: [String]
+
+        init(_ order: PendingOrder) {
+            message = order.action.message
+            options = order.action.options ?? []
+        }
+    }
+
+    private var seen: [String: Fingerprint] = [:]
+
+    /// Record `orders` as the full set now on offer and return the ones this
+    /// surface has not shown yet. Cards that left the queue are forgotten, so a
+    /// re-raised card counts as new again.
+    mutating func absorb(_ orders: [PendingOrder]) -> [PendingOrder] {
+        let fresh = orders.filter { Self.isFresh($0, seen: seen[$0.id]) }
+        seen = Dictionary(orders.map { ($0.id, Fingerprint($0)) }, uniquingKeysWith: { _, last in last })
+        return fresh
+    }
+
+    /// A card is fresh when its id is new, when its options changed, or when its
+    /// summary was rewritten into something other than a late prose upgrade.
+    /// `PendingOrdersQueue.refreshSuggestMessage` swaps a junk summary (tool
+    /// chrome) for the agent's real prose while leaving the options alone — that
+    /// is the same ask reading better, not a new one, and must not re-pop.
+    private static func isFresh(_ order: PendingOrder, seen: Fingerprint?) -> Bool {
+        guard let seen else { return true }
+        let now = Fingerprint(order)
+        if seen.options != now.options { return true }
+        if seen.message == now.message { return false }
+        return !FirstMate.isJunkSuggestionSummary(seen.message)
+    }
+}
+
 /// Red-zone pending-orders queue. At most one entry per (worktreePath, kind) — idempotent.
 /// Must be used on the main thread.
 final class PendingOrdersQueue {

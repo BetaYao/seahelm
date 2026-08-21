@@ -292,6 +292,39 @@ final class DebouncedStatusTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.currentStatus, .idle)
     }
 
+    /// A defaulted idle — no rule matched, the manifest's `default_status` filled
+    /// the gap — is absence of evidence. It must not end a turn on one frame the
+    /// way a matched idle rule would; that is what fired completion banners
+    /// mid-turn while the agent was only thinking.
+    func testDefaultedIdleHoldsFarLongerThanAMatchedOne() {
+        let tracker = DebouncedStatusTracker()
+        tracker.defaultedIdleConfirmations = 3
+        tracker.update(status: .running)
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertEqual(tracker.currentStatus, .running, "a thinking pause is not a finished turn")
+        XCTAssertTrue(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertEqual(tracker.currentStatus, .idle, "sustained silence still commits eventually")
+    }
+
+    func testDefaultedIdleCounterResetsWhenWorkingReappears() {
+        let tracker = DebouncedStatusTracker()
+        tracker.defaultedIdleConfirmations = 2
+        tracker.update(status: .running)
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertFalse(tracker.update(status: .running, visibleIdle: false))
+        XCTAssertFalse(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertEqual(tracker.currentStatus, .running)
+    }
+
+    /// Entering idle from anything but `running` is a classification, not the end
+    /// of a turn — the hold must not strand a fresh pane at `unknown`.
+    func testDefaultedIdleFromUnknownCommitsImmediately() {
+        let tracker = DebouncedStatusTracker()
+        XCTAssertTrue(tracker.update(status: .idle, visibleIdle: true, defaulted: true))
+        XCTAssertEqual(tracker.currentStatus, .idle)
+    }
+
     func testPendingIdleResetByRunningReobservation() {
         let tracker = DebouncedStatusTracker()
         tracker.pendingIdleConfirmations = 2

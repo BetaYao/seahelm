@@ -98,7 +98,14 @@ class StatusDetector {
         let lower = lowercasedContent ?? content.lowercased()
         let d = manifest.evaluate(DetectionInput(screen: lower, oscTitle: osc.title, oscProgress: osc.progress))
         if d.state == .unknown {
-            return Detection(state: manifest.defaultStatus, visibleIdle: manifest.defaultStatus == .idle)
+            // Nothing matched, so the manifest's default fills the gap. That is a
+            // baseline classification, not an observation — no shipped manifest has
+            // an idle rule, which makes a defaulted `.idle` mean only "no running /
+            // waiting / error rule matched THIS frame". Claiming `visibleIdle` here
+            // (as this used to) told the debounce layer the agent was seen finishing,
+            // so a single frame of a thinking agent — spinner momentarily off screen —
+            // ended its turn and fired a completion banner mid-turn.
+            return Detection(state: manifest.defaultStatus, isDefaulted: true)
         }
         return d
     }
@@ -282,19 +289,27 @@ class DebouncedStatusTracker {
 
     /// Consecutive plain-idle observations required to leave `running`.
     var pendingIdleConfirmations = 2
+    /// Consecutive observations required to leave `running` on a *defaulted* idle —
+    /// one where no rule matched at all (`Detection.isDefaulted`). Absence of
+    /// evidence is far weaker than a matched idle rule: an agent that merely paused
+    /// to think looks exactly like this, so the hold runs long enough (~12s at the
+    /// 2s poll cadence) to outlast a thinking gap. Agents that report through hooks
+    /// never wait on it — their Stop hook ends the turn directly.
+    var defaultedIdleConfirmations = 6
     private var pendingIdleCount = 0
 
     /// Update with detected status. Returns true if status changed.
     @discardableResult
-    func update(status: AgentStatus, visibleIdle: Bool = true) -> Bool {
+    func update(status: AgentStatus, visibleIdle: Bool = true, defaulted: Bool = false) -> Bool {
         // Unknown means "no data" — don't change.
         guard status != .unknown else { return false }
 
         // Hold a bare running→idle flip until it is confirmed (unless a visible
         // idle signal proves the agent really finished).
-        if currentStatus == .running, status == .idle, !visibleIdle {
+        if currentStatus == .running, status == .idle, defaulted || !visibleIdle {
             pendingIdleCount += 1
-            if pendingIdleCount < pendingIdleConfirmations { return false }
+            let needed = defaulted ? defaultedIdleConfirmations : pendingIdleConfirmations
+            if pendingIdleCount < needed { return false }
         }
         pendingIdleCount = 0
 
