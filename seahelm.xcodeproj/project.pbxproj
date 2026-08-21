@@ -276,6 +276,7 @@
 		A6CFE5CACA3D1493A8E309C0 /* MqttConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50591FAB1ABF2A23B82950E7 /* MqttConfig.swift */; };
 		A6ECE1CD32661EEAA08D012D /* FirstMateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96EE302F1479073676DB584 /* FirstMateTests.swift */; };
 		A7D36122AEE48C5F72C89C87 /* MediaPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFE8F526F75CD13158309C6 /* MediaPreviewView.swift */; };
+		A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */; };
 		A831B5F796896B48509F1F91 /* GatewayStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */; };
 		A8C7F6D5EE20B347D63B9947 /* XCUIElementExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DD3FFFF216C576CFDC7683 /* XCUIElementExtensions.swift */; };
 		A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */; };
@@ -688,6 +689,7 @@
 		8DAB60224D158B5E58C01717 /* AgentRegistryIngestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryIngestTests.swift; sourceTree = "<group>"; };
 		8DC6CD361867294E47A209E3 /* DialogPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogPresenter.swift; sourceTree = "<group>"; };
 		8E004E8B96865467209D3F2D /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneInfoDisplayStatusTests.swift; sourceTree = "<group>"; };
 		8EA68D37F6726B55761155E3 /* AgentRegistryBackgroundBusyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryBackgroundBusyTests.swift; sourceTree = "<group>"; };
 		902196E72A614F0FF9C90514 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
 		90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstallerTests.swift; sourceTree = "<group>"; };
@@ -1365,6 +1367,7 @@
 				826B5E1EB796AA82415B329F /* OSC133ParserTests.swift */,
 				FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */,
 				376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */,
+				8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
 				73FDA109B06DD6B1F279D87A /* PaneReducerTests.swift */,
 				63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */,
@@ -1879,6 +1882,7 @@
 				C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */,
 				E7AB85089D6CD9A1AF14B3CF /* OverviewFocusModelTests.swift in Sources */,
 				D4ABC34B40C85BDA5145EAAC /* PRURLParsingTests.swift in Sources */,
+				A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */,
 				EA9AE25E1B7C668B9DEE38D4 /* PaneReducerTests.swift in Sources */,
 				371A789DDD991B083F733DB8 /* PaneStatusTests.swift in Sources */,
 				6AC11D3AF38BF0EEAD1C57F3 /* PaneTitleResolverTests.swift in Sources */,
