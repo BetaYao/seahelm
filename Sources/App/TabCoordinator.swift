@@ -131,7 +131,8 @@ class TabCoordinator {
                 status: outcome.newStatus,
                 lastMessage: outcome.info.lastMessage,
                 lastUserPrompt: outcome.info.lastUserPrompt,
-                agentType: outcome.info.agentType)
+                agentType: outcome.info.agentType,
+                backgroundBusy: outcome.info.backgroundBusy)
             // Aggregator ignores commandLine-only changes; chrome pane title
             // still needs a refresh when the foreground shell job updates.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -347,7 +348,7 @@ class TabCoordinator {
             // dots. The worktree's own status is NOT derived from them here: the
             // aggregator already picked the most recently changed pane, and
             // re-deriving it would let the row and the tab badge disagree.
-            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
+            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.displayStatus)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
             let rolledUpStatus = ws?.rolledUpStatus ?? agent.status

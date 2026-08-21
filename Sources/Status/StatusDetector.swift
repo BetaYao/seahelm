@@ -105,7 +105,10 @@ class StatusDetector {
             // (as this used to) told the debounce layer the agent was seen finishing,
             // so a single frame of a thinking agent — spinner momentarily off screen —
             // ended its turn and fired a completion banner mid-turn.
-            return Detection(state: manifest.defaultStatus, isDefaulted: true)
+            // `backgroundBusy` survives the fallback: it was observed, and it is
+            // the one thing the screen did say.
+            return Detection(state: manifest.defaultStatus, isDefaulted: true,
+                             backgroundBusy: d.backgroundBusy)
         }
         return d
     }

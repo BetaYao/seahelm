@@ -13,6 +13,16 @@ struct PaneStatus: Equatable {
     /// waiting.
     var statusChangedAt: Date
     var agentType: AgentType = .unknown
+    /// The pane's session has background work of its own (see
+    /// `PaneInfo.backgroundBusy`). Carried alongside `status`, never folded into
+    /// it: `paneStatusDidChange` — the edge notifications ride on — must keep
+    /// seeing the agent's own state.
+    var backgroundBusy: Bool = false
+
+    /// What the dashboard draws for this pane. Mirrors `PaneInfo.displayStatus`.
+    var displayStatus: AgentStatus {
+        (status == .idle && backgroundBusy) ? .running : status
+    }
 }
 
 struct WorktreeStatus: Equatable {
@@ -44,6 +54,6 @@ struct WorktreeStatus: Equatable {
     }
 
     var rolledUpStatus: AgentStatus {
-        representative?.status ?? .unknown
+        representative?.displayStatus ?? .unknown
     }
 }

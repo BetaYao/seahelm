@@ -16,6 +16,14 @@ struct ScanDecoder: SignalDecoder {
     let tasks: [TaskItem]
 
     func decode() -> NormalizedEvent? {
+        let detection = detector.detectDetailed(
+            processStatus: processStatus,
+            shellInfo: shellInfo,
+            content: content,
+            manifest: manifest
+        )
+        // `detect` is still the answer for the legacy AgentDef path, which
+        // `detectDetailed` does not cover; the rich call only adds the flags.
         let status = detector.detect(
             processStatus: processStatus,
             shellInfo: shellInfo,
@@ -27,7 +35,8 @@ struct ScanDecoder: SignalDecoder {
         let kind = NormalizedEventKind.screenObserved(
             status: status, message: "", activity: events,
             commandLine: commandLine, agentType: agentType,
-            roundDuration: roundDuration, tasks: tasks)
+            roundDuration: roundDuration, tasks: tasks,
+            backgroundBusy: detection.backgroundBusy)
         return NormalizedEvent(terminalID: terminalID, source: .scan, kind: kind)
     }
 }

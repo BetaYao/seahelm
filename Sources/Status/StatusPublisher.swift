@@ -366,7 +366,8 @@ class StatusPublisher {
                 terminalID: terminalID, source: .scan,
                 kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
                                       commandLine: commandLine, agentType: agentType,
-                                      roundDuration: roundDur, tasks: webhookTasks))
+                                      roundDuration: roundDur, tasks: webhookTasks,
+                                      backgroundBusy: detection.backgroundBusy))
             AgentRegistry.shared.ingest(normalized)
 
             // Agent permission dialogs are rendered by the TUI rather than sent

@@ -148,6 +148,7 @@ class AgentRegistry {
         orderedIDs.removeAll { $0 == terminalID }
         statusEnteredAt.removeValue(forKey: terminalID)
         hookRunningSince.removeValue(forKey: terminalID)
+        hookIdleSince.removeValue(forKey: terminalID)
         hookWaitingSince.removeValue(forKey: terminalID)
         eventLog.removeValue(forKey: terminalID)
         globalSeq += 1
@@ -302,8 +303,9 @@ class AgentRegistry {
         let now = Date()
 
         switch event.kind {
-        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType, let roundDuration, let tasks):
+        case .screenObserved(let status, let msg, let activity, let commandLine, let agentType, let roundDuration, let tasks, let backgroundBusy):
             next.scanStatus = status
+            next.backgroundBusy = backgroundBusy
             next.roundDuration = roundDuration
             if !tasks.isEmpty { next.tasks = tasks }
             if !msg.isEmpty { message = msg }

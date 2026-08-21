@@ -16,6 +16,12 @@ struct Detection: Equatable {
     /// gap, not something observed on screen. Callers must treat it as weaker
     /// than a matched rule: see `DebouncedStatusTracker.update`.
     var isDefaulted: Bool = false
+    /// The session has background work of its own (a shell it launched, a monitor
+    /// it is watching). Deliberately NOT a status: the agent can be parked at an
+    /// empty prompt, ready for input, while this is true. Kept separate so the
+    /// dashboard can still show the worktree as busy without the status axis
+    /// losing the running → idle edge that notifications ride on.
+    var backgroundBusy: Bool = false
 
     static let unknown = Detection(state: .unknown)
 }
@@ -34,6 +40,9 @@ struct DetectionInput {
 final class CompiledManifest {
     let manifest: AgentManifest
     private let compiledRules: [CompiledRule]
+    /// Rules flagged `background_task` — evaluated on their own pass, never as
+    /// candidates for the status decision.
+    private let backgroundRules: [CompiledRule]
 
     struct CompiledRule {
         let rule: ManifestRule
@@ -43,14 +52,30 @@ final class CompiledManifest {
 
     init(_ manifest: AgentManifest) {
         self.manifest = manifest
-        self.compiledRules = manifest.rules
+        let compiled = manifest.rules
             .sorted { $0.priority > $1.priority }   // stable: ties keep source order
             .map { CompiledRule(rule: $0, region: ManifestRegion($0.region), gate: CompiledGate($0.gate)) }
+        // Two independent questions, two rule sets. Priority orders the status
+        // rules against each other; a background rule competes with nothing,
+        // because "the session has a shell running" and "the agent is working"
+        // are not answers to the same question and must not shadow one another.
+        self.compiledRules = compiled.filter { !$0.rule.backgroundTask }
+        self.backgroundRules = compiled.filter { $0.rule.backgroundTask }
     }
 
     /// Evaluate all rules; highest-priority match wins. Returns `.unknown`
     /// (falling through to default_status handling by the caller) if none match.
+    ///
+    /// `background_task` rules run on their own pass and only raise
+    /// `backgroundBusy`: "this session has a shell running" answers a different
+    /// question than "what is the agent doing". Letting one decide the status made
+    /// a pane parked at an empty prompt read as running for as long as its monitor
+    /// lived — and a pane that never leaves running never emits the edge that
+    /// notifies.
     func evaluate(_ input: DetectionInput) -> Detection {
+        let backgroundBusy = backgroundRules.contains {
+            $0.gate.matches(Self.regionText($0.region, input))
+        }
         for cr in compiledRules {
             let text = Self.regionText(cr.region, input)
             guard cr.gate.matches(text) else { continue }
@@ -60,10 +85,11 @@ final class CompiledManifest {
                 visibleBlocker: cr.rule.visibleBlocker,
                 visibleWorking: cr.rule.visibleWorking,
                 skipStateUpdate: cr.rule.skipStateUpdate,
-                matchedRuleId: cr.rule.id
+                matchedRuleId: cr.rule.id,
+                backgroundBusy: backgroundBusy
             )
         }
-        return Detection.unknown
+        return Detection(state: .unknown, backgroundBusy: backgroundBusy)
     }
 
     /// Default fallback when no rule matched a known agent.

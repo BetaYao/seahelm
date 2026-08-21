@@ -274,6 +274,9 @@ final class SeahelmControlDataSource: ControlDataSource {
             // True when no rule matched and `scan_status` is just the manifest's
             // default — the screen is saying nothing, not saying "idle".
             "scan_defaulted": scan.isDefaulted,
+            // Background work (a shell / monitor this session started). A separate
+            // axis from status: the agent can be idle at a prompt while it is true.
+            "background_busy": scan.backgroundBusy,
             "hook_status": hookStatus.rawValue,
             // True while a Stop is still inside its trailing-edge window, where a
             // hook `.idle` outranks a screen that has not gone quiet yet.
