@@ -25,8 +25,8 @@ struct Config: Codable {
     /// --resume <id>`) when a backend session is recreated instead of falling
     /// back to a plain shell.
     var agentSessions: [String: AgentSessionRef]
-    var wecomBot: WeComBotConfig?
-    var wechat: WeChatConfig?
+    /// Pairing identity for Host Gateway (`root_secret` / `mac_id`). Broker
+    /// fields are legacy and ignored — MQTT publisher was removed.
     var mqtt: MqttConfig?
     var imessage: IMessageConfig?
     /// Gmail email channel configuration. OAuth credentials are held separately
@@ -79,8 +79,6 @@ struct Config: Codable {
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
         case agentSessions = "agent_sessions"
-        case wecomBot = "wecom_bot"
-        case wechat
         case mqtt
         case imessage
         case gmailMail = "gmail_mail"
@@ -119,8 +117,6 @@ struct Config: Codable {
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
         agentSessions = [:]
-        wecomBot = nil
-        wechat = nil
         mqtt = nil
         imessage = nil
         gmailMail = nil
@@ -161,8 +157,6 @@ struct Config: Codable {
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
         agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
-        wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
-        wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
         mqtt = try container.decodeIfPresent(MqttConfig.self, forKey: .mqtt)
         imessage = try container.decodeIfPresent(IMessageConfig.self, forKey: .imessage)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)

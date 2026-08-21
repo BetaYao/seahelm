@@ -1,6 +1,6 @@
 import Foundation
 
-/// iMessage channel — the phone-side transport that replaced WeCom/WeChat.
+/// iMessage channel — phone-side remote control via Messages.app.
 ///
 /// The trade it makes: no server, no token, no relay, no push certificate. The
 /// price is that both directions are local-only side doors — reading

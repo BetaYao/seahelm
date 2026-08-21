@@ -1,56 +1,41 @@
 import Foundation
 
-/// MQTT remote-client backend config (`~/.config/seahelm/config.json`, `mqtt` key).
-/// Mirrors `WeComBotConfig`'s optional-with-resolved-default style so older
-/// configs decode unchanged. Drives `MqttChannel` (CocoaMQTT).
-///
-/// v1 target is EMQX Cloud over TLS (see `docs/remote-clients-design.md` §11).
-/// The Mac publisher connects outbound; clients connect to the same broker.
+/// Pairing identity + legacy MQTT broker fields (`~/.config/seahelm/config.json`,
+/// `mqtt` key). Host Gateway reads `root_secret` / `mac_id` from here; broker
+/// connection fields are kept for config compatibility only (no publisher).
 struct MqttConfig: Codable, Equatable {
-    /// Broker host, e.g. `a81fb6d3.ala.cn-hangzhou.emqxsl.cn` or `127.0.0.1`.
+    /// Legacy broker host. Unused by Host Gateway.
     var host: String
-    /// Broker port. Defaults by transport (see `resolvedPort`).
+    /// Legacy broker port.
     var port: UInt16?
-    /// TLS/SSL. Default true (EMQX Cloud requires it).
+    /// Legacy TLS flag.
     var tls: Bool?
-    /// Connect over WebSocket instead of raw TCP. Mac publisher uses TCP (false);
-    /// browser/Watch clients use WS. Default false.
+    /// Legacy WebSocket flag.
     var websocket: Bool?
-    /// WebSocket path when `websocket` is true. Default `/mqtt`.
+    /// Legacy WebSocket path.
     var wsPath: String?
-    /// Auth (EMQX built-in DB / external). Anonymous is refused on EMQX Cloud.
-    /// When `rootSecret` is set (paired), `MqttChannel` overrides `username` with
-    /// `macId` and `password` with the HKDF-derived hex — these become the manual
-    /// fallback for an un-paired/plaintext broker.
+    /// Legacy broker username/password (unused when `rootSecret` is set).
     var username: String?
     var password: String?
     /// Pairing root secret (base64url, 32 bytes). Set once via the pairing window;
-    /// drives both broker auth (HKDF info="auth") and payload E2EE (info="e2ee").
-    /// Nil = un-paired (plaintext, manual username/password). See `MqttCrypto`.
+    /// drives Host Gateway auth (HKDF info="auth"). See `MqttCrypto`.
     var rootSecret: String?
-    /// Optional CA path for pinning. Nil = rely on system trust (EMQX Cloud uses
-    /// DigiCert Global Root G2, already trusted by macOS).
+    /// Optional CA path (legacy).
     var caCertPath: String?
-    /// Topic namespace `seahelm/{mac_id}/…` and multi-tenant ACL boundary.
-    /// Nil = `MqttChannel` derives a stable, non-PII id.
+    /// Stable Mac instance id used in pair links and Host Gateway auth.
+    /// Nil = derived via `deriveMacId()`.
     var macId: String?
-    /// Optional public WS(S) URL for remote clients (Watch / Web) embedded in
-    /// `seahelm://pair?b=…`. When set, pair links use this instead of deriving
-    /// from `host`/`port` — so the Mac can publish over LAN TCP (`127.0.0.1:1883`)
-    /// while clients dial the edge (`wss://gw.seahelm.dev/mqtt`).
+    /// Legacy public client broker URL for pair links when Host Gateway is off.
     var clientBroker: String?
-    /// MQTT client id. Nil = derived from `macId`.
+    /// Legacy MQTT client id.
     var clientId: String?
-    /// Master enable. Default false (feature off until configured).
+    /// Legacy MQTT enable flag. Ignored — there is no MQTT publisher.
     var enabled: Bool?
-    /// Gate for inbound Control-tier commands (`pane.send_text` etc.). When false,
-    /// `MqttChannel` refuses writes with `capability_denied` regardless of broker
-    /// ACL. Default false — remote write is opt-in.
+    /// Legacy remote-write gate.
     var allowRemoteWrite: Bool?
-    /// Publish `message`/`last_message` bodies. When false, terminal content is
-    /// withheld from the (public) broker; only status/counts flow. Default true.
+    /// Legacy message-publish gate.
     var publishMessages: Bool?
-    /// Reconnect backoff cap (seconds). Default 30.
+    /// Legacy reconnect backoff cap.
     var maxReconnectInterval: TimeInterval?
 
     // MARK: Resolved defaults
@@ -71,8 +56,7 @@ struct MqttConfig: Codable, Equatable {
         }
     }
 
-    /// WS(S) URL for pair QR / long link. Prefers `clientBroker`; else builds from
-    /// host + resolved port (omitting :443 / :80).
+    /// Fallback pair `b=` when Host Gateway is disabled: prefers `clientBroker`.
     var resolvedClientBrokerURL: String {
         if let clientBroker, !clientBroker.isEmpty { return clientBroker }
         let scheme = resolvedTLS ? "wss" : "ws"
@@ -82,25 +66,12 @@ struct MqttConfig: Codable, Equatable {
         return "\(scheme)://\(authority)\(resolvedWsPath)"
     }
 
-    /// Retarget leftover EMQX Cloud hosts to local EMQX + public edge WSS for
-    /// pair links. Idempotent; preserves root_secret / mac_id / allow_remote_write.
-    static func normalizeForEdgeStack(_ mqtt: inout MqttConfig?) {
-        guard var m = mqtt else { return }
-        let host = m.host.lowercased()
-        let isCloud = host.contains("emqxsl") || host.contains("emqx.io")
-        let isLoopback = host == "127.0.0.1" || host == "localhost"
-        if isCloud {
-            m.host = "127.0.0.1"
-            m.port = 1883
-            m.tls = false
-            m.websocket = false
-            m.wsPath = "/mqtt"
-            m.enabled = true
-        }
-        if (m.clientBroker ?? "").isEmpty, isCloud || isLoopback {
-            m.clientBroker = "wss://gw.seahelm.dev/mqtt"
-        }
-        mqtt = m
+    /// Stable, non-PII Mac id from the local hostname (djb2-ish).
+    static func deriveMacId() -> String {
+        let name = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        var h: UInt64 = 5381
+        for b in name.utf8 { h = (h &* 33) ^ UInt64(b) }
+        return "m" + String(h & 0xFFFFFFFF, radix: 16)
     }
 
     enum CodingKeys: String, CodingKey {

@@ -72,21 +72,10 @@ final class MqttCryptoTests: XCTestCase {
         XCTAssertEqual(m.resolvedClientBrokerURL, "wss://broker.example:8084/mqtt")
     }
 
-    func testNormalizeMqttRetargetsEmqxCloud() {
-        var mqtt: MqttConfig? = MqttConfig(host: "a81fb6d3.ala.cn-hangzhou.emqxsl.cn")
-        mqtt?.port = 8084
-        mqtt?.tls = true
-        mqtt?.websocket = true
-        mqtt?.rootSecret = "keep-me"
-        mqtt?.macId = "live"
-        MqttConfig.normalizeForEdgeStack(&mqtt)
-        XCTAssertEqual(mqtt?.host, "127.0.0.1")
-        XCTAssertEqual(mqtt?.port, 1883)
-        XCTAssertEqual(mqtt?.tls, false)
-        XCTAssertEqual(mqtt?.websocket, false)
-        XCTAssertEqual(mqtt?.clientBroker, "wss://gw.seahelm.dev/mqtt")
-        XCTAssertEqual(mqtt?.rootSecret, "keep-me")
-        XCTAssertEqual(mqtt?.macId, "live")
-        XCTAssertEqual(mqtt?.resolvedClientBrokerURL, "wss://gw.seahelm.dev/mqtt")
+    func testDeriveMacIdIsStableAndNonEmpty() {
+        let id = MqttConfig.deriveMacId()
+        XCTAssertFalse(id.isEmpty)
+        XCTAssertEqual(id, MqttConfig.deriveMacId())
+        XCTAssertTrue(id.hasPrefix("m"))
     }
 }

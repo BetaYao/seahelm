@@ -445,12 +445,11 @@ class MainWindowController: NSWindowController, MailCommandContext {
         wc.show()
     }
 
-    /// Remote-client pairing window (QR + long link + on-demand short code).
-    /// Held strongly so it survives past this call. See `PairingWindowController`.
+    /// Browser pairing window (QR + long link). Held strongly so it survives
+    /// past this call. See `PairingWindowController`.
     @objc func showPairing() {
         let (secret, mqtt) = mintPairingContext()
         let wc = PairingWindowController(secret: secret, hostGateway: config.hostGateway, mqtt: mqtt)
-        wc.onShortCode = { [weak self] code, ttl in self?.tabCoordinator.setMqttPairingCode(code, ttl: ttl) }
         wc.showWindow(nil)
         wc.window?.center()
         NSApp.activate(ignoringOtherApps: true)
@@ -472,42 +471,20 @@ class MainWindowController: NSWindowController, MailCommandContext {
 
     /// Mint + persist the root secret on the LIVE config (a throwaway
     /// `Config.load()` copy is clobbered by the app's own config saves), then
-    /// hot-reload the MQTT channel so it reconnects with E2EE + derived broker
-    /// creds — no restart needed.
+    /// reload Host Gateway so auth picks up the secret — no restart needed.
     ///
     /// Shared by the pairing window and the Settings pairing page: both render
     /// the same payload, and neither may mint its own.
     private func mintPairingContext() -> (secret: Data, mqtt: MqttConfig) {
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
-        // Self-hosted edge stack: Mac publishes to local EMQX (TCP), but the
-        // pair QR/link must advertise the public WSS for Watch / web. Retarget
-        // leftover EMQX Cloud hosts and fill `client_broker` when missing.
-        MqttConfig.normalizeForEdgeStack(&config.mqtt)
         if config.mqtt?.rootSecret == nil {
             config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
         }
         config.saveNow()
         let mqtt = config.mqtt!
-        tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")   // sync + reconnect E2EE
+        tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")
         let secret = MqttCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? MqttCrypto.newRootSecret()
         return (secret, mqtt)
-    }
-
-    /// The WeChat bot token stopped being accepted. Point the user at the QR
-    /// flow rather than leaving the channel silently dead.
-    func promptWeChatReauth() {
-        guard let window else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "WeChat sign-in expired"
-        alert.informativeText = "Seahelm has stopped receiving WeChat messages. Scan the QR code again to reconnect."
-        alert.addButton(withTitle: "Open Settings")
-        alert.addButton(withTitle: "Later")
-
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.showSettings()
-        }
     }
 
     /// The iMessage bridge could not start. The only two real causes are
@@ -2664,10 +2641,6 @@ extension MainWindowController: SettingsDelegate {
     }
     func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? {
         mintPairingContext()
-    }
-
-    func settings(_ settings: SettingsViewController, didMintShortCode code: String, ttl: TimeInterval) {
-        tabCoordinator.setMqttPairingCode(code, ttl: ttl)
     }
 
     /// Live panes, so a rule's target is picked from what exists rather than

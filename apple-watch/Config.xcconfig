@@ -1,2 +1,0 @@
-// Shared Watch App build settings. Local secrets go in Secrets.xcconfig (gitignored).
-#include? "Secrets.xcconfig"

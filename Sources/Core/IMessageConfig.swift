@@ -2,7 +2,7 @@ import Foundation
 
 /// iMessage bridge settings.
 ///
-/// Unlike the retired WeCom/WeChat channels there is no token here: the
+/// Unlike other chat bridges there is no token here: the
 /// transport is the local Messages.app database plus AppleScript, so the only
 /// real configuration is *who* is allowed to steer the fleet.
 struct IMessageConfig: Codable, Equatable {

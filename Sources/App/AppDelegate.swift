@@ -75,8 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationManager.shared.requestPermission()
         }
 
-        // WeCom and WeChat are retired — their channels still compile but nothing
-        // constructs them any more. iMessage is the phone-side transport now.
+        // iMessage is the phone-side remote-control transport.
         if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
             let channel = IMessageChannel(config: imessageConfig)
             AgentRegistry.shared.registerChannel(channel)

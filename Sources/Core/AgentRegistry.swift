@@ -49,7 +49,7 @@ class AgentRegistry {
     /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
-    /// External channels (WeCom, future: Slack, etc.) — keyed by channelId
+    /// External channels (iMessage, future: Slack, etc.) — keyed by channelId
     private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
@@ -139,7 +139,7 @@ class AgentRegistry {
         let seq = globalSeq
         lock.unlock()
 
-        // Announce the close so remote mirrors (MqttChannel) can drop the pane's
+        // Announce the close so remote mirrors can drop the pane's
         // retained slot topic instead of leaving a ghost. Off the lock, on main.
         guard let info = closed else { return }
         let event: [String: Any] = [
@@ -421,7 +421,7 @@ class AgentRegistry {
             if !trimmed.isEmpty { dict["user_prompt"] = trimmed }
         }
         // Open decisions — surfaced so remote clients (Watch) can show/answer them
-        // (`pane/{slot}/event`). MqttChannel publishes these retained and clears
+        // (`pane/{slot}/event`). Remote clients publish these retained and clear
         // them when the pane leaves `.waiting`.
         switch o.event.kind {
         case .question(let prompt, let options, _):
@@ -950,7 +950,7 @@ class AgentRegistry {
 
     // MARK: - External Channel Management
 
-    /// Register an external channel (WeCom, Slack, etc.)
+    /// Register an external channel (iMessage, Slack, etc.)
     func registerChannel(_ channel: ExternalChannel) {
         lock.lock()
         externalChannels[channel.channelId] = channel

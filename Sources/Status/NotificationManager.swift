@@ -351,8 +351,8 @@ class NotificationManager: NSObject {
         return String(body.prefix(maxBodyLength - 3)) + "..."
     }
 
-    /// Mirrors a delivered banner out to the registered chat channels (WeCom /
-    /// WeChat), so a phone learns an agent finished without seahelm having to own
+    /// Mirrors a delivered banner out to the registered chat channels
+    /// (iMessage), so a phone learns an agent finished without seahelm having to own
     /// a transport, a relay, or push certificates — the IM app already has all
     /// three.
     ///

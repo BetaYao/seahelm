@@ -13,13 +13,10 @@ class TabCoordinator {
     var config: Config
     let workspaceManager = WorkspaceManager()
 
-    /// MQTT remote-client backend (Watch / web / ESP32), if `config.mqtt` enabled.
-    private var mqttChannel: MqttChannel?
     private var hostGatewayServer: HostGatewayServer?
     private var zmxVTAttachManager: ZmxVTAttachManager?
-    /// Retained so the channel can be torn down and rebuilt on pairing (E2EE).
     /// The live control data source. Also the pane lookup + write channel the
-    /// iMessage rule engine dispatches through, so it is not MQTT-private.
+    /// iMessage rule engine and Host Gateway dispatch through.
     private(set) var mqttDataSource: ControlDataSource?
     private var mailPaneRouter: MailPaneRouter?
     /// Set by `MainWindowController`, which owns the fleet accessors and the
@@ -800,32 +797,13 @@ class TabCoordinator {
                     if !DebugFlags.forceEmptyState {
                         control.start()
                         self.terminalCoordinator.controlSocketServer = control
-                        // Remote-client backend (MQTT). Shares the control
-                        // socket's dataSource; registered with AgentRegistry so it also
-                        // mirrors notifications. docs/remote-clients-design.md.
+                        // Host Gateway shares the control socket's dataSource.
                         self.mqttDataSource = controlDataSource
-                        self.setupMqttChannel(dataSource: controlDataSource)
                         self.setupHostGateway(dataSource: controlDataSource)
                     }
                 }
             }
         }
-    }
-
-    /// Bring up the MQTT remote-client backend if `config.mqtt` is enabled.
-    /// One channel per app run; started here because this is where the shared
-    /// `controlDataSource` is fully wired.
-    private func setupMqttChannel(dataSource: ControlDataSource) {
-        MqttConfig.normalizeForEdgeStack(&config.mqtt)
-        guard let mqttConfig = config.mqtt, mqttConfig.resolvedEnabled else { return }
-        guard mqttChannel == nil else { return }
-        config.save()   // persist retarget (e.g. emqxsl → 127.0.0.1 + client_broker)
-        let channel = MqttChannel(config: mqttConfig)
-        channel.dataSource = dataSource
-        AgentRegistry.shared.registerChannel(channel)
-        channel.connect()
-        mqttChannel = channel
-        NSLog("[TabCoordinator] MQTT remote-client backend started (\(channel.channelId)) broker=\(mqttConfig.host):\(mqttConfig.resolvedPort) pair=\(mqttConfig.resolvedClientBrokerURL)")
     }
 
     /// Localhost WebSocket gateway for browser clients when `config.hostGateway` is enabled.
@@ -834,10 +812,9 @@ class TabCoordinator {
         guard hostGatewayServer == nil else { return }
         guard let hgConfig = config.hostGateway else { return }
 
-        MqttConfig.normalizeForEdgeStack(&config.mqtt)
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
         let mqtt = config.mqtt!
-        let macId = mqtt.macId ?? MqttChannel.deriveMacId()
+        let macId = mqtt.macId ?? MqttConfig.deriveMacId()
         let rootB64 = mqtt.rootSecret ?? ""
 
         let vt = ZmxVTAttachManager()
@@ -869,32 +846,12 @@ class TabCoordinator {
         if let ds = mqttDataSource { setupHostGateway(dataSource: ds) }
     }
 
-    /// Apply a freshly-minted pairing secret to the *live* config and reconnect the
-    /// MQTT channel so it derives broker creds + the E2EE key — no app restart
-    /// needed. Called from `MainWindowController.showPairing`.
+    /// Apply a freshly-minted pairing secret to the *live* config and reload
+    /// Host Gateway so auth picks up the new root — no app restart needed.
     func applyMqttRootSecret(_ secret: String) {
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
         config.mqtt?.rootSecret = secret
-        reloadMqttChannel()
-    }
-
-    /// Arm the live MQTT channel to honor a short pairing code (§7.5.4).
-    func setMqttPairingCode(_ code: String, ttl: TimeInterval) {
-        mqttChannel?.setPairingCode(code, ttl: ttl)
-    }
-
-    /// Tear down the current MQTT channel and rebuild it from the current
-    /// `config.mqtt` (picks up a newly-set `rootSecret` → E2EE).
-    func reloadMqttChannel() {
-        if let old = mqttChannel {
-            old.disconnect()
-            AgentRegistry.shared.unregisterChannel(old.channelId)
-            mqttChannel = nil
-        }
-        if let ds = mqttDataSource {
-            setupMqttChannel(dataSource: ds)
-            reloadHostGateway()
-        }
+        reloadHostGateway()
     }
 
     // MARK: - Shared Worktree Integration

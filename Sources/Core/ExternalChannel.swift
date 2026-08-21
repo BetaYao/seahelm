@@ -53,13 +53,6 @@ struct OutboundMessage {
 // MARK: - ExternalChannel Protocol
 
 enum ExternalChannelType: String {
-    /// Retired. `WeComBotChannel` still compiles but nothing constructs it —
-    /// see `IMessageChannel`, which replaced both WeCom and WeChat as the
-    /// phone-side transport.
-    case wecom
-    /// Retired alongside `wecom`.
-    case wechat
-    case mqtt
     case imessage
 }
 

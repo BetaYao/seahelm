@@ -38,10 +38,10 @@ final class HostGatewayPairingURLTests: XCTestCase {
             "ws://127.0.0.1:2783/ws")
     }
 
-    func testMqttNilFallbackUsesEdgeDefault() {
+    func testMqttNilFallbackUsesLocalBrokerURL() {
         let hg = HostGatewayConfig(enabled: false)
         XCTAssertEqual(
             HostGatewayPairing.clientEntryURL(hostGateway: hg, mqtt: nil),
-            "wss://gw.seahelm.dev/mqtt")
+            "wss://127.0.0.1:8883/mqtt")
     }
 }

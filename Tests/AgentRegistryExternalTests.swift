@@ -4,7 +4,7 @@ import XCTest
 /// Mock ExternalChannel for testing
 final class MockExternalChannel: ExternalChannel {
     let channelId: String
-    let channelType: ExternalChannelType = .wecom
+    let channelType: ExternalChannelType = .imessage
     var gatewayState: GatewayState = .disconnected
     var onMessage: ((InboundMessage) -> Void)?
     var sentMessages: [OutboundMessage] = []

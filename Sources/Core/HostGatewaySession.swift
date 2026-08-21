@@ -121,7 +121,7 @@ final class HostGatewaySession {
             return HostGatewayFrame.encode(.response(id: id, result: ["ok": true], error: nil))
         case "question.answer":
             // The on-screen prompt is navigated, not addressed: move down `index`
-            // times, then Return. Same shape MqttChannel drives for the Watch.
+            // times, then Return.
             let qKey = paneSessionKey(from: params)
             let qIndex = max(0, params["index"] as? Int ?? 0)
             var keys = Array(repeating: "down", count: qIndex)
