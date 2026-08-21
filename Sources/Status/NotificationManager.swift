@@ -20,7 +20,16 @@ class NotificationManager: NSObject {
     /// is allowed to correct a scan-derived banner inside the cooldown window.
     enum NotificationSource { case scan, agent }
 
-    private var lastNotified: [String: (at: Date, source: NotificationSource)] = [:]
+    /// What was last announced for a key: when, by whom, and *which turn* it was.
+    /// The turn identity is what stops one completion being announced twice.
+    private struct Delivery {
+        let at: Date
+        let source: NotificationSource
+        /// Identifies the turn being announced — see `turnFingerprint`.
+        let turn: String
+    }
+
+    private var lastNotified: [String: Delivery] = [:]
 
     /// Minimum seconds between delivered notifications for the same key. Injected
     /// from `Config.notifications` at startup.
@@ -149,23 +158,51 @@ class NotificationManager: NSObject {
     /// agent-reported events really are two events, and the cooldown is what keeps
     /// a blocked-then-resumed Stop pair from bannering twice.
     func shouldNotify(cooldownKey: String, oldStatus: AgentStatus, newStatus: AgentStatus,
-                      source: NotificationSource = .scan, now: Date = Date()) -> Bool {
-        Self.shouldNotify(oldStatus: oldStatus, newStatus: newStatus, source: source,
-                          lastDelivery: lastNotified[cooldownKey], cooldown: cooldown, now: now)
+                      source: NotificationSource = .scan, turn: String = "",
+                      now: Date = Date()) -> Bool {
+        let last = lastNotified[cooldownKey]
+        return Self.shouldNotify(
+            oldStatus: oldStatus, newStatus: newStatus, source: source, turn: turn,
+            lastDelivery: last.map { (at: $0.at, source: $0.source, turn: $0.turn) },
+            cooldown: cooldown, now: now)
     }
 
     /// Pure core of the eligibility gate — extracted so the cooldown/override
     /// policy is testable without the shared instance's accumulated deliveries.
+    ///
+    /// A turn is announced at most once. A finished pane keeps moving: Claude Code
+    /// compacts its conversation, a shell it left running paints, a monitor ticks —
+    /// each of those retakes the screen, and when the screen settles the status
+    /// makes another running → idle edge out of the *same* completion. Judged on
+    /// timing alone those repeats look legitimate (minutes apart, well past the
+    /// cooldown), so they were delivered: the same banner, carrying the same
+    /// now-stale text, arriving long after the agent actually finished. Identity,
+    /// not timing, is what tells them apart.
     static func shouldNotify(oldStatus: AgentStatus, newStatus: AgentStatus,
-                             source: NotificationSource,
-                             lastDelivery: (at: Date, source: NotificationSource)?,
+                             source: NotificationSource, turn: String,
+                             lastDelivery: (at: Date, source: NotificationSource, turn: String)?,
                              cooldown: TimeInterval, now: Date) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
-        if let last = lastDelivery, now.timeIntervalSince(last.at) < cooldown {
+        guard let last = lastDelivery else { return true }
+        // Already announced, however long ago. An empty fingerprint identifies
+        // nothing, so it never matches itself.
+        if !turn.isEmpty, turn == last.turn { return false }
+        if now.timeIntervalSince(last.at) < cooldown {
             return source == .agent && last.source == .scan
         }
         return true
+    }
+
+    /// Identifies the turn a notification is about: its outcome plus the words it
+    /// would show. Two edges carrying the same answer to the same prompt are the
+    /// same completion seen twice, whatever the status did in between.
+    static func turnFingerprint(status: AgentStatus, lastAssistantMessage: String,
+                                lastMessage: String, lastUserPrompt: String) -> String {
+        let body = lastAssistantMessage.isEmpty ? lastMessage : lastAssistantMessage
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return "\(status.rawValue)|\(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))|\(trimmed)"
     }
 
     /// Whether a pending (delayed) notification for `targetStatus` should still
@@ -482,14 +519,16 @@ class NotificationManager: NSObject {
         // flicker that flips back to running mid-turn).
         latestStatus[key] = newStatus
 
-        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus,
-                           newStatus: newStatus, source: source) else { return }
+        let turn = Self.turnFingerprint(status: newStatus, lastAssistantMessage: lastAssistantMessage,
+                                        lastMessage: lastMessage, lastUserPrompt: lastUserPrompt)
+        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus, newStatus: newStatus,
+                           source: source, turn: turn) else { return }
 
         // The delivery closure captures the fully-formed payload. Invoked either
         // immediately or when the stability timer fires and the status still holds.
         let deliver = { [weak self] in
             guard let self else { return }
-            self.lastNotified[key] = (at: Date(), source: source)
+            self.lastNotified[key] = Delivery(at: Date(), source: source, turn: turn)
             self.deliver(
                 worktreePath: worktreePath,
                 workspaceName: workspaceName,
