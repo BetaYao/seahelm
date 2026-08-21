@@ -328,4 +328,20 @@ final class ManifestEngineTests: XCTestCase {
         XCTAssertEqual(AgentStatus.fromManifest("blocked"), .waiting)
         XCTAssertEqual(AgentStatus.fromManifest("IDLE"), .idle)
     }
+
+    /// Evidence must name the line that actually fired, not the whole region —
+    /// the wrong line sends you rewriting a rule that was innocent.
+    func testMatchDetailNarrowsEvidenceToTheMatchingLine() {
+        guard let cm = ManifestStore.shared.manifest(for: "claude") else {
+            return XCTFail("missing claude manifest")
+        }
+        let screen = """
+        ⏺ read(sources/status/manifestengine.swift)
+        ✳ synthesizing… (12m 12s · ↓ 36.4k tokens)
+          ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 5 agents
+        """
+        let detail = cm.matchDetail(DetectionInput(screen: screen))
+        XCTAssertEqual(detail?.rule.id, "working_spinner")
+        XCTAssertEqual(detail?.regionText, "✳ synthesizing… (12m 12s · ↓ 36.4k tokens)")
+    }
 }

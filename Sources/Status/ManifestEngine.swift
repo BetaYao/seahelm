@@ -69,14 +69,31 @@ final class CompiledManifest {
     /// Default fallback when no rule matched a known agent.
     var defaultStatus: AgentStatus { AgentStatus.fromManifest(manifest.defaultStatus) }
 
-    /// Explainability: the winning rule plus the region text it matched against
-    /// (evidence), or nil if no rule matched. Same evaluation order as `evaluate`.
+    /// Explainability: the winning rule plus the evidence it matched on, or nil if
+    /// no rule matched. Same evaluation order as `evaluate`.
+    ///
+    /// Evidence is narrowed to the single line responsible whenever one line is
+    /// enough to satisfy the gate. Reporting the whole region instead is actively
+    /// misleading — it reads as "the rule matched this footer" when the real match
+    /// was some line of transcript higher up, which is exactly how a false
+    /// `running` gets blamed on the wrong rule.
     func matchDetail(_ input: DetectionInput) -> (rule: ManifestRule, regionText: String)? {
         for cr in compiledRules {
             let text = Self.regionText(cr.region, input)
-            if cr.gate.matches(text) { return (cr.rule, text) }
+            guard cr.gate.matches(text) else { continue }
+            return (cr.rule, Self.narrowEvidence(text, gate: cr.gate))
         }
         return nil
+    }
+
+    /// The first line that satisfies the gate on its own, else the region text.
+    /// Only ever called from the explain path, so the extra passes are free.
+    private static func narrowEvidence(_ text: String, gate: CompiledGate) -> String {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let s = String(line)
+            if gate.matches(s) { return s.trimmingCharacters(in: .whitespaces) }
+        }
+        return text
     }
 
     // MARK: Region extraction
