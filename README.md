@@ -4,6 +4,12 @@ A native macOS workspace for coding agents, git worktrees, and parallel developm
 
 [中文文档](README.zh-CN.md)
 
+## Demo
+
+![Seahelm demo](assets/tour.gif)
+
+Full walkthrough: [YouTube](https://youtu.be/WUUcuglx_Ks)
+
 ## Why Seahelm
 
 - **Minimal** — No bloated code editor or diff review. Everything is delegated to agents; the UI stays out of the way.
