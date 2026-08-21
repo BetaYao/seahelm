@@ -45,11 +45,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
 
+        Analytics.initialize()
+        Analytics.trackAppStarted(worktreeCount: Analytics.knownWorktreeCount(from: config))
+
         // `--show-onboarding` forces the wizard for design iteration without
         // resetting config (finishing it still saves normally).
         if !config.onboardingCompleted || CommandLine.arguments.contains("--show-onboarding") {
             let wizard = OnboardingWindowController(config: config)
             wizard.onComplete = { [weak self] updated in
+                Analytics.trackOnboardingCompleted()
                 self?.onboardingController = nil
                 self?.bootstrapMainApp(config: updated)
             }
