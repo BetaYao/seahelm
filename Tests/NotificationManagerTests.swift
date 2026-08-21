@@ -199,11 +199,14 @@ final class NotificationManagerTests: XCTestCase {
 
     private func gate(_ source: NotificationManager.NotificationSource,
                       after last: (at: Date, source: NotificationManager.NotificationSource)?,
-                      elapsed: TimeInterval) -> Bool {
+                      elapsed: TimeInterval,
+                      turn: String = "turn-a", lastTurn: String = "turn-b") -> Bool {
         let now = Date()
-        let previous = last.map { (at: now.addingTimeInterval(-elapsed), source: $0.source) }
+        let previous = last.map {
+            (at: now.addingTimeInterval(-elapsed), source: $0.source, turn: lastTurn)
+        }
         return NotificationManager.shouldNotify(
-            oldStatus: .running, newStatus: .idle, source: source,
+            oldStatus: .running, newStatus: .idle, source: source, turn: turn,
             lastDelivery: previous, cooldown: 30, now: now)
     }
 
@@ -236,5 +239,59 @@ final class NotificationManagerTests: XCTestCase {
 
     func testFirstEverEdgeFires() {
         XCTAssertTrue(gate(.scan, after: nil, elapsed: 0))
+    }
+
+    // MARK: - One announcement per turn
+
+    /// The regression the user actually felt: a banner arriving "minutes late".
+    /// It was not late — it was a second banner for a completion already
+    /// announced. A finished Claude pane keeps painting (conversation
+    /// compaction, a leftover shell), which retakes the screen; when the screen
+    /// settles, the status makes another running → idle edge out of the same
+    /// turn, minutes past the cooldown, carrying the same stale text.
+    func testTheSameTurnIsNeverAnnouncedTwice() {
+        XCTAssertFalse(gate(.scan, after: (at: Date(), source: .agent), elapsed: 300,
+                            turn: "same", lastTurn: "same"))
+    }
+
+    func testANewTurnPastTheCooldownStillFires() {
+        XCTAssertTrue(gate(.scan, after: (at: Date(), source: .agent), elapsed: 300,
+                           turn: "second answer", lastTurn: "first answer"))
+    }
+
+    /// Turn identity outranks the agent-over-scan override too: correcting an
+    /// early banner is worth a second delivery, repeating one is not.
+    func testTheOverrideDoesNotResurrectAnAlreadyAnnouncedTurn() {
+        XCTAssertFalse(gate(.agent, after: (at: Date(), source: .scan), elapsed: 5,
+                            turn: "same", lastTurn: "same"))
+    }
+
+    /// A pane with nothing to say identifies no turn, so it must not match itself
+    /// and mute every later completion.
+    func testAnUnidentifiedTurnNeverMatches() {
+        XCTAssertTrue(gate(.scan, after: (at: Date(), source: .agent), elapsed: 300,
+                           turn: "", lastTurn: ""))
+    }
+
+    func testFingerprintPrefersTheAgentsOwnProse() {
+        let f = NotificationManager.turnFingerprint(
+            status: .idle, lastAssistantMessage: "shipped it",
+            lastMessage: "npm test", lastUserPrompt: "ship")
+        XCTAssertTrue(f.contains("shipped it"))
+        XCTAssertFalse(f.contains("npm test"), "the scanned command line is the weaker signal")
+    }
+
+    /// Same words, different question — still two turns.
+    func testSamePoseToADifferentPromptIsADifferentTurn() {
+        let a = NotificationManager.turnFingerprint(
+            status: .idle, lastAssistantMessage: "Done.", lastMessage: "", lastUserPrompt: "fix the test")
+        let b = NotificationManager.turnFingerprint(
+            status: .idle, lastAssistantMessage: "Done.", lastMessage: "", lastUserPrompt: "now ship it")
+        XCTAssertNotEqual(a, b)
+    }
+
+    func testEmptyPayloadYieldsNoFingerprint() {
+        XCTAssertEqual(NotificationManager.turnFingerprint(
+            status: .idle, lastAssistantMessage: "  ", lastMessage: "", lastUserPrompt: "x"), "")
     }
 }
