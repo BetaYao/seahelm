@@ -1,0 +1,56 @@
+name: Notify WeCom on GitHub Star
+
+on:
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Send WeCom notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ACTOR: ${{ github.actor }}
+      ACTOR_URL: https://github.com/${{ github.actor }}
+      EVENT_NAME: ${{ github.event_name }}
+      REPOSITORY: ${{ github.repository }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+      STAR_COUNT: ${{ github.event.repository.stargazers_count }}
+      WECOM_WEBHOOK_URL: ${{ secrets.WECOM_STAR_WEBHOOK_URL }}
+    steps:
+      - name: Send notification
+        shell: bash
+        run: |
+          if [[ -z "$WECOM_WEBHOOK_URL" ]]; then
+            echo "::error::WECOM_STAR_WEBHOOK_URL is not configured"
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            heading="GitHub Star notification test"
+          else
+            heading="New GitHub Star"
+          fi
+
+          content=$(printf '<font color="info">%s</font>\n> Repository: [%s](%s)\n> Starred by: [@%s](%s)\n> Total stars: **%s**' \
+            "$heading" "$REPOSITORY" "$REPOSITORY_URL" "$ACTOR" "$ACTOR_URL" "$STAR_COUNT")
+          payload=$(jq -n --arg content "$content" \
+            '{msgtype: "markdown", markdown: {content: $content}}')
+
+          response=$(curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            "$WECOM_WEBHOOK_URL")
+
+          if [[ $(jq -r '.errcode // -1' <<<"$response") != "0" ]]; then
+            echo "::error::WeCom webhook returned an error"
+            jq -c '{errcode, errmsg}' <<<"$response"
+            exit 1
+          fi
+
+          echo "WeCom notification sent"
