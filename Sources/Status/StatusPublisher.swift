@@ -345,7 +345,8 @@ class StatusPublisher {
 
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle)
+            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle,
+                                               defaulted: detection.isDefaulted)
             // The debounced/committed status drives both pipelines, so a held
             // running→idle flip does not leak into AgentRegistry either.
             let committedStatus = tracker.currentStatus
@@ -365,7 +366,8 @@ class StatusPublisher {
                 terminalID: terminalID, source: .scan,
                 kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
                                       commandLine: commandLine, agentType: agentType,
-                                      roundDuration: roundDur, tasks: webhookTasks))
+                                      roundDuration: roundDur, tasks: webhookTasks,
+                                      backgroundBusy: detection.backgroundBusy))
             AgentRegistry.shared.ingest(normalized)
 
             // Agent permission dialogs are rendered by the TUI rather than sent

@@ -65,16 +65,18 @@ class WorktreeStatusAggregator {
     }
 
     func agentDidUpdate(terminalID: String, status: AgentStatus, lastMessage: String,
-                        lastUserPrompt: String = "", agentType: AgentType = .unknown) {
+                        lastUserPrompt: String = "", agentType: AgentType = .unknown,
+                        backgroundBusy: Bool = false) {
         guard let worktreePath = terminalToWorktree[terminalID] else { return }
 
         let now = Date()
         let oldPaneState = paneStates[terminalID]
         let statusChanged = oldPaneState?.status != status
+        let backgroundChanged = oldPaneState?.backgroundBusy != backgroundBusy
         let messageChanged = oldPaneState?.lastMessage != lastMessage
         let promptChanged = oldPaneState?.lastUserPrompt != lastUserPrompt
 
-        guard statusChanged || messageChanged || promptChanged else { return }
+        guard statusChanged || messageChanged || promptChanged || backgroundChanged else { return }
 
         // Advance the worktree's last-activity time. A first-ever detection of a
         // pane (oldPaneState == nil) is launch/restore noise — keep any seeded/
@@ -100,7 +102,8 @@ class WorktreeStatusAggregator {
             lastUserPrompt: effectivePrompt,
             lastUpdated: now,
             statusChangedAt: statusChangedAt,
-            agentType: effectiveType
+            agentType: effectiveType,
+            backgroundBusy: backgroundBusy
         )
         paneStates[terminalID] = newPaneState
 

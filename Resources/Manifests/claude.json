@@ -1,6 +1,6 @@
 {
   "id": "claude",
-  "version": "2026.07.30.1",
+  "version": "2026.08.21.1",
   "min_engine_version": 1,
   "aliases": ["claude-code"],
   "default_status": "idle",
@@ -50,7 +50,8 @@
         { "line_regex": ["\\d+ shells?\\s*([,·]|$)"] },
         { "line_regex": ["\\d+ monitors?\\s*([,·]|$)"] }
       ],
-      "visible_working": true
+      "visible_working": true,
+      "background_task": true
     },
     {
       "id": "working_interrupt",

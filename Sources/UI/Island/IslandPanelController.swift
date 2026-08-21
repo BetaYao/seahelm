@@ -126,10 +126,15 @@ final class IslandPanelController {
 
     /// Auto-expand for an arriving suggestion so the card is visible without
     /// hovering. Collapses again after a timeout if the pointer never comes,
-    /// or as soon as it leaves after having engaged. Suppressed while seahelm
-    /// is frontmost — the main window already shows the suggestion.
-    func openForEvent() {
-        guard !NSApp.isActive else { return }
+    /// or as soon as it leaves after having engaged.
+    ///
+    /// Suppressed only when the user is already looking at the card: seahelm
+    /// frontmost AND the raising pane's worktree on screen, where the First Mate
+    /// sidebar carries it. Frontmost on a *different* worktree still pops —
+    /// that sidebar shows its own worktree's cards, so nothing else would
+    /// surface this one and it used to arrive silently.
+    func openForEvent(targetVisible: Bool) {
+        guard !(NSApp.isActive && targetVisible) else { return }
         guard let panel, !model.isOpened else { return }
         if !panel.isVisible { updateVisibility() }
         guard panel.isVisible else { return }

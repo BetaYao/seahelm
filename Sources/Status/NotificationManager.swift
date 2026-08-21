@@ -14,7 +14,13 @@ extension Notification.Name {
 class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
-    private var lastNotified: [String: Date] = [:]
+    /// Which channel a status change came from. The agent reporting its own stop
+    /// (hook) is worth more than the screen scan inferring one: the scan cannot
+    /// tell a thinking pause from a finished turn, so an agent-reported completion
+    /// is allowed to correct a scan-derived banner inside the cooldown window.
+    enum NotificationSource { case scan, agent }
+
+    private var lastNotified: [String: (at: Date, source: NotificationSource)] = [:]
 
     /// Minimum seconds between delivered notifications for the same key. Injected
     /// from `Config.notifications` at startup.
@@ -136,12 +142,28 @@ class NotificationManager: NSObject {
     /// only when a notification is actually *delivered* (`recordDelivery`), so a
     /// notification held by the stability gate and then dropped does not burn the
     /// cooldown window.
+    /// `source` says who reported this change (see `NotificationSource`): an
+    /// agent-reported event may overtake a still-warm scan-derived one, because
+    /// that earlier banner was quite possibly wrong — a thinking pause read as a
+    /// finished turn. It gets that right exactly once per window: two
+    /// agent-reported events really are two events, and the cooldown is what keeps
+    /// a blocked-then-resumed Stop pair from bannering twice.
     func shouldNotify(cooldownKey: String, oldStatus: AgentStatus, newStatus: AgentStatus,
-                      now: Date = Date()) -> Bool {
+                      source: NotificationSource = .scan, now: Date = Date()) -> Bool {
+        Self.shouldNotify(oldStatus: oldStatus, newStatus: newStatus, source: source,
+                          lastDelivery: lastNotified[cooldownKey], cooldown: cooldown, now: now)
+    }
+
+    /// Pure core of the eligibility gate — extracted so the cooldown/override
+    /// policy is testable without the shared instance's accumulated deliveries.
+    static func shouldNotify(oldStatus: AgentStatus, newStatus: AgentStatus,
+                             source: NotificationSource,
+                             lastDelivery: (at: Date, source: NotificationSource)?,
+                             cooldown: TimeInterval, now: Date) -> Bool {
         guard oldStatus == .running else { return false }
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
-        if let last = lastNotified[cooldownKey], now.timeIntervalSince(last) < cooldown {
-            return false
+        if let last = lastDelivery, now.timeIntervalSince(last.at) < cooldown {
+            return source == .agent && last.source == .scan
         }
         return true
     }
@@ -365,6 +387,20 @@ class NotificationManager: NSObject {
     /// Set by MainWindowController; nil in tests and headless runs.
     var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String) -> Void)?
 
+    /// Whether a suggestion card for this pane is already expanded on screen (the
+    /// island popped open with it). Set by MainWindowController; nil in tests and
+    /// headless runs, where nothing is on screen to be redundant with.
+    var isCardOnScreen: ((_ terminalID: String) -> Bool)?
+
+    /// Whether the system banner would only repeat something the user is already
+    /// looking at. Both surfaces that can pre-empt it — the focused pane itself and
+    /// an expanded island card — only count while seahelm is frontmost: in the
+    /// background the island collapses on its own after ten seconds and may never
+    /// have been seen at all, so the banner is the only durable record.
+    static func shouldSuppressBanner(appActive: Bool, targetVisible: Bool, cardOnScreen: Bool) -> Bool {
+        appActive && (targetVisible || cardOnScreen)
+    }
+
     static func formatSystemTitle(status: AgentStatus) -> String {
         switch status {
         case .idle:
@@ -421,6 +457,9 @@ class NotificationManager: NSObject {
     ///   - paneIndex/paneCount: 1-based; `paneCount > 1` adds a `[Pane N]` label
     ///     and records the pane in history so a click can mark just that pane read.
     ///   - isTargetVisible: whether this worktree is the one currently shown.
+    ///   - source: who reported the change — the agent's own hook, or the screen
+    ///     scan inferring it. Only the former may correct a banner already sent
+    ///     inside the cooldown window.
     func notify(
         worktreePath: String,
         workspaceName: String,
@@ -433,7 +472,8 @@ class NotificationManager: NSObject {
         lastMessage: String,
         lastUserPrompt: String = "",
         lastAssistantMessage: String = "",
-        isTargetVisible: Bool = false
+        isTargetVisible: Bool = false,
+        source: NotificationSource = .scan
     ) {
         let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
 
@@ -442,19 +482,21 @@ class NotificationManager: NSObject {
         // flicker that flips back to running mid-turn).
         latestStatus[key] = newStatus
 
-        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus, newStatus: newStatus) else { return }
+        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus,
+                           newStatus: newStatus, source: source) else { return }
 
         // The delivery closure captures the fully-formed payload. Invoked either
         // immediately or when the stability timer fires and the status still holds.
         let deliver = { [weak self] in
             guard let self else { return }
-            self.lastNotified[key] = Date()
+            self.lastNotified[key] = (at: Date(), source: source)
             self.deliver(
                 worktreePath: worktreePath,
                 workspaceName: workspaceName,
                 branch: branch,
                 paneIndex: paneIndex,
                 paneCount: paneCount,
+                terminalID: terminalID,
                 newStatus: newStatus,
                 lastMessage: lastMessage,
                 lastUserPrompt: lastUserPrompt,
@@ -493,6 +535,7 @@ class NotificationManager: NSObject {
         branch: String,
         paneIndex: Int,
         paneCount: Int,
+        terminalID: String,
         newStatus: AgentStatus,
         lastMessage: String,
         lastUserPrompt: String,
@@ -537,8 +580,13 @@ class NotificationManager: NSObject {
         ))
 
         // Suppress the system banner only when the user can already see this
-        // target (frontmost AND the worktree is on screen).
-        if isTargetVisible && NSApp.isActive { return }
+        // event — the pane itself is on screen and focused, or the island is
+        // expanded showing this pane's suggestion card (the same completion,
+        // rendered with the buttons that act on it).
+        let cardOnScreen = !terminalID.isEmpty && isCardOnScreen?(terminalID) == true
+        if Self.shouldSuppressBanner(appActive: NSApp.isActive,
+                                     targetVisible: isTargetVisible,
+                                     cardOnScreen: cardOnScreen) { return }
 
         // Mirror the banner, not the history entry: this fires on exactly the
         // edges that earn a banner, and is skipped by the return above when the

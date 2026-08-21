@@ -93,6 +93,13 @@ struct ManifestRule: Codable {
     var visibleIdle: Bool = false
     var visibleBlocker: Bool = false
     var visibleWorking: Bool = false
+    /// This rule reports *background* work (a shell or monitor the session
+    /// started), not the agent's own state. Such a rule never decides `state`:
+    /// it only raises `Detection.backgroundBusy`, and evaluation carries on to
+    /// find the rule that does. Conflating the two pinned a pane parked at an
+    /// empty prompt on `running` for as long as its monitor lived — and a pane
+    /// that never leaves running never produces the edge that notifies.
+    var backgroundTask: Bool = false
 
     // inline MatchGate
     var contains: [String] = []
@@ -108,6 +115,7 @@ struct ManifestRule: Codable {
         case visibleIdle = "visible_idle"
         case visibleBlocker = "visible_blocker"
         case visibleWorking = "visible_working"
+        case backgroundTask = "background_task"
         case lineRegex = "line_regex"
     }
 
@@ -126,6 +134,7 @@ struct ManifestRule: Codable {
         visibleIdle = try c.decodeIfPresent(Bool.self, forKey: .visibleIdle) ?? false
         visibleBlocker = try c.decodeIfPresent(Bool.self, forKey: .visibleBlocker) ?? false
         visibleWorking = try c.decodeIfPresent(Bool.self, forKey: .visibleWorking) ?? false
+        backgroundTask = try c.decodeIfPresent(Bool.self, forKey: .backgroundTask) ?? false
         contains = try c.decodeIfPresent([String].self, forKey: .contains) ?? []
         regex = try c.decodeIfPresent([String].self, forKey: .regex) ?? []
         lineRegex = try c.decodeIfPresent([String].self, forKey: .lineRegex) ?? []

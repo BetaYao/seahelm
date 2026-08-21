@@ -170,4 +170,71 @@ final class NotificationManagerTests: XCTestCase {
         // No observation → drop.
         XCTAssertFalse(NotificationManager.shouldDeliverPending(targetStatus: .idle, latestStatus: nil))
     }
+
+    // MARK: - Banner suppression
+
+    func testBannerFiresWhenAppIsInBackgroundEvenWithACardOnScreen() {
+        // The island collapses on its own after ten seconds and may never have
+        // been seen — in the background the banner is the only durable record.
+        XCTAssertFalse(NotificationManager.shouldSuppressBanner(
+            appActive: false, targetVisible: true, cardOnScreen: true))
+    }
+
+    func testBannerSuppressedWhenIslandCardIsExpandedFrontmost() {
+        XCTAssertTrue(NotificationManager.shouldSuppressBanner(
+            appActive: true, targetVisible: false, cardOnScreen: true))
+    }
+
+    func testBannerSuppressedWhenLookingAtThePane() {
+        XCTAssertTrue(NotificationManager.shouldSuppressBanner(
+            appActive: true, targetVisible: true, cardOnScreen: false))
+    }
+
+    func testBannerFiresForAnotherWorktreeWithNoCardShown() {
+        XCTAssertFalse(NotificationManager.shouldSuppressBanner(
+            appActive: true, targetVisible: false, cardOnScreen: false))
+    }
+
+    // MARK: - Cooldown override
+
+    private func gate(_ source: NotificationManager.NotificationSource,
+                      after last: (at: Date, source: NotificationManager.NotificationSource)?,
+                      elapsed: TimeInterval) -> Bool {
+        let now = Date()
+        let previous = last.map { (at: now.addingTimeInterval(-elapsed), source: $0.source) }
+        return NotificationManager.shouldNotify(
+            oldStatus: .running, newStatus: .idle, source: source,
+            lastDelivery: previous, cooldown: 30, now: now)
+    }
+
+    func testCooldownSuppressesASecondScanBanner() {
+        XCTAssertFalse(gate(.scan, after: (at: Date(), source: .scan), elapsed: 5))
+    }
+
+    /// The regression: a screen-inferred banner fired mid-turn (a thinking pause
+    /// read as a finished turn) used to swallow the real completion arriving
+    /// seconds later, with no retry — the user simply never heard about it.
+    func testAgentReportedCompletionOverridesAWarmScanBanner() {
+        XCTAssertTrue(gate(.agent, after: (at: Date(), source: .scan), elapsed: 5))
+    }
+
+    /// A blocked Stop is ingested as completion and the agent's follow-up turn
+    /// stops again moments later. Both are agent-reported, so the cooldown must
+    /// collapse them into one banner.
+    func testSecondAgentReportedCompletionIsStillSuppressed() {
+        XCTAssertFalse(gate(.agent, after: (at: Date(), source: .agent), elapsed: 5))
+    }
+
+    func testScanBannerNeverOverridesAnAgentReportedOne() {
+        XCTAssertFalse(gate(.scan, after: (at: Date(), source: .agent), elapsed: 5))
+    }
+
+    func testPastTheCooldownEitherSourceFires() {
+        XCTAssertTrue(gate(.scan, after: (at: Date(), source: .agent), elapsed: 31))
+        XCTAssertTrue(gate(.agent, after: (at: Date(), source: .agent), elapsed: 31))
+    }
+
+    func testFirstEverEdgeFires() {
+        XCTAssertTrue(gate(.scan, after: nil, elapsed: 0))
+    }
 }

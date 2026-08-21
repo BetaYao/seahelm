@@ -35,7 +35,8 @@ enum NormalizedEventKind {
                         commandLine: String?,
                         agentType: AgentType,
                         roundDuration: TimeInterval,
-                        tasks: [TaskItem])
+                        tasks: [TaskItem],
+                        backgroundBusy: Bool = false)
 }
 
 struct NormalizedEvent {

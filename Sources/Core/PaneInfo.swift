@@ -23,6 +23,19 @@ struct PaneInfo {
     var activityEvents: [ActivityEvent] = []
     var scanStatus: AgentStatus = .unknown   // latest screen-scan observation (component)
     var hookStatus: AgentStatus = .unknown   // webhook-accumulated inference (component)
+    /// The session has background work of its own — a shell it launched, a monitor
+    /// it watches. A separate axis from `status` on purpose: the agent can be idle
+    /// at an empty prompt while this is true, and folding it into the status
+    /// pinned such a pane on `running` for the life of the monitor, which cost it
+    /// every completion edge (and so every notification) it would have produced.
+    var backgroundBusy: Bool = false
+
+    /// What the dashboard draws. Background work still reads as busy — a worktree
+    /// watching CI is not "done" — while `status` stays the honest answer to
+    /// "what is the agent doing", which is what edges and notifications ride on.
+    var displayStatus: AgentStatus {
+        (status == .idle && backgroundBusy) ? .running : status
+    }
 
     /// Total duration computed live from startedAt
     var totalDuration: TimeInterval {

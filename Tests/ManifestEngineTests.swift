@@ -58,11 +58,17 @@ final class ManifestEngineTests: XCTestCase {
         XCTAssertNotNil(ManifestStore.shared.manifest(for: "pi-coding-agent"))
     }
 
-    /// Regression: Claude Code at an idle prompt but with background tasks still
-    /// running (footer shows "· 1 shell ·" / "← 2 agents", or the transcript
-    /// spinner line ends with "1 shell still running") must detect as running,
-    /// not fall through to the idle default.
-    func testClaudeBackgroundTasksDetectAsRunning() {
+    /// Claude Code at an idle prompt with background work of its own (footer
+    /// "· 1 shell ·", "· 1 monitor ·", or a spinner line ending "1 shell still
+    /// running") must be reported as background-busy, so the dashboard still
+    /// draws the worktree as busy rather than done.
+    ///
+    /// It is deliberately NOT the agent's status any more. A monitor lives as long
+    /// as the thing it watches, so folding it into `state` pinned the pane on
+    /// `running` indefinitely — and a pane that never leaves running never emits
+    /// the running → idle edge that notifications ride on. `displayStatus` is what
+    /// preserves the original dashboard behaviour; see `PaneInfoDisplayStatusTests`.
+    func testClaudeBackgroundTasksDetectAsBackgroundBusy() {
         guard let cm = ManifestStore.shared.manifest(for: "claude") else {
             return XCTFail("missing claude manifest")
         }
@@ -79,8 +85,9 @@ final class ManifestEngineTests: XCTestCase {
         ]
         for screen in footers {
             let d = cm.evaluate(DetectionInput(screen: screen.lowercased()))
-            XCTAssertEqual(d.state, .running, "expected running for: \(screen)")
-            XCTAssertTrue(d.visibleWorking)
+            XCTAssertTrue(d.backgroundBusy, "expected background-busy for: \(screen)")
+            XCTAssertNotEqual(d.state, .running,
+                              "background work must not decide the agent's own status: \(screen)")
         }
         // Idle prompts must NOT match: "← 2 agents" is a persistent connected-
         // agents indicator (not a background task), and transcript prose like
@@ -90,9 +97,29 @@ final class ManifestEngineTests: XCTestCase {
             "done.\n\n❯ \n▸▸ bypass permissions on (shift+tab to cycle) · ← 2 agents",
         ]
         for screen in idles {
-            XCTAssertEqual(cm.evaluate(DetectionInput(screen: screen)).state, .unknown,
-                           "expected no match for: \(screen)")
+            let d = cm.evaluate(DetectionInput(screen: screen))
+            XCTAssertEqual(d.state, .unknown, "expected no match for: \(screen)")
+            XCTAssertFalse(d.backgroundBusy, "expected no background work for: \(screen)")
         }
+    }
+
+    /// A background rule must not shadow the rule that answers the real question.
+    /// Evaluation used to stop at the first match, so a footer shell count hid a
+    /// live spinner (and anything else below its priority) behind `running` — the
+    /// right answer by luck, the wrong reason, and wrong the moment the agent
+    /// stopped.
+    func testBackgroundRuleDoesNotShadowTheStatusRule() {
+        guard let cm = ManifestStore.shared.manifest(for: "claude") else {
+            return XCTFail("missing claude manifest")
+        }
+        let screen = """
+        do you want to proceed?
+        ❯ 
+        ▸▸ bypass permissions on · 1 shell · ← 2 agents
+        """
+        let d = cm.evaluate(DetectionInput(screen: screen))
+        XCTAssertEqual(d.state, .waiting, "a blocked agent still reads as waiting")
+        XCTAssertTrue(d.backgroundBusy, "and the background work is still reported")
     }
 
     /// Regression: Claude Code no longer prints "esc to interrupt" in its spinner
@@ -327,5 +354,21 @@ final class ManifestEngineTests: XCTestCase {
         XCTAssertEqual(AgentStatus.fromManifest("working"), .running)
         XCTAssertEqual(AgentStatus.fromManifest("blocked"), .waiting)
         XCTAssertEqual(AgentStatus.fromManifest("IDLE"), .idle)
+    }
+
+    /// Evidence must name the line that actually fired, not the whole region —
+    /// the wrong line sends you rewriting a rule that was innocent.
+    func testMatchDetailNarrowsEvidenceToTheMatchingLine() {
+        guard let cm = ManifestStore.shared.manifest(for: "claude") else {
+            return XCTFail("missing claude manifest")
+        }
+        let screen = """
+        ⏺ read(sources/status/manifestengine.swift)
+        ✳ synthesizing… (12m 12s · ↓ 36.4k tokens)
+          ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 5 agents
+        """
+        let detail = cm.matchDetail(DetectionInput(screen: screen))
+        XCTAssertEqual(detail?.rule.id, "working_spinner")
+        XCTAssertEqual(detail?.regionText, "✳ synthesizing… (12m 12s · ↓ 36.4k tokens)")
     }
 }

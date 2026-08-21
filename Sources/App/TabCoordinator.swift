@@ -131,7 +131,8 @@ class TabCoordinator {
                 status: outcome.newStatus,
                 lastMessage: outcome.info.lastMessage,
                 lastUserPrompt: outcome.info.lastUserPrompt,
-                agentType: outcome.info.agentType)
+                agentType: outcome.info.agentType,
+                backgroundBusy: outcome.info.backgroundBusy)
             // Aggregator ignores commandLine-only changes; chrome pane title
             // still needs a refresh when the foreground shell job updates.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -347,7 +348,7 @@ class TabCoordinator {
             // dots. The worktree's own status is NOT derived from them here: the
             // aggregator already picked the most recently changed pane, and
             // re-deriving it would let the row and the tab badge disagree.
-            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.status)
+            let shipLogPaneStatuses = (agentsByWorktree[agent.worktreePath] ?? []).map(\.displayStatus)
             let paneStatuses = !shipLogPaneStatuses.isEmpty ? shipLogPaneStatuses
                 : (ws?.statuses ?? [agent.status])
             let rolledUpStatus = ws?.rolledUpStatus ?? agent.status
@@ -629,6 +630,10 @@ class TabCoordinator {
                         // sessionId made the two never match, so the block fired every turn.
                         // paneId is stable across both; fall back to sessionId outside a pane.
                         let turnKey = event.paneId ?? event.sessionId
+                        // Set when this Stop is answered with a `decision: block` body.
+                        // Held rather than returned early so the event still reaches
+                        // ingest — see the blocking branch below.
+                        var block: String?
                         // Track when the user sent a message to this session; a new
                         // user prompt starts a fresh turn, so the agent must suggest again.
                         if event.event == .userPrompt {
@@ -706,22 +711,30 @@ class TabCoordinator {
                            promptedAt > blockedAt {
                             sessionBlockedAt.removeValue(forKey: turnKey)
                             sessionUserPromptedAt.removeValue(forKey: turnKey)
-                        } else if let block = StopHookResponder.blockBody(
+                        } else if let body = StopHookResponder.blockBody(
                             for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
-                            // Blocking Stop: agent will continue and call seahelm-suggest.
-                            // Do NOT ingest this stop as completion (avoid premature idle), but
-                            // stash the agent's final message so the suggestion card can show it.
+                            // Blocking Stop: the agent will continue and declare its
+                            // options. Stash its final message so the suggestion card
+                            // can show it, and remember that we blocked.
                             sessionBlockedAt[turnKey] = Date()
                             if let msg = event.data?["last_assistant_message"] as? String {
                                 AgentRegistry.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
                             }
-                            return block
+                            // Fall through to ingest: the turn is over as far as the user
+                            // is concerned — the agent has written its answer — and the
+                            // extra round-trip this block buys is seahelm's own suggestion
+                            // overhead. Withholding the stop here used to delay every
+                            // completion (status, banner, chat mirror) by a whole model
+                            // round-trip: 2.6s to 20s, median ~9s, measured across real
+                            // sessions. The agent's follow-up turn re-reports running and
+                            // stops again; the notification cooldown collapses that pair.
+                            block = body
                         }
                         self.statusPublisher.webhookProvider.handleEvent(event)
                         AgentRegistry.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // AgentRegistry.shared.updateTodoFromWebhook(event)
-                        return nil
+                        return block
                       }
                     }
                     // Local control socket is the sole inbound transport: reads
@@ -1388,7 +1401,13 @@ class TabCoordinator {
         // The agent's final prose (Stop hook) — the most informative body line;
         // without it completed panes surface placeholder labels like
         // "Processing prompt".
-        let lastAssistantMessage = AgentRegistry.shared.pane(for: terminalID)?.lastAssistantMessage ?? ""
+        let pane = AgentRegistry.shared.pane(for: terminalID)
+        let lastAssistantMessage = pane?.lastAssistantMessage ?? ""
+        // Did the agent report this itself, or did the screen scan infer it? Only
+        // an agent-reported state is trusted enough to correct a banner already
+        // sent inside the cooldown window — see `NotificationManager.shouldNotify`.
+        let source: NotificationManager.NotificationSource =
+            pane?.hookStatus == newStatus ? .agent : .scan
 
         // A pending order card (AskUserQuestion / suggestion) for this pane
         // already surfaces the "needs input" state in the island and cockpit —
@@ -1411,14 +1430,16 @@ class TabCoordinator {
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
             lastAssistantMessage: lastAssistantMessage,
-            isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID)
+            isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID),
+            source: source
         )
     }
 
     /// Whether this worktree is the one currently shown in the dashboard (all its
     /// panes are on screen). Combined with app-frontmost in `NotificationManager`
-    /// to decide whether a system banner would be redundant.
-    private func isWorktreeVisible(_ worktreePath: String) -> Bool {
+    /// to decide whether a system banner would be redundant, and by the island /
+    /// First Mate reveal to decide which of the two surfaces a suggestion belongs on.
+    func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
     }
 
