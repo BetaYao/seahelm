@@ -207,6 +207,12 @@
   .term-keys button:disabled{opacity:.35;cursor:default}
   .term-keys button.danger:hover:not(:disabled){border-color:var(--danger);color:var(--danger)}
   .term-keys .sep{width:1px;height:14px;background:var(--line-20);flex:none;margin:0 2px}
+  .action-toast{position:fixed;top:52px;right:14px;z-index:100;max-width:min(420px,calc(100vw - 28px));
+    padding:8px 12px;border:1px solid var(--accent-20);border-radius:var(--r);
+    background:var(--panel2);color:var(--accent);font-family:var(--mono);font-size:11px;
+    box-shadow:0 4px 18px rgba(0,0,0,.45)}
+  .action-toast.error{border-color:var(--danger);color:var(--danger)}
+  .action-toast[hidden]{display:none}
   .detail-head button{flex:none;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
     border-radius:var(--r);padding:5px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600}
   .detail-head button:hover{border-color:var(--accent);color:var(--accent)}
@@ -378,6 +384,7 @@
     </div>
   </main>
   <div id="scrim"></div>
+  <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
   <!-- Suggestions float over the page, pinned to its very bottom. -->
   <div class="suggest-dock" id="suggestDock"></div>
 
@@ -1303,15 +1310,29 @@ function sendRawKey(bytes){
 function paneAction(method, extra){
   const key = S.vt.focus;
   if (!key || !isLinked()) return;
-  sendCommand(method, Object.assign({ pane_id: key }, extra), (r) => {
+  const pane = S.panes.get(key) || {};
+  sendCommand(method, Object.assign({ pane_id: pane.pane_id || key }, extra), (r) => {
     if (r && r.ok === false){
       log('sys', '(pane action failed)', JSON.stringify(r.error || r));
+      showActionToast((r.error && r.error.message) || '操作失败', true);
       return;
     }
+    showActionToast(method === 'pane.split' ? '已分屏' : '已关闭 pane');
     const path = S.sel;
     S.vt.worktree = null;        // force a remount of the changed layout
     if (path) requestLayout(path);
   });
+}
+
+let actionToastTimer = null;
+function showActionToast(message, isError){
+  const toast = $('actionToast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.toggle('error', !!isError);
+  toast.hidden = false;
+  if (actionToastTimer) clearTimeout(actionToastTimer);
+  actionToastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
 }
 
 // ── Mirrored pane layout ────────────────────────────────────────────────────

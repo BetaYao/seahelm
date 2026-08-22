@@ -767,13 +767,17 @@ class TabCoordinator {
                         }
                     }
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
-                        self?.terminalCoordinator.splitPane(targetStationId: targetStationId, axis: axis, focus: focus)
+                        guard let self, self.preparePaneControlTarget(targetStationId) else { return nil }
+                        return self.terminalCoordinator.splitPane(
+                            targetStationId: targetStationId, axis: axis, focus: focus)
                     }
                     controlDataSource.closeHandler = { [weak self] stationId in
-                        self?.terminalCoordinator.closePane(targetStationId: stationId) ?? false
+                        guard let self, self.preparePaneControlTarget(stationId) else { return false }
+                        return self.terminalCoordinator.closePane(targetStationId: stationId)
                     }
                     controlDataSource.focusHandler = { [weak self] stationId in
-                        self?.terminalCoordinator.focusPane(targetStationId: stationId) ?? false
+                        guard let self, self.preparePaneControlTarget(stationId) else { return false }
+                        return self.terminalCoordinator.focusPane(targetStationId: stationId)
                     }
                     controlDataSource.sleepHandler = { [weak self] stationId in
                         self?.terminalCoordinator.sleepPane(targetStationId: stationId) ?? []
@@ -1480,6 +1484,28 @@ class TabCoordinator {
     }
 
     // MARK: - Tab Selection
+
+    /// Structural control commands arrive with a pane identity, while
+    /// TerminalCoordinator intentionally mutates only the dashboard's active
+    /// split container. The Web client can mirror any worktree, so make that
+    /// pane's worktree active before forwarding the command. Keeping
+    /// `focusTerminal` false avoids stealing keyboard focus merely because a
+    /// remote client requested a background split.
+    private func preparePaneControlTarget(_ stationId: String?) -> Bool {
+        guard let stationId else { return dashboardVC?.activeSplitContainer != nil }
+        if dashboardVC?.activeSplitContainer?.tree?.allLeaves
+            .contains(where: { $0.stationId == stationId }) == true {
+            return true
+        }
+        guard let worktreePath = AgentRegistry.shared.pane(for: stationId)?.worktreePath else {
+            return false
+        }
+        dashboardVC?.selectPane(byWorktreePath: worktreePath, focusTerminal: false)
+        saveSelectedWorktree()
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        return dashboardVC?.activeSplitContainer?.tree?.allLeaves
+            .contains(where: { $0.stationId == stationId }) == true
+    }
 
     static func tabIndex(forWorktree path: String, in paths: [String]) -> Int? {
         paths.firstIndex(of: path)
