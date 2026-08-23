@@ -16,13 +16,22 @@ import AppKit
 // is left alone — it names a binary, not a session, and a pane may legitimately
 // want the same one.
 //
+// NO_COLOR is not a session identity, but it leaks by the same route and does
+// more damage, because it outlives the launch that carried it: a pane's
+// environment is fixed when its zmx session is created, and re-attaching never
+// re-execs the agent. So one relaunch from a shell that happened to have
+// NO_COLOR set leaves those panes rendering monochrome forever, surviving every
+// later app restart. A pane is always a real terminal, so the launching shell's
+// opinion about color never applies to it.
+//
 // Scrub before anything can spawn a child.
-let leakedSessionEnv = [
+let leakedEnv = [
     "ZMX_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID",
     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "NO_COLOR",
 ]
-for leaked in leakedSessionEnv {
+for leaked in leakedEnv {
     unsetenv(leaked)
 }
 
