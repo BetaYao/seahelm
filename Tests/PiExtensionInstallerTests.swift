@@ -59,6 +59,18 @@ final class PiExtensionInstallerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: PiExtensionInstaller.settingsURL(agentDir: dir), encoding: .utf8), raw)
     }
 
+    /// A resume ref built from the seahelm pane name is useless to Pi (`pi --session`
+    /// only recognizes Pi's own ids) — the extension must forward Pi's real session
+    /// handle, not fall back to PANE whenever a session context is available.
+    func testReportsPisOwnSessionIdAndPathNotThePaneId() {
+        let js = PiExtensionInstaller.extensionContents()
+        XCTAssertTrue(js.contains("ctx.sessionManager.getSessionId"))
+        XCTAssertTrue(js.contains("ctx.sessionManager.getSessionFile"))
+        XCTAssertTrue(js.contains("session_path"))
+        // Handlers must receive ctx to have anything to read.
+        XCTAssertTrue(js.contains("(e, ctx) =>"))
+    }
+
     func testLeavesForeignExtensionFileAlone() throws {
         let dir = try makeTempDir()
         let ext = PiExtensionInstaller.extensionFileURL(agentDir: dir)

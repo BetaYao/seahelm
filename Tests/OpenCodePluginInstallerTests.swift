@@ -81,4 +81,26 @@ final class OpenCodePluginInstallerTests: XCTestCase {
         // whole call must be skipped, not a filtered subset forwarded.
         XCTAssertTrue(js.contains("q.multiple"))
     }
+
+    /// A resume ref built from the seahelm pane name is useless to opencode
+    /// (`opencode resume` only recognizes opencode's own ids), so the plugin must
+    /// learn and forward the real `sessionID` — via the session lifecycle event,
+    /// not just whenever the question tool happens to fire.
+    func testTracksOpencodesOwnSessionIdViaLifecycleEvents() {
+        let js = OpenCodePluginInstaller.pluginContents()
+        XCTAssertTrue(js.contains("event: async ({ event }) =>"))
+        XCTAssertTrue(js.contains("\"session.created\""))
+        XCTAssertTrue(js.contains("\"session.idle\""))
+        XCTAssertTrue(js.contains("event.properties?.sessionID"))
+        // Question-tool events must carry the real id too, not PANE.
+        XCTAssertTrue(js.contains("input.sessionID"))
+    }
+
+    /// A Task-tool subagent's session going idle must never read as the main
+    /// pane's agent finishing — herdr's own history is the cautionary tale here.
+    func testExcludesSubagentSessionsFromIdleReporting() {
+        let js = OpenCodePluginInstaller.pluginContents()
+        XCTAssertTrue(js.contains("parentID"))
+        XCTAssertTrue(js.contains("subagentSessions"))
+    }
 }

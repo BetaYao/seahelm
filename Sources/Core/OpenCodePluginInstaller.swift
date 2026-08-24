@@ -26,11 +26,14 @@ enum OpenCodePluginInstaller {
     /// ignored, with no error to notice.
     static func pluginContents() -> String {
         return """
-        \(versionMarker) v2 — managed by seahelm. Do not edit; it is overwritten on launch.
+        \(versionMarker) v3 — managed by seahelm. Do not edit; it is overwritten on launch.
         //
         // Registers a `seahelm_suggest` tool that reports next-step options to
         // seahelm's control socket, where they render as clickable buttons, and
         // mirrors opencode's native `question` tool into a seahelm question card.
+        // Also reports session lifecycle (real opencode `sessionID`, not just
+        // seahelm's pane id) so seahelm can resume this exact opencode session
+        // (`opencode resume <id>`) if its zmx session is ever lost and recreated.
         //
         // The @opencode-ai/plugin import needs no setup: opencode writes its own
         // ~/.config/opencode/package.json pinning the package to its version and
@@ -45,9 +48,18 @@ enum OpenCodePluginInstaller {
         const PANE = process.env.SEAHELM_PANE_ID ?? process.env.ZMX_SESSION ?? ""
 
         export const SeahelmSuggest = async ({ $, directory }) => {
+          // Sessions opencode has told us are subagents (Task-tool children), via
+          // their `parentID` on session.created. `session.idle` carries only a bare
+          // sessionID, so this is the one place we can catch them before they'd
+          // otherwise read as the main pane's agent going idle.
+          const subagentSessions = new Set()
+
           // Send a webhook-shaped payload over the control socket's `hook` method.
           // Mimics Claude's event shape so the existing HookDecoder path applies.
-          const send = async (event, data) => {
+          // `sessionId` is opencode's own session id when known (the real resume
+          // handle); PANE is only seahelm's pane name and never means anything to
+          // `opencode resume`, so it's strictly a fallback for status bookkeeping.
+          const send = async (event, data, sessionId) => {
             if (!PANE) return
             const req = JSON.stringify({
               id: "opencode-question",
@@ -55,7 +67,7 @@ enum OpenCodePluginInstaller {
               params: {
                 source: "opencode",
                 event,
-                session_id: PANE,
+                session_id: sessionId || PANE,
                 seahelm_pane_id: PANE,
                 cwd: directory ?? "",
                 data,
@@ -65,6 +77,22 @@ enum OpenCodePluginInstaller {
           }
 
           return {
+            // Session lifecycle, independent of whether the question tool ever
+            // fires — the only reliable place to learn opencode's real sessionID.
+            event: async ({ event }) => {
+              const id = event.properties?.sessionID
+              if (!id) return
+              if (event.type === "session.created") {
+                if (event.properties?.info?.parentID) {
+                  subagentSessions.add(id)
+                  return
+                }
+                await send("session_start", {}, id)
+              } else if (event.type === "session.idle") {
+                if (subagentSessions.has(id)) return
+                await send("agent_stop", {}, id)
+              }
+            },
             // opencode's native question tool blocks the agent on a choice, like
             // Claude's AskUserQuestion. Forward it as that event so seahelm shows
             // the same tappable card. Multi-select questions are skipped entirely:
@@ -77,13 +105,13 @@ enum OpenCodePluginInstaller {
               await send("tool_use_start", {
                 tool_name: "AskUserQuestion",
                 tool_input: { questions },
-              })
+              }, input.sessionID)
             },
             // The dialog is gone once the tool returns (answered in the TUI or via
             // a card tap) — a tool_use_end lets seahelm clear a stale card.
             "tool.execute.after": async (input) => {
               if (input.tool !== "question") return
-              await send("tool_use_end", { tool_name: "AskUserQuestion" })
+              await send("tool_use_end", { tool_name: "AskUserQuestion" }, input.sessionID)
             },
             tool: {
               seahelm_suggest: tool({
