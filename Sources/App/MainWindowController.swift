@@ -310,7 +310,13 @@ class MainWindowController: NSWindowController, MailCommandContext {
         let iso = Self.activityISO8601.string(from: date)
         config.worktreeLastActivityAt[path] = iso
         tabCoordinator.config.worktreeLastActivityAt[path] = iso
-        config.save()
+        // This fires on nearly every status change across every worktree, so a
+        // raw `config.save()` here — Config is a value type, and `config` is a
+        // snapshot from launch — reliably clobbered fields owned elsewhere
+        // (agentSessions chief among them: a resume ref recorded via
+        // TerminalCoordinator moments earlier never survived to disk). Route
+        // through the shared sync instead of saving this stale copy directly.
+        saveConfig()
     }
 
     convenience init() {
@@ -391,6 +397,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
         config.worktreeStartedAt = tabCoordinator.config.worktreeStartedAt
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         config.splitLayouts = terminalCoordinator.config.splitLayouts
+        config.agentSessions = terminalCoordinator.config.agentSessions
         // Chrome layout is owned here — push into TabCoordinator so its saves
         // don't clobber sidebar_collapsed / sidebar_active_pane with defaults.
         tabCoordinator.config.sidebarWidth = config.sidebarWidth
@@ -2667,7 +2674,7 @@ extension MainWindowController: SettingsDelegate {
                 if self.config.gmailMail == nil {
                     self.config.gmailMail = GmailMailConfig(accountEmail: email,
                                                             inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias)
-                    self.config.save()
+                    self.saveConfig()
                 }
             case .failure(let error):
                 NSLog("[Gmail] OAuth failed: %@", error.localizedDescription)
