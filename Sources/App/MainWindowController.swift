@@ -310,7 +310,13 @@ class MainWindowController: NSWindowController, MailCommandContext {
         let iso = Self.activityISO8601.string(from: date)
         config.worktreeLastActivityAt[path] = iso
         tabCoordinator.config.worktreeLastActivityAt[path] = iso
-        config.save()
+        // This fires on nearly every status change across every worktree, so a
+        // raw `config.save()` here — Config is a value type, and `config` is a
+        // snapshot from launch — reliably clobbered fields owned elsewhere
+        // (agentSessions chief among them: a resume ref recorded via
+        // TerminalCoordinator moments earlier never survived to disk). Route
+        // through the shared sync instead of saving this stale copy directly.
+        saveConfig()
     }
 
     convenience init() {
@@ -391,6 +397,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
         config.worktreeStartedAt = tabCoordinator.config.worktreeStartedAt
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         config.splitLayouts = terminalCoordinator.config.splitLayouts
+        config.agentSessions = terminalCoordinator.config.agentSessions
         // Chrome layout is owned here — push into TabCoordinator so its saves
         // don't clobber sidebar_collapsed / sidebar_active_pane with defaults.
         tabCoordinator.config.sidebarWidth = config.sidebarWidth
@@ -2461,6 +2468,24 @@ extension MainWindowController {
         applyChromeState(animated: true)
     }
 
+    /// Non-nil only for the states the app cannot resolve by itself —
+    /// `ControlSocketServer` silently reclaims a vanished or stale socket path
+    /// on its own, and telling the user to restart for something already being
+    /// fixed would train them to ignore this.
+    fileprivate func controlChannelWarning() -> String? {
+        guard let server = tabCoordinator.terminalCoordinator?.controlSocketServer else {
+            return nil  // never started (e.g. the screenshot instance stands down)
+        }
+        switch server.state {
+        case .listening:
+            return nil
+        case .standby:
+            return "Another Seahelm instance owns the control channel. Agent hooks and the seahelm CLI are inactive in this window — quit the other instance to take it back."
+        case .stopped:
+            return "The control channel could not start. Agent hooks and the seahelm CLI are unavailable — restarting Seahelm usually clears it."
+        }
+    }
+
     fileprivate func refreshIsland() {
         guard config.islandEnabled else { return }
         let model = islandController.model
@@ -2514,6 +2539,14 @@ extension MainWindowController {
         // even when nothing changed.
         let orders = IslandModel.newestSuggestions(from: tabCoordinator.pendingOrders.all())
         if model.orders != orders { model.orders = orders }
+
+        // A dead control channel is invisible everywhere else: the hooks fail
+        // their `[ -S ]` guard and drop events without a word, so the island
+        // just goes quiet — indistinguishable from a fleet with nothing to say.
+        let channelWarning = controlChannelWarning()
+        if model.controlChannelWarning != channelWarning {
+            model.controlChannelWarning = channelWarning
+        }
 
         // A new suggestion is actionable — expand so the card is visible
         // without hovering. Nothing else opens the island: status changes are
@@ -2641,7 +2674,7 @@ extension MainWindowController: SettingsDelegate {
                 if self.config.gmailMail == nil {
                     self.config.gmailMail = GmailMailConfig(accountEmail: email,
                                                             inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias)
-                    self.config.save()
+                    self.saveConfig()
                 }
             case .failure(let error):
                 NSLog("[Gmail] OAuth failed: %@", error.localizedDescription)

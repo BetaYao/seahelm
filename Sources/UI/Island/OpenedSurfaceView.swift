@@ -21,6 +21,9 @@ struct OpenedSurfaceView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 header
+                if let warning = model.controlChannelWarning {
+                    controlChannelBanner(warning)
+                }
                 middleSection
                 commandBar
             }
@@ -32,6 +35,34 @@ struct OpenedSurfaceView: View {
         // animates instead of hard-swapping.
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.rows)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.controlChannelWarning)
+    }
+
+    /// The control channel is the island's supply line. With it down, the rows
+    /// below are the last thing seahelm heard rather than the current state —
+    /// say so, instead of letting a stale-but-plausible list stand.
+    private func controlChannelBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     /// Auto-height list area: renders at natural height, and past the cap it

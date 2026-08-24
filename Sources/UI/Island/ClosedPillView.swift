@@ -30,6 +30,7 @@ struct ClosedPillView: View {
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.orders.count)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), value: model.rows)
         .animation(.easeInOut(duration: 0.3), value: model.pillUsage)
+        .animation(.easeInOut(duration: 0.3), value: model.controlChannelWarning)
         .onAppear { updatePulse() }
         .onChange(of: pulseTiles) { updatePulse() }
     }
@@ -51,7 +52,23 @@ struct ClosedPillView: View {
     /// wing — status changes go to Notification Center.
     @ViewBuilder
     private var leftWing: some View {
-        if model.orders.isEmpty, let usage = model.pillUsage {
+        if model.controlChannelWarning != nil {
+            // Outranks both quota and pending suggestions: with the control
+            // channel down no new suggestion can arrive, so a count here would
+            // be a stale number sitting exactly where the problem belongs.
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("CTRL")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.orange.opacity(0.22)))
+            .transition(.opacity.combined(with: .move(edge: .leading)))
+        } else if model.orders.isEmpty, let usage = model.pillUsage {
             UsageReadoutView(logoName: usage.logoName, segments: [usage.segment])
                 // Keyed to the window so a rotation step crossfades instead of
                 // mutating the text in place.
