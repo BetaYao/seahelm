@@ -323,19 +323,23 @@ enum SessionManager {
         name: String,
         cwd: String,
         agentCommandLine: String,
-        shell: String
+        shell: String,
+        terminfoPath: String? = TerminalEnvironment.bundledTerminfoPath()
     ) -> [[String]] {
         switch backend {
         case "zmx":
             // `zmx run` types the command into its own persistent interactive
             // shell (and appends a ZMX_TASK_COMPLETED marker), so the session
             // survives the agent exiting on its own — no `exec "$0"` trick
-            // needed. Wrap in a login shell that cd's and `clear`s before the
-            // agent renders. That inner `cd` only affects the nested shell; the
-            // outer session shell's cwd is set separately by spawning `zmx` with
-            // `Process.currentDirectoryURL = cwd` (see `createDetachedSession`),
-            // so exiting the agent lands you back in the worktree — not in
-            // whatever directory Seahelm itself was launched from.
+            // needed. Wrap in a login shell that cd's and clears the screen
+            // before the agent renders — `zmx run` *types* this whole command
+            // line into the session's interactive shell, so without the clear
+            // the agent's TUI comes up underneath the echoed command plus the
+            // login shell's own startup noise. That inner `cd` only affects the
+            // nested shell; the outer session shell's cwd is set separately by
+            // spawning `zmx` with `Process.currentDirectoryURL = cwd` (see
+            // `createDetachedSession`), so exiting the agent lands you back in
+            // the worktree — not in whatever directory Seahelm was launched from.
             //
             // Export the control-socket context first so the agent (and any tool
             // it spawns, e.g. seahelm-suggest) can reach the multiplexer socket
@@ -345,8 +349,15 @@ enum SessionManager {
             // its own pane across app restarts (the control API resolves it).
             let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
                 + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
-            let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
-            return [[ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
+            let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd))"
+                + " && \(TerminalEnvironment.clearScreenCommand) && \(agentCommandLine)"
+            // Prefixed as `env` assignments rather than exported inside `inner`
+            // so the *session* PTY carries them: the shell zmx spawns, the rc
+            // files it sources, and the agent all see the same terminal a pane
+            // opened through Ghostty would have had. `runSync` execs through
+            // /usr/bin/env, so these ride along as plain argv.
+            let termEnv = TerminalEnvironment.envAssignments(terminfoPath: terminfoPath)
+            return [termEnv + [ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
         default:
             return []
         }

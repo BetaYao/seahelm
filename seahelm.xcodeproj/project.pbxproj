@@ -233,6 +233,7 @@
 		8F88CCC86880979546321D70 /* IMessageSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0129F6EBD2E1650EFE04DC4A /* IMessageSender.swift */; };
 		8FE5D1705C06DDB664FF7C94 /* Manifests in Resources */ = {isa = PBXBuildFile; fileRef = A94DAD757D9F452B11283244 /* Manifests */; };
 		90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A7E8E322E5A353D4457DBC /* HooksChannel.swift */; };
+		913DBD2B1D15867351B0DEE0 /* TerminalEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D90518E8BFCA59E2D344513 /* TerminalEnvironment.swift */; };
 		91AD0153C909A0DF726EE6A1 /* ManifestEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304981CB302BEC6B00289258 /* ManifestEngineTests.swift */; };
 		91AE9A595CB36E54847C8274 /* GlobalKeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F339357674536CA6736266 /* GlobalKeymapTests.swift */; };
 		926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */; };
@@ -552,6 +553,7 @@
 		3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutState.swift; sourceTree = "<group>"; };
 		3CD049D511655E149E38EA48 /* PairingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWindowController.swift; sourceTree = "<group>"; };
 		3D002748AEBEA4297919DC48 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
+		3D90518E8BFCA59E2D344513 /* TerminalEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalEnvironment.swift; sourceTree = "<group>"; };
 		3F4CB69B94BFFAB30A5D430C /* ChromeHeaderDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeHeaderDelegate.swift; sourceTree = "<group>"; };
 		3F67CBC84404085C3483C910 /* TestViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestViewHelpers.swift; sourceTree = "<group>"; };
 		3FA6E78D00BFAF395356B892 /* IMessageRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageRuleTests.swift; sourceTree = "<group>"; };
@@ -1018,6 +1020,7 @@
 				30F9565C3156144526A74B08 /* StationManager.swift */,
 				532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */,
 				22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */,
+				3D90518E8BFCA59E2D344513 /* TerminalEnvironment.swift */,
 				77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */,
 				F0982B809334A31181947736 /* WatchFeed.swift */,
 				B07FF7C768D8C4871A88AA48 /* WorkspaceManager.swift */,
@@ -2192,6 +2195,7 @@
 				D167E1E554F3BA094107F39D /* TabCoordinator.swift in Sources */,
 				859DBEFE2BAE0BA0C975FD3E /* TaskProgressParser.swift in Sources */,
 				0658FAE09BDFAD7932B01617 /* TerminalCoordinator.swift in Sources */,
+				913DBD2B1D15867351B0DEE0 /* TerminalEnvironment.swift in Sources */,
 				AD608FF60D293BA96BCB01B8 /* TerminalHeaderView.swift in Sources */,
 				CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */,
 				964D05E6C8C5D093CB6633E2 /* ThemedBackgroundView.swift in Sources */,
@@ -2272,7 +2276,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.49;
+				MARKETING_VERSION = 2.0.50;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2510,7 +2514,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.49;
+				MARKETING_VERSION = 2.0.50;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
