@@ -68,6 +68,14 @@ final class IslandModel {
     /// only attention signal — status notifications go to Notification Center
     /// and are not mirrored here.
     var orders: [PendingOrder] = []
+    /// Set when the control channel is down in a way the app cannot fix itself
+    /// — practically always a second live instance owning the socket path.
+    ///
+    /// It earns island space because it is invisible everywhere else: agent
+    /// hooks fail their `[ -S ]` guard and drop events without a word, so the
+    /// island simply goes quiet and looks idle. A quiet island is exactly what
+    /// a healthy one looks like, which is why this has to be said out loud.
+    var controlChannelWarning: String?
 
     static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
         Array(orders.lazy

@@ -107,17 +107,24 @@ final class ControlSocketServerTests: XCTestCase {
         XCTAssertEqual(ev?["seq"] as? Int, 42)
     }
 
-    /// Regression: when a second instance rebinds the same path, the first
+    /// Regression: when the path has been rebound by someone else, the first
     /// instance's stop() must not unlink it. It used to, which left the live
     /// server bound to an fd with no path on disk — `lsof` showed the socket,
     /// `ls` did not, and every hook silently no-op'd on its `[ -S ]` guard.
+    ///
+    /// The unlink here is deliberate and stands in for the real incident: a
+    /// build without the standby guard (or any other process) clearing the path
+    /// out from under a live listener. A current instance will not do this —
+    /// see `testSecondInstanceStandsByRatherThanStealLiveSocket`.
     func testStopLeavesSocketRebornUnderNewerInstance() {
         let shared = "/tmp/sh-\(UUID().uuidString.prefix(8)).sock"
         let first = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
         first.start()
         Thread.sleep(forTimeInterval: 0.1)
 
-        // Second instance takes the path over: unlinks the first socket, binds its own.
+        // Strand `first`: with the path gone, `second` sees no live listener and
+        // binds its own socket at the same name.
+        unlink(shared)
         let second = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
         second.start()
         Thread.sleep(forTimeInterval: 0.1)
@@ -135,6 +142,99 @@ final class ControlSocketServerTests: XCTestCase {
         second.stop()
         XCTAssertFalse(FileManager.default.fileExists(atPath: shared),
                        "stop() left a stale socket behind")
+    }
+
+    // MARK: - ownership + self-healing
+
+    /// Layer 1. `start()` used to unlink the path unconditionally, so a second
+    /// instance silently took the live app's socket and stranded it. Now it
+    /// probes first: something is listening, so it stands down instead.
+    func testSecondInstanceStandsByRatherThanStealLiveSocket() {
+        let shared = "/tmp/sh-\(UUID().uuidString.prefix(8)).sock"
+        let first = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
+        first.start()
+        Thread.sleep(forTimeInterval: 0.1)
+        var st = stat()
+        XCTAssertEqual(stat(shared, &st), 0)
+        let firstInode = st.st_ino
+
+        let second = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
+        second.start()
+        Thread.sleep(forTimeInterval: 0.1)
+        defer { second.stop(); first.stop() }
+
+        XCTAssertEqual(second.state, .standby, "second instance stole a live socket")
+        XCTAssertEqual(first.state, .listening)
+
+        // The file on disk must still be the first instance's socket...
+        var after = stat()
+        XCTAssertEqual(stat(shared, &after), 0)
+        XCTAssertEqual(after.st_ino, firstInode, "the path was rebound under a live listener")
+
+        // ...and the first instance must still answer on it.
+        let fd = connect(shared); defer { close(fd) }
+        send(fd, #"{"id":"10","method":"ping"}"#)
+        XCTAssertEqual((json(readLine(fd))?["result"] as? [String: Any])?["pong"] as? Bool, true)
+    }
+
+    /// Layer 2. The exact production failure: the socket file vanishes while the
+    /// listener is still bound to it. Nothing in-process notices on its own —
+    /// accept() keeps waiting on an fd no client can name — so the health check
+    /// has to spot it and rebind.
+    func testHealthCheckRebindsAfterSocketFileVanishes() {
+        let shared = "/tmp/sh-\(UUID().uuidString.prefix(8)).sock"
+        let server = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()),
+                                         path: shared, healthCheckInterval: 0.2)
+        server.start()
+        Thread.sleep(forTimeInterval: 0.1)
+        defer { server.stop() }
+
+        unlink(shared)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shared))
+
+        XCTAssertTrue(waitUntil(2) { FileManager.default.fileExists(atPath: shared) },
+                      "health check never rebound the vanished socket path")
+        XCTAssertEqual(server.state, .listening)
+
+        // Reachable again — a rebind that no client can use is not a recovery.
+        let fd = connect(shared); defer { close(fd) }
+        send(fd, #"{"id":"11","method":"ping"}"#)
+        XCTAssertEqual((json(readLine(fd))?["result"] as? [String: Any])?["pong"] as? Bool, true)
+    }
+
+    /// Layer 2, the other direction: a stood-down instance is not dead. When the
+    /// owner exits it takes the path with it, and the survivor claims it.
+    func testStandbyInstanceTakesOverWhenOwnerStops() {
+        let shared = "/tmp/sh-\(UUID().uuidString.prefix(8)).sock"
+        let owner = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()), path: shared)
+        owner.start()
+        Thread.sleep(forTimeInterval: 0.1)
+
+        let waiter = ControlSocketServer(router: ControlRouter(dataSource: FakeDS()),
+                                         path: shared, healthCheckInterval: 0.2)
+        waiter.start()
+        Thread.sleep(forTimeInterval: 0.1)
+        defer { waiter.stop() }
+        XCTAssertEqual(waiter.state, .standby)
+
+        owner.stop()
+        XCTAssertTrue(waitUntil(2) { waiter.state == .listening },
+                      "standby instance never claimed the freed socket path")
+
+        let fd = connect(shared); defer { close(fd) }
+        send(fd, #"{"id":"12","method":"ping"}"#)
+        XCTAssertEqual((json(readLine(fd))?["result"] as? [String: Any])?["pong"] as? Bool, true)
+    }
+
+    /// Poll a condition rather than sleeping a fixed slice — the health check
+    /// fires on its own timer and a fixed sleep is either flaky or slow.
+    private func waitUntil(_ timeout: TimeInterval, _ cond: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if cond() { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return cond()
     }
 
     func testEventsSubscribeReplaysAfterSeq() {

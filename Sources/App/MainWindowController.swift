@@ -2461,6 +2461,24 @@ extension MainWindowController {
         applyChromeState(animated: true)
     }
 
+    /// Non-nil only for the states the app cannot resolve by itself —
+    /// `ControlSocketServer` silently reclaims a vanished or stale socket path
+    /// on its own, and telling the user to restart for something already being
+    /// fixed would train them to ignore this.
+    fileprivate func controlChannelWarning() -> String? {
+        guard let server = tabCoordinator.terminalCoordinator?.controlSocketServer else {
+            return nil  // never started (e.g. the screenshot instance stands down)
+        }
+        switch server.state {
+        case .listening:
+            return nil
+        case .standby:
+            return "Another Seahelm instance owns the control channel. Agent hooks and the seahelm CLI are inactive in this window — quit the other instance to take it back."
+        case .stopped:
+            return "The control channel could not start. Agent hooks and the seahelm CLI are unavailable — restarting Seahelm usually clears it."
+        }
+    }
+
     fileprivate func refreshIsland() {
         guard config.islandEnabled else { return }
         let model = islandController.model
@@ -2514,6 +2532,14 @@ extension MainWindowController {
         // even when nothing changed.
         let orders = IslandModel.newestSuggestions(from: tabCoordinator.pendingOrders.all())
         if model.orders != orders { model.orders = orders }
+
+        // A dead control channel is invisible everywhere else: the hooks fail
+        // their `[ -S ]` guard and drop events without a word, so the island
+        // just goes quiet — indistinguishable from a fleet with nothing to say.
+        let channelWarning = controlChannelWarning()
+        if model.controlChannelWarning != channelWarning {
+            model.controlChannelWarning = channelWarning
+        }
 
         // A new suggestion is actionable — expand so the card is visible
         // without hovering. Nothing else opens the island: status changes are
