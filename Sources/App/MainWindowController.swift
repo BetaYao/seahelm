@@ -615,7 +615,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
 
     private func refreshChromeWorktreeContextEnabled() {
         let hasSelection = tabCoordinator.selectedPane != nil
-            || !(dashboardVC?.selectedPaneId.isEmpty ?? true)
+            || !(dashboardVC?.selectedWorktreeId.isEmpty ?? true)
         windowChrome?.setWorktreeContextEnabled(hasSelection)
     }
 

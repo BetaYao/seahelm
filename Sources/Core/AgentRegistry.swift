@@ -933,13 +933,17 @@ class AgentRegistry {
         lock.lock()
         defer { lock.unlock() }
 
-        orderedIDs.sort { a, b in
-            let pathA = agents[a]?.worktreePath ?? ""
-            let pathB = agents[b]?.worktreePath ?? ""
-            let ai = paths.firstIndex(of: pathA) ?? Int.max
-            let bi = paths.firstIndex(of: pathB) ?? Int.max
-            return ai < bi
-        }
+        // Stable by construction: `sort` is not a stable sort, and this
+        // comparator calls every pane of the same worktree equal — so a plain
+        // sort was free to permute panes *within* a worktree on each call,
+        // silently changing which pane the fleet treats as that worktree's
+        // representative. Falling back to the current position keeps registration
+        // order intact inside each worktree.
+        orderedIDs = orderedIDs.enumerated().sorted { a, b in
+            let ai = paths.firstIndex(of: agents[a.element]?.worktreePath ?? "") ?? Int.max
+            let bi = paths.firstIndex(of: agents[b.element]?.worktreePath ?? "") ?? Int.max
+            return ai != bi ? ai < bi : a.offset < b.offset
+        }.map(\.element)
     }
 
     // MARK: - Queries

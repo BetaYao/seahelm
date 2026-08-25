@@ -29,7 +29,6 @@ struct PaneDisplayInfo {
 // MARK: - WorktreeRowInfo
 
 struct WorktreeRowInfo {
-    let id: String          // terminal ID (from Station.id)
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
@@ -43,6 +42,17 @@ struct WorktreeRowInfo {
     let roundDuration: String   // "HH:MM:SS" format
     let station: Station
     let worktreePath: String    // needed to lazily create the terminal
+
+    /// Row identity. Deliberately the worktree path and nothing else.
+    ///
+    /// This used to be a pane's `Station.id` — whichever of the worktree's panes
+    /// happened to be registered first. Closing that pane changed the row's
+    /// identity, `selectedWorktreeId` stopped matching any row, and the "validate
+    /// the selection" fallback then landed on the *first row of the whole fleet*:
+    /// close a split pane in one worktree and the terminal jumped to another one.
+    /// A worktree outlives every pane inside it, so its path is the only identity
+    /// that can't die underneath the selection.
+    var id: String { worktreePath }
     let paneCount: Int          // number of split panes (1 = no badge)
     let paneStations: [Station]  // all pane stations in leaf order
     let isMainWorktree: Bool    // true = base repo, false = git worktree
@@ -107,7 +117,11 @@ class DashboardViewController: NSViewController {
     /// Set by MainWindowController — forwards split events to TerminalCoordinator
     weak var splitContainerDelegate: SplitContainerDelegate?
 
-    var selectedPaneId: String = ""
+    /// The selected fleet row's id — i.e. the selected worktree's path.
+    ///
+    /// Named for the worktree, not the pane, on purpose: it survives every pane
+    /// inside that worktree being split, slept, or closed. See `WorktreeRowInfo.id`.
+    var selectedWorktreeId: String = ""
 
     /// Deprecated layout alias for chrome collapse (SSOT is `ChromeLayoutState`):
     /// - `.split` == sidebar expanded (`!chrome.isCollapsed`)
@@ -147,7 +161,7 @@ class DashboardViewController: NSViewController {
     var idleWorktreePaths: Set<String> = []
 
     var selectedPaneIndex: Int {
-        agents.firstIndex(where: { $0.id == selectedPaneId }) ?? 0
+        agents.firstIndex(where: { $0.id == selectedWorktreeId }) ?? 0
     }
 
     /// Cached SplitContainerView per worktree path
@@ -238,7 +252,7 @@ class DashboardViewController: NSViewController {
     }
 
     private var currentWorktreePath: String? {
-        (agents.first(where: { $0.id == selectedPaneId }) ?? agents.first)?.worktreePath
+        (agents.first(where: { $0.id == selectedWorktreeId }) ?? agents.first)?.worktreePath
     }
 
     /// True when the selected worktree is showing the split edit layout.
@@ -428,9 +442,12 @@ class DashboardViewController: NSViewController {
             leftRightContainer.isHidden = false
         }
 
-        // Validate selectedPaneId
-        if !agents.contains(where: { $0.id == selectedPaneId }) {
-            selectedPaneId = agents.first?.id ?? ""
+        // Validate the selection. Now that a row is keyed by its worktree path,
+        // this only fires when the selected worktree itself is gone (deleted, or
+        // its last pane closed) — not when a pane inside it comes and goes, which
+        // is what used to bounce the selection onto an unrelated worktree.
+        if !agents.contains(where: { $0.id == selectedWorktreeId }) {
+            selectedWorktreeId = agents.first?.id ?? ""
         }
 
         if structureChanged {
@@ -444,7 +461,7 @@ class DashboardViewController: NSViewController {
     }
 
     private func syncSidePanelToSelection() {
-        let path = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
+        let path = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
         sidePanelVC.setWorktree(path)
     }
 
@@ -474,7 +491,7 @@ class DashboardViewController: NSViewController {
         lastCommittedWorktreePath = path
         guard agents.contains(where: { $0.worktreePath == path }) else { return }
         selectPane(byWorktreePath: path, focusTerminal: focusTerminal)
-        overviewSelectedId = selectedPaneId
+        overviewSelectedId = selectedWorktreeId
         // Push the highlight onto the overview so a programmatic commit (e.g. launch
         // restore, chat steering) moves the selected row just like a click does.
         if !overviewView.isHidden {
@@ -485,11 +502,11 @@ class DashboardViewController: NSViewController {
 
     func selectPane(byWorktreePath path: String, focusTerminal: Bool = true) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
-        let changed = agent.id != selectedPaneId
+        let changed = agent.id != selectedWorktreeId
         if changed {
             dismissCenterOverlay()
         }
-        selectedPaneId = agent.id
+        selectedWorktreeId = agent.id
         detachTerminals()
         embedSplitContainerForSelectedPane(focusTerminal: focusTerminal)
         syncSidePanelToSelection()
@@ -520,7 +537,7 @@ class DashboardViewController: NSViewController {
 
         if collapsed {
             if firstMateSideOpen { flushPendingPreview() }
-            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
                 ?? lastCommittedWorktreePath
             DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
                 guard let self, self.viewMode == .terminal else { return }
@@ -538,7 +555,7 @@ class DashboardViewController: NSViewController {
                 openFirstMateColumn()
                 currentSide = .firstMate
             }
-            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath
+            lastCommittedWorktreePath = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
                 ?? lastCommittedWorktreePath
             // Same reasoning as the collapse branch — the first embed after a
             // cold start is the most expensive one there is.
@@ -655,7 +672,7 @@ class DashboardViewController: NSViewController {
     /// needs is here: the row id, the focus ring's index, and the animation.
     func cycleToWorktree(path: String) {
         selectPane(byWorktreePath: path)
-        overviewSelectedId = selectedPaneId
+        overviewSelectedId = selectedWorktreeId
         if let index = overviewView.orderedRows.firstIndex(where: { $0.path == path }) {
             _ = overviewFocus.jumpToWorktree(index)
         }
@@ -671,7 +688,7 @@ class DashboardViewController: NSViewController {
 
     func enterWorktree(byWorktreePath path: String) {
         selectPane(byWorktreePath: path)
-        overviewSelectedId = selectedPaneId
+        overviewSelectedId = selectedWorktreeId
         // If the overview is on screen (fleet full-screen, or docked as the First
         // Mate side panel), move its selection highlight to the clicked row.
         if !overviewView.isHidden {
@@ -736,8 +753,8 @@ class DashboardViewController: NSViewController {
     // MARK: - Layout
 
     private func rebuildFocusLayout() {
-        if let selected = agents.first(where: { $0.id == selectedPaneId }) ?? agents.first {
-            selectedPaneId = selected.id
+        if let selected = agents.first(where: { $0.id == selectedWorktreeId }) ?? agents.first {
+            selectedWorktreeId = selected.id
             // Only embed when the dashboard is visible to avoid stealing
             // surfaces from the active repo tab's split container.
             if view.window != nil {
@@ -953,7 +970,7 @@ class DashboardViewController: NSViewController {
     /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
     /// VC as first responder so arrow keys keep driving the nav ring.
     func embedSplitContainerForSelectedPane(focusTerminal: Bool = true) {
-        guard let agent = agents.first(where: { $0.id == selectedPaneId }) ?? agents.first else { return }
+        guard let agent = agents.first(where: { $0.id == selectedWorktreeId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
 
         // Attach/detach the edit container for THIS worktree's mode before we pick
@@ -1113,14 +1130,14 @@ class DashboardViewController: NSViewController {
 
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
-            focusedWorktreePath: agents.first(where: { $0.id == selectedPaneId })?.worktreePath
+            focusedWorktreePath: agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
         )
         focusController.captureSnapshot(snapshot)
 
         let cardIds = cruiseOrder.map(\.id)
         let initial = snapshot.focusedWorktreePath
             .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
-            ?? (selectedPaneId.isEmpty ? nil : selectedPaneId)
+            ?? (selectedWorktreeId.isEmpty ? nil : selectedWorktreeId)
         focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
 
         view.window?.makeFirstResponder(self)
@@ -1139,7 +1156,7 @@ class DashboardViewController: NSViewController {
         if restoreSnapshot,
            let path = snapshot?.focusedWorktreePath,
            let original = agents.first(where: { $0.worktreePath == path }),
-           original.id != selectedPaneId {
+           original.id != selectedWorktreeId {
             selectPane(byWorktreePath: path)
         }
 
@@ -1284,8 +1301,8 @@ class DashboardViewController: NSViewController {
             overviewView.update(agents)
             // Persist the highlighted row immediately so a quit during the
             // preview debounce still restores this worktree, not the previous one.
-            if selectionChanged || selectedPaneId != row.id {
-                selectedPaneId = row.id
+            if selectionChanged || selectedWorktreeId != row.id {
+                selectedWorktreeId = row.id
                 notifySelectionChanged()
             }
             if viewMode == .split { schedulePreview(path: row.path) }
@@ -1397,7 +1414,7 @@ class DashboardViewController: NSViewController {
     /// updated (and persisted) by `applyOverviewEffect`; this only embeds.
     private func previewWorktree(path: String) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
-        selectedPaneId = agent.id
+        selectedWorktreeId = agent.id
         guard activeSplitWorktreePath != path else { return }
         detachTerminals()
         embedSplitContainerForSelectedPane(focusTerminal: false)
@@ -1898,7 +1915,7 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
     }
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
-        let worktreePath = agents.first(where: { $0.id == selectedPaneId })?.worktreePath ?? ""
+        let worktreePath = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath ?? ""
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let title = fileName.isEmpty ? "Changes" : fileName
         showCenterOverlay(
@@ -1926,6 +1943,18 @@ private final class NonFirstResponderScrollView: NSScrollView {
 /// pending orders live in the island, not here.
 extension Array {
     subscript(safeIndex index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+/// A fleet row that paints a pointer-hover tint.
+///
+/// Hover is owned by the list, not by the row's own tracking area. AppKit pairs
+/// `mouseEntered` / `mouseExited` off pointer *movement*: scrolling the fleet
+/// under a stationary cursor delivers an enter for every row that slides beneath
+/// the pointer and no matching exit, so each one it passed stayed tinted and the
+/// list read as a dozen rows selected at once. Routing both edges through the
+/// list keeps at most one row lit no matter which events AppKit drops.
+private protocol FleetHoverRow: NSView {
+    func setHovered(_ hovered: Bool)
 }
 
 final class DashboardOverviewView: NSView {
@@ -1987,6 +2016,8 @@ final class DashboardOverviewView: NSView {
     private var addWorktreeProjects: [String] = []
     private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
     private var revealedRowID: String?
+    /// The one row currently painting the hover tint, if any.
+    private weak var hoveredRow: FleetHoverRow?
     private var paneRowViewsByStationID: [String: PaneRowView] = [:]
     private var lastStructureSignature: String?
     private var fullRenderCount = 0
@@ -2066,6 +2097,10 @@ final class DashboardOverviewView: NSView {
         scroll.borderType = .noBorder
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = stack
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(fleetDidScroll),
+                                               name: NSView.boundsDidChangeNotification,
+                                               object: scroll.contentView)
         addSubview(scroll)
 
         // --- Bottom shortcut strip ---
@@ -2195,6 +2230,44 @@ final class DashboardOverviewView: NSView {
         refreshChromeColors()
     }
 
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    // MARK: - Hover
+
+    @objc private func fleetDidScroll() { refreshHoverForPointer() }
+
+    /// A row reported a tracking-area edge. Enters win outright; an exit only
+    /// counts for the row the list still believes is lit, so a stale exit
+    /// arriving after the pointer already moved on can't blank the new row.
+    private func rowHoverChanged(_ row: FleetHoverRow, entered: Bool) {
+        if entered {
+            setHoveredRow(row)
+        } else if hoveredRow === row {
+            setHoveredRow(nil)
+        }
+    }
+
+    private func setHoveredRow(_ row: FleetHoverRow?) {
+        guard hoveredRow !== row else { return }
+        hoveredRow?.setHovered(false)
+        hoveredRow = row
+        row?.setHovered(true)
+    }
+
+    /// Re-resolve the hovered row from where the pointer actually is.
+    ///
+    /// Scrolling moves rows under a still cursor, which AppKit reports as a run
+    /// of enters with no exits — so the fleet asks the pointer instead of
+    /// trusting the events every time the content offset changes.
+    private func refreshHoverForPointer() {
+        guard let window, window.isKeyWindow else { setHoveredRow(nil); return }
+        let point = scroll.contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard scroll.contentView.bounds.contains(point) else { setHoveredRow(nil); return }
+        var hit = stack.hitTest(point)
+        while let view = hit, !(view is FleetHoverRow) { hit = view.superview }
+        setHoveredRow(hit as? FleetHoverRow)
+    }
+
     /// Layer `CGColor`s don't auto-track dynamic `NSColor`s — re-resolve on appearance flips.
     private func refreshChromeColors() {
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -2264,6 +2337,7 @@ final class DashboardOverviewView: NSView {
         #endif
         fullRenderCount += 1
         lastStructureSignature = structureSignature
+        setHoveredRow(nil)
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         orderedRows = []
         rowViewsByID = [:]
@@ -2291,6 +2365,9 @@ final class DashboardOverviewView: NSView {
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
                 row.onDeleteWithBranch = { [weak self] path in self?.onDeleteWorktreeWithBranch?(path) }
+                row.onHoverChanged = { [weak self] row, entered in
+                    self?.rowHoverChanged(row, entered: entered)
+                }
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((groupedItem.id, groupedItem.path))
@@ -2307,6 +2384,9 @@ final class DashboardOverviewView: NSView {
                         let paneRow = PaneRowView(pane: paneInfo, worktreePath: pane.worktreePath)
                         paneRow.onTap = { [weak self] worktreePath, stationId in
                             self?.onSelectPane?(worktreePath, stationId)
+                        }
+                        paneRow.onHoverChanged = { [weak self] row, entered in
+                            self?.rowHoverChanged(row, entered: entered)
                         }
                         rowsBox.addArrangedSubview(paneRow)
                         paneRow.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
@@ -2459,6 +2539,15 @@ final class DashboardOverviewView: NSView {
             .compactMap { addWorktreeProjects[safeIndex: $0.tag] }
     }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
+    /// Ids of every row currently painting the hover tint — more than one means
+    /// the scroll-leaves-a-trail bug is back.
+    var hoveredRowIDsForTesting: [String] {
+        rowViewsByID.filter { $0.value.isHoveredForTesting }.keys.sorted()
+    }
+    func simulateRowHoverForTesting(id: String, entered: Bool) {
+        guard let row = rowViewsByID[id] else { return }
+        rowHoverChanged(row, entered: entered)
+    }
     var revealedRowIDForTesting: String? { revealedRowID }
     func rowRuntimeTextForTesting(id: String) -> String? { rowViewsByID[id]?.runtimeTextForTesting }
     func rowTitleTextForTesting(id: String) -> String? { rowViewsByID[id]?.titleTextForTesting }
@@ -2572,8 +2661,11 @@ final class DashboardOverviewView: NSView {
     ///    branch  git info                           N panes
     /// ```
     /// Title and branch share a text column so their leading edges align.
-    private final class RowView: NSView {
+    private final class RowView: NSView, FleetHoverRow {
         var onTap: ((String) -> Void)?
+        /// Pointer entered (`true`) or left (`false`) this row. The list, not the
+        /// row, decides what that means — see `FleetHoverRow`.
+        var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         var onDelete: ((String) -> Void)?
         var onDeleteWithBranch: ((String) -> Void)?
         /// Refreshed by `update` rather than fixed at init: a row is keyed by its
@@ -2863,11 +2955,12 @@ final class DashboardOverviewView: NSView {
             let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
             addTrackingArea(t); tracking = t
         }
-        override func mouseEntered(with event: NSEvent) {
-            applyBackground(hovered: true)
-        }
-        override func mouseExited(with event: NSEvent) {
-            applyBackground(hovered: false)
+        override func mouseEntered(with event: NSEvent) { onHoverChanged?(self, true) }
+        override func mouseExited(with event: NSEvent) { onHoverChanged?(self, false) }
+
+        func setHovered(_ hovered: Bool) {
+            guard self.hovered != hovered else { return }
+            applyBackground(hovered: hovered)
         }
 
         /// Move the selection highlight on or off this row.
@@ -2902,22 +2995,27 @@ final class DashboardOverviewView: NSView {
 
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
-            applyBackground(hovered: false)
+            applyBackground(hovered: hovered)
         }
+
+        var isHoveredForTesting: Bool { hovered }
     }
 
     // MARK: - Pane row (Group by Pane)
 
     /// Third-level row under a worktree in the expanded "Group by Pane" mode:
     /// an indented, clickable pane. `● pane title`, dimmed unless focused.
-    private final class PaneRowView: NSView {
+    private final class PaneRowView: NSView, FleetHoverRow {
         var onTap: ((String, String) -> Void)?
+        /// See `RowView.onHoverChanged`.
+        var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         private let stationId: String
         /// Carried on the view, not captured in `onTap`: rows outlive a single
         /// render now, and a transferred worktree keeps its station ids.
         private var worktreePath: String
         private let dotLabel: NSTextField
         private let titleLabel: NSTextField
+        private var hovered = false
 
         private static let cornerRadius: CGFloat = 6
         private static let hoverFill = NSColor(name: nil) { appearance in
@@ -2981,12 +3079,16 @@ final class DashboardOverviewView: NSView {
             let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
             addTrackingArea(t); tracking = t
         }
-        override func mouseEntered(with event: NSEvent) {
-            layer?.backgroundColor = resolvedCGColor(Self.hoverFill)
+        override func mouseEntered(with event: NSEvent) { onHoverChanged?(self, true) }
+        override func mouseExited(with event: NSEvent) { onHoverChanged?(self, false) }
+
+        func setHovered(_ hovered: Bool) {
+            guard self.hovered != hovered else { return }
+            self.hovered = hovered
+            layer?.backgroundColor = hovered ? resolvedCGColor(Self.hoverFill) : NSColor.clear.cgColor
         }
-        override func mouseExited(with event: NSEvent) {
-            layer?.backgroundColor = NSColor.clear.cgColor
-        }
+
+        var isHoveredForTesting: Bool { hovered }
     }
 
 }
