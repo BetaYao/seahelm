@@ -429,7 +429,6 @@ class TabCoordinator {
             }
 
             result.append(WorktreeRowInfo(
-                id: agent.id,
                 name: worktreeName,
                 project: agent.project,
                 thread: worktreeName,

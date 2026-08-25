@@ -9,7 +9,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         let lastActivityAt = Date(timeIntervalSince1970: 1_721_234_567)
         let creationDate = Date(timeIntervalSince1970: 1_700_000_000)
         let pane = makePane(
-            id: "station-42",
+            name: "station-42",
             project: "seahelm",
             worktreePath: "/tmp/seahelm-feature",
             paneStatuses: [.running, .error],
@@ -19,7 +19,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
         let item = pane.groupingItem(creationDate: creationDate)
 
-        XCTAssertEqual(item.id, "station-42")
+        XCTAssertEqual(item.id, "/tmp/seahelm-feature", "row identity is the worktree path")
         XCTAssertEqual(item.path, "/tmp/seahelm-feature")
         XCTAssertEqual(item.repository, "seahelm")
         XCTAssertEqual(item.status, .error)
@@ -69,15 +69,15 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                                              defaults: defaults,
                                              now: { self.now })
-            view.selectedId = "run"
+            view.selectedId = "/run"
             view.update([
-                makePane(id: "idle", project: "charlie", worktreePath: "/idle",
+                makePane(name: "idle", project: "charlie", worktreePath: "/idle",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-300)),
-                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(name: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
@@ -88,10 +88,10 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 
             XCTAssertEqual(defaults.string(forKey: WorktreeGroupingPreference.key), "status")
             XCTAssertEqual(view.renderedGroupTitlesForTesting, ["Needs input", "Running", "Idle"])
-            XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
-            XCTAssertEqual(view.selectedId, "run")
-            XCTAssertEqual(view.renderedSelectedRowIDForTesting, "run")
-            XCTAssertEqual(view.revealedRowIDForTesting, "run")
+            XCTAssertEqual(view.orderedRows.map(\.id), ["/wait", "/run", "/idle"])
+            XCTAssertEqual(view.selectedId, "/run")
+            XCTAssertEqual(view.renderedSelectedRowIDForTesting, "/run")
+            XCTAssertEqual(view.revealedRowIDForTesting, "/run")
             XCTAssertEqual(callbackCount, 1)
         }
     }
@@ -101,25 +101,25 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                                              defaults: defaults,
                                              now: { self.now })
-            view.selectedId = "removed"
+            view.selectedId = "/removed"
             view.update([
-                makePane(id: "idle", project: "charlie", worktreePath: "/idle",
+                makePane(name: "idle", project: "charlie", worktreePath: "/idle",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-300)),
-                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(name: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
 
             view.selectGroupingModeForTesting(.status)
 
-            XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run", "idle"])
-            XCTAssertEqual(view.selectedId, "wait")
-            XCTAssertEqual(view.renderedSelectedRowIDForTesting, "wait")
-            XCTAssertEqual(view.revealedRowIDForTesting, "wait")
+            XCTAssertEqual(view.orderedRows.map(\.id), ["/wait", "/run", "/idle"])
+            XCTAssertEqual(view.selectedId, "/wait")
+            XCTAssertEqual(view.renderedSelectedRowIDForTesting, "/wait")
+            XCTAssertEqual(view.revealedRowIDForTesting, "/wait")
         }
     }
 
@@ -145,10 +145,10 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(name: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
@@ -169,7 +169,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
             ])
@@ -178,17 +178,17 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             // rebuild them out from under it.
             view.isRenderPaused = true
             view.update([
-                makePane(id: "wait", project: "alpha", worktreePath: "/wait",
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
                            paneStatuses: [.waiting], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(id: "run", project: "bravo", worktreePath: "/run",
+                makePane(name: "run", project: "bravo", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-200)),
             ])
-            XCTAssertEqual(view.orderedRows.map(\.id), ["wait"])
+            XCTAssertEqual(view.orderedRows.map(\.id), ["/wait"])
 
             view.isRenderPaused = false
-            XCTAssertEqual(view.orderedRows.map(\.id), ["wait", "run"])
+            XCTAssertEqual(view.orderedRows.map(\.id), ["/wait", "/run"])
         }
     }
 
@@ -198,24 +198,24 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makePane(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneRunTime: "10s"),
             ])
 
             XCTAssertEqual(view.fullRenderCountForTesting, 1)
-            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "10s")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "/run"), "10s")
 
             view.update([
-                makePane(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-10),
                            currentPaneRunTime: "20s"),
             ])
 
             XCTAssertEqual(view.fullRenderCountForTesting, 1)
-            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "20s")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "/run"), "20s")
         }
     }
 
@@ -225,20 +225,20 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makePane(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneTitle: "Initial title"),
             ])
-            XCTAssertEqual(view.rowTitleTextForTesting(id: "run"), "Initial title")
+            XCTAssertEqual(view.rowTitleTextForTesting(id: "/run"), "Initial title")
 
             view.update([
-                makePane(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.running], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-10),
                            currentPaneTitle: "   "),
             ])
-            XCTAssertEqual(view.rowTitleTextForTesting(id: "run"), "Initial title")
+            XCTAssertEqual(view.rowTitleTextForTesting(id: "/run"), "Initial title")
         }
     }
 
@@ -252,7 +252,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                                              now: { self.now })
             func push(_ status: AgentStatus, runtime: String) {
                 view.update([
-                    makePane(id: "run", project: "alpha", worktreePath: "/run",
+                    makePane(name: "run", project: "alpha", worktreePath: "/run",
                                paneStatuses: [status], isMainWorktree: false,
                                lastActivityAt: now.addingTimeInterval(-10),
                                currentPaneRunTime: runtime),
@@ -260,15 +260,15 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             }
 
             push(.running, runtime: "12s")
-            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "12s")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "/run"), "12s")
 
             // Still running, value momentarily unavailable — hold the last figure.
             push(.running, runtime: "")
-            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "12s")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "/run"), "12s")
 
             // Stopped with no known activity age — the counter must go away.
             push(.idle, runtime: "")
-            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "run"), "")
+            XCTAssertEqual(view.rowRuntimeTextForTesting(id: "/run"), "")
 
             XCTAssertEqual(view.fullRenderCountForTesting, 1, "these should all be incremental")
         }
@@ -278,20 +278,58 @@ final class DashboardOverviewGroupingTests: XCTestCase {
     /// out of autoresizing constraints by hand. Without that, the frame-derived
     /// constraints win and the whole text column lays out at zero height — every
     /// row paints as a bare dot with no title, branch, or timings.
+    /// Scrolling the fleet under a stationary pointer used to deliver an enter
+    /// for every row that slid past and no matching exit, leaving a column of
+    /// rows tinted as if they were all selected.
+    func testHoverTintNeverLandsOnMoreThanOneRow() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makePane(name: "one", project: "alpha", worktreePath: "/one",
+                         paneStatuses: [.running], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-10)),
+                makePane(name: "two", project: "alpha", worktreePath: "/two",
+                         paneStatuses: [.waiting], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-20)),
+                makePane(name: "three", project: "alpha", worktreePath: "/three",
+                         paneStatuses: [.idle], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-30)),
+            ])
+
+            view.simulateRowHoverForTesting(id: "/one", entered: true)
+            XCTAssertEqual(view.hoveredRowIDsForTesting, ["/one"])
+
+            // Rows sliding past the pointer: enters with no exits.
+            view.simulateRowHoverForTesting(id: "/two", entered: true)
+            view.simulateRowHoverForTesting(id: "/three", entered: true)
+            XCTAssertEqual(view.hoveredRowIDsForTesting, ["/three"])
+
+            // A stale exit for a row the pointer already left must not blank the
+            // row that is actually under it.
+            view.simulateRowHoverForTesting(id: "/one", entered: false)
+            XCTAssertEqual(view.hoveredRowIDsForTesting, ["/three"])
+
+            view.simulateRowHoverForTesting(id: "/three", entered: false)
+            XCTAssertEqual(view.hoveredRowIDsForTesting, [])
+        }
+    }
+
     func testWorktreeRowLaysOutTitleWithRealSize() {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                                              defaults: defaults,
                                              now: { self.now })
             view.update([
-                makePane(id: "run", project: "alpha", worktreePath: "/run",
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
                            paneStatuses: [.idle], isMainWorktree: false,
                            lastActivityAt: now.addingTimeInterval(-20),
                            currentPaneTitle: "claude — building"),
             ])
             view.layoutSubtreeIfNeeded()
 
-            let frame = view.rowTitleFrameForTesting(id: "run")
+            let frame = view.rowTitleFrameForTesting(id: "/run")
             XCTAssertNotNil(frame)
             XCTAssertGreaterThan(frame?.height ?? 0, 0, "row title collapsed to zero height")
             XCTAssertGreaterThan(frame?.width ?? 0, 0, "row title collapsed to zero width")
@@ -308,7 +346,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
 }
 
 private func makePane(
-    id: String,
+    name: String,
     project: String,
     worktreePath: String,
     paneStatuses: [AgentStatus],
@@ -319,8 +357,7 @@ private func makePane(
 ) -> WorktreeRowInfo {
     let surface = Station()
     return WorktreeRowInfo(
-        id: id,
-        name: id,
+        name: name,
         project: project,
         thread: "feature",
         paneStatuses: paneStatuses,
@@ -340,7 +377,7 @@ private func makePane(
         lastActivityAge: "1m",
         lastActivityAt: lastActivityAt,
         gitStats: nil,
-        currentPaneTitle: currentPaneTitle ?? id,
+        currentPaneTitle: currentPaneTitle ?? name,
         currentPaneRunTime: currentPaneRunTime
     )
 }
