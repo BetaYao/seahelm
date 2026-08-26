@@ -437,11 +437,21 @@ final class HostGatewayServer {
         }
     }
 
-    private func send(_ text: String, on connection: NWConnection) {
-        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+    private func send(_ frame: HostGatewayWireFrame, on connection: NWConnection) {
+        let opcode: NWProtocolWebSocket.Opcode
+        let body: Data
+        switch frame {
+        case .text(let text):
+            opcode = .text
+            body = Data(text.utf8)
+        case .binary(let data):
+            opcode = .binary
+            body = data
+        }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: opcode)
         let context = NWConnection.ContentContext(identifier: "hostgateway", metadata: [metadata])
         connection.send(
-            content: Data(text.utf8),
+            content: body,
             contentContext: context,
             isComplete: true,
             completion: .contentProcessed { _ in })

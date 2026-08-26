@@ -5,7 +5,12 @@ protocol HostGatewayVTAttaching: AnyObject {
     func close(paneSessionKey: String)
     func keepalive(paneSessionKey: String)
     func sendKeys(paneSessionKey: String, utf8: Data) -> Bool
-    var onNotify: ((String, [String: Any]) -> Void)? { get set }
+    /// A subscription rather than a single slot: the manager is shared by every
+    /// connection, and one assignable callback meant the newest browser muted all
+    /// the others. Returns a token to unsubscribe with.
+    @discardableResult
+    func addObserver(_ observer: @escaping (VTEvent) -> Void) -> Int
+    func removeObserver(_ token: Int)
 }
 
 final class HostGatewaySession {
@@ -17,7 +22,16 @@ final class HostGatewaySession {
     private let decisions: HostGatewayDecisions
     private var authenticated = false
     private var openVTKeys: Set<String> = []
-    private var pendingNotifications: [HostGatewayOutbound] = []
+    /// Appended from the VT manager's queue and drained from the gateway's, so
+    /// the lock is load-bearing: two serial queues taking turns on one Swift
+    /// Array is still a data race, and it showed up as dropped frames under load.
+    private let pendingLock = NSLock()
+    private var pendingNotifications: [HostGatewayWireFrame] = []
+    private var vtObserverToken: Int?
+    /// Negotiated at auth. Absent means a client from before binary VT, which
+    /// still gets base64 inside a JSON notify.
+    private var vtBinary = false
+    private var vtDeflate = false
     /// Called after a notify is queued (e.g. server drains and sends on the connection).
     var onPendingOutbound: (() -> Void)?
 
@@ -31,10 +45,33 @@ final class HostGatewaySession {
         self.rootSecretBase64url = rootSecretBase64url
         self.vt = vt
         self.decisions = decisions
-        vt.onNotify = { [weak self] method, params in
-            self?.pendingNotifications.append(.notify(method: method, params: params))
-            self?.onPendingOutbound?()
+        vtObserverToken = vt.addObserver { [weak self] event in
+            guard let self else { return }
+            self.enqueue(self.encodeVT(event))
         }
+    }
+
+    /// The observer keeps the manager alive and the manager keeps a reference
+    /// back, so a closed connection that never unsubscribed would keep encoding
+    /// frames for a socket nobody is reading.
+    deinit {
+        if let vtObserverToken { vt.removeObserver(vtObserverToken) }
+    }
+
+    /// Chooses the wire shape this client negotiated.
+    private func encodeVT(_ event: VTEvent) -> HostGatewayWireFrame {
+        if vtBinary, let frame = HostGatewayVTFrame.encode(event, allowDeflate: vtDeflate) {
+            return .binary(frame)
+        }
+        return .text(HostGatewayFrame.encode(
+            .notify(method: event.kind.legacyMethod, params: event.legacyNotifyParams)))
+    }
+
+    private func enqueue(_ frame: HostGatewayWireFrame) {
+        pendingLock.lock()
+        pendingNotifications.append(frame)
+        pendingLock.unlock()
+        onPendingOutbound?()
     }
 
     /// Server → session: an event that opened or closed a decision.
@@ -42,42 +79,43 @@ final class HostGatewaySession {
         guard authenticated else { return }
         switch change {
         case .opened(let d):
-            pendingNotifications.append(
-                .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d)))
+            enqueue(.text(HostGatewayFrame.encode(
+                .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d)))))
         case .cleared(let key):
-            pendingNotifications.append(
-                .notify(method: "pane.event", params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))
+            enqueue(.text(HostGatewayFrame.encode(
+                .notify(method: "pane.event",
+                        params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))))
         case .none:
             return
         }
-        onPendingOutbound?()
     }
 
     /// Answering locally clears it for everyone; other clients must be told.
     private func queueDecisionCleared(_ key: String) {
-        pendingNotifications.append(
-            .notify(method: "pane.event", params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))
-        onPendingOutbound?()
+        enqueue(.text(HostGatewayFrame.encode(
+            .notify(method: "pane.event",
+                    params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))))
     }
 
-    func drainNotifications() -> [String] {
-        let out = pendingNotifications.map { HostGatewayFrame.encode($0) }
+    func drainNotifications() -> [HostGatewayWireFrame] {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        let out = pendingNotifications
         pendingNotifications.removeAll()
         return out
     }
 
-    func handle(text: String) -> [String] {
+    func handle(text: String) -> [HostGatewayWireFrame] {
         switch HostGatewayFrame.parse(text) {
         case .malformed:
-            return [encodeError(id: "", code: ControlError.parse, message: "parse error")]
+            return [.text(encodeError(id: "", code: ControlError.parse, message: "parse error"))]
         case .request(let id, let method, let params):
             if !authenticated {
                 guard method == "auth" else {
-                    return [encodeError(id: id, code: -32001, message: "unauthorized")]
+                    return [.text(encodeError(id: id, code: -32001, message: "unauthorized"))]
                 }
-                return handleAuth(id: id, params: params)
+                return handleAuth(id: id, params: params).map { .text($0) }
             }
-            return [handleAuthenticated(id: id, method: method, params: params)]
+            return [.text(handleAuthenticated(id: id, method: method, params: params))]
         }
     }
 
@@ -87,8 +125,17 @@ final class HostGatewaySession {
         let ok = HostGatewayAuth.verify(
             macId: macId, token: token,
             expectedMacId: expectedMacId, rootSecretBase64url: rootSecretBase64url)
-        if ok { authenticated = true }
-        var out = [HostGatewayFrame.encode(.response(id: id, result: ["ok": ok], error: nil))]
+        if ok {
+            authenticated = true
+            // Opt-in, so a cached page from before the binary frame keeps working
+            // against a new Mac rather than rendering nothing.
+            vtBinary = params["vt_binary"] as? Bool ?? false
+            vtDeflate = vtBinary && (params["vt_deflate"] as? Bool ?? false)
+        }
+        var out = [HostGatewayFrame.encode(.response(
+            id: id,
+            result: ["ok": ok, "vt_binary": vtBinary, "vt_deflate": vtDeflate],
+            error: nil))]
         if ok {
             // Replay what is already open. Without this a client that connects a
             // second after a question is raised waits for an event it has missed.
