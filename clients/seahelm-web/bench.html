@@ -126,6 +126,7 @@ async function timed(label, fn){
 }
 
 function pad(s, n){ return String(s).padEnd(n, ' '); }
+const fmt = (ms) => ms < 0.001 ? '<0.001 ms' : ms.toFixed(3) + ' ms';
 
 /**
  * Fixed integer work, timed. Safari reports `cores 8` and no deviceMemory on
@@ -230,7 +231,6 @@ async function main(){
   const bytesFor = { 'today (JSON+base64)': legacyBytes, '  + old double decode': legacyBytes,
                      'binary': binaryBytes, 'binary + deflate': deflateBytes };
   const mb = corpus.length / 1048576;
-  const fmt = (ms) => ms < 0.001 ? '<0.001 ms' : ms.toFixed(3) + ' ms';
   const rate = (ms) => ms < 0.001 ? '>250000 MB/s' : (mb / (ms / 1000)).toFixed(0) + ' MB/s';
   for (const r of results) {
     say(`${pad(r.label, 26)}${pad((bytesFor[r.label] / 1024).toFixed(1) + ' KB', 12)}`
@@ -298,6 +298,8 @@ async function main(){
     say(`xterm cost above, so neither decode is what you feel.`);
   }
 
+  await scrollbackSweep();
+
   document.getElementById('results').classList.remove('running');
   window.BENCH_DONE = true;
   report();
@@ -312,6 +314,69 @@ function report(){
   try {
     fetch(target, { method: 'POST', mode: 'cors', body: out.join('\n') }).catch(() => {});
   } catch (e) { /* file:// — the on-page table is the output */ }
+}
+
+// ── scrollback ────────────────────────────────────────────────────────────
+// The `top` corpus repaints in place and never fills the scrollback, so it
+// cannot answer what scrollback costs. This pushes lines that actually scroll,
+// and measures the two things depth could plausibly charge for: writing, and
+// the reflow a resize forces — which in xterm walks the whole buffer.
+function scrollingCorpus(lines){
+  const parts = [];
+  for (let i = 0; i < lines; i++) {
+    // Deliberately wider than the resize target below (120 -> 96): reflow only
+    // does work on lines that have to re-wrap, and a first attempt at this used
+    // 62-char lines, so the reflow column measured nothing and read as flat.
+    const sev = i % 17 === 0 ? '\x1b[31mERROR\x1b[0m' : '\x1b[32m ok  \x1b[0m';
+    parts.push(`${sev} \x1b[90m[${String(i).padStart(6, '0')}]\x1b[0m `
+      + `compiled module src/feature/${i % 97}/components/Detail/index.ts `
+      + `in ${(i % 400) + 12}ms (${(i % 30) + 3} deps, cache ${i % 2 ? 'hit' : 'miss'})\r\n`);
+  }
+  return new TextEncoder().encode(parts.join(''));
+}
+
+async function scrollbackSweep(){
+  const TerminalCtor = (window.Terminal && window.Terminal.Terminal) || window.Terminal;
+  if (!TerminalCtor) return;
+  const LINES = 12000;                       // well past every depth tested
+  const RESIZE_COLS = 96;                    // narrower than the lines, so reflow works
+  const corpus = scrollingCorpus(LINES);
+  const host = document.getElementById('termhost');
+  const heap = () => (performance.memory && performance.memory.usedJSHeapSize) || 0;
+
+  say('');
+  const sampleWidth = Math.round(corpus.length / LINES);
+  say(`scrollback sweep — ${LINES} scrolling lines (${(corpus.length / 1024).toFixed(0)} KB, `
+      + `~${sampleWidth} cols, reflowed 120→${RESIZE_COLS})`);
+  say(`${pad('scrollback', 14)}${pad('write', 13)}${pad('painted', 13)}${pad('reflow', 13)}heap`);
+  say('─'.repeat(64));
+
+  for (const scrollback of [0, 1000, 5000, 20000]) {
+    host.innerHTML = '';
+    if (window.gc) window.gc();
+    const before = heap();
+    const term = new TerminalCtor({ cols: 120, rows: 40, scrollback, convertEol: false });
+    term.open(host);
+
+    const t0 = performance.now();
+    await new Promise((r) => term.write(corpus, r));
+    const write = performance.now() - t0;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const painted = performance.now() - t0;
+
+    // Resize is where depth is supposed to hurt: xterm reflows the buffer it
+    // kept, so the cost should scale with how much it kept.
+    const t1 = performance.now();
+    term.resize(RESIZE_COLS, 40);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const reflow = performance.now() - t1;
+
+    const used = heap() - before;
+    term.dispose();
+    say(`${pad(scrollback, 14)}${pad(fmt(write), 13)}${pad(fmt(painted), 13)}${pad(fmt(reflow), 13)}`
+        + (used > 0 ? `${(used / 1048576).toFixed(1)} MB` : 'n/a'));
+  }
+  say('(heap needs Chrome performance.memory; n/a elsewhere)');
 }
 
 main().catch((e) => {
