@@ -2686,6 +2686,10 @@ extension MainWindowController: SettingsDelegate {
         mintPairingContext()
     }
 
+    func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool {
+        tabCoordinator.hostGatewayIsListening
+    }
+
     /// Live panes, so a rule's target is picked from what exists rather than
     /// recalled from memory.
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] {
@@ -2708,6 +2712,7 @@ extension MainWindowController: SettingsDelegate {
         let oldPaths = Set(self.config.workspacePaths)
         let oldIMessage = self.config.imessage
         let oldGmail = self.config.gmailMail
+        let oldGateway = self.config.hostGateway ?? HostGatewayConfig()
         // Preserve split layouts — SettingsVC doesn't track them
         var merged = config
         merged.splitLayouts = terminalCoordinator.config.splitLayouts
@@ -2720,6 +2725,16 @@ extension MainWindowController: SettingsDelegate {
         let newPaths = Set(config.workspacePaths)
         if oldPaths != newPaths {
             tabCoordinator.loadWorkspaces()
+        }
+
+        // Host Gateway: restart only on what the listener is actually built from.
+        // `public_url` feeds the pair link and nothing else, so typing one must
+        // not drop the browser sessions already attached.
+        let newGateway = config.hostGateway ?? HostGatewayConfig()
+        if oldGateway.resolvedEnabled != newGateway.resolvedEnabled
+            || oldGateway.resolvedPort != newGateway.resolvedPort
+            || oldGateway.webRoot != newGateway.webRoot {
+            tabCoordinator.reloadHostGateway()
         }
 
         // Hot-reload the mail channel too. The poller captures its config when

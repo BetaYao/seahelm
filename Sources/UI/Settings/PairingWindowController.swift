@@ -9,8 +9,17 @@ import CoreImage.CIFilterBuiltins
 /// clients (browser paste, phone scan of the Host Gateway entry URL).
 final class PairingPaneView: NSView {
     private let rootSecret: Data
-    private let brokerURL: String
+    /// Settable: Settings edits the Gateway's public URL on the same page that
+    /// shows this QR, and a code still encoding the old endpoint pairs a browser
+    /// to an address nothing answers on.
+    var brokerURL: String {
+        didSet {
+            guard brokerURL != oldValue else { return }
+            refresh()
+        }
+    }
     private let macId: String
+    private let qrSide: CGFloat
     private var pairURI: String { MqttCrypto.pairURI(broker: brokerURL, macId: macId, rootSecret: rootSecret) }
 
     private let linkField = NSTextField(labelWithString: "")
@@ -22,6 +31,7 @@ final class PairingPaneView: NSView {
         self.rootSecret = rootSecret
         self.brokerURL = brokerURL
         self.macId = macId
+        self.qrSide = qrSide
         super.init(frame: .zero)
         build(qrSide: qrSide)
     }
@@ -70,6 +80,12 @@ final class PairingPaneView: NSView {
             qrView.widthAnchor.constraint(equalToConstant: qrSide),
             qrView.heightAnchor.constraint(equalToConstant: qrSide),
         ])
+    }
+
+    /// Re-encode both renderings of the payload from the current endpoint.
+    private func refresh() {
+        qrView.image = Self.qrImage(from: pairURI, side: qrSide)
+        linkField.stringValue = pairURI
     }
 
     // MARK: - Actions
