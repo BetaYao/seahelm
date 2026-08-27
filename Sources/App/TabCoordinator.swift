@@ -856,11 +856,19 @@ class TabCoordinator {
         stopHostGateway()
     }
 
-    /// Rebuild the gateway after pairing mints a new root secret.
-    private func reloadHostGateway() {
+    /// Rebuild the gateway after pairing mints a new root secret, or after
+    /// Settings changes what the listener itself is built from (enabled, port,
+    /// web root). Editing the public URL does not come through here: it only
+    /// feeds the pair link, and restarting on it would drop live browsers.
+    func reloadHostGateway() {
         stopHostGateway()
         if let ds = mqttDataSource { setupHostGateway(dataSource: ds) }
     }
+
+    /// Whether the public listener is actually up. The Settings toggle records
+    /// intent; a port already in use fails the bind, and the page should be able
+    /// to say so rather than imply the switch proved anything.
+    var hostGatewayIsListening: Bool { hostGatewayServer?.isListening ?? false }
 
     /// Apply a freshly-minted pairing secret to the *live* config and reload
     /// Host Gateway so auth picks up the new root — no app restart needed.

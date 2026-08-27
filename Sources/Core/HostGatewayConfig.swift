@@ -36,6 +36,27 @@ struct HostGatewayConfig: Codable, Equatable {
         return components.string ?? "http://127.0.0.1:\(resolvedPort)/"
     }
 
+    /// Rebuild from the Settings fields. Text that is not a usable port keeps
+    /// whatever was stored — 0 included, since it is the ephemeral-port wildcard
+    /// and would publish a pair link pointing at a port nothing predictable is on.
+    static func edited(enabled: Bool,
+                       portText: String,
+                       publicURLText: String,
+                       from existing: HostGatewayConfig?) -> HostGatewayConfig {
+        let typedPort = UInt16(portText.trimmingCharacters(in: .whitespaces))
+        let url = publicURLText.trimmingCharacters(in: .whitespaces)
+        return HostGatewayConfig(
+            enabled: enabled,
+            port: typedPort.flatMap { $0 > 0 ? $0 : nil } ?? existing?.port,
+            // Empty means "derive from the port", which is what the field's
+            // placeholder already shows; storing "" would resolve the same but
+            // read as a deliberate blank in the JSON.
+            publicURL: url.isEmpty ? nil : url,
+            // No field carries the dev-only web root, so pass it through rather
+            // than erase a working copy set by hand in config.json.
+            webRoot: existing?.webRoot)
+    }
+
     enum CodingKeys: String, CodingKey {
         case enabled, port
         case publicURL = "public_url"

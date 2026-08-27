@@ -17,6 +17,10 @@ protocol SettingsDelegate: AnyObject {
     /// a kill that would take out a live agent is at least an informed one.
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String>
     func settings(_ settings: SettingsViewController, connectGmailAccount email: String)
+
+    /// Whether the Host Gateway listener is actually up, so the page reports what
+    /// happened rather than what was asked for.
+    func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool
 }
 
 /// Optional halves of the protocol: only the main window can answer them, and
@@ -26,6 +30,7 @@ extension SettingsDelegate {
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
     func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {}
+    func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool { false }
 }
 
 /// Settings, as a sidebar of pages built from `SettingsChrome` groups.
@@ -51,7 +56,8 @@ class SettingsViewController: NSViewController {
         .init(id: "gmail", title: "Gmail", symbol: "envelope",
               keywords: ["email", "mail", "oauth", "google", "alias"]),
         .init(id: "pairing", title: "Pairing", symbol: "qrcode",
-              keywords: ["qr", "remote", "browser", "gateway", "pair"]),
+              keywords: ["qr", "remote", "browser", "gateway", "pair",
+                         "port", "tunnel", "wss", "cloudflare", "web"]),
         .init(id: "sessions", title: "Sessions", symbol: "rectangle.stack",
               keywords: ["zmx", "cleanup", "kill", "detached", "orphan"]),
     ])
@@ -94,6 +100,22 @@ class SettingsViewController: NSViewController {
     private let gmailAllowedSendersField = SettingsTextField()
     private let gmailStatusLabel = NSTextField(labelWithString: "Not connected")
     private lazy var gmailEnabledToggle = SettingsControls.toggle(on: config.gmailMail?.enabled ?? false, target: self, action: #selector(controlChanged))
+
+    // Pairing tab: Host Gateway server + the pair link it feeds
+    private lazy var gatewayEnabledToggle = SettingsControls.toggle(
+        on: config.hostGateway?.resolvedEnabled ?? false,
+        target: self, action: #selector(gatewayControlChanged))
+    private let gatewayPortField = SettingsTextField()
+    private let gatewayPublicURLField = SettingsTextField()
+    private let gatewayStatusLabel = NSTextField(labelWithString: "")
+    private lazy var gatewayOpenPageButton = SettingsControls.button(
+        "Open web client", target: self, action: #selector(openGatewayPageClicked))
+    /// Held so an edited public URL can re-encode the QR in place.
+    private var pairingPane: PairingPaneView?
+    /// The mqtt half of the pairing context, cached from the page build: asking
+    /// the delegate again mints and reloads the gateway, which is not what a
+    /// typed URL should cost.
+    private var pairingMqtt: MqttConfig?
 
     init(config: Config) {
         self.config = config
@@ -164,6 +186,10 @@ class SettingsViewController: NSViewController {
         if id == "sessions" {
             sessionMonitor.activeSessionNames = settingsDelegate?.settingsActiveSessionNames(self) ?? []
             sessionMonitor.reload()
+        }
+        // Same reason: the gateway may have died, or bound, since the page was built.
+        if id == "pairing" {
+            refreshHostGatewayStatus()
         }
     }
 
@@ -437,29 +463,117 @@ class SettingsViewController: NSViewController {
     // MARK: - Pairing
 
     private func buildPairingGroups() -> [NSView] {
+        let gatewayGroup = buildHostGatewayGroup()
+
         guard let context = settingsDelegate?.settingsPairingContext(self) else {
-            return [
-                SettingsGroupView(title: "Browser access", rows: [
-                    SettingsRow.stacked("Pairing unavailable",
-                                        subtitle: "Enable Host Gateway in config, then reopen Settings to mint a pairing link.",
-                                        content: NSView()),
-                ]),
-            ]
+            return [gatewayGroup]
         }
+        pairingMqtt = context.mqtt
+        // Fold the minted config back into this snapshot. `settingsPairingContext`
+        // creates `mqtt` and its `rootSecret` on the *owner's* config and saves
+        // it, so from here on this view controller's copy is a version behind —
+        // and `applyChanges()` writes this copy out wholesale. Without this line,
+        // touching any Host Gateway control right after the QR appeared erased
+        // the secret it encodes, from disk and from memory, and restarted the
+        // listener with an empty one.
+        config.mqtt = context.mqtt
 
         let pane = PairingPaneView(rootSecret: context.secret,
                                    brokerURL: HostGatewayPairing.clientEntryURL(
                                        hostGateway: config.hostGateway, mqtt: context.mqtt),
                                    macId: context.mqtt.macId ?? MqttConfig.deriveMacId(),
                                    qrSide: 180)
+        pairingPane = pane
 
         return [
+            gatewayGroup,
             SettingsGroupView(title: "Browser access", rows: [
                 SettingsRow.stacked(nil,
                                     subtitle: "Scan or paste to pair a browser with this Mac via Host Gateway.",
                                     content: pane),
             ]),
         ]
+    }
+
+    private func buildHostGatewayGroup() -> NSView {
+        let gateway = config.hostGateway ?? HostGatewayConfig()
+
+        gatewayPortField.stringValue = String(gateway.resolvedPort)
+        gatewayPortField.placeholderString = String(HostGatewayConfig().resolvedPort)
+        gatewayPortField.target = self
+        gatewayPortField.action = #selector(gatewayControlChanged)
+
+        gatewayPublicURLField.stringValue = gateway.publicURL ?? ""
+        // The derived localhost URL, so an empty field reads as "localhost only"
+        // rather than "unset".
+        gatewayPublicURLField.placeholderString = HostGatewayConfig(port: gateway.port).resolvedPublicURL
+        gatewayPublicURLField.target = self
+        gatewayPublicURLField.action = #selector(gatewayControlChanged)
+        // A URL right-aligned truncates its host, which is the half worth seeing.
+        gatewayPublicURLField.alignment = .left
+        gatewayPublicURLField.font = AppFont.mono(size: 11, weight: .regular)
+
+        gatewayStatusLabel.font = .systemFont(ofSize: 11)
+        gatewayStatusLabel.textColor = SettingsPalette.secondary
+        gatewayStatusLabel.lineBreakMode = .byTruncatingMiddle
+        gatewayStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        refreshHostGatewayStatus()
+
+        return SettingsGroupView(title: "Host Gateway", rows: [
+            SettingsRow.make("Serve browser clients",
+                             subtitle: "Runs the web client and its WebSocket on one port of this Mac. Turning it on publishes nothing by itself \u{2014} reachability is whatever you point at that port \u{2014} and every session still has to pair.",
+                             control: gatewayEnabledToggle,
+                             accessibilityId: "settings.hostGateway.enabled"),
+            SettingsRow.make("Port",
+                             control: gatewayPortField,
+                             accessibilityId: "settings.hostGateway.port"),
+            SettingsRow.stacked("Public URL",
+                                subtitle: "The address remote browsers reach, written into the pair link below. Point a tunnel at the port above and paste its `wss://\u{2026}/ws` here; leave it empty for this Mac only. It has to be `wss://` or localhost: the pairing token is derived with SubtleCrypto, which a page served over plain HTTP cannot use at all.",
+                                content: gatewayPublicURLField,
+                                height: 28),
+            SettingsRow.actions([gatewayOpenPageButton], leading: [gatewayStatusLabel]),
+        ])
+    }
+
+    /// Gateway edits move a listener, so they refresh what the page claims: the
+    /// pair link's `b=`, and whether the bind actually took.
+    @objc private func gatewayControlChanged() {
+        applyChanges()
+        // Echo back what was stored, so a rejected port does not sit in the field
+        // looking accepted.
+        gatewayPortField.stringValue = String((config.hostGateway ?? HostGatewayConfig()).resolvedPort)
+        refreshPairingLink()
+        refreshHostGatewayStatus()
+        // The listener binds on its own queue; ask again once it has had a moment
+        // to succeed or fail, or a taken port reads as running.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.refreshHostGatewayStatus()
+        }
+    }
+
+    @objc private func openGatewayPageClicked() {
+        guard let url = URL(string: (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func refreshPairingLink() {
+        guard let pairingPane, let mqtt = pairingMqtt else { return }
+        pairingPane.brokerURL = HostGatewayPairing.clientEntryURL(hostGateway: config.hostGateway, mqtt: mqtt)
+    }
+
+    private func refreshHostGatewayStatus() {
+        let gateway = config.hostGateway ?? HostGatewayConfig()
+        gatewayOpenPageButton.isEnabled = gateway.resolvedEnabled
+        guard gateway.resolvedEnabled else {
+            gatewayStatusLabel.stringValue = "Not serving."
+            return
+        }
+        if settingsDelegate?.settingsHostGatewayListening(self) == true {
+            gatewayStatusLabel.stringValue = "Serving \(gateway.resolvedPageURL)"
+        } else {
+            gatewayStatusLabel.stringValue =
+                "Enabled, but nothing is listening on port \(gateway.resolvedPort) \u{2014} the bind failed."
+        }
     }
 
     // MARK: - Sessions
@@ -632,9 +746,21 @@ class SettingsViewController: NSViewController {
                                                 allowedSenders: senders)
         }
 
+        // Host Gateway. Guarded like Gmail: the fields only carry real values once
+        // the page has been built, so an unvisited page must not write its blank
+        // defaults over a config edited by hand.
+        if pages["pairing"] != nil {
+            config.hostGateway = HostGatewayConfig.edited(
+                enabled: gatewayEnabledToggle.state == .on,
+                portText: gatewayPortField.stringValue,
+                publicURLText: gatewayPublicURLField.stringValue,
+                from: config.hostGateway)
+        }
+
         config.save()
         settingsDelegate?.settingsDidUpdateConfig(self, config: config)
     }
+
 
     private static func parseGBField(_ field: NSTextField, fallbackMB: Int) -> Int {
         let raw = field.stringValue

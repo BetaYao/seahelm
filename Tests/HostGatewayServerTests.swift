@@ -11,7 +11,27 @@ private final class ServerFakeDataSource: ControlDataSource {
 }
 
 private final class ServerFakeVT: HostGatewayVTAttaching {
-    var onNotify: ((String, [String: Any]) -> Void)?
+    private let lock = NSLock()
+    private var observers: [Int: (VTEvent) -> Void] = [:]
+    private var nextToken = 1
+
+    @discardableResult
+    func addObserver(_ observer: @escaping (VTEvent) -> Void) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        defer { nextToken += 1 }
+        observers[nextToken] = observer
+        return nextToken
+    }
+
+    func removeObserver(_ token: Int) {
+        lock.lock(); defer { lock.unlock() }
+        observers.removeValue(forKey: token)
+    }
+
+    func emit(_ event: VTEvent) {
+        lock.lock(); let current = Array(observers.values); lock.unlock()
+        for observer in current { observer(event) }
+    }
 
     func open(paneSessionKey: String) -> [String: Any] { ["ok": true] }
     func close(paneSessionKey: String) {}
@@ -100,6 +120,96 @@ final class HostGatewayServerTests: XCTestCase {
         task.cancel(with: .goingAway, reason: nil)
     }
 
+    /// Toggling "Serve browser clients" off and back on in Settings tears the
+    /// listener down and rebinds the same port. Nothing exercised that before —
+    /// the gateway only ever restarted on a pairing mint — and a port left held
+    /// would leave the switch on with nothing serving.
+    func testStoppingReleasesThePortForTheNextServer() {
+        let b64 = MqttCrypto.base64url(root)
+        let config = HostGatewayConfig(enabled: true, port: testPort)
+        let make = { HostGatewayServer(
+            config: config,
+            router: ControlRouter(dataSource: ServerFakeDataSource()),
+            expectedMacId: self.macId,
+            rootSecretBase64url: b64,
+            vt: ServerFakeVT()) }
+
+        let first = make()
+        waitUntilListening(first)
+        first.stop()
+        XCTAssertFalse(first.isListening)
+
+        let second = make()
+        defer { second.stop() }
+        waitUntilListening(second)
+
+        // Not just bound — actually answering, since a half-dead listener can
+        // hold the port without serving.
+        let exp = expectation(description: "page")
+        var status = 0
+        URLSession.shared.dataTask(with: URL(string: "http://127.0.0.1:\(testPort)/")!) { _, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            exp.fulfill()
+        }.resume()
+        wait(for: [exp], timeout: 5)
+        XCTAssertEqual(status, 200, "rebound server should serve the page again")
+    }
+
+    /// The binary path end to end: negotiated at auth, framed by the server,
+    /// delivered with a binary opcode through `NWProtocolWebSocket`, and decoding
+    /// back to the exact bytes the pane produced.
+    func testBinaryVTFrameDeliveredOverWebSocket() throws {
+        let ds = ServerFakeDataSource()
+        let vt = ServerFakeVT()
+        let b64 = MqttCrypto.base64url(root)
+        let token = MqttCrypto(rootSecret: root).authPassword
+        let server = HostGatewayServer(
+            config: HostGatewayConfig(enabled: true, port: testPort),
+            router: ControlRouter(dataSource: ds),
+            expectedMacId: macId,
+            rootSecretBase64url: b64,
+            vt: vt)
+        defer { server.stop() }
+        waitUntilListening(server)
+
+        let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(testPort)/ws")!)
+        task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
+
+        sendText(#"""
+        {"id":"a","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token)","vt_binary":true,"vt_deflate":true}}
+        """#, on: task)
+        let reply = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(receiveText(from: task).utf8)) as? [String: Any])
+        let result = try XCTUnwrap(reply["result"] as? [String: Any])
+        XCTAssertEqual(result["vt_binary"] as? Bool, true)
+        XCTAssertEqual(result["vt_deflate"] as? Bool, true)
+
+        // A session only forwards panes this client opened, so ask for it first.
+        sendText(#"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#, on: task)
+        _ = receiveText(from: task)
+
+        // Big enough to cross the compression threshold, repetitive enough to
+        // actually shrink — the shape a repainting agent produces.
+        let payload = Data(repeating: 0x41, count: 4096)
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: payload))
+
+        let received = expectation(description: "binary frame")
+        var frame = Data()
+        task.receive { result in
+            if case .success(.data(let data)) = result { frame = data }
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 5)
+
+        let decoded = try XCTUnwrap(HostGatewayVTFrame.decode(frame),
+                                    "server did not send a decodable binary frame")
+        XCTAssertEqual(decoded.paneSessionKey, "k1")
+        XCTAssertEqual(decoded.payload, payload)
+        XCTAssertTrue(decoded.wasCompressed, "4KB of one repeated byte should deflate")
+        XCTAssertLessThan(frame.count, payload.count / 4, "compression did not reach the wire")
+    }
+
     func testVtNotifyDeliveredOverWebSocket() {
         let ds = ServerFakeDataSource()
         let vt = ServerFakeVT()
@@ -125,7 +235,10 @@ final class HostGatewayServerTests: XCTestCase {
             on: task)
         _ = receiveText(from: task)
 
-        vt.onNotify?("vt.data", ["pane_session_key": "k1", "b64": "YQ=="])
+        sendText(#"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#, on: task)
+        _ = receiveText(from: task)
+
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("a".utf8)))
 
         let noteReply = receiveText(from: task)
         let noteObj = try! JSONSerialization.jsonObject(with: Data(noteReply.utf8)) as! [String: Any]

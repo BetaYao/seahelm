@@ -99,6 +99,34 @@ final class SettingsRowLayoutTests: XCTestCase {
         }
     }
 
+    // MARK: - Action row with a leading status
+
+    /// The Host Gateway page is the first caller to pass `leading:`, and it puts
+    /// a status line there whose text is a URL — long enough to shove the button
+    /// off the row if the label refuses to compress.
+    func testActionRowKeepsItsLeadingStatusBesideTheButton() {
+        let status = NSTextField(labelWithString:
+            "Serving https://a-rather-long-tunnel-hostname.example.dev/")
+        status.lineBreakMode = .byTruncatingMiddle
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let button = SettingsControls.button("Open web client", target: self, action: #selector(noop))
+        let row = laidOut(SettingsRow.actions([button], leading: [status]))
+
+        // Both sit inside their own stack view, so compare in the row's space.
+        let statusFrame = status.convert(status.bounds, to: row)
+        let buttonFrame = button.convert(button.bounds, to: row)
+
+        XCTAssertGreaterThan(statusFrame.width, 0, "status collapsed to zero width")
+        XCTAssertGreaterThan(statusFrame.height, 0, "status collapsed to zero height")
+        XCTAssertGreaterThan(buttonFrame.width, 0, "button collapsed to zero width")
+        XCTAssertLessThanOrEqual(statusFrame.maxX, buttonFrame.minX,
+                                 "status must not run under the button")
+        XCTAssertLessThanOrEqual(buttonFrame.maxX, row.frame.width,
+                                 "button pushed outside the row")
+    }
+
+    @objc private func noop() {}
+
     private func allLabels(in view: NSView) -> [NSTextField] {
         view.subviews.flatMap { child -> [NSTextField] in
             let here = (child as? NSTextField).map { [$0] } ?? []

@@ -87,8 +87,8 @@ final class ZmxVTAttachManagerTests: XCTestCase {
             now: { [unowned self] in self.fakeClock },
             leaseTTL: leaseTTL,
             queue: queue)
-        mgr.onNotify = { [unowned self] method, params in
-            self.notifications.append((method, params))
+        mgr.addObserver { [unowned self] event in
+            self.notifications.append((event.kind.legacyMethod, event.legacyNotifyParams))
         }
         return mgr
     }

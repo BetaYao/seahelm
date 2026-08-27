@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>seahelm VT — browser benchmark</title>
+<link rel="stylesheet" href="./xterm.css" />
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 24px; background: #0c0f14; color: #d7dde5;
+         font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #7d8794; margin-bottom: 20px; }
+  pre { background: #141922; border: 1px solid #232b38; border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; white-space: pre; }
+  /* On-screen and in the viewport on purpose. Parked off-canvas at left:-9999px
+     the browser is free to skip painting, which silently turns the render row
+     into a parse-only measurement — and made headless look 10x faster than a
+     real window on the same corpus. */
+  .term-host { width: 900px; max-width: 100%; height: 320px; margin-top: 18px;
+               border: 1px solid #232b38; border-radius: 8px; overflow: hidden; }
+  .running { color: #d9a441; }
+</style>
+</head>
+<body>
+<h1>seahelm VT — browser benchmark</h1>
+<div class="sub">
+  Decode cost per wire format, measured in the browser that actually has to do it.
+  Corpus is real captured PTY output (<code>top</code> repainting), the same fixture
+  the Swift benchmark quotes.
+</div>
+<pre id="results" class="running">running…</pre>
+<div id="termhost" class="term-host"></div>
+
+<script src="./bench-corpus.js"></script>
+<script src="./xterm.js"></script>
+<script src="./xterm-addon-webgl.js"></script>
+<script>
+// ── wire formats ──────────────────────────────────────────────────────────
+// Kept byte-identical to Sources/Core/HostGatewayVTFrame.swift and the legacy
+// JSON notify, so what is timed here is what the socket really delivers.
+const KEY = 'seahelm-workspace-seahelm-2';
+const FRAME_BYTES = 48 * 1024;          // the manager's flush threshold under load
+
+const out = [];
+const say = (s) => { out.push(s); document.getElementById('results').textContent = out.join('\n'); };
+
+function bytesToB64(bytes){
+  let s = '';
+  const CH = 0x8000;                     // chunked: apply() blows the arg limit
+  for (let i = 0; i < bytes.length; i += CH) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(s);
+}
+
+/** The decode the client shipped before binary frames. */
+function b64ToBytes(b64){
+  const s = atob(b64); const a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+
+function b64Size(b64){
+  const n = b64.length;
+  if (!n) return 0;
+  const pad = b64.charCodeAt(n-1) === 61 ? (b64.charCodeAt(n-2) === 61 ? 2 : 1) : 0;
+  return (n / 4) * 3 - pad;
+}
+
+async function inflateRaw(bytes){
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function deflateRaw(bytes){
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function binaryFrame(key, payload, deflated){
+  const keyBytes = new TextEncoder().encode(key);
+  const buf = new Uint8Array(4 + keyBytes.length + payload.length);
+  buf[0] = 1;                            // version
+  buf[1] = deflated ? 1 : 0;             // flags
+  buf[2] = 1;                            // kind: vt.data
+  buf[3] = keyBytes.length;
+  buf.set(keyBytes, 4);
+  buf.set(payload, 4 + keyBytes.length);
+  return buf;
+}
+
+function legacyFrame(key, payload){
+  return JSON.stringify({ type: 'notify', method: 'vt.data',
+                          params: { pane_session_key: key, b64: bytesToB64(payload) } });
+}
+
+// ── timing ────────────────────────────────────────────────────────────────
+// Median of repeated passes, each scaled to clear the clock's resolution.
+//
+// The scaling is not a nicety. Safari coarsens `performance.now()` to about 1ms
+// against timing attacks, and a single 0.4ms decode therefore reads as exactly
+// 1.00 ms — as did decoding *twice*, which reported the double-decode bug as
+// free. Every sub-millisecond number this page produced under Safari was the
+// timer, not the code. So: calibrate, then run enough repetitions per pass that
+// the pass itself is far larger than the quantum, and divide.
+const TARGET_PASS_MS = 30;
+
+async function timed(label, fn){
+  for (let i = 0; i < 3; i++) await fn();              // warm up the JIT
+
+  const probe0 = performance.now();
+  await fn();
+  const probe = performance.now() - probe0;
+  // A probe that lands on 0 is below the clock entirely; assume the worst case
+  // (one quantum) so the repetition count is generous rather than useless.
+  const reps = Math.max(1, Math.ceil(TARGET_PASS_MS / Math.max(probe, 1)));
+
+  const samples = [];
+  for (let i = 0; i < 7; i++) {
+    const t0 = performance.now();
+    for (let r = 0; r < reps; r++) await fn();
+    samples.push((performance.now() - t0) / reps);
+  }
+  samples.sort((a, b) => a - b);
+  return { label, ms: samples[3], reps };
+}
+
+function pad(s, n){ return String(s).padEnd(n, ' '); }
+const fmt = (ms) => ms < 0.001 ? '<0.001 ms' : ms.toFixed(3) + ' ms';
+
+/**
+ * Fixed integer work, timed. Safari reports `cores 8` and no deviceMemory on
+ * every Mac, so the header could not distinguish a fast machine from a slow one
+ * — two runs that differed 1.5x looked identical in their environment lines.
+ * This is engine-sensitive too, but paired with the UA it separates machines.
+ */
+function cpuIndexMs(){
+  const t0 = performance.now();
+  let acc = 0;
+  for (let i = 1; i < 6_000_000; i++) acc = (acc + i * 2654435761) >>> 7;
+  const ms = performance.now() - t0;
+  return acc === -1 ? 0 : ms;      // keep `acc` observable
+}
+
+/** Smallest non-zero gap performance.now() will report. */
+function clockQuantumMs(){
+  let smallest = Infinity;
+  for (let i = 0; i < 20000; i++) {
+    const a = performance.now(), b = performance.now();
+    if (b > a) smallest = Math.min(smallest, b - a);
+  }
+  return smallest === Infinity ? 1 : smallest;
+}
+
+async function main(){
+  if (typeof DecompressionStream !== 'function') {
+    say('DecompressionStream unavailable — this browser cannot run the deflate case.');
+    return;
+  }
+
+  const corpus = await inflateRaw(b64ToBytes(window.BENCH_CORPUS_DEFLATE_B64));
+  const frames = [];
+  for (let i = 0; i < corpus.length; i += FRAME_BYTES) {
+    frames.push(corpus.subarray(i, Math.min(i + FRAME_BYTES, corpus.length)));
+  }
+
+  // Build each wire representation once; the benchmark times *decoding*, which
+  // is the browser's half of the job.
+  const legacyWire = frames.map((f) => legacyFrame(KEY, f));
+  const binaryWire = frames.map((f) => binaryFrame(KEY, f, false));
+  const deflateWire = [];
+  for (const f of frames) deflateWire.push(binaryFrame(KEY, await deflateRaw(f), true));
+
+  const size = (xs, len) => xs.reduce((n, x) => n + (len ? x.length : x.byteLength ?? x.length), 0);
+  const legacyBytes = legacyWire.reduce((n, s) => n + new TextEncoder().encode(s).length, 0);
+  const binaryBytes = size(binaryWire, true);
+  const deflateBytes = size(deflateWire, true);
+
+  // Absolute numbers vary by an order of magnitude across engines — a run
+  // without its environment attached cannot be compared to anything.
+  const nav = navigator;
+  say(`ua            ${nav.userAgent}`);
+  say(`cores         ${nav.hardwareConcurrency || '?'}`
+      + (nav.deviceMemory ? `   memory ${nav.deviceMemory} GB` : ''));
+  say(`clock         ~${clockQuantumMs().toFixed(3)} ms resolution`);
+  say(`cpu index     ${cpuIndexMs().toFixed(0)} ms (lower is a faster machine)`);
+  say(`corpus        ${(corpus.length / 1024).toFixed(1)} KB in ${frames.length} frames of ${FRAME_BYTES / 1024} KB`);
+  say('');
+  say(`${pad('wire format', 26)}${pad('bytes', 12)}${pad('decode', 11)}throughput`);
+  say('─'.repeat(64));
+
+  const results = [];
+
+  // Today: JSON.parse, then atob, then a per-byte loop into a Uint8Array.
+  results.push(await timed('today (JSON+base64)', async () => {
+    for (const wire of legacyWire) {
+      const msg = JSON.parse(wire);
+      b64ToBytes(msg.params.b64);
+    }
+  }));
+
+  // The bug that shipped: log() drops VT frames, but its argument was evaluated
+  // first, so every payload was decoded a second time and discarded.
+  results.push(await timed('  + old double decode', async () => {
+    for (const wire of legacyWire) {
+      const msg = JSON.parse(wire);
+      const _elide = b64ToBytes(msg.params.b64).length;   // the discarded decode
+      b64ToBytes(msg.params.b64);
+    }
+  }));
+
+  // Binary: parse a 4-byte header and hand xterm a view. No copy, no decode.
+  // The accumulator is load-bearing — an unused subarray is optimised away and
+  // the case then measures nothing at all (it reported "Infinity MB/s").
+  let sink = 0;
+  results.push(await timed('binary', async () => {
+    for (const wire of binaryWire) {
+      const keyLen = wire[3];
+      sink += wire.subarray(4 + keyLen).length;
+    }
+  }));
+
+  results.push(await timed('binary + deflate', async () => {
+    for (const wire of deflateWire) {
+      const keyLen = wire[3];
+      sink += (await inflateRaw(wire.subarray(4 + keyLen))).length;
+    }
+  }));
+  if (sink < 0) say('unreachable');   // keep `sink` observable
+
+  const bytesFor = { 'today (JSON+base64)': legacyBytes, '  + old double decode': legacyBytes,
+                     'binary': binaryBytes, 'binary + deflate': deflateBytes };
+  const mb = corpus.length / 1048576;
+  const rate = (ms) => ms < 0.001 ? '>250000 MB/s' : (mb / (ms / 1000)).toFixed(0) + ' MB/s';
+  for (const r of results) {
+    say(`${pad(r.label, 26)}${pad((bytesFor[r.label] / 1024).toFixed(1) + ' KB', 12)}`
+        + `${pad(fmt(r.ms), 11)}${pad(rate(r.ms), 13)}x${r.reps}/pass`);
+  }
+
+  const today = results[0], deflate = results[3];
+
+  // ── the reference the decode column has to be read against ───────────────
+  const TerminalCtor = (window.Terminal && window.Terminal.Terminal) || window.Terminal;
+
+  /// One full corpus through a fresh terminal. `webgl` is attempted, not assumed:
+  /// the addon fails on machines without a GPU context, and an earlier version of
+  /// this page claimed WebGL "is faster" while never loading the addon at all.
+  async function renderPass(useWebgl){
+    const host = document.getElementById('termhost');
+    host.innerHTML = '';
+    const term = new TerminalCtor({ cols: 120, rows: 40, scrollback: 1000, convertEol: false });
+    term.open(host);
+    let renderer = 'dom';
+    if (useWebgl) {
+      try {
+        if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) return null;
+        term.loadAddon(new WebglAddon.WebglAddon());
+        renderer = 'webgl';
+      } catch (e) { return null; }
+    }
+    const t0 = performance.now();
+    await new Promise((resolve) => {
+      let left = frames.length;
+      for (const f of frames) term.write(f, () => { if (--left === 0) resolve(); });
+    });
+    const parseMs = performance.now() - t0;
+    // Two frames: the first schedules the paint, the second cannot run until it
+    // has been composited.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const paintedMs = performance.now() - t0;
+    term.dispose();
+    return { ms: parseMs, paintedMs, renderer };
+  }
+
+  if (TerminalCtor) {
+    const dom = await renderPass(false);
+    const webgl = await renderPass(true);
+    const ms = dom.ms;
+    const rrow = (label, r) => r
+      ? `${pad(label, 26)}${pad('—', 12)}${pad(fmt(r.ms), 11)}${pad(rate(r.ms), 13)}`
+        + `painted ${fmt(r.paintedMs)}`
+      : `${pad(label, 26)}${pad('—', 12)}unavailable (no GPU context)`;
+    say(rrow('xterm.write (dom)', dom));
+    say(rrow('xterm.write (webgl)', webgl));
+    say('');
+    say(`bytes saved, binary+deflate vs today   ${((1 - deflateBytes / legacyBytes) * 100).toFixed(1)}%`);
+    say(`double-decode fix alone                ${(results[1].ms / today.ms).toFixed(2)}x of the old decode cost`);
+    say('');
+    const best = webgl ? Math.min(dom.ms, webgl.ms) : dom.ms;
+    const slowest = Math.max(today.ms, deflate.ms), fastest = Math.min(today.ms, deflate.ms);
+    say(`Read the decode column against the xterm.write rows: the wire formats`);
+    say(`decode ${(best / Math.max(slowest, 0.01)).toFixed(0)}-${(best / Math.max(fastest, 0.01)).toFixed(0)}x faster than xterm can parse the result, so the`);
+    say(`terminal emulator — not the wire format — is the browser bottleneck.`);
+    say('');
+    say(`Deflate costs a little more decode CPU than base64 on every engine`);
+    say(`measured so far (Chrome, Safari) — it is chosen for the`);
+    say(`${((1 - deflateBytes / legacyBytes) * 100).toFixed(0)}% bandwidth saving, not for CPU. Both are far below the`);
+    say(`xterm cost above, so neither decode is what you feel.`);
+  }
+
+  await scrollbackSweep();
+
+  document.getElementById('results').classList.remove('running');
+  window.BENCH_DONE = true;
+  report();
+}
+
+// Headless runners have no way to know the async work finished, so the page says
+// so itself. `?report=<url>` aims that at a collector on another origin, which is
+// what lets this be driven from a phone on the far side of the tunnel; with no
+// parameter it posts same-origin and a 404 is harmless.
+function report(){
+  const target = new URLSearchParams(location.search).get('report') || '/__bench_result';
+  try {
+    fetch(target, { method: 'POST', mode: 'cors', body: out.join('\n') }).catch(() => {});
+  } catch (e) { /* file:// — the on-page table is the output */ }
+}
+
+// ── scrollback ────────────────────────────────────────────────────────────
+// The `top` corpus repaints in place and never fills the scrollback, so it
+// cannot answer what scrollback costs. This pushes lines that actually scroll,
+// and measures the two things depth could plausibly charge for: writing, and
+// the reflow a resize forces — which in xterm walks the whole buffer.
+function scrollingCorpus(lines){
+  const parts = [];
+  for (let i = 0; i < lines; i++) {
+    // Deliberately wider than the resize target below (120 -> 96): reflow only
+    // does work on lines that have to re-wrap, and a first attempt at this used
+    // 62-char lines, so the reflow column measured nothing and read as flat.
+    const sev = i % 17 === 0 ? '\x1b[31mERROR\x1b[0m' : '\x1b[32m ok  \x1b[0m';
+    parts.push(`${sev} \x1b[90m[${String(i).padStart(6, '0')}]\x1b[0m `
+      + `compiled module src/feature/${i % 97}/components/Detail/index.ts `
+      + `in ${(i % 400) + 12}ms (${(i % 30) + 3} deps, cache ${i % 2 ? 'hit' : 'miss'})\r\n`);
+  }
+  return new TextEncoder().encode(parts.join(''));
+}
+
+async function scrollbackSweep(){
+  const TerminalCtor = (window.Terminal && window.Terminal.Terminal) || window.Terminal;
+  if (!TerminalCtor) return;
+  const LINES = 12000;                       // well past every depth tested
+  const RESIZE_COLS = 96;                    // narrower than the lines, so reflow works
+  const corpus = scrollingCorpus(LINES);
+  const host = document.getElementById('termhost');
+  const heap = () => (performance.memory && performance.memory.usedJSHeapSize) || 0;
+
+  say('');
+  const sampleWidth = Math.round(corpus.length / LINES);
+  say(`scrollback sweep — ${LINES} scrolling lines (${(corpus.length / 1024).toFixed(0)} KB, `
+      + `~${sampleWidth} cols, reflowed 120→${RESIZE_COLS})`);
+  say(`${pad('scrollback', 14)}${pad('write', 13)}${pad('painted', 13)}${pad('reflow', 13)}heap`);
+  say('─'.repeat(64));
+
+  for (const scrollback of [0, 1000, 5000, 20000]) {
+    host.innerHTML = '';
+    if (window.gc) window.gc();
+    const before = heap();
+    const term = new TerminalCtor({ cols: 120, rows: 40, scrollback, convertEol: false });
+    term.open(host);
+
+    const t0 = performance.now();
+    await new Promise((r) => term.write(corpus, r));
+    const write = performance.now() - t0;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const painted = performance.now() - t0;
+
+    // Resize is where depth is supposed to hurt: xterm reflows the buffer it
+    // kept, so the cost should scale with how much it kept.
+    const t1 = performance.now();
+    term.resize(RESIZE_COLS, 40);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const reflow = performance.now() - t1;
+
+    const used = heap() - before;
+    term.dispose();
+    say(`${pad(scrollback, 14)}${pad(fmt(write), 13)}${pad(fmt(painted), 13)}${pad(fmt(reflow), 13)}`
+        + (used > 0 ? `${(used / 1048576).toFixed(1)} MB` : 'n/a'));
+  }
+  say('(heap needs Chrome performance.memory; n/a elsewhere)');
+}
+
+main().catch((e) => {
+  say('FAILED: ' + (e && e.stack || e));
+  window.BENCH_DONE = true;
+  report();
+});
+</script>
+</body>
+</html>

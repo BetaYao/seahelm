@@ -104,7 +104,11 @@ final class DefaultVTProcessSpawner: VTProcessSpawning {
 // MARK: - Manager
 
 final class ZmxVTAttachManager: HostGatewayVTAttaching {
-    var onNotify: ((String, [String: Any]) -> Void)?
+    /// Observers, not one closure. A single slot meant every new browser session
+    /// overwrote the previous one's callback on this shared manager, so opening a
+    /// second tab silently killed the first tab's terminal.
+    private var observers: [Int: (VTEvent) -> Void] = [:]
+    private var nextObserverToken = 1
 
     private enum Phase {
         case snapshot
@@ -116,12 +120,17 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         let cols: Int
         let rows: Int
         var phase: Phase
-        var buffer: [Data] = []
-        var bufferLen: Int = 0
+        /// One growing `Data`, not an array of chunks. The array had to be
+        /// concatenated on every flush, allocating and copying the whole buffer
+        /// again each time; appending in place reuses the capacity.
+        var buffer = Data()
         var flushWorkItem: DispatchWorkItem?
         var snapshotIdleWorkItem: DispatchWorkItem?
         var snapshotCapWorkItem: DispatchWorkItem?
         var lastSeen: Date
+        /// When this stream last emitted, so an idle pane can answer immediately
+        /// instead of serving out a coalescing window nothing is filling.
+        var lastFlush: Date
     }
 
     private let processSpawner: VTProcessSpawning
@@ -181,6 +190,20 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             return body()
         }
         return queue.sync(execute: body)
+    }
+
+    @discardableResult
+    func addObserver(_ observer: @escaping (VTEvent) -> Void) -> Int {
+        syncOnQueue {
+            let token = nextObserverToken
+            nextObserverToken += 1
+            observers[token] = observer
+            return token
+        }
+    }
+
+    func removeObserver(_ token: Int) {
+        syncOnQueue { _ = observers.removeValue(forKey: token) }
     }
 
     func open(paneSessionKey: String) -> [String: Any] {
@@ -300,7 +323,8 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             cols: geometry.cols,
             rows: geometry.rows,
             phase: .snapshot,
-            lastSeen: now())
+            lastSeen: now(),
+            lastFlush: now())
         streams[paneSessionKey] = st
         wireProcess(key: paneSessionKey, proc: proc)
         scheduleSnapshotClose(key: paneSessionKey)
@@ -331,7 +355,6 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     private func handleStdout(key: String, chunk: Data) {
         guard var st = streams[key] else { return }
         st.buffer.append(chunk)
-        st.bufferLen += chunk.count
 
         switch st.phase {
         case .snapshot:
@@ -339,7 +362,21 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             scheduleSnapshotClose(key: key)
         case .live:
             streams[key] = st
-            if st.bufferLen >= ZmxVTTiming.maxChunkBytes {
+            // Coalescing used to be unconditional, so a one-byte keystroke echo
+            // sat out the full window exactly like a build log did — measured as
+            // ~16ms of the 17.9ms round trip on loopback, where there is no
+            // network to blame. Send immediately when the stream has been quiet,
+            // and only batch once it is actually streaming: bursts still cost at
+            // most one frame per window.
+            // Clamped, because `now` is a wall clock — the same source the lease
+            // reaper uses, and injectable for tests. A backward step (sleep/wake
+            // correction, `settimeofday`, a VM host resync) made this negative,
+            // which put the coalescing deadline `flushInterval - sinceLastFlush`
+            // an hour out; every later chunk then found `flushWorkItem` already
+            // set and did nothing, so the pane emitted nothing at all until it
+            // hit the 48KB cap. An interactive shell just froze.
+            let sinceLastFlush = max(0, now().timeIntervalSince(st.lastFlush))
+            if st.buffer.count >= ZmxVTTiming.maxChunkBytes || sinceLastFlush >= flushInterval {
                 flushLive(key: key)
             } else if st.flushWorkItem == nil {
                 let work = DispatchWorkItem { [weak self] in
@@ -347,7 +384,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
                 }
                 st.flushWorkItem = work
                 streams[key] = st
-                queue.asyncAfter(deadline: .now() + flushInterval, execute: work)
+                queue.asyncAfter(deadline: .now() + (flushInterval - sinceLastFlush), execute: work)
             }
         }
     }
@@ -378,33 +415,32 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         st.snapshotCapWorkItem = nil
         st.phase = .live
 
-        let chunk = st.bufferLen > 0 ? Data(st.buffer.reduce(into: Data()) { $0.append($1) }) : Data()
-        st.buffer = []
-        st.bufferLen = 0
+        let chunk = st.buffer
+        st.buffer = Data()
+        st.lastFlush = now()
         streams[key] = st
 
-        emitNotify(method: "vt.snapshot", key: key, chunk: chunk, cols: st.cols, rows: st.rows)
+        emit(VTEvent(kind: .snapshot, paneSessionKey: key, payload: chunk,
+                     cols: st.cols, rows: st.rows))
     }
 
     private func flushLive(key: String) {
-        guard var st = streams[key], st.phase == .live, st.bufferLen > 0 else { return }
+        guard var st = streams[key], st.phase == .live, !st.buffer.isEmpty else { return }
         st.flushWorkItem?.cancel()
         st.flushWorkItem = nil
-        let chunk = st.buffer.reduce(into: Data()) { $0.append($1) }
-        st.buffer = []
-        st.bufferLen = 0
+        let chunk = st.buffer
+        st.buffer = Data()
+        st.lastFlush = now()
         streams[key] = st
-        emitNotify(method: "vt.data", key: key, chunk: chunk, cols: nil, rows: nil)
+        emit(VTEvent(kind: .data, paneSessionKey: key, payload: chunk))
     }
 
-    private func emitNotify(method: String, key: String, chunk: Data, cols: Int?, rows: Int?) {
-        var params: [String: Any] = [
-            "pane_session_key": key,
-            "b64": chunk.base64EncodedString(),
-        ]
-        if let cols { params["cols"] = cols }
-        if let rows { params["rows"] = rows }
-        onNotify?(method, params)
+    /// Raw bytes to every watcher. Encoding belongs to the gateway, which is the
+    /// only layer that knows what a given client negotiated.
+    private func emit(_ event: VTEvent) {
+        for observer in observers.values {
+            observer(event)
+        }
     }
 
     private func tearDown(key: String, reason: String) {
