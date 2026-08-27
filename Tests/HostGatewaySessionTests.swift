@@ -204,6 +204,7 @@ final class HostGatewaySessionTests: XCTestCase {
     func testVtNotifyQueued() {
         let (s, _, vt) = session()
         _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
         vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("a".utf8)))
         let notes = s.drainNotifications()
         XCTAssertEqual(notes.count, 1)
@@ -224,6 +225,7 @@ final class HostGatewaySessionTests: XCTestCase {
             let s = HostGatewaySession(router: ControlRouter(dataSource: ds),
                                        expectedMacId: macId, rootSecretBase64url: b64, vt: vt)
             _ = s.handle(text: authFrame())
+            _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
             return s
         }
         let first = make()
@@ -239,6 +241,7 @@ final class HostGatewaySessionTests: XCTestCase {
     func testBinaryVTOnlyWhenNegotiated() {
         let (s, _, vt) = session()
         _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
         vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data(repeating: 0x41, count: 8)))
         guard case .text = s.drainNotifications()[0] else {
             return XCTFail("un-negotiated client must keep the JSON frame")
@@ -248,6 +251,7 @@ final class HostGatewaySessionTests: XCTestCase {
         let authBinary = #"{"id":"a","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token())","vt_binary":true}}"#
         let reply = decodeResponse(b.handle(text: authBinary)[0])
         XCTAssertEqual((reply["result"] as? [String: Any])?["vt_binary"] as? Bool, true)
+        _ = b.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
         bvt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data(repeating: 0x41, count: 8)))
         guard case .binary(let data) = b.drainNotifications()[0] else {
             return XCTFail("negotiated client should get a binary frame")
@@ -258,6 +262,11 @@ final class HostGatewaySessionTests: XCTestCase {
     }
 
     /// A closed connection must stop costing the manager encode work.
+    ///
+    /// Wired the way `HostGatewayServer.accept` wires it — with a pending-outbound
+    /// handler installed — because that is where the leak lived: the previous
+    /// version of this test left the handler nil, so it passed against a session
+    /// that retained itself and never unsubscribed in production.
     func testClosingASessionUnsubscribesIt() {
         let vt = FakeVT()
         autoreleasepool {
@@ -265,9 +274,68 @@ final class HostGatewaySessionTests: XCTestCase {
                                        expectedMacId: macId,
                                        rootSecretBase64url: MqttCrypto.base64url(root),
                                        vt: vt)
+            s.setPendingOutboundHandler { session in _ = session.drainNotifications() }
             _ = s.handle(text: authFrame())
             XCTAssertEqual(vt.observerCount, 1)
         }
         XCTAssertEqual(vt.observerCount, 0, "a dropped session left its observer behind")
+    }
+
+    /// The server calls this when the socket dies, rather than waiting for the
+    /// last reference to fall out of Network.framework's handler graph.
+    func testCloseUnsubscribesWhileStillReferenced() {
+        let (s, _, vt) = session()
+        _ = s.handle(text: authFrame())
+        XCTAssertEqual(vt.observerCount, 1)
+        s.close()
+        XCTAssertEqual(vt.observerCount, 0)
+        _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("a".utf8)))
+        XCTAssertTrue(s.drainNotifications().isEmpty, "a closed session still queued a frame")
+    }
+
+    /// The observer is live from `init`, so without an auth gate anything that
+    /// completes the WebSocket upgrade reads every pane's screen for free.
+    func testNoVTBeforeAuth() {
+        let (s, _, vt) = session()
+        vt.emit(VTEvent(kind: .snapshot, paneSessionKey: "k1", payload: Data("secret".utf8),
+                        cols: 80, rows: 24))
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("secret".utf8)))
+        XCTAssertTrue(s.drainNotifications().isEmpty,
+                      "an unauthenticated client was queued terminal output")
+    }
+
+    /// The manager broadcasts every pane to every observer, so the session is
+    /// what has to filter: one browser must not receive another browser's pane.
+    func testVTOnlyReachesSessionsThatOpenedThePane() {
+        let ds = SessionFakeDataSource()
+        let vt = FakeVT()
+        let b64 = MqttCrypto.base64url(root)
+        func make(open key: String) -> HostGatewaySession {
+            let s = HostGatewaySession(router: ControlRouter(dataSource: ds),
+                                       expectedMacId: macId, rootSecretBase64url: b64, vt: vt)
+            _ = s.handle(text: authFrame())
+            _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"\#(key)"}}"#)
+            return s
+        }
+        let watchingX = make(open: "x")
+        let watchingY = make(open: "y")
+
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "x", payload: Data("x-output".utf8)))
+
+        XCTAssertEqual(watchingX.drainNotifications().count, 1)
+        XCTAssertTrue(watchingY.drainNotifications().isEmpty,
+                      "a session was sent a pane it never opened")
+    }
+
+    /// Closing the pane stops the stream for this client too — otherwise a
+    /// `vt_close` would leave frames queueing against a terminal it disposed.
+    func testVTStopsAfterPaneClose() {
+        let (s, _, vt) = session()
+        _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
+        _ = s.handle(text: #"{"id":"c","method":"pane.vt_close","params":{"pane_session_key":"k1"}}"#)
+        vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("a".utf8)))
+        XCTAssertTrue(s.drainNotifications().isEmpty)
     }
 }

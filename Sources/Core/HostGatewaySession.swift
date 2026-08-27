@@ -20,20 +20,43 @@ final class HostGatewaySession {
     private let vt: HostGatewayVTAttaching
     /// Shared with the server, which feeds it EventHub and fans out the results.
     private let decisions: HostGatewayDecisions
+
+    /// A queued outbound frame.
+    ///
+    /// VT events are queued as events and encoded at drain time. `emit` runs on
+    /// the VT manager's serial queue — the same one that has to drain the PTY —
+    /// so deflating a 48KB chunk there stalls reading for every pane, and does it
+    /// once per connected browser. Decisions are already text, so they queue
+    /// encoded.
+    ///
+    /// The trade is that a queued VT frame is held uncompressed, so a client that
+    /// stalls holds more memory than it used to. That is bounded: the manager
+    /// coalesces to one frame per pane per flush window, capped at 48KB, only
+    /// panes this client opened are queued at all, and every enqueue wakes a
+    /// drain.
+    private enum Pending {
+        case ready(HostGatewayWireFrame)
+        case vt(VTEvent)
+    }
+
+    /// One lock for all mutable state, because the state is read across two
+    /// queues that take turns on it: the gateway's (auth, requests, drain) and
+    /// the VT manager's (the observer). The array alone was locked before, and
+    /// the negotiation flags next to it were not — a frame emitted during auth
+    /// could be encoded against a half-published negotiation, and one emitted
+    /// before the server installed its handler was queued with nothing to wake
+    /// it up. Nothing may call into `vt` or `router` while holding it: those
+    /// hop to the VT queue, which is where the observer takes this same lock.
+    private let lock = NSLock()
     private var authenticated = false
     private var openVTKeys: Set<String> = []
-    /// Appended from the VT manager's queue and drained from the gateway's, so
-    /// the lock is load-bearing: two serial queues taking turns on one Swift
-    /// Array is still a data race, and it showed up as dropped frames under load.
-    private let pendingLock = NSLock()
-    private var pendingNotifications: [HostGatewayWireFrame] = []
+    private var pending: [Pending] = []
     private var vtObserverToken: Int?
     /// Negotiated at auth. Absent means a client from before binary VT, which
     /// still gets base64 inside a JSON notify.
     private var vtBinary = false
     private var vtDeflate = false
-    /// Called after a notify is queued (e.g. server drains and sends on the connection).
-    var onPendingOutbound: (() -> Void)?
+    private var pendingOutbound: ((HostGatewaySession) -> Void)?
 
     init(router: ControlRouter,
          expectedMacId: String,
@@ -46,37 +69,85 @@ final class HostGatewaySession {
         self.vt = vt
         self.decisions = decisions
         vtObserverToken = vt.addObserver { [weak self] event in
-            guard let self else { return }
-            self.enqueue(self.encodeVT(event))
+            self?.enqueueVT(event)
         }
     }
 
-    /// The observer keeps the manager alive and the manager keeps a reference
-    /// back, so a closed connection that never unsubscribed would keep encoding
-    /// frames for a socket nobody is reading.
+    /// Stop costing the shared manager encode work for a socket nobody reads.
+    ///
+    /// Called by the server when the connection goes away, so teardown does not
+    /// wait on the last reference being dropped somewhere in Network.framework's
+    /// handler graph. Idempotent; `deinit` repeats it for any path that simply
+    /// releases the session.
+    func close() {
+        lock.lock()
+        let token = vtObserverToken
+        vtObserverToken = nil
+        pendingOutbound = nil
+        pending.removeAll()
+        lock.unlock()
+        if let token { vt.removeObserver(token) }
+    }
+
     deinit {
         if let vtObserverToken { vt.removeObserver(vtObserverToken) }
     }
 
+    /// Where a queued notify gets flushed to the socket.
+    ///
+    /// The handler receives the session instead of capturing it. That is the
+    /// whole point of the shape: the natural spelling at the call site captured
+    /// `session` strongly, which made every session retain its own callback, so
+    /// `deinit` never ran and a closed browser tab left its VT observer
+    /// registered on the shared manager — encoding and deflating every pane's
+    /// output forever, and holding the manager alive past the point where the
+    /// app tried to tear it down.
+    func setPendingOutboundHandler(_ handler: @escaping (HostGatewaySession) -> Void) {
+        lock.lock()
+        pendingOutbound = handler
+        lock.unlock()
+    }
+
     /// Chooses the wire shape this client negotiated.
-    private func encodeVT(_ event: VTEvent) -> HostGatewayWireFrame {
-        if vtBinary, let frame = HostGatewayVTFrame.encode(event, allowDeflate: vtDeflate) {
+    private func encodeVT(_ event: VTEvent, binary: Bool, deflate: Bool) -> HostGatewayWireFrame {
+        if binary, let frame = HostGatewayVTFrame.encode(event, allowDeflate: deflate) {
             return .binary(frame)
         }
         return .text(HostGatewayFrame.encode(
             .notify(method: event.kind.legacyMethod, params: event.legacyNotifyParams)))
     }
 
+    /// VT manager's queue → this session's outbound queue.
+    ///
+    /// Two gates, both load-bearing. `authenticated`: the observer is live from
+    /// `init`, so without it anything that completes the WebSocket upgrade reads
+    /// every pane's screen — including whatever an agent has on it — without ever
+    /// presenting a token. `openVTKeys`: the manager broadcasts every pane to
+    /// every observer, so without it one browser receives the contents of panes
+    /// another browser opened, separately encoded for each of them.
+    private func enqueueVT(_ event: VTEvent) {
+        lock.lock()
+        let wanted = authenticated && openVTKeys.contains(event.paneSessionKey)
+        if wanted { pending.append(.vt(event)) }
+        let notify = wanted ? pendingOutbound : nil
+        lock.unlock()
+        notify?(self)
+    }
+
     private func enqueue(_ frame: HostGatewayWireFrame) {
-        pendingLock.lock()
-        pendingNotifications.append(frame)
-        pendingLock.unlock()
-        onPendingOutbound?()
+        lock.lock()
+        pending.append(.ready(frame))
+        let notify = pendingOutbound
+        lock.unlock()
+        notify?(self)
     }
 
     /// Server → session: an event that opened or closed a decision.
     func pushDecision(_ change: HostGatewayDecisions.Change) {
-        guard authenticated else { return }
+        lock.lock()
+        let ready = authenticated
+        lock.unlock()
+        guard ready else { return }
         switch change {
         case .opened(let d):
             enqueue(.text(HostGatewayFrame.encode(
@@ -98,10 +169,20 @@ final class HostGatewaySession {
     }
 
     func drainNotifications() -> [HostGatewayWireFrame] {
-        pendingLock.lock(); defer { pendingLock.unlock() }
-        let out = pendingNotifications
-        pendingNotifications.removeAll()
-        return out
+        lock.lock()
+        let queued = pending
+        pending.removeAll()
+        let binary = vtBinary
+        let deflate = vtDeflate
+        lock.unlock()
+        // Encoding happens here — on the gateway's queue, outside the lock, and
+        // off the queue that reads the PTY.
+        return queued.map { item in
+            switch item {
+            case .ready(let frame): return frame
+            case .vt(let event): return encodeVT(event, binary: binary, deflate: deflate)
+            }
+        }
     }
 
     func handle(text: String) -> [HostGatewayWireFrame] {
@@ -109,7 +190,10 @@ final class HostGatewaySession {
         case .malformed:
             return [.text(encodeError(id: "", code: ControlError.parse, message: "parse error"))]
         case .request(let id, let method, let params):
-            if !authenticated {
+            lock.lock()
+            let ready = authenticated
+            lock.unlock()
+            if !ready {
                 guard method == "auth" else {
                     return [.text(encodeError(id: id, code: -32001, message: "unauthorized"))]
                 }
@@ -125,16 +209,20 @@ final class HostGatewaySession {
         let ok = HostGatewayAuth.verify(
             macId: macId, token: token,
             expectedMacId: expectedMacId, rootSecretBase64url: rootSecretBase64url)
+        // Opt-in, so a cached page from before the binary frame keeps working
+        // against a new Mac rather than rendering nothing.
+        let binary = ok && (params["vt_binary"] as? Bool ?? false)
+        let deflate = binary && (params["vt_deflate"] as? Bool ?? false)
         if ok {
+            lock.lock()
             authenticated = true
-            // Opt-in, so a cached page from before the binary frame keeps working
-            // against a new Mac rather than rendering nothing.
-            vtBinary = params["vt_binary"] as? Bool ?? false
-            vtDeflate = vtBinary && (params["vt_deflate"] as? Bool ?? false)
+            vtBinary = binary
+            vtDeflate = deflate
+            lock.unlock()
         }
         var out = [HostGatewayFrame.encode(.response(
             id: id,
-            result: ["ok": ok, "vt_binary": vtBinary, "vt_deflate": vtDeflate],
+            result: ["ok": ok, "vt_binary": binary, "vt_deflate": deflate],
             error: nil))]
         if ok {
             // Replay what is already open. Without this a client that connects a
@@ -151,16 +239,33 @@ final class HostGatewaySession {
         switch method {
         case "pane.vt_open":
             let key = paneSessionKey(from: params)
+            // Registered before the open, and withdrawn if it failed. The other
+            // order leaves a window: the manager starts producing for this pane
+            // the moment the attach spawns, and a key inserted after `vt.open`
+            // returns would drop whatever landed in between — including, on a
+            // slow spawn, the opening snapshot.
+            //
+            // `vt.open` itself is called outside the lock on purpose: it hops to
+            // the VT manager's queue, which is where the observer takes this
+            // same lock.
+            lock.lock()
+            openVTKeys.insert(key)
+            lock.unlock()
             let result = vt.open(paneSessionKey: key)
-            // Only route send_keys to VT when open actually succeeded.
-            if (result["ok"] as? Bool) != false {
-                openVTKeys.insert(key)
+            // Only route send_keys to VT — and only accept its frames — when open
+            // actually succeeded.
+            if (result["ok"] as? Bool) == false {
+                lock.lock()
+                openVTKeys.remove(key)
+                lock.unlock()
             }
             return HostGatewayFrame.encode(.response(id: id, result: result, error: nil))
         case "pane.vt_close":
             let key = paneSessionKey(from: params)
             vt.close(paneSessionKey: key)
+            lock.lock()
             openVTKeys.remove(key)
+            lock.unlock()
             return HostGatewayFrame.encode(.response(id: id, result: ["ok": true], error: nil))
         case "pane.vt_keepalive":
             let key = paneSessionKey(from: params)
@@ -206,7 +311,7 @@ final class HostGatewaySession {
             _ = router.handle(method: "decision.dismiss", params: ["pane_id": dKey])
             return HostGatewayFrame.encode(.response(id: id, result: ["dismissed": true], error: nil))
         case "pane.send_keys":
-            if let key = vtKey(from: params), openVTKeys.contains(key),
+            if let key = vtKey(from: params), isVTOpen(key),
                let utf8 = utf8Payload(from: params) {
                 let sent = vt.sendKeys(paneSessionKey: key, utf8: utf8)
                 return HostGatewayFrame.encode(.response(id: id, result: ["sent": sent], error: nil))
@@ -215,6 +320,12 @@ final class HostGatewaySession {
         default:
             return encodeControlResult(id: id, result: router.handle(method: method, params: params))
         }
+    }
+
+    private func isVTOpen(_ key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return openVTKeys.contains(key)
     }
 
     private func paneSessionKey(from params: [String: Any]) -> String {

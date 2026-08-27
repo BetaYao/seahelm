@@ -368,7 +368,14 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             // network to blame. Send immediately when the stream has been quiet,
             // and only batch once it is actually streaming: bursts still cost at
             // most one frame per window.
-            let sinceLastFlush = now().timeIntervalSince(st.lastFlush)
+            // Clamped, because `now` is a wall clock — the same source the lease
+            // reaper uses, and injectable for tests. A backward step (sleep/wake
+            // correction, `settimeofday`, a VM host resync) made this negative,
+            // which put the coalescing deadline `flushInterval - sinceLastFlush`
+            // an hour out; every later chunk then found `flushWorkItem` already
+            // set and did nothing, so the pane emitted nothing at all until it
+            // hit the 48KB cap. An interactive shell just froze.
+            let sinceLastFlush = max(0, now().timeIntervalSince(st.lastFlush))
             if st.buffer.count >= ZmxVTTiming.maxChunkBytes || sinceLastFlush >= flushInterval {
                 flushLive(key: key)
             } else if st.flushWorkItem == nil {

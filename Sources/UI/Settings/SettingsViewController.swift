@@ -469,6 +469,14 @@ class SettingsViewController: NSViewController {
             return [gatewayGroup]
         }
         pairingMqtt = context.mqtt
+        // Fold the minted config back into this snapshot. `settingsPairingContext`
+        // creates `mqtt` and its `rootSecret` on the *owner's* config and saves
+        // it, so from here on this view controller's copy is a version behind —
+        // and `applyChanges()` writes this copy out wholesale. Without this line,
+        // touching any Host Gateway control right after the QR appeared erased
+        // the secret it encodes, from disk and from memory, and restarted the
+        // listener with an empty one.
+        config.mqtt = context.mqtt
 
         let pane = PairingPaneView(rootSecret: context.secret,
                                    brokerURL: HostGatewayPairing.clientEntryURL(

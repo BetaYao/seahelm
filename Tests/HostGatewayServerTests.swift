@@ -185,6 +185,10 @@ final class HostGatewayServerTests: XCTestCase {
         XCTAssertEqual(result["vt_binary"] as? Bool, true)
         XCTAssertEqual(result["vt_deflate"] as? Bool, true)
 
+        // A session only forwards panes this client opened, so ask for it first.
+        sendText(#"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#, on: task)
+        _ = receiveText(from: task)
+
         // Big enough to cross the compression threshold, repetitive enough to
         // actually shrink — the shape a repainting agent produces.
         let payload = Data(repeating: 0x41, count: 4096)
@@ -229,6 +233,9 @@ final class HostGatewayServerTests: XCTestCase {
         sendText(
             #"{"id":"auth2","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token)"}}"#,
             on: task)
+        _ = receiveText(from: task)
+
+        sendText(#"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#, on: task)
         _ = receiveText(from: task)
 
         vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: Data("a".utf8)))

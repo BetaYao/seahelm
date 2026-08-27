@@ -105,6 +105,7 @@ final class HostGatewayServer {
     func stop() {
         queue.sync {
             for state in connections.values {
+                state.session.close()
                 state.connection.cancel()
             }
             connections.removeAll()
@@ -383,7 +384,10 @@ final class HostGatewayServer {
         let state = ConnectionState(connection: connection, session: session)
         connections[key] = state
 
-        session.onPendingOutbound = { [weak self, weak connection] in
+        // The session is handed back as an argument rather than captured: a
+        // closure that captured it made the session retain itself, so `deinit`
+        // never ran and a closed tab kept its VT observer on the shared manager.
+        session.setPendingOutboundHandler { [weak self, weak connection] session in
             guard let self, let connection else { return }
             self.queue.async {
                 self.sendPendingNotifications(for: connection, session: session)
@@ -396,7 +400,11 @@ final class HostGatewayServer {
             case .ready:
                 self.receive(on: connection, session: session)
             case .failed, .cancelled:
-                self.connections.removeValue(forKey: key)
+                // Unsubscribe here rather than leaving it to ARC: the session is
+                // still referenced by Network.framework's own handler graph at
+                // this point, and until it unsubscribes it keeps queueing frames
+                // for a socket that is gone.
+                self.connections.removeValue(forKey: key)?.session.close()
             default:
                 break
             }

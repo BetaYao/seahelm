@@ -220,6 +220,7 @@
 		859DBEFE2BAE0BA0C975FD3E /* TaskProgressParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EE31EC02520149C8E193C0 /* TaskProgressParser.swift */; };
 		862DDEDAF094D4C2523B632F /* ClaudeHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEFC2B75DCC01AF5F766AF1B /* ClaudeHooksSetupTests.swift */; };
 		8650FD8E9CFABA790A4BEAB4 /* ZmxVTAttachManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4914856A712CFC9ADFAB82E9 /* ZmxVTAttachManagerTests.swift */; };
+		868325DCA0D71C5CF997E11E /* HostGatewayVTFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16AC3A2325B391B90BFD6175 /* HostGatewayVTFrameTests.swift */; };
 		86EB2D1A015733623B873AA9 /* WorktreeGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */; };
 		88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19639EE57241F8A021EBD2 /* PaneStatus.swift */; };
 		88CCF79393F2D978227B95E9 /* HostGatewayPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA61698D1160080DD9E900B /* HostGatewayPairing.swift */; };
@@ -486,6 +487,7 @@
 		148C3573E73EB0680BE0D550 /* HostGatewayPairingURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayPairingURLTests.swift; sourceTree = "<group>"; };
 		14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
 		159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestGuidanceWriter.swift; sourceTree = "<group>"; };
+		16AC3A2325B391B90BFD6175 /* HostGatewayVTFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayVTFrameTests.swift; sourceTree = "<group>"; };
 		16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuthTests.swift; sourceTree = "<group>"; };
 		16F923AC4CC69AE72ABE17C5 /* ProcessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessProbe.swift; sourceTree = "<group>"; };
 		176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarViewTests.swift; sourceTree = "<group>"; };
@@ -1362,6 +1364,7 @@
 				A7F8EA0DFCBD7F74049EA635 /* HostGatewayServerTests.swift */,
 				1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */,
 				BB735C1E5E1238DE2F51758B /* HostGatewayStaticFilesTests.swift */,
+				16AC3A2325B391B90BFD6175 /* HostGatewayVTFrameTests.swift */,
 				EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */,
 				7CFF2129E5D3A2E51C49F22C /* IdeaStoreTests.swift */,
 				5D16F46555938EC971913798 /* IMessageBridgeTests.swift */,
@@ -1898,6 +1901,7 @@
 				9684C23FB2CD701D95E47EDA /* HostGatewayServerTests.swift in Sources */,
 				71206C48591B67FF56E51E8E /* HostGatewaySessionTests.swift in Sources */,
 				72897701FB2E01A0DA5305D1 /* HostGatewayStaticFilesTests.swift in Sources */,
+				868325DCA0D71C5CF997E11E /* HostGatewayVTFrameTests.swift in Sources */,
 				71610612223CEDEA13DC6166 /* IMessageBridgeTests.swift in Sources */,
 				3D08E49AA0DFCF40D705CD5C /* IMessageRuleCoalescerTests.swift in Sources */,
 				DA8BCC5B96E62682BEBA2925 /* IMessageRuleTargetTests.swift in Sources */,

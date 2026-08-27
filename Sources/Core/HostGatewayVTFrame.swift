@@ -109,8 +109,23 @@ enum HostGatewayVTFrame {
     /// wrapper, which is precisely what the browser's
     /// `DecompressionStream('deflate-raw')` expects.
     static func deflate(_ input: Data) -> Data? {
-        guard !input.isEmpty else { return nil }
-        var output = Data(count: input.count + 64)
+        guard input.count > 1 else { return nil }
+        // Sized one byte UNDER the input, not over it.
+        //
+        // A frame is only sent compressed when compressing made it smaller, so
+        // "did not fit" and "was not worth sending" are the same answer, and
+        // this buffer gives it directly — `compression_encode_buffer` reports a
+        // too-small destination as 0 written.
+        //
+        // Sizing it above the input instead — the obvious reading of "leave room
+        // for the worst case", which the previous `+ 64` was a broken attempt at
+        // — buys nothing. Measured on this framework: COMPRESSION_ZLIB expands
+        // incompressible input by ~5 bytes per 16KB stored block (+460 bytes on
+        // 1.5MB), so a generous buffer would succeed and the caller would throw
+        // the result away for being bigger than what it started with. The old
+        // constant only ever mattered for incompressible payloads above ~800KB,
+        // and those went out raw either way.
+        var output = Data(count: input.count - 1)
         let written = output.withUnsafeMutableBytes { dst -> Int in
             input.withUnsafeBytes { src -> Int in
                 guard let dstBase = dst.bindMemory(to: UInt8.self).baseAddress,
