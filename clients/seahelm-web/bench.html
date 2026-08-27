@@ -32,12 +32,14 @@
 <div id="termhost" class="term-host"></div>
 
 <script src="./bench-corpus.js"></script>
+<script src="./vt-frame.js"></script>
 <script src="./xterm.js"></script>
 <script src="./xterm-addon-webgl.js"></script>
 <script>
 // ── wire formats ──────────────────────────────────────────────────────────
-// Kept byte-identical to Sources/Core/HostGatewayVTFrame.swift and the legacy
-// JSON notify, so what is timed here is what the socket really delivers.
+// The binary frame comes from vt-frame.js, the same module index.html uses, so
+// this page cannot end up timing a format the socket no longer speaks. Only the
+// legacy JSON notify is spelled out here, because nothing else still builds one.
 const KEY = 'seahelm-workspace-seahelm-2';
 const FRAME_BYTES = 48 * 1024;          // the manager's flush threshold under load
 
@@ -67,26 +69,12 @@ function b64Size(b64){
   return (n / 4) * 3 - pad;
 }
 
-async function inflateRaw(bytes){
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
+const inflateRaw = VTFrame.inflateRaw;
 
+// Only the benchmark compresses; the client never does, so this one stays local.
 async function deflateRaw(bytes){
   const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function binaryFrame(key, payload, deflated){
-  const keyBytes = new TextEncoder().encode(key);
-  const buf = new Uint8Array(4 + keyBytes.length + payload.length);
-  buf[0] = 1;                            // version
-  buf[1] = deflated ? 1 : 0;             // flags
-  buf[2] = 1;                            // kind: vt.data
-  buf[3] = keyBytes.length;
-  buf.set(keyBytes, 4);
-  buf.set(payload, 4 + keyBytes.length);
-  return buf;
 }
 
 function legacyFrame(key, payload){
@@ -167,9 +155,9 @@ async function main(){
   // Build each wire representation once; the benchmark times *decoding*, which
   // is the browser's half of the job.
   const legacyWire = frames.map((f) => legacyFrame(KEY, f));
-  const binaryWire = frames.map((f) => binaryFrame(KEY, f, false));
+  const binaryWire = frames.map((f) => VTFrame.encode(KEY, f));
   const deflateWire = [];
-  for (const f of frames) deflateWire.push(binaryFrame(KEY, await deflateRaw(f), true));
+  for (const f of frames) deflateWire.push(VTFrame.encode(KEY, await deflateRaw(f), { deflated: true }));
 
   const size = (xs, len) => xs.reduce((n, x) => n + (len ? x.length : x.byteLength ?? x.length), 0);
   const legacyBytes = legacyWire.reduce((n, s) => n + new TextEncoder().encode(s).length, 0);
@@ -209,22 +197,18 @@ async function main(){
     }
   }));
 
-  // Binary: parse a 4-byte header and hand xterm a view. No copy, no decode.
+  // Binary: the client's own parser, header to payload view. No copy, no decode.
+  // Running VTFrame.parse rather than a hand-rolled header read is deliberate —
+  // it is what index.html actually pays per frame, object allocation included.
   // The accumulator is load-bearing — an unused subarray is optimised away and
   // the case then measures nothing at all (it reported "Infinity MB/s").
   let sink = 0;
   results.push(await timed('binary', async () => {
-    for (const wire of binaryWire) {
-      const keyLen = wire[3];
-      sink += wire.subarray(4 + keyLen).length;
-    }
+    for (const wire of binaryWire) sink += VTFrame.parse(wire).body.length;
   }));
 
   results.push(await timed('binary + deflate', async () => {
-    for (const wire of deflateWire) {
-      const keyLen = wire[3];
-      sink += (await inflateRaw(wire.subarray(4 + keyLen))).length;
-    }
+    for (const wire of deflateWire) sink += (await inflateRaw(VTFrame.parse(wire).body)).length;
   }));
   if (sink < 0) say('unreachable');   // keep `sink` observable
 
@@ -252,11 +236,15 @@ async function main(){
     term.open(host);
     let renderer = 'dom';
     if (useWebgl) {
+      // Dispose before bailing: `term.open(host)` has already run, and returning
+      // without it leaves a live emulator attached to #termhost — the next pass
+      // clears the DOM but not its listeners or renderer, so the scrollback
+      // numbers below would be measured against a page holding a leaked one.
       try {
-        if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) return null;
+        if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) { term.dispose(); return null; }
         term.loadAddon(new WebglAddon.WebglAddon());
         renderer = 'webgl';
-      } catch (e) { return null; }
+      } catch (e) { term.dispose(); return null; }
     }
     const t0 = performance.now();
     await new Promise((resolve) => {
@@ -275,7 +263,6 @@ async function main(){
   if (TerminalCtor) {
     const dom = await renderPass(false);
     const webgl = await renderPass(true);
-    const ms = dom.ms;
     const rrow = (label, r) => r
       ? `${pad(label, 26)}${pad('—', 12)}${pad(fmt(r.ms), 11)}${pad(rate(r.ms), 13)}`
         + `painted ${fmt(r.paintedMs)}`

@@ -392,6 +392,7 @@
 <script src="./xterm.js"></script>
 <script src="./xterm-addon-webgl.js"></script>
 <script src="./e2ee.js"></script>
+<script src="./vt-frame.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -593,7 +594,7 @@ function connectGateway(url){
     // sending JSON, which the message handler still understands.
     gwSend('auth', {
       mac_id: S.mac, token: S.authPass,
-      vt_binary: true, vt_deflate: typeof DecompressionStream === 'function',
+      vt_binary: true, vt_deflate: VTFrame.deflateSupported(),
     }, (r, err) => {
       if (err || !r || r.ok === false) {
         setStatus(false, '认证失败');
@@ -615,7 +616,12 @@ function connectGateway(url){
     if (ev.data instanceof ArrayBuffer) { onGatewayBinaryFrame(new Uint8Array(ev.data)); return; }
     try { onGatewayFrame(JSON.parse(ev.data)); } catch {}
   };
-  ws.onclose = () => { setStatus(false, '离线'); S.gw = null; S.transport = null; };
+  ws.onclose = () => {
+    setStatus(false, '离线'); S.gw = null; S.transport = null;
+    // Each entry pins the last frame's view into its WebSocket buffer, so a
+    // session that browsed many worktrees leaves one pinned buffer per pane.
+    vtWriteChains.clear();
+  };
   ws.onerror = () => setStatus(false, '错误');
 }
 
@@ -629,37 +635,8 @@ function gwSend(method, params, onReply){
 }
 
 // ── binary VT frames ──────────────────────────────────────────────────────
-// Layout (see Sources/Core/HostGatewayVTFrame.swift):
-//   u8 version | u8 flags (bit0 = deflate-raw) | u8 kind (1 data, 2 snapshot)
-//   u8 keyLen  | key… | [snapshot only] u16 cols, u16 rows | payload
-const VT_FRAME_VERSION = 1;
-
-function parseVTFrame(buf){
-  if (buf.length < 4 || buf[0] !== VT_FRAME_VERSION) return null;
-  const flags = buf[1], kind = buf[2], keyLen = buf[3];
-  let off = 4;
-  if (buf.length < off + keyLen) return null;
-  const key = new TextDecoder().decode(buf.subarray(off, off + keyLen));
-  off += keyLen;
-  let cols, rows;
-  if (kind === 2){
-    if (buf.length < off + 4) return null;
-    cols = (buf[off] << 8) | buf[off+1];
-    rows = (buf[off+2] << 8) | buf[off+3];
-    off += 4;
-  }
-  return {
-    type: kind === 2 ? 'vt.snapshot' : 'vt.data',
-    key, cols, rows,
-    deflated: (flags & 1) !== 0,
-    body: buf.subarray(off),
-  };
-}
-
-async function inflateRaw(bytes){
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
+// The wire format itself lives in vt-frame.js, shared with bench.html so the
+// benchmark cannot drift onto a format the socket no longer speaks.
 
 // Inflation is async, and a terminal that applies two chunks out of order is
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
@@ -667,13 +644,24 @@ async function inflateRaw(bytes){
 const vtWriteChains = new Map();
 
 function onGatewayBinaryFrame(buf){
-  const f = parseVTFrame(buf);
+  // The auth reply is what makes these frames expected at all. Checking it here
+  // turns a server that ignored the negotiation into one visible log line
+  // instead of a terminal that renders some frames and silently drops the rest.
+  if (!S.gw || !S.gw.binary) {
+    log('sys', '(vt)', `binary frame on a JSON-negotiated socket, dropped (${buf.length}B)`);
+    return;
+  }
+  const f = VTFrame.parse(buf);
   if (!f) { log('sys', '(vt)', `unparseable binary frame, ${buf.length}B`); return; }
+  if (f.deflated && !S.gw.deflate) {
+    log('sys', '(vt)', 'deflated frame we did not negotiate for, dropped');
+    return;
+  }
   log('rx', f.type, `${f.type} ${f.body.length}B${f.deflated ? ' deflated' : ''} (payload elided)`);
 
   const prior = vtWriteChains.get(f.key) || Promise.resolve();
   const next = prior.then(async () => {
-    const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
+    const bytes = f.deflated ? await VTFrame.inflateRaw(f.body) : f.body;
     handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
   }).catch((e) => log('sys', '(vt)', `frame dropped: ${e && e.message}`));
   vtWriteChains.set(f.key, next);
@@ -1581,6 +1569,7 @@ function mountSinglePane(key){
   // Drop the previous terminal first — its attach client goes with it.
   for (const [k, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: k });
+    vtWriteChains.delete(k);
     if (entry.flushT) clearTimeout(entry.flushT);
     try { entry.term.dispose(); } catch (e) {}
   }
@@ -1620,6 +1609,7 @@ function renderPaneStrip(activeKey){
 function unmountPanes(){
   for (const [key, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: key });
+    vtWriteChains.delete(key);
     if (entry.flushT) clearTimeout(entry.flushT);
     try { entry.term.dispose(); } catch (e) {}
   }
