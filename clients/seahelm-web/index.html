@@ -404,6 +404,23 @@ function saveGeom(){
   catch (e) {}   // private mode, quota — the cache is an optimisation, not state
 }
 
+// Scrollback is charged per terminal, and mirroring a split builds one terminal
+// per leaf — so the cost scales with leaf count while the value of deep history
+// does not. Measured at ~122 columns: 7.6 MB per terminal at 5000, 1.5 MB at
+// 1000. A six-way mirror is therefore ~45 MB of buffer nobody scrolls, on a
+// phone, while you are glancing across panes rather than reading any one of
+// them. Drilling into a pane switches to single mode, which gets the full depth.
+//
+// Depth is not a speed knob: paint moves 4% between 1000 and 5000. This buys
+// memory on multi-pane mirrors and nothing else.
+const VT_SCROLLBACK_DEEP = 5000;
+const VT_SCROLLBACK_SHALLOW = 1000;
+const VT_SHALLOW_FROM_LEAVES = 3;
+
+function scrollbackForLeafCount(count){
+  return count >= VT_SHALLOW_FROM_LEAVES ? VT_SCROLLBACK_SHALLOW : VT_SCROLLBACK_DEEP;
+}
+
 const S = {
   client:null, mac:'testmac', transport:null,   // transport: null | 'mqtt' | 'gateway'
   gw:null,   // gateway WebSocket state when transport === 'gateway'
@@ -415,7 +432,8 @@ const S = {
   // VT terminal: `open` is the pane key currently streaming
   // One entry per mirrored pane, keyed by paneSessionKey; `focus` is the pane
   // keystrokes reach, `worktree` is the layout currently mounted.
-  vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror' },
+  vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror',
+       scrollback:VT_SCROLLBACK_DEEP },
   // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
   // the next mount can decide its layout without attaching first. Persisted
   // because that decision happens *before* anything attaches: on a cold visit
@@ -439,6 +457,7 @@ const VT_COLS = 120, VT_ROWS = 32;
 // a floor to grow off. VT_FONT_MIN is where shrinking stops being worth it —
 // below this you cannot read the pane anyway, so we pan instead.
 const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
+
 // SailorStatus.color, 1:1 with Sources/Core/SailorStatus.swift (dark values).
 // `waiting` is the amber attention accent, NOT the blue one — the Mac routes
 // waiting through SemanticColors.attention, and exited shares idle's grey.
@@ -1526,6 +1545,7 @@ function mountPanes(tree, focusKey, path){
     return;
   }
 
+  S.vt.scrollback = scrollbackForLeafCount(treeLeaves(tree).length);
   wrap.appendChild(buildLayoutNode(tree));
   openMountedPanes();
   focusPane(focusKey || S.selPane || S.vt.panes.keys().next().value || null);
@@ -1554,6 +1574,9 @@ function mountSinglePane(key){
   if (!key && leaves.length) key = leaves[0].pane_session_key;
   const leaf = leaves.find(l => l.pane_session_key === key) || leaves[0];
   if (!leaf) return;
+
+  // Exactly one terminal lives at a time here, so depth costs 7.6 MB once.
+  S.vt.scrollback = VT_SCROLLBACK_DEEP;
 
   // Drop the previous terminal first — its attach client goes with it.
   for (const [k, entry] of S.vt.panes){
@@ -1641,7 +1664,7 @@ function buildLayoutLeaf(node){
   el.appendChild(bar); el.appendChild(host);
 
   const t = new TerminalCtor({
-    cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:5000,
+    cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:S.vt.scrollback,
     fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
     theme:{ background:'#05090c', foreground:'#c8d6d5' },
   });
