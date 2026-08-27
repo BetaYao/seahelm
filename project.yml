@@ -203,7 +203,7 @@ targets:
         GMAIL_OAUTH_CLIENT_ID: ""
         GMAIL_OAUTH_CLIENT_SECRET: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: "2.0.51"
+        MARKETING_VERSION: "2.0.52"
         CURRENT_PROJECT_VERSION: 1
         # Local builds sign with the same Developer ID as the shipped app, and
         # deliberately not ad-hoc. TCC pins a Full Disk Access grant to a code
