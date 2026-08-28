@@ -289,7 +289,13 @@ private final class PRTableCellView: NSTableCellView {
 
     func configure(with pr: GitHubPR) {
         titleField.stringValue = "#\(pr.number) \(pr.title)"
-        metaField.stringValue = "\(pr.user.login) · +\(pr.additions) -\(pr.deletions)"
+        // Line counts come from the single-PR endpoint; the list has none, so
+        // the row shows the author alone rather than a made-up +0 -0.
+        if let additions = pr.additions, let deletions = pr.deletions {
+            metaField.stringValue = "\(pr.user.login) · +\(additions) -\(deletions)"
+        } else {
+            metaField.stringValue = pr.user.login
+        }
 
         let (badgeColor, badgeText): (NSColor, String)
         if pr.mergedAt != nil {

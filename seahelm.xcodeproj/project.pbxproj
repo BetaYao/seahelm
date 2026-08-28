@@ -306,6 +306,7 @@
 		A9F68DDF088D5A32BFC14242 /* GhosttyConfigImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F749E954C706D5C69B5BCD0C /* GhosttyConfigImporter.swift */; };
 		AA20697D1C5A53598DEF9CE9 /* SuggestionSeenSetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300BF0C990100B9C582BBB82 /* SuggestionSeenSetTests.swift */; };
 		AA44F31E55A3443F4FED6247 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64961AFD1B97D23C0490E083 /* StatusBarView.swift */; };
+		ABD409C2FE27613FADC3369E /* github-pr-list.json in Resources */ = {isa = PBXBuildFile; fileRef = D00FBF5F2A32A2CF327AF6E1 /* github-pr-list.json */; };
 		ACF7082F13C72511EDEBDA61 /* GitDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */; };
 		AD2BB97C703A9CEAA447467C /* ProcessProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BE708AEC9451A9A8135976C /* ProcessProbeTests.swift */; };
 		AD608FF60D293BA96BCB01B8 /* TerminalHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */; };
@@ -358,6 +359,7 @@
 		C7C89AAA411460F1904959D7 /* KeyboardHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8A4A0AA60C531F684B87 /* KeyboardHelpOverlay.swift */; };
 		C7CB9AA977EF6E8B1C8F1F57 /* ChromeLayoutStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */; };
 		C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */; };
+		C8637A05AB23B7E54F219927 /* github-pr-detail.json in Resources */ = {isa = PBXBuildFile; fileRef = 72D7AE18D546D48E83055667 /* github-pr-detail.json */; };
 		C94539AC393B4AA9EB7D4BFC /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2691E78106330B779373C2 /* StatusDetectorActivityTests.swift */; };
 		C98FA9225C36EA1C59E1A67E /* OpenCodePluginInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */; };
 		CA43EB5F470FF6E325C0934F /* SelectedFilePathResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */; };
@@ -436,6 +438,7 @@
 		F18B943680E61083D1FD04D8 /* OSCProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF833BDB434AB8F30EE6D6AF /* OSCProgressTests.swift */; };
 		F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */; };
 		F1E70D8C132244AB37E40E34 /* AgentRegistryBackgroundBusyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA68D37F6726B55761155E3 /* AgentRegistryBackgroundBusyTests.swift */; };
+		F2FA4DECFDEA67F6475BAF04 /* GitHubPRDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */; };
 		F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */; };
 		F609F16851D769F1513883D2 /* zmx-attach.py in Resources */ = {isa = PBXBuildFile; fileRef = 091FF7815D565EA0D1CD27E4 /* zmx-attach.py */; };
 		F62D784C6BDA373D99051F3A /* MailBodyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B463225AE9F973C259F06772 /* MailBodyTests.swift */; };
@@ -667,7 +670,9 @@
 		6E1906E0816DDA737033BBF1 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolver.swift; sourceTree = "<group>"; };
 		72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstallerTests.swift; sourceTree = "<group>"; };
+		724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPRDecodingTests.swift; sourceTree = "<group>"; };
 		7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventExtractor.swift; sourceTree = "<group>"; };
+		72D7AE18D546D48E83055667 /* github-pr-detail.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-pr-detail.json"; sourceTree = "<group>"; };
 		73FDA109B06DD6B1F279D87A /* PaneReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneReducerTests.swift; sourceTree = "<group>"; };
 		755D82DD1EFBD20111AC9BF2 /* RepoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPage.swift; sourceTree = "<group>"; };
 		75619FAA0B399E6EFEFD58ED /* WorktreeFileIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeFileIndexTests.swift; sourceTree = "<group>"; };
@@ -839,6 +844,7 @@
 		CF9A024C6CD76762DD132684 /* AgentRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistry.swift; sourceTree = "<group>"; };
 		CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayConfig.swift; sourceTree = "<group>"; };
 		CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
+		D00FBF5F2A32A2CF327AF6E1 /* github-pr-list.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-pr-list.json"; sourceTree = "<group>"; };
 		D01D0EBCC80C1AA901CA8E5B /* VTEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTEvent.swift; sourceTree = "<group>"; };
 		D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayDecisionsTests.swift; sourceTree = "<group>"; };
 		D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffTests.swift; sourceTree = "<group>"; };
@@ -1389,6 +1395,7 @@
 				358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */,
 				1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */,
 				D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */,
+				724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */,
 				47F339357674536CA6736266 /* GlobalKeymapTests.swift */,
 				17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */,
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
@@ -1561,6 +1568,8 @@
 		CE15FDEE12E5910A78B04223 /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
+				72D7AE18D546D48E83055667 /* github-pr-detail.json */,
+				D00FBF5F2A32A2CF327AF6E1 /* github-pr-list.json */,
 				672F37207D00728382AD2C41 /* vt-top-repaint.deflate */,
 			);
 			path = Fixtures;
@@ -1810,6 +1819,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C8637A05AB23B7E54F219927 /* github-pr-detail.json in Resources */,
+				ABD409C2FE27613FADC3369E /* github-pr-list.json in Resources */,
 				2E8008F420C8593DD968CB74 /* vt-top-repaint.deflate in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1931,6 +1942,7 @@
 				2CE3679CE395A49CDD452CEB /* FuzzyMatchTests.swift in Sources */,
 				A831B5F796896B48509F1F91 /* GatewayStateTests.swift in Sources */,
 				ACF7082F13C72511EDEBDA61 /* GitDiffTests.swift in Sources */,
+				F2FA4DECFDEA67F6475BAF04 /* GitHubPRDecodingTests.swift in Sources */,
 				91AE9A595CB36E54847C8274 /* GlobalKeymapTests.swift in Sources */,
 				5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */,
 				9F5D2E6010FDB991FA2F0B32 /* HTMLPreviewResourceTests.swift in Sources */,
