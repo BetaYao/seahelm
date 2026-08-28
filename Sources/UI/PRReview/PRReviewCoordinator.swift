@@ -22,10 +22,17 @@ final class PRReviewCoordinator {
     // MARK: - 入口
 
     /// 从 PR 列表开始展示。
+    ///
+    /// The list holds the coordinator, strongly and deliberately. Callers reach
+    /// this through `PRReviewCoordinator(...).show()` and keep no reference, so
+    /// a `[weak self]` here left the coordinator deallocated the moment `show()`
+    /// returned — every row click resolved `self` to nil and the panel could
+    /// never leave the list. Not a cycle: the coordinator does not hold the
+    /// list, so both go when the overlay is replaced or closed.
     func show() {
         let list = PRListView(service: service)
-        list.onSelectPR = { [weak self] pr in
-            self?.showPRDiff(pr)
+        list.onSelectPR = { pr in
+            self.showPRDiff(pr)
         }
         dashboard?.showCenterOverlay(list, title: "Pull Requests")
     }

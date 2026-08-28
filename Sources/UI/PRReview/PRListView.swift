@@ -212,7 +212,7 @@ extension PRListView: NSTableViewDelegate {
 
 // MARK: - PR Table Cell
 
-private final class PRTableCellView: NSTableCellView {
+final class PRTableCellView: NSTableCellView {
     private let titleField = NSTextField(labelWithString: "")
     private let metaField = NSTextField(labelWithString: "")
     private let statusBadge = NSView()
@@ -230,13 +230,21 @@ private final class PRTableCellView: NSTableCellView {
         titleField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         titleField.textColor = Theme.textPrimary
         titleField.lineBreakMode = .byTruncatingTail
+        // Explicit: a row whose title drifts to the right edge reads as broken,
+        // and `.natural` leaves that to the text's own direction.
+        titleField.alignment = .left
         titleField.translatesAutoresizingMaskIntoConstraints = false
-        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The title is the row. Letting it compress freely is what allowed the
+        // badge to take the whole width — the solver had a cheaper way to
+        // satisfy the constraints than keeping the title readable.
+        titleField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        titleField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         addSubview(titleField)
 
         metaField.font = NSFont.systemFont(ofSize: 11)
         metaField.textColor = Theme.textSecondary
         metaField.lineBreakMode = .byTruncatingMiddle
+        metaField.alignment = .left
         metaField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(metaField)
 
@@ -247,7 +255,13 @@ private final class PRTableCellView: NSTableCellView {
 
         statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
         statusLabel.textColor = .white
+        statusLabel.alignment = .center
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        // The badge is sized by its label, so the label has to insist on its
+        // own width in both directions. Without this it is happy to stretch,
+        // and a badge pinned to it stretches with it.
+        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusBadge.addSubview(statusLabel)
 
         draftLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
@@ -263,13 +277,17 @@ private final class PRTableCellView: NSTableCellView {
         NSLayoutConstraint.activate([
             statusBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             statusBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            // Fixed, not a range. The badge holds one letter, so a range buys
+            // nothing and costs a degree of freedom: with `>= 20` and the label
+            // pinned to both edges, the solver is *allowed* to widen the badge
+            // and take the width from the title. I could not reproduce that
+            // outcome in a table, so this is not a diagnosed fix — it removes
+            // the freedom that would permit it.
+            statusBadge.widthAnchor.constraint(equalToConstant: 22),
             statusBadge.heightAnchor.constraint(equalToConstant: 18),
 
             statusLabel.centerXAnchor.constraint(equalTo: statusBadge.centerXAnchor),
             statusLabel.centerYAnchor.constraint(equalTo: statusBadge.centerYAnchor),
-            statusLabel.leadingAnchor.constraint(equalTo: statusBadge.leadingAnchor, constant: 6),
-            statusLabel.trailingAnchor.constraint(equalTo: statusBadge.trailingAnchor, constant: -6),
 
             titleField.leadingAnchor.constraint(equalTo: statusBadge.trailingAnchor, constant: 10),
             titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
@@ -281,11 +299,24 @@ private final class PRTableCellView: NSTableCellView {
             draftLabel.leadingAnchor.constraint(equalTo: metaField.trailingAnchor, constant: 8),
             draftLabel.centerYAnchor.constraint(equalTo: metaField.centerYAnchor),
             draftLabel.heightAnchor.constraint(equalToConstant: 16),
+            // Bound the meta row too, or the author name grows past the cell
+            // instead of truncating.
+            draftLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
         ])
 
         draftLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        metaField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        draftLabel.setContentHuggingPriority(.required, for: .horizontal)
+        // Hugs its text: the author sits next to the title, not stretched across
+        // the row with the Draft pill shoved to the far edge.
+        metaField.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     }
+
+    /// Resolved frames, for the layout regression: the badge is one letter and
+    /// must never take width from the title.
+    var badgeFrameForTesting: NSRect { statusBadge.frame }
+    var titleFrameForTesting: NSRect { titleField.frame }
+    var titleTextForTesting: String { titleField.stringValue }
+    var metaTextForTesting: String { metaField.stringValue }
 
     func configure(with pr: GitHubPR) {
         titleField.stringValue = "#\(pr.number) \(pr.title)"
