@@ -2,9 +2,27 @@ import Foundation
 
 struct WorktreeInfo {
     let path: String
+    /// Empty when the worktree is checked out at a bare commit — see `isDetached`.
     let branch: String
     let commitHash: String
     let isMainWorktree: Bool
+    /// A worktree sitting on a commit rather than a branch. Rare by hand, but
+    /// the normal state for a jj workspace, which is anonymous by design.
+    let isDetached: Bool
+
+    init(
+        path: String,
+        branch: String,
+        commitHash: String,
+        isMainWorktree: Bool,
+        isDetached: Bool = false
+    ) {
+        self.path = path
+        self.branch = branch
+        self.commitHash = commitHash
+        self.isMainWorktree = isMainWorktree
+        self.isDetached = isDetached
+    }
 
     var displayName: String {
         return branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : branch
@@ -126,6 +144,7 @@ enum WorktreeDiscovery {
         var currentBranch = ""
         var currentCommit = ""
         var isMainWorktree = false
+        var isDetached = false
 
         for line in output.components(separatedBy: "\n") {
             if line.isEmpty {
@@ -135,13 +154,15 @@ enum WorktreeDiscovery {
                         path: path,
                         branch: currentBranch,
                         commitHash: currentCommit,
-                        isMainWorktree: isMainWorktree
+                        isMainWorktree: isMainWorktree,
+                        isDetached: isDetached
                     ))
                 }
                 currentPath = nil
                 currentBranch = ""
                 currentCommit = ""
                 isMainWorktree = false
+                isDetached = false
             } else if line.hasPrefix("worktree ") {
                 currentPath = String(line.dropFirst("worktree ".count))
                     .trimmingCharacters(in: .whitespaces)
@@ -162,7 +183,11 @@ enum WorktreeDiscovery {
             } else if line == "bare" {
                 // bare worktree, skip
             } else if line == "detached" {
-                currentBranch = "(detached)"
+                // Leave `branch` empty rather than naming it "(detached)": that
+                // string is not a branch, it defeats the directory-name fallback
+                // in `displayName`, and it makes every detached worktree look
+                // like the same one to anything matching on branch name.
+                isDetached = true
             }
         }
 
@@ -172,7 +197,8 @@ enum WorktreeDiscovery {
                 path: path,
                 branch: currentBranch,
                 commitHash: currentCommit,
-                isMainWorktree: isMainWorktree
+                isMainWorktree: isMainWorktree,
+                isDetached: isDetached
             ))
         }
 

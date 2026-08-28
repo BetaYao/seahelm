@@ -58,7 +58,48 @@ final class WorktreeDiscoveryTests: XCTestCase {
         """
         let worktrees = WorktreeDiscovery.parsePorcelain(output)
         XCTAssertEqual(worktrees.count, 1)
-        XCTAssertEqual(worktrees[0].branch, "(detached)")
+        XCTAssertTrue(worktrees[0].isDetached)
+        // Not "(detached)": that is not a branch name, and leaving it empty is
+        // what lets `displayName` fall back to the directory.
+        XCTAssertEqual(worktrees[0].branch, "")
+        XCTAssertEqual(worktrees[0].displayName, "project")
+    }
+
+    /// Detachment is per entry, so a detached worktree must not mark the branched
+    /// one that follows it.
+    func testParseDetachedDoesNotLeakIntoNextEntry() {
+        let output = """
+        worktree /Users/dev/project
+        HEAD abc1234567890
+        detached
+
+        worktree /Users/dev/project-feature
+        HEAD def4567890123
+        branch refs/heads/feature-x
+
+        """
+        let worktrees = WorktreeDiscovery.parsePorcelain(output)
+        XCTAssertEqual(worktrees.count, 2)
+        XCTAssertTrue(worktrees[0].isDetached)
+        XCTAssertFalse(worktrees[1].isDetached)
+        XCTAssertEqual(worktrees[1].branch, "feature-x")
+    }
+
+    /// Two anonymous worktrees have to stay tellable apart — under "(detached)"
+    /// they shared a name, which is how a jj-style fleet would collide.
+    func testDetachedWorktreesGetDistinctDisplayNames() {
+        let output = """
+        worktree /Users/dev/.worktrees/agent1
+        HEAD abc1234567890
+        detached
+
+        worktree /Users/dev/.worktrees/agent2
+        HEAD def4567890123
+        detached
+
+        """
+        let worktrees = WorktreeDiscovery.parsePorcelain(output)
+        XCTAssertEqual(worktrees.map(\.displayName), ["agent1", "agent2"])
     }
 
     func testParseEmptyOutput() {
@@ -137,7 +178,8 @@ final class WorktreeDiscoveryTests: XCTestCase {
     }
 
     func testDisplayName_FallsBackToDirectoryWhenDetached() {
-        let info = WorktreeInfo(path: "/Users/dev/project", branch: "", commitHash: "abc", isMainWorktree: true)
+        let info = WorktreeInfo(path: "/Users/dev/project", branch: "", commitHash: "abc",
+                                isMainWorktree: true, isDetached: true)
         XCTAssertEqual(info.displayName, "project")
     }
 
