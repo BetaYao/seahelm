@@ -100,6 +100,11 @@ enum WorktreeCreator {
         let hash = runGit(args: ["rev-parse", "--short", "HEAD"], in: worktreePath)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
+        // Remember what this was cut from. git keeps no record of it, and
+        // without it a worktree stacked on another agent's branch reports that
+        // branch's commits as its own changes.
+        WorktreeBaseBranchStore.shared.set(baseBranch, forWorktree: worktreePath)
+
         // Write seahelm-suggest guidance to worktree
         SuggestGuidanceWriter.writeForWorktree(worktreePath)
 

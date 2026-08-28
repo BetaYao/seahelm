@@ -82,6 +82,8 @@ enum WorktreeDeleter {
             throw WorktreeDeleterError.gitFailed(classifyWorktreeRemoveError(stderr, path: worktreePath))
         }
 
+        WorktreeBaseBranchStore.shared.forget(worktreePath: worktreePath)
+
         // Optionally delete the branch
         var branchWarning: String?
         if deleteBranch {

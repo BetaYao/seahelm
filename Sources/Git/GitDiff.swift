@@ -233,9 +233,22 @@ enum GitDiff {
         worktreePath: String,
         limit: Int = maxListedChangedFiles
     ) -> GitBranchChanges {
+        branchChangedFiles(
+            worktreePath: worktreePath,
+            limit: limit,
+            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath)
+        )
+    }
+
+    /// Seam for tests — see `resolveBaseRef(worktreePath:recordedBase:)`.
+    static func branchChangedFiles(
+        worktreePath: String,
+        limit: Int = maxListedChangedFiles,
+        recordedBase: String?
+    ) -> GitBranchChanges {
         let uncapped: [GitChangedFile]
         let baseRef: String?
-        if let resolved = resolveBaseRef(worktreePath: worktreePath),
+        if let resolved = resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase),
            let mergeBase = mergeBase(with: resolved, worktreePath: worktreePath) {
             baseRef = resolved
             let nameStatus = runGit(
@@ -293,12 +306,33 @@ enum GitDiff {
     }
 
     static func resolveBaseRef(worktreePath: String) -> String? {
-        for ref in preferredBaseRefs {
-            if runGit(args: ["rev-parse", "--verify", "--quiet", ref], in: worktreePath) != nil {
-                return ref
-            }
+        resolveBaseRef(
+            worktreePath: worktreePath,
+            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath)
+        )
+    }
+
+    /// Seam for tests, so they can supply a recorded base without writing to
+    /// the user's real store.
+    ///
+    /// What seahelm recorded when it created the worktree beats guessing at a
+    /// trunk name: a worktree stacked on another agent's branch has a base no
+    /// entry in `preferredBaseRefs` can name, and comparing it against trunk
+    /// reports the branch below it as its own work. A recorded base that no
+    /// longer resolves — merged and pruned, or renamed — falls through to the
+    /// trunk guess rather than leaving the panel with no base at all.
+    static func resolveBaseRef(worktreePath: String, recordedBase: String?) -> String? {
+        if let recordedBase, refExists(recordedBase, worktreePath: worktreePath) {
+            return recordedBase
+        }
+        for ref in preferredBaseRefs where refExists(ref, worktreePath: worktreePath) {
+            return ref
         }
         return nil
+    }
+
+    private static func refExists(_ ref: String, worktreePath: String) -> Bool {
+        runGit(args: ["rev-parse", "--verify", "--quiet", ref], in: worktreePath) != nil
     }
 
     private static func mergeBase(with baseRef: String?, worktreePath: String) -> String? {

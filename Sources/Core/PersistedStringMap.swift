@@ -32,6 +32,16 @@ final class PersistedStringMap {
         persist(snapshot)
     }
 
+    /// Drop a key. Worktree paths get reused — a stale entry left behind by a
+    /// deleted worktree would answer for whatever is created at that path next.
+    func remove(forKey key: String) {
+        lock.lock()
+        guard map.removeValue(forKey: key) != nil else { lock.unlock(); return }
+        let snapshot = map
+        lock.unlock()
+        persist(snapshot)
+    }
+
     private func persist(_ snapshot: [String: String]) {
         DispatchQueue.global(qos: .utility).async {
             try? FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
