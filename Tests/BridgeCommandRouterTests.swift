@@ -13,7 +13,7 @@ final class BridgeCommandRouterTests: XCTestCase {
                     removeRepo: @escaping (String) -> Void = { _ in },
                     removeWorktree: @escaping (String) -> Void = { _ in },
                     flagIssue: @escaping (String) -> Void = { _ in },
-                    integrate: @escaping (IntegrationConflictMode) -> Void = { _ in },
+                    integrate: @escaping (IntegrationConflictMode, Bool) -> Void = { _, _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created,
                             selectWorktree: selectWorktree, selectAgent: selectAgent,
@@ -30,11 +30,12 @@ final class BridgeCommandRouterTests: XCTestCase {
     /// before the final checkout can disturb a worktree.
     func testIntegrateCallsClosureNotQueue() {
         let q = PendingOrdersQueue()
-        var modes: [IntegrationConflictMode] = []
-        let router = makeRouter(queue: q, integrate: { modes.append($0) })
-        router.route(.integrate(mode: .excludeConflicting))
-        router.route(.integrate(mode: .includeWithMarkers))
-        XCTAssertEqual(modes, [.excludeConflicting, .includeWithMarkers])
+        var calls: [(IntegrationConflictMode, Bool)] = []
+        let router = makeRouter(queue: q, integrate: { calls.append(($0, $1)) })
+        router.route(.integrate(mode: .excludeConflicting, force: false))
+        router.route(.integrate(mode: .includeWithMarkers, force: true))
+        XCTAssertEqual(calls.map(\.0), [.excludeConflicting, .includeWithMarkers])
+        XCTAssertEqual(calls.map(\.1), [false, true])
         XCTAssertTrue(q.all().isEmpty)
     }
 

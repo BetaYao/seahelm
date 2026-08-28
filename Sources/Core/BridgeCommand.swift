@@ -70,10 +70,12 @@ enum BridgeCommand: Equatable {
     case removeWorktree(worktreePath: String)
     /// `/feedback <description>` — open a GitHub issue pre-filled with the description.
     case flagIssue(title: String)
-    /// `/integrate [full]` — fold every worktree in the current repo onto trunk
-    /// and check the result out in the integration worktree. `full` keeps
-    /// conflicting worktrees with markers instead of dropping them.
-    case integrate(mode: IntegrationConflictMode)
+    /// `/integrate [full] [force]` — fold every worktree in the current repo
+    /// onto trunk and check the result out in the integration worktree. `full`
+    /// keeps conflicting worktrees with markers instead of dropping them;
+    /// `force` discards local edits in the checkout, which is otherwise the one
+    /// thing that holds a round back.
+    case integrate(mode: IntegrationConflictMode, force: Bool)
 }
 
 enum BridgeCommandError: Error, Equatable {
@@ -212,14 +214,19 @@ enum BridgeCommandParser {
             return rest.isEmpty ? .failure(.emptyTask) : .success(.flagIssue(title: rest))
 
         case "integrate":
-            switch rest.lowercased() {
-            case "", "clean":
-                return .success(.integrate(mode: .excludeConflicting))
-            case "full":
-                return .success(.integrate(mode: .includeWithMarkers))
-            default:
-                return .failure(.unknownTarget(rest))
+            var mode = IntegrationConflictMode.excludeConflicting
+            var force = false
+            for token in rest.lowercased().split(separator: " ", omittingEmptySubsequences: true) {
+                switch token {
+                case "clean": mode = .excludeConflicting
+                case "full": mode = .includeWithMarkers
+                case "force": force = true
+                // An unrecognised word is a typo, not a shrug: `/integrate ful`
+                // must not quietly drop someone's conflicting work.
+                default: return .failure(.unknownTarget(String(token)))
+                }
             }
+            return .success(.integrate(mode: mode, force: force))
 
         default:
             return .failure(.unknownCommand(verb))

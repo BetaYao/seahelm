@@ -29,6 +29,9 @@ class TabCoordinator {
 
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
+    /// Keeps each repo's integration checkout current as agents finish turns.
+    /// Nil until `init` builds it; only acts on repos that already have one.
+    private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
 
     /// Display name of the repo owning a given worktree path.
@@ -112,6 +115,32 @@ class TabCoordinator {
                 self?.runFirstMateInspection(action)
             }
         )
+        integration = IntegrationCoordinator(
+            isEnabled: { [weak self] in self?.config.autoIntegrate ?? false },
+            repoRoot: { WorktreeDiscovery.findRepoRoot(from: $0) },
+            worktrees: { [weak self] repo in
+                self?.allWorktrees
+                    .map(\.info)
+                    .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repo } ?? []
+            },
+            integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
+            isCheckoutBusy: { AgentRegistry.shared.pane(forWorktree: $0)?.status == .running },
+            onReport: { [weak self] report, _ in
+                IntegrationStatusStore.shared.set(report.cardLine, forWorktree: report.integrationWorktreePath)
+                guard report.needsAttention else { return }
+                self?.pendingOrders.enqueue(
+                    FirstMateAction(
+                        kind: .integrationReport,
+                        zone: .red,
+                        worktreePath: report.integrationWorktreePath,
+                        branch: "",
+                        project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
+                        terminalID: "",
+                        message: report.summary
+                    )
+                )
+            }
+        )
         AgentRegistry.shared.onOutcome = { [weak self] outcome in
             guard let self else { return }
             switch outcome.event.source {
@@ -121,6 +150,7 @@ class TabCoordinator {
                 self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
             }
             self.firstMate?.handle(outcome)
+            self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
             // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven

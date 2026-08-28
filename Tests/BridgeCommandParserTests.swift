@@ -260,14 +260,22 @@ final class BridgeCommandParserTests: XCTestCase {
 
     // MARK: - /integrate
 
-    func testIntegrateDefaultsToDroppingConflicts() {
-        XCTAssertEqual(parse("/integrate"), .success(.integrate(mode: .excludeConflicting)))
-        XCTAssertEqual(parse("/integrate clean"), .success(.integrate(mode: .excludeConflicting)))
+    func testIntegrateDefaultsToDroppingConflictsAndNotForcing() {
+        XCTAssertEqual(parse("/integrate"), .success(.integrate(mode: .excludeConflicting, force: false)))
+        XCTAssertEqual(parse("/integrate clean"), .success(.integrate(mode: .excludeConflicting, force: false)))
     }
 
     func testIntegrateFullKeepsConflictingWorktrees() {
-        XCTAssertEqual(parse("/integrate full"), .success(.integrate(mode: .includeWithMarkers)))
-        XCTAssertEqual(parse("/integrate FULL"), .success(.integrate(mode: .includeWithMarkers)))
+        XCTAssertEqual(parse("/integrate full"), .success(.integrate(mode: .includeWithMarkers, force: false)))
+        XCTAssertEqual(parse("/integrate FULL"), .success(.integrate(mode: .includeWithMarkers, force: false)))
+    }
+
+    /// `force` is the escape hatch from the one hold the feature has, and is
+    /// independent of how conflicts are treated.
+    func testIntegrateForceCombinesWithEitherMode() {
+        XCTAssertEqual(parse("/integrate force"), .success(.integrate(mode: .excludeConflicting, force: true)))
+        XCTAssertEqual(parse("/integrate full force"), .success(.integrate(mode: .includeWithMarkers, force: true)))
+        XCTAssertEqual(parse("/integrate force full"), .success(.integrate(mode: .includeWithMarkers, force: true)))
     }
 
     /// An unrecognised argument is a typo, not a silent fallback to the default:

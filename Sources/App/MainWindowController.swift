@@ -1259,7 +1259,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             openGitHubIssue(title: title)
             reply("Opening GitHub issue for **seahelm**…")
 
-        case .integrate(let mode):
+        case .integrate(let mode, let force):
             // Nothing here can disturb a worktree until the final checkout, so
             // this is safe to run straight from a message rather than carded.
             guard let selected = tabCoordinator.config.selectedWorktreePath,
@@ -1278,10 +1278,12 @@ dashboard.stationManager = terminalCoordinator.stationManager
                         repoPath: repoPath,
                         integrationPath: integrationPath,
                         worktrees: worktrees,
-                        mode: mode
+                        mode: mode,
+                        force: force
                     )
                     DispatchQueue.main.async {
                         IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
+                        IntegrationStatusStore.shared.set(report.cardLine, forWorktree: report.integrationWorktreePath)
                     }
                     reply(report.summary)
                 } catch {
@@ -1384,8 +1386,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             flagIssue: { [weak self] title in
                 self?.openGitHubIssue(title: title)
             },
-            integrate: { [weak self] mode in
-                self?.runIntegration(mode: mode)
+            integrate: { [weak self] mode, force in
+                self?.runIntegration(mode: mode, force: force)
             },
             activePaneCount: { AgentRegistry.shared.allPanes().count },
             branchForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.branch ?? "" },
@@ -1399,7 +1401,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// the main thread; only the report comes back. Nothing it does before the
     /// final checkout can disturb a worktree, so an interrupted or failed round
     /// simply leaves everything as it was.
-    private func runIntegration(mode: IntegrationConflictMode) {
+    private func runIntegration(mode: IntegrationConflictMode, force: Bool) {
         guard let selected = tabCoordinator.config.selectedWorktreePath,
               let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
             NSSound.beep()
@@ -1418,7 +1420,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     repoPath: repoPath,
                     integrationPath: integrationPath,
                     worktrees: worktrees,
-                    mode: mode
+                    mode: mode,
+                    force: force
                 ))
             } catch {
                 outcome = .failure(error)
@@ -1430,6 +1433,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     // checkout, so a failed first run does not leave the store
                     // pointing at a directory that was never created.
                     IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
+                    IntegrationStatusStore.shared.set(report.cardLine, forWorktree: report.integrationWorktreePath)
                     // A round that published cleanly is meant to be invisible —
                     // the integration worktree is simply current. Only speak up
                     // when something was dropped or held back.

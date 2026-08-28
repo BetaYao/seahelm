@@ -67,4 +67,43 @@ final class WorktreeTitleResolverTests: XCTestCase {
         )
         XCTAssertEqual(title, "the prompt")
     }
+
+    /// The integration checkout has no agent and no task, so every other source
+    /// would end up describing a shell. Its own state wins outright.
+    func testIntegrationStateOutranksEveryOtherSource() {
+        let title = WorktreeTitleResolver.resolve(
+            worktreePath: "/repo-worktrees/integration",
+            lastUserPrompt: "a prompt",
+            branch: "some-branch",
+            integrationStatus: { _ in "integration · 3 worktrees" },
+            sessionTitle: { _ in "a session summary" },
+            taskDescription: { _ in "a task" }
+        )
+        XCTAssertEqual(title, "integration · 3 worktrees")
+    }
+
+    /// Every other worktree is unaffected — no status, no change in order.
+    func testAbsentIntegrationStateChangesNothing() {
+        let title = WorktreeTitleResolver.resolve(
+            worktreePath: "/repo-worktrees/agent",
+            lastUserPrompt: "a prompt",
+            branch: "some-branch",
+            integrationStatus: { _ in nil },
+            sessionTitle: { _ in nil },
+            taskDescription: { _ in "a task" }
+        )
+        XCTAssertEqual(title, "a task")
+    }
+
+    func testBlankIntegrationStateFallsThrough() {
+        let title = WorktreeTitleResolver.resolve(
+            worktreePath: "/repo-worktrees/integration",
+            lastUserPrompt: "a prompt",
+            branch: "some-branch",
+            integrationStatus: { _ in "   " },
+            sessionTitle: { _ in nil },
+            taskDescription: { _ in nil }
+        )
+        XCTAssertEqual(title, "a prompt")
+    }
 }

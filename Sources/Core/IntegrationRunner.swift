@@ -19,6 +19,21 @@ struct IntegrationRunReport: Equatable {
         }
     }
 
+    /// The ambient line on the checkout's card. Says what is in it, not what
+    /// went wrong — the report card covers that.
+    var cardLine: String {
+        var line = result.included.isEmpty
+            ? "integration · empty"
+            : "integration · \(result.included.count) worktree\(result.included.count == 1 ? "" : "s")"
+        if !result.excluded.isEmpty {
+            line += " · excluded \(result.excluded.map(\.label).joined(separator: ", "))"
+        }
+        if case .held = outcome {
+            line += " · pending"
+        }
+        return line
+    }
+
     /// One line for a notification or the helm.
     var summary: String {
         var parts: [String] = []
@@ -41,7 +56,8 @@ struct IntegrationRunReport: Equatable {
         switch outcome {
         case .published: break
         case .unchanged: parts.append("already current")
-        case .held(.dirtyWorktree, _): parts.append("not checked out — local edits in the integration worktree")
+        case .held(.dirtyWorktree, _):
+            parts.append("not checked out — local edits in the integration worktree; `/integrate force` to discard them")
         case .failed(let message): parts.append("checkout failed: \(message)")
         }
         return parts.joined(separator: " · ")
