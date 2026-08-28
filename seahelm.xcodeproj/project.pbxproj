@@ -26,6 +26,7 @@
 		0B486DC8922CD428C8D48A90 /* CursorSessionTitleLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */; };
 		0C553E03E27CDC10711D9EDD /* NewBranchDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1768F75790892B5D280CBC0 /* NewBranchDialog.swift */; };
 		0DA6D2D48F320DFB8671C67C /* ClaudeStatuslineBridgeInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */; };
+		0DCC5CC757854AB4054F646F /* IntegrationWorktreeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC3559992F8B4562068B449 /* IntegrationWorktreeStore.swift */; };
 		0E3AA9FF166CC516F1B7264B /* ZmxChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6F98DB046516F2EB312E63F /* ZmxChannel.swift */; };
 		0F1F7BA79FAD1F778C22E92B /* WorktreeTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */; };
 		0F42CE97488379120CBB967A /* StackedWorktreeBaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F52B822BB29970B0615304 /* StackedWorktreeBaseTests.swift */; };
@@ -65,6 +66,7 @@
 		28F64A45113C9031DE991377 /* WrappedPathAtClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */; };
 		29495AEAADEAB3360FDADEDB /* GmailAccessToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88D1AA083189266856E9B02 /* GmailAccessToken.swift */; };
 		29FFE70A579739BDA4A737AC /* GitHubPRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864EF5AD3DEA27B0135D7D1 /* GitHubPRService.swift */; };
+		2AB9FBCF955A1C0BC01C1C3C /* IntegrationWorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90EF92DD407F1B5BBC3F3FC1 /* IntegrationWorktreeTests.swift */; };
 		2BC7A5243BDCCBADED457B44 /* SplitContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF31BD8D110A45D923D8B7D /* SplitContainerView.swift */; };
 		2C2802EE819E3CFE15765F18 /* WebhookStatusProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D1A230FCEF8663316AD13F /* WebhookStatusProviderTests.swift */; };
 		2CE3679CE395A49CDD452CEB /* FuzzyMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */; };
@@ -167,6 +169,7 @@
 		65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC183C3A20588D380EF62682 /* TabSelectionTests.swift */; };
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
+		68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
 		6AC11D3AF38BF0EEAD1C57F3 /* PaneTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49437644810F143C24E9273B /* PaneTitleResolverTests.swift */; };
 		6B44C70CFE8C5CE5F00533F6 /* ChromeCollapseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A61F49272C1D9D5FAF19F2 /* ChromeCollapseUITests.swift */; };
@@ -395,6 +398,7 @@
 		E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F647B139CCD0468E41CBBB6F /* BridgePanelViewController.swift */; };
 		E0D71AAD78443B2E6D4BB573 /* StatusDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7598CDC2F8E33DD35632FAB7 /* StatusDetectorTests.swift */; };
 		E100AB08193BEDC6CD9E62C1 /* IngestOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */; };
+		E134224DD16226B5C25277C5 /* IntegrationWorktree.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B6751DF6EEC2F5FB03616F /* IntegrationWorktree.swift */; };
 		E2066652132155948F7F9B1F /* SplitContainerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */; };
 		E2CE378761CC355AC0091ECC /* RepoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 755D82DD1EFBD20111AC9BF2 /* RepoPage.swift */; };
 		E38E545F2B88EE35F5D68621 /* OnboardingThemeStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E255132C2399E444871CFA /* OnboardingThemeStepView.swift */; };
@@ -712,6 +716,7 @@
 		8EA68D37F6726B55761155E3 /* AgentRegistryBackgroundBusyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryBackgroundBusyTests.swift; sourceTree = "<group>"; };
 		902196E72A614F0FF9C90514 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
 		90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstallerTests.swift; sourceTree = "<group>"; };
+		90EF92DD407F1B5BBC3F3FC1 /* IntegrationWorktreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationWorktreeTests.swift; sourceTree = "<group>"; };
 		9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPort.swift; sourceTree = "<group>"; };
 		911314F4B91E512511E3FC21 /* EventHubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventHubTests.swift; sourceTree = "<group>"; };
@@ -749,6 +754,7 @@
 		A94DAD757D9F452B11283244 /* Manifests */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manifests; path = Resources/Manifests; sourceTree = SOURCE_ROOT; };
 		AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageSummaryProvider.swift; sourceTree = "<group>"; };
+		AAC3559992F8B4562068B449 /* IntegrationWorktreeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationWorktreeStore.swift; sourceTree = "<group>"; };
 		AB8C0AA934FBBE1D3F9E6831 /* AgentManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManifest.swift; sourceTree = "<group>"; };
 		ADAB7F280D7925E9A0CD660C /* HostGatewayStaticFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayStaticFiles.swift; sourceTree = "<group>"; };
 		ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalizedEventDecoderTests.swift; sourceTree = "<group>"; };
@@ -812,6 +818,7 @@
 		C687ACEF28BB0481292D8AAF /* GmailMailPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailMailPoller.swift; sourceTree = "<group>"; };
 		C6F98DB046516F2EB312E63F /* ZmxChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxChannel.swift; sourceTree = "<group>"; };
 		C71C3A59719695387993016D /* FuzzyMatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatch.swift; sourceTree = "<group>"; };
+		C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationRunner.swift; sourceTree = "<group>"; };
 		C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinnerDotView.swift; sourceTree = "<group>"; };
 		CA55CCCA9FF0DB650A2D0CDE /* GmailOAuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthCoordinator.swift; sourceTree = "<group>"; };
 		CB28B1CB12CE417A892A04C4 /* VTPipelineBenchmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTPipelineBenchmarks.swift; sourceTree = "<group>"; };
@@ -858,6 +865,7 @@
 		E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
 		E08BEAA55278BCB719905234 /* OnboardingWelcomeStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWelcomeStepView.swift; sourceTree = "<group>"; };
 		E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePluginInstaller.swift; sourceTree = "<group>"; };
+		E0B6751DF6EEC2F5FB03616F /* IntegrationWorktree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationWorktree.swift; sourceTree = "<group>"; };
 		E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
 		E1479F39CD088308B1796C1F /* ChromeLayoutStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutStateTests.swift; sourceTree = "<group>"; };
 		E16FBC8322498A92AB007AAB /* ModalPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPage.swift; sourceTree = "<group>"; };
@@ -1015,6 +1023,8 @@
 				0B383B7D494355714192C928 /* IMessageRuleCoalescer.swift */,
 				0129F6EBD2E1650EFE04DC4A /* IMessageSender.swift */,
 				340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */,
+				C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */,
+				AAC3559992F8B4562068B449 /* IntegrationWorktreeStore.swift */,
 				B4A702B5B856603AEC1DAAFA /* MailBody.swift */,
 				366D03974E15A858BE536AE1 /* MailHTML.swift */,
 				93F4FC4D61D58DD56DB8E9FE /* MailPaneRouter.swift */,
@@ -1172,6 +1182,7 @@
 				4E3492399099DDDAE527C6CA /* GitHubDiffAdapter.swift */,
 				E2BAEF3139798D53AE355496 /* GitProcess.swift */,
 				8D8B57E510DFD6E674BE5080 /* IntegrationBuilder.swift */,
+				E0B6751DF6EEC2F5FB03616F /* IntegrationWorktree.swift */,
 				159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */,
 				F0479C060435CDD5ED956DFE /* WorktreeCreator.swift */,
 				7F2C37E0232BF78E7DCFAAC4 /* WorktreeDeleter.swift */,
@@ -1390,6 +1401,7 @@
 				3FA6E78D00BFAF395356B892 /* IMessageRuleTests.swift */,
 				9A6626CE19664527CAF45610 /* InlineWorktreeCreateViewTests.swift */,
 				A1876E1900448D0350043DB3 /* IntegrationBuilderTests.swift */,
+				90EF92DD407F1B5BBC3F3FC1 /* IntegrationWorktreeTests.swift */,
 				C09670C63C69A22AF3AE348B /* IslandProjectGroupTests.swift */,
 				77AAEF167452AD3BAB184D84 /* KeyboardSubstateControllerTests.swift */,
 				85D2312DE47C6FDA0B8652EE /* LayoutNodeTests.swift */,
@@ -1930,6 +1942,7 @@
 				19A26EE54A5CE77EB9A5A51B /* IdeaStoreTests.swift in Sources */,
 				7264850316B48C75C53EA138 /* InlineWorktreeCreateViewTests.swift in Sources */,
 				969A1488531C0DC09B3C0D84 /* IntegrationBuilderTests.swift in Sources */,
+				2AB9FBCF955A1C0BC01C1C3C /* IntegrationWorktreeTests.swift in Sources */,
 				6D77816EA35B10D7A42D5491 /* IslandProjectGroupTests.swift in Sources */,
 				73225618467620F782EF0465 /* KeyboardSubstateControllerTests.swift in Sources */,
 				926281EDB1D02F36BD5782DE /* LayoutNodeTests.swift in Sources */,
@@ -2162,6 +2175,9 @@
 				E100AB08193BEDC6CD9E62C1 /* IngestOutcome.swift in Sources */,
 				81E16B0856AC19CEF54AC77A /* InlineWorktreeCreateView.swift in Sources */,
 				1F121DE08BEE76DF3987C368 /* IntegrationBuilder.swift in Sources */,
+				68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */,
+				E134224DD16226B5C25277C5 /* IntegrationWorktree.swift in Sources */,
+				0DCC5CC757854AB4054F646F /* IntegrationWorktreeStore.swift in Sources */,
 				8EABBB670FE78F05B40F735B /* IslandModel.swift in Sources */,
 				426F95A44B1C856837684FCF /* IslandPanelController.swift in Sources */,
 				1F8744F999963A2E2F376171 /* IslandRootView.swift in Sources */,

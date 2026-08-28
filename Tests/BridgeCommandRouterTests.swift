@@ -13,6 +13,7 @@ final class BridgeCommandRouterTests: XCTestCase {
                     removeRepo: @escaping (String) -> Void = { _ in },
                     removeWorktree: @escaping (String) -> Void = { _ in },
                     flagIssue: @escaping (String) -> Void = { _ in },
+                    integrate: @escaping (IntegrationConflictMode) -> Void = { _ in },
                     agentCount: @escaping () -> Int = { 0 }) -> BridgeCommandRouter {
         BridgeCommandRouter(queue: queue, createWorktree: created,
                             selectWorktree: selectWorktree, selectAgent: selectAgent,
@@ -20,8 +21,21 @@ final class BridgeCommandRouterTests: XCTestCase {
                             removeAll: removeAll, addRepo: addRepo, removeRepo: removeRepo,
                             removeWorktree: removeWorktree,
                             flagIssue: flagIssue,
+                            integrate: integrate,
                             activePaneCount: agentCount,
                             branchForPath: { _ in "feat-x" }, projectForPath: { _ in "repo" })
+    }
+
+    /// `/integrate` runs directly rather than becoming a card: nothing it does
+    /// before the final checkout can disturb a worktree.
+    func testIntegrateCallsClosureNotQueue() {
+        let q = PendingOrdersQueue()
+        var modes: [IntegrationConflictMode] = []
+        let router = makeRouter(queue: q, integrate: { modes.append($0) })
+        router.route(.integrate(mode: .excludeConflicting))
+        router.route(.integrate(mode: .includeWithMarkers))
+        XCTAssertEqual(modes, [.excludeConflicting, .includeWithMarkers])
+        XCTAssertTrue(q.all().isEmpty)
     }
 
     func testRemoveRepoCallsClosureNotQueue() {

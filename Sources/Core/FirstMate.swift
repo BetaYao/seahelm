@@ -10,6 +10,9 @@ enum FirstMateActionKind: Equatable {
     case suggestNextOrder
     case returnToPort
     case broadcastOrder
+    /// An integration round that needs looking at — conflicts, or a checkout
+    /// held back. A round that published cleanly says nothing.
+    case integrationReport
 }
 
 struct FirstMateAction: Equatable {

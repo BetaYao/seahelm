@@ -32,6 +32,13 @@ final class PersistedStringMap {
         persist(snapshot)
     }
 
+    /// Snapshot of the stored values. Callers that ask on every render need an
+    /// in-memory answer, not a file read.
+    var values: Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        return Set(map.values)
+    }
+
     /// Drop a key. Worktree paths get reused — a stale entry left behind by a
     /// deleted worktree would answer for whatever is created at that path next.
     func remove(forKey key: String) {

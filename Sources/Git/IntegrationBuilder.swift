@@ -18,7 +18,14 @@ struct IntegrationExclusion: Equatable {
 
 struct IntegrationResult: Equatable {
     /// The integrated commit. Equal to the base when nothing merged in.
+    ///
+    /// Not an identity: `commit-tree` stamps a timestamp, so two rounds over an
+    /// unchanged fleet produce different commits holding the same files. Compare
+    /// `tree` to ask whether anything actually changed.
     let commit: String
+    /// The integrated tree — the change key. Same tree, same files, whatever
+    /// the commits say.
+    let tree: String
     let base: String
     /// Labels that merged, in the order they were applied.
     let included: [String]
@@ -33,7 +40,7 @@ struct IntegrationResult: Equatable {
 }
 
 /// What to do with a source that will not merge cleanly.
-enum IntegrationConflictMode {
+enum IntegrationConflictMode: Equatable {
     /// Drop it. The result stays buildable and testable, at the cost of that
     /// source's other work.
     case excludeConflicting
@@ -118,8 +125,17 @@ enum IntegrationBuilder {
             }
         }
 
+        guard let tree = GitProcess.run(
+            ["rev-parse", "--verify", "--quiet", "\(accumulator)^{tree}"],
+            in: repoPath,
+            timeout: timeout
+        )?.trimmingCharacters(in: .whitespacesAndNewlines), !tree.isEmpty else {
+            return nil
+        }
+
         return IntegrationResult(
             commit: accumulator,
+            tree: tree,
             base: baseCommit,
             included: included,
             excluded: excluded,

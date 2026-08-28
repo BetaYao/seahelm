@@ -2305,7 +2305,12 @@ final class DashboardOverviewView: NSView {
         headerSub.stringValue = running > 0 ? "\(panes.count) · \(running) running" : "\(panes.count)"
 
         let panesByPath = Dictionary(panes.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
-        let groupingItems = panes.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
+        let groupingItems = panes.map {
+            $0.groupingItem(
+                creationDate: Self.creationDate($0.worktreePath),
+                isIntegration: IntegrationWorktreeStore.shared.isIntegrationWorktree($0.worktreePath)
+            )
+        }
         let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
 
         // A mode switch is an explicit navigation action. If its previous

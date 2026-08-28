@@ -258,6 +258,24 @@ final class BridgeCommandParserTests: XCTestCase {
         XCTAssertFalse(list.contains("1. alpha / feat-x"), "repo/branch should not repeat per row: \(list)")
     }
 
+    // MARK: - /integrate
+
+    func testIntegrateDefaultsToDroppingConflicts() {
+        XCTAssertEqual(parse("/integrate"), .success(.integrate(mode: .excludeConflicting)))
+        XCTAssertEqual(parse("/integrate clean"), .success(.integrate(mode: .excludeConflicting)))
+    }
+
+    func testIntegrateFullKeepsConflictingWorktrees() {
+        XCTAssertEqual(parse("/integrate full"), .success(.integrate(mode: .includeWithMarkers)))
+        XCTAssertEqual(parse("/integrate FULL"), .success(.integrate(mode: .includeWithMarkers)))
+    }
+
+    /// An unrecognised argument is a typo, not a silent fallback to the default:
+    /// `/integrate ful` must not quietly drop someone's conflicting work.
+    func testIntegrateRejectsAnUnknownArgument() {
+        XCTAssertEqual(parse("/integrate ful"), .failure(.unknownTarget("ful")))
+    }
+
     func testFormatterEmptyStates() {
         XCTAssertEqual(BridgeCommandFormatter.agentList([], currentId: nil), "No panes in this worktree.")
         XCTAssertTrue(BridgeCommandFormatter.worktreeList([], currentPath: nil).contains("No worktrees"))

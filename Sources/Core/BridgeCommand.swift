@@ -70,6 +70,10 @@ enum BridgeCommand: Equatable {
     case removeWorktree(worktreePath: String)
     /// `/feedback <description>` — open a GitHub issue pre-filled with the description.
     case flagIssue(title: String)
+    /// `/integrate [full]` — fold every worktree in the current repo onto trunk
+    /// and check the result out in the integration worktree. `full` keeps
+    /// conflicting worktrees with markers instead of dropping them.
+    case integrate(mode: IntegrationConflictMode)
 }
 
 enum BridgeCommandError: Error, Equatable {
@@ -206,6 +210,16 @@ enum BridgeCommandParser {
 
         case "feedback":
             return rest.isEmpty ? .failure(.emptyTask) : .success(.flagIssue(title: rest))
+
+        case "integrate":
+            switch rest.lowercased() {
+            case "", "clean":
+                return .success(.integrate(mode: .excludeConflicting))
+            case "full":
+                return .success(.integrate(mode: .includeWithMarkers))
+            default:
+                return .failure(.unknownTarget(rest))
+            }
 
         default:
             return .failure(.unknownCommand(verb))

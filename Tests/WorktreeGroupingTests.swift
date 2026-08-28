@@ -16,7 +16,8 @@ final class WorktreeGroupingTests: XCTestCase {
         status: AgentStatus = .idle,
         activity: Date? = nil,
         main: Bool = false,
-        created: Date = .distantPast
+        created: Date = .distantPast,
+        integration: Bool = false
     ) -> WorktreeGroupingItem {
         WorktreeGroupingItem(
             id: path,
@@ -25,8 +26,55 @@ final class WorktreeGroupingTests: XCTestCase {
             status: status,
             lastActivityAt: activity,
             isMainWorktree: main,
-            creationDate: created
+            creationDate: created,
+            isIntegration: integration
         )
+    }
+
+    // MARK: - the integration checkout
+
+    /// Pinned under main rather than sorted by creation date: it is a fixture of
+    /// the repo, and creation-date order would move it whenever it is recreated.
+    func testIntegrationPinsDirectlyBelowMainRegardlessOfAge() {
+        let groups = WorktreeGrouping.groups([
+            item("/repo/old", repo: "alpha", created: Date(timeIntervalSince1970: 10)),
+            item("/repo/integration", repo: "alpha", created: Date(timeIntervalSince1970: 9_000), integration: true),
+            item("/repo", repo: "alpha", main: true, created: Date(timeIntervalSince1970: 5_000)),
+            item("/repo/new", repo: "alpha", created: Date(timeIntervalSince1970: 20)),
+        ], mode: .repository, now: now)
+
+        XCTAssertEqual(groups.first?.items.map(\.path), ["/repo", "/repo/integration", "/repo/old", "/repo/new"])
+    }
+
+    func testPaneModePinsItTheSameWay() {
+        let groups = WorktreeGrouping.groups([
+            item("/repo/a", repo: "alpha", created: Date(timeIntervalSince1970: 10)),
+            item("/repo/integration", repo: "alpha", integration: true),
+            item("/repo", repo: "alpha", main: true),
+        ], mode: .pane, now: now)
+
+        XCTAssertEqual(groups.first?.items.map(\.path), ["/repo", "/repo/integration", "/repo/a"])
+    }
+
+    /// Status groups answer "what needs me now". The checkout has no agent, so
+    /// its status is a shell's and would only dilute the answer.
+    func testStatusGroupingLeavesTheIntegrationOut() {
+        let groups = WorktreeGrouping.groups([
+            item("/repo/a", repo: "alpha", status: .waiting),
+            item("/repo/integration", repo: "alpha", status: .idle, integration: true),
+        ], mode: .status, now: now)
+
+        XCTAssertEqual(groups.flatMap { $0.items.map(\.path) }, ["/repo/a"])
+    }
+
+    /// Same for time buckets: its "activity" is terminal output, not work.
+    func testActivityGroupingLeavesTheIntegrationOut() {
+        let groups = WorktreeGrouping.groups([
+            item("/repo/a", repo: "alpha", activity: now.addingTimeInterval(-60)),
+            item("/repo/integration", repo: "alpha", activity: now, integration: true),
+        ], mode: .activityTime, now: now, calendar: utcCalendar)
+
+        XCTAssertEqual(groups.flatMap { $0.items.map(\.path) }, ["/repo/a"])
     }
 
     func testRepositoryGroupsRemainInFirstSeenOrderAndNormalizeEmptyName() {

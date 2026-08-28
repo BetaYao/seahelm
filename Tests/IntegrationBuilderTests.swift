@@ -103,10 +103,27 @@ final class IntegrationBuilderTests: XCTestCase {
         XCTAssertEqual(bFirst.excluded.map(\.label), ["agentC"])
         XCTAssertEqual(cFirst.excluded.map(\.label), ["agentB"])
 
+        // The tree, not the commit: `commit-tree` stamps a timestamp, so two
+        // rounds a second apart over the same fleet produce different commits
+        // holding identical files. That is exactly why `tree` is the change key
+        // the publish path compares.
         let repeated = try XCTUnwrap(IntegrationBuilder.build(
             repoPath: repo, base: "main",
             sources: [source("agentB", repo: repo), source("agentC", repo: repo)]))
-        XCTAssertEqual(repeated.commit, bFirst.commit)
+        XCTAssertEqual(repeated.tree, bFirst.tree)
+        XCTAssertEqual(repeated.included, bFirst.included)
+        XCTAssertEqual(repeated.excluded, bFirst.excluded)
+    }
+
+    /// The change key has to survive the timestamp that makes commits differ,
+    /// or the "nothing changed, do nothing" path never fires.
+    func testTreeIsStableAcrossRebuildsWhileCommitsAreNot() throws {
+        let repo = try makeFleet()
+        let sources = [source("agentA", repo: repo), source("agentD", repo: repo)]
+        let first = try XCTUnwrap(IntegrationBuilder.build(repoPath: repo, base: "main", sources: sources))
+        let second = try XCTUnwrap(IntegrationBuilder.build(repoPath: repo, base: "main", sources: sources))
+        XCTAssertEqual(first.tree, second.tree)
+        XCTAssertEqual(first.tree, gitOutput(["rev-parse", "\(first.commit)^{tree}"], in: repo))
     }
 
     func testNoSourcesYieldsTheBaseItself() throws {

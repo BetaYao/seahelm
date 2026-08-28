@@ -1718,7 +1718,10 @@ extension TabCoordinator {
     /// the far side is what would let the browser and the desktop disagree.
     func worktreeGroups(mode: String) -> [[String: Any]] {
         let items = buildWorktreeRowInfos().map {
-            $0.groupingItem(creationDate: DashboardOverviewView.creationDate($0.worktreePath))
+            $0.groupingItem(
+                creationDate: DashboardOverviewView.creationDate($0.worktreePath),
+                isIntegration: IntegrationWorktreeStore.shared.isIntegrationWorktree($0.worktreePath)
+            )
         }
         return WorktreeGrouping
             .groups(items, mode: WorktreeGroupingMode(wire: mode), now: Date())

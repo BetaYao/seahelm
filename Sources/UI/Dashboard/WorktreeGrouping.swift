@@ -32,10 +32,34 @@ struct WorktreeGroupingItem: Equatable {
     let lastActivityAt: Date?
     let isMainWorktree: Bool
     let creationDate: Date
+    /// The repo's integration checkout rather than a fleet member. It has no
+    /// agent, so its status and activity describe a shell, not work — see
+    /// `groups(_:mode:now:calendar:)` for what that changes.
+    let isIntegration: Bool
+
+    init(
+        id: String,
+        path: String,
+        repository: String,
+        status: AgentStatus,
+        lastActivityAt: Date?,
+        isMainWorktree: Bool,
+        creationDate: Date,
+        isIntegration: Bool = false
+    ) {
+        self.id = id
+        self.path = path
+        self.repository = repository
+        self.status = status
+        self.lastActivityAt = lastActivityAt
+        self.isMainWorktree = isMainWorktree
+        self.creationDate = creationDate
+        self.isIntegration = isIntegration
+    }
 }
 
 extension WorktreeRowInfo {
-    func groupingItem(creationDate: Date) -> WorktreeGroupingItem {
+    func groupingItem(creationDate: Date, isIntegration: Bool = false) -> WorktreeGroupingItem {
         WorktreeGroupingItem(
             id: id,
             path: worktreePath,
@@ -43,7 +67,8 @@ extension WorktreeRowInfo {
             status: AgentStatus.highestPriority(paneStatuses),
             lastActivityAt: lastActivityAt,
             isMainWorktree: isMainWorktree,
-            creationDate: creationDate
+            creationDate: creationDate,
+            isIntegration: isIntegration
         )
     }
 }
@@ -64,11 +89,18 @@ enum WorktreeGrouping {
     ) -> [WorktreeGroup] {
         switch mode {
         case .repository, .pane:
+            // Belongs to its repo, so it belongs in the repo's group — pinned
+            // just under main rather than sorted among the agents.
             return repositoryGroups(items)
         case .status:
-            return statusGroups(items)
+            // Status groups answer "what needs me now" and time buckets answer
+            // "what has been happening". The integration checkout is neither: it
+            // has no agent, so its status is a shell's and its activity is
+            // terminal output. Including it would only dilute both views. It is
+            // surfaced separately instead.
+            return statusGroups(items.filter { !$0.isIntegration })
         case .activityTime:
-            return activityGroups(items, now: now, calendar: calendar)
+            return activityGroups(items.filter { !$0.isIntegration }, now: now, calendar: calendar)
         }
     }
 
@@ -165,6 +197,12 @@ enum WorktreeGrouping {
     ) -> Bool {
         if lhs.isMainWorktree != rhs.isMainWorktree {
             return lhs.isMainWorktree
+        }
+        // Pinned under main, explicitly rather than by creation date: it is a
+        // fixture of the repo, and sorting it by when it happened to be made
+        // would move it every time it is recreated.
+        if lhs.isIntegration != rhs.isIntegration {
+            return lhs.isIntegration
         }
         if lhs.creationDate != rhs.creationDate {
             return lhs.creationDate < rhs.creationDate
