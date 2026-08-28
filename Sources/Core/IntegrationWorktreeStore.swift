@@ -11,8 +11,14 @@ final class IntegrationWorktreeStore {
     static let shared = IntegrationWorktreeStore()
 
     private let store = PersistedStringMap(fileName: "integration-worktrees.json")
+    /// Membership cache. `isIntegrationWorktree` is asked once per pane per
+    /// render, on a two-second poll, so it must not rebuild a set each time.
+    private var knownPaths: Set<String>
+    private let lock = NSLock()
 
-    private init() {}
+    private init() {
+        knownPaths = store.values
+    }
 
     func worktreePath(forRepo repoPath: String) -> String? {
         store[WorktreeDiscovery.canonicalPath(repoPath)]?.nonEmptyTrimmed
@@ -23,17 +29,25 @@ final class IntegrationWorktreeStore {
             WorktreeDiscovery.canonicalPath(worktreePath),
             forKey: WorktreeDiscovery.canonicalPath(repoPath)
         )
+        refreshCache()
     }
 
     func forget(repoPath: String) {
         store.remove(forKey: WorktreeDiscovery.canonicalPath(repoPath))
+        refreshCache()
+    }
+
+    private func refreshCache() {
+        let values = store.values
+        lock.lock(); knownPaths = values; lock.unlock()
     }
 
     /// Whether this path is some repo's integration worktree. Used to keep it
     /// out of the fleet groupings, so it is asked often and must not touch disk.
     func isIntegrationWorktree(_ path: String) -> Bool {
-        let canonical = WorktreeDiscovery.canonicalPath(path)
-        return store.values.contains(canonical)
+        lock.lock(); let known = knownPaths; lock.unlock()
+        guard !known.isEmpty else { return false }
+        return known.contains(WorktreeDiscovery.canonicalPath(path))
     }
 }
 

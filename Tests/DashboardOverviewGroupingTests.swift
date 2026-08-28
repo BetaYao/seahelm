@@ -197,6 +197,71 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    // MARK: - the integration banner
+
+    /// Status and time groupings leave the checkout out of the list on purpose,
+    /// so it needs somewhere else to be visible. The banner is that place, and
+    /// it must not appear in the modes that already show the checkout as a row.
+    func testBannerAppearsOnlyInStatusAndTimeGroupings() {
+        withDefaults { defaults in
+            let view = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
+            view.update(fleetWithIntegration())
+
+            XCTAssertEqual(view.integrationBannerLinesForTesting, [],
+                           "grouped by project the checkout is a pinned row, not a banner")
+
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+
+            view.selectGroupingModeForTesting(.activityTime)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+
+            view.selectGroupingModeForTesting(.pane)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, [])
+        }
+    }
+
+    /// A checkout that exists but has never been built still says so, rather
+    /// than showing an empty strip.
+    func testBannerFallsBackWhenNoRoundHasRunYet() {
+        withDefaults { defaults in
+            let view = makeViewWithIntegration(defaults: defaults, status: nil)
+            view.update(fleetWithIntegration())
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · not built yet"])
+        }
+    }
+
+    func testNoBannerWithoutAnIntegrationCheckout() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults, now: { self.now },
+                                             isIntegrationWorktree: { _ in false },
+                                             integrationStatus: { _ in nil })
+            view.update(fleetWithIntegration())
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, [])
+        }
+    }
+
+    private func makeViewWithIntegration(defaults: UserDefaults, status: String?) -> DashboardOverviewView {
+        DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                              defaults: defaults, now: { self.now },
+                              isIntegrationWorktree: { $0 == "/alpha-worktrees/integration" },
+                              integrationStatus: { _ in status })
+    }
+
+    private func fleetWithIntegration() -> [WorktreeRowInfo] {
+        [
+            makePane(name: "main", project: "alpha", worktreePath: "/alpha",
+                     paneStatuses: [.idle], isMainWorktree: true,
+                     lastActivityAt: now.addingTimeInterval(-100)),
+            makePane(name: "integration", project: "alpha", worktreePath: "/alpha-worktrees/integration",
+                     paneStatuses: [.idle], isMainWorktree: false,
+                     lastActivityAt: now.addingTimeInterval(-50)),
+        ]
+    }
+
     func testPausedRenderHoldsRowsUntilResumed() {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
