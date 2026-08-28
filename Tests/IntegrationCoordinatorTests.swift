@@ -127,7 +127,8 @@ final class IntegrationCoordinatorTests: XCTestCase {
                         result: IntegrationResult(commit: "c", tree: "t", base: "b",
                                                   included: [], excluded: [], conflictedPaths: []),
                         outcome: .unchanged(commit: "c"),
-                        unsnapshotable: []
+                        unsnapshotable: [],
+                        committedOnly: []
                     )
                 }
             )

@@ -87,6 +87,13 @@ enum WorktreeSnapshotter {
         return WorktreeSnapshot(commit: commit, tree: tree, head: head)
     }
 
+    /// The worktree's HEAD, with nothing on top. For a worktree whose agent is
+    /// mid-turn: its last self-consistent state, where a live snapshot would
+    /// catch half a file.
+    static func head(worktreePath: String) -> String? {
+        revParse("HEAD", in: worktreePath)
+    }
+
     /// `commit-tree` with seahelm's identity, so it works in a repo where the
     /// user has configured none.
     static func commitTree(

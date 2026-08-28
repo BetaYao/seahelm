@@ -128,6 +128,7 @@ class TabCoordinator {
             },
             integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
             isCheckoutBusy: { AgentRegistry.shared.pane(forWorktree: $0)?.status == .running },
+            isWorktreeBusy: { AgentRegistry.shared.pane(forWorktree: $0)?.status == .running },
             onReport: { [weak self] report, _ in
                 IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
                 guard report.needsAttention else { return }

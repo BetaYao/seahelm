@@ -8,6 +8,9 @@ struct IntegrationRunReport: Equatable {
     /// Worktrees that offered nothing — no HEAD to snapshot, usually an unborn
     /// branch. Reported rather than silently skipped.
     let unsnapshotable: [String]
+    /// Worktrees taken at HEAD because their agent was mid-turn, so their
+    /// uncommitted work is not in this round.
+    let committedOnly: [String]
 
     /// Whether this round is worth telling the user about. A clean publish is
     /// meant to be invisible; anything dropped, marked or held is not.
@@ -27,6 +30,11 @@ struct IntegrationRunReport: Equatable {
             : "integration · \(result.included.count) worktree\(result.included.count == 1 ? "" : "s")"
         if !result.excluded.isEmpty {
             line += " · excluded \(result.excluded.map(\.label).joined(separator: ", "))"
+        }
+        if !committedOnly.isEmpty {
+            // Ambient, not a card: an agent still working is the normal case,
+            // and raising one every round would be pure noise.
+            line += " · \(committedOnly.count) still working"
         }
         if case .held = outcome {
             line += " · pending"
@@ -68,6 +76,9 @@ struct IntegrationRunReport: Equatable {
         }
         if !result.conflictedPaths.isEmpty {
             parts.append("conflict markers in \(result.conflictedPaths.joined(separator: ", "))")
+        }
+        if !committedOnly.isEmpty {
+            parts.append("committed work only from \(committedOnly.joined(separator: ", ")) — still working")
         }
         switch outcome {
         case .published: break
@@ -116,12 +127,20 @@ enum IntegrationRunner {
     ///   - integrationPath: the checkout to publish into. Created if absent.
     ///   - worktrees: the repo's worktrees, main and integration included; both
     ///     are filtered out here.
+    ///   - isBusy: whether a worktree has an agent mid-turn. A round is
+    ///     triggered by *one* agent finishing, but it folds in every worktree,
+    ///     and the others may be mid-write — half a file, half a rename. Those
+    ///     contribute their HEAD instead: their last self-consistent state,
+    ///     rather than a torn one that could fail the integration in a way that
+    ///     looks like a real conflict. They come in whole on the round their own
+    ///     turn ends.
     static func run(
         repoPath: String,
         integrationPath: String,
         worktrees: [WorktreeInfo],
         mode: IntegrationConflictMode = .excludeConflicting,
-        force: Bool = false
+        force: Bool = false,
+        isBusy: (String) -> Bool = { _ in false }
     ) throws -> IntegrationRunReport {
         guard let base = GitDiff.resolveBaseRef(worktreePath: repoPath) else {
             throw IntegrationRunError.noBaseRef
@@ -142,7 +161,19 @@ enum IntegrationRunner {
 
         var integrationSources: [IntegrationSource] = []
         var unsnapshotable: [String] = []
+        var partial: [String] = []
         for worktree in candidates {
+            if isBusy(worktree.path) {
+                guard let head = WorktreeSnapshotter.head(worktreePath: worktree.path) else {
+                    unsnapshotable.append(worktree.displayName)
+                    continue
+                }
+                partial.append(worktree.displayName)
+                integrationSources.append(
+                    IntegrationSource(label: worktree.displayName, commit: head)
+                )
+                continue
+            }
             guard let snapshot = WorktreeSnapshotter.snapshot(worktreePath: worktree.path) else {
                 unsnapshotable.append(worktree.displayName)
                 continue
@@ -166,7 +197,8 @@ enum IntegrationRunner {
             integrationWorktreePath: integrationPath,
             result: result,
             outcome: outcome,
-            unsnapshotable: unsnapshotable
+            unsnapshotable: unsnapshotable,
+            committedOnly: partial
         )
     }
 }

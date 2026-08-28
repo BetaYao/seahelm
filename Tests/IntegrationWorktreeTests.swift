@@ -176,6 +176,46 @@ final class IntegrationWorktreeTests: XCTestCase {
         XCTAssertEqual(report.result.included, ["agentA"])
     }
 
+    /// A round is triggered by one agent finishing but folds in every
+    /// worktree. One that is still mid-turn contributes its HEAD, not a torn
+    /// working tree — half a file failing the integration would look like a
+    /// real conflict.
+    func testBusyWorktreeContributesItsCommittedWorkOnly() throws {
+        let repo = try makeFleet()
+        let worktrees = try addWorktrees(["agentA"], in: repo)
+        try "half written\n".write(toFile: worktrees[0].path + "/torn.txt", atomically: true, encoding: .utf8)
+        let path = tempDir.appendingPathComponent("integration").path
+
+        let report = try IntegrationRunner.run(
+            repoPath: repo, integrationPath: path, worktrees: worktrees,
+            isBusy: { _ in true }
+        )
+        XCTAssertEqual(report.result.included, ["agentA"])
+        XCTAssertEqual(report.committedOnly, ["agentA"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path + "/a.txt"), "its commit is in")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path + "/torn.txt"),
+                       "its half-written file is not")
+        // An agent still working is the normal case, so a partial round stays
+        // quiet: the note is ambient on the card, not a card of its own.
+        XCTAssertFalse(report.needsAttention)
+        XCTAssertTrue(report.cardLine.contains("1 still working"), report.cardLine)
+    }
+
+    /// The same worktree comes in whole once its turn ends.
+    func testWorkArrivesInFullOnTheRoundAfterTheAgentStops() throws {
+        let repo = try makeFleet()
+        let worktrees = try addWorktrees(["agentA"], in: repo)
+        try "now finished\n".write(toFile: worktrees[0].path + "/torn.txt", atomically: true, encoding: .utf8)
+        let path = tempDir.appendingPathComponent("integration").path
+
+        _ = try IntegrationRunner.run(repoPath: repo, integrationPath: path,
+                                      worktrees: worktrees, isBusy: { _ in true })
+        let after = try IntegrationRunner.run(repoPath: repo, integrationPath: path,
+                                              worktrees: worktrees, isBusy: { _ in false })
+        XCTAssertTrue(after.committedOnly.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path + "/torn.txt"))
+    }
+
     func testSourceOrderIsStable() throws {
         let repo = try makeFleet()
         let worktrees = try addWorktrees(["agentD", "agentA"], in: repo)

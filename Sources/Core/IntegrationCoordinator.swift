@@ -29,6 +29,9 @@ final class IntegrationCoordinator {
     private let worktrees: (String) -> [WorktreeInfo]
     private let integrationPath: (String) -> String?
     private let isCheckoutBusy: (String) -> Bool
+    /// Whether a worktree has an agent mid-turn. Such a worktree contributes its
+    /// HEAD rather than a live snapshot — see `IntegrationRunner.run`.
+    private let isWorktreeBusy: (String) -> Bool
     private let onReport: (IntegrationRunReport, String) -> Void
     private let runRound: (String, String, [WorktreeInfo]) throws -> IntegrationRunReport
 
@@ -42,10 +45,9 @@ final class IntegrationCoordinator {
         worktrees: @escaping (String) -> [WorktreeInfo],
         integrationPath: @escaping (String) -> String?,
         isCheckoutBusy: @escaping (String) -> Bool,
+        isWorktreeBusy: @escaping (String) -> Bool = { _ in false },
         onReport: @escaping (IntegrationRunReport, String) -> Void,
-        runRound: @escaping (String, String, [WorktreeInfo]) throws -> IntegrationRunReport = { repo, path, trees in
-            try IntegrationRunner.run(repoPath: repo, integrationPath: path, worktrees: trees)
-        }
+        runRound: ((String, String, [WorktreeInfo]) throws -> IntegrationRunReport)? = nil
     ) {
         self.coalesceWindow = coalesceWindow
         self.isEnabled = isEnabled
@@ -53,8 +55,12 @@ final class IntegrationCoordinator {
         self.worktrees = worktrees
         self.integrationPath = integrationPath
         self.isCheckoutBusy = isCheckoutBusy
+        self.isWorktreeBusy = isWorktreeBusy
         self.onReport = onReport
-        self.runRound = runRound
+        self.runRound = runRound ?? { repo, path, trees in
+            try IntegrationRunner.run(repoPath: repo, integrationPath: path,
+                                      worktrees: trees, isBusy: isWorktreeBusy)
+        }
     }
 
     /// An agent status outcome. Only the edge out of `.running` schedules work.
