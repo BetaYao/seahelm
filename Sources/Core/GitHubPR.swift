@@ -24,14 +24,21 @@ struct GitHubPR: Codable {
     let closedAt: String?
     let mergedAt: String?
 
-    let additions: Int
-    let deletions: Int
-    let changedFiles: Int
-    let comments: Int
-    let reviewComments: Int
-    let commits: Int
+    // The list endpoint (`GET /repos/{owner}/{repo}/pulls`) omits all of these:
+    // they exist only on the single-PR endpoint. Declaring them non-optional
+    // made every list decode fail with `keyNotFound`, so the PR list could
+    // never load for any repo. Optional here, filled in by `getPR`.
+    let additions: Int?
+    let deletions: Int?
+    let changedFiles: Int?
+    let comments: Int?
+    let reviewComments: Int?
+    let commits: Int?
 
     let mergeable: Bool?           // 可能为 null（还在计算）
+
+    /// Whether this came from the single-PR endpoint, and so carries counts.
+    var hasDetailCounts: Bool { additions != nil && deletions != nil }
 
     enum CodingKeys: String, CodingKey {
         case number, title, body, state, draft
