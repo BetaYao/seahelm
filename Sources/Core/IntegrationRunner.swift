@@ -34,6 +34,22 @@ struct IntegrationRunReport: Equatable {
         return line
     }
 
+    /// Everything the card, the banner and the Changes panel show, from one
+    /// round, so they cannot disagree about it.
+    var panelState: IntegrationPanelState {
+        var held = false
+        if case .held = outcome { held = true }
+        return IntegrationPanelState(
+            line: cardLine,
+            included: result.included,
+            excluded: result.excluded.map {
+                IntegrationPanelState.Excluded(label: $0.label, paths: $0.conflictingPaths)
+            },
+            conflictedPaths: result.conflictedPaths,
+            isHeld: held
+        )
+    }
+
     /// One line for a notification or the helm.
     var summary: String {
         var parts: [String] = []

@@ -1290,7 +1290,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     )
                     DispatchQueue.main.async {
                         IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
-                        IntegrationStatusStore.shared.set(report.cardLine, forWorktree: report.integrationWorktreePath)
+                        IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
                     }
                     reply(report.summary)
                 } catch {
@@ -1444,7 +1444,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     // checkout, so a failed first run does not leave the store
                     // pointing at a directory that was never created.
                     IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
-                    IntegrationStatusStore.shared.set(report.cardLine, forWorktree: report.integrationWorktreePath)
+                    IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
                     // A round that published cleanly is meant to be invisible —
                     // the integration worktree is simply current. Only speak up
                     // when something was dropped or held back.
