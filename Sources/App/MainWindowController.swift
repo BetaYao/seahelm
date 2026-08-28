@@ -924,6 +924,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
             // its createForm keyboard substate were removed).
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
         }
+        dashboard.onIntegrateProject = { [weak self] project in
+            guard let self, let repoPath = self.tabCoordinator.repoPath(forProject: project) else {
+                NSSound.beep()
+                return
+            }
+            self.runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: false)
+        }
         dashboard.onAddWorktreeToProject = { [weak self] project, rect, anchor in
             self?.presentAddWorktreePopover(project: project, rect: rect, anchor: anchor)
         }
@@ -1407,6 +1414,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
             NSSound.beep()
             return
         }
+        runIntegration(repoPath: repoPath, mode: mode, force: force)
+    }
+
+    private func runIntegration(repoPath: String, mode: IntegrationConflictMode, force: Bool) {
         let worktrees = tabCoordinator.allWorktrees
             .map(\.info)
             .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }

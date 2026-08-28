@@ -163,6 +163,40 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    /// The integrate button is the feature's only announcement — without it,
+    /// `/integrate` is a command you have to already know exists.
+    func testProjectGroupsCarryAnIntegrateButtonOnlyWhereThereIsSomethingToFold() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makePane(name: "one", project: "alpha", worktreePath: "/a1",
+                         paneStatuses: [.idle], isMainWorktree: true,
+                         lastActivityAt: now.addingTimeInterval(-100)),
+                makePane(name: "two", project: "alpha", worktreePath: "/a2",
+                         paneStatuses: [.idle], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-200)),
+                // A single-worktree project has nothing to fold together.
+                makePane(name: "solo", project: "bravo", worktreePath: "/b1",
+                         paneStatuses: [.idle], isMainWorktree: true,
+                         lastActivityAt: now.addingTimeInterval(-300)),
+            ])
+
+            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
+
+            view.selectGroupingModeForTesting(.pane)
+            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
+
+            // Status and time groups have no project header to hang it on, and
+            // the checkout is deliberately absent from those views anyway.
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrateProjectsForTesting, [])
+            view.selectGroupingModeForTesting(.activityTime)
+            XCTAssertEqual(view.integrateProjectsForTesting, [])
+        }
+    }
+
     func testPausedRenderHoldsRowsUntilResumed() {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),

@@ -103,6 +103,9 @@ class DashboardViewController: NSViewController {
     /// The "+" on a project group header was clicked. Args: the project title and
     /// the rect + view to anchor the create popover to.
     var onAddWorktreeToProject: ((String, NSRect, NSView) -> Void)?
+    /// Fold this project's worktrees into its integration checkout. Equivalent
+    /// to typing `/integrate` with that repo selected.
+    var onIntegrateProject: ((String) -> Void)?
     /// The fleet header "+" was clicked: open the folder picker to add a repo.
     var onRequestAddRepo: (() -> Void)?
 
@@ -354,6 +357,9 @@ class DashboardViewController: NSViewController {
         // "+" on a project group header: the anchored create form, scoped to that
         // project. The window owns the create itself (it holds the repo map and the
         // worktree-create path), so forward the click with its anchor view.
+        overviewView.onIntegrate = { [weak self] project in
+            self?.onIntegrateProject?(project)
+        }
         overviewView.onAddWorktree = { [weak self] project, rect, anchor in
             self?.onAddWorktreeToProject?(project, rect, anchor)
         }
@@ -1972,6 +1978,7 @@ final class DashboardOverviewView: NSView {
     /// the button's rect in this view's coordinates, and this view (the popover's
     /// anchor — see `addWorktreeClicked`).
     var onAddWorktree: ((String, NSRect, NSView) -> Void)?
+    var onIntegrate: ((String) -> Void)?
     /// The header "+" was clicked: add a repo via the folder picker.
     var onAddRepo: (() -> Void)?
     /// The bottom shortcut strip was clicked — show the full `?` cheat-sheet.
@@ -2014,7 +2021,11 @@ final class DashboardOverviewView: NSView {
     /// Project title per "add worktree" button, indexed by the button's tag —
     /// rebuilt with the rows on every render.
     private var addWorktreeProjects: [String] = []
+    /// Tag → project for the integrate buttons, rebuilt on every full render
+    /// exactly like `addWorktreeProjects`.
+    private var integrateProjects: [String] = []
     private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
+    private static let integrateButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.integrate")
     private var revealedRowID: String?
     /// The one row currently painting the hover tint, if any.
     private weak var hoveredRow: FleetHoverRow?
@@ -2349,6 +2360,7 @@ final class DashboardOverviewView: NSView {
         paneRowViewsByStationID = [:]
         renderedGroupTitles = []
         addWorktreeProjects = []
+        integrateProjects = []
         revealedRowID = nil
 
         for (groupIndex, group) in groups.enumerated() {
@@ -2543,6 +2555,15 @@ final class DashboardOverviewView: NSView {
             .filter { $0.identifier == Self.addWorktreeButtonIdentifier }
             .compactMap { addWorktreeProjects[safeIndex: $0.tag] }
     }
+    /// Project titles behind the rendered "integrate" buttons, in group order.
+    var integrateProjectsForTesting: [String] {
+        stack.arrangedSubviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap { $0.arrangedSubviews }
+            .compactMap { $0 as? NSButton }
+            .filter { $0.identifier == Self.integrateButtonIdentifier }
+            .compactMap { integrateProjects[safeIndex: $0.tag] }
+    }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     /// Ids of every row currently painting the hover tint — more than one means
     /// the scroll-leaves-a-trail bug is back.
@@ -2605,6 +2626,12 @@ final class DashboardOverviewView: NSView {
             let spacer = NSView()
             spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
             views.append(spacer)
+            // Only worth offering once there is more than one worktree to fold
+            // together — on a single-worktree project it would integrate a repo
+            // with itself.
+            if group.items.count > 1 {
+                views.append(makeIntegrateButton(project: group.title))
+            }
             let button = makeAddWorktreeButton(project: group.title)
             views.append(button)
             addButton = button
@@ -2620,6 +2647,44 @@ final class DashboardOverviewView: NSView {
             addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         return row
+    }
+
+    /// Trailing "integrate" affordance on a project group header. Equivalent to
+    /// `/integrate` with that repo selected, and the only place the feature
+    /// announces itself — otherwise it is a command you have to already know.
+    private func makeIntegrateButton(project: String) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.refusesFirstResponder = true
+        if let image = NSImage(systemSymbolName: "arrow.trianglehead.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+            ?? NSImage(systemSymbolName: "arrow.triangle.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) {
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+        } else {
+            button.title = "⑃"
+            button.font = AppFont.mono(size: 12)
+        }
+        button.contentTintColor = Self.inkFaint
+        let description = "Integrate \(project)"
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
+        button.identifier = Self.integrateButtonIdentifier
+        button.target = self
+        button.action = #selector(integrateClicked(_:))
+        button.tag = integrateProjects.count
+        integrateProjects.append(project)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
+    @objc private func integrateClicked(_ sender: NSButton) {
+        guard let project = integrateProjects[safeIndex: sender.tag] else { return }
+        onIntegrate?(project)
     }
 
     /// Trailing "add worktree" affordance on a project group header. Equivalent
