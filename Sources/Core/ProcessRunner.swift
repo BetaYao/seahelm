@@ -39,6 +39,7 @@ enum ProcessRunner {
         arguments: [String],
         currentDirectory: String? = nil,
         standardInput: String? = nil,
+        environment: [String: String]? = nil,
         timeout: TimeInterval?,
         maxCapturedBytes: Int = defaultMaxCapturedBytes
     ) -> Capture {
@@ -47,6 +48,11 @@ enum ProcessRunner {
         process.arguments = arguments
         if let currentDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        }
+        if let environment {
+            // Merged over the inherited environment, never replacing it: a bare
+            // dictionary would strip PATH and HOME, and git reads both.
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         }
 
         let outPipe = Pipe()

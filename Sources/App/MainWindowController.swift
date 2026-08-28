@@ -849,6 +849,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
 
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
+        dashboard.integrationEnabled = config.integrationEnabled
         dashboard.dashboardDelegate = self
         dashboard.hasWorkspaces = { [weak self] in
             !(self?.tabCoordinator.config.workspacePaths.isEmpty ?? true)
@@ -923,6 +924,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
             // Opens the Helm cockpit with `/new ` prefilled (the inline creator and
             // its createForm keyboard substate were removed).
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
+        }
+        dashboard.onIntegrateProject = { [weak self] project in
+            guard let self, let repoPath = self.tabCoordinator.repoPath(forProject: project) else {
+                NSSound.beep()
+                return
+            }
+            self.runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: false)
         }
         dashboard.onAddWorktreeToProject = { [weak self] project, rect, anchor in
             self?.presentAddWorktreePopover(project: project, rect: rect, anchor: anchor)
@@ -1259,6 +1267,42 @@ dashboard.stationManager = terminalCoordinator.stationManager
             openGitHubIssue(title: title)
             reply("Opening GitHub issue for **seahelm**…")
 
+        case .integrate(let mode, let force):
+            // Nothing here can disturb a worktree until the final checkout, so
+            // this is safe to run straight from a message rather than carded.
+            guard config.integrationEnabled else {
+                reply("Integration is turned off in Settings.")
+                return
+            }
+            guard let selected = tabCoordinator.config.selectedWorktreePath,
+                  let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
+                reply("No repo selected.")
+                return
+            }
+            let worktrees = tabCoordinator.allWorktrees
+                .map(\.info)
+                .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
+            let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
+                ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let report = try IntegrationRunner.run(
+                        repoPath: repoPath,
+                        integrationPath: integrationPath,
+                        worktrees: worktrees,
+                        mode: mode,
+                        force: force
+                    )
+                    DispatchQueue.main.async {
+                        IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
+                        IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
+                    }
+                    reply(report.summary)
+                } catch {
+                    reply("Integration failed: \(error.localizedDescription)")
+                }
+            }
+
         case .removeAll:
             // Cards, exactly as on the desktop. A blind sweep is the one place
             // direct execution could delete several worktrees from one stray line.
@@ -1354,9 +1398,92 @@ dashboard.stationManager = terminalCoordinator.stationManager
             flagIssue: { [weak self] title in
                 self?.openGitHubIssue(title: title)
             },
+            integrate: { [weak self] mode, force in
+                self?.runIntegration(mode: mode, force: force)
+            },
             activePaneCount: { AgentRegistry.shared.allPanes().count },
             branchForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.branch ?? "" },
             projectForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.project ?? "" }
+        )
+    }
+
+    /// One `/integrate` round for the current repo.
+    ///
+    /// Snapshotting and merging shell out several times over, so it runs off
+    /// the main thread; only the report comes back. Nothing it does before the
+    /// final checkout can disturb a worktree, so an interrupted or failed round
+    /// simply leaves everything as it was.
+    private func runIntegration(mode: IntegrationConflictMode, force: Bool) {
+        guard let selected = tabCoordinator.config.selectedWorktreePath,
+              let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
+            NSSound.beep()
+            return
+        }
+        runIntegration(repoPath: repoPath, mode: mode, force: force)
+    }
+
+    private func runIntegration(repoPath: String, mode: IntegrationConflictMode, force: Bool) {
+        guard config.integrationEnabled else {
+            enqueueIntegrationReport(
+                "Integration is turned off in Settings ▸ General ▸ Integration",
+                repoPath: repoPath
+            )
+            return
+        }
+        let worktrees = tabCoordinator.allWorktrees
+            .map(\.info)
+            .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
+        let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
+            ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome: Result<IntegrationRunReport, Error>
+            do {
+                outcome = .success(try IntegrationRunner.run(
+                    repoPath: repoPath,
+                    integrationPath: integrationPath,
+                    worktrees: worktrees,
+                    mode: mode,
+                    force: force
+                ))
+            } catch {
+                outcome = .failure(error)
+            }
+            DispatchQueue.main.async { [weak self] in
+                switch outcome {
+                case .success(let report):
+                    // Record only once the round got far enough to have a
+                    // checkout, so a failed first run does not leave the store
+                    // pointing at a directory that was never created.
+                    IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
+                    IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
+                    // A round that published cleanly is meant to be invisible —
+                    // the integration worktree is simply current. Only speak up
+                    // when something was dropped or held back.
+                    if report.needsAttention {
+                        self?.enqueueIntegrationReport(report.summary, repoPath: repoPath)
+                    }
+                case .failure(let error):
+                    self?.enqueueIntegrationReport(
+                        "Integration failed: \(error.localizedDescription)",
+                        repoPath: repoPath
+                    )
+                }
+            }
+        }
+    }
+
+    private func enqueueIntegrationReport(_ message: String, repoPath: String) {
+        tabCoordinator.pendingOrders.enqueue(
+            FirstMateAction(
+                kind: .integrationReport,
+                zone: .red,
+                worktreePath: repoPath,
+                branch: "",
+                project: tabCoordinator.repoName(forWorktree: repoPath),
+                terminalID: "",
+                message: message
+            )
         )
     }
 
@@ -2720,6 +2847,7 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.config = merged
         terminalCoordinator.config = merged
         updateCoordinator.config = merged
+        dashboardVC?.integrationEnabled = merged.integrationEnabled
         normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)

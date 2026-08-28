@@ -103,6 +103,13 @@ class DashboardViewController: NSViewController {
     /// The "+" on a project group header was clicked. Args: the project title and
     /// the rect + view to anchor the create popover to.
     var onAddWorktreeToProject: ((String, NSRect, NSView) -> Void)?
+    /// Fold this project's worktrees into its integration checkout. Equivalent
+    /// to typing `/integrate` with that repo selected.
+    var onIntegrateProject: ((String) -> Void)?
+    /// Master switch for the integration feature, forwarded to the fleet view.
+    var integrationEnabled: Bool = true {
+        didSet { overviewView.integrationEnabled = integrationEnabled }
+    }
     /// The fleet header "+" was clicked: open the folder picker to add a repo.
     var onRequestAddRepo: (() -> Void)?
 
@@ -354,6 +361,9 @@ class DashboardViewController: NSViewController {
         // "+" on a project group header: the anchored create form, scoped to that
         // project. The window owns the create itself (it holds the repo map and the
         // worktree-create path), so forward the click with its anchor view.
+        overviewView.onIntegrate = { [weak self] project in
+            self?.onIntegrateProject?(project)
+        }
         overviewView.onAddWorktree = { [weak self] project, rect, anchor in
             self?.onAddWorktreeToProject?(project, rect, anchor)
         }
@@ -1972,6 +1982,7 @@ final class DashboardOverviewView: NSView {
     /// the button's rect in this view's coordinates, and this view (the popover's
     /// anchor — see `addWorktreeClicked`).
     var onAddWorktree: ((String, NSRect, NSView) -> Void)?
+    var onIntegrate: ((String) -> Void)?
     /// The header "+" was clicked: add a repo via the folder picker.
     var onAddRepo: (() -> Void)?
     /// The bottom shortcut strip was clicked — show the full `?` cheat-sheet.
@@ -2014,7 +2025,34 @@ final class DashboardOverviewView: NSView {
     /// Project title per "add worktree" button, indexed by the button's tag —
     /// rebuilt with the rows on every render.
     private var addWorktreeProjects: [String] = []
+    /// Tag → project for the integrate buttons, rebuilt on every full render
+    /// exactly like `addWorktreeProjects`.
+    private var integrateProjects: [String] = []
+    /// Integration checkouts, shown above the fleet in the modes that group by
+    /// status or time. Deliberately outside `stack`: those groupings leave the
+    /// checkout out, and a banner inside the scrolling stack would go stale
+    /// whenever `render` takes the incremental path.
+    /// Seams, so a test can describe a fleet with an integration checkout
+    /// without writing into the user's real config directory.
+    private let isIntegrationWorktree: (String) -> Bool
+    private let integrationStatus: (String) -> String?
+    /// Master switch, pushed down from settings. Off hides the button, the
+    /// banner and the pinned row — the checkout on disk is left alone.
+    var integrationEnabled: Bool = true {
+        didSet {
+            guard integrationEnabled != oldValue else { return }
+            // The flag changes what the header and banner hold, which the
+            // structure signature does not describe — drop it so the next pass
+            // is a full render rather than an incremental one.
+            lastStructureSignature = nil
+            render(latestPanes, revealSelection: false)
+        }
+    }
+    private let integrationBanner = NSStackView()
+    private var integrationBannerHeight: NSLayoutConstraint!
+    private var integrationBannerLines: [String] = []
     private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
+    private static let integrateButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.integrate")
     private var revealedRowID: String?
     /// The one row currently painting the hover tint, if any.
     private weak var hoveredRow: FleetHoverRow?
@@ -2032,6 +2070,8 @@ final class DashboardOverviewView: NSView {
         let preference = WorktreeGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
+        isIntegrationWorktree = { IntegrationWorktreeStore.shared.isIntegrationWorktree($0) }
+        integrationStatus = { IntegrationStatusStore.shared.status(forWorktree: $0) }
         groupingMode = preference.load()
         super.init(frame: frameRect)
         setup()
@@ -2040,15 +2080,25 @@ final class DashboardOverviewView: NSView {
         let preference = WorktreeGroupingPreference(defaults: .standard)
         groupingPreference = preference
         now = Date.init
+        isIntegrationWorktree = { IntegrationWorktreeStore.shared.isIntegrationWorktree($0) }
+        integrationStatus = { IntegrationStatusStore.shared.status(forWorktree: $0) }
         groupingMode = preference.load()
         super.init(coder: coder)
         setup()
     }
 
-    init(frame frameRect: NSRect, defaults: UserDefaults, now: @escaping () -> Date) {
+    init(
+        frame frameRect: NSRect,
+        defaults: UserDefaults,
+        now: @escaping () -> Date,
+        isIntegrationWorktree: @escaping (String) -> Bool = { IntegrationWorktreeStore.shared.isIntegrationWorktree($0) },
+        integrationStatus: @escaping (String) -> String? = { IntegrationStatusStore.shared.status(forWorktree: $0) }
+    ) {
         let preference = WorktreeGroupingPreference(defaults: defaults)
         groupingPreference = preference
         self.now = now
+        self.isIntegrationWorktree = isIntegrationWorktree
+        self.integrationStatus = integrationStatus
         groupingMode = preference.load()
         super.init(frame: frameRect)
         setup()
@@ -2103,6 +2153,13 @@ final class DashboardOverviewView: NSView {
                                                object: scroll.contentView)
         addSubview(scroll)
 
+        // --- Integration banner (status / time groupings only) ---
+        integrationBanner.orientation = .vertical
+        integrationBanner.spacing = 3
+        integrationBanner.alignment = .leading
+        integrationBanner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(integrationBanner)
+
         // --- Bottom shortcut strip ---
         hintBar.onShowAllShortcuts = { [weak self] in self?.onShowAllShortcuts?() }
         addSubview(hintBar)
@@ -2117,7 +2174,11 @@ final class DashboardOverviewView: NSView {
             headerLine.trailingAnchor.constraint(equalTo: trailingAnchor),
             headerLine.heightAnchor.constraint(equalToConstant: 1),
 
-            scroll.topAnchor.constraint(equalTo: headerLine.bottomAnchor, constant: 14),
+            integrationBanner.topAnchor.constraint(equalTo: headerLine.bottomAnchor, constant: 10),
+            integrationBanner.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
+            integrationBanner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+
+            scroll.topAnchor.constraint(equalTo: integrationBanner.bottomAnchor, constant: 4),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: hintBar.topAnchor),
@@ -2128,6 +2189,45 @@ final class DashboardOverviewView: NSView {
 
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
         ])
+        // Collapsed by default; height is the only thing that moves, so showing
+        // and hiding it never reflows the rest of the column.
+        integrationBannerHeight = integrationBanner.heightAnchor.constraint(equalToConstant: 0)
+        integrationBannerHeight.isActive = true
+    }
+
+    /// Rebuilds the banner from the panes that are integration checkouts.
+    ///
+    /// Called on every update, including the ones that take the incremental
+    /// path, because the line changes far more often than the fleet's structure
+    /// does — that is the whole reason it lives outside `stack`.
+    private func refreshIntegrationBanner(_ panes: [WorktreeRowInfo]) {
+        let checkouts = integrationEnabled && (groupingMode == .status || groupingMode == .activityTime)
+            ? panes.filter { isIntegrationWorktree($0.worktreePath) }
+            : []
+
+        // Compare the rendered text, not the paths: the line changes far more
+        // often than the set of checkouts does, and rebuilding labels on every
+        // poll would churn views for nothing.
+        let lines = checkouts.map { checkout in
+            "⑃  " + (integrationStatus(checkout.worktreePath) ?? "integration · not built yet")
+        }
+        guard lines != integrationBannerLines else { return }
+        integrationBannerLines = lines
+
+        integrationBanner.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard !lines.isEmpty else {
+            integrationBannerHeight.constant = 0
+            return
+        }
+
+        for line in lines {
+            let label = NSTextField(labelWithString: line)
+            label.font = AppFont.mono(size: 11)
+            label.textColor = Self.inkDim
+            label.lineBreakMode = .byTruncatingTail
+            integrationBanner.addArrangedSubview(label)
+        }
+        integrationBannerHeight.constant = CGFloat(lines.count) * 15 + CGFloat(max(0, lines.count - 1)) * 3
     }
 
     /// Header: add a whole repo via the folder picker.
@@ -2305,7 +2405,12 @@ final class DashboardOverviewView: NSView {
         headerSub.stringValue = running > 0 ? "\(panes.count) · \(running) running" : "\(panes.count)"
 
         let panesByPath = Dictionary(panes.map { ($0.worktreePath, $0) }, uniquingKeysWith: { first, _ in first })
-        let groupingItems = panes.map { $0.groupingItem(creationDate: Self.creationDate($0.worktreePath)) }
+        let groupingItems = panes.map {
+            $0.groupingItem(
+                creationDate: Self.creationDate($0.worktreePath),
+                isIntegration: integrationEnabled && isIntegrationWorktree($0.worktreePath)
+            )
+        }
         let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
 
         // A mode switch is an explicit navigation action. If its previous
@@ -2317,6 +2422,8 @@ final class DashboardOverviewView: NSView {
            !groups.contains(where: { group in group.items.contains(where: { $0.id == selectedId }) }) {
             selectedId = groups.first?.items.first?.id ?? ""
         }
+
+        refreshIntegrationBanner(panes)
 
         let structureSignature = Self.structureSignature(for: groups, panesByPath: panesByPath, groupingMode: groupingMode)
         if !revealSelection, structureSignature == lastStructureSignature {
@@ -2344,6 +2451,7 @@ final class DashboardOverviewView: NSView {
         paneRowViewsByStationID = [:]
         renderedGroupTitles = []
         addWorktreeProjects = []
+        integrateProjects = []
         revealedRowID = nil
 
         for (groupIndex, group) in groups.enumerated() {
@@ -2538,6 +2646,20 @@ final class DashboardOverviewView: NSView {
             .filter { $0.identifier == Self.addWorktreeButtonIdentifier }
             .compactMap { addWorktreeProjects[safeIndex: $0.tag] }
     }
+    /// Lines currently shown in the integration banner, top to bottom.
+    var integrationBannerLinesForTesting: [String] {
+        integrationBanner.arrangedSubviews
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+    }
+    /// Project titles behind the rendered "integrate" buttons, in group order.
+    var integrateProjectsForTesting: [String] {
+        stack.arrangedSubviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap { $0.arrangedSubviews }
+            .compactMap { $0 as? NSButton }
+            .filter { $0.identifier == Self.integrateButtonIdentifier }
+            .compactMap { integrateProjects[safeIndex: $0.tag] }
+    }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     /// Ids of every row currently painting the hover tint — more than one means
     /// the scroll-leaves-a-trail bug is back.
@@ -2600,6 +2722,12 @@ final class DashboardOverviewView: NSView {
             let spacer = NSView()
             spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
             views.append(spacer)
+            // Only worth offering once there is more than one worktree to fold
+            // together — on a single-worktree project it would integrate a repo
+            // with itself.
+            if integrationEnabled, group.items.count > 1 {
+                views.append(makeIntegrateButton(project: group.title))
+            }
             let button = makeAddWorktreeButton(project: group.title)
             views.append(button)
             addButton = button
@@ -2615,6 +2743,44 @@ final class DashboardOverviewView: NSView {
             addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         return row
+    }
+
+    /// Trailing "integrate" affordance on a project group header. Equivalent to
+    /// `/integrate` with that repo selected, and the only place the feature
+    /// announces itself — otherwise it is a command you have to already know.
+    private func makeIntegrateButton(project: String) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.refusesFirstResponder = true
+        if let image = NSImage(systemSymbolName: "arrow.trianglehead.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+            ?? NSImage(systemSymbolName: "arrow.triangle.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) {
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+        } else {
+            button.title = "⑃"
+            button.font = AppFont.mono(size: 12)
+        }
+        button.contentTintColor = Self.inkFaint
+        let description = "Integrate \(project)"
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
+        button.identifier = Self.integrateButtonIdentifier
+        button.target = self
+        button.action = #selector(integrateClicked(_:))
+        button.tag = integrateProjects.count
+        integrateProjects.append(project)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
+    @objc private func integrateClicked(_ sender: NSButton) {
+        guard let project = integrateProjects[safeIndex: sender.tag] else { return }
+        onIntegrate?(project)
     }
 
     /// Trailing "add worktree" affordance on a project group header. Equivalent

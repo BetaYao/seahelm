@@ -78,6 +78,10 @@ class SettingsViewController: NSViewController {
     private lazy var copyOnSelectToggle = SettingsControls.toggle(
         on: GhosttyConfigImporter.copyOnSelectEnabled(),
         target: self, action: #selector(copyOnSelectChanged))
+    private lazy var integrationEnabledToggle = SettingsControls.toggle(
+        on: config.integrationEnabled, target: self, action: #selector(integrationControlChanged))
+    private lazy var autoIntegrateToggle = SettingsControls.toggle(
+        on: config.autoIntegrate, target: self, action: #selector(controlChanged))
     private lazy var revealGhosttyConfButton = SettingsControls.button(
         "Reveal ghostty.conf", target: self, action: #selector(revealGhosttyConfClicked))
 
@@ -319,6 +323,7 @@ class SettingsViewController: NSViewController {
                                     content: SettingsControls.surface(pathScrollView), height: 140),
                 SettingsRow.actions([addButton, removeButton]),
             ]),
+            makeIntegrationGroup(),
             SettingsGroupView(title: "Terminal", rows: [
                 SettingsRow.make("Scrollback rows cached",
                                  subtitle: "How much of each pane's viewport the status poll re-reads every cycle.",
@@ -331,6 +336,20 @@ class SettingsViewController: NSViewController {
                                  control: revealGhosttyConfButton),
             ]),
         ]
+    }
+
+    private func makeIntegrationGroup() -> NSView {
+        // Built here rather than inline so the dependent toggle's enabled state
+        // is set once, at construction, and not left to the first click.
+        refreshIntegrationEnabledState()
+        return SettingsGroupView(title: "Integration", rows: [
+            SettingsRow.make("Integration worktree",
+                             subtitle: "A throwaway checkout per project holding every worktree folded onto trunk, to run integration tests in. Off hides it everywhere; a checkout already on disk is left alone.",
+                             control: integrationEnabledToggle),
+            SettingsRow.make("Keep it current",
+                             subtitle: "Rebuild it as agents finish turns. Only ever touches a project that already has a checkout — running /integrate once is what creates one.",
+                             control: autoIntegrateToggle),
+        ])
     }
 
     // MARK: - Agents
@@ -673,6 +692,16 @@ class SettingsViewController: NSViewController {
     /// there is nothing to cancel back to.
     @objc private func controlChanged() { applyChanges() }
 
+    /// The master switch owns whether the finer one can be reached at all.
+    @objc private func integrationControlChanged() {
+        refreshIntegrationEnabledState()
+        applyChanges()
+    }
+
+    private func refreshIntegrationEnabledState() {
+        autoIntegrateToggle.isEnabled = integrationEnabledToggle.state == .on
+    }
+
     @objc private func copyOnSelectChanged() {
         let enabled = copyOnSelectToggle.state == .on
         guard GhosttyConfigImporter.setCopyOnSelect(enabled) else { return }
@@ -687,6 +716,8 @@ class SettingsViewController: NSViewController {
     private func applyChanges() {
         // Update config from UI
         config.workspacePaths = workspacePaths
+        config.integrationEnabled = integrationEnabledToggle.state == .on
+        config.autoIntegrate = autoIntegrateToggle.state == .on
         config.terminalRowCacheSize = Int(cacheSizeField.stringValue) ?? 200
         config.agentMemoryGuard = AgentMemoryGuardConfig(
             warnMB: Self.parseGBField(memoryWarnField, fallbackMB: config.agentMemoryGuard.warnMB),

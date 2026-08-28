@@ -21,6 +21,8 @@ struct BridgeCommandRouter {
     let removeWorktree: (String) -> Void
     /// Open a pre-filled GitHub issue in the browser.
     let flagIssue: (String) -> Void
+    /// Run one integration round for the current repo and report what happened.
+    let integrate: (IntegrationConflictMode, Bool) -> Void
     let activePaneCount: () -> Int
     let branchForPath: (String) -> String
     let projectForPath: (String) -> String
@@ -47,6 +49,8 @@ struct BridgeCommandRouter {
             removeWorktree(path)
         case .flagIssue(let title):
             flagIssue(title)
+        case .integrate(let mode, let force):
+            integrate(mode, force)
         case .broadcast(let task):
             queue.enqueue(FirstMateAction(kind: .broadcastOrder, zone: .red, worktreePath: "",
                                           branch: "", project: "", terminalID: "",
