@@ -849,6 +849,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
 
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
+        dashboard.integrationEnabled = config.integrationEnabled
         dashboard.dashboardDelegate = self
         dashboard.hasWorkspaces = { [weak self] in
             !(self?.tabCoordinator.config.workspacePaths.isEmpty ?? true)
@@ -1269,6 +1270,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
         case .integrate(let mode, let force):
             // Nothing here can disturb a worktree until the final checkout, so
             // this is safe to run straight from a message rather than carded.
+            guard config.integrationEnabled else {
+                reply("Integration is turned off in Settings.")
+                return
+            }
             guard let selected = tabCoordinator.config.selectedWorktreePath,
                   let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
                 reply("No repo selected.")
@@ -1418,6 +1423,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     private func runIntegration(repoPath: String, mode: IntegrationConflictMode, force: Bool) {
+        guard config.integrationEnabled else {
+            enqueueIntegrationReport(
+                "Integration is turned off in Settings ▸ General ▸ Integration",
+                repoPath: repoPath
+            )
+            return
+        }
         let worktrees = tabCoordinator.allWorktrees
             .map(\.info)
             .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
@@ -2835,6 +2847,7 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.config = merged
         terminalCoordinator.config = merged
         updateCoordinator.config = merged
+        dashboardVC?.integrationEnabled = merged.integrationEnabled
         normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)

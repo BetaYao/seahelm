@@ -116,7 +116,10 @@ class TabCoordinator {
             }
         )
         integration = IntegrationCoordinator(
-            isEnabled: { [weak self] in self?.config.autoIntegrate ?? false },
+            isEnabled: { [weak self] in
+                guard let self else { return false }
+                return self.config.integrationEnabled && self.config.autoIntegrate
+            },
             repoRoot: { WorktreeDiscovery.findRepoRoot(from: $0) },
             worktrees: { [weak self] repo in
                 self?.allWorktrees

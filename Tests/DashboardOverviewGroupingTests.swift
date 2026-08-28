@@ -262,6 +262,42 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         ]
     }
 
+    // MARK: - the master switch
+
+    /// Off means the feature is not there: no button, no banner, and the
+    /// checkout stops being pinned — it just sorts as an ordinary worktree.
+    func testDisablingIntegrationHidesEverySurface() {
+        withDefaults { defaults in
+            let view = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
+            view.update(fleetWithIntegration())
+            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
+
+            view.integrationEnabled = false
+            XCTAssertEqual(view.integrateProjectsForTesting, [])
+
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, [])
+        }
+    }
+
+    /// Turning it back on restores them without needing new pane data — the
+    /// structure signature does not describe the flag, so the view has to force
+    /// a full render itself.
+    func testReEnablingIntegrationRestoresTheSurfacesWithoutNewData() {
+        withDefaults { defaults in
+            let view = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
+            view.update(fleetWithIntegration())
+            view.integrationEnabled = false
+            XCTAssertEqual(view.integrateProjectsForTesting, [])
+
+            view.integrationEnabled = true
+            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
+
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+        }
+    }
+
     func testPausedRenderHoldsRowsUntilResumed() {
         withDefaults { defaults in
             let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),

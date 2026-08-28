@@ -106,6 +106,10 @@ class DashboardViewController: NSViewController {
     /// Fold this project's worktrees into its integration checkout. Equivalent
     /// to typing `/integrate` with that repo selected.
     var onIntegrateProject: ((String) -> Void)?
+    /// Master switch for the integration feature, forwarded to the fleet view.
+    var integrationEnabled: Bool = true {
+        didSet { overviewView.integrationEnabled = integrationEnabled }
+    }
     /// The fleet header "+" was clicked: open the folder picker to add a repo.
     var onRequestAddRepo: (() -> Void)?
 
@@ -2032,6 +2036,18 @@ final class DashboardOverviewView: NSView {
     /// without writing into the user's real config directory.
     private let isIntegrationWorktree: (String) -> Bool
     private let integrationStatus: (String) -> String?
+    /// Master switch, pushed down from settings. Off hides the button, the
+    /// banner and the pinned row — the checkout on disk is left alone.
+    var integrationEnabled: Bool = true {
+        didSet {
+            guard integrationEnabled != oldValue else { return }
+            // The flag changes what the header and banner hold, which the
+            // structure signature does not describe — drop it so the next pass
+            // is a full render rather than an incremental one.
+            lastStructureSignature = nil
+            render(latestPanes, revealSelection: false)
+        }
+    }
     private let integrationBanner = NSStackView()
     private var integrationBannerHeight: NSLayoutConstraint!
     private var integrationBannerLines: [String] = []
@@ -2185,7 +2201,7 @@ final class DashboardOverviewView: NSView {
     /// path, because the line changes far more often than the fleet's structure
     /// does — that is the whole reason it lives outside `stack`.
     private func refreshIntegrationBanner(_ panes: [WorktreeRowInfo]) {
-        let checkouts = groupingMode == .status || groupingMode == .activityTime
+        let checkouts = integrationEnabled && (groupingMode == .status || groupingMode == .activityTime)
             ? panes.filter { isIntegrationWorktree($0.worktreePath) }
             : []
 
@@ -2392,7 +2408,7 @@ final class DashboardOverviewView: NSView {
         let groupingItems = panes.map {
             $0.groupingItem(
                 creationDate: Self.creationDate($0.worktreePath),
-                isIntegration: isIntegrationWorktree($0.worktreePath)
+                isIntegration: integrationEnabled && isIntegrationWorktree($0.worktreePath)
             )
         }
         let groups = WorktreeGrouping.groups(groupingItems, mode: groupingMode, now: now())
@@ -2709,7 +2725,7 @@ final class DashboardOverviewView: NSView {
             // Only worth offering once there is more than one worktree to fold
             // together — on a single-worktree project it would integrate a repo
             // with itself.
-            if group.items.count > 1 {
+            if integrationEnabled, group.items.count > 1 {
                 views.append(makeIntegrateButton(project: group.title))
             }
             let button = makeAddWorktreeButton(project: group.title)

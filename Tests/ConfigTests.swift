@@ -477,4 +477,22 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.agents[0].rules[0].status, "Running")
         XCTAssertEqual(config.agents[0].rules[0].patterns, ["working"])
     }
+
+    /// Both integration flags default on, so a config written before they
+    /// existed keeps the feature exactly as it behaved.
+    func testIntegrationFlagsDefaultOnForOlderConfigs() throws {
+        let json = Data("{}".utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        XCTAssertTrue(config.integrationEnabled)
+        XCTAssertTrue(config.autoIntegrate)
+    }
+
+    func testIntegrationFlagsRoundTrip() throws {
+        var config = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
+        config.integrationEnabled = false
+        config.autoIntegrate = false
+        let decoded = try JSONDecoder().decode(Config.self, from: try JSONEncoder().encode(config))
+        XCTAssertFalse(decoded.integrationEnabled)
+        XCTAssertFalse(decoded.autoIntegrate)
+    }
 }
