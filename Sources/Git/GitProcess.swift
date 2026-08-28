@@ -17,9 +17,10 @@ enum GitProcess {
     static func run(
         _ arguments: [String],
         in directory: String,
-        timeout: TimeInterval = defaultTimeout
+        timeout: TimeInterval = defaultTimeout,
+        environment: [String: String]? = nil
     ) -> String? {
-        let result = capture(arguments, in: directory, timeout: timeout)
+        let result = capture(arguments, in: directory, timeout: timeout, environment: environment)
         return result.succeeded ? result.stdout : nil
     }
 
@@ -27,12 +28,14 @@ enum GitProcess {
     static func capture(
         _ arguments: [String],
         in directory: String,
-        timeout: TimeInterval = defaultTimeout
+        timeout: TimeInterval = defaultTimeout,
+        environment: [String: String]? = nil
     ) -> Result {
         ProcessRunner.capture(
             executable: URL(fileURLWithPath: executable),
             arguments: arguments,
             currentDirectory: directory,
+            environment: environment,
             timeout: timeout
         )
     }
