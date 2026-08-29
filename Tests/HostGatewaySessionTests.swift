@@ -126,6 +126,71 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual((obj["result"] as? [String: Any])?["ok"] as? Bool, false)
     }
 
+    private final class FakePairingCode: PairingCodeVerifying {
+        var code: String
+        init(_ code: String) { self.code = code }
+        func verify(_ raw: String) -> Bool {
+            PairingCodeStore(code: code).verify(raw)
+        }
+    }
+
+    private func sessionWithCode(_ code: String,
+                                 limiter: PairRateLimiter? = nil,
+                                 ip: String = "1.1.1.1")
+    -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
+        let ds = SessionFakeDataSource()
+        let vt = FakeVT()
+        let b64 = MqttCrypto.base64url(root)
+        let s = HostGatewaySession(
+            router: ControlRouter(dataSource: ds),
+            expectedMacId: macId,
+            rootSecretBase64url: b64,
+            vt: vt,
+            pairingCode: FakePairingCode(code),
+            rateLimiter: limiter,
+            clientIP: ip)
+        return (s, ds, vt)
+    }
+
+    func testAuthWithCodeSucceedsAndReturnsToken() {
+        let (s, _, _) = sessionWithCode("48291736")
+        let out = s.handle(text:
+            #"{"id":"a","method":"auth","params":{"code":"4829 1736","vt_binary":true,"vt_deflate":true}}"#)
+        XCTAssertEqual(out.count, 1)
+        let result = decodeResponse(out[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, true)
+        XCTAssertEqual(result?["mac_id"] as? String, macId)
+        XCTAssertEqual(result?["token"] as? String, token())
+        XCTAssertEqual(result?["vt_binary"] as? Bool, true)
+        XCTAssertEqual(result?["vt_deflate"] as? Bool, true)
+
+        let snap = s.handle(text: #"{"id":"2","method":"session.snapshot","params":{}}"#)
+        let snapObj = decodeResponse(snap[0])
+        XCTAssertNil(snapObj["error"])
+        XCTAssertNotNil(snapObj["result"])
+    }
+
+    func testAuthWithWrongCodeFails() {
+        let (s, _, _) = sessionWithCode("48291736")
+        let out = s.handle(text:
+            #"{"id":"a","method":"auth","params":{"code":"00000000"}}"#)
+        XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["ok"] as? Bool, false)
+        let snap = s.handle(text: #"{"id":"2","method":"session.snapshot","params":{}}"#)
+        XCTAssertEqual((decodeResponse(snap[0])["error"] as? [String: Any])?["code"] as? Int, -32001)
+    }
+
+    func testAuthCodeRateLimited() {
+        let lim = PairRateLimiter(maxFailures: 2, window: 60)
+        let (s, _, _) = sessionWithCode("48291736", limiter: lim, ip: "9.9.9.9")
+        for _ in 0..<2 {
+            _ = s.handle(text: #"{"id":"a","method":"auth","params":{"code":"00000000"}}"#)
+        }
+        let out = s.handle(text: #"{"id":"a","method":"auth","params":{"code":"00000000"}}"#)
+        let err = decodeResponse(out[0])["error"] as? [String: Any]
+        XCTAssertEqual(err?["code"] as? Int, -32029)
+        XCTAssertEqual(err?["message"] as? String, "rate_limited")
+    }
+
     func testSnapshotAfterAuthCallsRouter() {
         let (s, ds, _) = session()
         ds.panes = [PaneSnapshot(paneId: "t1", worktreePath: "/wt", branch: "main",

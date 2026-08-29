@@ -20,6 +20,9 @@ final class HostGatewaySession {
     private let vt: HostGatewayVTAttaching
     /// Shared with the server, which feeds it EventHub and fans out the results.
     private let decisions: HostGatewayDecisions
+    private let pairingCode: PairingCodeVerifying?
+    private let rateLimiter: PairRateLimiter?
+    private let clientIP: String
 
     /// A queued outbound frame.
     ///
@@ -62,12 +65,18 @@ final class HostGatewaySession {
          expectedMacId: String,
          rootSecretBase64url: String,
          vt: HostGatewayVTAttaching,
-         decisions: HostGatewayDecisions = HostGatewayDecisions()) {
+         decisions: HostGatewayDecisions = HostGatewayDecisions(),
+         pairingCode: PairingCodeVerifying? = nil,
+         rateLimiter: PairRateLimiter? = nil,
+         clientIP: String = "unknown") {
         self.router = router
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
         self.vt = vt
         self.decisions = decisions
+        self.pairingCode = pairingCode
+        self.rateLimiter = rateLimiter
+        self.clientIP = clientIP
         vtObserverToken = vt.addObserver { [weak self] event in
             self?.enqueueVT(event)
         }
@@ -206,9 +215,34 @@ final class HostGatewaySession {
     private func handleAuth(id: String, params: [String: Any]) -> [String] {
         let macId = params["mac_id"] as? String ?? ""
         let token = params["token"] as? String ?? ""
-        let ok = HostGatewayAuth.verify(
-            macId: macId, token: token,
-            expectedMacId: expectedMacId, rootSecretBase64url: rootSecretBase64url)
+        let code = params["code"] as? String ?? ""
+
+        // Token path wins when both are present (return visits).
+        if !token.isEmpty {
+            let ok = HostGatewayAuth.verify(
+                macId: macId, token: token,
+                expectedMacId: expectedMacId, rootSecretBase64url: rootSecretBase64url)
+            return finishAuth(id: id, ok: ok, params: params, issuedToken: ok ? token : nil)
+        }
+
+        if !code.isEmpty {
+            if let rateLimiter, !rateLimiter.allow(ip: clientIP) {
+                return [encodeError(id: id, code: -32029, message: "rate_limited")]
+            }
+            let matched = pairingCode?.verify(code) == true
+            if matched {
+                rateLimiter?.recordSuccess(ip: clientIP)
+                let issued = HostGatewayAuth.expectedToken(rootSecretBase64url: rootSecretBase64url)
+                return finishAuth(id: id, ok: issued != nil, params: params, issuedToken: issued)
+            }
+            rateLimiter?.recordFailure(ip: clientIP)
+            return finishAuth(id: id, ok: false, params: params, issuedToken: nil)
+        }
+
+        return finishAuth(id: id, ok: false, params: params, issuedToken: nil)
+    }
+
+    private func finishAuth(id: String, ok: Bool, params: [String: Any], issuedToken: String?) -> [String] {
         // Opt-in, so a cached page from before the binary frame keeps working
         // against a new Mac rather than rendering nothing.
         let binary = ok && (params["vt_binary"] as? Bool ?? false)
@@ -220,10 +254,16 @@ final class HostGatewaySession {
             vtDeflate = deflate
             lock.unlock()
         }
-        var out = [HostGatewayFrame.encode(.response(
-            id: id,
-            result: ["ok": ok, "vt_binary": binary, "vt_deflate": deflate],
-            error: nil))]
+        var result: [String: Any] = [
+            "ok": ok,
+            "vt_binary": binary,
+            "vt_deflate": deflate,
+        ]
+        if ok {
+            result["mac_id"] = expectedMacId
+            if let issuedToken { result["token"] = issuedToken }
+        }
+        var out = [HostGatewayFrame.encode(.response(id: id, result: result, error: nil))]
         if ok {
             // Replay what is already open. Without this a client that connects a
             // second after a question is raised waits for an event it has missed.

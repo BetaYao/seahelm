@@ -15,6 +15,8 @@ final class HostGatewayServer {
     private let expectedMacId: String
     private let rootSecretBase64url: String
     private let vt: HostGatewayVTAttaching
+    private let pairingCode: PairingCodeVerifying?
+    private let rateLimiter: PairRateLimiter?
     private let staticFiles: HostGatewayStaticFiles
     private let queue = DispatchQueue(label: "seahelm.hostgateway", qos: .userInitiated)
 
@@ -59,12 +61,16 @@ final class HostGatewayServer {
          router: ControlRouter,
          expectedMacId: String,
          rootSecretBase64url: String,
-         vt: HostGatewayVTAttaching) {
+         vt: HostGatewayVTAttaching,
+         pairingCode: PairingCodeVerifying? = nil,
+         rateLimiter: PairRateLimiter? = nil) {
         self.config = config
         self.router = router
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
         self.vt = vt
+        self.pairingCode = pairingCode
+        self.rateLimiter = rateLimiter
         self.staticFiles = HostGatewayStaticFiles(
             root: HostGatewayStaticFiles.resolveRoot(override: config.webRoot))
     }
@@ -379,7 +385,10 @@ final class HostGatewayServer {
             expectedMacId: expectedMacId,
             rootSecretBase64url: rootSecretBase64url,
             vt: vt,
-            decisions: decisions)
+            decisions: decisions,
+            pairingCode: pairingCode,
+            rateLimiter: rateLimiter,
+            clientIP: Self.clientIP(of: connection))
         let key = ObjectIdentifier(connection)
         let state = ConnectionState(connection: connection, session: session)
         connections[key] = state
@@ -463,5 +472,14 @@ final class HostGatewayServer {
             contentContext: context,
             isComplete: true,
             completion: .contentProcessed { _ in })
+    }
+
+    /// Best-effort remote address for pairing rate limits. Accepted connections
+    /// expose the peer as `.hostPort`; anything else collapses to `"unknown"`.
+    static func clientIP(of connection: NWConnection) -> String {
+        if case .hostPort(let host, _) = connection.endpoint {
+            return "\(host)"
+        }
+        return "unknown"
     }
 }

@@ -14,6 +14,9 @@ class TabCoordinator {
     let workspaceManager = WorkspaceManager()
 
     private var hostGatewayServer: HostGatewayServer?
+    /// Shared with Settings so "Refresh code" updates what live `auth` accepts.
+    private(set) var pairingCodeLive: LivePairingCode?
+    private var pairRateLimiter: PairRateLimiter?
     private var zmxVTAttachManager: ZmxVTAttachManager?
     /// The live control data source. Also the pane lookup + write channel the
     /// iMessage rule engine and Host Gateway dispatch through.
@@ -860,12 +863,29 @@ class TabCoordinator {
     private func setupHostGateway(dataSource: ControlDataSource) {
         guard config.hostGateway?.resolvedEnabled == true else { return }
         guard hostGatewayServer == nil else { return }
-        guard let hgConfig = config.hostGateway else { return }
+        guard var hgConfig = config.hostGateway else { return }
 
         if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
         let mqtt = config.mqtt!
         let macId = mqtt.macId ?? MqttConfig.deriveMacId()
         let rootB64 = mqtt.rootSecret ?? ""
+
+        var store = PairingCodeStore(code: hgConfig.pairCode)
+        let ensured = store.ensureCode()
+        if hgConfig.pairCode != ensured {
+            hgConfig.pairCode = ensured
+            config.hostGateway = hgConfig
+            saveConfig()
+        }
+        let live = LivePairingCode(store: store)
+        live.onChange = { [weak self] updated in
+            guard let self else { return }
+            self.config.hostGateway?.pairCode = updated.code
+            self.saveConfig()
+        }
+        pairingCodeLive = live
+        let limiter = PairRateLimiter()
+        pairRateLimiter = limiter
 
         let vt = ZmxVTAttachManager()
         zmxVTAttachManager = vt
@@ -874,7 +894,9 @@ class TabCoordinator {
             router: ControlRouter(dataSource: dataSource),
             expectedMacId: macId,
             rootSecretBase64url: rootB64,
-            vt: vt)
+            vt: vt,
+            pairingCode: live,
+            rateLimiter: limiter)
         server.start()
         hostGatewayServer = server
         NSLog("[TabCoordinator] Host Gateway started port=\(hgConfig.resolvedPort) pair=\(hgConfig.resolvedPublicURL)")
@@ -884,6 +906,8 @@ class TabCoordinator {
         hostGatewayServer?.stop()
         hostGatewayServer = nil
         zmxVTAttachManager = nil
+        pairingCodeLive = nil
+        pairRateLimiter = nil
     }
 
     func teardownRemoteBackends() {
