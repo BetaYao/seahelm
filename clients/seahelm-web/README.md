@@ -99,6 +99,17 @@ MAC=live npm run mock:zmx # 终端 B: ZMX_PANES=1,真实 zmx session → MQTT pa
 
 窄窗口仍强制单屏(`layoutFitsMirror` 不满足时忽略镜像偏好)。
 
+## 弱网相关行为
+
+| 能力 | 说明 |
+|---|---|
+| **静态加速** | Gateway 对 js/css/html 等做 gzip；带 `?v=` 的资源可长期缓存；HTTP keep-alive 连拉多文件 |
+| **延后 WebGL** | `xterm-addon-webgl.js` 在首个终端打开后再加载 |
+| **默认单屏** | 见上「VT 订阅模式」— 默认只订阅焦点 pane，镜像需手动开 |
+| **背压** | Mac 侧 VT 发送队列有界；积压时丢旧 `vt.data` 并重 snapshot，画面可能短暂跳动 |
+| **浏览器丢帧** | 解压/写终端积压超过深度上限时丢中间 `vt.data` |
+| **binary keys** | `auth` 协商 `keys_binary` 后按键走二进制帧（无 JSON/base64）；旧 Mac 仍用 `pane.send_keys` |
+
 ## VT 终端
 
 Mac 侧经 **`zmx attach`** 保真 PTY 流;浏览器 xterm.js 渲染。
@@ -111,7 +122,7 @@ Gateway notify / MQTT topic 均携带 `{b64, cols?, rows?}`;客户端共用 `han
 | `pane.vt_open` | attach;首屏 `vt.snapshot`,其后 `vt.data` |
 | `pane.vt_keepalive` | 20s 心跳 |
 | `pane.vt_close` | 断开 attach 客户端 |
-| `pane.send_keys` | `{b64}` UTF-8 键序列 |
+| `pane.send_keys` | `{b64}` UTF-8 键序列；协商 `keys_binary` 后可走二进制帧 |
 
 ## 协议一致性测试(MQTT devbroker)
 

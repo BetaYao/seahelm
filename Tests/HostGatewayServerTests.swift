@@ -144,10 +144,15 @@ final class HostGatewayServerTests: XCTestCase {
         waitUntilListening(second)
 
         // Not just bound — actually answering, since a half-dead listener can
-        // hold the port without serving.
+        // hold the port without serving. Use an ephemeral session: keep-alive
+        // would otherwise reuse a pooled connection to the stopped first server.
         let exp = expectation(description: "page")
         var status = 0
-        URLSession.shared.dataTask(with: URL(string: "http://127.0.0.1:\(testPort)/")!) { _, response, _ in
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(testPort)/")!)
+        request.setValue("close", forHTTPHeaderField: "Connection")
+        session.dataTask(with: request) { _, response, _ in
             status = (response as? HTTPURLResponse)?.statusCode ?? 0
             exp.fulfill()
         }.resume()
