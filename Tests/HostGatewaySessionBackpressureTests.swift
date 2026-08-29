@@ -105,14 +105,30 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
     }
 
     private func vtPayloadBytes(of frames: [HostGatewayWireFrame]) -> Int {
-        frames.reduce(0) { sum, frame in
+        vtNotifies(of: frames).reduce(0) { $0 + $1.payload.count }
+    }
+
+    private func vtNotifies(of frames: [HostGatewayWireFrame]) -> [(method: String, payload: Data)] {
+        frames.compactMap { frame in
             let obj = decodeResponse(frame)
             guard let method = obj["method"] as? String,
                   method == "vt.data" || method == "vt.snapshot",
                   let b64 = (obj["params"] as? [String: Any])?["b64"] as? String,
-                  let data = Data(base64Encoded: b64) else { return sum }
-            return sum + data.count
+                  let data = Data(base64Encoded: b64) else { return nil }
+            return (method, data)
         }
+    }
+
+    private func taggedChunk(_ id: UInt8, count: Int = 32 * 1024) -> Data {
+        var data = Data(repeating: 0x41, count: count)
+        data[0] = id
+        return data
+    }
+
+    private func openedDecision() -> HostGatewayDecisions.Change {
+        .opened(HostGatewayDecisions.Decision(
+            paneSessionKey: "k1", paneId: "p1", kind: "question",
+            prompt: "ok?", options: ["yes"], seq: 1))
     }
 
     func testHighPriorityDrainsBeforeVT() {
@@ -136,17 +152,44 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
     func testDropsOldVTWhenOverBudget() {
         let (s, _, vt) = session()
         openAuthenticated(s)
-        let chunk = Data(repeating: 0x41, count: 32 * 1024)
-        for _ in 0..<8 {
-            vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: chunk))
+        s.pushDecision(openedDecision())
+        for i in 0..<8 {
+            vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: taggedChunk(UInt8(i))))
         }
 
         let notes = s.drainNotifications()
+        let names = methods(of: notes)
+        XCTAssertEqual(names.first, "pane.event",
+                       "high-priority frame must drain first and survive VT flood")
+        XCTAssertEqual(names.filter { $0 == "pane.event" }.count, 1)
+
+        let data = vtNotifies(of: notes).filter { $0.method == "vt.data" }
+        XCTAssertEqual(data.map { $0.payload.first }, [4, 5, 6, 7],
+                       "drop-old must keep the newest chunks, not the oldest")
+        XCTAssertFalse(data.contains { ($0.payload.first ?? 0) < 4 })
+
         let vtBytes = vtPayloadBytes(of: notes)
         XCTAssertLessThanOrEqual(vtBytes, 256 * 1024)
         XCTAssertLessThanOrEqual(vtBytes, 128 * 1024)
-        XCTAssertEqual(methods(of: notes).last, "vt.snapshot",
+        XCTAssertEqual(names.last, "vt.snapshot",
                        "overflow must leave a resync snapshot at the end")
+    }
+
+    func testKeepsQueuedSnapshotInsteadOfEmptyResync() {
+        let (s, _, vt) = session()
+        openAuthenticated(s)
+        let screen = Data("SCREEN".utf8)
+        vt.emit(VTEvent(kind: .snapshot, paneSessionKey: "k1", payload: screen))
+        for i in 0..<8 {
+            vt.emit(VTEvent(kind: .data, paneSessionKey: "k1", payload: taggedChunk(UInt8(i))))
+        }
+
+        let notes = s.drainNotifications()
+        let snaps = vtNotifies(of: notes).filter { $0.method == "vt.snapshot" }
+        XCTAssertEqual(snaps.count, 1, "must not append an empty synthetic over a real snapshot")
+        XCTAssertEqual(snaps.first?.payload, screen)
+        XCTAssertEqual(methods(of: notes).last, "vt.snapshot")
+        XCTAssertFalse(snaps.contains { $0.payload.isEmpty })
     }
 
     func testResyncRateLimited() {

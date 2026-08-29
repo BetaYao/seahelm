@@ -215,6 +215,10 @@ final class HostGatewaySession {
     }
 
     private func maybeScheduleResync(pane: String) {
+        // A still-queued real snapshot *is* the resync. An empty synthetic after
+        // it would make the client term.reset() to a blank screen and undo it.
+        if restackRealSnapshot(pane: pane) { return }
+
         let now = Date()
         let allowed = needsResync[pane].map { now.timeIntervalSince($0) >= Self.resyncMinInterval } ?? true
         let existing = pending.lastIndex {
@@ -233,6 +237,34 @@ final class HostGatewaySession {
         guard allowed else { return }
         needsResync[pane] = now
         pending.append(.vt(VTEvent(kind: .snapshot, paneSessionKey: pane, payload: Data())))
+    }
+
+    /// If a non-empty snapshot for `pane` survived trim, drop later `.data` for
+    /// that pane and restack the snapshot last so drain ends on a consistent
+    /// screen. Returns true when that happened (caller must not append empty).
+    private func restackRealSnapshot(pane: String) -> Bool {
+        let snapIdx = pending.lastIndex {
+            if case .vt(let e) = $0,
+               e.kind == .snapshot,
+               e.paneSessionKey == pane,
+               !e.payload.isEmpty { return true }
+            return false
+        }
+        guard let snapIdx else { return false }
+        var i = pending.count - 1
+        while i > snapIdx {
+            if case .vt(let e) = pending[i],
+               e.paneSessionKey == pane,
+               e.kind == .data {
+                pendingVTBytes -= e.payload.count
+                pending.remove(at: i)
+            }
+            i -= 1
+        }
+        if pendingVTBytes < 0 { pendingVTBytes = 0 }
+        let item = pending.remove(at: snapIdx)
+        pending.append(item)
+        return true
     }
 
     /// Server → session: an event that opened or closed a decision.
