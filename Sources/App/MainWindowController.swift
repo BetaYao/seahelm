@@ -459,11 +459,17 @@ class MainWindowController: NSWindowController, MailCommandContext {
         wc.show()
     }
 
-    /// Browser pairing window (QR + long link). Held strongly so it survives
+    /// Browser pairing window (8-digit code). Held strongly so it survives
     /// past this call. See `PairingWindowController`.
     @objc func showPairing() {
-        let (secret, mqtt) = mintPairingContext()
-        let wc = PairingWindowController(secret: secret, hostGateway: config.hostGateway, mqtt: mqtt)
+        _ = mintPairingContext()
+        let accessURL = (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
+        let code = currentPairingCode()
+        let wc = PairingWindowController(
+            accessURL: accessURL,
+            code: code,
+            onRefresh: { [weak self] in self?.refreshPairingCode() ?? "" },
+            onRevokeAll: { [weak self] in self?.revokeAllRemotes() })
         wc.showWindow(nil)
         wc.window?.center()
         NSApp.activate(ignoringOtherApps: true)
@@ -2813,8 +2819,56 @@ extension MainWindowController: SettingsDelegate {
         mintPairingContext()
     }
 
+    func settingsPairingCode(_ settings: SettingsViewController) -> String {
+        currentPairingCode()
+    }
+
+    func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String {
+        refreshPairingCode()
+    }
+
+    func settingsRevokeAllRemotes(_ settings: SettingsViewController) {
+        revokeAllRemotes()
+    }
+
     func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool {
         tabCoordinator.hostGatewayIsListening
+    }
+
+    /// Ensure an 8-digit code exists on the live config (and LivePairingCode if Gateway is up).
+    @discardableResult
+    private func currentPairingCode() -> String {
+        if let live = tabCoordinator.pairingCodeLive {
+            return live.current()
+        }
+        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
+        let code = store.ensureCode()
+        if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
+        config.hostGateway?.pairCode = code
+        config.saveNow()
+        return code
+    }
+
+    @discardableResult
+    private func refreshPairingCode() -> String {
+        if let live = tabCoordinator.pairingCodeLive {
+            return live.refresh()
+        }
+        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
+        let code = store.refresh()
+        if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
+        config.hostGateway?.pairCode = code
+        config.saveNow()
+        return code
+    }
+
+    /// Rotate root secret and pairing code so every remembered browser must re-pair.
+    private func revokeAllRemotes() {
+        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
+        config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
+        _ = refreshPairingCode()
+        config.saveNow()
+        tabCoordinator.applyMqttRootSecret(config.mqtt?.rootSecret ?? "")
     }
 
     /// Live panes, so a rule's target is picked from what exists rather than
