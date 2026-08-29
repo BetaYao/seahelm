@@ -142,7 +142,22 @@ final class HostGatewayStaticFilesTests: XCTestCase {
         XCTAssertTrue(wire.contains("Cache-Control: public, max-age=86400\r\n"))
         XCTAssertTrue(wire.contains("ETag: \"abc\"\r\n"))
         XCTAssertTrue(wire.contains("Vary: Accept-Encoding\r\n"))
+        XCTAssertTrue(wire.contains("Connection: keep-alive\r\n"))
         XCTAssertFalse(wire.contains("Connection: close\r\n"))
+    }
+
+    func testSerializeConnectionClose() {
+        let response = HostGatewayStaticFiles.Response(
+            status: 200, reason: "OK",
+            contentType: "text/plain; charset=utf-8",
+            body: Data("ok".utf8),
+            cacheControl: "no-cache",
+            contentEncoding: nil,
+            etag: nil,
+            vary: nil)
+        let wire = String(decoding: HostGatewayStaticFiles.serialize(
+            response, includeBody: true, connectionClose: true), as: UTF8.self)
+        XCTAssertTrue(wire.contains("Connection: close\r\n"))
     }
 
     func testRequestParsing() {

@@ -290,6 +290,22 @@ final class HostGatewayServerTests: XCTestCase {
         XCTAssertTrue(contentType.hasPrefix("text/html"), "got \(contentType)")
     }
 
+    func testKeepAliveDefaultHttp11() {
+        XCTAssertFalse(HostGatewayServer.clientRequestsClose(
+            head: "GET / HTTP/1.1\r\nHost: x\r\n"))
+        XCTAssertTrue(HostGatewayServer.clientRequestsClose(
+            head: "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"))
+        XCTAssertTrue(HostGatewayServer.clientRequestsClose(
+            head: "GET / HTTP/1.0\r\nHost: x\r\n"))
+    }
+
+    func testParseRequestHeaders() {
+        let headers = HostGatewayServer.parseRequestHeaders(
+            head: "GET /e2ee.js HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip, deflate\r\nIf-None-Match: \"abc\"\r\n")
+        XCTAssertEqual(headers.acceptEncoding, "gzip, deflate")
+        XCTAssertEqual(headers.ifNoneMatch, "\"abc\"")
+    }
+
     /// Static hosting must not become a file server for the rest of the disk.
     func testUnknownPathIs404() throws {
         let server = HostGatewayServer(

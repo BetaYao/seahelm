@@ -244,7 +244,7 @@ struct HostGatewayStaticFiles {
     }
 
     /// Serialize to the wire. HEAD keeps the headers and drops the body.
-    static func serialize(_ response: Response, includeBody: Bool) -> Data {
+    static func serialize(_ response: Response, includeBody: Bool, connectionClose: Bool = false) -> Data {
         var head = "HTTP/1.1 \(response.status) \(response.reason)\r\n"
         head += "Content-Type: \(response.contentType)\r\n"
         head += "Content-Length: \(response.body.count)\r\n"
@@ -258,7 +258,7 @@ struct HostGatewayStaticFiles {
         if let vary = response.vary {
             head += "Vary: \(vary)\r\n"
         }
-        head += "Connection: keep-alive\r\n\r\n"
+        head += "Connection: \(connectionClose ? "close" : "keep-alive")\r\n\r\n"
         var data = Data(head.utf8)
         if includeBody { data.append(response.body) }
         return data

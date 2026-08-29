@@ -276,10 +276,18 @@ final class HostGatewayServer {
             return
         }
         let (method, target) = Self.requestLine(head: head)
-        let response = staticFiles.response(method: method, target: target)
-        let payload = HostGatewayStaticFiles.serialize(response, includeBody: method != "HEAD")
-        connection.send(content: payload, isComplete: true, completion: .contentProcessed { _ in
-            connection.cancel()
+        let headers = Self.parseRequestHeaders(head: head)
+        let response = staticFiles.response(method: method, target: target, headers: headers)
+        let close = Self.clientRequestsClose(head: head)
+        let payload = HostGatewayStaticFiles.serialize(
+            response, includeBody: method != "HEAD", connectionClose: close)
+        connection.send(content: payload, isComplete: close, completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            if error != nil || close {
+                connection.cancel()
+                return
+            }
+            self.readRequestHead(on: connection, buffered: Data())
         })
     }
 
@@ -375,6 +383,46 @@ final class HostGatewayServer {
             return String(target[target.startIndex..<cut])
         }
         return target
+    }
+
+    static func parseRequestHeaders(head: String) -> HostGatewayStaticFiles.RequestHeaders {
+        var acceptEncoding: String?
+        var ifNoneMatch: String?
+        for line in head.split(separator: "\r\n", omittingEmptySubsequences: true).dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            switch name {
+            case "accept-encoding":
+                acceptEncoding = value
+            case "if-none-match":
+                ifNoneMatch = value
+            default:
+                break
+            }
+        }
+        return HostGatewayStaticFiles.RequestHeaders(
+            acceptEncoding: acceptEncoding, ifNoneMatch: ifNoneMatch)
+    }
+
+    /// HTTP/1.0 defaults to close; HTTP/1.1 defaults to keep-alive unless `Connection: close`.
+    static func clientRequestsClose(head: String) -> Bool {
+        guard let first = head.split(separator: "\r\n", omittingEmptySubsequences: true).first else {
+            return true
+        }
+        let parts = first.split(separator: " ", omittingEmptySubsequences: true)
+        let version = parts.count > 2 ? String(parts[2]).uppercased() : "HTTP/1.0"
+        let isHTTP11 = version.hasPrefix("HTTP/1.1")
+        if !isHTTP11 { return true }
+
+        for line in head.split(separator: "\r\n", omittingEmptySubsequences: true).dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            guard name == "connection" else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces).lowercased()
+            if value.contains("close") { return true }
+        }
+        return false
     }
 
     // MARK: - WebSocket sessions (internal listener)
