@@ -585,11 +585,12 @@ function openGatewaySocket(){
   log('sys', '(connect)', wsURL + ' [Gateway]');
   const ws = new WebSocket(wsURL);
   ws.binaryType = 'arraybuffer';
-  S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false };
+  S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false, keysBinary: false };
   ws.onopen = () => {
     const params = {
       vt_binary: true,
       vt_deflate: typeof DecompressionStream === 'function',
+      keys_binary: true,
     };
     if (S.pendingCode) params.code = S.pendingCode;
     else { params.mac_id = S.mac; params.token = S.authPass; }
@@ -613,6 +614,7 @@ function openGatewaySocket(){
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
+      S.gw.keysBinary = !!(r && r.keys_binary);
       if (r.mac_id) S.mac = r.mac_id;
       if (r.token) S.authPass = r.token;
       S.pendingCode = null;
@@ -726,11 +728,13 @@ function enqueueVTApply(key, type, work){
   vtApplyDepth.set(key, depth + 1);
   const prior = vtWriteChains.get(key) || Promise.resolve();
   const next = prior.then(async () => {
-    try { await work(); }
-    finally { vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1)); }
-  }).catch((e) => {
-    vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
-    log('sys', '(vt)', `frame dropped: ${e && e.message}`);
+    try {
+      await work();
+    } catch (e) {
+      log('sys', '(vt)', `frame dropped: ${e && e.message}`);
+    } finally {
+      vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
+    }
   });
   vtWriteChains.set(key, next);
 }
@@ -1376,8 +1380,7 @@ function copySelection(){
 function sendRawKey(bytes){
   const key = S.vt.focus;
   if (!key || !isLinked()) return;
-  sendCommand('pane.send_keys',
-    { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(bytes)) });
+  sendKeysPayload(key, new TextEncoder().encode(bytes));
   const entry = S.vt.panes.get(key);
   if (entry) { try { entry.term.focus(); } catch (e) {} }   // hand the keyboard back
 }
@@ -1669,8 +1672,7 @@ function buildLayoutLeaf(node){
     windowMs: VT_INPUT_WINDOW_MS,
     send: (buf) => {
       if (!isLinked()) return;
-      sendCommand('pane.send_keys',
-        { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(buf)) });
+      sendKeysPayload(key, new TextEncoder().encode(buf));
     },
   });
   S.vt.panes.set(key, entry);
@@ -1802,6 +1804,30 @@ function b64ToBytes(b64){
 function bytesToB64(bytes){
   let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
   return btoa(s);
+}
+
+/** Binary key frame — same layout as HostGatewayKeyFrame.swift. */
+function encodeKeyFrame(paneKey, utf8Bytes){
+  const keyBytes = new TextEncoder().encode(paneKey);
+  if (keyBytes.length > 255) return null;
+  const out = new Uint8Array(3 + keyBytes.length + utf8Bytes.length);
+  out[0] = 1; out[1] = 1; out[2] = keyBytes.length;
+  out.set(keyBytes, 3);
+  out.set(utf8Bytes, 3 + keyBytes.length);
+  return out.buffer;
+}
+
+function sendKeysPayload(paneKey, utf8Bytes){
+  if (S.gw && S.gw.keysBinary && S.gw.ws && S.gw.ws.readyState === WebSocket.OPEN) {
+    const frame = encodeKeyFrame(paneKey, utf8Bytes);
+    if (frame) {
+      S.gw.ws.send(frame);
+      log('tx', 'keys', `${paneKey} ${utf8Bytes.length}B`);
+      return;
+    }
+  }
+  sendCommand('pane.send_keys',
+    { pane_session_key: paneKey, b64: bytesToB64(utf8Bytes) });
 }
 
 /** Shared VT path for MQTT topic payloads and Gateway notify frames. */

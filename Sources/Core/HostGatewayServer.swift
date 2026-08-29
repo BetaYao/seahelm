@@ -479,15 +479,21 @@ final class HostGatewayServer {
 
             let wsMeta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata
-            if let data,
-               let metadata = wsMeta,
-               metadata.opcode == .text,
-               let text = String(data: data, encoding: .utf8) {
-                let outbound = session.handle(text: text)
-                for frame in outbound {
-                    self.send(frame, on: connection)
+            if let data, let metadata = wsMeta {
+                if metadata.opcode == .text,
+                   let text = String(data: data, encoding: .utf8) {
+                    let outbound = session.handle(text: text)
+                    for frame in outbound {
+                        self.send(frame, on: connection)
+                    }
+                    self.sendPendingNotifications(for: connection, session: session)
+                } else if metadata.opcode == .binary {
+                    let outbound = session.handle(binary: data)
+                    for frame in outbound {
+                        self.send(frame, on: connection)
+                    }
+                    self.sendPendingNotifications(for: connection, session: session)
                 }
-                self.sendPendingNotifications(for: connection, session: session)
             }
 
             if connection.state != .cancelled {

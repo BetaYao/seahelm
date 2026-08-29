@@ -70,6 +70,7 @@ final class HostGatewaySession {
     /// still gets base64 inside a JSON notify.
     private var vtBinary = false
     private var vtDeflate = false
+    private var keysBinary = false
     private var pendingOutbound: ((HostGatewaySession) -> Void)?
 
     init(router: ControlRouter,
@@ -333,6 +334,19 @@ final class HostGatewaySession {
         }
     }
 
+    /// Negotiated binary `send_keys` — fire-and-forget, no RPC id.
+    func handle(binary: Data) -> [HostGatewayWireFrame] {
+        lock.lock()
+        let ready = authenticated
+        let allowKeys = keysBinary
+        lock.unlock()
+        guard ready, allowKeys,
+              let decoded = HostGatewayKeyFrame.decode(binary) else { return [] }
+        guard isVTOpen(decoded.paneSessionKey) else { return [] }
+        _ = vt.sendKeys(paneSessionKey: decoded.paneSessionKey, utf8: decoded.utf8)
+        return []
+    }
+
     private func handleAuth(id: String, params: [String: Any]) -> [String] {
         let macId = params["mac_id"] as? String ?? ""
         let token = params["token"] as? String ?? ""
@@ -368,17 +382,20 @@ final class HostGatewaySession {
         // against a new Mac rather than rendering nothing.
         let binary = ok && (params["vt_binary"] as? Bool ?? false)
         let deflate = binary && (params["vt_deflate"] as? Bool ?? false)
+        let keysBin = ok && (params["keys_binary"] as? Bool ?? false)
         if ok {
             lock.lock()
             authenticated = true
             vtBinary = binary
             vtDeflate = deflate
+            keysBinary = keysBin
             lock.unlock()
         }
         var result: [String: Any] = [
             "ok": ok,
             "vt_binary": binary,
             "vt_deflate": deflate,
+            "keys_binary": keysBin,
         ]
         if ok {
             result["mac_id"] = expectedMacId
