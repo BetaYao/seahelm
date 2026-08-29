@@ -79,6 +79,31 @@ final class HostGatewayServerTests: XCTestCase {
         wait(for: [exp], timeout: timeout)
     }
 
+    /// Fresh session + `Connection: close` so keep-alive cannot reuse a socket to a
+    /// stopped previous server on the same `testPort`.
+    private func httpGet(_ path: String, timeout: TimeInterval = 10)
+        -> (status: Int, body: String, contentType: String) {
+        let exp = expectation(description: "http \(path)")
+        var status = -1
+        var body = ""
+        var contentType = ""
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(testPort)\(path)")!)
+        request.setValue("close", forHTTPHeaderField: "Connection")
+        session.dataTask(with: request) { data, response, error in
+            if let error { XCTFail("GET failed: \(error)") }
+            if let http = response as? HTTPURLResponse {
+                status = http.statusCode
+                contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            }
+            body = String(decoding: data ?? Data(), as: UTF8.self)
+            exp.fulfill()
+        }.resume()
+        wait(for: [exp], timeout: timeout)
+        return (status, body, contentType)
+    }
+
     func testWebSocketAuthAndSnapshot() {
         let ds = ServerFakeDataSource()
         ds.panes = [PaneSnapshot(
@@ -144,20 +169,9 @@ final class HostGatewayServerTests: XCTestCase {
         waitUntilListening(second)
 
         // Not just bound — actually answering, since a half-dead listener can
-        // hold the port without serving. Use an ephemeral session: keep-alive
-        // would otherwise reuse a pooled connection to the stopped first server.
-        let exp = expectation(description: "page")
-        var status = 0
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.invalidateAndCancel() }
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(testPort)/")!)
-        request.setValue("close", forHTTPHeaderField: "Connection")
-        session.dataTask(with: request) { _, response, _ in
-            status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            exp.fulfill()
-        }.resume()
-        wait(for: [exp], timeout: 5)
-        XCTAssertEqual(status, 200, "rebound server should serve the page again")
+        // hold the port without serving.
+        let page = httpGet("/")
+        XCTAssertEqual(page.status, 200, "rebound server should serve the page again")
     }
 
     /// The binary path end to end: negotiated at auth, framed by the server,
@@ -272,27 +286,10 @@ final class HostGatewayServerTests: XCTestCase {
 
         waitUntilListening(server)
 
-        let exp = expectation(description: "http get")
-        var status = -1
-        var body = ""
-        var contentType = ""
-        let task = URLSession.shared.dataTask(
-            with: URL(string: "http://127.0.0.1:\(testPort)/")!
-        ) { data, response, error in
-            if let error { XCTFail("GET failed: \(error)") }
-            if let http = response as? HTTPURLResponse {
-                status = http.statusCode
-                contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
-            }
-            body = String(decoding: data ?? Data(), as: UTF8.self)
-            exp.fulfill()
-        }
-        task.resume()
-        wait(for: [exp], timeout: 10)
-
-        XCTAssertEqual(status, 200)
-        XCTAssertEqual(body, "<html>cockpit</html>")
-        XCTAssertTrue(contentType.hasPrefix("text/html"), "got \(contentType)")
+        let page = httpGet("/")
+        XCTAssertEqual(page.status, 200)
+        XCTAssertEqual(page.body, "<html>cockpit</html>")
+        XCTAssertTrue(page.contentType.hasPrefix("text/html"), "got \(page.contentType)")
     }
 
     func testKeepAliveDefaultHttp11() {
@@ -323,17 +320,7 @@ final class HostGatewayServerTests: XCTestCase {
 
         waitUntilListening(server)
 
-        let exp = expectation(description: "http 404")
-        var status = -1
-        let task = URLSession.shared.dataTask(
-            with: URL(string: "http://127.0.0.1:\(testPort)/definitely-not-here.js")!
-        ) { _, response, _ in
-            status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            exp.fulfill()
-        }
-        task.resume()
-        wait(for: [exp], timeout: 10)
-
-        XCTAssertEqual(status, 404)
+        let page = httpGet("/definitely-not-here.js")
+        XCTAssertEqual(page.status, 404)
     }
 }
