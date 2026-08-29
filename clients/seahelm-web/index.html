@@ -712,6 +712,28 @@ async function inflateRaw(bytes){
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
 // through one promise chain, so decode can overlap but application cannot.
 const vtWriteChains = new Map();
+// Under decode backlog, drop intermediate vt.data rather than growing forever.
+// Snapshots always enqueue (they reset the terminal).
+const VT_APPLY_MAX = 8;
+const vtApplyDepth = new Map();
+
+function enqueueVTApply(key, type, work){
+  const depth = vtApplyDepth.get(key) || 0;
+  if (type === 'vt.data' && depth >= VT_APPLY_MAX) {
+    log('sys', '(vt drop)', key);
+    return;
+  }
+  vtApplyDepth.set(key, depth + 1);
+  const prior = vtWriteChains.get(key) || Promise.resolve();
+  const next = prior.then(async () => {
+    try { await work(); }
+    finally { vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1)); }
+  }).catch((e) => {
+    vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
+    log('sys', '(vt)', `frame dropped: ${e && e.message}`);
+  });
+  vtWriteChains.set(key, next);
+}
 
 /// A pane that goes away takes its chain with it — the map is keyed by pane and
 /// nothing else ever removed an entry, so worktree churn grew it for the life of
@@ -723,12 +745,10 @@ function onGatewayBinaryFrame(buf){
   if (!f) { log('sys', '(vt)', `unparseable binary frame, ${buf.length}B`); return; }
   log('rx', f.type, `${f.type} ${f.body.length}B${f.deflated ? ' deflated' : ''} (payload elided)`);
 
-  const prior = vtWriteChains.get(f.key) || Promise.resolve();
-  const next = prior.then(async () => {
+  enqueueVTApply(f.key, f.type, async () => {
     const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
     handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
-  }).catch((e) => log('sys', '(vt)', `frame dropped: ${e && e.message}`));
-  vtWriteChains.set(f.key, next);
+  });
 }
 
 function onGatewayFrame(msg){
@@ -753,8 +773,7 @@ function onGatewayFrame(msg){
 }
 
 function onGatewayNotify(method, params){
-  // Open questions / suggestions. MQTT delivered these as retained topics; over
-  // the socket the Mac pushes them and replays whatever is open on auth.
+  // Open questions / suggestions — pushed by the Mac and replayed on auth.
   if (method === 'pane.event') {
     const key = params.pane_session_key || params.pane_id;
     if (!key) return;
@@ -765,9 +784,11 @@ function onGatewayNotify(method, params){
   }
   if (method === 'vt.snapshot' || method === 'vt.data') {
     const key = params.pane_session_key || params.pane_id;
-    handleVT(key, {
-      type: method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data',
-      b64: params.b64, cols: params.cols, rows: params.rows,
+    const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
+    enqueueVTApply(key, type, async () => {
+      handleVT(key, {
+        type, b64: params.b64, cols: params.cols, rows: params.rows,
+      });
     });
   }
 }
