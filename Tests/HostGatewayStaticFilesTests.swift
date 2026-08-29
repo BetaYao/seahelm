@@ -19,20 +19,23 @@ final class HostGatewayStaticFilesTests: XCTestCase {
     private var files: HostGatewayStaticFiles { HostGatewayStaticFiles(root: root) }
 
     func testRootServesIndex() {
-        let response = files.response(method: "GET", target: "/")
+        let response = files.response(method: "GET", target: "/",
+                                      headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(String(decoding: response.body, as: UTF8.self), "<html>index</html>")
         XCTAssertEqual(response.contentType, "text/html; charset=utf-8")
     }
 
     func testAssetContentType() {
-        let response = files.response(method: "GET", target: "/e2ee.js")
+        let response = files.response(method: "GET", target: "/e2ee.js",
+                                      headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(response.contentType, "text/javascript; charset=utf-8")
     }
 
     func testQueryStringIsStripped() {
-        let response = files.response(method: "GET", target: "/e2ee.js?v=20260724")
+        let response = files.response(method: "GET", target: "/e2ee.js?v=20260724",
+                                      headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(String(decoding: response.body, as: UTF8.self), "var E2EE;")
     }
@@ -67,12 +70,79 @@ final class HostGatewayStaticFilesTests: XCTestCase {
     }
 
     func testSerializeHeadOmitsBodyButKeepsLength() {
-        let response = files.response(method: "HEAD", target: "/")
+        let response = files.response(method: "HEAD", target: "/",
+                                      headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
         let wire = String(decoding: HostGatewayStaticFiles.serialize(response, includeBody: false), as: UTF8.self)
         XCTAssertTrue(wire.hasPrefix("HTTP/1.1 200 OK\r\n"))
         XCTAssertTrue(wire.contains("Content-Length: 18\r\n"))
         XCTAssertTrue(wire.hasSuffix("\r\n\r\n"))
         XCTAssertFalse(wire.contains("<html>"))
+    }
+
+    func testGzipWhenAccepted() {
+        // Make body large enough that gzip shrinks it.
+        let raw = Data(repeating: 0x61, count: 4096) // "aaaa..."
+        try! raw.write(to: root.appendingPathComponent("big.js"))
+        let response = files.response(
+            method: "GET",
+            target: "/big.js",
+            headers: .init(acceptEncoding: "gzip, deflate", ifNoneMatch: nil))
+        XCTAssertEqual(response.status, 200)
+        XCTAssertEqual(response.contentEncoding, "gzip")
+        XCTAssertLessThan(response.body.count, raw.count)
+        XCTAssertEqual(response.cacheControl, "public, max-age=86400")
+        XCTAssertNotNil(response.etag)
+    }
+
+    func testNoGzipWithoutAcceptEncoding() {
+        let response = files.response(
+            method: "GET", target: "/e2ee.js",
+            headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
+        XCTAssertNil(response.contentEncoding)
+        XCTAssertEqual(String(decoding: response.body, as: UTF8.self), "var E2EE;")
+    }
+
+    func testHtmlIsNoCache() {
+        let response = files.response(
+            method: "GET", target: "/",
+            headers: .init(acceptEncoding: "gzip", ifNoneMatch: nil))
+        XCTAssertEqual(response.cacheControl, "no-cache")
+    }
+
+    func testVersionedAssetIsImmutable() {
+        let response = files.response(
+            method: "GET", target: "/e2ee.js?v=20260724",
+            headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
+        XCTAssertEqual(response.cacheControl, "public, max-age=31536000, immutable")
+    }
+
+    func testETagYields304() {
+        let first = files.response(
+            method: "GET", target: "/e2ee.js",
+            headers: .init(acceptEncoding: nil, ifNoneMatch: nil))
+        let etag = try! XCTUnwrap(first.etag)
+        let again = files.response(
+            method: "GET", target: "/e2ee.js",
+            headers: .init(acceptEncoding: nil, ifNoneMatch: etag))
+        XCTAssertEqual(again.status, 304)
+        XCTAssertTrue(again.body.isEmpty)
+    }
+
+    func testSerializeIncludesEncodingAndCache() {
+        let response = HostGatewayStaticFiles.Response(
+            status: 200, reason: "OK",
+            contentType: "text/javascript; charset=utf-8",
+            body: Data([0x1f, 0x8b]),
+            cacheControl: "public, max-age=86400",
+            contentEncoding: "gzip",
+            etag: "\"abc\"",
+            vary: "Accept-Encoding")
+        let wire = String(decoding: HostGatewayStaticFiles.serialize(response, includeBody: true), as: UTF8.self)
+        XCTAssertTrue(wire.contains("Content-Encoding: gzip\r\n"))
+        XCTAssertTrue(wire.contains("Cache-Control: public, max-age=86400\r\n"))
+        XCTAssertTrue(wire.contains("ETag: \"abc\"\r\n"))
+        XCTAssertTrue(wire.contains("Vary: Accept-Encoding\r\n"))
+        XCTAssertFalse(wire.contains("Connection: close\r\n"))
     }
 
     func testRequestParsing() {

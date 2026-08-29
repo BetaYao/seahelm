@@ -1,3 +1,5 @@
+import Compression
+import CryptoKit
 import Foundation
 
 /// Static hosting for the browser client, served from the Host Gateway's own port.
@@ -26,15 +28,28 @@ struct HostGatewayStaticFiles {
         return Bundle.main.resourceURL?.appendingPathComponent("seahelm-web")
     }
 
+    struct RequestHeaders: Equatable {
+        var acceptEncoding: String?
+        var ifNoneMatch: String?
+    }
+
     struct Response: Equatable {
         let status: Int
         let reason: String
         let contentType: String
         let body: Data
+        let cacheControl: String
+        let contentEncoding: String?
+        let etag: String?
+        let vary: String?
     }
 
     /// Resolve an HTTP request target (`/`, `/e2ee.js`, `/x?v=1`) to a response.
     func response(method: String, target: String) -> Response {
+        response(method: method, target: target, headers: .init())
+    }
+
+    func response(method: String, target: String, headers: RequestHeaders) -> Response {
         guard method == "GET" || method == "HEAD" else {
             return Self.plain(405, "Method Not Allowed", "method not allowed\n")
         }
@@ -47,10 +62,36 @@ struct HostGatewayStaticFiles {
         guard let data = try? Data(contentsOf: file) else {
             return Self.plain(404, "Not Found", "not found\n")
         }
-        return Response(status: 200,
-                        reason: "OK",
-                        contentType: Self.contentType(for: file.pathExtension.lowercased()),
-                        body: data)
+
+        let ext = file.pathExtension.lowercased()
+        let contentType = Self.contentType(for: ext)
+        let cache = Self.cacheControl(for: target, pathExtension: ext)
+        let etag = Self.etag(for: data)
+
+        if let inm = headers.ifNoneMatch, inm == etag {
+            return Response(status: 304, reason: "Not Modified",
+                            contentType: contentType, body: Data(),
+                            cacheControl: cache,
+                            contentEncoding: nil, etag: etag, vary: nil)
+        }
+
+        let wantGzip = Self.acceptsGzip(headers.acceptEncoding) && Self.gzipable(ext)
+        var body = data
+        var encoding: String?
+        var vary: String?
+        if wantGzip, let gz = Self.gzip(data), gz.count < data.count {
+            body = gz
+            encoding = "gzip"
+            vary = "Accept-Encoding"
+        }
+
+        return Response(status: 200, reason: "OK",
+                        contentType: contentType,
+                        body: body,
+                        cacheControl: cache,
+                        contentEncoding: encoding,
+                        etag: etag,
+                        vary: vary)
     }
 
     /// Map a request target onto a file inside `root`, refusing to escape it.
@@ -94,11 +135,112 @@ struct HostGatewayStaticFiles {
         }
     }
 
+    static func cacheControl(for target: String, pathExtension: String) -> String {
+        switch pathExtension {
+        case "html", "htm":
+            return "no-cache"
+        default:
+            if target.contains("?v=") || target.contains("?v&") {
+                return "public, max-age=31536000, immutable"
+            }
+            return "public, max-age=86400"
+        }
+    }
+
+    static func etag(for data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "\"\(hex)\""
+    }
+
+    static func acceptsGzip(_ acceptEncoding: String?) -> Bool {
+        guard let acceptEncoding else { return false }
+        let tokens = acceptEncoding.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        for token in tokens {
+            let parts = token.split(separator: ";", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let name = parts.first?.lowercased(), name == "gzip" else { continue }
+            if parts.count > 1 {
+                let qPart = parts[1].trimmingCharacters(in: .whitespaces).lowercased()
+                if qPart.hasPrefix("q="), let q = Double(qPart.dropFirst(2)), q == 0 {
+                    continue
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    static func gzipable(_ pathExtension: String) -> Bool {
+        switch pathExtension {
+        case "html", "htm", "js", "mjs", "css", "svg", "json", "map", "txt", "md":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func gzip(_ input: Data) -> Data? {
+        guard !input.isEmpty else { return nil }
+        guard let deflated = deflateRaw(input) else { return nil }
+
+        var out = Data()
+        // RFC 1952 gzip header
+        out.append(contentsOf: [0x1f, 0x8b, 0x08, 0x00])
+        out.append(contentsOf: [0, 0, 0, 0]) // mtime
+        out.append(contentsOf: [0x00, 0x03]) // xfl + OS (Unix)
+        out.append(deflated)
+        out.append(contentsOf: crc32(input).littleEndianBytes)
+        out.append(contentsOf: UInt32(truncatingIfNeeded: input.count).littleEndianBytes)
+        return out
+    }
+
+    private static func deflateRaw(_ input: Data) -> Data? {
+        var output = Data(count: max(input.count, 64))
+        var capacity = output.count
+        for _ in 0..<8 {
+            let written = output.withUnsafeMutableBytes { dst -> Int in
+                input.withUnsafeBytes { src -> Int in
+                    guard let dstBase = dst.bindMemory(to: UInt8.self).baseAddress,
+                          let srcBase = src.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+                    return compression_encode_buffer(dstBase, capacity,
+                                                     srcBase, input.count,
+                                                     nil, COMPRESSION_ZLIB)
+                }
+            }
+            if written > 0 {
+                output.removeSubrange(written...)
+                return output
+            }
+            capacity *= 2
+            output = Data(count: capacity)
+        }
+        return nil
+    }
+
+    private static func crc32(_ input: Data) -> UInt32 {
+        var crc: UInt32 = 0xFFFF_FFFF
+        for byte in input {
+            crc ^= UInt32(byte)
+            for _ in 0..<8 {
+                if crc & 1 != 0 {
+                    crc = (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >>= 1
+                }
+            }
+        }
+        return crc ^ 0xFFFF_FFFF
+    }
+
     private static func plain(_ status: Int, _ reason: String, _ body: String) -> Response {
         Response(status: status,
                  reason: reason,
                  contentType: "text/plain; charset=utf-8",
-                 body: Data(body.utf8))
+                 body: Data(body.utf8),
+                 cacheControl: "no-cache",
+                 contentEncoding: nil,
+                 etag: nil,
+                 vary: nil)
     }
 
     /// Serialize to the wire. HEAD keeps the headers and drops the body.
@@ -106,12 +248,25 @@ struct HostGatewayStaticFiles {
         var head = "HTTP/1.1 \(response.status) \(response.reason)\r\n"
         head += "Content-Type: \(response.contentType)\r\n"
         head += "Content-Length: \(response.body.count)\r\n"
-        // The gateway is a live view of the machine; a stale cached shell is worse
-        // than a re-fetch of a few hundred KB over the loopback or a tunnel.
-        head += "Cache-Control: no-cache\r\n"
-        head += "Connection: close\r\n\r\n"
+        head += "Cache-Control: \(response.cacheControl)\r\n"
+        if let encoding = response.contentEncoding {
+            head += "Content-Encoding: \(encoding)\r\n"
+        }
+        if let etag = response.etag {
+            head += "ETag: \(etag)\r\n"
+        }
+        if let vary = response.vary {
+            head += "Vary: \(vary)\r\n"
+        }
+        head += "Connection: keep-alive\r\n\r\n"
         var data = Data(head.utf8)
         if includeBody { data.append(response.body) }
         return data
+    }
+}
+
+private extension FixedWidthInteger {
+    var littleEndianBytes: [UInt8] {
+        withUnsafeBytes(of: littleEndian) { Array($0) }
     }
 }
