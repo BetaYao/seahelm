@@ -7,24 +7,26 @@
 
 ## 生产用法(Gateway-first)
 
-1. Mac 上启用 Host Gateway(Seahelm Settings → Pairing),Cloudflare Tunnel 指向 Gateway 端口。
-2. 复制 Settings 里的 `seahelm://pair?b=<wss>/ws&m=…&k=…` 链接。
-3. 浏览器打开 `index.html`(可经 Tunnel 同域托管) → **配对** → 粘贴链接 → **连接**。
+1. Mac 上启用 Host Gateway(Seahelm Settings → Host Gateway / Browser access)。
+2. 浏览器打开 Gateway 页面(如 `http://<Mac Tailscale IP>:2783/` 或 localhost)——**http / https 均可**。
+3. 在网页输入 Settings 里显示的 **8 位配对码** → 配对并连接。
 4. 连接后自动 `session.snapshot` → First Mate 渲染 pane 列表 → 点一行开 VT 终端。
+5. 浏览器会记住 token;下次打开同一页面自动重连。刷新配对码不会踢掉已配对浏览器;「撤销所有远程」才会。
 
 传输选择(自动,无需手调):
 
 | 条件 | 传输 |
 |---|---|
-| pair `b=` 路径为 `/ws`,或 `?transport=gateway` / `localStorage seahelm_transport=gateway` | **WebSocket Host Gateway** |
+| 页面同源 `/ws`(Host Gateway 托管),或 `?transport=gateway` | **WebSocket Host Gateway** |
 | `?mqtt=1`,或 broker 为 `localhost:28083` | **MQTT**(devbroker 调试) |
 
 Gateway 握手:
 
-1. `auth` → `{mac_id, token}` — `token` = `E2EE.deriveKeys(…).password`(HKDF auth 十六进制)
-2. `session.snapshot` → 填充 First Mate
-3. 选 pane → `pane.vt_open`; 服务端 push `notify` `vt.snapshot` / `vt.data`(base64 PTY 字节)
-4. 键盘 → `pane.send_keys` `{pane_session_key, b64}`
+1. 首次:`auth` → `{code}` → 返回 `{ok, mac_id, token, vt_binary, vt_deflate}`
+2. 回访:`auth` → `{mac_id, token}`(localStorage)
+3. `session.snapshot` → 填充 First Mate
+4. 选 pane → `pane.vt_open`; 服务端 push binary VT frames(或 JSON legacy)
+5. 键盘 → `pane.send_keys` `{pane_session_key, b64}`
 
 Wire 格式:
 

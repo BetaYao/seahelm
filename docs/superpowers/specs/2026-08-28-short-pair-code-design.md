@@ -1,6 +1,6 @@
 # Short numeric pairing code for Host Gateway
 
-> **Status:** Draft for review (2026-08-28 brainstorm)  
+> **Status:** Implemented (2026-08-29) — ready for QA  
 > **Goal:** Pair a browser to a Mac Host Gateway by entering an 8-digit code on the page you already opened — works on plain HTTP and HTTPS, with no URL or secret in the pairing payload.  
 > **Replaces for web:** `seahelm://pair?b=…&m=…&k=…` QR / long-link pairing in Settings and the web gate UI.
 
