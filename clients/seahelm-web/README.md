@@ -44,6 +44,7 @@ Wire 格式:
 | `e2ee.js` | 配对 URI 解析 + HKDF auth/E2EE(与 Mac `MqttCrypto` 一致) |
 | `mqtt.min.js` | vendored MQTT.js — **仅 devbroker / 遗留 MQTT 调试** |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
+| `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
 | `devbroker/` | 本地 MQTT 调试台(**非生产路径**) |
 
 ## 本地 MQTT 调试(dev-only)

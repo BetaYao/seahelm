@@ -385,9 +385,9 @@
 
 <link rel="stylesheet" href="./xterm.css" />
 <script src="./xterm.js"></script>
-<script src="./xterm-addon-webgl.js"></script>
 <script src="./input-coalescer.js"></script>
 <script src="./reconnect.js"></script>
+<script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1650,20 +1650,39 @@ function buildLayoutLeaf(node){
  * contexts (Chrome around 16), so a big enough layout will legitimately run out,
  * and a lost context leaves a blank canvas behind if the addon stays attached.
  * A pane rendering by DOM is slower; a pane rendering nothing is broken.
+ *
+ * The addon script is deferred until the first terminal open so the initial
+ * page load skips ~242KB on weak links.
  */
+let webglAddonPromise = null;
+function loadWebglAddon(){
+  if (typeof WebglAddon !== 'undefined' && WebglAddon.WebglAddon) {
+    return Promise.resolve(WebglAddon);
+  }
+  if (webglAddonPromise) return webglAddonPromise;
+  webglAddonPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './xterm-addon-webgl.js';
+    s.onload = () => resolve(window.WebglAddon || WebglAddon);
+    s.onerror = () => reject(new Error('webgl addon failed'));
+    document.head.appendChild(s);
+  });
+  return webglAddonPromise;
+}
+
 function attachWebglRenderer(term){
   if (RENDERER === 'ghostty') return;              // ghostty-web draws its own canvas
-  if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) return;
-  try {
-    const addon = new WebglAddon.WebglAddon();
+  loadWebglAddon().then((mod) => {
+    const Ctor = mod.WebglAddon || mod;
+    const addon = new Ctor();
     addon.onContextLoss(() => {
       log('sys', '(webgl)', 'context lost — 该面板回退到 DOM 渲染');
       try { addon.dispose(); } catch (e) {}
     });
     term.loadAddon(addon);
-  } catch (e) {
+  }).catch((e) => {
     log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
-  }
+  });
 }
 
 function focusPane(key){

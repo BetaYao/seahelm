@@ -1898,7 +1898,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nSRC=\"${SRCROOT}/clients/seahelm-web\"\nDEST=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/seahelm-web\"\nrm -rf \"${DEST}\"\nmkdir -p \"${DEST}\"\nrsync -a \\\n  --exclude 'devbroker' --exclude '.gitignore' --exclude 'README.md' \\\n  \"${SRC}/\" \"${DEST}/\"\n";
+			shellScript = "set -euo pipefail\nSRC=\"${SRCROOT}/clients/seahelm-web\"\nDEST=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/seahelm-web\"\nrm -rf \"${DEST}\"\nmkdir -p \"${DEST}\"\nrsync -a \\\n  --exclude 'devbroker' --exclude '.gitignore' --exclude 'README.md' \\\n  --exclude 'bench.html' --exclude 'bench-corpus.js' \\\n  \"${SRC}/\" \"${DEST}/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
