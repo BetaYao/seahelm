@@ -88,6 +88,17 @@ MAC=live npm run mock:zmx # 终端 B: ZMX_PANES=1,真实 zmx session → MQTT pa
 
 终端按宽度贴合;字号下限 9px;右下角「↓ 最新」在回看时出现。
 
+### VT 订阅模式
+
+终端标题栏 **单屏 / 镜像** 徽章切换 VT attach 策略(`localStorage seahelm_vt_mode`,默认 **`single`**):
+
+| 模式 | 行为 |
+|---|---|
+| **单屏** (默认) | 只 attach 当前焦点 pane — 弱网/小屏友好,多 pane 时靠顶栏 chip 切换 |
+| **镜像** | 每个 pane 一路 VT,按 Mac 侧 split 布局同屏渲染 |
+
+窄窗口仍强制单屏(`layoutFitsMirror` 不满足时忽略镜像偏好)。
+
 ## VT 终端
 
 Mac 侧经 **`zmx attach`** 保真 PTY 流;浏览器 xterm.js 渲染。

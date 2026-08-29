@@ -363,6 +363,7 @@
     <div class="col" id="midcol">
       <div class="detail-head">
         <h2 id="detailHead">终端</h2>
+        <button class="renderer-badge" id="vtModeBadge" title="VT 订阅模式">单屏</button>
         <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
       </div>
@@ -1152,7 +1153,8 @@ window.addEventListener('resize', handleViewportResize);
 function handleViewportResize(){
   const wrap = $('termWrap');
   if (S.vt.tree && wrap){
-    const want = layoutFitsMirror(S.vt.tree, wrap.clientWidth) ? 'mirror' : 'single';
+    const preferMirror = loadVtMode() === 'mirror';
+    const want = (preferMirror && layoutFitsMirror(S.vt.tree, wrap.clientWidth)) ? 'mirror' : 'single';
     if (want !== S.vt.mode){
       const keep = S.vt.focus, tree = S.vt.tree, path = S.vt.worktree;
       unmountPanes();
@@ -1235,6 +1237,37 @@ function renderRendererBadge(active){
 // Resolve the renderer once the declarations above exist: `rendererReady` is a
 // `let`, so any call placed earlier in the file hits its temporal dead zone.
 ensureRenderer().then(renderRendererBadge);
+
+const VT_MODE_KEY = 'seahelm_vt_mode';
+function loadVtMode(){
+  const v = localStorage.getItem(VT_MODE_KEY);
+  return v === 'mirror' ? 'mirror' : 'single';
+}
+function setVtMode(mode){
+  localStorage.setItem(VT_MODE_KEY, mode);
+  renderVtModeBadge();
+  if (S.sel){
+    const path = S.sel, focus = S.vt.focus || S.selPane;
+    const tree = S.vt.tree, wt = S.vt.worktree;
+    if (tree && wt === path){
+      unmountPanes();
+      mountPanes(tree, focus, path);
+    } else {
+      requestLayout(path);
+    }
+  }
+}
+function renderVtModeBadge(){
+  const el = $('vtModeBadge');
+  if (!el) return;
+  const mode = loadVtMode();
+  el.textContent = mode === 'mirror' ? '镜像' : '单屏';
+  el.title = mode === 'mirror'
+    ? '镜像：每个 pane 一路 VT — 点击切到单屏'
+    : '单屏：只订阅焦点 pane — 点击切到镜像';
+  el.onclick = () => setVtMode(mode === 'mirror' ? 'single' : 'mirror');
+}
+renderVtModeBadge();
 
 // ── Shortcut bar ────────────────────────────────────────────────────────────
 // Some keys never reach a web page. Cmd+W closes the tab and is unpreventable
@@ -1473,7 +1506,8 @@ function mountPanes(tree, focusKey, path){
   }
   S.vt.worktree = path;
   S.vt.tree = tree;
-  S.vt.mode = layoutFitsMirror(tree, wrap.clientWidth) ? 'mirror' : 'single';
+  const preferMirror = loadVtMode() === 'mirror';
+  S.vt.mode = (preferMirror && layoutFitsMirror(tree, wrap.clientWidth)) ? 'mirror' : 'single';
 
   if (S.vt.mode === 'single'){
     const leaves = treeLeaves(tree);
