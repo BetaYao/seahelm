@@ -853,7 +853,7 @@ async function applyPair(link){
   const p = E2EE.parsePairURI(link);
   const { password, encKey } = await E2EE.deriveKeys(p.rootBytes);
   S.encKey = encKey; S.authPass = password; S.mac = p.mac;
-  $('broker').value = edgeBroker() || p.broker; $('mac').value = p.mac;
+  $('broker').value = defaultBroker() || edgeBroker() || p.broker; $('mac').value = p.mac;
   $('user').value = p.mac; $('pass').value = '';
   try {
     localStorage.setItem(CREDS_KEY, JSON.stringify({ b: p.broker, m: p.mac, t: password }));
