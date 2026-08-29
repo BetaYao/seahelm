@@ -8,15 +8,19 @@ struct HostGatewayConfig: Codable, Equatable {
     /// Directory served at `/`. Empty → the bundled `seahelm-web`; set it to a
     /// working copy to iterate on the web client without rebuilding the app.
     var webRoot: String?
+    /// Eight-digit code required to pair a remote client with this host.
+    var pairCode: String?
 
     init(enabled: Bool? = nil,
          port: UInt16? = nil,
          publicURL: String? = nil,
-         webRoot: String? = nil) {
+         webRoot: String? = nil,
+         pairCode: String? = nil) {
         self.enabled = enabled
         self.port = port
         self.publicURL = publicURL
         self.webRoot = webRoot
+        self.pairCode = pairCode
     }
 
     var resolvedEnabled: Bool { enabled ?? false }
@@ -54,12 +58,14 @@ struct HostGatewayConfig: Codable, Equatable {
             publicURL: url.isEmpty ? nil : url,
             // No field carries the dev-only web root, so pass it through rather
             // than erase a working copy set by hand in config.json.
-            webRoot: existing?.webRoot)
+            webRoot: existing?.webRoot,
+            pairCode: existing?.pairCode)
     }
 
     enum CodingKeys: String, CodingKey {
         case enabled, port
         case publicURL = "public_url"
         case webRoot = "web_root"
+        case pairCode = "pair_code"
     }
 }
