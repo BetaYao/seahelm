@@ -428,7 +428,7 @@ const S = {
   focus:null, dnd:null, events:new Map(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
   sel:null, selPane:null,
-  encKey:null, authPass:null,   // set once a seahelm:// pair link is applied (E2EE on)
+  encKey:null, authPass:null, pendingCode:null,   // authPass = long-lived token; pendingCode for first pair
   // VT terminal: `open` is the pane key currently streaming
   // One entry per mirrored pane, keyed by paneSessionKey; `focus` is the pane
   // keystrokes reach, `worktree` is the layout currently mounted.
@@ -501,15 +501,29 @@ const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;',
 const $ = id => document.getElementById(id);
 const base = () => `seahelm/${S.mac}`;
 
+// Same-origin Host Gateway WSS. Prefer this whenever the page is served by
+// Host Gateway (any host/port), so plain HTTP Tailscale URLs work.
+function gatewayWsURL(){
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${scheme}//${location.host}/ws`;
+}
 // Edge stack (https://gw.seahelm.dev/): same-origin Host Gateway WSS.
-// Pair links may still carry a legacy MQTT `b=`; ignore that on the gateway host.
 function edgeBroker() {
   if (location.protocol === 'https:' && /\.(seahelm\.dev|ucar\.cc)$/i.test(location.hostname)) {
-    return `wss://${location.host}/ws`;
+    return gatewayWsURL();
   }
   return null;
 }
-if ($('broker') && edgeBroker()) $('broker').value = edgeBroker();
+function defaultBroker(){
+  if (new URLSearchParams(location.search).get('mqtt') === '1') return null;
+  // Served from Host Gateway (not file://, not mqtt-only): use same-origin /ws.
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    if (location.port === '28083') return null; // local MQTT devbroker
+    return gatewayWsURL();
+  }
+  return edgeBroker();
+}
+if ($('broker') && defaultBroker()) $('broker').value = defaultBroker();
 
 // Host Gateway (WSS /ws) vs MQTT devbroker. Force MQTT with ?mqtt=1 or localhost:28083.
 function useGatewayTransport(url) {
@@ -573,29 +587,42 @@ function setStatus(on, txt){
 // ── connect ───────────────────────────────────────────────────────────────
 function connect(){
   disconnectAll();
-  S.mac = $('mac').value.trim() || 'testmac';
-  const edge = edgeBroker();
+  S.mac = $('mac').value.trim() || S.mac || 'testmac';
+  const edge = defaultBroker();
   if (edge) $('broker').value = edge;
-  const url = $('broker').value.trim();
+  const url = $('broker').value.trim() || gatewayWsURL();
   if (useGatewayTransport(url)) connectGateway(url);
   else connectMqtt(url);
 }
 
 function connectGateway(url){
-  if (!S.authPass) return alert('Host Gateway 需要先配对(seahelm://pair?…)');
+  if (!S.authPass && !S.pendingCode) {
+    setStatus(false, '需要配对码');
+    return;
+  }
+  const wsURL = (url && url.includes('/ws')) ? url : gatewayWsURL();
   S.transport = 'gateway';
-  log('sys', '(connect)', url + ' [Gateway]');
-  const ws = new WebSocket(url);
+  log('sys', '(connect)', wsURL + ' [Gateway]');
+  const ws = new WebSocket(wsURL);
   ws.binaryType = 'arraybuffer';
   S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false };
   ws.onopen = () => {
-    // Opt in to the binary VT frame. An older Mac ignores these and keeps
-    // sending JSON, which the message handler still understands.
-    gwSend('auth', {
-      mac_id: S.mac, token: S.authPass,
-      vt_binary: true, vt_deflate: typeof DecompressionStream === 'function',
-    }, (r, err) => {
+    const params = {
+      vt_binary: true,
+      vt_deflate: typeof DecompressionStream === 'function',
+    };
+    if (S.pendingCode) params.code = S.pendingCode;
+    else { params.mac_id = S.mac; params.token = S.authPass; }
+    gwSend('auth', params, (r, err) => {
+      if (err && err.code === -32029) {
+        S.pendingCode = null;
+        setStatus(false, '尝试过多,稍后再试');
+        log('sys', '(auth-rate)', JSON.stringify(err));
+        ws.close();
+        return;
+      }
       if (err || !r || r.ok === false) {
+        S.pendingCode = null;
         setStatus(false, '认证失败');
         log('sys', '(auth-fail)', err ? JSON.stringify(err) : JSON.stringify(r));
         ws.close();
@@ -604,6 +631,13 @@ function connectGateway(url){
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
+      if (r.mac_id) S.mac = r.mac_id;
+      if (r.token) S.authPass = r.token;
+      S.pendingCode = null;
+      try {
+        localStorage.setItem(CREDS_KEY, JSON.stringify({ m: S.mac, t: S.authPass }));
+      } catch (e) {}
+      if ($('mac')) $('mac').value = S.mac;
       log('sys', '(vt format)', S.gw.binary ? (S.gw.deflate ? 'binary+deflate' : 'binary') : 'json+base64');
       setStatus(true, '已连接');
       gwSend('session.snapshot', {}, (snap) => {
@@ -819,7 +853,7 @@ async function applyPair(link){
   const p = E2EE.parsePairURI(link);
   const { password, encKey } = await E2EE.deriveKeys(p.rootBytes);
   S.encKey = encKey; S.authPass = password; S.mac = p.mac;
-  $('broker').value = edgeBroker() || p.broker; $('mac').value = p.mac;
+  $('broker').value = defaultBroker() || edgeBroker() || p.broker; $('mac').value = p.mac;
   $('user').value = p.mac; $('pass').value = '';
   try {
     localStorage.setItem(CREDS_KEY, JSON.stringify({ b: p.broker, m: p.mac, t: password }));
@@ -833,18 +867,21 @@ function restoreCreds(){
   let c;
   try { c = JSON.parse(localStorage.getItem(CREDS_KEY) || 'null'); } catch (e) { c = null; }
   if (!c || !c.t || !c.m) return false;
-  S.authPass = c.t; S.mac = c.m; S.encKey = null;
-  $('broker').value = edgeBroker() || c.b || ''; $('mac').value = c.m;
+  S.authPass = c.t; S.mac = c.m; S.encKey = null; S.pendingCode = null;
+  const edge = defaultBroker();
+  $('broker').value = edge || c.b || gatewayWsURL();
+  $('mac').value = c.m;
   $('user').value = c.m; $('pass').value = '';
   return true;
 }
 function pairPrompt(){
+  // Legacy MQTT-only helper; Gateway uses the gate's 8-digit input.
   const link = prompt('粘贴 macOS 配对界面的长链接(seahelm://pair?…):', '');
   if (!link) return;
   applyPair(link.trim()).catch(e => alert('配对失败:' + e.message));
 }
 function clearPair(){
-  S.encKey = null; S.authPass = null;
+  S.encKey = null; S.authPass = null; S.pendingCode = null;
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem('seahelm_pair');   // pre-migration installs
   log('sys', '(unpaired)', '回到明文/手填模式');
@@ -852,10 +889,7 @@ function clearPair(){
 }
 // Reflect pairing state in the header: chip when paired, 配对 button when not.
 /**
- * Connection gate. Pairing and connecting used to be two buttons in a corner,
- * which asked the user to know they were two steps — the first one exactly once,
- * and never again. Now the page has three states and shows only the one you are
- * in: paste a link, or press connect, or get out of the way entirely.
+ * Connection gate. Three states: enter code, press connect, or get out of the way.
  */
 function renderGate(){
   const gate = $('gate');
@@ -871,7 +905,7 @@ function renderGate(){
   if (S.authPass){                       // paired, disconnected
     gate.innerHTML = `
       <div class="gate-card">
-        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b><span class="e2ee">E2EE</span></div>
+        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
         <button class="gate-primary" id="gateConnect">连接</button>
         <button class="gate-link" id="gateUnpair">解除配对</button>
       </div>`;
@@ -883,33 +917,25 @@ function renderGate(){
   gate.innerHTML = `
     <div class="gate-card">
       <div class="gate-title">配对这台 Mac</div>
-      <div class="gate-hint">粘贴 Seahelm 设置里的配对链接(seahelm://pair?…)</div>
-      <textarea class="gate-input" id="gateLink" rows="3" spellcheck="false"
-                placeholder="seahelm://pair?b=…&amp;m=…&amp;k=…"></textarea>
+      <div class="gate-hint">在 Seahelm 设置里查看 8 位配对码，输入后连接</div>
+      <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="9" placeholder="1234 5678" />
       <button class="gate-primary" id="gatePair">配对并连接</button>
       <div class="gate-error" id="gateError" hidden></div>
     </div>`;
-  const input = $('gateLink'), err = $('gateError');
+  const input = $('gateCode'), err = $('gateError');
   const fail = (m) => { err.textContent = m; err.hidden = false; };
 
-  const go = async () => {
-    const link = (input.value || '').trim();
-    if (!link) return fail('请先粘贴配对链接');
+  const go = () => {
+    const digits = String(input.value || '').replace(/\D/g, '');
+    if (digits.length !== 8) return fail('请输入 8 位配对码');
     err.hidden = true;
-    try {
-      await applyPair(link);
-      connect();                         // one action, not two
-      renderGate();
-    } catch (e) {
-      // The usual cause is a page served without a secure context, where
-      // SubtleCrypto does not exist and e2ee.js never finished loading.
-      fail(typeof E2EE === 'undefined'
-        ? '此页面不在安全上下文中,无法计算配对密钥 —— 请用 https:// 或 http://127.0.0.1 打开'
-        : '配对失败:' + (e && e.message));
-    }
+    S.pendingCode = digits;
+    connect();
+    renderGate();
   };
   $('gatePair').onclick = go;
-  input.onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) go(); };
+  input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
   setTimeout(() => input.focus(), 0);
 }
 

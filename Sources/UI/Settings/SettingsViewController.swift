@@ -3,11 +3,18 @@ import AppKit
 protocol SettingsDelegate: AnyObject {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config)
 
-    /// Mint (if needed) and persist the pairing secret on the *live* config, and
-    /// hand back what the QR needs. Settings edits a copy of the config, and a
-    /// secret minted into a copy would be lost or clobbered — so the owner of the
-    /// live config does it, exactly as the standalone pairing window does.
+    /// Mint (if needed) and persist the pairing root secret on the *live* config.
+    /// Still required so Host Gateway can issue long-lived tokens after a code auth.
     func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)?
+
+    /// Current 8-digit pairing code (ensures one exists).
+    func settingsPairingCode(_ settings: SettingsViewController) -> String
+
+    /// Generate a new code; previous code stops working. Does not revoke tokens.
+    func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String
+
+    /// Rotate root secret + refresh code; all stored browser tokens die.
+    func settingsRevokeAllRemotes(_ settings: SettingsViewController)
 
     /// Live panes, so a rule's target is picked from a project → worktree →
     /// pane cascade of what actually exists rather than typed from memory.
@@ -27,6 +34,15 @@ protocol SettingsDelegate: AnyObject {
 /// tests conform with just the config callback.
 extension SettingsDelegate {
     func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? { nil }
+    func settingsPairingCode(_ settings: SettingsViewController) -> String {
+        var store = PairingCodeStore(code: nil)
+        return store.ensureCode()
+    }
+    func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String {
+        var store = PairingCodeStore(code: nil)
+        return store.refresh()
+    }
+    func settingsRevokeAllRemotes(_ settings: SettingsViewController) {}
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
     func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {}
@@ -484,31 +500,52 @@ class SettingsViewController: NSViewController {
     private func buildPairingGroups() -> [NSView] {
         let gatewayGroup = buildHostGatewayGroup()
 
-        guard let context = settingsDelegate?.settingsPairingContext(self) else {
-            return [gatewayGroup]
+        // Ensure a root secret exists so code auth can issue tokens.
+        if let context = settingsDelegate?.settingsPairingContext(self) {
+            pairingMqtt = context.mqtt
+            config.mqtt = context.mqtt
         }
-        pairingMqtt = context.mqtt
-        // Fold the minted config back into this snapshot. `settingsPairingContext`
-        // creates `mqtt` and its `rootSecret` on the *owner's* config and saves
-        // it, so from here on this view controller's copy is a version behind —
-        // and `applyChanges()` writes this copy out wholesale. Without this line,
-        // touching any Host Gateway control right after the QR appeared erased
-        // the secret it encodes, from disk and from memory, and restarted the
-        // listener with an empty one.
-        config.mqtt = context.mqtt
 
-        let pane = PairingPaneView(rootSecret: context.secret,
-                                   brokerURL: HostGatewayPairing.clientEntryURL(
-                                       hostGateway: config.hostGateway, mqtt: context.mqtt),
-                                   macId: context.mqtt.macId ?? MqttConfig.deriveMacId(),
-                                   qrSide: 180)
+        let accessURL = (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
+        let code: String = {
+            if let fromDelegate = settingsDelegate?.settingsPairingCode(self) {
+                return fromDelegate
+            }
+            var store = PairingCodeStore(code: config.hostGateway?.pairCode)
+            return store.ensureCode()
+        }()
+        // Sync into our editable copy so applyChanges does not wipe it.
+        if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
+        config.hostGateway?.pairCode = PairingCodeStore.normalize(code)
+
+        let pane = PairingPaneView(accessURL: accessURL, code: code)
+        pane.onRefresh = { [weak self] in
+            guard let self else { return "" }
+            let next = self.settingsDelegate?.settingsRefreshPairingCode(self) ?? {
+                var store = PairingCodeStore(code: self.config.hostGateway?.pairCode)
+                return store.refresh()
+            }()
+            self.config.hostGateway?.pairCode = next
+            return next
+        }
+        pane.onRevokeAll = { [weak self] in
+            guard let self else { return }
+            self.settingsDelegate?.settingsRevokeAllRemotes(self)
+            let next = self.settingsDelegate?.settingsPairingCode(self) ?? {
+                var store = PairingCodeStore(code: nil)
+                return store.ensureCode()
+            }()
+            self.config.hostGateway?.pairCode = next
+            pane.setCode(next)
+            pane.accessURL = (self.config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
+        }
         pairingPane = pane
 
         return [
             gatewayGroup,
             SettingsGroupView(title: "Browser access", rows: [
                 SettingsRow.stacked(nil,
-                                    subtitle: "Scan or paste to pair a browser with this Mac via Host Gateway.",
+                                    subtitle: "Open the access URL below in a browser and enter the 8-digit code.",
                                     content: pane),
             ]),
         ]
@@ -547,21 +584,21 @@ class SettingsViewController: NSViewController {
                              control: gatewayPortField,
                              accessibilityId: "settings.hostGateway.port"),
             SettingsRow.stacked("Public URL",
-                                subtitle: "The address remote browsers reach, written into the pair link below. Point a tunnel at the port above and paste its `wss://\u{2026}/ws` here; leave it empty for this Mac only. It has to be `wss://` or localhost: the pairing token is derived with SubtleCrypto, which a page served over plain HTTP cannot use at all.",
+                                subtitle: "Optional override for the access URL shown under Browser access (and Open page). Point a tunnel at the port above and paste its `http(s)://\u{2026}/` or leave empty for this Mac only. Pairing no longer embeds this URL in a secret.",
                                 content: gatewayPublicURLField,
                                 height: 28),
             SettingsRow.actions([gatewayOpenPageButton], leading: [gatewayStatusLabel]),
         ])
     }
 
-    /// Gateway edits move a listener, so they refresh what the page claims: the
-    /// pair link's `b=`, and whether the bind actually took.
+    /// Gateway edits move a listener, so they refresh the access URL shown on
+    /// the pairing pane and whether the bind actually took.
     @objc private func gatewayControlChanged() {
         applyChanges()
         // Echo back what was stored, so a rejected port does not sit in the field
         // looking accepted.
         gatewayPortField.stringValue = String((config.hostGateway ?? HostGatewayConfig()).resolvedPort)
-        refreshPairingLink()
+        refreshPairingDisplay()
         refreshHostGatewayStatus()
         // The listener binds on its own queue; ask again once it has had a moment
         // to succeed or fail, or a taken port reads as running.
@@ -575,9 +612,12 @@ class SettingsViewController: NSViewController {
         NSWorkspace.shared.open(url)
     }
 
-    private func refreshPairingLink() {
-        guard let pairingPane, let mqtt = pairingMqtt else { return }
-        pairingPane.brokerURL = HostGatewayPairing.clientEntryURL(hostGateway: config.hostGateway, mqtt: mqtt)
+    private func refreshPairingDisplay() {
+        guard let pairingPane else { return }
+        pairingPane.accessURL = (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
+        if let code = config.hostGateway?.pairCode {
+            pairingPane.setCode(code)
+        }
     }
 
     private func refreshHostGatewayStatus() {
