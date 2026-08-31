@@ -126,6 +126,11 @@ async function timed(label, fn){
 }
 
 function pad(s, n){ return String(s).padEnd(n, ' '); }
+
+/// Safari coarsens performance.now() to ~1ms, so anything faster than the clock
+/// reads as zero and turns into a made-up throughput. Say "below the clock"
+/// instead of ">250000 MB/s", which is not a measurement.
+function belowClock(ms){ return ms < clockQuantumMs(); }
 const fmt = (ms) => ms < 0.001 ? '<0.001 ms' : ms.toFixed(3) + ' ms';
 
 /**
@@ -150,6 +155,86 @@ function clockQuantumMs(){
     if (b > a) smallest = Math.min(smallest, b - a);
   }
   return smallest === Infinity ? 1 : smallest;
+}
+
+// ── network ───────────────────────────────────────────────────────────────
+// The decode rows below are the phone's CPU. This is the other half, and on a
+// phone it is the larger one: everything above is single-digit milliseconds,
+// while a cellular round trip is tens to hundreds — and, more to the point, it
+// varies more between two consecutive samples than the whole decode costs.
+//
+// Which is why it is measured here rather than reasoned about. Open this page
+// from the device you actually use, on the network you actually use.
+async function measureNetwork(){
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsURL = `${scheme}//${location.host}/ws`;
+
+  say('');
+  say('network — from this device, on this connection');
+  say(pad('', 22) + pad('n', 5) + pad('min', 10) + pad('p50', 10) + pad('p90', 10) + 'max');
+
+  function stat(label, xs){
+    if (!xs.length) { say(pad(label, 22) + '—'); return; }
+    xs.sort((a, b) => a - b);
+    const q = (f) => xs[Math.min(Math.floor(xs.length * f), xs.length - 1)];
+    const f = (v) => `${v.toFixed(1)} ms`;
+    say(pad(label, 22) + pad(String(xs.length), 5) + pad(f(xs[0]), 10)
+        + pad(f(q(0.5)), 10) + pad(f(q(0.9)), 10) + f(xs[xs.length - 1]));
+  }
+
+  // A tiny same-origin GET: one HTTP round trip on a warm connection. This is
+  // the floor every interaction is built on.
+  const http = [];
+  for (let i = 0; i < 12; i++) {
+    const t = performance.now();
+    try { await fetch(`./xterm.css?probe=${i}`, { cache: 'no-store' }); http.push(performance.now() - t); }
+    catch (e) { break }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  stat('HTTP round trip', http);
+
+  // Socket setup, which a reconnect pays in full.
+  const openings = [];
+  for (let i = 0; i < 3; i++) {
+    const t = performance.now();
+    const ok = await new Promise((res) => {
+      let ws; try { ws = new WebSocket(wsURL); } catch (e) { return res(false); }
+      const done = (v) => { try { ws.close(); } catch (e) {} res(v); };
+      ws.onopen = () => done(performance.now() - t);
+      ws.onerror = () => done(false);
+      setTimeout(() => done(false), 8000);
+    });
+    if (ok === false) break;
+    openings.push(ok);
+  }
+  stat('WebSocket open', openings);
+
+  // The number a keystroke is built on: send a frame, wait for the reply. The
+  // gateway rejects an unauthenticated call, and a rejection is a round trip —
+  // which is exactly what is being timed, so no pairing code is needed.
+  const rtt = await new Promise((res) => {
+    const xs = [];
+    let ws; try { ws = new WebSocket(wsURL); } catch (e) { return res(xs); }
+    let n = 0, sentAt = 0;
+    const fire = () => {
+      if (n >= 20) { try { ws.close(); } catch (e) {} return res(xs); }
+      n++; sentAt = performance.now();
+      ws.send(JSON.stringify({ id: 'probe' + n, method: 'session.snapshot', params: {} }));
+    };
+    ws.onopen = fire;
+    ws.onmessage = () => { xs.push(performance.now() - sentAt); setTimeout(fire, 40); };
+    ws.onerror = () => res(xs);
+    setTimeout(() => { try { ws.close(); } catch (e) {} res(xs); }, 15000);
+  });
+  stat('request round trip', rtt);
+
+  const p50 = rtt.length ? rtt.slice().sort((a,b)=>a-b)[Math.floor(rtt.length/2)] : null;
+  if (p50 !== null) {
+    say('');
+    say(`a keystroke costs one of those round trips, plus the coalescing windows.`);
+    say(`here that is ~${p50.toFixed(0)} ms of network against ~3 ms of Mac —`);
+    say(`which is why bytes and round-trip count matter more than either.`);
+  }
 }
 
 async function main(){
@@ -245,7 +330,16 @@ async function main(){
   /// One full corpus through a fresh terminal. `webgl` is attempted, not assumed:
   /// the addon fails on machines without a GPU context, and an earlier version of
   /// this page claimed WebGL "is faster" while never loading the addon at all.
-  async function renderPass(useWebgl){
+  // Cold and warm are different questions and were being answered as one.
+  //
+  // A WebGL terminal pays for its context, its shaders and its glyph atlas on
+  // the first paint. Measuring a single freshly-built terminal charges all of
+  // that to the renderer, and on a phone that setup can be tens of milliseconds
+  // — enough to make WebGL look far worse than DOM when what it actually costs
+  // per frame may be lower. The app builds a terminal once and then writes to it
+  // for the rest of the session, so the warm number is the one that describes
+  // watching an agent work; the cold number is what opening a pane costs.
+  async function renderPass(useWebgl, passes = 5){
     const host = document.getElementById('termhost');
     host.innerHTML = '';
     const term = new TerminalCtor({ cols: 120, rows: 40, scrollback: 1000, convertEol: false });
@@ -258,18 +352,38 @@ async function main(){
         renderer = 'webgl';
       } catch (e) { return null; }
     }
-    const t0 = performance.now();
-    await new Promise((resolve) => {
-      let left = frames.length;
-      for (const f of frames) term.write(f, () => { if (--left === 0) resolve(); });
-    });
-    const parseMs = performance.now() - t0;
+
     // Two frames: the first schedules the paint, the second cannot run until it
     // has been composited.
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const paintedMs = performance.now() - t0;
+    const painted = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    async function onePass(){
+      const t0 = performance.now();
+      await new Promise((resolve) => {
+        let left = frames.length;
+        for (const f of frames) term.write(f, () => { if (--left === 0) resolve(); });
+      });
+      const ms = performance.now() - t0;
+      await painted();
+      return { ms, paintedMs: performance.now() - t0 };
+    }
+
+    const cold = await onePass();          // includes context, shaders, atlas
+    const warm = [];
+    for (let i = 0; i < passes; i++) {
+      term.reset();
+      await painted();                     // don't time the clear
+      warm.push(await onePass());
+    }
     term.dispose();
-    return { ms: parseMs, paintedMs, renderer };
+
+    const mid = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+    return {
+      renderer,
+      coldMs: cold.ms, coldPaintedMs: cold.paintedMs,
+      ms: mid(warm.map((w) => w.ms)),
+      paintedMs: mid(warm.map((w) => w.paintedMs)),
+      passes: warm.length,
+    };
   }
 
   if (TerminalCtor) {
@@ -280,8 +394,22 @@ async function main(){
       ? `${pad(label, 26)}${pad('—', 12)}${pad(fmt(r.ms), 11)}${pad(rate(r.ms), 13)}`
         + `painted ${fmt(r.paintedMs)}`
       : `${pad(label, 26)}${pad('—', 12)}unavailable (no GPU context)`;
+    const crow = (label, r) => r
+      ? `${pad(label, 26)}${pad('—', 12)}${pad(fmt(r.coldMs), 11)}${pad('—', 13)}`
+        + `painted ${fmt(r.coldPaintedMs)}`
+      : '';
     say(rrow('xterm.write (dom)', dom));
     say(rrow('xterm.write (webgl)', webgl));
+    say('');
+    say(`first paint — setup included, i.e. what opening a pane costs`);
+    say(crow('  dom, cold', dom));
+    if (webgl) say(crow('  webgl, cold', webgl));
+    if (webgl) {
+      const setup = webgl.coldPaintedMs - webgl.paintedMs;
+      say('');
+      say(`webgl setup (context + shaders + atlas): ~${fmt(setup)}, paid once per pane.`);
+      say(`steady state is the row above it — ${fmt(webgl.paintedMs)} vs dom ${fmt(dom.paintedMs)}.`);
+    }
     say('');
     say(`bytes saved, binary+deflate vs today   ${((1 - deflateBytes / legacyBytes) * 100).toFixed(1)}%`);
     say(`double-decode fix alone                ${(results[1].ms / today.ms).toFixed(2)}x of the old decode cost`);
@@ -299,6 +427,8 @@ async function main(){
   }
 
   await scrollbackSweep();
+
+  await measureNetwork();
 
   document.getElementById('results').classList.remove('running');
   window.BENCH_DONE = true;
