@@ -86,8 +86,8 @@ final class HostGatewayServerTests: XCTestCase {
             project: "proj", agentType: "Claude Code", status: "Running",
             lastMessage: "hi")]
         let vt = ServerFakeVT()
-        let b64 = MqttCrypto.base64url(root)
-        let token = MqttCrypto(rootSecret: root).authPassword
+        let b64 = PairingCrypto.base64url(root)
+        let token = PairingCrypto(rootSecret: root).authPassword
         let config = HostGatewayConfig(enabled: true, port: testPort)
         let server = HostGatewayServer(
             config: config,
@@ -125,7 +125,7 @@ final class HostGatewayServerTests: XCTestCase {
     /// the gateway only ever restarted on a pairing mint — and a port left held
     /// would leave the switch on with nothing serving.
     func testStoppingReleasesThePortForTheNextServer() {
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         let config = HostGatewayConfig(enabled: true, port: testPort)
         let make = { HostGatewayServer(
             config: config,
@@ -161,8 +161,8 @@ final class HostGatewayServerTests: XCTestCase {
     func testBinaryVTFrameDeliveredOverWebSocket() throws {
         let ds = ServerFakeDataSource()
         let vt = ServerFakeVT()
-        let b64 = MqttCrypto.base64url(root)
-        let token = MqttCrypto(rootSecret: root).authPassword
+        let b64 = PairingCrypto.base64url(root)
+        let token = PairingCrypto(rootSecret: root).authPassword
         let server = HostGatewayServer(
             config: HostGatewayConfig(enabled: true, port: testPort),
             router: ControlRouter(dataSource: ds),
@@ -213,8 +213,8 @@ final class HostGatewayServerTests: XCTestCase {
     func testVtNotifyDeliveredOverWebSocket() {
         let ds = ServerFakeDataSource()
         let vt = ServerFakeVT()
-        let b64 = MqttCrypto.base64url(root)
-        let token = MqttCrypto(rootSecret: root).authPassword
+        let b64 = PairingCrypto.base64url(root)
+        let token = PairingCrypto(rootSecret: root).authPassword
         let config = HostGatewayConfig(enabled: true, port: testPort)
         let server = HostGatewayServer(
             config: config,
@@ -261,7 +261,7 @@ final class HostGatewayServerTests: XCTestCase {
             config: HostGatewayConfig(enabled: true, port: testPort, webRoot: webRoot.path),
             router: ControlRouter(dataSource: ServerFakeDataSource()),
             expectedMacId: macId,
-            rootSecretBase64url: MqttCrypto.base64url(root),
+            rootSecretBase64url: PairingCrypto.base64url(root),
             vt: ServerFakeVT())
         defer { server.stop() }
 
@@ -296,7 +296,7 @@ final class HostGatewayServerTests: XCTestCase {
             config: HostGatewayConfig(enabled: true, port: testPort, webRoot: NSTemporaryDirectory()),
             router: ControlRouter(dataSource: ServerFakeDataSource()),
             expectedMacId: macId,
-            rootSecretBase64url: MqttCrypto.base64url(root),
+            rootSecretBase64url: PairingCrypto.base64url(root),
             vt: ServerFakeVT())
         defer { server.stop() }
 

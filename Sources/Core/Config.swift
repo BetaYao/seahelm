@@ -27,7 +27,8 @@ struct Config: Codable {
     var agentSessions: [String: AgentSessionRef]
     /// Pairing identity for Host Gateway (`root_secret` / `mac_id`). Broker
     /// fields are legacy and ignored — MQTT publisher was removed.
-    var mqtt: MqttConfig?
+    /// Pairing identity. The JSON key stays `mqtt` — see `PairingIdentity`.
+    var pairing: PairingIdentity?
     var imessage: IMessageConfig?
     /// Gmail email channel configuration. OAuth credentials are held separately
     /// in Keychain, so this remains safe to serialize to config.json.
@@ -87,7 +88,7 @@ struct Config: Codable {
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
         case agentSessions = "agent_sessions"
-        case mqtt
+        case pairing = "mqtt"
         case imessage
         case gmailMail = "gmail_mail"
         case hostGateway = "host_gateway"
@@ -127,7 +128,7 @@ struct Config: Codable {
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
         agentSessions = [:]
-        mqtt = nil
+        pairing = nil
         imessage = nil
         gmailMail = nil
         hostGateway = nil
@@ -169,7 +170,7 @@ struct Config: Codable {
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
         agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
-        mqtt = try container.decodeIfPresent(MqttConfig.self, forKey: .mqtt)
+        pairing = try container.decodeIfPresent(PairingIdentity.self, forKey: .pairing)
         imessage = try container.decodeIfPresent(IMessageConfig.self, forKey: .imessage)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
         hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)

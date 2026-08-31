@@ -495,15 +495,15 @@ class MainWindowController: NSWindowController, MailCommandContext {
     ///
     /// Shared by the pairing window and the Settings pairing page: both render
     /// the same payload, and neither may mint its own.
-    private func mintPairingContext() -> (secret: Data, mqtt: MqttConfig) {
-        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
-        if config.mqtt?.rootSecret == nil {
-            config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
+    private func mintPairingContext() -> (secret: Data, mqtt: PairingIdentity) {
+        if config.pairing == nil { config.pairing = PairingIdentity() }
+        if config.pairing?.rootSecret == nil {
+            config.pairing?.rootSecret = PairingCrypto.base64url(PairingCrypto.newRootSecret())
         }
         config.saveNow()
-        let mqtt = config.mqtt!
+        let mqtt = config.pairing!
         tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")
-        let secret = MqttCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? MqttCrypto.newRootSecret()
+        let secret = PairingCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? PairingCrypto.newRootSecret()
         return (secret, mqtt)
     }
 
@@ -2815,7 +2815,7 @@ extension MainWindowController: SettingsDelegate {
             }
         }
     }
-    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? {
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: PairingIdentity)? {
         mintPairingContext()
     }
 
@@ -2864,11 +2864,11 @@ extension MainWindowController: SettingsDelegate {
 
     /// Rotate root secret and pairing code so every remembered browser must re-pair.
     private func revokeAllRemotes() {
-        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
-        config.mqtt?.rootSecret = MqttCrypto.base64url(MqttCrypto.newRootSecret())
+        if config.pairing == nil { config.pairing = PairingIdentity() }
+        config.pairing?.rootSecret = PairingCrypto.base64url(PairingCrypto.newRootSecret())
         _ = refreshPairingCode()
         config.saveNow()
-        tabCoordinator.applyMqttRootSecret(config.mqtt?.rootSecret ?? "")
+        tabCoordinator.applyMqttRootSecret(config.pairing?.rootSecret ?? "")
     }
 
     /// Live panes, so a rule's target is picked from what exists rather than

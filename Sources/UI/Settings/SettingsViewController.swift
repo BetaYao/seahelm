@@ -5,7 +5,7 @@ protocol SettingsDelegate: AnyObject {
 
     /// Mint (if needed) and persist the pairing root secret on the *live* config.
     /// Still required so Host Gateway can issue long-lived tokens after a code auth.
-    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)?
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: PairingIdentity)?
 
     /// Current 8-digit pairing code (ensures one exists).
     func settingsPairingCode(_ settings: SettingsViewController) -> String
@@ -33,7 +33,7 @@ protocol SettingsDelegate: AnyObject {
 /// Optional halves of the protocol: only the main window can answer them, and
 /// tests conform with just the config callback.
 extension SettingsDelegate {
-    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: MqttConfig)? { nil }
+    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: PairingIdentity)? { nil }
     func settingsPairingCode(_ settings: SettingsViewController) -> String {
         var store = PairingCodeStore(code: nil)
         return store.ensureCode()
@@ -135,7 +135,7 @@ class SettingsViewController: NSViewController {
     /// The mqtt half of the pairing context, cached from the page build: asking
     /// the delegate again mints and reloads the gateway, which is not what a
     /// typed URL should cost.
-    private var pairingMqtt: MqttConfig?
+    private var pairingMqtt: PairingIdentity?
 
     init(config: Config) {
         self.config = config
@@ -503,7 +503,7 @@ class SettingsViewController: NSViewController {
         // Ensure a root secret exists so code auth can issue tokens.
         if let context = settingsDelegate?.settingsPairingContext(self) {
             pairingMqtt = context.mqtt
-            config.mqtt = context.mqtt
+            config.pairing = context.mqtt
         }
 
         let accessURL = (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL

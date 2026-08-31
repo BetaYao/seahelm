@@ -73,7 +73,7 @@ final class HostGatewaySessionTests: XCTestCase {
     private func session() -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
         let ds = SessionFakeDataSource()
         let vt = FakeVT()
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         let s = HostGatewaySession(
             router: ControlRouter(dataSource: ds),
             expectedMacId: macId,
@@ -83,7 +83,7 @@ final class HostGatewaySessionTests: XCTestCase {
     }
 
     private func token() -> String {
-        MqttCrypto(rootSecret: root).authPassword
+        PairingCrypto(rootSecret: root).authPassword
     }
 
     private func authFrame(id: String = "auth1", tok: String? = nil) -> String {
@@ -140,7 +140,7 @@ final class HostGatewaySessionTests: XCTestCase {
     -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
         let ds = SessionFakeDataSource()
         let vt = FakeVT()
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         let s = HostGatewaySession(
             router: ControlRouter(dataSource: ds),
             expectedMacId: macId,
@@ -285,7 +285,7 @@ final class HostGatewaySessionTests: XCTestCase {
     func testEverySessionKeepsReceivingVT() {
         let ds = SessionFakeDataSource()
         let vt = FakeVT()
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         func make() -> HostGatewaySession {
             let s = HostGatewaySession(router: ControlRouter(dataSource: ds),
                                        expectedMacId: macId, rootSecretBase64url: b64, vt: vt)
@@ -337,7 +337,7 @@ final class HostGatewaySessionTests: XCTestCase {
         autoreleasepool {
             let s = HostGatewaySession(router: ControlRouter(dataSource: SessionFakeDataSource()),
                                        expectedMacId: macId,
-                                       rootSecretBase64url: MqttCrypto.base64url(root),
+                                       rootSecretBase64url: PairingCrypto.base64url(root),
                                        vt: vt)
             s.setPendingOutboundHandler { session in _ = session.drainNotifications() }
             _ = s.handle(text: authFrame())
@@ -375,7 +375,7 @@ final class HostGatewaySessionTests: XCTestCase {
     func testVTOnlyReachesSessionsThatOpenedThePane() {
         let ds = SessionFakeDataSource()
         let vt = FakeVT()
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         func make(open key: String) -> HostGatewaySession {
             let s = HostGatewaySession(router: ControlRouter(dataSource: ds),
                                        expectedMacId: macId, rootSecretBase64url: b64, vt: vt)
