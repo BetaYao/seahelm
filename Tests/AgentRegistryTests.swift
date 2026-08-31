@@ -193,6 +193,34 @@ final class AgentRegistryTests: XCTestCase {
         XCTAssertNil(AgentRegistry.shared.pane(forWorktree: "/nonexistent"))
     }
 
+    /// The guard that decides whether it is safe to touch a worktree's files —
+    /// reaping it, or resetting an integration checkout onto a fresh fold — used
+    /// to read `pane(forWorktree:)`, i.e. only the *first* registered pane. A
+    /// split whose second pane was mid-turn therefore reported idle.
+    func testHasRunningPaneSeesANonFirstPane() {
+        registerTestPane(path: "/tmp/repo/split", branch: "feature")
+        let second = registerTestPane(path: "/tmp/repo/split", branch: "feature")
+
+        AgentRegistry.shared.updateStatus(terminalID: second, status: .running,
+                                          lastMessage: "", roundDuration: 0)
+
+        XCTAssertNotEqual(AgentRegistry.shared.pane(forWorktree: "/tmp/repo/split")?.status, .running,
+                          "precondition: the first pane is the idle one")
+        XCTAssertTrue(AgentRegistry.shared.hasRunningPane(inWorktree: "/tmp/repo/split"))
+    }
+
+    func testHasRunningPaneIsFalseWhenEveryPaneIsIdle() {
+        let first = registerTestPane(path: "/tmp/repo/quiet")
+        let second = registerTestPane(path: "/tmp/repo/quiet")
+        AgentRegistry.shared.updateStatus(terminalID: first, status: .idle,
+                                          lastMessage: "", roundDuration: 0)
+        AgentRegistry.shared.updateStatus(terminalID: second, status: .idle,
+                                          lastMessage: "", roundDuration: 0)
+
+        XCTAssertFalse(AgentRegistry.shared.hasRunningPane(inWorktree: "/tmp/repo/quiet"))
+        XCTAssertFalse(AgentRegistry.shared.hasRunningPane(inWorktree: "/nonexistent"))
+    }
+
     // MARK: - Ordering
 
     func testAllAgentsPreservesInsertionOrder() {

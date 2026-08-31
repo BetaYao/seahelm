@@ -981,6 +981,20 @@ class AgentRegistry {
         return (worktreeIndex[worktreePath] ?? []).compactMap { agents[$0] }
     }
 
+    /// Whether *any* pane in a worktree has an agent mid-turn.
+    ///
+    /// Deliberately not `pane(forWorktree:)?.status == .running`: that reads
+    /// only the first registered pane, so a split whose second pane is working
+    /// reports idle. Every caller asking this is really asking "is it safe to
+    /// touch this worktree's files?", and for that question one busy pane is
+    /// enough to say no.
+    func hasRunningPane(inWorktree worktreePath: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return (worktreeIndex[worktreePath] ?? []).contains { agents[$0]?.status == .running }
+    }
+
     func panesForProject(_ project: String) -> [PaneInfo] {
         lock.lock()
         defer { lock.unlock() }

@@ -1327,7 +1327,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         case .removeWorktree(let path):
             let branch = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info.branch ?? ""
-            if AgentRegistry.shared.pane(forWorktree: path)?.status == .running {
+            if AgentRegistry.shared.hasRunningPane(inWorktree: path) {
                 reply("**\(branch)** has an agent running — leaving it alone.")
                 return
             }
@@ -1507,7 +1507,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
         // A worktree with a live agent must never be reaped by /remove: neither
         // deleted outright nor carded for "Force remove". Leave it untouched.
-        if pane?.status == .running {
+        // Asked across every pane, not just `pane`: that one is the worktree's
+        // first, and a split whose second pane is working is just as live.
+        if AgentRegistry.shared.hasRunningPane(inWorktree: path) {
             onDone?()
             return
         }
@@ -3035,7 +3037,7 @@ extension MainWindowController {
         if order.action.kind == .returnToPort {
             // Guard against a stale card: if the agent started running after the
             // card was enqueued, refuse the reap and drop the card.
-            if AgentRegistry.shared.pane(forWorktree: order.action.worktreePath)?.status == .running {
+            if AgentRegistry.shared.hasRunningPane(inWorktree: order.action.worktreePath) {
                 NSSound.beep()
                 tabCoordinator.pendingOrders.resolve(id: order.id)
                 return
@@ -3104,7 +3106,7 @@ extension MainWindowController {
             AgentRegistry.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
             // Never reap a worktree whose agent is now running.
-            if AgentRegistry.shared.pane(forWorktree: order.action.worktreePath)?.status == .running {
+            if AgentRegistry.shared.hasRunningPane(inWorktree: order.action.worktreePath) {
                 NSSound.beep()
                 break
             }
