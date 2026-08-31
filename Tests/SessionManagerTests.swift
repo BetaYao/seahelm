@@ -138,6 +138,47 @@ class SessionManagerTests: XCTestCase {
                        "only a reachable session with a known clients=0 may be reaped")
     }
 
+    // MARK: - Session reachability
+
+    func testReachabilityReadsHealthyRow() {
+        let output = "  name=seahelm-repo-main\tpid=123\tclients=1\tcreated=1785228325\tstart_dir=/tmp/repo"
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .reachable)
+    }
+
+    func testReachabilityReportsWedgedDaemonUnreachable() {
+        // The shape `zmx list` takes after the volume holding the daemons drops
+        // out: the row survives, the socket survives, the daemon answers nothing.
+        let output = "  name=seahelm-repo-main\terr=Timeout\tstatus=unreachable"
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .unreachable)
+    }
+
+    func testReachabilityTreatsAbsentAndEmptyAsMissing() {
+        let output = "  name=seahelm-other\tpid=1\tclients=1\tstart_dir=/tmp/o"
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .missing)
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: ""), .missing)
+    }
+
+    /// Split panes are named `<base>` and `<base>-1`, so a prefix match would let
+    /// one pane's health stand in for the other's — in either direction.
+    func testReachabilityMatchesNameExactlyNotByPrefix() {
+        let output = """
+          name=seahelm-repo-main\terr=Timeout\tstatus=unreachable
+          name=seahelm-repo-main-1\tpid=2\tclients=1\tstart_dir=/tmp/repo
+        """
+
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .unreachable)
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main-1", listOutput: output), .reachable)
+    }
+
+    /// An unreachable session is still an *existing* one: `sessionExists` backs
+    /// "should I create one?", and spawning a duplicate on top of a daemon that
+    /// merely missed a probe is worse than waiting for it.
+    func testSessionExistsStaysPresenceOnlyForUnreachableRows() {
+        let output = "  name=seahelm-repo-main\terr=Timeout\tstatus=unreachable"
+        XCTAssertTrue(SessionManager.parseZmxSessionNames(listOutput: output).contains("seahelm-repo-main"))
+        XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .unreachable)
+    }
+
     // MARK: - Session monitor parsing
 
     func testParseZmxSessionsReadsEveryField() {
