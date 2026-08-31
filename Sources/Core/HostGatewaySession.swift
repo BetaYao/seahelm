@@ -262,6 +262,18 @@ final class HostGatewaySession {
         if ok {
             result["mac_id"] = expectedMacId
             if let issuedToken { result["token"] = issuedToken }
+            // Fold the session snapshot into the reply. The client asked for it
+            // unconditionally on the very next round trip, and a round trip is
+            // the expensive unit here: ~240ms p50 from a phone over the tunnel,
+            // against ~3ms of work on this side. Four serial trips stood between
+            // opening the page and seeing a pane; this removes one of them.
+            //
+            // A client that predates this simply ignores the extra key and makes
+            // the call it always made.
+            if case .ok(let snapshot) = router.handle(method: "session.snapshot", params: [:]),
+               let panes = snapshot["panes"] {
+                result["panes"] = panes
+            }
         }
         var out = [HostGatewayFrame.encode(.response(id: id, result: result, error: nil))]
         if ok {

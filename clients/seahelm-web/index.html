@@ -622,10 +622,18 @@ function openGatewaySocket(){
       log('sys', '(vt format)', S.gw.binary ? (S.gw.deflate ? 'binary+deflate' : 'binary') : 'json+base64');
       reconnector.succeeded();
       setStatus(true, '已连接');
-      gwSend('session.snapshot', {}, (snap) => {
-        if (snap && snap.panes) applySessionSnapshot(snap);
+      // The Mac folds the snapshot into the auth reply, because a round trip
+      // over the tunnel costs far more than the query does. Ask separately only
+      // when talking to one that predates it.
+      if (r.panes) {
+        applySessionSnapshot(r);
         restoreMount();
-      });
+      } else {
+        gwSend('session.snapshot', {}, (snap) => {
+          if (snap && snap.panes) applySessionSnapshot(snap);
+          restoreMount();
+        });
+      }
     });
   };
   ws.onmessage = (ev) => {

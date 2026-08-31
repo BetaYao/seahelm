@@ -82,6 +82,17 @@ class Station {
 
     private var recoveryTimer: DispatchWorkItem?
     private static let recoveryDelay: TimeInterval = 3.0
+    /// Gap before a second probe is allowed to confirm an unreachable session.
+    /// A daemon busy enough to miss one `zmx list` probe is indistinguishable
+    /// from a wedged one in that instant; only the wedged one is still
+    /// unreachable a beat later.
+    private static let unreachableConfirmDelay: TimeInterval = 5.0
+    /// Recoveries attempted since this pane was last seen healthy. A backend
+    /// broken for reasons recovery cannot touch — the volume holding the zmx
+    /// binary is gone — would otherwise thrash forever, because every recovery
+    /// re-attaches and schedules the next health check.
+    private var zmxRecoveryAttempts = 0
+    private static let maxZmxRecoveryAttempts = 3
 
     /// Owned C strings passed into `ghostty_surface_config_s`. libghostty's
     /// embedded path copies `working_directory` into its arena but assigns
@@ -520,16 +531,65 @@ class Station {
     private func checkZmxHealth(paneSessionKey: String, container: NSView, workingDirectory: String?) {
         // If the surface was already destroyed, nothing to do.
         guard surface != nil else { return }
-        let exited = processStatus == .exited
-        guard ZmxSessionRecovery.shouldRecover(processExited: exited) else { return }
+        // Deliberately no "did the attach process exit?" gate here. A daemon
+        // wedged by its volume disappearing leaves the client hanging rather than
+        // exiting, so gating on exit meant the one failure that never recovers on
+        // its own was also the one this check never looked at.
+        probeZmxSession(
+            paneSessionKey: paneSessionKey,
+            container: container,
+            workingDirectory: workingDirectory,
+            processExited: processStatus == .exited,
+            confirmUnreachable: true
+        )
+    }
 
-        // Session existence is a blocking `zmx list` — probe off the main thread,
-        // then recover with a plan that never force-kills a still-living session.
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let exists = SessionManager.sessionExists(name: paneSessionKey, backend: "zmx")
-            let plan = ZmxSessionRecovery.plan(processExited: exited, sessionExists: exists)
-            guard plan != .none else { return }
-            NSLog("Station: zmx session '%@' attach exited — plan=%@", paneSessionKey, String(describing: plan))
+    /// Probe the session's reachability off the main thread and act on the plan.
+    ///
+    /// `confirmUnreachable` spends one delayed re-probe before an unreachable
+    /// reading is allowed to mean "dead" — see `ZmxSessionRecovery.plan`.
+    private func probeZmxSession(
+        paneSessionKey: String,
+        container: NSView,
+        workingDirectory: String?,
+        processExited: Bool,
+        confirmUnreachable: Bool
+    ) {
+        // Reachability is a blocking `zmx list`, and a slow one exactly when
+        // sessions are wedged — never on the main thread.
+        let queue = DispatchQueue.global(qos: .utility)
+        queue.async { [weak self] in
+            guard self != nil else { return }
+            let reachability = SessionManager.sessionReachability(name: paneSessionKey, backend: "zmx")
+            if reachability == .unreachable, confirmUnreachable {
+                // asyncAfter, not sleep: with a dozen panes probing at once,
+                // parking a pool thread each is how the dispatch pool starves.
+                queue.asyncAfter(deadline: .now() + Self.unreachableConfirmDelay) { [weak self] in
+                    self?.probeZmxSession(
+                        paneSessionKey: paneSessionKey,
+                        container: container,
+                        workingDirectory: workingDirectory,
+                        processExited: processExited,
+                        confirmUnreachable: false
+                    )
+                }
+                return
+            }
+            let plan = ZmxSessionRecovery.plan(processExited: processExited, reachability: reachability)
+            guard plan != .none else {
+                // A pane confirmed healthy gets its recovery budget back.
+                if reachability == .reachable {
+                    DispatchQueue.main.async { self?.zmxRecoveryAttempts = 0 }
+                }
+                return
+            }
+            NSLog(
+                "Station: zmx session '%@' unhealthy — exited=%@ reachability=%@ plan=%@",
+                paneSessionKey,
+                processExited ? "yes" : "no",
+                String(describing: reachability),
+                String(describing: plan)
+            )
             DispatchQueue.main.async {
                 self?.recoverZmxSession(
                     paneSessionKey: paneSessionKey,
@@ -547,6 +607,14 @@ class Station {
         workingDirectory: String?,
         plan: ZmxSessionRecovery.Plan
     ) {
+        guard zmxRecoveryAttempts < Self.maxZmxRecoveryAttempts else {
+            NSLog(
+                "Station: giving up on zmx session '%@' after %d recovery attempts",
+                paneSessionKey, zmxRecoveryAttempts
+            )
+            return
+        }
+        zmxRecoveryAttempts += 1
         let resumeCmd = agentSessionRef?.resumeCommandLine()
         DispatchQueue.global(qos: .utility).async {
             switch plan {

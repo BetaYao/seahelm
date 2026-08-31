@@ -118,6 +118,54 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual((obj["result"] as? [String: Any])?["ok"] as? Bool, true)
     }
 
+    /// The point is not that a key exists — it is that a round trip is gone.
+    ///
+    /// Opening the page used to cost four serial trips before anything appeared:
+    /// socket, auth, snapshot, vt_open. Measured from a phone over the tunnel a
+    /// trip is ~240ms p50 against ~3ms of work here, so folding the snapshot into
+    /// the reply it always immediately followed removes a fifth of that wait.
+    func testAuthReplyCarriesTheSnapshotSoTheClientNeedNotAskAgain() {
+        let (s, ds, _) = session()
+        ds.panes = [
+            PaneSnapshot(paneId: "p1", worktreePath: "/w", branch: "main", project: "proj",
+                         agentType: "claudeCode", status: "idle", lastMessage: "", paneSessionKey: "k1"),
+        ]
+        let result = try! XCTUnwrap(decodeResponse(s.handle(text: authFrame())[0])["result"] as? [String: Any])
+        XCTAssertEqual(result["ok"] as? Bool, true)
+        let panes = try! XCTUnwrap(result["panes"] as? [[String: Any]])
+        XCTAssertEqual(panes.count, 1)
+        XCTAssertEqual(panes[0]["pane_session_key"] as? String, "k1")
+    }
+
+    /// And it is the same answer the separate call gives, or the saved trip is
+    /// bought with a client that shows something different on the first frame.
+    func testFoldedSnapshotMatchesTheStandaloneCall() {
+        let (s, ds, _) = session()
+        ds.panes = [
+            PaneSnapshot(paneId: "p1", worktreePath: "/w", branch: "main", project: "proj",
+                         agentType: "claudeCode", status: "idle", lastMessage: "", paneSessionKey: "k1"),
+            PaneSnapshot(paneId: "p2", worktreePath: "/w2", branch: "feat", project: "proj",
+                         agentType: "codex", status: "running", lastMessage: "x", paneSessionKey: "k2"),
+        ]
+        let folded = (decodeResponse(s.handle(text: authFrame())[0])["result"] as? [String: Any])?["panes"] as? [[String: Any]]
+        let standalone = (decodeResponse(s.handle(text: #"{"id":"s1","method":"session.snapshot","params":{}}"#)[0])["result"] as? [String: Any])?["panes"] as? [[String: Any]]
+        XCTAssertEqual(folded?.count, standalone?.count)
+        XCTAssertEqual(folded?.map { $0["pane_session_key"] as? String },
+                       standalone?.map { $0["pane_session_key"] as? String })
+    }
+
+    /// A rejected auth must not hand out the fleet.
+    func testFailedAuthCarriesNoSnapshot() {
+        let (s, ds, _) = session()
+        ds.panes = [
+            PaneSnapshot(paneId: "p1", worktreePath: "/w", branch: "main", project: "proj",
+                         agentType: "claudeCode", status: "idle", lastMessage: "", paneSessionKey: "k1"),
+        ]
+        let result = decodeResponse(s.handle(text: authFrame(tok: "bad"))[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertNil(result?["panes"])
+    }
+
     func testWrongTokenFails() {
         let (s, _, _) = session()
         let out = s.handle(text: authFrame(tok: "bad"))

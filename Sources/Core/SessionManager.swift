@@ -84,6 +84,41 @@ enum SessionManager {
             }
     }
 
+    /// What `zmx list` says about one session's control socket.
+    enum SessionReachability: Equatable {
+        /// Not listed at all — the daemon is gone.
+        case missing
+        /// Listed, and the control socket answered.
+        case reachable
+        /// Listed, but the control-socket probe timed out or errored. The daemon
+        /// process is still around; whether it can serve anyone is another matter.
+        case unreachable
+    }
+
+    /// Reachability of `name` within an already-captured `zmx list` output.
+    ///
+    /// Deliberately a different question from `sessionExists`, which only asks
+    /// whether the name appears. A daemon wedged by its volume dropping out keeps
+    /// its socket file and its `zmx list` row — it just stops answering — so
+    /// "listed" and "usable" part company exactly when it matters most, and
+    /// answering the first when the caller meant the second is what left panes
+    /// re-attaching to a corpse forever.
+    static func reachability(of name: String, listOutput: String) -> SessionReachability {
+        for line in listOutput.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let rowName = zmxListField(trimmed, "name=")
+                ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
+            // Exact match, never a prefix: `seahelm-foo` and `seahelm-foo-1` are
+            // separate panes and routinely have opposite health.
+            guard rowName == name else { continue }
+            if zmxListField(trimmed, "err=") != nil { return .unreachable }
+            if let status = zmxListField(trimmed, "status="), status != "reachable" { return .unreachable }
+            return .reachable
+        }
+        return .missing
+    }
+
     /// Full `zmx list` rows, for the session monitor in Settings.
     ///
     /// Deliberately separate from `orphanZmxSessionNames`: that one answers "may
@@ -364,6 +399,12 @@ enum SessionManager {
     }
 
     /// Whether a persistent session with `name` already exists for `backend`.
+    ///
+    /// Presence only — an unreachable session still counts as existing here, on
+    /// purpose. Every caller is asking "should I create one?"
+    /// (`createDetachedSession`, `seedSessionIfMissing`), and a daemon that merely
+    /// missed a probe while busy must not get a second session spawned on top of
+    /// it. Callers asking "can I still use it?" want `sessionReachability`.
     static func sessionExists(name: String, backend: String) -> Bool {
         switch backend {
         case "zmx":
@@ -372,6 +413,17 @@ enum SessionManager {
         default:
             return false
         }
+    }
+
+    /// Live reachability of `name`. Spawns `zmx list`, which is slow precisely
+    /// when sessions are wedged — call off the main thread.
+    ///
+    /// A `zmx list` that fails outright reads as `.missing`, which on its own
+    /// never triggers a teardown (see `ZmxSessionRecovery.plan`).
+    static func sessionReachability(name: String, backend: String) -> SessionReachability {
+        guard backend == "zmx" else { return .missing }
+        let list = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        return reachability(of: name, listOutput: list)
     }
 
     /// Create a detached session running the agent, unless one already exists.
