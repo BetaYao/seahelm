@@ -392,6 +392,7 @@
 <script src="./xterm.js"></script>
 <script src="./xterm-addon-webgl.js"></script>
 <script src="./e2ee.js"></script>
+<script src="./input-coalescer.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -413,6 +414,9 @@ function saveGeom(){
 //
 // Depth is not a speed knob: paint moves 4% between 1000 and 5000. This buys
 // memory on multi-pane mirrors and nothing else.
+// Matches the Mac's own flush window in spirit, not in number: this one only
+// applies to a burst, never to the keystroke that starts it.
+const VT_INPUT_WINDOW_MS = 10;
 const VT_SCROLLBACK_DEEP = 5000;
 const VT_SCROLLBACK_SHALLOW = 1000;
 const VT_SHALLOW_FROM_LEAVES = 3;
@@ -667,13 +671,15 @@ function gwSend(method, params, onReply){
 //   u8 version | u8 flags (bit0 = deflate-raw) | u8 kind (1 data, 2 snapshot)
 //   u8 keyLen  | key… | [snapshot only] u16 cols, u16 rows | payload
 const VT_FRAME_VERSION = 1;
+// Hoisted: parseVTFrame runs per keystroke and per screen update.
+const VT_KEY_DECODER = new TextDecoder();
 
 function parseVTFrame(buf){
   if (buf.length < 4 || buf[0] !== VT_FRAME_VERSION) return null;
   const flags = buf[1], kind = buf[2], keyLen = buf[3];
   let off = 4;
   if (buf.length < off + keyLen) return null;
-  const key = new TextDecoder().decode(buf.subarray(off, off + keyLen));
+  const key = VT_KEY_DECODER.decode(buf.subarray(off, off + keyLen));
   off += keyLen;
   let cols, rows;
   if (kind === 2){
@@ -699,6 +705,11 @@ async function inflateRaw(bytes){
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
 // through one promise chain, so decode can overlap but application cannot.
 const vtWriteChains = new Map();
+
+/// A pane that goes away takes its chain with it — the map is keyed by pane and
+/// nothing else ever removed an entry, so worktree churn grew it for the life of
+/// the page.
+function releaseVTChain(key){ vtWriteChains.delete(key); }
 
 function onGatewayBinaryFrame(buf){
   const f = parseVTFrame(buf);
@@ -1607,7 +1618,8 @@ function mountSinglePane(key){
   // Drop the previous terminal first — its attach client goes with it.
   for (const [k, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: k });
-    if (entry.flushT) clearTimeout(entry.flushT);
+    if (entry.keys) entry.keys.cancel();
+    releaseVTChain(k);
     try { entry.term.dispose(); } catch (e) {}
   }
   S.vt.panes.clear();
@@ -1646,7 +1658,8 @@ function renderPaneStrip(activeKey){
 function unmountPanes(){
   for (const [key, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: key });
-    if (entry.flushT) clearTimeout(entry.flushT);
+    if (entry.keys) entry.keys.cancel();
+    releaseVTChain(key);
     try { entry.term.dispose(); } catch (e) {}
   }
   S.vt.panes.clear();
@@ -1696,22 +1709,20 @@ function buildLayoutLeaf(node){
   });
   t.open(host);
   attachWebglRenderer(t);
-  const entry = { term:t, el, host, pending:'', flushT:null };
+  const entry = { term:t, el, host, keys:null };
+  entry.keys = SeahelmInput.createKeystrokeCoalescer({
+    windowMs: VT_INPUT_WINDOW_MS,
+    send: (buf) => {
+      if (!isLinked()) return;
+      sendCommand('pane.send_keys',
+        { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(buf)) });
+    },
+  });
   S.vt.panes.set(key, entry);
 
   // xterm only fires onData for the terminal that actually holds focus, so each
   // pane can own its own outbound path — no routing table, no focus bookkeeping.
-  t.onData((data) => {
-    entry.pending += data;
-    if (entry.flushT) return;
-    entry.flushT = setTimeout(() => {
-      entry.flushT = null;
-      const buf = entry.pending; entry.pending = '';
-      if (!buf || !isLinked()) return;
-      sendCommand('pane.send_keys',
-        { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(buf)) });
-    }, 10);
-  });
+  t.onData((data) => entry.keys.push(data));
   t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
   el.addEventListener('mousedown', () => focusPane(key));
 
