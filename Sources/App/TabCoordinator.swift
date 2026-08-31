@@ -865,9 +865,9 @@ class TabCoordinator {
         guard hostGatewayServer == nil else { return }
         guard var hgConfig = config.hostGateway else { return }
 
-        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
-        let mqtt = config.mqtt!
-        let macId = mqtt.macId ?? MqttConfig.deriveMacId()
+        if config.pairing == nil { config.pairing = PairingIdentity() }
+        let mqtt = config.pairing!
+        let macId = mqtt.macId ?? PairingIdentity.deriveMacId()
         let rootB64 = mqtt.rootSecret ?? ""
 
         var store = PairingCodeStore(code: hgConfig.pairCode)
@@ -931,8 +931,8 @@ class TabCoordinator {
     /// Apply a freshly-minted pairing secret to the *live* config and reload
     /// Host Gateway so auth picks up the new root — no app restart needed.
     func applyMqttRootSecret(_ secret: String) {
-        if config.mqtt == nil { config.mqtt = MqttConfig(host: "localhost") }
-        config.mqtt?.rootSecret = secret
+        if config.pairing == nil { config.pairing = PairingIdentity() }
+        config.pairing?.rootSecret = secret
         reloadHostGateway()
     }
 

@@ -2,8 +2,8 @@ import Foundation
 
 enum HostGatewayAuth {
     static func expectedToken(rootSecretBase64url: String) -> String? {
-        guard let bytes = MqttCrypto.rootSecret(fromBase64url: rootSecretBase64url) else { return nil }
-        return MqttCrypto(rootSecret: bytes).authPassword
+        guard let bytes = PairingCrypto.rootSecret(fromBase64url: rootSecretBase64url) else { return nil }
+        return PairingCrypto(rootSecret: bytes).authPassword
     }
 
     static func verify(macId: String, token: String,

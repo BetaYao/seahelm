@@ -353,7 +353,7 @@ final class VTPipelineBenchmarks: XCTestCase {
             config: HostGatewayConfig(enabled: true, port: port),
             router: ControlRouter(dataSource: BenchDataSource()),
             expectedMacId: macId,
-            rootSecretBase64url: MqttCrypto.base64url(root),
+            rootSecretBase64url: PairingCrypto.base64url(root),
             vt: manager)
         defer { server.stop() }
 
@@ -367,7 +367,7 @@ final class VTPipelineBenchmarks: XCTestCase {
         pump(task, into: inbox)
         defer { task.cancel(with: .goingAway, reason: nil) }
 
-        let token = MqttCrypto(rootSecret: root).authPassword
+        let token = PairingCrypto(rootSecret: root).authPassword
         task.send(.string(#"{"id":"a","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token)"}}"#)) { _ in }
         XCTAssertNotNil(inbox.take(matching: { $0.contains("\"ok\"") }, timeout: 5), "auth failed")
 

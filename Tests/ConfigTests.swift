@@ -495,4 +495,45 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(decoded.integrationEnabled)
         XCTAssertFalse(decoded.autoIntegrate)
     }
+
+    /// The one thing this refactor could break silently.
+    ///
+    /// `MqttConfig` became `PairingIdentity` and lost every broker field, but the
+    /// JSON key stays `mqtt` because that is where every install already keeps its
+    /// root secret. Decoding is `decodeIfPresent`: a renamed key would read as
+    /// absent, a fresh secret would be minted, and every paired device would stop
+    /// connecting — with nothing failing anywhere to say why.
+    func testExistingConfigKeepsItsPairingSecret() throws {
+        let json = Data("""
+        {"mqtt":{"root_secret":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+                 "mac_id":"m1a2b3c4",
+                 "host":"broker.example.com","port":8084,"tls":true,
+                 "websocket":true,"ws_path":"/mqtt","client_broker":"wss://old/mqtt",
+                 "enabled":true,"allow_remote_write":false}}
+        """.utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        XCTAssertEqual(config.pairing?.rootSecret, "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
+        XCTAssertEqual(config.pairing?.macId, "m1a2b3c4")
+    }
+
+    /// And the secret still derives the same token, so the device authenticates.
+    func testRestoredSecretStillDerivesTheSameToken() throws {
+        let json = Data("{\"mqtt\":{\"root_secret\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}}".utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        let bytes = try XCTUnwrap(PairingCrypto.rootSecret(fromBase64url: config.pairing?.rootSecret ?? ""))
+        XCTAssertEqual(bytes, Data((0..<32).map { UInt8($0) }))
+        XCTAssertEqual(PairingCrypto(rootSecret: bytes).authPassword,
+                       "1f30db8b0e2f696aa5575f7eef0a05eb08b443df09bbad725e21f915b6abc26b")
+    }
+
+    /// Re-encoding must not resurrect the broker fields.
+    func testRoundTripDropsTheBrokerFields() throws {
+        let json = Data("{\"mqtt\":{\"root_secret\":\"AAA\",\"host\":\"broker.example.com\",\"port\":8084}}".utf8)
+        var config = try JSONDecoder().decode(Config.self, from: json)
+        config.workspacePaths = []
+        let out = String(data: try JSONEncoder().encode(config), encoding: .utf8) ?? ""
+        XCTAssertTrue(out.contains("root_secret"), out)
+        XCTAssertFalse(out.contains("broker.example.com"), out)
+        XCTAssertFalse(out.contains("ws_path"), out)
+    }
 }
