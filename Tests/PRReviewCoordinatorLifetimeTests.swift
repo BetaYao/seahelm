@@ -47,8 +47,10 @@ final class PRReviewCoordinatorLifetimeTests: XCTestCase {
 
         autoreleasepool { dashboard.dismissCenterOverlay() }
         // `dismissCenterOverlay` hands the overlay's release to the next runloop
-        // turn on purpose, so the click feels instant. Give it that turn.
-        let deadline = Date().addingTimeInterval(2)
+        // turn on purpose, so the click feels instant. Give it that turn — and
+        // room, because the assertion is that it releases at all, not that it
+        // does so inside a window a loaded machine has to hit.
+        let deadline = Date().addingTimeInterval(15)
         while weakCoordinator != nil, Date() < deadline {
             autoreleasepool { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
         }

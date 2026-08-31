@@ -387,6 +387,7 @@
 <script src="./xterm.js"></script>
 <script src="./xterm-addon-webgl.js"></script>
 <script src="./input-coalescer.js"></script>
+<script src="./reconnect.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -552,18 +553,33 @@ function setStatus(on, txt){
 }
 
 // ── connect ───────────────────────────────────────────────────────────────
+// Remembered across a drop so the page can put itself back: which worktree was
+// mounted, and which pane had focus. The panes themselves are torn down — their
+// attach leases died with the socket — and rebuilt on the way back.
+let lastMount = null;
+
+const reconnector = SeahelmReconnect.createReconnector({
+  attempt: () => openGatewaySocket(),
+  onSchedule: ({ retrying, attempt, delayMs }) => {
+    if (retrying) setStatus(false, `\u91cd\u8fde\u4e2d\u2026 (${attempt})`);
+  },
+});
+
 function connect(){
   disconnectAll();
   S.mac = $('mac').value.trim() || S.mac || 'testmac';
-  connectGateway(gatewayWsURL());
+  reconnector.resume();
+  openGatewaySocket();
 }
 
-function connectGateway(url){
+function openGatewaySocket(){
+  const url = gatewayWsURL();
   if (!S.authPass && !S.pendingCode) {
+    reconnector.stop();            // nothing to authenticate with
     setStatus(false, '需要配对码');
     return;
   }
-  const wsURL = (url && url.includes('/ws')) ? url : gatewayWsURL();
+  const wsURL = url;
   S.transport = 'gateway';
   log('sys', '(connect)', wsURL + ' [Gateway]');
   const ws = new WebSocket(wsURL);
@@ -579,6 +595,7 @@ function connectGateway(url){
     gwSend('auth', params, (r, err) => {
       if (err && err.code === -32029) {
         S.pendingCode = null;
+        reconnector.stop();        // retrying would only burn the rate limit
         setStatus(false, '尝试过多,稍后再试');
         log('sys', '(auth-rate)', JSON.stringify(err));
         ws.close();
@@ -586,6 +603,7 @@ function connectGateway(url){
       }
       if (err || !r || r.ok === false) {
         S.pendingCode = null;
+        reconnector.stop();        // a rejected credential stays rejected
         setStatus(false, '认证失败');
         log('sys', '(auth-fail)', err ? JSON.stringify(err) : JSON.stringify(r));
         ws.close();
@@ -602,9 +620,11 @@ function connectGateway(url){
       } catch (e) {}
       if ($('mac')) $('mac').value = S.mac;
       log('sys', '(vt format)', S.gw.binary ? (S.gw.deflate ? 'binary+deflate' : 'binary') : 'json+base64');
+      reconnector.succeeded();
       setStatus(true, '已连接');
       gwSend('session.snapshot', {}, (snap) => {
         if (snap && snap.panes) applySessionSnapshot(snap);
+        restoreMount();
       });
     });
   };
@@ -612,8 +632,27 @@ function connectGateway(url){
     if (ev.data instanceof ArrayBuffer) { onGatewayBinaryFrame(new Uint8Array(ev.data)); return; }
     try { onGatewayFrame(JSON.parse(ev.data)); } catch {}
   };
-  ws.onclose = () => { setStatus(false, '离线'); S.gw = null; S.transport = null; };
-  ws.onerror = () => setStatus(false, '错误');
+  ws.onclose = () => {
+    S.gw = null; S.transport = null;
+    // The panes' attach leases went with the socket; keep where we were so
+    // the reconnect can put it back rather than landing on an empty page.
+    if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
+    unmountPanes();
+    if (reconnector.isStopped) setStatus(false, '离线');
+    reconnector.closed();
+  };
+  ws.onerror = () => { if (reconnector.isStopped) setStatus(false, '错误'); };
+}
+
+/** Put back the worktree that was on screen before the drop. */
+function restoreMount(){
+  if (!lastMount) return;
+  const { path, focus } = lastMount;
+  lastMount = null;
+  // Addressed by path, because the row objects are rebuilt from the fresh
+  // snapshot — the ones we held before the drop are stale.
+  const row = buildFleet().find(r => r.path === path);
+  if (row) selectWorktree(row, focus);
 }
 
 function gwSend(method, params, onReply){
@@ -1732,7 +1771,23 @@ function updateToBottom(){
 // not harmless — and mirroring a layout opens one per pane, which multiplies the
 // cost of getting this wrong. vt_close covers the tidy exits; pagehide covers
 // closing the tab; the bridge's lease sweep covers a crash, where neither runs.
-window.addEventListener('pagehide', unmountPanes);
+window.addEventListener('pagehide', () => {
+  // Keep where we were: on a phone this fires on every app switch, and the page
+  // that comes back is the same one — nothing re-runs to rebuild it.
+  if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
+  unmountPanes();
+});
+
+// The other half. Without it, switching apps and back left a page that had torn
+// down its panes and had nothing to put them back — the panes are gone either
+// way, since their attach leases do not survive the socket.
+window.addEventListener('pageshow', () => {
+  if (reconnector.isStopped) return;          // disconnected on purpose
+  if (isLinked()) { restoreMount(); return; } // socket outlived the trip
+  if (!S.authPass && !S.pendingCode) return;  // never paired
+  reconnector.resume();
+  openGatewaySocket();
+});
 setInterval(() => {
   if (!isLinked()) return;
   for (const key of S.vt.panes.keys()) sendCommand('pane.vt_keepalive', { pane_session_key: key });
@@ -1741,15 +1796,18 @@ setInterval(() => {
 let corrN=0;
 const cmdReq = new Map();    // corr → onReply, for commands whose result we need
 function sendCommand(method, params, onReply){
-  if (S.transport === 'gateway') {
-    if (!isLinked()) { alert('未连接'); return; }
-    gwSend(method, params, (result, error) => {
-      if (!onReply) return;
-      onReply(error ? { ok: false, error } : { ok: true, result: result ?? {} });
-    });
+  // Not an alert. A dropped socket now reconnects on its own, so this is a
+  // transient state a tap can land in — a modal the user has to dismiss, on
+  // a phone, for something about to fix itself, is the wrong shape.
+  if (!isLinked()) {
+    setStatus(false, reconnector.isPending ? '重连中…' : '未连接');
+    log('sys', '(dropped)', method);
     return;
   }
-  alert('未连接');
+  gwSend(method, params, (result, error) => {
+    if (!onReply) return;
+    onReply(error ? { ok: false, error } : { ok: true, result: result ?? {} });
+  });
 }
 
 // ── wire ─────────────────────────────────────────────────────────────────────
@@ -1788,6 +1846,10 @@ function applyLogVisibility(){
   setTimeout(fitAllPanes, 200);   // the panes just got wider
 }
 $('disconnectBtn').onclick = () => {
+  // Before disconnectAll: closing the socket fires onclose, which would
+  // otherwise schedule the reconnect the user just asked us not to make.
+  reconnector.stop();
+  lastMount = null;
   disconnectAll();
   unmountPanes();
   setStatus(false, '离线');
