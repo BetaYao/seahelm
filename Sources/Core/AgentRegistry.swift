@@ -86,6 +86,12 @@ class AgentRegistry {
         worktreeIndex[worktreePath, default: []].append(terminalID)
         if !orderedIDs.contains(terminalID) { orderedIDs.append(terminalID) }
     }
+
+    /// Test accessor: the backend recorded for a worktree, if any.
+    func backendForTesting(worktreePath: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return backendsByPath[worktreePath]
+    }
     #endif
 
     // MARK: - Registration
@@ -141,7 +147,13 @@ class AgentRegistry {
             if worktreeIndex[info.worktreePath]?.isEmpty == true {
                 worktreeIndex.removeValue(forKey: info.worktreePath)
             }
-            backendsByPath.removeValue(forKey: info.worktreePath)
+            // Keyed by worktree, not by pane: dropping it whenever *any* pane closed
+            // left the worktree's surviving siblings with no backend to resolve, so
+            // closing one split silently un-backed the rest. The index above removes
+            // its key exactly when the last pane goes, which is the right moment.
+            if worktreeIndex[info.worktreePath] == nil {
+                backendsByPath.removeValue(forKey: info.worktreePath)
+            }
         }
         agents.removeValue(forKey: terminalID)
         channels.removeValue(forKey: terminalID)
@@ -166,6 +178,57 @@ class AgentRegistry {
             "worktree_path": info.worktreePath,
         ]
         DispatchQueue.main.async { EventHub.shared.publish(seq: seq, event: event) }
+    }
+
+    /// Re-attribute a live pane to a different worktree, preserving its history.
+    /// Returns false when the pane is unknown or already filed under `worktreePath`.
+    ///
+    /// Deliberately NOT `unregister` + `register`: `unregister` drops
+    /// `statusEnteredAt`, all three `hook*Since` timers and the entire `eventLog`,
+    /// and `register` rebuilds the entry at `.unknown` with an empty message — so a
+    /// pane that merely moved worktree came back looking like a freshly opened one,
+    /// losing exactly the agent state a move exists to preserve.
+    func rehome(terminalID: String, to worktreePath: String, branch: String, project: String) -> Bool {
+        lock.lock()
+        guard let old = agents[terminalID], old.worktreePath != worktreePath else {
+            lock.unlock()
+            return false
+        }
+        let oldPath = old.worktreePath
+
+        worktreeIndex[oldPath]?.removeAll { $0 == terminalID }
+        if worktreeIndex[oldPath]?.isEmpty == true {
+            worktreeIndex.removeValue(forKey: oldPath)
+        }
+        var ids = worktreeIndex[worktreePath] ?? []
+        if !ids.contains(terminalID) { ids.append(terminalID) }
+        worktreeIndex[worktreePath] = ids
+
+        // The backend describes the pane's runtime, not the path it is filed under,
+        // so the destination must resolve the same one. Only seed it — a worktree
+        // that already has panes has already declared its backend.
+        if backendsByPath[worktreePath] == nil, let backend = backendsByPath[oldPath] {
+            backendsByPath[worktreePath] = backend
+        }
+        if worktreeIndex[oldPath] == nil {
+            backendsByPath.removeValue(forKey: oldPath)
+        }
+
+        agents[terminalID] = old.rehomed(to: worktreePath, branch: branch, project: project)
+        globalSeq += 1
+        let seq = globalSeq
+        lock.unlock()
+
+        let event: [String: Any] = [
+            "type": "pane.rehomed",
+            "seq": seq,
+            "pane_id": terminalID,
+            "pane_session_key": old.station?.paneSessionKey ?? "",
+            "worktree_path": worktreePath,
+            "old_worktree_path": oldPath,
+        ]
+        DispatchQueue.main.async { EventHub.shared.publish(seq: seq, event: event) }
+        return true
     }
 
     // MARK: - Worktree Index (1:N)

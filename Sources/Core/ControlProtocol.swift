@@ -93,6 +93,9 @@ protocol ControlDataSource: AnyObject {
     func closePane(paneId: String) -> Bool
     /// Give keyboard focus to a pane. False if it isn't found in the active container.
     func focusPane(paneId: String) -> Bool
+    /// Move a pane into an existing worktree, keeping its session and the agent
+    /// inside it alive. False if either the pane or the worktree is unknown.
+    func movePane(paneId: String, worktreePath: String) -> Bool
     /// Explain how a pane's current status was decided (matched rule + evidence,
     /// authority, scan vs hook), or nil if the pane is unknown.
     func explainPane(paneId: String) -> [String: Any]?
@@ -127,6 +130,7 @@ extension ControlDataSource {
     func paneStatus(paneId: String) -> String? { nil }
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? { nil }
     func closePane(paneId: String) -> Bool { false }
+    func movePane(paneId: String, worktreePath: String) -> Bool { false }
     func focusPane(paneId: String) -> Bool { false }
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
@@ -311,6 +315,19 @@ final class ControlRouter {
                 : (dataSource?.focusPane(paneId: paneId) ?? false)
             guard ok else { return .error(code: ControlError.notFound, message: "pane not found: \(paneId)") }
             return .ok([method == "pane.close" ? "closed" : "focused": true])
+
+        case "pane.move":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            guard let worktree = params["worktree_path"] as? String, !worktree.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "worktree_path required")
+            }
+            guard dataSource?.movePane(paneId: paneId, worktreePath: worktree) == true else {
+                return .error(code: ControlError.notFound,
+                              message: "could not move \(paneId) to \(worktree)")
+            }
+            return .ok(["moved": true, "worktree_path": worktree])
 
         case "decision.dismiss":
             let paneRef = (params["pane_id"] as? String)

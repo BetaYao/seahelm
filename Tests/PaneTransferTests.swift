@@ -4,143 +4,243 @@ import XCTest
 
 final class PaneTransferTests: XCTestCase {
 
-    // MARK: - PendingWorktreeTransfer Tests
+    // MARK: - PendingTransferTracker
 
-    func testRecordAndMatch() {
+    func testRecordAndConsumeByPath() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1",
-                       paneId: "seahelm-repo-main")
+        tracker.record(worktreePath: "/repo/.claude/worktrees/feature-x", paneId: "seahelm-repo-main")
 
-        let result = tracker.consume(newWorktreePath: "/repo/.worktrees/feature-x")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.sourceWorktreePath, "/repo")
-        XCTAssertEqual(result?.worktreeName, "feature-x")
-        XCTAssertEqual(result?.sessionId, "s1")
-        XCTAssertEqual(result?.paneId, "seahelm-repo-main")   // carried for precise transfer
-    }
-
-    func testPaneIdDefaultsNil() {
-        let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "fx", sessionId: "s1")
-        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/fx")?.paneId)
+        let result = tracker.consume(newWorktreePath: "/repo/.claude/worktrees/feature-x")
+        XCTAssertEqual(result?.worktreePath, "/repo/.claude/worktrees/feature-x")
+        XCTAssertEqual(result?.paneId, "seahelm-repo-main")
     }
 
     func testConsumeRemovesEntry() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1")
-
-        _ = tracker.consume(newWorktreePath: "/repo/.worktrees/feature-x")
-        let second = tracker.consume(newWorktreePath: "/repo/.worktrees/feature-x")
-        XCTAssertNil(second)
+        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
+        _ = tracker.consume(newWorktreePath: "/repo/wt")
+        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
     }
 
-    func testNoMatchForUnrelatedPath() {
+    /// The old tracker matched on directory NAME, so a new worktree in repo B
+    /// could consume a transfer recorded by a pane in repo A and the transfer
+    /// then destroyed A's tree. Matching on the full path removes the ambiguity
+    /// rather than defending against it.
+    func testSameNameInAnotherRepoDoesNotMatch() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1")
-
-        let result = tracker.consume(newWorktreePath: "/other-repo/feature-y")
-        XCTAssertNil(result)
+        tracker.record(worktreePath: "/repo-a-worktrees/collide", paneId: "p1")
+        XCTAssertNil(tracker.consume(newWorktreePath: "/repo-b-worktrees/collide"))
+        XCTAssertNotNil(tracker.consume(newWorktreePath: "/repo-a-worktrees/collide"))
     }
 
-    /// Transfers match on worktree NAME alone, so a new worktree in repo B can
-    /// consume a transfer whose source pane lives in repo A. The source must still
-    /// survive: it is absent from repo B's discovery, and losing it here strands the
-    /// worktree with no card and no terminal until the app is relaunched.
-    func testCrossRepoNameCollisionKeepsSourceWorktree() {
-        // AgentRegistry is a global singleton; drop anything this test registers so it
-        // can't leak panes into tests that assert on an empty AgentRegistry.
-        defer {
-            for path in ["/repo-a", "/repo-b", "/repo-b-worktrees/collide"] {
-                for id in AgentRegistry.shared.terminalIDs(forWorktree: path) {
-                    AgentRegistry.shared.unregister(terminalID: id)
-                }
-            }
-        }
-        let coordinator = TabCoordinator(config: Config())
-        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
-        coordinator.statusAggregator = WorktreeStatusAggregator()
-
-        // Repo A — the source pane's repo. Its main worktree is what must survive.
-        let aMain = WorktreeInfo(path: "/repo-a", branch: "main", commitHash: "aaaa1111", isMainWorktree: true)
-        let aTree = SplitTree(worktreePath: aMain.path, rootLeafId: "leaf-a", stationId: "surface-a", paneSessionKey: "a")
-        _ = coordinator.workspaceManager.addTab(repoPath: "/repo-a", worktrees: [aMain])
-        coordinator.allWorktrees.append((info: aMain, tree: aTree))
-        coordinator.worktreeRepoCache[aMain.path] = "/repo-a"
-        coordinator.terminalCoordinator.stationManager.registerTree(aTree, forPath: aMain.path)
-
-        // Repo B — where a worktree named "collide" is about to appear.
-        let bMain = WorktreeInfo(path: "/repo-b", branch: "main", commitHash: "bbbb2222", isMainWorktree: true)
-        let bTree = SplitTree(worktreePath: bMain.path, rootLeafId: "leaf-b", stationId: "surface-b", paneSessionKey: "b")
-        let bTab = coordinator.workspaceManager.addTab(repoPath: "/repo-b", worktrees: [bMain])
-        coordinator.allWorktrees.append((info: bMain, tree: bTree))
-        coordinator.worktreeRepoCache[bMain.path] = "/repo-b"
-
-        // A pane in repo A's main records a transfer for a worktree named "collide"...
-        coordinator.pendingTransfers.record(sourceWorktreePath: aMain.path, worktreeName: "collide", sessionId: "s1")
-
-        // ...but repo B's scan surfaces a same-named worktree first and consumes it.
-        let bNew = WorktreeInfo(path: "/repo-b-worktrees/collide", branch: "collide", commitHash: "cccc3333", isMainWorktree: false)
-        coordinator.reconcileDiscoveredWorktrees(tabIndex: bTab, oldWorktrees: [bMain], freshWorktrees: [bMain, bNew])
-
-        XCTAssertTrue(coordinator.allWorktrees.contains { $0.info.path == aMain.path },
-                      "repo-a's main was destroyed by a cross-repo transfer and cannot come back until relaunch")
-        XCTAssertEqual(coordinator.worktreeRepoCache[aMain.path], "/repo-a",
-                       "repo-a's main must keep its own repo, not inherit repo-b")
-    }
-
-    func testMatchByWorktreeNameSuffix() {
+    func testReRecordingSamePathDoesNotStack() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "feature-x", sessionId: "s1")
-
-        // Worktree might be created at a sibling path, not nested
-        let result = tracker.consume(newWorktreePath: "/worktrees/feature-x")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.worktreeName, "feature-x")
+        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
+        tracker.record(worktreePath: "/repo/wt", paneId: "p2")
+        XCTAssertEqual(tracker.consume(newWorktreePath: "/repo/wt")?.paneId, "p2")
+        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
     }
 
     func testStaleEntriesExpire() {
         let tracker = PendingTransferTracker()
-        tracker.record(sourceWorktreePath: "/repo", worktreeName: "old", sessionId: "s1")
-        // Manually expire by setting timestamp in the past
+        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
         tracker.expireAll()
-
-        let result = tracker.consume(newWorktreePath: "/repo/.worktrees/old")
-        XCTAssertNil(result)
+        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
     }
 
-    // MARK: - StationManager Transfer Tests
+    // MARK: - StationManager.moveLeaf
 
-    func testTransferTreeRekeys() {
+    private func info(_ path: String) -> WorktreeInfo {
+        WorktreeInfo(path: path, branch: "main", commitHash: "abc", isMainWorktree: true)
+    }
+
+    func testMoveLeafFromSinglePaneWorktreeEmptiesTheSource() {
         let manager = StationManager()
-        let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
-        let tree = manager.tree(for: info, backend: "local")
+        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let stationId = tree.allLeaves[0].stationId
 
-        let transferred = manager.transferTree(fromPath: "/repo", toPath: "/worktrees/feature-x")
-        XCTAssertNotNil(transferred)
+        let move = manager.moveLeaf(stationId: stationId, toPath: "/repo-worktrees/feature")
+        XCTAssertNotNil(move)
+        XCTAssertEqual(move?.sourcePath, "/repo")
+        XCTAssertEqual(move?.sourceEmptied, true)
+        // The source keeps no tree — its card is left empty rather than handed a
+        // pane nobody asked for, which is what keeps the undo a clean reverse.
         XCTAssertNil(manager.tree(forPath: "/repo"))
-        XCTAssertNotNil(manager.tree(forPath: "/worktrees/feature-x"))
-        XCTAssertTrue(transferred === tree)
-        // Re-homed: worktreePath must track the destination, or saveSplitLayout
-        // (which keys on worktreePath) persists under the old path and the
-        // transferred layout is lost on restart.
-        XCTAssertEqual(transferred?.worktreePath, "/worktrees/feature-x")
+        XCTAssertEqual(manager.tree(forPath: "/repo-worktrees/feature")?.leafCount, 1)
     }
 
-    func testTransferredTreeKeepsRealSessionNames() {
-        // zmx can't rename: transferred leaves keep their original (source-derived)
-        // session names, so a restore attaches to the still-live session.
+    func testMovedLeafKeepsItsSessionName() {
+        // zmx cannot rename a session, so the live pane stays addressable only by
+        // the name it was created with.
         let manager = StationManager()
-        let info = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc", isMainWorktree: true)
-        let tree = manager.tree(for: info, backend: "zmx")
-        let originalNames = tree.allLeaves.map(\.paneSessionKey)
-        let transferred = manager.transferTree(fromPath: "/repo", toPath: "/worktrees/feature-x")
-        XCTAssertEqual(transferred?.allLeaves.map(\.paneSessionKey), originalNames)
+        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let original = tree.allLeaves[0].paneSessionKey
+        let stationId = tree.allLeaves[0].stationId
+
+        let move = manager.moveLeaf(stationId: stationId, toPath: "/repo-worktrees/feature")
+        XCTAssertEqual(move?.tree.allLeaves.first?.paneSessionKey, original)
+        XCTAssertFalse(original.isEmpty)
     }
 
-    func testTransferTreeReturnsNilForUnknownPath() {
+    func testDestinationTreeNamesLaterPanesAfterItsOwnWorktree() {
+        // The adopted leaf keeps its old name; panes split off afterwards must not.
         let manager = StationManager()
-        let result = manager.transferTree(fromPath: "/nonexistent", toPath: "/dest")
-        XCTAssertNil(result)
+        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let stationId = tree.allLeaves[0].stationId
+
+        let move = manager.moveLeaf(stationId: stationId, toPath: "/repo-worktrees/feature")
+        let expectedBase = SessionManager.persistentSessionName(for: "/repo-worktrees/feature")
+        XCTAssertTrue(move?.tree.nextSessionName().hasPrefix(expectedBase) == true,
+                      "new panes in the destination should be named after it, got \(move?.tree.nextSessionName() ?? "nil")")
+    }
+
+    func testMoveLeafTakesOnlyTheNamedPane() {
+        let manager = StationManager()
+        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let siblingStation = Station()
+        StationRegistry.shared.register(siblingStation)
+        tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "leaf-2",
+                              newStationId: siblingStation.id, newSessionName: "seahelm-repo-2")
+        let movingStationId = tree.allLeaves.first { $0.stationId != siblingStation.id }!.stationId
+
+        let move = manager.moveLeaf(stationId: movingStationId, toPath: "/repo-worktrees/feature")
+        XCTAssertEqual(move?.sourceEmptied, false)
+        // The sibling has its own agent doing its own work — it must not follow.
+        XCTAssertEqual(manager.tree(forPath: "/repo")?.leafCount, 1)
+        XCTAssertEqual(manager.tree(forPath: "/repo")?.allLeaves.first?.stationId, siblingStation.id)
+        XCTAssertEqual(move?.tree.leafCount, 1)
+    }
+
+    func testMoveIntoOccupiedWorktreeJoinsItInsteadOfReplacing() {
+        let manager = StationManager()
+        let source = manager.tree(for: info("/repo"), backend: "zmx")
+        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "zmx")
+        let residentStationId = destination.allLeaves[0].stationId
+        let movingStationId = source.allLeaves[0].stationId
+
+        let move = manager.moveLeaf(stationId: movingStationId, toPath: "/repo-worktrees/feature")
+        XCTAssertEqual(move?.tree.leafCount, 2, "replacing the tree would orphan the resident pane")
+        XCTAssertTrue(move?.tree.allLeaves.contains { $0.stationId == residentStationId } == true)
+        XCTAssertTrue(move?.tree.allLeaves.contains { $0.stationId == movingStationId } == true)
+    }
+
+    /// The pane that leaves keeps the worktree's canonical zmx session name —
+    /// zmx has no rename — so a replacement pane must claim a different one or
+    /// both panes drive the same live session.
+    func testReplacementPaneDoesNotReuseTheDepartedPanesSessionName() {
+        let manager = StationManager()
+        let source = info("/repo")
+        let tree = manager.tree(for: source, backend: "zmx")
+        let departedName = tree.allLeaves[0].paneSessionKey
+        XCTAssertEqual(departedName, SessionManager.persistentSessionName(for: "/repo"))
+
+        let move = manager.moveLeaf(stationId: tree.allLeaves[0].stationId,
+                                    toPath: "/repo-worktrees/feature")
+        XCTAssertEqual(move?.sourceEmptied, true)
+
+        let replacement = manager.replacementTree(for: source, backend: "zmx")
+        XCTAssertNotEqual(replacement.allLeaves[0].paneSessionKey, departedName)
+        XCTAssertFalse(replacement.allLeaves[0].paneSessionKey.isEmpty)
+    }
+
+    func testReplacementPaneTakesTheCanonicalNameWhenItIsFree() {
+        let manager = StationManager()
+        let source = info("/repo")
+        let replacement = manager.replacementTree(for: source, backend: "zmx")
+        XCTAssertEqual(replacement.allLeaves[0].paneSessionKey,
+                       SessionManager.persistentSessionName(for: "/repo"))
+    }
+
+    /// A stale `focusedId` must not cost the destination its panes. `removeLeaf`
+    /// reassigns focus, and a tree can be adopted into long after its focus moved,
+    /// so adopting has to attach to *some* leaf rather than trusting focus — the
+    /// earlier form replaced `root` outright and orphaned every Station in it.
+    func testAdoptIntoTreeWithStaleFocusKeepsExistingPanes() {
+        let manager = StationManager()
+        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "zmx")
+        let residentStationId = destination.allLeaves[0].stationId
+        destination.focusedId = "no-such-leaf"
+
+        let source = manager.tree(for: info("/repo"), backend: "zmx")
+        let movingStationId = source.allLeaves[0].stationId
+
+        let move = manager.moveLeaf(stationId: movingStationId, toPath: "/repo-worktrees/feature")
+        XCTAssertEqual(move?.tree.leafCount, 2)
+        XCTAssertTrue(move?.tree.allLeaves.contains { $0.stationId == residentStationId } == true,
+                      "the resident pane was orphaned by a stale focus")
+        XCTAssertTrue(move?.tree.allLeaves.contains { $0.stationId == movingStationId } == true)
+    }
+
+    func testMoveLeafReturnsNilForUnknownStation() {
+        let manager = StationManager()
+        XCTAssertNil(manager.moveLeaf(stationId: "nope", toPath: "/dest"))
+    }
+
+    func testMoveLeafToItsOwnWorktreeIsANoOp() {
+        let manager = StationManager()
+        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        XCTAssertNil(manager.moveLeaf(stationId: tree.allLeaves[0].stationId, toPath: "/repo"))
+        XCTAssertNotNil(manager.tree(forPath: "/repo"))
+    }
+
+    // MARK: - AgentRegistry.rehome
+
+    func testRehomeKeepsTheAgentsHistory() {
+        defer { AgentRegistry.shared.unregister(terminalID: "t-move") }
+        AgentRegistry.shared.registerForTesting(terminalID: "t-move", worktreePath: "/wt-a",
+                                                branch: "main", project: "proj")
+        AgentRegistry.shared.updateStatus(terminalID: "t-move", status: .running,
+                                          lastMessage: "npm test", roundDuration: 12)
+
+        XCTAssertTrue(AgentRegistry.shared.rehome(terminalID: "t-move", to: "/wt-b",
+                                                  branch: "feature", project: "proj"))
+
+        let moved = AgentRegistry.shared.pane(for: "t-move")
+        XCTAssertEqual(moved?.worktreePath, "/wt-b")
+        XCTAssertEqual(moved?.branch, "feature")
+        // unregister+register would have reset all three — the agent is still
+        // running, and losing its state is exactly what the move exists to avoid.
+        XCTAssertEqual(moved?.status, .running)
+        XCTAssertEqual(moved?.lastMessage, "npm test")
+        XCTAssertEqual(moved?.roundDuration, 12)
+
+        XCTAssertTrue(AgentRegistry.shared.terminalIDs(forWorktree: "/wt-a").isEmpty)
+        XCTAssertEqual(AgentRegistry.shared.terminalIDs(forWorktree: "/wt-b"), ["t-move"])
+    }
+
+    func testRehomeToTheSameWorktreeIsRejected() {
+        defer { AgentRegistry.shared.unregister(terminalID: "t-same") }
+        AgentRegistry.shared.registerForTesting(terminalID: "t-same", worktreePath: "/wt-a",
+                                                branch: "main", project: "proj")
+        XCTAssertFalse(AgentRegistry.shared.rehome(terminalID: "t-same", to: "/wt-a",
+                                                   branch: "main", project: "proj"))
+    }
+
+    func testRehomeOfUnknownPaneIsRejected() {
+        XCTAssertFalse(AgentRegistry.shared.rehome(terminalID: "ghost", to: "/wt-b",
+                                                   branch: "b", project: "p"))
+    }
+
+    /// `backendsByPath` is keyed by worktree, so unregistering one pane used to
+    /// drop the backend for every sibling in the same worktree — closing one
+    /// split silently un-backed the rest.
+    func testClosingOnePaneKeepsTheWorktreeBackendForItsSiblings() {
+        let first = Station()
+        let second = Station()
+        defer {
+            AgentRegistry.shared.unregister(terminalID: first.id)
+            AgentRegistry.shared.unregister(terminalID: second.id)
+        }
+        for station in [first, second] {
+            AgentRegistry.shared.register(station: station, worktreePath: "/wt-multi", branch: "main",
+                                          project: "proj", startedAt: nil,
+                                          paneSessionKey: "seahelm-wt-multi", backend: "zmx")
+        }
+        AgentRegistry.shared.unregister(terminalID: first.id)
+        XCTAssertEqual(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"), "zmx")
+
+        AgentRegistry.shared.unregister(terminalID: second.id)
+        XCTAssertNil(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"),
+                     "the last pane leaving should still clear it")
     }
 }

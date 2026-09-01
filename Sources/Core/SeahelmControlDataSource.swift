@@ -18,6 +18,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     var zoomHandler: ((String?, String) -> Bool?)?
     /// Close a pane by station id (main thread). Returns whether it was closed.
     var closeHandler: ((String) -> Bool)?
+    /// (stationId, worktreePath) -> moved. Re-files a live pane under another
+    /// worktree without recreating it.
+    var moveHandler: ((String, String) -> Bool)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
     var focusHandler: ((String) -> Bool)?
     /// Sleep/wake panes by station id (nil = all but the focused one), on the
@@ -216,6 +219,13 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard let sid = station(for: paneId)?.id, let focusHandler else { return false }
         var ok = false
         runOnMain { ok = focusHandler(sid) }
+        return ok
+    }
+
+    func movePane(paneId: String, worktreePath: String) -> Bool {
+        guard let sid = station(for: paneId)?.id, let moveHandler else { return false }
+        var ok = false
+        runOnMain { ok = moveHandler(sid, worktreePath) }
         return ok
     }
 

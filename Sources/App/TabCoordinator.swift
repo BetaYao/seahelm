@@ -31,7 +31,10 @@ class TabCoordinator {
     private lazy var mailPaneObserver = MailPaneObserver(conversations: mailConversationStore)
 
     var activeTabIndex: Int = 0
-    var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
+    /// Every worktree across all repos. `tree` is optional because the tree is
+    /// owned by `StationManager`, not by this list, and a worktree can be between
+    /// trees — a pane move unkeys the source's before its replacement is built.
+    var allWorktrees: [(info: WorktreeInfo, tree: SplitTree?)] = []
     /// Keeps each repo's integration checkout current as agents finish turns.
     /// Nil until `init` builds it; only acts on repos that already have one.
     private var integration: IntegrationCoordinator?
@@ -552,7 +555,7 @@ class TabCoordinator {
                 }
                 self.pruneStaleWorktreeConfigEntries()
 
-                var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree)] = []
+                var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree?)] = []
 
                 for (repoPath, worktrees) in discoveredWorktrees {
                     if worktrees.isEmpty {
@@ -629,16 +632,21 @@ class TabCoordinator {
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
-                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
-                        self?.handleNewWorktreeFromHook(worktreePath)
+                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath, paneId in
+                        guard let self else { return }
+                        // The pane whose agent is already working there follows it in
+                        // once discovery integrates the worktree, instead of the
+                        // worktree standing up an empty pane of its own beside it.
+                        if let paneId {
+                            self.pendingTransfers.record(worktreePath: worktreePath, paneId: paneId)
+                        }
+                        self.handleNewWorktreeFromHook(worktreePath)
+                    }
+                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath in
+                        self?.followAgentToWorktree(paneId: paneId, worktreePath: worktreePath)
                     }
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
-                    }
-                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId, paneId in
-                        guard let self else { return }
-                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName) (pane \(paneId ?? "?"))")
-                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId, paneId: paneId)
                     }
                     // Per-session timestamps: when we last blocked a session for suggestions,
                     // and when a user prompt last arrived for that session. If the user sent a
@@ -815,6 +823,9 @@ class TabCoordinator {
                         guard let self, self.preparePaneControlTarget(stationId) else { return false }
                         return self.terminalCoordinator.focusPane(targetStationId: stationId)
                     }
+                    controlDataSource.moveHandler = { [weak self] stationId, worktreePath in
+                        self?.movePane(stationId: stationId, toWorktreePath: worktreePath) ?? false
+                    }
                     controlDataSource.sleepHandler = { [weak self] stationId in
                         self?.terminalCoordinator.sleepPane(targetStationId: stationId) ?? []
                     }
@@ -958,12 +969,14 @@ class TabCoordinator {
             let proj = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
                 ?? URL(fileURLWithPath: repoRoot).lastPathComponent
 
-            // Check if this worktree has a pending transfer (created via hook from an existing pane)
-            if let transfer = pendingTransfers.consume(newWorktreePath: info.path) {
-                NSLog("[TabCoordinator] Transferring pane from \(transfer.sourceWorktreePath) to \(info.path)")
-                performPaneTransfer(transfer: transfer, newInfo: info, repoRoot: repoRoot, project: proj, allDiscoveredWorktrees: allDiscovered)
-            } else {
-                // No pending transfer — create a fresh tree
+            // A pane whose agent is already working in this worktree follows it in
+            // rather than letting the worktree stand up an empty pane beside it.
+            let claimed = pendingTransfers.consume(newWorktreePath: info.path).map {
+                performPaneRehome(transfer: $0, newInfo: info, repoRoot: repoRoot, project: proj)
+            } ?? false
+
+            if !claimed {
+                // Nobody moved here — create a fresh tree
                 let tree = terminalCoordinator.resolveTree(for: info)
                 allWorktrees.append((info: info, tree: tree))
                 worktreeRepoCache[info.path] = repoRoot
@@ -1064,82 +1077,123 @@ class TabCoordinator {
         return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
     }
 
-    private func performPaneTransfer(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
-        let sourcePath = transfer.sourceWorktreePath
-        // Capture the source's own info before step 2 drops it. Step 6 restores the
-        // source from `allDiscoveredWorktrees`, but that list only covers `repoRoot`
-        // — the *new* worktree's repo. Transfers are matched by worktree name alone
-        // (a worktree may be created at any sibling path), so a name collision can
-        // pair this new worktree with a source in a *different* repo, and then the
-        // lookup finds nothing and the source is destroyed with no way back until
-        // relaunch. Falling back to the captured info keeps that unrecoverable.
-        let sourceEntryInfo = allWorktrees.first(where: { $0.info.path == sourcePath })?.info
-        // The source keeps its OWN repo/project — `repoRoot` and `project` describe
-        // the new worktree, which is only the same repo when no cross-repo name
-        // collision routed us here.
-        let sourceRepo = worktreeRepoCache[sourcePath] ?? repoRoot
-
-        // 1. Transfer the SplitTree from source → new worktree path
-        guard let transferredTree = terminalCoordinator.stationManager.transferTree(fromPath: sourcePath, toPath: newInfo.path) else {
-            NSLog("[TabCoordinator] Transfer failed: no tree at \(sourcePath), falling back to fresh tree")
-            let tree = terminalCoordinator.resolveTree(for: newInfo)
-            allWorktrees.append((info: newInfo, tree: tree))
-            worktreeRepoCache[newInfo.path] = repoRoot
-            return
+    /// Move the pane whose agent created `newInfo` into it, keeping the agent
+    /// running. Returns false when the pane can no longer be resolved, so the
+    /// caller falls back to standing up a fresh tree.
+    @discardableResult
+    private func performPaneRehome(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo,
+                                   repoRoot: String, project: String) -> Bool {
+        guard let station = StationRegistry.shared.station(forSessionName: transfer.paneId) else {
+            NSLog("[TabCoordinator] Rehome skipped — no live station for pane \(transfer.paneId)")
+            return false
         }
-
-        // 2. Update allWorktrees: remove old entry for source, add new entry
-        allWorktrees.removeAll { $0.info.path == sourcePath }
-        allWorktrees.append((info: newInfo, tree: transferredTree))
-        worktreeRepoCache[newInfo.path] = repoRoot
-
-        // 3. Re-register transferred surfaces in AgentRegistry under new worktree
-        // Unregister all old agents for the source path first
-        while let oldAgent = AgentRegistry.shared.pane(forWorktree: sourcePath) {
-            AgentRegistry.shared.unregister(terminalID: oldAgent.id)
-        }
-        for leaf in transferredTree.allLeaves {
-            if let station = StationRegistry.shared.station(forId: leaf.stationId) {
-                // zmx has no rename, so the session keeps its original (source-derived)
-                // name. Register with that real name — NOT persistentSessionName(for:
-                // newInfo.path), which would build a channel to a nonexistent session
-                // and let the orphan-reaper reap the live one.
-                let paneSessionKey = runtimeBackend == "local" ? nil : leaf.paneSessionKey
-                AgentRegistry.shared.register(station: station, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
-            }
-        }
-
-        // 4. Save the transferred tree's layout under the new path, remove old
-        terminalCoordinator.config.splitLayouts.removeValue(forKey: sourcePath)
-        terminalCoordinator.saveSplitLayout(transferredTree)
-
-        // 5. Invalidate the old split container so the UI rebuilds it
-        dashboardVC?.invalidateSplitContainer(forPath: sourcePath)
-
-        // 6. Create a fresh tree for the source worktree (e.g., main)
-        let rediscoveredSource = allDiscoveredWorktrees.first(where: {
-            WorktreeDiscovery.canonicalPath($0.path) == WorktreeDiscovery.canonicalPath(sourcePath)
-        })
-        if rediscoveredSource == nil, sourceEntryInfo != nil {
-            NSLog("[TabCoordinator] Transfer source \(sourcePath) absent from \(repoRoot) discovery — restoring from its tracked info")
-        }
-        if let sourceInfo = rediscoveredSource ?? sourceEntryInfo {
-            let freshTree = terminalCoordinator.stationManager.tree(for: sourceInfo, backend: runtimeBackend)
-            if let idx = allWorktrees.firstIndex(where: { $0.info.path == sourceInfo.path }) {
-                allWorktrees[idx] = (info: sourceInfo, tree: freshTree)
-            } else {
-                allWorktrees.append((info: sourceInfo, tree: freshTree))
-            }
-            worktreeRepoCache[sourceInfo.path] = sourceRepo
-            let sourceProject = workspaceManager.tabs.first(where: { $0.repoPath == sourceRepo })?.displayName
-                ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
-            let paneSessionKey = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
-            if let surface = terminalCoordinator.stationManager.primaryStation(forPath: sourceInfo.path) {
-                AgentRegistry.shared.register(station: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: sourceProject, startedAt: Date(), paneSessionKey: paneSessionKey, backend: runtimeBackend)
-            }
-            terminalCoordinator.saveSplitLayout(freshTree)
-        }
+        return rehomePane(stationId: station.id, into: newInfo, repoRoot: repoRoot, project: project)
     }
+
+    /// Move a live pane into an existing worktree, by station id. The manual
+    /// counterpart of the automatic rehome, behind `pane.move`: for agents whose
+    /// worktree creation we cannot observe, and for correcting a misattribution.
+    /// False when the pane or the worktree is unknown.
+    @discardableResult
+    func movePane(stationId: String, toWorktreePath: String) -> Bool {
+        let canon = WorktreeDiscovery.canonicalPath(toWorktreePath)
+        guard let entry = allWorktrees.first(where: {
+            WorktreeDiscovery.canonicalPath($0.info.path) == canon
+        }) else {
+            NSLog("[TabCoordinator] pane.move: unknown worktree \(toWorktreePath)")
+            return false
+        }
+        let repoRoot = worktreeRepoCache[entry.info.path] ?? ""
+        let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
+            ?? URL(fileURLWithPath: repoRoot).lastPathComponent
+        return rehomePane(stationId: stationId, into: entry.info, repoRoot: repoRoot, project: project)
+    }
+
+    /// Move a pane to the worktree its agent is actually working in, whenever it
+    /// is not already filed there.
+    ///
+    /// The "worktree we do not track yet" trigger cannot carry this on its own: it
+    /// holds only until discovery catches up, and discovery sweeps every 5s. An
+    /// agent whose directory change is not itself a tool call — Codex's `/cd`
+    /// fires no hook — reports its new cwd well after that window shut, and would
+    /// go on working out of the pane it left. Comparing against the pane's live
+    /// attribution on every event has no window to miss, and it also brings a pane
+    /// back when its agent leaves a worktree again.
+    private func followAgentToWorktree(paneId: String, worktreePath: String) {
+        guard let station = StationRegistry.shared.station(forSessionName: paneId),
+              let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
+              WorktreeDiscovery.canonicalPath(current) != WorktreeDiscovery.canonicalPath(worktreePath)
+        else { return }
+        movePane(stationId: station.id, toWorktreePath: worktreePath)
+    }
+
+    /// Lift one pane out of its current worktree and into `destination`, keeping
+    /// its Station, its zmx session and the agent inside it alive.
+    ///
+    /// Moves that one pane, never the whole tree: a worktree's other panes have
+    /// their own agents doing their own work, and re-homing them because a sibling
+    /// moved mis-attributes all of them.
+    @discardableResult
+    private func rehomePane(stationId: String, into destination: WorktreeInfo,
+                            repoRoot: String, project: String) -> Bool {
+        guard let move = terminalCoordinator.stationManager.moveLeaf(stationId: stationId,
+                                                                     toPath: destination.path) else {
+            NSLog("[TabCoordinator] Rehome skipped — station \(stationId) is not in a movable tree")
+            return false
+        }
+        let sourcePath = move.sourcePath
+        NSLog("[TabCoordinator] Rehomed pane \(stationId) from \(sourcePath) to \(destination.path)")
+
+        // Re-attribute rather than unregister+register: the agent in this pane is
+        // still running, and rebuilding its entry would reset its status, timers
+        // and event log to those of a freshly opened pane.
+        _ = AgentRegistry.shared.rehome(terminalID: stationId, to: destination.path,
+                                        branch: destination.branch, project: project)
+
+        if let idx = allWorktrees.firstIndex(where: { $0.info.path == destination.path }) {
+            allWorktrees[idx] = (info: destination, tree: move.tree)
+        } else {
+            allWorktrees.append((info: destination, tree: move.tree))
+        }
+        worktreeRepoCache[destination.path] = repoRoot
+
+        // A source that just lost its last pane gets a replacement, because the
+        // dashboard builds its cards from live panes — leaving it with none would
+        // remove the card outright, not show an empty one. `replacementTree`
+        // claims a *free* session name: the departed pane kept the worktree's
+        // canonical one, and reusing it would point both panes at one live zmx
+        // session. The undo stays lossless either way, since moving the pane back
+        // adopts it into whatever tree is there rather than replacing it.
+        terminalCoordinator.config.splitLayouts.removeValue(forKey: sourcePath)
+        if let idx = allWorktrees.firstIndex(where: { $0.info.path == sourcePath }) {
+            let sourceInfo = allWorktrees[idx].info
+            let sourceTree = move.sourceEmptied
+                ? terminalCoordinator.stationManager.replacementTree(for: sourceInfo, backend: runtimeBackend)
+                : terminalCoordinator.stationManager.tree(forPath: sourcePath)
+            allWorktrees[idx] = (info: sourceInfo, tree: sourceTree)
+
+            if move.sourceEmptied,
+               let replacement = terminalCoordinator.stationManager.primaryStation(forPath: sourcePath) {
+                let sourceRepo = worktreeRepoCache[sourcePath] ?? repoRoot
+                let sourceProject = workspaceManager.tabs.first(where: { $0.repoPath == sourceRepo })?.displayName
+                    ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
+                AgentRegistry.shared.register(
+                    station: replacement, worktreePath: sourcePath, branch: sourceInfo.branch,
+                    project: sourceProject, startedAt: Date(),
+                    paneSessionKey: replacement.paneSessionKey.flatMap { $0.isEmpty ? nil : $0 },
+                    backend: runtimeBackend)
+            }
+            if let sourceTree { terminalCoordinator.saveSplitLayout(sourceTree) }
+        }
+        terminalCoordinator.saveSplitLayout(move.tree)
+        saveConfig()
+
+        dashboardVC?.invalidateSplitContainer(forPath: sourcePath)
+        dashboardVC?.invalidateSplitContainer(forPath: destination.path)
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
+        return true
+    }
+
 
     // MARK: - Worktree Lifecycle
 
@@ -1600,7 +1654,7 @@ class TabCoordinator {
             return []
         }
         let names = allWorktrees.flatMap { entry in
-            entry.tree.allLeaves.map(\.paneSessionKey)
+            entry.tree?.allLeaves.map(\.paneSessionKey) ?? []
         }
         return Set(names.filter { !$0.isEmpty })
     }

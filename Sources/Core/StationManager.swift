@@ -33,6 +33,45 @@ class StationManager {
         trees[path]
     }
 
+    /// Every zmx session name a live tree currently claims.
+    var claimedSessionNames: Set<String> {
+        Set(trees.values.flatMap { $0.allLeaves.map(\.paneSessionKey) }.filter { !$0.isEmpty })
+    }
+
+    /// Stand up a fresh tree for a worktree whose panes have all left.
+    ///
+    /// It must not simply take `persistentSessionName(for:)` the way `tree(for:)`
+    /// does: the pane that moved away kept that exact name — zmx has no rename —
+    /// so the replacement would attach to the live session the departed agent is
+    /// still running in, and both panes would drive the same terminal. Claims the
+    /// first free `<base>`, `<base>-2`, `<base>-3` … instead.
+    func replacementTree(for info: WorktreeInfo, backend: String) -> SplitTree {
+        if let existing = trees[info.path] { return existing }
+
+        var paneSessionKey = ""
+        if backend != "local" {
+            let base = SessionManager.persistentSessionName(for: info.path)
+            let taken = claimedSessionNames
+            paneSessionKey = base
+            var index = 2
+            while taken.contains(paneSessionKey) {
+                paneSessionKey = "\(base)-\(index)"
+                index += 1
+            }
+        }
+
+        let station = Station()
+        if backend != "local" {
+            station.paneSessionKey = paneSessionKey
+            station.backend = backend
+        }
+        StationRegistry.shared.register(station)
+        let tree = SplitTree(worktreePath: info.path, rootLeafId: UUID().uuidString,
+                             stationId: station.id, paneSessionKey: paneSessionKey)
+        trees[info.path] = tree
+        return tree
+    }
+
     /// Every live tree, for bulk persistence (e.g. capturing pane titles at quit).
     var allTrees: [SplitTree] { Array(trees.values) }
 
@@ -79,17 +118,57 @@ class StationManager {
         trees.count
     }
 
-    /// Re-key an existing tree from one worktree path to another.
-    /// Used when a worktree is created and the terminal should follow the new path.
-    /// Returns the tree if found, nil if no tree exists at fromPath.
+    /// The tree containing `stationId`, with the id of its leaf.
+    ///
+    /// A pane move addresses one pane, not a worktree: the emitting agent names
+    /// itself with SEAHELM_PANE_ID, which resolves to a Station, and the tree that
+    /// holds it may be any of them.
+    func locate(stationId: String) -> (tree: SplitTree, leafId: String)? {
+        for (_, tree) in trees {
+            if let leaf = tree.allLeaves.first(where: { $0.stationId == stationId }) {
+                return (tree, leaf.id)
+            }
+        }
+        return nil
+    }
+
+    /// Lift one leaf out of its tree and install it as the whole tree for
+    /// `toPath`, keeping the Station and its zmx session alive.
+    ///
+    /// Returns nil when the station is unknown. When the leaf is the last one in
+    /// its tree, the source tree is *unkeyed* (not destroyed — its stations move
+    /// with it) and the source worktree is left with no tree at all; the caller
+    /// decides what the emptied worktree shows.
     @discardableResult
-    func transferTree(fromPath: String, toPath: String) -> SplitTree? {
-        guard let tree = trees.removeValue(forKey: fromPath) else { return nil }
-        // Re-home the tree so persistence (saveSplitLayout keys on worktreePath)
-        // and station.create's cwd point at the destination, not the old path.
-        tree.worktreePath = toPath
-        trees[toPath] = tree
-        return tree
+    func moveLeaf(stationId: String, toPath: String) -> (tree: SplitTree, sourcePath: String, sourceEmptied: Bool)? {
+        guard let (sourceTree, leafId) = locate(stationId: stationId) else { return nil }
+        let sourcePath = sourceTree.worktreePath
+        guard sourcePath != toPath else { return nil }
+
+        let leaf: SplitNode.LeafInfo
+        var sourceEmptied = false
+        if let removed = sourceTree.removeLeaf(id: leafId) {
+            leaf = removed
+        } else {
+            // Only leaf: the whole tree comes across, so drop the source key
+            // without destroying anything.
+            guard let only = sourceTree.allLeaves.first else { return nil }
+            leaf = only
+            trees.removeValue(forKey: sourcePath)
+            sourceEmptied = true
+        }
+
+        // A worktree that already has panes keeps them — the moved pane joins as a
+        // split. Replacing its tree would orphan every Station in it.
+        let destination: SplitTree
+        if let existing = trees[toPath] {
+            existing.adopt(leaf: leaf)
+            destination = existing
+        } else {
+            destination = SplitTree.adopting(leaf: leaf, worktreePath: toPath)
+            trees[toPath] = destination
+        }
+        return (destination, sourcePath, sourceEmptied)
     }
 
     // MARK: - Primary station accessor (for AgentRegistry / backward compat)

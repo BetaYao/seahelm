@@ -9,8 +9,21 @@ class WebhookStatusProvider {
         CodexSessionPromptLookup.lastUserPrompt(sessionId: sessionId)
     }
 
-    /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
-    var onNewWorktreeDetected: ((String) -> Void)?
+    /// Called (on main) when an agent's cwd names a worktree we do not track yet.
+    /// `paneId` is the emitting pane's session name (SEAHELM_PANE_ID), so the owner
+    /// can move that exact pane into the worktree once it is integrated instead of
+    /// standing up an empty one beside it — nil when the hook carried none.
+    var onNewWorktreeDetected: ((_ worktreePath: String, _ paneId: String?) -> Void)?
+
+    /// Called (on main) with the worktree a pane's agent is *currently* working
+    /// in, on every hook event that names a pane.
+    ///
+    /// Not edge-triggered here on purpose. The owner compares against the pane's
+    /// live attribution, which is the authoritative copy, so a move that could not
+    /// be completed yet — the destination not integrated, the station not
+    /// resolvable — is simply retried on the agent's next event instead of being
+    /// swallowed by a cache that already recorded the edge.
+    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String) -> Void)?
 
     /// Called (on main) when an agent hook event resolves a persistable resume
     /// ref for a known worktree. `paneId` is the emitting pane's session name
@@ -20,9 +33,14 @@ class WebhookStatusProvider {
     /// is recreated.
     var onAgentSessionResolved: ((_ worktreePath: String, _ paneId: String?, _ ref: AgentSessionRef) -> Void)?
 
-    /// Called when a WorktreeCreate event arrives, with source worktree path and worktree name.
-    /// Fires before the new worktree is discoverable (the git operation may still be in progress).
-    var onWorktreeCreateReceived: ((_ sourceWorktreePath: String, _ worktreeName: String, _ sessionId: String, _ paneId: String?) -> Void)?
+    /// Memo for "is this path a git worktree root" — see `isWorktreeRoot`.
+    private var worktreeRootProbeCache: [String: Bool] = [:]
+
+    /// When we last asked the owner to discover a given path. The cwd check below
+    /// runs on *every* hook event, so without this an agent sitting in a worktree
+    /// we have not integrated yet would re-trigger discovery on every tool call.
+    private var discoveryRequestedAt: [String: Date] = [:]
+    private let discoveryRequestInterval: TimeInterval = 15
 
     struct SessionState {
         let sessionId: String
@@ -52,52 +70,15 @@ class WebhookStatusProvider {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
 
-            // WorktreeCreate: record transfer intent before new worktree is discoverable
-            if event.event == .worktreeCreate {
-                // Claude Code sends "branch" and "worktree_path", not "worktree_name".
-                // Prefer worktree_path's last component since PendingTransferTracker
-                // matches by directory name, not branch name.
-                let worktreeName: String = {
-                    if let name = event.data?["worktree_name"] as? String, !name.isEmpty { return name }
-                    if let wtPath = event.data?["worktree_path"] as? String, !wtPath.isEmpty {
-                        return URL(fileURLWithPath: wtPath).lastPathComponent
-                    }
-                    if let branch = event.data?["branch"] as? String, !branch.isEmpty { return branch }
-                    return ""
-                }()
-                if !worktreeName.isEmpty {
-                    let sourcePath = canonCwd
-                    let worktreePath = event.data?["worktree_path"] as? String
-                    NSLog("[WebhookStatusProvider] WorktreeCreate from \(sourcePath): \(worktreeName)")
-                    let paneId = event.paneId
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onWorktreeCreateReceived?(sourcePath, worktreeName, event.sessionId, paneId)
-                    }
-                    // Also trigger delayed discovery — CwdChanged may not fire
-                    // if the agent stays in the original directory after creating the worktree
-                    if let wtPath = worktreePath {
-                        let canonWtPath = canonicalize(wtPath)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                            guard let self else { return }
-                            if self.matchWorktreeSync(canonWtPath) == nil {
-                                NSLog("[WebhookStatusProvider] Triggering discovery for WorktreeCreate path: \(wtPath)")
-                                self.onNewWorktreeDetected?(canonWtPath)
-                            }
-                        }
-                    }
-                }
-                return
-            }
-
-            // CwdChanged with unknown path → notify upstream to discover it
-            if event.event == .cwdChanged {
-                if matchWorktree(canonCwd) == nil {
-                    NSLog("[WebhookStatusProvider] New worktree detected via CwdChanged: \(event.cwd)")
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onNewWorktreeDetected?(canonCwd)
-                    }
-                }
-                // CwdChanged falls through to update session status
+            // An agent that moved into a worktree we do not track yet. Two shapes:
+            // the cwd matches nothing at all, or — the case that used to be
+            // invisible — it sits *inside* a known worktree while being a worktree
+            // root itself, which is exactly where Claude Code's own EnterWorktree
+            // puts one (`<repo>/.claude/worktrees/<name>`). Ask the owner to
+            // discover it; the pane follows once it is integrated.
+            let preMatch = matchWorktree(canonCwd)
+            if preMatch == nil || (preMatch != canonCwd && isWorktreeRoot(canonCwd)) {
+                requestDiscovery(of: canonCwd, rawCwd: event.cwd, paneId: event.paneId)
             }
 
             guard let worktreePath = matchWorktree(canonCwd) else {
@@ -132,13 +113,28 @@ class WebhookStatusProvider {
             // Persist a resume ref for recognized agents. Exclude subagent
             // events — their `agent_id` marks a nested context, and (as herdr
             // learned) letting them drive main-pane lifecycle causes false
-            // revivals. `worktreeCreate` already returned early above, so its
-            // cross-worktree session id never reaches here.
+            // revivals.
             if event.data?["agent_id"] == nil,
                let ref = AgentSessionRef(source: event.source, sessionId: event.sessionId, sessionPath: event.sessionPath) {
                 let paneId = event.paneId
                 DispatchQueue.main.async { [weak self] in
                     self?.onAgentSessionResolved?(worktreePath, paneId, ref)
+                }
+            }
+
+            // Where this pane's agent is now. Every hook payload carries `cwd`, so
+            // this lands on the agent's next action after it moves — which is what
+            // the "worktree we do not track yet" check above cannot cover on its
+            // own: discovery sweeps every 5s, and an agent whose directory change
+            // is not itself a tool call (Codex's `/cd` fires no hook) reports its
+            // new cwd long after the worktree stopped being new.
+            //
+            // Subagents are excluded for the same reason they are above: their
+            // `agent_id` marks a nested context, and one running elsewhere must not
+            // drag the pane its parent is sitting in.
+            if let paneId = event.paneId, event.data?["agent_id"] == nil {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onPaneWorktreeResolved?(paneId, worktreePath)
                 }
             }
 
@@ -329,13 +325,58 @@ class WebhookStatusProvider {
         if knownWorktrees.contains(canonCwd) {
             return canonCwd
         }
-        // Prefix match (agent in subdirectory)
-        for worktree in knownWorktrees {
-            if canonCwd.hasPrefix(worktree + "/") {
-                return worktree
-            }
+        // Prefix match (agent in a subdirectory). Must be the *longest* match:
+        // Claude Code's own worktrees live at `<repo>/.claude/worktrees/<name>`,
+        // i.e. nested inside the worktree they were created from, so a first-match
+        // scan attributed every event from such a worktree to its parent — the
+        // agent's move was invisible no matter which hook reported it.
+        var best: String?
+        for worktree in knownWorktrees where canonCwd.hasPrefix(worktree + "/") {
+            if best == nil || worktree.count > best!.count { best = worktree }
         }
-        return nil
+        return best
+    }
+
+    /// True when `path` is the root of a git worktree (linked or main): a linked
+    /// worktree root holds a `.git` *file*, the main one a `.git` directory.
+    ///
+    /// Only consulted when an event's cwd sits inside a known worktree but is not
+    /// that worktree's root — the case where an agent created a nested worktree we
+    /// have not discovered yet. Memoized because it runs on the webhook queue, and
+    /// probed with a short timeout so an unresponsive volume cannot wedge it.
+    private func isWorktreeRoot(_ path: String) -> Bool {
+        if let cached = worktreeRootProbeCache[path] { return cached }
+        // A timeout must read as "no", not "yes": `exists` resolves an
+        // unresponsive mount as present, and inheriting that here would make
+        // every subdirectory an agent visits on a wedged volume look like a new
+        // worktree and start moving panes into it. Nor is an unknown memoized —
+        // the volume may come back.
+        guard let result = FileSystemProbe.existsIfKnown(path + "/.git", timeout: 0.5) else {
+            return false
+        }
+        // Agents wander through plenty of ordinary subdirectories; drop the memo
+        // wholesale rather than let it grow for the life of the process.
+        if worktreeRootProbeCache.count > 512 { worktreeRootProbeCache.removeAll() }
+        worktreeRootProbeCache[path] = result
+        return result
+    }
+
+    /// Ask the owner to discover `canonPath`, at most once per
+    /// `discoveryRequestInterval`. Called on the webhook queue.
+    private func requestDiscovery(of canonPath: String, rawCwd: String, paneId: String?) {
+        let now = Date()
+        if let last = discoveryRequestedAt[canonPath],
+           now.timeIntervalSince(last) < discoveryRequestInterval {
+            return
+        }
+        discoveryRequestedAt = discoveryRequestedAt.filter {
+            now.timeIntervalSince($0.value) < discoveryRequestInterval
+        }
+        discoveryRequestedAt[canonPath] = now
+        NSLog("[WebhookStatusProvider] Untracked worktree at agent cwd: \(rawCwd) (pane \(paneId ?? "?"))")
+        DispatchQueue.main.async { [weak self] in
+            self?.onNewWorktreeDetected?(canonPath, paneId)
+        }
     }
 
     private func canonicalize(_ path: String) -> String {

@@ -103,4 +103,18 @@ final class OpenCodePluginInstallerTests: XCTestCase {
         XCTAssertTrue(js.contains("parentID"))
         XCTAssertTrue(js.contains("subagentSessions"))
     }
+    /// The plugin's `directory` argument is bound once when the plugin loads, so
+    /// a session that moved into a worktree would keep reporting the directory
+    /// opencode started in — and seahelm files a pane by that cwd. The session's
+    /// own directory rides on the Session payload, so track it per session.
+    func testPluginReportsThePerSessionDirectory() {
+        let js = OpenCodePluginInstaller.pluginContents()
+        XCTAssertTrue(js.contains("dirBySession"), "plugin does not track per-session directories")
+        XCTAssertTrue(js.contains("info.directory"), "plugin never reads the Session's directory")
+        XCTAssertTrue(js.contains("dirBySession.get(sessionId)"),
+                      "plugin still reports the load-time directory")
+        XCTAssertFalse(js.contains("cwd: directory ?? \"\""),
+                       "plugin still pins cwd to the load-time directory")
+    }
+
 }

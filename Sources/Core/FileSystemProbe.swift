@@ -31,6 +31,29 @@ enum FileSystemProbe {
         return box.value
     }
 
+    /// Bounded `fileExists` that reports *uncertainty* rather than guessing:
+    /// nil when the `stat()` did not return within `timeout`.
+    ///
+    /// `exists` resolves a timeout as "present" because its callers prune config
+    /// on absence, and a temporarily unreachable drive must not delete a user's
+    /// saved workspaces. Callers whose safe direction is the opposite — where a
+    /// false positive causes work rather than loss — need to see the timeout for
+    /// what it is instead of inheriting that policy.
+    static func existsIfKnown(_ path: String, timeout: TimeInterval = 2) -> Bool? {
+        let semaphore = DispatchSemaphore(value: 0)
+        final class Box { var value: Bool? }
+        let box = Box()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let exists = FileManager.default.fileExists(atPath: path)
+            box.value = exists
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            return nil
+        }
+        return box.value
+    }
+
     /// Probes many paths concurrently and returns the subset that **definitively
     /// does not exist**. Paths whose `stat()` did not return within `timeout`
     /// (stale mount) are treated as present and omitted. Total wall-clock is
