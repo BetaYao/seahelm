@@ -34,6 +34,21 @@ final class HostGatewayServer {
     private var proxied: [ObjectIdentifier: NWConnection] = [:]
     private var readyHandlers: [() -> Void] = []
     private let stateLock = NSLock()
+    /// Rebind attempts left for the public port.
+    ///
+    /// `NWListener.cancel()` is asynchronous, so `stop()` returns while the old
+    /// listener may still hold the port and a restart — which is what a pairing
+    /// mint does — can land on an address that is not free yet. Unretried that
+    /// surfaces as `.failed`, and `failStart` then fires the ready handlers with
+    /// `isListening == false`: the switch reads on with nothing behind it, the
+    /// one outcome owning this port is meant to rule out.
+    private var frontBindAttemptsLeft = 0
+    private static let frontBindAttempts = 20
+    private static let frontBindRetryDelay: TimeInterval = 0.05
+    /// Tells the current bind attempt from a superseded one, so a dropped
+    /// listener's late `.cancelled` cannot tear down its own replacement.
+    private var frontListenerGeneration = 0
+
     private var _isListening = false
 
     /// Request head cap: real browser heads are ~1KB, so this only bounds abuse.
@@ -84,6 +99,7 @@ final class HostGatewayServer {
                 if self.isListening { self.fireReadyHandlers() }
                 return
             }
+            self.frontBindAttemptsLeft = Self.frontBindAttempts
             self.subscribeToAgentEvents()
             self.startWebSocketListener()
         }
@@ -194,13 +210,21 @@ final class HostGatewayServer {
         do {
             let listener = try NWListener(using: parameters, on: port)
             frontListener = listener
+            frontListenerGeneration += 1
+            let generation = frontListenerGeneration
             listener.stateUpdateHandler = { [weak self] state in
-                guard let self else { return }
+                guard let self, generation == self.frontListenerGeneration else { return }
                 switch state {
                 case .ready:
                     self.isListening = true
                     self.fireReadyHandlers()
-                case .failed, .cancelled:
+                case .failed:
+                    // A port still held by a listener we only just cancelled is
+                    // a slow start, not a dead one.
+                    if !self.retryFrontListener() {
+                        self.failStart("front listener \(state)")
+                    }
+                case .cancelled:
                     self.failStart("front listener \(state)")
                 default:
                     break
@@ -214,6 +238,23 @@ final class HostGatewayServer {
             NSLog("[HostGateway] front listener failed: \(error.localizedDescription)")
             failStart("front listener error")
         }
+    }
+
+    /// Drops the failed attempt and schedules another, if any are left and the
+    /// server has not been stopped meanwhile. Returns whether it did.
+    private func retryFrontListener() -> Bool {
+        guard frontBindAttemptsLeft > 0, wsListener != nil else { return false }
+        frontBindAttemptsLeft -= 1
+        // Orphan this attempt's handler before cancelling it, or its own
+        // `.cancelled` would come back through the branch below as a teardown.
+        frontListenerGeneration += 1
+        frontListener?.cancel()
+        frontListener = nil
+        queue.asyncAfter(deadline: .now() + Self.frontBindRetryDelay) { [weak self] in
+            guard let self, self.frontListener == nil, self.wsListener != nil else { return }
+            self.startFrontListener()
+        }
+        return true
     }
 
     private func failStart(_ reason: String) {
