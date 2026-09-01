@@ -169,6 +169,7 @@
 		62FF9B7688CD065BE7DEBF35 /* TodoStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC2859D1D589D68F33F0552 /* TodoStoreTests.swift */; };
 		63A79C488B508192740AA539 /* AgentRegistryExternalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46850D7037DB8C66886F9AF /* AgentRegistryExternalTests.swift */; };
 		64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */; };
+		646692CC7C11231CC40284EC /* Array+SafeIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27117C2D2A6DF78BFACD7E05 /* Array+SafeIndex.swift */; };
 		65856EB705254F9707D884C5 /* ScanDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46776FFD2F37DD5907B7D108 /* ScanDecoderTests.swift */; };
 		65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC183C3A20588D380EF62682 /* TabSelectionTests.swift */; };
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
@@ -219,6 +220,7 @@
 		7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */; };
 		7DD2666A7F2FE0E895A38F8B /* WorktreeTaskStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */; };
 		7F9546C174F5D5E52457F7A8 /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */; };
+		7FAB179ADDFF8EF7D3B14D93 /* DashboardOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */; };
 		8080334C2591CD6DAEE35749 /* KeyboardSubstateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 081CE1B8C53AC598217B30B7 /* KeyboardSubstateController.swift */; };
 		80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C97F6C22C29552377720F4D /* WorktreePathNavigationTests.swift */; };
 		8103E9F323713DDD8EF66FD6 /* GmailRESTMailClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */; };
@@ -304,6 +306,7 @@
 		A6ECE1CD32661EEAA08D012D /* FirstMateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96EE302F1479073676DB584 /* FirstMateTests.swift */; };
 		A7D36122AEE48C5F72C89C87 /* MediaPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFE8F526F75CD13158309C6 /* MediaPreviewView.swift */; };
 		A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */; };
+		A80D6282151CE15D76D23514 /* SeahelmWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03838903285A44F08004A14 /* SeahelmWindow.swift */; };
 		A831B5F796896B48509F1F91 /* GatewayStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */; };
 		A8C7F6D5EE20B347D63B9947 /* XCUIElementExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DD3FFFF216C576CFDC7683 /* XCUIElementExtensions.swift */; };
 		A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */; };
@@ -487,6 +490,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardOverviewView.swift; sourceTree = "<group>"; };
 		0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeController.swift; sourceTree = "<group>"; };
 		0129F6EBD2E1650EFE04DC4A /* IMessageSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageSender.swift; sourceTree = "<group>"; };
 		03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstallerTests.swift; sourceTree = "<group>"; };
@@ -542,6 +546,7 @@
 		256BB7C447703DD227B69806 /* IntegrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationCoordinator.swift; sourceTree = "<group>"; };
 		258A1C3E5F11466A79C1CAF3 /* ClaudeUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstaller.swift; sourceTree = "<group>"; };
+		27117C2D2A6DF78BFACD7E05 /* Array+SafeIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Array+SafeIndex.swift"; sourceTree = "<group>"; };
 		27293C9549D95350D5CA8E80 /* DiffReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffReviewView.swift; sourceTree = "<group>"; };
 		2761438177A32EEF5CCFE031 /* IslandPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandPanelController.swift; sourceTree = "<group>"; };
 		27B42EEB25FF49236DBABA03 /* SplitContainerRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerRecoveryTests.swift; sourceTree = "<group>"; };
@@ -921,6 +926,7 @@
 		EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLPreviewResourceTests.swift; sourceTree = "<group>"; };
 		EF3E143D632D86B7DBBC840E /* PersistedStringMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedStringMap.swift; sourceTree = "<group>"; };
 		EF9EEEBC6FB86CD29B2B3D45 /* FirstMate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMate.swift; sourceTree = "<group>"; };
+		F03838903285A44F08004A14 /* SeahelmWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmWindow.swift; sourceTree = "<group>"; };
 		F0479C060435CDD5ED956DFE /* WorktreeCreator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreator.swift; sourceTree = "<group>"; };
 		F0982B809334A31181947736 /* WatchFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeed.swift; sourceTree = "<group>"; };
 		F11134E3FD389088A2D35EEE /* ChromeLayoutMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeLayoutMetrics.swift; sourceTree = "<group>"; };
@@ -1201,6 +1207,7 @@
 				B953D23003F184833FA1CFBA /* PanelCoordinator.swift */,
 				7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */,
 				777994FF5519110FAD559388 /* Region.swift */,
+				F03838903285A44F08004A14 /* SeahelmWindow.swift */,
 				7A4DC3FC06EC4D5EFE6BFA7F /* TabCoordinator.swift */,
 				35D82D53B83B8C48E71D9E57 /* TerminalCoordinator.swift */,
 				49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */,
@@ -1547,7 +1554,9 @@
 			children = (
 				D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */,
 				599AEE9969A8C01373011303 /* AddWorktreePopoverController.swift */,
+				27117C2D2A6DF78BFACD7E05 /* Array+SafeIndex.swift */,
 				D241FA217901216F43E4BDBE /* DashboardFocusController.swift */,
+				00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */,
 				BCEC0119082025691BCED456 /* DashboardViewController.swift */,
 				25346A39BB85A9E74B496865 /* EditLayoutContainerView.swift */,
 				641B13C5C51C4D5B012443A6 /* EditTabStripView.swift */,
@@ -2137,6 +2146,7 @@
 				F8E50AFAEFE6FB68CF09D75A /* Analytics.swift in Sources */,
 				33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */,
 				12702A1B7B7DD78FD49D65D5 /* AppFont.swift in Sources */,
+				646692CC7C11231CC40284EC /* Array+SafeIndex.swift in Sources */,
 				B2A3720360222C93BA542DF0 /* BridgeCommand.swift in Sources */,
 				4CF16F974806657762EEFE0D /* BridgeCommandRouter.swift in Sources */,
 				E03AA117E6413878273128F9 /* BridgePanelViewController.swift in Sources */,
@@ -2163,6 +2173,7 @@
 				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,
 				1BB8C6D16F033D0337FB2BAD /* CursorSessionTitleLookup.swift in Sources */,
 				B624161842A284D12A4CBBB1 /* DashboardFocusController.swift in Sources */,
+				7FAB179ADDFF8EF7D3B14D93 /* DashboardOverviewView.swift in Sources */,
 				DBC71AE11E16638FD7EE341D /* DashboardViewController.swift in Sources */,
 				6152CD919925AF8CBC204000 /* DebugFlags.swift in Sources */,
 				FD97CEE3018382B7182D5EB7 /* DialogPresenter.swift in Sources */,
@@ -2302,6 +2313,7 @@
 				EEF9D35496F94C190A4F90EA /* SeahelmHookInstaller.swift in Sources */,
 				1E9E18DF38B9685E5EE65D23 /* SeahelmSkillInstaller.swift in Sources */,
 				F0C9DBC1959D88845016A1F4 /* SeahelmSuggestInstaller.swift in Sources */,
+				A80D6282151CE15D76D23514 /* SeahelmWindow.swift in Sources */,
 				F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */,
 				4BABED7139C987D39C7BBE38 /* SessionManager.swift in Sources */,
 				926766A36B27D910AF7974CB /* SessionMonitorView.swift in Sources */,
@@ -2412,7 +2424,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.52;
+				MARKETING_VERSION = 2.0.55;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2650,7 +2662,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.52;
+				MARKETING_VERSION = 2.0.55;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
