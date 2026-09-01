@@ -152,6 +152,7 @@ targets:
           mkdir -p "${DEST}"
           rsync -a \
             --exclude 'devbroker' --exclude '.gitignore' --exclude 'README.md' \
+            --exclude 'bench.html' --exclude 'bench-corpus.js' \
             "${SRC}/" "${DEST}/"
     sources:
       - path: Sources

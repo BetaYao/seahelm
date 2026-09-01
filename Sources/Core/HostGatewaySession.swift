@@ -24,8 +24,16 @@ final class HostGatewaySession {
     private let rateLimiter: PairRateLimiter?
     private let clientIP: String
 
+    /// Caps on queued VT payload (uncompressed). Overflow drops oldest `.vt`
+    /// for the overflowing pane (or globally, if the session total is over)
+    /// and rate-limits a synthetic empty snapshot so the client can reset.
+    static let maxPendingVTBytes = 256 * 1024
+    static let maxPendingVTBytesPerPane = 128 * 1024
+    static let resyncMinInterval: TimeInterval = 1.0
+
     /// A queued outbound frame.
     ///
+    /// High-priority frames (decisions / control notifies) drain before VT.
     /// VT events are queued as events and encoded at drain time. `emit` runs on
     /// the VT manager's serial queue — the same one that has to drain the PTY —
     /// so deflating a 48KB chunk there stalls reading for every pane, and does it
@@ -33,12 +41,12 @@ final class HostGatewaySession {
     /// encoded.
     ///
     /// The trade is that a queued VT frame is held uncompressed, so a client that
-    /// stalls holds more memory than it used to. That is bounded: the manager
-    /// coalesces to one frame per pane per flush window, capped at 48KB, only
-    /// panes this client opened are queued at all, and every enqueue wakes a
-    /// drain.
+    /// stalls holds more memory than it used to. That is bounded: drop-old keeps
+    /// pending VT at `maxPendingVTBytes` (and `maxPendingVTBytesPerPane` per
+    /// pane), only panes this client opened are queued at all, and every enqueue
+    /// wakes a drain.
     private enum Pending {
-        case ready(HostGatewayWireFrame)
+        case high(HostGatewayWireFrame)
         case vt(VTEvent)
     }
 
@@ -54,11 +62,15 @@ final class HostGatewaySession {
     private var authenticated = false
     private var openVTKeys: Set<String> = []
     private var pending: [Pending] = []
+    /// pane → last forced-resync time. Also the rate-limit clock.
+    private var needsResync: [String: Date] = [:]
+    private var pendingVTBytes: Int = 0
     private var vtObserverToken: Int?
     /// Negotiated at auth. Absent means a client from before binary VT, which
     /// still gets base64 inside a JSON notify.
     private var vtBinary = false
     private var vtDeflate = false
+    private var keysBinary = false
     private var pendingOutbound: ((HostGatewaySession) -> Void)?
 
     init(router: ControlRouter,
@@ -94,6 +106,8 @@ final class HostGatewaySession {
         vtObserverToken = nil
         pendingOutbound = nil
         pending.removeAll()
+        pendingVTBytes = 0
+        needsResync.removeAll()
         lock.unlock()
         if let token { vt.removeObserver(token) }
     }
@@ -137,7 +151,11 @@ final class HostGatewaySession {
     private func enqueueVT(_ event: VTEvent) {
         lock.lock()
         let wanted = authenticated && openVTKeys.contains(event.paneSessionKey)
-        if wanted { pending.append(.vt(event)) }
+        if wanted {
+            pending.append(.vt(event))
+            pendingVTBytes += event.payload.count
+            trimVTIfNeeded(pane: event.paneSessionKey)
+        }
         let notify = wanted ? pendingOutbound : nil
         lock.unlock()
         notify?(self)
@@ -145,10 +163,109 @@ final class HostGatewaySession {
 
     private func enqueue(_ frame: HostGatewayWireFrame) {
         lock.lock()
-        pending.append(.ready(frame))
+        pending.append(.high(frame))
         let notify = pendingOutbound
         lock.unlock()
         notify?(self)
+    }
+
+    /// Must run while `lock` is held.
+    private func trimVTIfNeeded(pane: String) {
+        var dropped = Set<String>()
+        while panePendingVTBytes(pane) > Self.maxPendingVTBytesPerPane {
+            guard let key = dropOldestVT(pane: pane) else { break }
+            dropped.insert(key)
+        }
+        while pendingVTBytes > Self.maxPendingVTBytes {
+            guard let key = dropOldestVT(pane: nil) else { break }
+            dropped.insert(key)
+        }
+        for key in dropped {
+            maybeScheduleResync(pane: key)
+        }
+    }
+
+    private func panePendingVTBytes(_ pane: String) -> Int {
+        var n = 0
+        for item in pending {
+            if case .vt(let e) = item, e.paneSessionKey == pane {
+                n += e.payload.count
+            }
+        }
+        return n
+    }
+
+    /// Drops the oldest `vt.data` for `pane` (or any pane if `pane` is nil).
+    /// Falls back to any `.vt` so a huge snapshot cannot pin the budget over cap.
+    private func dropOldestVT(pane: String?) -> String? {
+        func matches(_ event: VTEvent) -> Bool {
+            pane.map { event.paneSessionKey == $0 } ?? true
+        }
+        let dataIdx = pending.firstIndex {
+            if case .vt(let e) = $0, e.kind == .data, matches(e) { return true }
+            return false
+        }
+        let idx = dataIdx ?? pending.firstIndex {
+            if case .vt(let e) = $0, matches(e) { return true }
+            return false
+        }
+        guard let idx, case .vt(let event) = pending.remove(at: idx) else { return nil }
+        pendingVTBytes -= event.payload.count
+        if pendingVTBytes < 0 { pendingVTBytes = 0 }
+        return event.paneSessionKey
+    }
+
+    private func maybeScheduleResync(pane: String) {
+        // A still-queued real snapshot *is* the resync. An empty synthetic after
+        // it would make the client term.reset() to a blank screen and undo it.
+        if restackRealSnapshot(pane: pane) { return }
+
+        let now = Date()
+        let allowed = needsResync[pane].map { now.timeIntervalSince($0) >= Self.resyncMinInterval } ?? true
+        let existing = pending.lastIndex {
+            if case .vt(let e) = $0,
+               e.kind == .snapshot,
+               e.paneSessionKey == pane,
+               e.payload.isEmpty { return true }
+            return false
+        }
+        if let existing {
+            let item = pending.remove(at: existing)
+            pending.append(item)
+            if allowed { needsResync[pane] = now }
+            return
+        }
+        guard allowed else { return }
+        needsResync[pane] = now
+        pending.append(.vt(VTEvent(kind: .snapshot, paneSessionKey: pane, payload: Data())))
+    }
+
+    /// If a non-empty snapshot for `pane` survived trim, drop later `.data` for
+    /// that pane and restack the snapshot last so drain ends on a consistent
+    /// screen. Returns true when that happened (caller must not append empty).
+    private func restackRealSnapshot(pane: String) -> Bool {
+        let snapIdx = pending.lastIndex {
+            if case .vt(let e) = $0,
+               e.kind == .snapshot,
+               e.paneSessionKey == pane,
+               !e.payload.isEmpty { return true }
+            return false
+        }
+        guard let snapIdx else { return false }
+        var i = pending.count - 1
+        while i > snapIdx {
+            if case .vt(let e) = pending[i],
+               e.paneSessionKey == pane,
+               e.kind == .data {
+                pendingVTBytes -= e.payload.count
+                pending.remove(at: i)
+            }
+            i -= 1
+        }
+        if pendingVTBytes < 0 { pendingVTBytes = 0 }
+        let item = pending.remove(at: snapIdx)
+        pending.append(item)
+        return true
     }
 
     /// Server → session: an event that opened or closed a decision.
@@ -181,17 +298,22 @@ final class HostGatewaySession {
         lock.lock()
         let queued = pending
         pending.removeAll()
+        pendingVTBytes = 0
         let binary = vtBinary
         let deflate = vtDeflate
         lock.unlock()
         // Encoding happens here — on the gateway's queue, outside the lock, and
-        // off the queue that reads the PTY.
-        return queued.map { item in
-            switch item {
-            case .ready(let frame): return frame
-            case .vt(let event): return encodeVT(event, binary: binary, deflate: deflate)
-            }
+        // off the queue that reads the PTY. High-priority control always
+        // precedes VT, even if the VT was enqueued first.
+        let high = queued.compactMap { item -> HostGatewayWireFrame? in
+            if case .high(let frame) = item { return frame }
+            return nil
         }
+        let vts = queued.compactMap { item -> VTEvent? in
+            if case .vt(let event) = item { return event }
+            return nil
+        }
+        return high + vts.map { encodeVT($0, binary: binary, deflate: deflate) }
     }
 
     func handle(text: String) -> [HostGatewayWireFrame] {
@@ -210,6 +332,19 @@ final class HostGatewaySession {
             }
             return [.text(handleAuthenticated(id: id, method: method, params: params))]
         }
+    }
+
+    /// Negotiated binary `send_keys` — fire-and-forget, no RPC id.
+    func handle(binary: Data) -> [HostGatewayWireFrame] {
+        lock.lock()
+        let ready = authenticated
+        let allowKeys = keysBinary
+        lock.unlock()
+        guard ready, allowKeys,
+              let decoded = HostGatewayKeyFrame.decode(binary) else { return [] }
+        guard isVTOpen(decoded.paneSessionKey) else { return [] }
+        _ = vt.sendKeys(paneSessionKey: decoded.paneSessionKey, utf8: decoded.utf8)
+        return []
     }
 
     private func handleAuth(id: String, params: [String: Any]) -> [String] {
@@ -247,17 +382,20 @@ final class HostGatewaySession {
         // against a new Mac rather than rendering nothing.
         let binary = ok && (params["vt_binary"] as? Bool ?? false)
         let deflate = binary && (params["vt_deflate"] as? Bool ?? false)
+        let keysBin = ok && (params["keys_binary"] as? Bool ?? false)
         if ok {
             lock.lock()
             authenticated = true
             vtBinary = binary
             vtDeflate = deflate
+            keysBinary = keysBin
             lock.unlock()
         }
         var result: [String: Any] = [
             "ok": ok,
             "vt_binary": binary,
             "vt_deflate": deflate,
+            "keys_binary": keysBin,
         ]
         if ok {
             result["mac_id"] = expectedMacId

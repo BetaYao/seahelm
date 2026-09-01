@@ -363,6 +363,7 @@
     <div class="col" id="midcol">
       <div class="detail-head">
         <h2 id="detailHead">终端</h2>
+        <button class="renderer-badge" id="vtModeBadge" title="VT 订阅模式">单屏</button>
         <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
       </div>
@@ -385,9 +386,9 @@
 
 <link rel="stylesheet" href="./xterm.css" />
 <script src="./xterm.js"></script>
-<script src="./xterm-addon-webgl.js"></script>
 <script src="./input-coalescer.js"></script>
 <script src="./reconnect.js"></script>
+<script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -584,11 +585,12 @@ function openGatewaySocket(){
   log('sys', '(connect)', wsURL + ' [Gateway]');
   const ws = new WebSocket(wsURL);
   ws.binaryType = 'arraybuffer';
-  S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false };
+  S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false, keysBinary: false };
   ws.onopen = () => {
     const params = {
       vt_binary: true,
       vt_deflate: typeof DecompressionStream === 'function',
+      keys_binary: true,
     };
     if (S.pendingCode) params.code = S.pendingCode;
     else { params.mac_id = S.mac; params.token = S.authPass; }
@@ -612,6 +614,7 @@ function openGatewaySocket(){
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
+      S.gw.keysBinary = !!(r && r.keys_binary);
       if (r.mac_id) S.mac = r.mac_id;
       if (r.token) S.authPass = r.token;
       S.pendingCode = null;
@@ -711,6 +714,30 @@ async function inflateRaw(bytes){
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
 // through one promise chain, so decode can overlap but application cannot.
 const vtWriteChains = new Map();
+// Under decode backlog, drop intermediate vt.data rather than growing forever.
+// Snapshots always enqueue (they reset the terminal).
+const VT_APPLY_MAX = 8;
+const vtApplyDepth = new Map();
+
+function enqueueVTApply(key, type, work){
+  const depth = vtApplyDepth.get(key) || 0;
+  if (type === 'vt.data' && depth >= VT_APPLY_MAX) {
+    log('sys', '(vt drop)', key);
+    return;
+  }
+  vtApplyDepth.set(key, depth + 1);
+  const prior = vtWriteChains.get(key) || Promise.resolve();
+  const next = prior.then(async () => {
+    try {
+      await work();
+    } catch (e) {
+      log('sys', '(vt)', `frame dropped: ${e && e.message}`);
+    } finally {
+      vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
+    }
+  });
+  vtWriteChains.set(key, next);
+}
 
 /// A pane that goes away takes its chain with it — the map is keyed by pane and
 /// nothing else ever removed an entry, so worktree churn grew it for the life of
@@ -722,12 +749,10 @@ function onGatewayBinaryFrame(buf){
   if (!f) { log('sys', '(vt)', `unparseable binary frame, ${buf.length}B`); return; }
   log('rx', f.type, `${f.type} ${f.body.length}B${f.deflated ? ' deflated' : ''} (payload elided)`);
 
-  const prior = vtWriteChains.get(f.key) || Promise.resolve();
-  const next = prior.then(async () => {
+  enqueueVTApply(f.key, f.type, async () => {
     const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
     handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
-  }).catch((e) => log('sys', '(vt)', `frame dropped: ${e && e.message}`));
-  vtWriteChains.set(f.key, next);
+  });
 }
 
 function onGatewayFrame(msg){
@@ -752,8 +777,7 @@ function onGatewayFrame(msg){
 }
 
 function onGatewayNotify(method, params){
-  // Open questions / suggestions. MQTT delivered these as retained topics; over
-  // the socket the Mac pushes them and replays whatever is open on auth.
+  // Open questions / suggestions — pushed by the Mac and replayed on auth.
   if (method === 'pane.event') {
     const key = params.pane_session_key || params.pane_id;
     if (!key) return;
@@ -764,9 +788,11 @@ function onGatewayNotify(method, params){
   }
   if (method === 'vt.snapshot' || method === 'vt.data') {
     const key = params.pane_session_key || params.pane_id;
-    handleVT(key, {
-      type: method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data',
-      b64: params.b64, cols: params.cols, rows: params.rows,
+    const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
+    enqueueVTApply(key, type, async () => {
+      handleVT(key, {
+        type, b64: params.b64, cols: params.cols, rows: params.rows,
+      });
     });
   }
 }
@@ -1152,7 +1178,8 @@ window.addEventListener('resize', handleViewportResize);
 function handleViewportResize(){
   const wrap = $('termWrap');
   if (S.vt.tree && wrap){
-    const want = layoutFitsMirror(S.vt.tree, wrap.clientWidth) ? 'mirror' : 'single';
+    const preferMirror = loadVtMode() === 'mirror';
+    const want = (preferMirror && layoutFitsMirror(S.vt.tree, wrap.clientWidth)) ? 'mirror' : 'single';
     if (want !== S.vt.mode){
       const keep = S.vt.focus, tree = S.vt.tree, path = S.vt.worktree;
       unmountPanes();
@@ -1235,6 +1262,37 @@ function renderRendererBadge(active){
 // Resolve the renderer once the declarations above exist: `rendererReady` is a
 // `let`, so any call placed earlier in the file hits its temporal dead zone.
 ensureRenderer().then(renderRendererBadge);
+
+const VT_MODE_KEY = 'seahelm_vt_mode';
+function loadVtMode(){
+  const v = localStorage.getItem(VT_MODE_KEY);
+  return v === 'mirror' ? 'mirror' : 'single';
+}
+function setVtMode(mode){
+  localStorage.setItem(VT_MODE_KEY, mode);
+  renderVtModeBadge();
+  if (S.sel){
+    const path = S.sel, focus = S.vt.focus || S.selPane;
+    const tree = S.vt.tree, wt = S.vt.worktree;
+    if (tree && wt === path){
+      unmountPanes();
+      mountPanes(tree, focus, path);
+    } else {
+      requestLayout(path);
+    }
+  }
+}
+function renderVtModeBadge(){
+  const el = $('vtModeBadge');
+  if (!el) return;
+  const mode = loadVtMode();
+  el.textContent = mode === 'mirror' ? '镜像' : '单屏';
+  el.title = mode === 'mirror'
+    ? '镜像：每个 pane 一路 VT — 点击切到单屏'
+    : '单屏：只订阅焦点 pane — 点击切到镜像';
+  el.onclick = () => setVtMode(mode === 'mirror' ? 'single' : 'mirror');
+}
+renderVtModeBadge();
 
 // ── Shortcut bar ────────────────────────────────────────────────────────────
 // Some keys never reach a web page. Cmd+W closes the tab and is unpreventable
@@ -1322,8 +1380,7 @@ function copySelection(){
 function sendRawKey(bytes){
   const key = S.vt.focus;
   if (!key || !isLinked()) return;
-  sendCommand('pane.send_keys',
-    { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(bytes)) });
+  sendKeysPayload(key, new TextEncoder().encode(bytes));
   const entry = S.vt.panes.get(key);
   if (entry) { try { entry.term.focus(); } catch (e) {} }   // hand the keyboard back
 }
@@ -1473,7 +1530,8 @@ function mountPanes(tree, focusKey, path){
   }
   S.vt.worktree = path;
   S.vt.tree = tree;
-  S.vt.mode = layoutFitsMirror(tree, wrap.clientWidth) ? 'mirror' : 'single';
+  const preferMirror = loadVtMode() === 'mirror';
+  S.vt.mode = (preferMirror && layoutFitsMirror(tree, wrap.clientWidth)) ? 'mirror' : 'single';
 
   if (S.vt.mode === 'single'){
     const leaves = treeLeaves(tree);
@@ -1614,8 +1672,7 @@ function buildLayoutLeaf(node){
     windowMs: VT_INPUT_WINDOW_MS,
     send: (buf) => {
       if (!isLinked()) return;
-      sendCommand('pane.send_keys',
-        { pane_session_key: key, b64: bytesToB64(new TextEncoder().encode(buf)) });
+      sendKeysPayload(key, new TextEncoder().encode(buf));
     },
   });
   S.vt.panes.set(key, entry);
@@ -1650,20 +1707,39 @@ function buildLayoutLeaf(node){
  * contexts (Chrome around 16), so a big enough layout will legitimately run out,
  * and a lost context leaves a blank canvas behind if the addon stays attached.
  * A pane rendering by DOM is slower; a pane rendering nothing is broken.
+ *
+ * The addon script is deferred until the first terminal open so the initial
+ * page load skips ~242KB on weak links.
  */
+let webglAddonPromise = null;
+function loadWebglAddon(){
+  if (typeof WebglAddon !== 'undefined' && WebglAddon.WebglAddon) {
+    return Promise.resolve(WebglAddon);
+  }
+  if (webglAddonPromise) return webglAddonPromise;
+  webglAddonPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './xterm-addon-webgl.js';
+    s.onload = () => resolve(window.WebglAddon || WebglAddon);
+    s.onerror = () => reject(new Error('webgl addon failed'));
+    document.head.appendChild(s);
+  });
+  return webglAddonPromise;
+}
+
 function attachWebglRenderer(term){
   if (RENDERER === 'ghostty') return;              // ghostty-web draws its own canvas
-  if (typeof WebglAddon === 'undefined' || !WebglAddon.WebglAddon) return;
-  try {
-    const addon = new WebglAddon.WebglAddon();
+  loadWebglAddon().then((mod) => {
+    const Ctor = mod.WebglAddon || mod;
+    const addon = new Ctor();
     addon.onContextLoss(() => {
       log('sys', '(webgl)', 'context lost — 该面板回退到 DOM 渲染');
       try { addon.dispose(); } catch (e) {}
     });
     term.loadAddon(addon);
-  } catch (e) {
+  }).catch((e) => {
     log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
-  }
+  });
 }
 
 function focusPane(key){
@@ -1728,6 +1804,30 @@ function b64ToBytes(b64){
 function bytesToB64(bytes){
   let s=''; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
   return btoa(s);
+}
+
+/** Binary key frame — same layout as HostGatewayKeyFrame.swift. */
+function encodeKeyFrame(paneKey, utf8Bytes){
+  const keyBytes = new TextEncoder().encode(paneKey);
+  if (keyBytes.length > 255) return null;
+  const out = new Uint8Array(3 + keyBytes.length + utf8Bytes.length);
+  out[0] = 1; out[1] = 1; out[2] = keyBytes.length;
+  out.set(keyBytes, 3);
+  out.set(utf8Bytes, 3 + keyBytes.length);
+  return out.buffer;
+}
+
+function sendKeysPayload(paneKey, utf8Bytes){
+  if (S.gw && S.gw.keysBinary && S.gw.ws && S.gw.ws.readyState === WebSocket.OPEN) {
+    const frame = encodeKeyFrame(paneKey, utf8Bytes);
+    if (frame) {
+      S.gw.ws.send(frame);
+      log('tx', 'keys', `${paneKey} ${utf8Bytes.length}B`);
+      return;
+    }
+  }
+  sendCommand('pane.send_keys',
+    { pane_session_key: paneKey, b64: bytesToB64(utf8Bytes) });
 }
 
 /** Shared VT path for MQTT topic payloads and Gateway notify frames. */

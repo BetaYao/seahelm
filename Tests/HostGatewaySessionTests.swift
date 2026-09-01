@@ -374,6 +374,27 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual(decoded?.payload, Data(repeating: 0x41, count: 8))
     }
 
+    func testBinaryKeysOnlyWhenNegotiated() {
+        let frame = try! XCTUnwrap(HostGatewayKeyFrame.encode(
+            paneSessionKey: "k1", utf8: Data("x".utf8)))
+
+        let (s, _, vt) = session()
+        _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
+        _ = s.handle(binary: frame)
+        XCTAssertTrue(vt.sentKeys.isEmpty, "binary keys ignored without negotiation")
+
+        let (b, _, bvt) = session()
+        let authKeys = #"{"id":"a","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token())","keys_binary":true}}"#
+        let reply = decodeResponse(b.handle(text: authKeys)[0])
+        XCTAssertEqual((reply["result"] as? [String: Any])?["keys_binary"] as? Bool, true)
+        _ = b.handle(text: #"{"id":"o","method":"pane.vt_open","params":{"pane_session_key":"k1"}}"#)
+        _ = b.handle(binary: frame)
+        XCTAssertEqual(bvt.sentKeys.count, 1)
+        XCTAssertEqual(bvt.sentKeys[0].key, "k1")
+        XCTAssertEqual(bvt.sentKeys[0].utf8, Data("x".utf8))
+    }
+
     /// A closed connection must stop costing the manager encode work.
     ///
     /// Wired the way `HostGatewayServer.accept` wires it — with a pending-outbound
