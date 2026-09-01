@@ -9,6 +9,13 @@
 //   → on the phone, over the tunnel:
 //     https://gw.seahelm.dev/bench.html?report=http://<mac-lan-ip>:28099/
 //
+// That URL resolves only while the gateway is serving a tree that contains
+// bench.html, and a release bundle has no reason to carry a benchmark page — so
+// do not assume the shipped app serves one. Point `host_gateway.web_root` in
+// ~/.config/seahelm/config.json at this working copy and the gateway serves the
+// files from here instead of from the bundle. That is what you want while
+// iterating anyway: edits land without a rebuild.
+//
 // The phone must be able to reach the Mac for the POST — same LAN is simplest.
 // If it cannot, the page still shows everything on screen; this is convenience.
 'use strict';
