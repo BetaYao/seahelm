@@ -26,7 +26,7 @@ enum OpenCodePluginInstaller {
     /// ignored, with no error to notice.
     static func pluginContents() -> String {
         return """
-        \(versionMarker) v3 — managed by seahelm. Do not edit; it is overwritten on launch.
+        \(versionMarker) v4 — managed by seahelm. Do not edit; it is overwritten on launch.
         //
         // Registers a `seahelm_suggest` tool that reports next-step options to
         // seahelm's control socket, where they render as clickable buttons, and
@@ -54,6 +54,17 @@ enum OpenCodePluginInstaller {
           // otherwise read as the main pane's agent going idle.
           const subagentSessions = new Set()
 
+          // Each session's working directory, learned from the Session payload
+          // opencode attaches to session.created / session.updated (`info.directory`
+          // — opencode's own model is `{cwd: directory, root: worktree}`).
+          //
+          // The plugin's `directory` argument is bound once when the plugin loads,
+          // so reporting it would peg every event to wherever the process started —
+          // and a worktree in opencode *is* a session pointed at another directory.
+          // seahelm decides which worktree card a pane belongs to from this cwd, so
+          // a stale one keeps the pane filed under the worktree it left.
+          const dirBySession = new Map()
+
           // Send a webhook-shaped payload over the control socket's `hook` method.
           // Mimics Claude's event shape so the existing HookDecoder path applies.
           // `sessionId` is opencode's own session id when known (the real resume
@@ -69,7 +80,7 @@ enum OpenCodePluginInstaller {
                 event,
                 session_id: sessionId || PANE,
                 seahelm_pane_id: PANE,
-                cwd: directory ?? "",
+                cwd: (sessionId && dirBySession.get(sessionId)) || directory || "",
                 data,
               },
             })
@@ -80,7 +91,15 @@ enum OpenCodePluginInstaller {
             // Session lifecycle, independent of whether the question tool ever
             // fires — the only reliable place to learn opencode's real sessionID.
             event: async ({ event }) => {
-              const id = event.properties?.sessionID
+              // Record the directory before the guard below: it is carried by the
+              // Session payload, not by the bare `sessionID` the other branches key
+              // off, and session.updated (which is otherwise ignored here) is how a
+              // session that moved reports its new one.
+              const info = event.properties?.info
+              if (info?.id && typeof info.directory === "string" && info.directory) {
+                dirBySession.set(info.id, info.directory)
+              }
+              const id = event.properties?.sessionID ?? info?.id
               if (!id) return
               if (event.type === "session.created") {
                 if (event.properties?.info?.parentID) {
