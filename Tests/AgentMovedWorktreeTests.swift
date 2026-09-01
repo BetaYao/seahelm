@@ -191,4 +191,99 @@ final class AgentMovedWorktreeTests: XCTestCase {
         wait(for: [detected], timeout: 2)
         XCTAssertNil(reportedPane)
     }
+    // MARK: - The live attribution signal
+
+    /// The untracked-worktree check only holds until the 5s discovery sweep
+    /// integrates the worktree. An agent whose directory change is not itself a
+    /// tool call reports its new cwd well after that, so every event has to say
+    /// where the pane's agent is — including for worktrees already tracked.
+    func testEveryEventReportsThePanesCurrentWorktree() throws {
+        let repo = root.appendingPathComponent("repo")
+        let other = root.appendingPathComponent("repo-worktrees/feature")
+        try makeDirectory(repo)
+        try makeWorktreeRoot(other)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path, other.path])
+
+        let resolved = expectation(description: "pane worktree reported")
+        var reportedPane: String?
+        var reportedPath: String?
+        provider.onPaneWorktreeResolved = { paneId, path in
+            reportedPane = paneId
+            reportedPath = path
+            resolved.fulfill()
+        }
+
+        provider.handleEvent(event(cwd: other.path))
+
+        wait(for: [resolved], timeout: 2)
+        XCTAssertEqual(reportedPane, "seahelm-repo-main")
+        XCTAssertEqual(reportedPath, canon(other))
+    }
+
+    /// A subagent's `agent_id` marks a nested context. One working in another
+    /// directory must not drag the pane its parent is sitting in.
+    func testSubagentEventsDoNotReportAPaneMove() throws {
+        let repo = root.appendingPathComponent("repo")
+        try makeDirectory(repo)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path])
+
+        let notReported = expectation(description: "no move reported")
+        notReported.isInverted = true
+        provider.onPaneWorktreeResolved = { _, _ in notReported.fulfill() }
+
+        provider.handleEvent(WebhookEvent(
+            source: "claude-code", sessionId: "s1", event: .toolUseEnd,
+            cwd: repo.path, timestamp: nil,
+            data: ["tool_name": "Bash", "agent_id": "sub-1"],
+            paneId: "seahelm-repo-main"))
+
+        wait(for: [notReported], timeout: 0.6)
+    }
+
+    /// An event with no pane id cannot be attributed to a pane, so it must not
+    /// claim one.
+    func testEventWithoutAPaneIdReportsNoMove() throws {
+        let repo = root.appendingPathComponent("repo")
+        try makeDirectory(repo)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path])
+
+        let notReported = expectation(description: "no move reported")
+        notReported.isInverted = true
+        provider.onPaneWorktreeResolved = { _, _ in notReported.fulfill() }
+
+        provider.handleEvent(event(cwd: repo.path, paneId: nil))
+
+        wait(for: [notReported], timeout: 0.6)
+    }
+
+    /// Not edge-cached: a move that the owner could not complete on the first
+    /// event has to be retried on the next one, so the signal must repeat.
+    func testTheSignalRepeatsRatherThanFiringOnce() throws {
+        let repo = root.appendingPathComponent("repo")
+        try makeDirectory(repo)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path])
+
+        var calls = 0
+        let twice = expectation(description: "reported for both events")
+        twice.expectedFulfillmentCount = 2
+        provider.onPaneWorktreeResolved = { _, _ in
+            calls += 1
+            twice.fulfill()
+        }
+
+        provider.handleEvent(event(cwd: repo.path))
+        provider.handleEvent(event(cwd: repo.path))
+
+        wait(for: [twice], timeout: 2)
+        XCTAssertEqual(calls, 2)
+    }
+
 }

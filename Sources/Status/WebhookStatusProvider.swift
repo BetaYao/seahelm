@@ -15,6 +15,16 @@ class WebhookStatusProvider {
     /// standing up an empty one beside it — nil when the hook carried none.
     var onNewWorktreeDetected: ((_ worktreePath: String, _ paneId: String?) -> Void)?
 
+    /// Called (on main) with the worktree a pane's agent is *currently* working
+    /// in, on every hook event that names a pane.
+    ///
+    /// Not edge-triggered here on purpose. The owner compares against the pane's
+    /// live attribution, which is the authoritative copy, so a move that could not
+    /// be completed yet — the destination not integrated, the station not
+    /// resolvable — is simply retried on the agent's next event instead of being
+    /// swallowed by a cache that already recorded the edge.
+    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String) -> Void)?
+
     /// Called (on main) when an agent hook event resolves a persistable resume
     /// ref for a known worktree. `paneId` is the emitting pane's session name
     /// (SEAHELM_PANE_ID), so the owner can route the ref to that exact pane —
@@ -109,6 +119,22 @@ class WebhookStatusProvider {
                 let paneId = event.paneId
                 DispatchQueue.main.async { [weak self] in
                     self?.onAgentSessionResolved?(worktreePath, paneId, ref)
+                }
+            }
+
+            // Where this pane's agent is now. Every hook payload carries `cwd`, so
+            // this lands on the agent's next action after it moves — which is what
+            // the "worktree we do not track yet" check above cannot cover on its
+            // own: discovery sweeps every 5s, and an agent whose directory change
+            // is not itself a tool call (Codex's `/cd` fires no hook) reports its
+            // new cwd long after the worktree stopped being new.
+            //
+            // Subagents are excluded for the same reason they are above: their
+            // `agent_id` marks a nested context, and one running elsewhere must not
+            // drag the pane its parent is sitting in.
+            if let paneId = event.paneId, event.data?["agent_id"] == nil {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onPaneWorktreeResolved?(paneId, worktreePath)
                 }
             }
 

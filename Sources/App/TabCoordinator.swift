@@ -642,6 +642,9 @@ class TabCoordinator {
                         }
                         self.handleNewWorktreeFromHook(worktreePath)
                     }
+                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath in
+                        self?.followAgentToWorktree(paneId: paneId, worktreePath: worktreePath)
+                    }
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
                     }
@@ -1084,17 +1087,7 @@ class TabCoordinator {
             NSLog("[TabCoordinator] Rehome skipped — no live station for pane \(transfer.paneId)")
             return false
         }
-        // Capture where the pane is coming from *before* the move, so the undo can
-        // put it back exactly there.
-        let origin = terminalCoordinator.stationManager.locate(stationId: station.id)
-            .flatMap { loc in allWorktrees.first { $0.info.path == loc.tree.worktreePath } }?.info
-        guard rehomePane(stationId: station.id, into: newInfo, repoRoot: repoRoot, project: project) else {
-            return false
-        }
-        if let origin {
-            offerRehomeUndo(stationId: station.id, destination: newInfo, source: origin)
-        }
-        return true
+        return rehomePane(stationId: station.id, into: newInfo, repoRoot: repoRoot, project: project)
     }
 
     /// Move a live pane into an existing worktree, by station id. The manual
@@ -1114,6 +1107,24 @@ class TabCoordinator {
         let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
             ?? URL(fileURLWithPath: repoRoot).lastPathComponent
         return rehomePane(stationId: stationId, into: entry.info, repoRoot: repoRoot, project: project)
+    }
+
+    /// Move a pane to the worktree its agent is actually working in, whenever it
+    /// is not already filed there.
+    ///
+    /// The "worktree we do not track yet" trigger cannot carry this on its own: it
+    /// holds only until discovery catches up, and discovery sweeps every 5s. An
+    /// agent whose directory change is not itself a tool call — Codex's `/cd`
+    /// fires no hook — reports its new cwd well after that window shut, and would
+    /// go on working out of the pane it left. Comparing against the pane's live
+    /// attribution on every event has no window to miss, and it also brings a pane
+    /// back when its agent leaves a worktree again.
+    private func followAgentToWorktree(paneId: String, worktreePath: String) {
+        guard let station = StationRegistry.shared.station(forSessionName: paneId),
+              let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
+              WorktreeDiscovery.canonicalPath(current) != WorktreeDiscovery.canonicalPath(worktreePath)
+        else { return }
+        movePane(stationId: station.id, toWorktreePath: worktreePath)
     }
 
     /// Lift one pane out of its current worktree and into `destination`, keeping
@@ -1183,55 +1194,6 @@ class TabCoordinator {
         return true
     }
 
-    /// How long an automatic rehome stays undoable.
-    static let rehomeUndoWindow: TimeInterval = 30
-
-    /// The pane move currently on offer to undo. Only the *automatic* path files
-    /// one — `pane.move` is the user's own explicit instruction, and a card
-    /// offering to undo what you just asked for is noise.
-    private struct RehomeUndo {
-        let stationId: String
-        let source: WorktreeInfo
-        let orderId: String
-    }
-    private var pendingRehomeUndo: RehomeUndo?
-
-    private func offerRehomeUndo(stationId: String, destination: WorktreeInfo, source: WorktreeInfo) {
-        let project = worktreeRepoCache[destination.path]
-            .flatMap { root in workspaceManager.tabs.first(where: { $0.repoPath == root })?.displayName } ?? ""
-        let action = FirstMateAction(
-            kind: .paneRehomed, zone: .green,
-            worktreePath: destination.path, branch: destination.branch, project: project,
-            terminalID: stationId,
-            message: "Moved this pane into \(destination.branch.isEmpty ? destination.path : destination.branch)",
-            options: ["Undo"])
-        let id = PendingOrdersQueue.key(action)
-        pendingOrders.upsert(action)
-        pendingRehomeUndo = RehomeUndo(stationId: stationId, source: source, orderId: id)
-
-        // The move is visually obvious the moment it happens, so the offer is
-        // short-lived: either it was wrong and you say so now, or it was right.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.rehomeUndoWindow) { [weak self] in
-            guard let self, self.pendingRehomeUndo?.orderId == id else { return }
-            self.pendingRehomeUndo = nil
-            self.pendingOrders.resolve(id: id)
-        }
-    }
-
-    /// Put the last automatically-moved pane back where it came from. The reverse
-    /// of the move is the same operation, so nothing is destroyed or recreated on
-    /// the way back — the agent keeps running throughout.
-    @discardableResult
-    func undoLastRehome() -> Bool {
-        guard let undo = pendingRehomeUndo else { return false }
-        pendingRehomeUndo = nil
-        pendingOrders.resolve(id: undo.orderId)
-        let repoRoot = worktreeRepoCache[undo.source.path] ?? ""
-        let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
-            ?? URL(fileURLWithPath: repoRoot).lastPathComponent
-        return rehomePane(stationId: undo.stationId, into: undo.source,
-                          repoRoot: repoRoot, project: project)
-    }
 
     // MARK: - Worktree Lifecycle
 
