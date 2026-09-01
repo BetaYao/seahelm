@@ -70,7 +70,7 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
     private func session() -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
         let ds = SessionFakeDataSource()
         let vt = FakeVT()
-        let b64 = MqttCrypto.base64url(root)
+        let b64 = PairingCrypto.base64url(root)
         let s = HostGatewaySession(
             router: ControlRouter(dataSource: ds),
             expectedMacId: macId,
@@ -80,7 +80,7 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
     }
 
     private func token() -> String {
-        MqttCrypto(rootSecret: root).authPassword
+        PairingCrypto(rootSecret: root).authPassword
     }
 
     private func authFrame(id: String = "auth1") -> String {
