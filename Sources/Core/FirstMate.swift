@@ -13,6 +13,10 @@ enum FirstMateActionKind: Equatable {
     /// An integration round that needs looking at — conflicts, or a checkout
     /// held back. A round that published cleanly says nothing.
     case integrationReport
+    /// A pane that followed its agent into a worktree it just created, offering
+    /// to put it back. Not a First Mate decision — it borrows the order card so a
+    /// silent move stays reversible without a second notification surface.
+    case paneRehomed
 }
 
 struct FirstMateAction: Equatable {

@@ -19,7 +19,7 @@ final class SeahelmSkillInstallerTests: XCTestCase {
         XCTAssertTrue(s.contains("SEAHELM_ENV"))          // the guard
         XCTAssertTrue(s.contains("$SEAHELM_PANE_ID"))     // self-reference
         for cmd in ["pane split", "pane run", "pane read", "pane send-keys",
-                    "wait output", "wait agent-status", "session snapshot"] {
+                    "pane move", "wait output", "wait agent-status", "session snapshot"] {
             XCTAssertTrue(s.contains(cmd), "skill missing `\(cmd)`")
         }
     }

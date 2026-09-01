@@ -77,9 +77,14 @@ final class IslandModel {
     /// a healthy one looks like, which is why this has to be said out loud.
     var controlChannelWarning: String?
 
+    /// The order kinds the island puts on screen. An agent's suggestion, and the
+    /// offer to undo a pane that just followed its agent into a new worktree —
+    /// both are a thing to act on now, and both go stale on their own.
+    static let islandCardKinds: Set<FirstMateActionKind> = [.suggestNextOrder, .paneRehomed]
+
     static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
         Array(orders.lazy
-            .filter { $0.action.kind == .suggestNextOrder }
+            .filter { islandCardKinds.contains($0.action.kind) }
             .reversed())
     }
 

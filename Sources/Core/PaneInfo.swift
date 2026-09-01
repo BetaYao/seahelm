@@ -44,6 +44,41 @@ struct PaneInfo {
     }
 }
 
+extension PaneInfo {
+    /// A copy of this pane re-attributed to a different worktree, keeping every
+    /// live field.
+    ///
+    /// `worktreePath`/`branch`/`project` are `let` on purpose — a pane's identity
+    /// is not meant to drift — so a move rebuilds the struct instead of mutating
+    /// it. Anything added to `PaneInfo` with a default value must be carried here
+    /// too, or a moved pane silently loses it.
+    func rehomed(to newWorktreePath: String, branch newBranch: String, project newProject: String) -> PaneInfo {
+        var copy = PaneInfo(
+            id: id,
+            worktreePath: newWorktreePath,
+            agentType: agentType,
+            project: newProject,
+            branch: newBranch,
+            status: status,
+            lastMessage: lastMessage,
+            commandLine: commandLine,
+            roundDuration: roundDuration,
+            startedAt: startedAt,
+            station: station,
+            channel: channel,
+            taskProgress: taskProgress
+        )
+        copy.lastAssistantMessage = lastAssistantMessage
+        copy.lastUserPrompt = lastUserPrompt
+        copy.tasks = tasks
+        copy.activityEvents = activityEvents
+        copy.scanStatus = scanStatus
+        copy.hookStatus = hookStatus
+        copy.backgroundBusy = backgroundBusy
+        return copy
+    }
+}
+
 /// Tracks an agent's task progress (how many tasks completed out of total)
 struct TaskProgress {
     var totalTasks: Int = 0            // total tasks in current session

@@ -59,6 +59,8 @@ enum SeahelmSkillInstaller {
                                                  # prints the NEW pane id
         seahelm pane focus <pane>                # give it keyboard focus
         seahelm pane close <pane>                # close it (kills its session)
+        seahelm pane move <pane> <worktree-path> # re-file a pane under another worktree
+                                                 # (keeps the session and the agent alive)
         seahelm pane explain <pane>              # JSON: why this pane is in its status (matched rule + evidence)
         seahelm pane zoom [<pane>] [--on|--off]  # tmux-style full-tab zoom (toggles by default)
         seahelm wait output <pane> --match TEXT [--regex] [--source recent] [--timeout MS]
@@ -110,6 +112,11 @@ enum SeahelmSkillInstaller {
           own stable id is `$SEAHELM_PANE_ID` (shown as `pane_session_key` in the
           snapshot). Either form works as a `<pane>` argument.
         - Re-read ids after closing panes; don't cache a `pane_id` across changes.
+        - If you create a worktree and start working in it, seahelm normally
+          notices from your cwd and moves your pane there. If you created one some
+          other way and your pane is still filed under the worktree you came from,
+          say so: `seahelm pane move "$SEAHELM_PANE_ID" <new-worktree-path>`. It
+          keeps your session and everything running in it.
         """
     }
 

@@ -2943,6 +2943,16 @@ extension MainWindowController {
     /// Routes a suggestion chip tap. `returnToPort` chips trigger actual deletion;
     /// all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
+        if order.action.kind == .paneRehomed {
+            // Not a First Mate order — it borrows the card so a silent pane move
+            // stays reversible. The offer expires on its own, so a stale tap just
+            // drops the card.
+            if !tabCoordinator.undoLastRehome() {
+                NSSound.beep()
+                tabCoordinator.pendingOrders.resolve(id: order.id)
+            }
+            return
+        }
         if order.action.kind == .returnToPort {
             // Guard against a stale card: if the agent started running after the
             // card was enqueued, refuse the reap and drop the card.

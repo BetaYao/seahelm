@@ -71,6 +71,10 @@ final class FirstMateCoordinator {
                     // Never adjudicated green: reports are raised directly by
                     // `/integrate`, and the rest are red-zone by construction.
                     break
+                case .paneRehomed:
+                    // Not a First Mate decision at all — TabCoordinator files the
+                    // undo card on the queue itself, so nothing to route here.
+                    break
                 }
             case .red:
                 switch action.kind {

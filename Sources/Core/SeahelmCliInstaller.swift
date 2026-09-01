@@ -119,7 +119,7 @@ enum SeahelmCliInstaller {
                 sys.exit(0 if r.get("matched") else 1)
 
             if g == "pane":
-                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|explain|zoom|options|sleep|wake> ...")
+                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|move|explain|zoom|options|sleep|wake> ...")
                 sub = a[0]; rest = a[1:]
                 if sub == "list":
                     print(json.dumps(call("pane.list", {}).get("panes", []), indent=2)); return
@@ -143,6 +143,9 @@ enum SeahelmCliInstaller {
                 if sub == "focus":
                     if not rest: die("usage: seahelm pane focus <pane>")
                     call("pane.focus", {"pane_id": rest[0]}); return
+                if sub == "move":
+                    if len(rest) < 2: die("usage: seahelm pane move <pane> <worktree-path>")
+                    print(json.dumps(call("pane.move", {"pane_id": rest[0], "worktree_path": rest[1]}))); return
                 if sub in ("sleep", "wake"):
                     # seahelm pane sleep <pane> | seahelm pane sleep --all
                     pane = rest[0] if rest and not rest[0].startswith("--") else None

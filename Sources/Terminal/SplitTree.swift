@@ -44,12 +44,64 @@ class SplitTree {
     }
 
     func closeFocusedLeaf() -> SplitNode.LeafInfo? {
+        removeLeaf(id: focusedId)
+    }
+
+    /// Remove any leaf by id, promoting its sibling. Returns the removed leaf, or
+    /// nil when it is not in this tree or is the tree's only leaf — a tree always
+    /// keeps a root leaf, so a caller lifting out the last pane drops the whole
+    /// tree instead.
+    @discardableResult
+    func removeLeaf(id: String) -> SplitNode.LeafInfo? {
         guard leafCount > 1 else { return nil }
-        guard let leafInfo = root.findLeaf(id: focusedId) else { return nil }
-        guard let newRoot = root.removing(leafId: focusedId) else { return nil }
+        guard let leafInfo = root.findLeaf(id: id) else { return nil }
+        guard let newRoot = root.removing(leafId: id) else { return nil }
         root = newRoot
-        focusedId = root.allLeaves.first?.id ?? focusedId
+        if focusedId == id {
+            focusedId = root.allLeaves.first?.id ?? focusedId
+        }
         return leafInfo
+    }
+
+    /// Insert an existing leaf beside the focused one, keeping its Station and
+    /// zmx session. The mirror of `removeLeaf`: together they move a live pane
+    /// between trees without recreating it, which is the whole point — the agent
+    /// running in that pane must survive the move.
+    @discardableResult
+    func adopt(leaf: SplitNode.LeafInfo, axis: SplitAxis = .horizontal) -> String {
+        let incoming = SplitNode.leaf(id: leaf.id, stationId: leaf.stationId, paneSessionKey: leaf.paneSessionKey)
+        // `focusedId` can be stale — removing the focused leaf reassigns it, and a
+        // tree can be adopted into after its focus moved. Attach to any leaf rather
+        // than to focus alone: replacing `root` outright would orphan every Station
+        // already in this tree, which is the one thing a move must never do.
+        let anchorId = root.findLeaf(id: focusedId)?.id ?? root.allLeaves.first?.id
+        guard let anchorId else {
+            root = incoming
+            focusedId = leaf.id
+            return leaf.id
+        }
+        let focusedNode = extractSubnode(id: anchorId)
+        let replacement = SplitNode.split(id: UUID().uuidString, axis: axis, ratio: 0.5,
+                                          first: focusedNode, second: incoming)
+        root = root.replacing(leafId: anchorId, with: replacement)
+        focusedId = leaf.id
+        return leaf.id
+    }
+
+    /// Build a tree for `worktreePath` whose only leaf is one lifted out of
+    /// another tree, keeping its live Station and zmx session.
+    ///
+    /// The adopted leaf keeps the session name it was created with — zmx has no
+    /// rename, so the running pane stays addressable only by its original name —
+    /// while `baseSessionName` is derived from the destination, so panes split off
+    /// later are named after the worktree they actually live in.
+    static func adopting(leaf: SplitNode.LeafInfo, worktreePath: String) -> SplitTree {
+        let node = SplitNode.leaf(id: leaf.id, stationId: leaf.stationId, paneSessionKey: leaf.paneSessionKey)
+        let tree = SplitTree(worktreePath: worktreePath,
+                             root: node,
+                             baseSessionName: SessionManager.persistentSessionName(for: worktreePath))
+        tree.focusedId = leaf.id
+        return tree
     }
 
     func updateRatio(splitId: String, newRatio: CGFloat) {
