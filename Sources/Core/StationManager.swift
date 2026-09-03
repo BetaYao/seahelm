@@ -3,6 +3,12 @@ import Foundation
 /// Manages the lifecycle of SplitTree instances, keyed by worktree path.
 class StationManager {
     private var trees: [String: SplitTree] = [:]
+    /// Stations this manager stood up itself, in this run — `tree(for:)` and
+    /// `replacementTree`. Deliberately not `registerTree`: a layout restored from
+    /// config may have its panes attached to zmx sessions with work still in them,
+    /// and an empty-looking viewport is no proof otherwise before the attach has
+    /// painted. Only a pane on this list is a candidate for being discarded.
+    private var autoCreatedStationIds: Set<String> = []
 
     /// Get or create a SplitTree for the given worktree info.
     /// Creates a single-leaf tree and registers the station in StationRegistry.
@@ -17,6 +23,7 @@ class StationManager {
             station.backend = backend
         }
         StationRegistry.shared.register(station)
+        autoCreatedStationIds.insert(station.id)
         let leafId = UUID().uuidString
         let splitTree = SplitTree(
             worktreePath: info.path,
@@ -66,6 +73,7 @@ class StationManager {
             station.backend = backend
         }
         StationRegistry.shared.register(station)
+        autoCreatedStationIds.insert(station.id)
         let tree = SplitTree(worktreePath: info.path, rootLeafId: UUID().uuidString,
                              stationId: station.id, paneSessionKey: paneSessionKey)
         trees[info.path] = tree
@@ -91,8 +99,20 @@ class StationManager {
                 station.destroy()
             }
             StationRegistry.shared.unregister(leaf.stationId)
+            autoCreatedStationIds.remove(leaf.stationId)
         }
         return tree
+    }
+
+    /// Whether `stationId` names a pane this manager created rather than restored.
+    func wasAutoCreated(stationId: String) -> Bool {
+        autoCreatedStationIds.contains(stationId)
+    }
+
+    /// The only leaf of `path`'s tree, when the worktree has exactly one pane.
+    func soleLeaf(atPath path: String) -> SplitNode.LeafInfo? {
+        guard let tree = trees[path], tree.allLeaves.count == 1 else { return nil }
+        return tree.allLeaves.first
     }
 
     /// Remove all trees, destroying each station.
@@ -106,6 +126,7 @@ class StationManager {
             }
         }
         trees.removeAll()
+        autoCreatedStationIds.removeAll()
     }
 
     /// All current tree entries.

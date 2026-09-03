@@ -64,6 +64,15 @@ class TabCoordinator {
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
     let pendingTransfers = PendingTransferTracker()
+    /// When each pane last changed worktree, keyed by station id. A pane that just
+    /// moved is settling in, and an agent's cwd bounces while it works: Claude runs
+    /// `cd <worktree> && …` for one tool call and is back at the repo root for the
+    /// next, so following every bounce walked the pane in and out — and each
+    /// departure left a replacement pane behind on the source. Auto-follow holds off
+    /// for `autoRehomeCooldown` after any move, `pane move` included, so a manual
+    /// correction sticks instead of being undone by the agent's next event.
+    private var lastRehomedAt: [String: Date] = [:]
+    private let autoRehomeCooldown: TimeInterval = 600
 
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
@@ -1047,6 +1056,8 @@ class TabCoordinator {
                 // An agent that clones into $TMPDIR to build and cd's there would
                 // otherwise join that clone to the workspace permanently.
                 NSLog("[TabCoordinator] Ignoring ephemeral repo from hook: \(repoRoot)")
+            } else if Self.isToolStateRepoPath(repoRoot) {
+                NSLog("[TabCoordinator] Ignoring tool-state repo from hook: \(repoRoot)")
             } else {
                 NSLog("[TabCoordinator] Auto-adding new repo via hook: \(repoRoot)")
                 self.addRepo(at: repoRoot)
@@ -1077,6 +1088,20 @@ class TabCoordinator {
         return roots.contains { canon == $0 || canon.hasPrefix($0 + "/") }
     }
 
+    /// Repos that live inside a hidden directory — `~/.amuxd/teams/<id>/apps/<id>`,
+    /// `~/.local/state/…`. That is a tool's own generated state, not a project the
+    /// user opened, and the generator often runs agents inside it; those agents
+    /// inherit `SEAHELM_PANE_ID` from the pane that started the generator, so their
+    /// cwd arrives looking exactly like a pane that moved. Auto-add is silent and
+    /// `workspacePaths` is never pruned, so every generated app became a permanent
+    /// project. Only the hook-driven path consults this — a repo under a dot
+    /// directory the user actually works in (`~/.dotfiles`) is still theirs to add.
+    static func isToolStateRepoPath(_ path: String) -> Bool {
+        WorktreeDiscovery.canonicalPath(path)
+            .split(separator: "/")
+            .contains { $0.hasPrefix(".") }
+    }
+
     /// Move the pane whose agent created `newInfo` into it, keeping the agent
     /// running. Returns false when the pane can no longer be resolved, so the
     /// caller falls back to standing up a fresh tree.
@@ -1085,6 +1110,16 @@ class TabCoordinator {
                                    repoRoot: String, project: String) -> Bool {
         guard let station = StationRegistry.shared.station(forSessionName: transfer.paneId) else {
             NSLog("[TabCoordinator] Rehome skipped — no live station for pane \(transfer.paneId)")
+            return false
+        }
+        // Same-repo gate, as in `shouldAutoFollow` — the destination is not in
+        // `worktreeRepoCache` yet, so compare against the repo root the caller
+        // already resolved. Fails open when the pane's own repo is unknown: this
+        // path has an explicit creation signal behind it, not just a cwd.
+        if let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
+           let currentRepo = trackedRepoRoot(forWorktree: current),
+           currentRepo != WorktreeDiscovery.canonicalPath(repoRoot) {
+            NSLog("[TabCoordinator] Rehome skipped — pane \(transfer.paneId) lives in \(currentRepo), not \(repoRoot)")
             return false
         }
         return rehomePane(stationId: station.id, into: newInfo, repoRoot: repoRoot, project: project)
@@ -1118,13 +1153,54 @@ class TabCoordinator {
     /// fires no hook — reports its new cwd well after that window shut, and would
     /// go on working out of the pane it left. Comparing against the pane's live
     /// attribution on every event has no window to miss, and it also brings a pane
-    /// back when its agent leaves a worktree again.
+    /// back when its agent leaves a worktree for good — `shouldAutoFollow` is what
+    /// separates leaving for good from the `cd` an agent does mid-turn.
     private func followAgentToWorktree(paneId: String, worktreePath: String) {
         guard let station = StationRegistry.shared.station(forSessionName: paneId),
               let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
               WorktreeDiscovery.canonicalPath(current) != WorktreeDiscovery.canonicalPath(worktreePath)
         else { return }
+        guard Self.shouldAutoFollow(currentRepo: trackedRepoRoot(forWorktree: current),
+                                    destinationRepo: trackedRepoRoot(forWorktree: worktreePath),
+                                    lastRehomedAt: lastRehomedAt[station.id],
+                                    now: Date(), cooldown: autoRehomeCooldown) else { return }
         movePane(stationId: station.id, toWorktreePath: worktreePath)
+    }
+
+    /// Whether a pane may auto-follow its agent right now. Pure, because both rules
+    /// are policy rather than mechanism and each was learned from one failure.
+    ///
+    /// **Same repo.** A pane follows its agent between worktrees of the repo it is
+    /// working on; a cwd in an unrelated repo is a visit, not a move. It is also the
+    /// only thing separating the pane's own agent from an agent it merely spawned:
+    /// `SEAHELM_PANE_ID` (and the `ZMX_SESSION` the hook falls back to) is inherited
+    /// by every descendant process, so a test harness that stands up its own agent
+    /// in a generated app directory reports hook events under the pane's id with a
+    /// cwd of its own — which is how a pane working in one repo's worktree was
+    /// hauled into `~/.amuxd/teams/<id>/apps/<id>`. An unknown repo on either side
+    /// fails closed: without both we cannot tell a move from a visit.
+    ///
+    /// **Cooldown.** See `lastRehomedAt`.
+    static func shouldAutoFollow(currentRepo: String?, destinationRepo: String?,
+                                 lastRehomedAt: Date?, now: Date,
+                                 cooldown: TimeInterval) -> Bool {
+        guard let currentRepo, let destinationRepo, currentRepo == destinationRepo else { return false }
+        guard let lastRehomedAt else { return true }
+        return now.timeIntervalSince(lastRehomedAt) >= cooldown
+    }
+
+    /// Canonical repo root behind a tracked worktree path, or nil when the path is
+    /// not one we track. The cache is keyed by the spelling discovery produced, so
+    /// a miss falls back to comparing canonical forms rather than concluding the
+    /// worktree is unknown.
+    private func trackedRepoRoot(forWorktree path: String) -> String? {
+        if let hit = worktreeRepoCache[path] { return WorktreeDiscovery.canonicalPath(hit) }
+        let canon = WorktreeDiscovery.canonicalPath(path)
+        for (worktree, repo) in worktreeRepoCache
+        where WorktreeDiscovery.canonicalPath(worktree) == canon {
+            return WorktreeDiscovery.canonicalPath(repo)
+        }
+        return nil
     }
 
     /// Lift one pane out of its current worktree and into `destination`, keeping
@@ -1136,12 +1212,26 @@ class TabCoordinator {
     @discardableResult
     private func rehomePane(stationId: String, into destination: WorktreeInfo,
                             repoRoot: String, project: String) -> Bool {
+        // A worktree standing on nothing but the placeholder pane seahelm gave it
+        // has that pane retired rather than split: the card would otherwise show
+        // the arriving agent beside an empty terminal nobody asked for. Runs
+        // before `moveLeaf`, which builds a fresh single-leaf tree only when the
+        // destination has none — and only once the move is known to be possible,
+        // so a move that gets rejected cannot cost the destination its pane.
+        if let located = terminalCoordinator.stationManager.locate(stationId: stationId),
+           located.tree.worktreePath != destination.path {
+            retirePlaceholderPane(at: destination.path)
+        }
         guard let move = terminalCoordinator.stationManager.moveLeaf(stationId: stationId,
                                                                      toPath: destination.path) else {
             NSLog("[TabCoordinator] Rehome skipped — station \(stationId) is not in a movable tree")
             return false
         }
         let sourcePath = move.sourcePath
+        // Self-healing: entries past the cooldown can never gate anything again,
+        // so drop them rather than keep a row per pane for the life of the process.
+        lastRehomedAt = lastRehomedAt.filter { Date().timeIntervalSince($0.value) < autoRehomeCooldown }
+        lastRehomedAt[stationId] = Date()
         NSLog("[TabCoordinator] Rehomed pane \(stationId) from \(sourcePath) to \(destination.path)")
 
         // Re-attribute rather than unregister+register: the agent in this pane is
@@ -1191,7 +1281,56 @@ class TabCoordinator {
         dashboardVC?.invalidateSplitContainer(forPath: sourcePath)
         dashboardVC?.invalidateSplitContainer(forPath: destination.path)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
+        // The surface set changed on both sides — and a retired placeholder is
+        // gone from the registry, so the poller must stop holding on to it.
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
         return true
+    }
+
+    /// Retire the placeholder a worktree is standing on, so an arriving pane takes
+    /// its place instead of splitting the card in two. No-op unless the worktree's
+    /// *only* pane is one seahelm created and nobody has used yet.
+    @discardableResult
+    private func retirePlaceholderPane(at worktreePath: String) -> Bool {
+        let manager = terminalCoordinator.stationManager
+        guard let leaf = manager.soleLeaf(atPath: worktreePath),
+              let station = StationRegistry.shared.station(forId: leaf.stationId) else { return false }
+        let pane = AgentRegistry.shared.pane(for: leaf.stationId)
+        guard Self.isPlaceholderPane(autoCreated: manager.wasAutoCreated(stationId: leaf.stationId),
+                                     agentType: pane?.agentType ?? .unknown,
+                                     status: pane?.status ?? .unknown,
+                                     hasActivity: pane.map(Self.paneHasActivity) ?? false,
+                                     showsOnlyPrompt: station.showsOnlyPrompt) else { return false }
+
+        NSLog("[TabCoordinator] Retiring placeholder pane \(leaf.stationId) in \(worktreePath)")
+        manager.removeTree(forPath: worktreePath)
+        AgentRegistry.shared.unregister(terminalID: leaf.stationId)
+        if !leaf.paneSessionKey.isEmpty {
+            SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
+            terminalCoordinator.config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
+        }
+        terminalCoordinator.config.splitLayouts.removeValue(forKey: worktreePath)
+        return true
+    }
+
+    /// Whether a worktree's only pane is still the placeholder seahelm stood up for
+    /// it. Every clause is a reason not to throw a terminal away: `autoCreated`
+    /// excludes panes restored from a saved layout (their zmx sessions may hold
+    /// work, and an unpainted attach looks empty); `showsOnlyPrompt == true`
+    /// excludes both a used pane and one whose contents we cannot read; the rest
+    /// exclude a pane something has already happened in. Pure, because a rule that
+    /// discards a pane is worth pinning down without a live terminal.
+    static func isPlaceholderPane(autoCreated: Bool, agentType: AgentType, status: AgentStatus,
+                                  hasActivity: Bool, showsOnlyPrompt: Bool?) -> Bool {
+        guard autoCreated, showsOnlyPrompt == true, agentType == .unknown, !hasActivity else { return false }
+        return status == .unknown || status == .idle
+    }
+
+    /// Anything that has happened in a pane beyond its existing.
+    static func paneHasActivity(_ pane: PaneInfo) -> Bool {
+        !pane.activityEvents.isEmpty || !pane.tasks.isEmpty
+            || !pane.lastMessage.isEmpty || !pane.lastUserPrompt.isEmpty
+            || !pane.lastAssistantMessage.isEmpty || !(pane.commandLine ?? "").isEmpty
     }
 
 
