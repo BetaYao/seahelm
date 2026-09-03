@@ -41,9 +41,26 @@ if [[ "$CLEAN_RESTART" -eq 1 ]]; then
 fi
 
 echo "==> Building Seahelm..."
+
+# The project defaults to Developer ID signing so TCC grants (Full Disk Access,
+# iMessage bridge) survive rebuilds. Contributors without that cert can still
+# build locally — ad-hoc works for UI work; re-grant FDA after each rebuild if
+# you need the iMessage bridge.
+SIGN_ARGS=()
+if ! security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application'; then
+  echo "    (no Developer ID cert — using ad-hoc signing for this build)"
+  SIGN_ARGS+=(CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="")
+fi
+
+if [[ ! -f GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a ]]; then
+  echo "==> GhosttyKit missing — running scripts/setup.sh (first-time setup)..."
+  scripts/setup.sh
+fi
+
 xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   -skipPackagePluginValidation \
+  "${SIGN_ARGS[@]}" \
   build
 
 # PRODUCT_NAME is Seahelm; on case-insensitive APFS seahelm.app resolves to the same bundle.

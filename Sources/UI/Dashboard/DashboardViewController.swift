@@ -349,6 +349,9 @@ class DashboardViewController: NSViewController {
             guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
             self.dashboardDelegate?.dashboardDidRequestDeleteWithBranch(agent.id)
         }
+        overviewView.onCloseProject = { [weak self] project in
+            self?.dashboardDelegate?.dashboardDidRequestCloseRepo(project)
+        }
         // The bottom shortcut strip is a teaser for the full `?` cheat-sheet.
         overviewView.onShowAllShortcuts = { [weak self] in
             self?.toggleHelp()
