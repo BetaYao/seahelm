@@ -163,6 +163,34 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    func testProjectGroupsOfferCloseProjectAndStatusGroupsDoNot() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makePane(name: "wait", project: "alpha", worktreePath: "/wait",
+                           paneStatuses: [.waiting], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-100)),
+                makePane(name: "run", project: "bravo", worktreePath: "/run",
+                           paneStatuses: [.running], isMainWorktree: false,
+                           lastActivityAt: now.addingTimeInterval(-200)),
+            ])
+
+            XCTAssertEqual(view.closeableProjectsForTesting, ["alpha", "bravo"])
+            XCTAssertEqual(view.closeProjectButtonsForTesting, ["alpha", "bravo"])
+
+            var closed: String?
+            view.onCloseProject = { closed = $0 }
+            view.simulateCloseProjectForTesting("alpha")
+            XCTAssertEqual(closed, "alpha")
+
+            view.selectGroupingModeForTesting(.status)
+            XCTAssertEqual(view.closeableProjectsForTesting, [])
+            XCTAssertEqual(view.closeProjectButtonsForTesting, [])
+        }
+    }
+
     /// The integrate button is the feature's only announcement — without it,
     /// `/integrate` is a command you have to already know exists.
     func testProjectGroupsCarryAnIntegrateButtonOnlyWhereThereIsSomethingToFold() {

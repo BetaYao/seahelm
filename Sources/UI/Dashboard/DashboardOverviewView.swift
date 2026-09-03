@@ -39,6 +39,9 @@ final class DashboardOverviewView: NSView {
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
     var onDeleteWorktreeWithBranch: ((String) -> Void)?
+    /// Right-click "Close Project…" on a project group header. Untracks the repo
+    /// and tears down its sessions; worktrees stay on disk.
+    var onCloseProject: ((String) -> Void)?
     var onGroupingChanged: (() -> Void)?
     /// The "+" on a project group header was clicked. Args: the project title,
     /// the button's rect in this view's coordinates, and this view (the popover's
@@ -90,6 +93,8 @@ final class DashboardOverviewView: NSView {
     /// Tag → project for the integrate buttons, rebuilt on every full render
     /// exactly like `addWorktreeProjects`.
     private var integrateProjects: [String] = []
+    /// Tag → project for the close-project buttons, rebuilt on every full render.
+    private var closeProjectProjects: [String] = []
     /// Integration checkouts, shown above the fleet in the modes that group by
     /// status or time. Deliberately outside `stack`: those groupings leave the
     /// checkout out, and a banner inside the scrolling stack would go stale
@@ -115,6 +120,7 @@ final class DashboardOverviewView: NSView {
     private var integrationBannerLines: [String] = []
     private static let addWorktreeButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.addWorktree")
     private static let integrateButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.integrate")
+    private static let closeProjectButtonIdentifier = NSUserInterfaceItemIdentifier("seahelm.closeProject")
     private var revealedRowID: String?
     /// The one row currently painting the hover tint, if any.
     private weak var hoveredRow: FleetHoverRow?
@@ -514,6 +520,7 @@ final class DashboardOverviewView: NSView {
         renderedGroupTitles = []
         addWorktreeProjects = []
         integrateProjects = []
+        closeProjectProjects = []
         revealedRowID = nil
 
         for (groupIndex, group) in groups.enumerated() {
@@ -701,11 +708,7 @@ final class DashboardOverviewView: NSView {
     var fullRenderCountForTesting: Int { fullRenderCount }
     /// Project titles behind the rendered "add worktree" buttons, in group order.
     var addWorktreeProjectsForTesting: [String] {
-        stack.arrangedSubviews
-            .compactMap { $0 as? NSStackView }
-            .flatMap { $0.arrangedSubviews }
-            .compactMap { $0 as? NSButton }
-            .filter { $0.identifier == Self.addWorktreeButtonIdentifier }
+        headerButtons(matching: Self.addWorktreeButtonIdentifier)
             .compactMap { addWorktreeProjects[safeIndex: $0.tag] }
     }
     /// Lines currently shown in the integration banner, top to bottom.
@@ -715,12 +718,29 @@ final class DashboardOverviewView: NSView {
     }
     /// Project titles behind the rendered "integrate" buttons, in group order.
     var integrateProjectsForTesting: [String] {
+        headerButtons(matching: Self.integrateButtonIdentifier)
+            .compactMap { integrateProjects[safeIndex: $0.tag] }
+    }
+    /// Project titles whose group headers offer "Close Project…".
+    var closeableProjectsForTesting: [String] {
         stack.arrangedSubviews
-            .compactMap { $0 as? NSStackView }
+            .compactMap { ($0 as? GroupHeaderView)?.projectNameForTesting }
+    }
+    /// Project titles behind the rendered "close project" buttons, in group order.
+    var closeProjectButtonsForTesting: [String] {
+        headerButtons(matching: Self.closeProjectButtonIdentifier)
+            .compactMap { closeProjectProjects[safeIndex: $0.tag] }
+    }
+    func simulateCloseProjectForTesting(_ project: String) {
+        onCloseProject?(project)
+    }
+
+    private func headerButtons(matching identifier: NSUserInterfaceItemIdentifier) -> [NSButton] {
+        stack.arrangedSubviews
+            .compactMap { ($0 as? GroupHeaderView)?.contentRowForTesting }
             .flatMap { $0.arrangedSubviews }
             .compactMap { $0 as? NSButton }
-            .filter { $0.identifier == Self.integrateButtonIdentifier }
-            .compactMap { integrateProjects[safeIndex: $0.tag] }
+            .filter { $0.identifier == identifier }
     }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     /// Ids of every row currently painting the hover tint — more than one means
@@ -779,7 +799,7 @@ final class DashboardOverviewView: NSView {
 
         // Project groups (Group by Project / Expand All Panes) carry a trailing
         // "+" that opens the helm prefilled with `/worktree @<project>`.
-        var addButton: NSButton?
+        var trailingButtons: [NSButton] = []
         if case .repository = group.id {
             let spacer = NSView()
             spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
@@ -790,9 +810,9 @@ final class DashboardOverviewView: NSView {
             if integrationEnabled, group.items.count > 1 {
                 views.append(makeIntegrateButton(project: group.title))
             }
-            let button = makeAddWorktreeButton(project: group.title)
-            views.append(button)
-            addButton = button
+            trailingButtons.append(makeAddWorktreeButton(project: group.title))
+            trailingButtons.append(makeCloseProjectButton(project: group.title))
+            views.append(contentsOf: trailingButtons)
         }
 
         let row = NSStackView(views: views)
@@ -800,11 +820,62 @@ final class DashboardOverviewView: NSView {
         row.spacing = 7
         row.alignment = .centerY
         row.edgeInsets = NSEdgeInsets(top: topGap, left: 0, bottom: 7, right: 0)
-        if let addButton {
-            addButton.setContentHuggingPriority(.required, for: .horizontal)
-            addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for button in trailingButtons {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        return row
+
+        let projectName: String?
+        if case .repository = group.id {
+            projectName = group.title
+        } else {
+            projectName = nil
+        }
+        let header = GroupHeaderView(contentRow: row, projectName: projectName)
+        header.onCloseProject = { [weak self] project in self?.onCloseProject?(project) }
+        return header
+    }
+
+    /// Project group header — carries a context menu to close/untrack the repo.
+    private final class GroupHeaderView: NSView {
+        var onCloseProject: ((String) -> Void)?
+        private let projectName: String?
+        private let contentRow: NSStackView
+
+        init(contentRow: NSStackView, projectName: String?) {
+            self.contentRow = contentRow
+            self.projectName = projectName
+            super.init(frame: .zero)
+            addSubview(contentRow)
+            contentRow.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                contentRow.leadingAnchor.constraint(equalTo: leadingAnchor),
+                contentRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+                contentRow.topAnchor.constraint(equalTo: topAnchor),
+                contentRow.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            if let projectName {
+                setAccessibilityIdentifier("dashboard.projectHeader.\(projectName)")
+            }
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        var projectNameForTesting: String? { projectName }
+        var contentRowForTesting: NSStackView { contentRow }
+
+        override func menu(for event: NSEvent) -> NSMenu? {
+            guard let projectName else { return nil }
+            let menu = NSMenu()
+            let item = NSMenuItem(title: "Close Project…", action: #selector(closeProjectAction), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            return menu
+        }
+
+        @objc private func closeProjectAction() {
+            guard let projectName else { return }
+            onCloseProject?(projectName)
+        }
     }
 
     /// Trailing "integrate" affordance on a project group header. Equivalent to
@@ -879,6 +950,39 @@ final class DashboardOverviewView: NSView {
         // every status poll, and a popover whose anchor view leaves the hierarchy
         // closes itself — which read as "the form collapses while I type".
         onAddWorktree?(project, sender.convert(sender.bounds, to: self), self)
+    }
+
+    /// Trailing "close project" affordance on a project group header. Equivalent
+    /// to `/return @<project>` — untracks the repo and tears down its sessions.
+    private func makeCloseProjectButton(project: String) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.refusesFirstResponder = true
+        if let image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) {
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+        } else {
+            button.title = "×"
+            button.font = AppFont.mono(size: 12)
+        }
+        button.contentTintColor = Self.inkFaint
+        let description = "Close project \(project)"
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
+        button.identifier = Self.closeProjectButtonIdentifier
+        button.target = self
+        button.action = #selector(closeProjectClicked(_:))
+        button.tag = closeProjectProjects.count
+        closeProjectProjects.append(project)
+        return button
+    }
+
+    @objc private func closeProjectClicked(_ sender: NSButton) {
+        guard let project = closeProjectProjects[safeIndex: sender.tag] else { return }
+        onCloseProject?(project)
     }
 
     // MARK: - Fleet row
