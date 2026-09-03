@@ -82,6 +82,134 @@ final class TabCoordinatorTests: XCTestCase {
         XCTAssertFalse(TabCoordinator.isEphemeralRepoPath("/tmpfoo/repo"))
     }
 
+    /// A daemon that generates apps under a hidden directory and runs its own
+    /// agents inside them turned each generated app into a permanent project:
+    /// those agents inherit `SEAHELM_PANE_ID` from the pane that started the
+    /// daemon, so their cwd reaches the hook path indistinguishable from a pane
+    /// that moved, and `workspacePaths` is never pruned.
+    func testToolStateReposAreNotAutoAdded() {
+        XCTAssertTrue(TabCoordinator.isToolStateRepoPath(
+            "/Users/me/.amuxd/teams/e84103ca-c229/apps/dcb910dc-1688"))
+        XCTAssertTrue(TabCoordinator.isToolStateRepoPath("/Users/me/.local/state/thing/repo"))
+
+        // Real checkouts still auto-add; the guard is about hidden directories,
+        // not about hidden *files* or a dot inside a name.
+        XCTAssertFalse(TabCoordinator.isToolStateRepoPath("/Volumes/openbeta/workspace/teamclaw"))
+        XCTAssertFalse(TabCoordinator.isToolStateRepoPath("/Users/me/src/project.v2"))
+    }
+
+    // MARK: - Auto-follow policy
+
+    private let repoA = "/Volumes/openbeta/workspace/teamclaw"
+    private let repoB = "/Users/me/.amuxd/teams/t/apps/a"
+
+    /// The move the feature exists for: an agent's cwd lands in another worktree
+    /// of the repo the pane is already working on.
+    func testFollowsWithinTheSameRepo() {
+        XCTAssertTrue(TabCoordinator.shouldAutoFollow(
+            currentRepo: repoA, destinationRepo: repoA,
+            lastRehomedAt: nil, now: Date(), cooldown: 600))
+    }
+
+    /// The pane that was hauled out of `teamclaw-worktrees/integration` into an
+    /// amuxd app directory: the events carried the pane's own id, because the
+    /// agent emitting them was spawned *by* that pane and inherited its
+    /// `SEAHELM_PANE_ID`. Only the cwd's repo tells the two apart.
+    func testDoesNotFollowIntoAnotherRepo() {
+        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
+            currentRepo: repoA, destinationRepo: repoB,
+            lastRehomedAt: nil, now: Date(), cooldown: 600))
+    }
+
+    /// An unknown repo on either side is not a move we can vouch for.
+    func testDoesNotFollowWhenEitherRepoIsUnknown() {
+        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
+            currentRepo: nil, destinationRepo: repoA,
+            lastRehomedAt: nil, now: Date(), cooldown: 600))
+        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
+            currentRepo: repoA, destinationRepo: nil,
+            lastRehomedAt: nil, now: Date(), cooldown: 600))
+    }
+
+    /// Claude runs `cd <worktree> && …` for one tool call and is back at the repo
+    /// root for the next. Following both bounced the pane in and out and left a
+    /// replacement pane behind on every departure, so the agent ended up back on
+    /// the card it started from with two stray panes to show for it.
+    func testDoesNotFollowAgainDuringTheCooldown() {
+        let movedAt = Date()
+        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
+            currentRepo: repoA, destinationRepo: repoA,
+            lastRehomedAt: movedAt, now: movedAt.addingTimeInterval(15), cooldown: 600))
+    }
+
+    /// The cooldown delays the pane, it does not pin it: once the agent has
+    /// settled somewhere else the next event moves it.
+    func testFollowsAgainOnceTheCooldownExpires() {
+        let movedAt = Date()
+        XCTAssertTrue(TabCoordinator.shouldAutoFollow(
+            currentRepo: repoA, destinationRepo: repoA,
+            lastRehomedAt: movedAt, now: movedAt.addingTimeInterval(601), cooldown: 600))
+    }
+
+    // MARK: - Placeholder replacement
+
+    /// The shape the rule exists for: discovery stands a worktree up with one
+    /// pane, nobody touches it, and the agent that made the worktree arrives.
+    /// Splitting put the working agent beside an empty terminal on the card.
+    func testUntouchedPaneSeahelmCreatedIsAPlaceholder() {
+        XCTAssertTrue(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .unknown,
+            hasActivity: false, showsOnlyPrompt: true))
+        XCTAssertTrue(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .idle,
+            hasActivity: false, showsOnlyPrompt: true))
+    }
+
+    /// A pane restored from a saved layout is attached to a zmx session that may
+    /// still hold work, and an attach that has not painted yet looks exactly like
+    /// an empty one — so provenance, not appearance, is what clears it.
+    func testRestoredPaneIsNeverAPlaceholder() {
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: false, agentType: .unknown, status: .unknown,
+            hasActivity: false, showsOnlyPrompt: true))
+    }
+
+    /// nil is "cannot read it" — an asleep pane, a failed read — and a pane about
+    /// to be destroyed does not get the benefit of the doubt.
+    func testUnreadablePaneIsNotAPlaceholder() {
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .unknown,
+            hasActivity: false, showsOnlyPrompt: nil))
+    }
+
+    func testUsedPaneIsNotAPlaceholder() {
+        // Something is on screen.
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .idle,
+            hasActivity: false, showsOnlyPrompt: false))
+        // An agent is in it.
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .claudeCode, status: .idle,
+            hasActivity: false, showsOnlyPrompt: true))
+        // It ran something.
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .idle,
+            hasActivity: true, showsOnlyPrompt: true))
+        // It is busy, whatever the screen says.
+        XCTAssertFalse(TabCoordinator.isPlaceholderPane(
+            autoCreated: true, agentType: .unknown, status: .running,
+            hasActivity: false, showsOnlyPrompt: true))
+    }
+
+    /// "One line of prompt and nothing else" — blank lines around it do not count,
+    /// and a prompt plus its first command output does.
+    func testPromptOnlyViewport() {
+        XCTAssertTrue(Station.promptOnly(""))
+        XCTAssertTrue(Station.promptOnly("\n\n"))
+        XCTAssertTrue(Station.promptOnly("➜  integration git:(5bfee693) ✗\n\n\n"))
+        XCTAssertFalse(Station.promptOnly("➜  integration git:(5bfee693) ✗ pwd\n/Volumes/openbeta\n"))
+    }
+
     func testReconcileDiscoveredWorktreesRemovesDeletedWorktree() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })

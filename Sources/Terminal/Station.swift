@@ -415,6 +415,28 @@ class Station {
         return readViewportText(tryOnly: false, contended: &contended)
     }
 
+    /// Whether this pane still shows nothing but the shell's first prompt — the
+    /// state a pane seahelm stands up for a worktree sits in until someone uses it.
+    ///
+    /// `nil` means *unknowable*, not "no". An asleep pane's content lives in a zmx
+    /// session this cannot read, and a failed read is not evidence of emptiness;
+    /// a caller deciding whether to discard a pane must treat nil as "used".
+    var showsOnlyPrompt: Bool? {
+        if isAsleep { return nil }
+        // No surface was ever created for it, so nothing can have run in it.
+        if surface == nil { return true }
+        guard let text = readViewportText() else { return nil }
+        return Self.promptOnly(text)
+    }
+
+    /// A viewport holding nothing but one prompt line. Pure, so the rule that
+    /// decides a pane is disposable is pinnable without a live Ghostty surface.
+    static func promptOnly(_ viewport: String) -> Bool {
+        viewport.split(separator: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .count <= 1
+    }
+
     /// Background poll variant: gives up without blocking when `ghosttyLock` is
     /// held (someone is typing / pasting) — input latency matters more than one
     /// poll cycle, and the poller retries 2s later. `contended` lets the caller
