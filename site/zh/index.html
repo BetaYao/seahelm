@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Seahelm &mdash; 为 coding agent 准备的原生 macOS 工作台</title>
-<meta name="description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<meta name="description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <link rel="canonical" href="https://www.seahelm.dev/zh/">
 <link rel="alternate" hreflang="en" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="zh-Hans" href="https://www.seahelm.dev/zh/">
@@ -17,7 +17,7 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 <meta property="og:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
-<meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <meta property="og:image" content="https://www.seahelm.dev/og.zh.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -25,7 +25,7 @@
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
-<meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.zh.png">
 
 <meta name="theme-color" content="#eaf1f9" media="(prefers-color-scheme: light)">
@@ -85,9 +85,9 @@
       <p class="eyebrow"><span class="mark">&#9679;</span> 为 coding agent 准备的原生 macOS 工作台</p>
       <h1>一个窗口，管住所有在跑的 agent。</h1>
       <p class="lede">
-        一个仓库是一个 tab，一个 git worktree 是一张卡片，一个 split pane 就是一个 agent。
-        Seahelm 用 Ghostty 引擎逐个渲染它们，盯着它们在做什么，并让会话在重启后依然活着。
-        十二种 agent CLI 开箱即用。
+        你的舰队排在一张名册上：每个 worktree 一行，按仓库、状态或最近动向编队，每个 split pane
+        里坐着一个 agent。Seahelm 用 Ghostty 引擎把它们逐个画出来，盯着谁在干活、谁在等你，
+        重启之后每个会话都还在原位。十二种 agent CLI 开箱即用。
       </p>
 
       <div class="fleet">
@@ -174,8 +174,9 @@
       <div class="rule-row"><p class="eyebrow">甲板一 &middot; 甲板之上</p></div>
       <h2>你掌控的是什么</h2>
       <p class="lede prose">
-        Seahelm 没有编辑器，也没有那套 diff review 的仪式。整个界面只做两件事：把 agent
-        <em>放到位</em> —— 哪个仓库、哪个 worktree、哪个 pane —— 然后告诉你其中谁需要人。
+        Seahelm 没有编辑器，没有 diff review。整个界面只处理两件事：把 Agent 放到
+        <em>合适的位置</em> —— 合适的仓库，合适的 worktree，合适的 Pane ——
+        然后告诉你其中哪个 Agent 需要你的帮助才能完成目标。
       </p>
     </div>
 
@@ -241,11 +242,7 @@
     <dl class="rows">
       <div class="row">
         <dt>分屏与布局</dt>
-        <dd>每个 worktree 一棵二叉分屏树，可以拖分隔条，也可以纯键盘操作。仪表盘有四种布局 —— 网格、左右、上小、上大 —— 整棵树会序列化进配置，重启后原样恢复。</dd>
-      </div>
-      <div class="row">
-        <dt>模式化键盘</dt>
-        <dd>NORMAL 与 INSERT 两种模式，<code>Space</code> 是 which-key 风格的 leader 键。<code>h j k l</code> 移动焦点，<code>Cmd+P</code> 是快速切换器，<code>Cmd+N</code> 开新分支。</dd>
+        <dd>每个 worktree 一棵二叉分屏树，可以拖分隔条，也可以纯键盘操作，整棵树会序列化进配置，重启后原样恢复。舰队列表可以按仓库、按状态、按最近活动分组，或展开到每个 pane。</dd>
       </div>
       <div class="row">
         <dt>侧边栏</dt>
@@ -261,7 +258,7 @@
       </div>
       <div class="row">
         <dt>远程掌舵</dt>
-        <dd>用手机给舰队发消息。命令通过 iMessage 进来，前缀是 <code>sea&nbsp;</code>；回复带着 <code>helm&nbsp;</code> 标记发回去 —— 这个前缀同时也是让这座桥不会自问自答的原因。</dd>
+        <dd>一个浏览器客户端 <code>seahelm-web</code>，由 app 自己内嵌的网关托管。用八位配对码配一次，它就能列出整支舰队，并在任意 pane 上打开一个真正的终端 —— xterm.js 跑在一条 WebSocket 上，桌面端用的那套控制调用和 VT 字节流都走这一条连接。通过 iMessage 和邮件下达指令仍是实验性的。</dd>
       </div>
     </dl>
 

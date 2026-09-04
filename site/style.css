@@ -420,6 +420,19 @@ html[lang^="zh"] .note,
 html[lang^="zh"] figcaption,
 html[lang^="zh"] .svg-note { font-style: normal; }
 
+/* Chinese does not italicise for emphasis, and there is no italic to apply:
+   a slant on CJK is synthesised from glyphs never drawn for one. 着重号 — a
+   dot under each character — is what the script actually uses, and it is what
+   <em> means here. Every <em> on the page is pure CJK, so no dot lands under
+   a Latin word. The generous line-height above leaves room for them. */
+html[lang^="zh"] em {
+  font-style: normal;
+  -webkit-text-emphasis: filled dot;
+  text-emphasis: filled dot;
+  -webkit-text-emphasis-position: under right;
+  text-emphasis-position: under right;
+}
+
 /* Same `ch`-versus-CJK problem as .prose above. */
 html[lang^="zh"] figcaption { max-width: 38em; }
 
