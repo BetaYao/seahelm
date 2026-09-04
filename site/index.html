@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Seahelm &mdash; a native macOS workspace for coding agents</title>
-<meta name="description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<meta name="description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
 <link rel="canonical" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="en" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="zh-Hans" href="https://www.seahelm.dev/zh/">
@@ -17,7 +17,7 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:locale:alternate" content="zh_CN">
 <meta property="og:title" content="Seahelm &mdash; one window for every agent you have running">
-<meta property="og:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<meta property="og:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
 <meta property="og:image" content="https://www.seahelm.dev/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -25,7 +25,7 @@
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Seahelm &mdash; one window for every agent you have running">
-<meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.png">
 
 <meta name="theme-color" content="#eaf1f9" media="(prefers-color-scheme: light)">
@@ -85,9 +85,10 @@
       <p class="eyebrow"><span class="mark">&#9679;</span> A native macOS workspace for coding agents</p>
       <h1>One window for every agent you have running.</h1>
       <p class="lede">
-        A repo is a tab. A git worktree is a card. A split pane is one agent. Seahelm renders every
-        one of them on the Ghostty engine, watches what they are doing, and keeps their sessions
-        alive across a reboot. Twelve agent CLIs work out of the box.
+        Your fleet sits on one roster: a row per worktree, mustered by repo, by status, or by what
+        moved last, one agent to a split pane. Seahelm draws every one of them on the Ghostty engine,
+        watches who is working and who is waiting on you, and after a reboot every session is where
+        you left it. Twelve agent CLIs work out of the box.
       </p>
 
       <div class="fleet">
@@ -242,7 +243,7 @@
     <dl class="rows">
       <div class="row">
         <dt>Splits &amp; layouts</dt>
-        <dd>A binary split tree per worktree, dragged by dividers or driven from the keyboard. Four dashboard layouts &mdash; grid, left/right, top-small, top-large &mdash; and the whole tree serializes to config, so relaunch restores it.</dd>
+        <dd>A binary split tree per worktree, dragged by dividers or driven from the keyboard, and serialized to config so relaunch restores it. The fleet list groups by repo, by status, by last activity, or expands to every pane.</dd>
       </div>
       <div class="row">
         <dt>Side panel</dt>
