@@ -28,8 +28,7 @@
 <meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.zh.png">
 
-<meta name="theme-color" content="#eaf1f9" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a2731" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f9fb">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,8 +37,8 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<!-- ══════════════ MASTHEAD + HERO ══════════════ -->
-<section class="deck">
+<!-- ══════════════ MASTHEAD + HERO · above the waterline ══════════════ -->
+<section class="deck sky">
   <div class="wrap">
 
     <div class="masthead">
@@ -89,7 +88,14 @@
         里坐着一个 agent。Seahelm 用 Ghostty 引擎把它们逐个画出来，盯着谁在干活、谁在等你，
         重启之后每个会话都还在原位。十二种 agent CLI 开箱即用。
       </p>
+    </div>
+  </div>
+</section>
 
+<!-- ══════════════ THE WATERLINE · the fleet at rest ══════════════ -->
+<section class="deck surface">
+  <div class="wrap">
+    <div class="berth">
       <div class="fleet">
         <div class="fleet-bar">
           <span>openbeta/seahelm</span>
@@ -143,7 +149,7 @@
 </section>
 
 <!-- ══════════════ THE TOUR ══════════════ -->
-<section class="deck">
+<section class="deck surface">
   <div class="wrap">
     <div class="film">
       <p class="eyebrow"><span class="mark">&#9654;</span> 四十七秒，看它真的在跑</p>
@@ -168,7 +174,7 @@
 </section>
 
 <!-- ══════════════ DECK ONE — ON DECK ══════════════ -->
-<section class="deck">
+<section class="deck shallows">
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">甲板一 &middot; 甲板之上</p></div>
@@ -641,7 +647,7 @@
 </section>
 
 <!-- ══════════════ DECK THREE — THE RENDEZVOUS ══════════════ -->
-<section class="deck" id="rendezvous">
+<section class="deck deep" id="rendezvous">
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">甲板三 &middot; 汇合点</p></div>
@@ -806,7 +812,7 @@
 </section>
 
 <!-- ══════════════ FOOTER ══════════════ -->
-<section class="deck">
+<section class="deck seabed">
   <div class="wrap">
     <footer>
       <div class="cmd" style="max-width:max-content"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
