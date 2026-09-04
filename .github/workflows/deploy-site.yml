@@ -1,0 +1,59 @@
+name: Deploy site
+
+# www.seahelm.dev is a Cloudflare Pages *direct upload* project ("seahelm").
+# There is no Git integration on the Cloudflare side — this workflow is the
+# only thing that publishes, so the deploy is reviewable in the repo.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/deploy-site.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Fork PRs cannot see the secrets; skip rather than fail red.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v5
+
+      # A push to main publishes production; any other ref gets a preview URL
+      # at https://<branch>.seahelm.pages.dev.
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy site
+            --project-name=seahelm
+            --branch=${{ github.head_ref || github.ref_name }}
+
+      # site/_headers puts a long cache on poster.jpg, og.png and tour-loop.mp4,
+      # so replacing any of them would otherwise stay invisible at the edge for
+      # a day. Previews live on pages.dev and are not behind this zone.
+      - name: Purge the edge cache
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sS -X POST --fail-with-body \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            --data '{"hosts":["www.seahelm.dev","seahelm.dev"]}' \
+            -o /dev/null
+          echo "edge cache purged"

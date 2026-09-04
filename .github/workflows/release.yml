@@ -220,7 +220,7 @@ jobs:
             ### macOS (one-line install)
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+            curl -fsSL https://seahelm.dev/install.sh | sh
             ```
 
             ### macOS (manual)

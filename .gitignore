@@ -51,3 +51,6 @@ gmail-oauth-client.json
 
 # Python bytecode from scripts/perf
 __pycache__/
+
+# Wrangler (Cloudflare Pages CLI) local state
+.wrangler/

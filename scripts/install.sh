@@ -3,7 +3,7 @@
 # Seahelm.app into /Applications (or ~/Applications without write access).
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+#   curl -fsSL https://seahelm.dev/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- v2.0.11      # pin a version
 #   SEAHELM_INSTALL_DIR=~/Applications sh install.sh  # custom destination
 #

@@ -1,0 +1,15 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/favicon.svg
+  Cache-Control: public, max-age=86400
+
+/og.png
+  Cache-Control: public, max-age=86400
+
+/poster.jpg
+  Cache-Control: public, max-age=86400
+
+/tour-loop.mp4
+  Cache-Control: public, max-age=604800
