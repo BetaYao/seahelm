@@ -8,10 +8,12 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'scripts/check-site-parity.py'
       - '.github/workflows/deploy-site.yml'
   pull_request:
     paths:
       - 'site/**'
+      - 'scripts/check-site-parity.py'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +25,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The English and Chinese pages are separate files, so they can drift. This
+  # runs on every event including fork PRs — it needs no secrets, and a fork's
+  # translation is exactly the change most worth checking. Deploy waits on it:
+  # a half-translated publish is worse than a late one.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check en/zh parity
+        run: python3 scripts/check-site-parity.py
+
   deploy:
+    needs: parity
     runs-on: ubuntu-latest
     # Fork PRs cannot see the secrets; skip rather than fail red.
     if: >-

@@ -1,0 +1,430 @@
+/* ───────────────────────────────────────────────────────────────
+   www.seahelm.dev — the whole stylesheet, shared by the English
+   page at / and the Chinese one at /zh/.
+
+   It is a separate file for exactly one reason: there are two
+   pages now. Inline, every rule below would exist twice and a
+   restyle would mean making the same edit in two places, forever
+   — which is the drift the parity check in scripts/ exists to
+   catch and this file exists to prevent.
+   ─────────────────────────────────────────────────────────────── */
+/* ───────────────────────────────────────────────────────────────
+   Palette is lifted verbatim from the app's own Sources/UI/Shared/
+   SemanticColors.swift — deep TUI navy, cyan helm, and the four
+   status hues the status dots actually use.
+   ─────────────────────────────────────────────────────────────── */
+:root {
+  --sea-0:  #eaf1f9;
+  --sea-1:  #ffffff;
+  --sea-2:  #f4f8fd;
+  --ink:    #14232c;
+  --ink-2:  #566772;
+  --rule:   #ccd8e2;
+  --rule-2: #e2eaf2;
+  --accent: #0e9bb5;
+  --accent-soft: rgba(14,155,181,.10);
+  --run:    #1f9d63;
+  --wait:   #b0760a;
+  --err:    #cc2a22;
+  --idle:   #8a93a1;
+  --grid:   rgba(14,155,181,.075);
+  --shadow: 0 1px 2px rgba(8,34,42,.05), 0 10px 30px -18px rgba(8,34,42,.35);
+
+  --f-cond: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --f-note: "Newsreader", Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sea-0:  #0a2731;
+    --sea-1:  #0e323d;
+    --sea-2:  #123a46;
+    --ink:    #d6e6e6;
+    --ink-2:  #86a8ab;
+    --rule:   #1e5460;
+    --rule-2: #163f4a;
+    --accent: #1fc8da;
+    --accent-soft: rgba(31,200,218,.12);
+    --run:    #1bb062;
+    --wait:   #e0a458;
+    --err:    #ef5a4a;
+    --idle:   #6b8584;
+    --grid:   rgba(31,200,218,.06);
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 12px 34px -20px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --sea-0:  #0a2731;
+  --sea-1:  #0e323d;
+  --sea-2:  #123a46;
+  --ink:    #d6e6e6;
+  --ink-2:  #86a8ab;
+  --rule:   #1e5460;
+  --rule-2: #163f4a;
+  --accent: #1fc8da;
+  --accent-soft: rgba(31,200,218,.12);
+  --run:    #1bb062;
+  --wait:   #e0a458;
+  --err:    #ef5a4a;
+  --idle:   #6b8584;
+  --grid:   rgba(31,200,218,.06);
+  --shadow: 0 1px 2px rgba(0,0,0,.25), 0 12px 34px -20px rgba(0,0,0,.7);
+}
+
+/* Below deck: always the deeper surface, in either theme. */
+.hold {
+  --sea-0:  #08222a;
+  --sea-1:  #0d2b34;
+  --sea-2:  #11333d;
+  --ink:    #d8e8e8;
+  --ink-2:  #90b2b5;
+  --rule:   #1e5563;
+  --rule-2: #16414d;
+  --accent: #1fc8da;
+  --accent-soft: rgba(31,200,218,.12);
+  --run:    #1bb062;
+  --wait:   #e0a458;
+  --err:    #ef5a4a;
+  --idle:   #5d7b7a;
+  --grid:   rgba(31,200,218,.05);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 40px -22px rgba(0,0,0,.8);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hold { --sea-0: #04141a; --sea-1: #0a252d; --sea-2: #0e2c35; }
+}
+:root[data-theme="dark"] .hold { --sea-0: #04141a; --sea-1: #0a252d; --sea-2: #0e2c35; }
+
+/* ── base ─────────────────────────────────────────────────────── */
+body {
+  background: var(--sea-0);
+  color: var(--ink);
+  font: 400 16px/1.62 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+a { color: inherit; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+.wrap { width: min(1120px, 100% - 2.75rem); margin-inline: auto; }
+.prose { max-width: 66ch; }
+
+.deck {
+  background-color: var(--sea-0);
+  color: var(--ink);
+  background-image:
+    repeating-linear-gradient(to right,  var(--grid) 0 1px, transparent 1px 56px),
+    repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 56px);
+}
+
+h1, h2, h3 { font-family: var(--f-cond); font-weight: 700; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(2.35rem, 5.4vw, 3.85rem); line-height: .99; letter-spacing: -.015em; }
+h2 { font-size: clamp(1.85rem, 3.5vw, 2.6rem); line-height: 1.04; letter-spacing: -.01em; }
+h3 { font-size: 1.24rem; font-weight: 600; line-height: 1.2; letter-spacing: -.005em; }
+p  { margin: 0; }
+
+.eyebrow {
+  font: 500 .69rem/1 var(--f-mono);
+  letter-spacing: .17em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.eyebrow .mark { color: var(--accent); }
+.note { font: italic 400 1.02rem/1.5 var(--f-note); color: var(--ink-2); }
+.mono { font-family: var(--f-mono); font-size: .86em; }
+.lede { font-size: 1.12rem; line-height: 1.6; color: var(--ink-2); }
+
+/* ── header / hero ────────────────────────────────────────────── */
+.masthead {
+  display: flex; align-items: center; gap: .85rem;
+  padding: 2.4rem 0 0;
+}
+.wheel { width: 46px; height: 46px; color: var(--ink); flex: none; }
+.wordmark { font: 700 1.55rem/1 var(--f-cond); letter-spacing: -.01em; }
+.masthead .spec {
+  margin-left: auto; font: 400 .74rem/1 var(--f-mono); color: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: 999px; padding: .45rem .7rem;
+  white-space: nowrap;
+}
+.hero { padding: 2.1rem 0 2.2rem; display: grid; gap: 1.35rem; }
+.hero h1 { max-width: 17ch; }
+.hero .lede { max-width: 56ch; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .35rem; }
+.cmd {
+  font: 400 .82rem/1 var(--f-mono);
+  background: var(--sea-1); border: 1px solid var(--rule);
+  border-radius: 6px; padding: .7rem .85rem; overflow-x: auto; max-width: 100%;
+  white-space: nowrap; box-shadow: var(--shadow);
+}
+.cmd .prompt { color: var(--accent); }
+.linkout {
+  font: 500 .82rem/1 var(--f-mono); color: var(--accent);
+  text-decoration: none; border-bottom: 1px solid currentColor; padding-bottom: 2px;
+}
+.linkout:hover { color: var(--ink); }
+
+/* ── the at-rest fleet strip ──────────────────────────────────── */
+.fleet {
+  border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+  background: var(--sea-1); box-shadow: var(--shadow); margin-top: .5rem;
+}
+.fleet-bar {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .6rem .85rem; border-bottom: 1px solid var(--rule-2);
+  background: var(--sea-2); font: 400 .78rem/1 var(--f-mono); color: var(--ink-2);
+}
+.island {
+  margin-left: auto; display: inline-flex; align-items: center; gap: .6rem;
+  border: 1px solid var(--rule); border-radius: 999px; padding: .3rem .7rem;
+  background: var(--sea-1);
+}
+.fleet-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.wt { padding: .85rem .9rem 1rem; border-right: 1px solid var(--rule-2); display: grid; gap: .6rem; align-content: start; }
+.wt:last-child { border-right: 0; }
+.wt-head { display: flex; align-items: baseline; gap: .5rem; }
+.branch { font: 500 .84rem/1.2 var(--f-mono); }
+.wt-state { margin-left: auto; font: 400 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .09em; }
+.pane {
+  border: 1px solid var(--rule-2); border-radius: 6px; padding: .5rem .6rem;
+  background: var(--sea-2); display: grid; gap: .28rem;
+}
+.pane-top { display: flex; align-items: center; gap: .45rem; font: 500 .78rem/1 var(--f-mono); }
+.pane-msg { font: 400 .74rem/1.35 var(--f-mono); color: var(--ink-2); }
+.dot { font-size: .95em; line-height: 1; }
+.s-run  { color: var(--run); }
+.s-wait { color: var(--wait); }
+.s-idle { color: var(--idle); }
+.s-err  { color: var(--err); }
+.pulse { animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .42; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* ── the tour ─────────────────────────────────────────────────── */
+.film { padding: 2.6rem 0 0; display: grid; gap: 1rem; }
+.player {
+  position: relative; aspect-ratio: 1380 / 890; border: 1px solid var(--rule);
+  border-radius: 10px; overflow: hidden; background: var(--sea-1);
+  box-shadow: var(--shadow);
+}
+.player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.face { position: absolute; inset: 0; display: block; text-decoration: none; }
+.face video { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--sea-2); }
+/* The scrim and its text sit on the screenshot, not on a theme surface, so
+   these are deliberately fixed colours rather than tokens. */
+.face .scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, rgba(4,20,26,0) 62%, rgba(4,20,26,.66) 100%);
+}
+.face .cta {
+  position: absolute; right: 18px; bottom: 16px;
+  display: inline-flex; align-items: center; gap: .55rem;
+  padding: .5rem .85rem; border-radius: 999px;
+  background: rgba(4,20,26,.74); border: 1px solid rgba(207,230,232,.28);
+  backdrop-filter: blur(8px);
+  font: 400 .82rem/1 var(--f-mono); color: #e4f2f3; white-space: nowrap;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+.face .cta svg { width: 11px; height: 11px; fill: var(--accent); flex: none; }
+.face .cta b { font-weight: 500; color: #9fc4c7; }
+.face:hover .cta, .face:focus-visible .cta {
+  background: rgba(4,20,26,.9); border-color: rgba(31,200,218,.7);
+}
+.face:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .face .cta { transition: none; } }
+@media (max-width: 620px) {
+  .face .cta { right: 10px; bottom: 10px; padding: .42rem .6rem; font-size: .72rem; }
+}
+
+/* ── deck sections ────────────────────────────────────────────── */
+.deck-head { display: grid; gap: .9rem; padding: 3.6rem 0 0; }
+.deck-head .rule-row { display: flex; align-items: center; gap: 1rem; }
+.deck-head .rule-row::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+section.deck { padding-bottom: 4rem; }
+.hold { border-block: 1px solid var(--rule); }
+
+/* ── figures ──────────────────────────────────────────────────── */
+figure { margin: 2.4rem 0 0; display: grid; gap: .9rem; }
+.fig-frame {
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--sea-1);
+  padding: 1.1rem; overflow-x: auto; box-shadow: var(--shadow);
+}
+.fig-frame svg { display: block; width: 100%; min-width: 560px; height: auto; color: var(--ink); }
+figcaption { font: italic 400 1.02rem/1.55 var(--f-note); color: var(--ink-2); max-width: 76ch; }
+figcaption code { font: 400 .82em/1 var(--f-mono); font-style: normal; color: var(--ink); }
+
+/* svg text conventions */
+.svg-box { fill: var(--sea-2); stroke: var(--rule); stroke-width: 1; }
+.svg-box-plain { fill: none; stroke: var(--rule); stroke-width: 1; }
+.svg-t  { font: 500 13px var(--f-mono); fill: var(--ink); }
+.svg-t2 { font: 400 12px var(--f-mono); fill: var(--ink-2); }
+.svg-lbl{ font: 500 10.5px var(--f-mono); fill: var(--ink-2); letter-spacing: .06em; }
+.svg-hd { font: 500 10.5px var(--f-mono); fill: var(--ink-2); letter-spacing: .14em; }
+.svg-note { font: italic 400 13px var(--f-note); fill: var(--ink-2); }
+.svg-line { stroke: var(--ink-2); stroke-width: 1.4; fill: none; }
+.svg-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.svg-dash { stroke: var(--ink-2); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+
+/* ── layer table ──────────────────────────────────────────────── */
+.tbl-scroll { overflow-x: auto; margin-top: 2rem; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; color: var(--ink); }
+th, td { text-align: left; padding: .72rem .9rem; border-bottom: 1px solid var(--rule-2); vertical-align: baseline; }
+thead th {
+  font: 500 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .14em;
+  color: var(--ink-2); border-bottom: 1px solid var(--rule); padding-bottom: .55rem;
+}
+tbody td:first-child { font: 600 .95rem/1.3 var(--f-cond); color: var(--ink); white-space: nowrap; }
+td.path { font: 400 .8rem/1.4 var(--f-mono); color: var(--accent); white-space: nowrap; }
+td.num  { font: 400 .82rem/1.4 var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-2); }
+td.desc { font-size: .93rem; line-height: 1.5; color: var(--ink-2); }
+td.tick { font: 400 .85rem/1.4 var(--f-mono); }
+
+/* ── feature rows ─────────────────────────────────────────────── */
+.rows { margin-top: 2rem; display: grid; gap: 0; }
+.row {
+  display: grid; grid-template-columns: minmax(150px, 200px) 1fr; gap: 1.4rem;
+  padding: .95rem 0; border-top: 1px solid var(--rule-2); align-items: baseline;
+}
+.row:last-child { border-bottom: 1px solid var(--rule-2); }
+.row dt { font: 600 1rem/1.3 var(--f-cond); letter-spacing: .01em; }
+.row dd { margin: 0; font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
+.row dd code, .desc code, .lede code { font: 400 .85em/1 var(--f-mono); color: var(--ink); }
+
+/* two lifted callouts — these get the border, the rows do not */
+.lift { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+.lift > div {
+  border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+  border-radius: 4px; padding: 1.1rem 1.2rem; background: var(--sea-1);
+  display: grid; gap: .5rem; align-content: start;
+}
+.lift h3 { font-size: 1.1rem; }
+.lift p { font-size: .93rem; line-height: 1.55; color: var(--ink-2); }
+
+/* ── status legend ────────────────────────────────────────────── */
+.legend {
+  margin-top: 1.6rem; display: grid; gap: 0;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--sea-1);
+}
+.legend > div { padding: .8rem .9rem; border-right: 1px solid var(--rule-2); display: grid; gap: .25rem; }
+.legend > div:last-child { border-right: 0; }
+.legend .g { font: 500 1rem/1 var(--f-mono); }
+.legend .k { font: 400 .78rem/1 var(--f-mono); color: var(--ink); }
+.legend .v { font: 400 .74rem/1.3 var(--f-mono); color: var(--ink-2); }
+
+/* ── code block ───────────────────────────────────────────────── */
+pre.code {
+  margin: 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--sea-1);
+  padding: 1rem 1.1rem; overflow-x: auto; font: 400 .82rem/1.85 var(--f-mono);
+  color: var(--ink); box-shadow: var(--shadow);
+}
+pre.code .c { color: var(--ink-2); }
+pre.code .p { color: var(--accent); }
+
+.pair { margin-top: 2.4rem; display: grid; grid-template-columns: 1fr; gap: 1.6rem; align-items: start; }
+@media (min-width: 900px) { .pair { grid-template-columns: 1.15fr .85fr; gap: 2rem; } }
+.pair figure { margin-top: 0; }
+.pair .side { display: grid; gap: .9rem; align-content: start; }
+.pair .side h3 { margin-bottom: -.2rem; }
+.pair .side p { font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
+
+/* ── footer ───────────────────────────────────────────────────── */
+footer { border-top: 1px solid var(--rule); padding: 2.8rem 0 3.6rem; display: grid; gap: 1.1rem; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 1.3rem; }
+.foot-meta { font: 400 .78rem/1.7 var(--f-mono); color: var(--ink-2); }
+
+@media (max-width: 720px) {
+  .fleet-grid { grid-template-columns: 1fr; }
+  .wt { border-right: 0; border-bottom: 1px solid var(--rule-2); }
+  .wt:last-child { border-bottom: 0; }
+  .row { grid-template-columns: 1fr; gap: .3rem; }
+  .legend > div { border-right: 0; border-bottom: 1px solid var(--rule-2); }
+}
+
+/* Standalone reset. The Artifact host supplied one; a hosted page must not
+   assume it — without this the page carries the UA's 8px body margin. */
+html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+body { margin: 0; }
+img, svg { max-width: 100%; }
+[hidden] { display: none !important; }
+
+/* ── language switcher ────────────────────────────────────────── */
+/* Sits after .spec in the masthead, so .spec keeps the auto margin
+   that pushes the pair to the right. */
+.lang {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font: 500 .74rem/1 var(--f-mono);
+  border: 1px solid var(--rule); border-radius: 999px; padding: .45rem .75rem;
+  white-space: nowrap;
+}
+.lang a { color: var(--ink-2); text-decoration: none; }
+.lang a:hover { color: var(--ink); }
+.lang a[aria-current="page"] { color: var(--accent); }
+.lang .sep { color: var(--rule); }
+
+@media (max-width: 620px) {
+  /* The spec pill is the first thing to go: the language choice has to
+     stay reachable on a phone, the file count does not. */
+  .masthead .spec { display: none; }
+  .lang { margin-left: auto; }
+}
+
+/* ── Chinese ──────────────────────────────────────────────────── */
+/* Latin still renders in IBM Plex; only the glyphs Plex does not have
+   fall through to the system CJK face. No web font is loaded for this:
+   a Chinese web font is megabytes, and every platform this page runs on
+   already ships a good one. */
+html[lang^="zh"] {
+  --f-cond: "IBM Plex Sans Condensed", "PingFang SC", "Hiragino Sans GB",
+            "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --f-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
+            "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+            "PingFang SC", monospace;
+  /* Newsreader is loaded in its italic cut only. Asking for an upright
+     one leaves the browser with no normal face for the family, and it
+     falls back to using the italic anyway — so the Latin words inside a
+     Chinese sentence would stay slanted while the Chinese around them
+     went upright. Georgia leads instead: one upright serif voice for
+     both scripts. */
+  --f-note: Georgia, "Songti SC", "Noto Serif SC", "Times New Roman", serif;
+}
+
+/* CJK sets denser than Latin at the same metrics: it wants more leading,
+   no negative tracking, and headline lines that are allowed to breathe. */
+html[lang^="zh"] body { line-height: 1.78; }
+html[lang^="zh"] h1,
+html[lang^="zh"] h2,
+html[lang^="zh"] h3 { letter-spacing: 0; }
+html[lang^="zh"] h1 { line-height: 1.18; }
+html[lang^="zh"] h2 { line-height: 1.24; }
+html[lang^="zh"] .lede { line-height: 1.85; }
+
+/* `ch` is the width of a zero, so a limit tuned for Latin comes out at
+   half the intended measure in Chinese. These are the same line lengths
+   expressed in a unit that means something here. */
+html[lang^="zh"] .prose { max-width: 34em; }
+html[lang^="zh"] .hero h1 { max-width: 15em; }
+html[lang^="zh"] .hero .lede { max-width: 30em; }
+
+/* Uppercase does nothing to CJK, and the Latin it is mixed with here is
+   brand names — uppercasing turns "macOS" into "MACOS", which is simply the
+   wrong word. The wide Latin tracking also reads loose against CJK, so the
+   eyebrow keeps its rhythm at a smaller step. */
+html[lang^="zh"] .eyebrow { letter-spacing: .1em; text-transform: none; }
+
+/* Synthesised italic CJK is a slant applied to glyphs that were never drawn
+   for one — the page loads Newsreader in its italic cut only, so there is no
+   real upright to fall back to either. Every place the design speaks in that
+   italic serif voice goes upright here instead, and picks up a CJK serif. */
+html[lang^="zh"] .note,
+html[lang^="zh"] figcaption,
+html[lang^="zh"] .svg-note { font-style: normal; }
+
+/* Same `ch`-versus-CJK problem as .prose above. */
+html[lang^="zh"] figcaption { max-width: 38em; }
+
+/* Chinese has no spaces to break at, so a long run inside a narrow
+   figure caption or table cell needs permission to wrap anywhere. */
+html[lang^="zh"] figcaption,
+html[lang^="zh"] .row dd,
+html[lang^="zh"] td { line-break: strict; overflow-wrap: anywhere; }

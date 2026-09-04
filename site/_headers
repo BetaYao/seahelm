@@ -8,6 +8,9 @@
 /og.png
   Cache-Control: public, max-age=86400
 
+/og.zh.png
+  Cache-Control: public, max-age=86400
+
 /poster.jpg
   Cache-Control: public, max-age=86400
 
