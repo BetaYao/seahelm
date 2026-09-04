@@ -245,10 +245,6 @@
         <dd>A binary split tree per worktree, dragged by dividers or driven from the keyboard. Four dashboard layouts &mdash; grid, left/right, top-small, top-large &mdash; and the whole tree serializes to config, so relaunch restores it.</dd>
       </div>
       <div class="row">
-        <dt>Modal keyboard</dt>
-        <dd>NORMAL and INSERT, with <code>Space</code> as a which-key leader. <code>h j k l</code> moves focus, <code>Cmd+P</code> is the quick switcher, <code>Cmd+N</code> opens a new branch.</dd>
-      </div>
-      <div class="row">
         <dt>Side panel</dt>
         <dd>File tree, code editor, Markdown preview, and git diff review &mdash; without leaving the worktree or interrupting the agent in it.</dd>
       </div>
@@ -262,7 +258,7 @@
       </div>
       <div class="row">
         <dt>Remote helm</dt>
-        <dd>Message the fleet from your phone. Commands arrive over iMessage prefixed <code>sea&nbsp;</code>; replies go back stamped <code>helm&nbsp;</code>, which is also what stops the bridge from answering itself.</dd>
+        <dd>A browser client, <code>seahelm-web</code>, served by a gateway inside the app itself. Pair once with an eight-digit code: it lists the fleet and opens a real terminal on any pane &mdash; xterm.js over a single WebSocket, carrying the same control calls the desktop makes and the VT bytes beside them. Taking orders over iMessage and mail is experimental.</dd>
       </div>
     </dl>
 
