@@ -130,3 +130,11 @@ See [`CLAUDE.md`](CLAUDE.md) for details and [`docs/`](docs/) for design notes.
 Pushing a `v*` tag triggers the release workflow, which builds `arm64` and `x86_64` macOS artifacts.
 
 With repository secrets configured (`APPLE_CERTIFICATE_P12`, `APPLE_DEVELOPER_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`, etc.), the workflow also signs, notarizes, and staples the app.
+
+## License
+
+Seahelm is released under the [MIT License](LICENSE).
+
+It builds on other people's work — notably the [Ghostty](https://github.com/ghostty-org/ghostty)
+terminal engine (MIT) and [zmx](https://zmx.sh) for session persistence. Bundled Swift packages
+are MIT, BSD-3-Clause, or Apache-2.0; each retains its own copyright and license.
