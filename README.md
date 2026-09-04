@@ -138,3 +138,7 @@ Seahelm is released under the [MIT License](LICENSE).
 It builds on other people's work — notably the [Ghostty](https://github.com/ghostty-org/ghostty)
 terminal engine (MIT) and [zmx](https://zmx.sh) for session persistence. Bundled Swift packages
 are MIT, BSD-3-Clause, or Apache-2.0; each retains its own copyright and license.
+
+Third-party components bundled in the app — Ghostty, zmx, Sparkle and the Swift
+packages — are listed with their full license texts in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
