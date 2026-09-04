@@ -60,7 +60,7 @@ fi
 xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   -skipPackagePluginValidation \
-  "${SIGN_ARGS[@]}" \
+  "${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}" \
   build
 
 # PRODUCT_NAME is Seahelm; on case-insensitive APFS seahelm.app resolves to the same bundle.
