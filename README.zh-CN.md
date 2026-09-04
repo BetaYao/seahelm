@@ -130,3 +130,11 @@ Swift + AppKit,macOS 14.0+,四层结构:
 推送 `v*` tag 触发 release workflow,构建 `arm64` 和 `x86_64` macOS 产物。
 
 配置仓库 secrets(`APPLE_CERTIFICATE_P12`、`APPLE_DEVELOPER_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID` 等)后,workflow 会自动签名、notarize、staple。
+
+## 许可
+
+Seahelm 以 [MIT License](LICENSE) 发布。
+
+本项目建立在他人的工作之上 —— 主要是 [Ghostty](https://github.com/ghostty-org/ghostty)
+终端引擎(MIT)和负责会话持久化的 [zmx](https://zmx.sh)。捆绑的 Swift 包分别采用
+MIT、BSD-3-Clause 或 Apache-2.0 协议,各自保留其版权与许可。
