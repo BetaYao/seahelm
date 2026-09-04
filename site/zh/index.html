@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seahelm &mdash; 为 coding agent 准备的原生 macOS 工作台</title>
+<meta name="description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<link rel="canonical" href="https://www.seahelm.dev/zh/">
+<link rel="alternate" hreflang="en" href="https://www.seahelm.dev/">
+<link rel="alternate" hreflang="zh-Hans" href="https://www.seahelm.dev/zh/">
+<link rel="alternate" hreflang="x-default" href="https://www.seahelm.dev/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Seahelm">
+<meta property="og:url" content="https://www.seahelm.dev/zh/">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
+<meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<meta property="og:image" content="https://www.seahelm.dev/og.zh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Seahelm — 为 coding agent 准备的原生 macOS 工作台">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
+<meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。一个仓库是一个 tab，一个 worktree 是一张卡片，一个 split pane 就是一个 agent&mdash;&mdash; 由 Ghostty 引擎渲染，由 zmx 保持会话。">
+<meta name="twitter:image" content="https://www.seahelm.dev/og.zh.png">
+
+<meta name="theme-color" content="#eaf1f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a2731" media="(prefers-color-scheme: dark)">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=Newsreader:ital,opsz,wght@1,6..72,400&display=swap">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- ══════════════ MASTHEAD + HERO ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+
+    <div class="masthead">
+      <svg class="wheel" viewBox="0 0 100 100" role="img" aria-label="Seahelm —— 一个舵轮，轮毂是波浪色带">
+        <defs>
+          <clipPath id="hub"><circle cx="50" cy="50" r="16"/></clipPath>
+        </defs>
+        <g stroke="currentColor" fill="none" stroke-width="3.4" stroke-linecap="round">
+          <circle cx="50" cy="50" r="30"/>
+          <g>
+            <line x1="50" y1="14" x2="50" y2="86"/>
+            <line x1="14" y1="50" x2="86" y2="50"/>
+            <line x1="24.5" y1="24.5" x2="75.5" y2="75.5"/>
+            <line x1="75.5" y1="24.5" x2="24.5" y2="75.5"/>
+          </g>
+        </g>
+        <g fill="currentColor">
+          <circle cx="50" cy="13" r="3.2"/><circle cx="50" cy="87" r="3.2"/>
+          <circle cx="13" cy="50" r="3.2"/><circle cx="87" cy="50" r="3.2"/>
+          <circle cx="23.8" cy="23.8" r="3.2"/><circle cx="76.2" cy="76.2" r="3.2"/>
+          <circle cx="76.2" cy="23.8" r="3.2"/><circle cx="23.8" cy="76.2" r="3.2"/>
+        </g>
+        <g clip-path="url(#hub)">
+          <path d="M34 34 H66 V66 H34 Z" fill="#101f8f"/>
+          <path d="M34 34 H66 V57 C58 61, 46 52, 34 56 Z" fill="#2f6fe0"/>
+          <path d="M34 34 H66 V49 C58 53, 46 44, 34 48 Z" fill="#22d3ee"/>
+          <path d="M34 34 H66 V44 C58 48, 46 40, 34 43 Z" fill="#12925a"/>
+          <path d="M34 34 H66 V40 C58 44, 46 36, 34 39 Z" fill="#f4571f"/>
+          <path d="M34 34 H66 V36 C58 40, 46 33, 34 35 Z" fill="#e03131"/>
+        </g>
+        <circle cx="50" cy="50" r="17.4" fill="none" stroke="var(--sea-0)" stroke-width="2.6"/>
+      </svg>
+      <span class="wordmark">Seahelm</span>
+      <span class="spec">macOS 14+ &middot; Swift + AppKit &middot; 247 个文件</span>
+      <nav class="lang" aria-label="语言">
+        <a href="/" hreflang="en" lang="en">EN</a>
+        <span class="sep" aria-hidden="true">/</span>
+        <a href="/zh/" hreflang="zh-Hans" aria-current="page">中文</a>
+      </nav>
+    </div>
+
+    <div class="hero">
+      <p class="eyebrow"><span class="mark">&#9679;</span> 为 coding agent 准备的原生 macOS 工作台</p>
+      <h1>一个窗口，管住所有在跑的 agent。</h1>
+      <p class="lede">
+        一个仓库是一个 tab，一个 git worktree 是一张卡片，一个 split pane 就是一个 agent。
+        Seahelm 用 Ghostty 引擎逐个渲染它们，盯着它们在做什么，并让会话在重启后依然活着。
+        十二种 agent CLI 开箱即用。
+      </p>
+
+      <div class="fleet">
+        <div class="fleet-bar">
+          <span>openbeta/seahelm</span>
+          <span style="opacity:.5">&middot;</span>
+          <span>3 个 worktree &middot; 5 个 pane</span>
+          <span class="island">
+            <span><span class="dot s-wait">&#9679;</span> 1 个待输入</span>
+            <span><span class="dot s-run pulse">&#9686;</span> 2 个在跑</span>
+          </span>
+        </div>
+        <div class="fleet-grid">
+          <div class="wt">
+            <div class="wt-head"><span class="branch">main</span><span class="wt-state s-idle">空闲</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-idle">&#9675;</span> claude</div>
+              <div class="pane-msg">空闲 &middot; 4 分钟</div>
+            </div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-idle">&#9675;</span> codex</div>
+              <div class="pane-msg">空闲 &middot; 22 分钟</div>
+            </div>
+          </div>
+          <div class="wt">
+            <div class="wt-head"><span class="branch">feat/island-usage</span><span class="wt-state s-run">运行中</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> claude</div>
+              <div class="pane-msg">Edit &middot; UsageSummaryFormatter.swift</div>
+            </div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> codex</div>
+              <div class="pane-msg">Bash &middot; xcodebuild test</div>
+            </div>
+          </div>
+          <div class="wt">
+            <div class="wt-head"><span class="branch">fix/zmx-recovery</span><span class="wt-state s-wait">待输入</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-wait">&#9679;</span> claude</div>
+              <div class="pane-msg">允许执行 <span style="color:var(--ink)">rm -rf .build</span> 吗？</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">示意舰队。上面每一种状态都是这个 app 真实会报的状态。</p>
+
+      <div class="hero-cta">
+        <div class="cmd"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
+        <a class="linkout" href="https://github.com/BetaYao/seahelm">github.com/BetaYao/seahelm</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ THE TOUR ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+    <div class="film">
+      <p class="eyebrow"><span class="mark">&#9654;</span> 四十七秒，看它真的在跑</p>
+      <div class="player" id="player">
+        <a class="face" href="https://youtu.be/WUUcuglx_Ks" rel="noopener"
+           aria-label="Seahelm 运行中 —— 侧栏是一列 worktree，灵动岛先弹出一张建议卡片，再展开舰队列表。点击打开完整的 47 秒演示。">
+          <video id="loop" width="1380" height="890" muted loop playsinline
+                 preload="none" poster="/poster.jpg">
+            <source src="/tour-loop.mp4" type="video/mp4">
+          </video>
+          <span class="scrim" aria-hidden="true"></span>
+          <span class="cta"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 21,12 5,21"/></svg>
+            看完整演示 <b>0:47</b></span>
+        </a>
+      </div>
+      <p class="note">
+        真实会话，不是效果图：侧栏是一列 worktree，其中一个里有 agent 正在干活，
+        还有一张建议卡片在问接下来往哪走。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DECK ONE — ON DECK ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+    <div class="deck-head">
+      <div class="rule-row"><p class="eyebrow">甲板一 &middot; 甲板之上</p></div>
+      <h2>你操的是什么</h2>
+      <p class="lede prose">
+        Seahelm 没有编辑器，也没有那套 diff review 的仪式。整个界面只做两件事：把 agent
+        <em>放到位</em> —— 哪个仓库、哪个 worktree、哪个 pane —— 然后告诉你其中谁需要人。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 940 362" role="img" aria-label="层级图：一个 Seahelm 窗口装着若干项目，项目装着 git worktree，worktree 装着 pane，每个 pane 跑一个 agent">
+          <!-- depth scale -->
+          <g class="svg-hd" text-anchor="end">
+            <text x="86" y="50">应用</text>
+            <text x="86" y="90">项目</text>
+            <text x="86" y="130">WORKTREE</text>
+            <text x="86" y="168">PANE</text>
+          </g>
+          <g class="svg-dash" stroke-dasharray="3 3">
+            <line x1="94" y1="46" x2="112" y2="46"/>
+            <line x1="94" y1="86" x2="128" y2="86"/>
+            <line x1="94" y1="126" x2="144" y2="126"/>
+            <line x1="94" y1="164" x2="160" y2="164"/>
+          </g>
+
+          <!-- window -->
+          <rect x="114" y="28" width="812" height="316" rx="10" class="svg-box-plain"/>
+          <text x="128" y="50" class="svg-t">seahelm &mdash; 一个窗口，一副键盘</text>
+
+          <!-- project A -->
+          <rect x="130" y="66" width="386" height="260" rx="8" class="svg-box"/>
+          <text x="144" y="90" class="svg-t">openbeta/seahelm</text>
+          <rect x="146" y="104" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="160" y="128" class="svg-t2">main</text>
+          <rect x="162" y="140" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="176" y="169" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  claude</text>
+          <rect x="334" y="140" width="150" height="48" rx="5" class="svg-box"/>
+          <text x="348" y="169" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="146" y="212" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="160" y="236" class="svg-t2">feat/island-usage</text>
+          <rect x="162" y="248" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="176" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <rect x="334" y="248" width="150" height="48" rx="5" class="svg-box"/>
+          <text x="348" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  codex</text>
+
+          <!-- project B -->
+          <rect x="524" y="66" width="386" height="260" rx="8" class="svg-box"/>
+          <text x="538" y="90" class="svg-t">acme/api</text>
+          <rect x="540" y="104" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="554" y="128" class="svg-t2">fix/auth-retry</text>
+          <rect x="556" y="140" width="322" height="48" rx="5" class="svg-box"/>
+          <text x="570" y="169" class="svg-t"><tspan fill="var(--wait)">&#9679;</tspan>  claude &mdash; 待输入</text>
+
+          <rect x="540" y="212" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="554" y="236" class="svg-t2">main</text>
+          <rect x="556" y="248" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="570" y="277" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  aider</text>
+        </svg>
+      </div>
+      <figcaption>
+        四层结构，一个真相来源。项目就是你加进来的 git 仓库；它的 worktree 来自
+        <code>git worktree list --porcelain</code>；pane 是这个 worktree 分屏树上的一个叶子，
+        里面正好装一个 agent。图里每一个叶子的状态，<code>AgentRegistry.shared</code> 都知道。
+      </figcaption>
+    </figure>
+
+    <dl class="rows">
+      <div class="row">
+        <dt>分屏与布局</dt>
+        <dd>每个 worktree 一棵二叉分屏树，可以拖分隔条，也可以纯键盘操作。仪表盘有四种布局 —— 网格、左右、上小、上大 —— 整棵树会序列化进配置，重启后原样恢复。</dd>
+      </div>
+      <div class="row">
+        <dt>模式化键盘</dt>
+        <dd>NORMAL 与 INSERT 两种模式，<code>Space</code> 是 which-key 风格的 leader 键。<code>h j k l</code> 移动焦点，<code>Cmd+P</code> 是快速切换器，<code>Cmd+N</code> 开新分支。</dd>
+      </div>
+      <div class="row">
+        <dt>侧边栏</dt>
+        <dd>文件树、代码编辑器、Markdown 预览、git diff 审查 —— 不用离开当前 worktree，也不打断里面正在干活的 agent。</dd>
+      </div>
+      <div class="row">
+        <dt>Token 用量</dt>
+        <dd>解析 Claude 和 Codex 的本地会话日志，算出 token 和额度数字，在状态药丸里一次轮播一条。</dd>
+      </div>
+      <div class="row">
+        <dt>持续集成</dt>
+        <dd>每当一个 agent 结束一轮，整支舰队的成果就会被叠到主干上，并检出到一个你能直接构建的地方 —— 不需要任何人提交，也不碰任何一个工作目录。<a class="linkout" href="#rendezvous">它是怎么做到的</a>。</dd>
+      </div>
+      <div class="row">
+        <dt>远程掌舵</dt>
+        <dd>用手机给舰队发消息。命令通过 iMessage 进来，前缀是 <code>sea&nbsp;</code>；回复带着 <code>helm&nbsp;</code> 标记发回去 —— 这个前缀同时也是让这座桥不会自问自答的原因。</dd>
+      </div>
+    </dl>
+
+    <div class="lift">
+      <div>
+        <h3>灵动岛</h3>
+        <p>屏幕顶部的一颗药丸，没事的时候一直闭着，直到某个 worktree 需要你。它只为三件事张开：有东西在跑、有东西在等、有东西坏了。agent 的建议会以可点击的卡片形式落在里面。</p>
+      </div>
+      <div>
+        <h3>First Mate（大副）</h3>
+        <p>一个盯着状态迁移的自动值班员。绿区动作它自己就做了 —— 盯着、查看、自动提交。红区动作 —— 广播指令、把 worktree 收回港口 —— 要先排队等你批准。</p>
+      </div>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 940 300" role="img" aria-label="前后对比：agent 建了一个 worktree 并 cd 进去，它把自己的 pane 一起带了过去，目标处那个没人用的占位 pane 被销毁">
+          <text x="10" y="30" class="svg-hd">之前</text>
+          <text x="520" y="30" class="svg-hd">之后</text>
+
+          <!-- BEFORE -->
+          <rect x="10" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
+          <rect x="26" y="68" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="40" y="92" class="svg-t2">main</text>
+          <rect x="42" y="104" width="172" height="42" rx="5" class="svg-box"/>
+          <text x="56" y="131" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <rect x="226" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="240" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="26" y="174" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="40" y="198" class="svg-t2">feat/x &mdash; 刚建好</text>
+          <rect x="42" y="210" width="172" height="42" rx="5" fill="none" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="4 4"/>
+          <text x="56" y="237" class="svg-t2">空占位 pane</text>
+
+          <!-- transition -->
+          <line x1="432" y1="160" x2="504" y2="160" class="svg-accent" marker-end="url(#ah-a)"/>
+          <text x="468" y="146" class="svg-lbl" text-anchor="middle">hook 带的 cwd</text>
+          <text x="468" y="182" class="svg-lbl" text-anchor="middle">moveLeaf</text>
+
+          <!-- AFTER -->
+          <rect x="520" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
+          <rect x="536" y="68" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="550" y="92" class="svg-t2">main</text>
+          <rect x="552" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="536" y="174" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="550" y="198" class="svg-t2">feat/x</text>
+          <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <text x="914" y="231" class="svg-note" text-anchor="end">Station 与 zmx 会话都留着</text>
+          <text x="914" y="250" class="svg-lbl" text-anchor="end">占位 pane 被销毁</text>
+
+          <defs>
+            <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        pane 跟着它的 agent 走。Claude Code 建一个 worktree 然后在里面干活；每一条 hook 消息都带着
+        <code>cwd</code>，于是 Seahelm 按<em>最长</em>前缀匹配 worktree，把那一个 pane 整体挪过去 ——
+        它的 Ghostty surface 和 zmx 会话都原样保留 —— 而不是在旁边另起一个跟它无关的。
+        两道闸门保证这件事不跑偏：目标必须属于同一个仓库；而且任何一次搬迁之后，自动跟随会停十分钟，
+        因为 agent 干活时 <code>cwd</code> 是来回跳的。
+      </figcaption>
+    </figure>
+
+    <div class="tbl-scroll">
+      <table>
+        <caption class="eyebrow" style="text-align:left;padding-bottom:.9rem">十二种 agent，三种集成深度</caption>
+        <thead>
+          <tr><th>Agent</th><th>状态识别</th><th>事件 hook</th><th>建议卡片</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Claude Code</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; 原生</td><td class="tick" style="color:var(--run)">&#10003;</td></tr>
+          <tr><td>Codex</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; 原生</td><td class="tick" style="color:var(--run)">&#10003;</td></tr>
+          <tr><td>opencode</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; 插件</td><td class="tick" style="color:var(--wait)">看模型自觉</td></tr>
+          <tr><td>另外九种</td><td class="tick" style="color:var(--run)">&#10003; 屏幕识别</td><td class="tick" style="color:var(--idle)">&mdash;</td><td class="tick" style="color:var(--idle)">&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:.9rem">agent &middot; aider &middot; amp &middot; claude &middot; cline &middot; codex &middot; cursor &middot; gemini &middot; goose &middot; kiro &middot; opencode &middot; pi</p>
+  </div>
+</section>
+
+<!-- ══════════════ DECK TWO — BELOW DECK ══════════════ -->
+<section class="deck hold">
+  <div class="wrap">
+    <div class="deck-head">
+      <div class="rule-row"><p class="eyebrow">甲板二 &middot; 甲板之下</p></div>
+      <h2>底下是什么在跑</h2>
+      <p class="lede prose">
+        247 个 Swift 文件，分四层，跑在 Ghostty 终端引擎之上。没有 Combine，也没有 SwiftUI ——
+        用的是 AppKit 加 delegate，因为屏幕上那个东西本质是一块 Metal surface，后面接着一个 PTY。
+      </p>
+    </div>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr><th>分层</th><th>路径</th><th style="text-align:right">文件数</th><th>里面装什么</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>协调层</td><td class="path">Sources/App/</td><td class="num">15</td>
+            <td class="desc">窗口、tab、分屏操作、侧边面板、模式化键盘状态机。</td>
+          </tr>
+          <tr>
+            <td>UI</td><td class="path">Sources/UI/</td><td class="num">75</td>
+            <td class="desc">仪表盘布局、灵动岛、分屏容器、worktree 侧栏、diff 查看器、设置、首次引导。</td>
+          </tr>
+          <tr>
+            <td>核心服务</td><td class="path">Sources/Core/ &middot; Status/</td><td class="num">133</td>
+            <td class="desc"><code>AgentRegistry</code>、状态识别流水线、manifest 引擎、First Mate、控制 socket、hook 安装器。</td>
+          </tr>
+          <tr>
+            <td>终端与 git</td><td class="path">Sources/Terminal/ &middot; Git/</td><td class="num">19</td>
+            <td class="desc">Ghostty C API 桥接、<code>Station</code> 的 surface 生命周期、分屏树、worktree 发现。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 1200 410" role="img" aria-label="状态识别流水线：hook 通道和屏幕扫描通道各自解码成同一种归一化事件，归约进 AgentRegistry，再发布给界面、First Mate 和事件总线">
+          <g class="svg-hd" text-anchor="middle">
+            <text x="94"   y="30">来源</text>
+            <text x="288"  y="30">桥接</text>
+            <text x="493"  y="30">解读</text>
+            <text x="687"  y="30">解码</text>
+            <text x="872"  y="30">归约</text>
+            <text x="1087" y="30">消费</text>
+          </g>
+
+          <!-- hook lane -->
+          <rect x="20" y="62" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="90" class="svg-t">Claude Code</text>
+          <text x="34" y="112" class="svg-t2">Codex &middot; opencode</text>
+
+          <rect x="214" y="62" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="228" y="90" class="svg-t">seahelm-hook</text>
+          <text x="228" y="112" class="svg-t2">socket &#9656; webhook</text>
+
+          <rect x="408" y="54" width="170" height="84" rx="6" class="svg-box"/>
+          <text x="422" y="80" class="svg-t">hook 事件</text>
+          <text x="422" y="102" class="svg-t2">SessionStart &middot; Stop</text>
+          <text x="422" y="122" class="svg-t2">Pre/PostToolUse</text>
+
+          <rect x="624" y="76" width="126" height="40" rx="6" class="svg-box"/>
+          <text x="638" y="101" class="svg-t">HookDecoder</text>
+
+          <g class="svg-line">
+            <line x1="168" y1="96" x2="208" y2="96" marker-end="url(#ah-b)"/>
+            <line x1="362" y1="96" x2="402" y2="96" marker-end="url(#ah-b)"/>
+            <line x1="578" y1="96" x2="618" y2="96" marker-end="url(#ah-b)"/>
+          </g>
+          <g class="svg-lbl" text-anchor="middle">
+            <text x="191" y="86">执行</text>
+            <text x="385" y="86">JSON</text>
+            <text x="601" y="86">映射</text>
+          </g>
+
+          <!-- scan lane -->
+          <rect x="20" y="272" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="300" class="svg-t">12 种 CLI 任选</text>
+          <text x="34" y="322" class="svg-t2">无需集成</text>
+
+          <rect x="214" y="272" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="228" y="300" class="svg-t">Ghostty 屏幕</text>
+          <text x="228" y="322" class="svg-t2">加锁读取文本</text>
+
+          <rect x="408" y="264" width="170" height="84" rx="6" class="svg-box"/>
+          <text x="422" y="290" class="svg-t">StatusDetector</text>
+          <text x="422" y="312" class="svg-t2">进程退出 &#9656; OSC 133</text>
+          <text x="422" y="332" class="svg-t2">&#9656; 文本模式</text>
+
+          <rect x="624" y="286" width="126" height="40" rx="6" class="svg-box"/>
+          <text x="638" y="311" class="svg-t">ScanDecoder</text>
+
+          <rect x="408" y="364" width="170" height="34" rx="6" class="svg-box"/>
+          <text x="422" y="386" class="svg-t2">12 份 JSON manifest</text>
+          <line x1="493" y1="348" x2="493" y2="360" class="svg-dash" marker-end="url(#ah-c)"/>
+          <text x="502" y="360" class="svg-lbl">规则</text>
+
+          <g class="svg-line">
+            <line x1="168" y1="306" x2="208" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="362" y1="306" x2="402" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="578" y1="306" x2="618" y2="306" marker-end="url(#ah-b)"/>
+          </g>
+          <g class="svg-lbl" text-anchor="middle">
+            <text x="191" y="296">渲染</text>
+            <text x="385" y="296">轮询</text>
+            <text x="601" y="296">判定</text>
+          </g>
+
+          <!-- both lanes converge on one event shape -->
+          <line x1="750" y1="96"  x2="790" y2="150" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <line x1="750" y1="306" x2="790" y2="178" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="758" y="124" class="svg-lbl">每个事件</text>
+          <text x="758" y="288" class="svg-lbl">每次轮询</text>
+
+          <rect x="796" y="126" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="810" y="152" class="svg-t">NormalizedEvent</text>
+          <text x="810" y="174" class="svg-t2">PaneReducer 纯函数</text>
+
+          <rect x="796" y="214" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="810" y="240" class="svg-t">AgentRegistry</text>
+          <text x="810" y="262" class="svg-t2">唯一真相来源</text>
+
+          <line x1="872" y1="190" x2="872" y2="208" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="880" y="205" class="svg-lbl">增量</text>
+          <text x="872" y="306" class="svg-lbl" text-anchor="middle">同时发布给三方</text>
+
+          <!-- consumers -->
+          <rect x="994" y="110" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="134" class="svg-t">灵动岛 &middot; 仪表盘</text>
+          <text x="1008" y="155" class="svg-t2">状态栏</text>
+
+          <rect x="994" y="188" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="212" class="svg-t">First Mate</text>
+          <text x="1008" y="233" class="svg-t2">绿区 &#9656; 红区</text>
+
+          <rect x="994" y="266" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="290" class="svg-t">EventHub</text>
+          <text x="1008" y="311" class="svg-t2">CLI 订阅方</text>
+
+          <g class="svg-line">
+            <line x1="948" y1="246" x2="988" y2="142" marker-end="url(#ah-b)"/>
+            <line x1="948" y1="246" x2="988" y2="217" marker-end="url(#ah-b)"/>
+            <line x1="948" y1="246" x2="988" y2="292" marker-end="url(#ah-b)"/>
+          </g>
+
+          <defs>
+            <marker id="ah-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+            </marker>
+            <marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+            </marker>
+            <marker id="ah-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        两条通道，一种事件形状。会上报 hook 的 agent 走快车道；另外九种每两秒从屏幕上读一次，
+        再按优先级顺序去匹配 manifest —— 进程退出优先于 OSC&nbsp;133 的 shell 阶段，后者又优先于文本模式匹配。
+        两条通道最终解码成同一个 <code>NormalizedEvent</code>，所以归约器保持是纯函数，
+        界面永远不知道某个状态是从哪条通道来的。想知道某个 pane 是被哪条规则判定的，就问它：
+        <code>seahelm pane explain &lt;pane&gt;</code>。
+      </figcaption>
+    </figure>
+
+    <div class="legend">
+      <div><span class="g s-run">&#9686;</span><span class="k">运行中</span><span class="v">有一次工具调用在途</span></div>
+      <div><span class="g s-wait">&#9679;</span><span class="k">待输入</span><span class="v">卡在等人</span></div>
+      <div><span class="g s-idle">&#9675;</span><span class="k">空闲</span><span class="v">提示符回来了，等着</span></div>
+      <div><span class="g s-err">&#10005;</span><span class="k">出错</span><span class="v">agent 挂了</span></div>
+      <div><span class="g s-idle">&#9676;</span><span class="k">休眠</span><span class="v">进程已退出</span></div>
+    </div>
+    <p class="note" style="margin-top:.8rem">同样这五种状态，驱动状态点、卡片、灵动岛和上卷汇总。没有第六种。</p>
+
+    <div class="pair">
+      <figure>
+        <div class="fig-frame">
+          <svg viewBox="0 0 640 330" role="img" aria-label="闭合的控制回路：pane 里的 agent 调用 seahelm CLI，CLI 通过私有 unix socket 用 JSON-RPC 和控制服务器通信，服务器改动 pane，并经事件总线把事件广播回 agent">
+            <rect x="28" y="42" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="44" y="68" class="svg-t">pane 里的一个 agent</text>
+            <text x="44" y="90" class="svg-t2">SEAHELM_PANE_ID</text>
+
+            <rect x="416" y="42" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="432" y="68" class="svg-t">seahelm CLI</text>
+            <text x="432" y="90" class="svg-t2">~/.local/bin/seahelm</text>
+
+            <rect x="416" y="226" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="432" y="252" class="svg-t">ControlSocketServer</text>
+            <text x="432" y="274" class="svg-t2">0600 权限的 unix socket</text>
+
+            <rect x="28" y="226" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="44" y="252" class="svg-t">EventHub</text>
+            <text x="44" y="274" class="svg-t2">有界环形缓冲</text>
+
+            <rect x="246" y="128" width="154" height="76" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="262" y="150" class="svg-t2">pane.split</text>
+            <text x="262" y="168" class="svg-t2">pane.run</text>
+            <text x="262" y="186" class="svg-t2">wait.agent_status</text>
+
+            <g class="svg-line">
+              <line x1="224" y1="73"  x2="410" y2="73"  marker-end="url(#ah-d)"/>
+              <line x1="514" y1="104" x2="514" y2="220" marker-end="url(#ah-d)"/>
+              <line x1="410" y1="257" x2="230" y2="257" marker-end="url(#ah-d)"/>
+              <line x1="126" y1="220" x2="126" y2="110" marker-end="url(#ah-d)"/>
+            </g>
+            <text x="317" y="63"  class="svg-lbl" text-anchor="middle">调用</text>
+            <text x="522" y="166" class="svg-lbl">JSON-RPC</text>
+            <text x="320" y="247" class="svg-lbl" text-anchor="middle">改动 pane</text>
+            <text x="118" y="166" class="svg-lbl" text-anchor="end">事件</text>
+
+            <text x="320" y="316" class="svg-note" text-anchor="middle">agent 可以反过来驱动正在盯着它的 app</text>
+
+            <defs>
+              <marker id="ah-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <figcaption>
+          回路是闭合的。Seahelm 盯着 agent；而 agent 手里握着 <code>$SEAHELM_PANE_ID</code>，可以反过来
+          调回来分屏、在兄弟 pane 里跑命令、读它的回滚缓冲，或者一直阻塞到另一个 pane 变空闲为止。
+        </figcaption>
+      </figure>
+      <div class="side">
+        <h3>agent 拿到的接口</h3>
+        <p><code>PATH</code> 上的一个 python3 包装脚本，通过 0600 权限的 socket 走按行分隔的 JSON-RPC。没有需要认证的东西，也不走网络。</p>
+<pre class="code"><span class="p">$</span> seahelm pane list
+<span class="p">$</span> seahelm pane read &lt;pane&gt; --lines 50
+<span class="p">$</span> seahelm pane split &lt;pane&gt; --direction right
+<span class="p">$</span> seahelm pane run &lt;pane&gt; "npm test"
+<span class="p">$</span> seahelm wait agent-status &lt;pane&gt; --status Idle
+<span class="p">$</span> seahelm pane explain &lt;pane&gt;   <span class="c"># 命中哪条规则？</span>
+<span class="p">$</span> seahelm layout export</pre>
+        <p>Hook 垫片以非破坏的方式装进每个工具自己的配置里 —— 装完就不挡路。<code>CwdChanged</code> 是<em>故意</em>不注册的：一旦接了它，Claude Code 就会把创建 worktree 这件事交给我们，反而弄坏了 <code>--worktree</code>。</p>
+      </div>
+    </div>
+
+    <div class="pair">
+      <figure>
+        <div class="fig-frame">
+          <svg viewBox="0 0 640 300" role="img" aria-label="持久化边界：app 的窗口和 Metal surface 在退出时被丢弃，而持有 PTY 和 agent 进程的 zmx 会话、以及磁盘上的 git worktree 都活了下来，重启后按名字重新挂接">
+            <rect x="20" y="28" width="600" height="76" rx="7" class="svg-box"/>
+            <text x="34" y="54" class="svg-t">seahelm.app</text>
+            <text x="34" y="80" class="svg-t2">窗口 &middot; SplitTree &middot; Station &middot; Metal surface</text>
+            <text x="606" y="54" class="svg-lbl" text-anchor="end" fill="var(--idle)">退出即消失</text>
+
+            <line x1="20" y1="138" x2="620" y2="138" class="svg-dash"/>
+            <text x="606" y="130" class="svg-note" text-anchor="end">你退出 app &middot; 机器重启</text>
+
+            <rect x="20" y="148" width="600" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="34" y="174" class="svg-t">zmx 会话 &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
+            <text x="34" y="200" class="svg-t2">PTY &middot; shell &middot; agent 进程，还在想</text>
+            <text x="606" y="174" class="svg-lbl" text-anchor="end" fill="var(--run)">存活</text>
+
+            <rect x="20" y="240" width="600" height="48" rx="7" class="svg-box"/>
+            <text x="34" y="270" class="svg-t2">磁盘上的 git worktree 与分支</text>
+            <text x="606" y="270" class="svg-lbl" text-anchor="end" fill="var(--run)">存活</text>
+
+            <line x1="66" y1="148" x2="66" y2="108" class="svg-accent" marker-end="url(#ah-e)"/>
+            <text x="78" y="130" class="svg-lbl">按名字重新挂接</text>
+
+            <defs>
+              <marker id="ah-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <figcaption>
+          会话活得比 app 久。每个分屏叶子都占用一个以其 worktree 命名的 zmx 会话；创建三秒后有一次健康检查，
+          发现是坏的就重建。退出、重启、再打开 —— agent 还在你离开时的位置上，话说到一半。
+        </figcaption>
+      </figure>
+      <div class="side">
+        <h3>两个线程，一个终端引擎</h3>
+        <p>状态轮询跑在后台队列上，而你在主队列上打字，两边调的是同一个 C 库。一把锁把它们串起来 ——
+        唯独按键输入故意不加锁：Ghostty 对按键本身是线程安全的，而在那里持锁会在一次同步回调上死锁。</p>
+        <p>轮询也不是一视同仁的。你正在看的那个 worktree 每个周期都读；其余的每三个周期读一次，
+        所以二十个 pane 的舰队，开销大约只相当于三个。</p>
+        <h3>构建于</h3>
+        <p>终端引擎用 <a class="linkout" href="https://ghostty.org">Ghostty</a>，以 C xcframework 链接进来 ——
+        会话持久化用 <a class="linkout" href="https://zmx.sh">zmx</a> —— 自动更新用 Sparkle&nbsp;2，
+        但渲染成页面内的横幅，而不是它自带的模态弹窗。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DECK THREE — THE RENDEZVOUS ══════════════ -->
+<section class="deck" id="rendezvous">
+  <div class="wrap">
+    <div class="deck-head">
+      <div class="rule-row"><p class="eyebrow">甲板三 &middot; 汇合点</p></div>
+      <h2>它们还能拼到一起吗？</h2>
+      <p class="lede prose">
+        六个 agent，六个 worktree，六个分支，单看每一个都是绿的。但它们放<em>一起</em>还能不能跑，
+        这个问题通常要拖到合并那天才有人回答。Seahelm 每一轮结束就回答一次 ——
+        不需要任何人提交，也不碰任何一个工作目录。
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 1320 430" role="img" aria-label="一轮集成：每个 worktree 经由临时索引被快照进对象数据库，快照用 merge-tree 逐个叠到主干上，冲突的那个被排除并报告，最后用一次 reset --hard 把游离状态的集成检出移到结果上">
+          <text x="20" y="32" class="svg-hd">工作目录</text>
+          <text x="20" y="218" class="svg-hd">对象数据库 &middot; .git</text>
+
+          <!-- the fleet -->
+          <rect x="20"  y="48" width="170" height="86" rx="7" class="svg-box"/>
+          <text x="36" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  feat/auth</text>
+          <text x="36" y="104" class="svg-t2">HEAD + 改动</text>
+
+          <rect x="206" y="48" width="170" height="86" rx="7" class="svg-box"/>
+          <text x="222" y="78" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  feat/island</text>
+          <text x="222" y="104" class="svg-t2">一轮进行中</text>
+
+          <rect x="392" y="48" width="170" height="86" rx="7" class="svg-box"/>
+          <text x="408" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  fix/zmx</text>
+          <text x="408" y="104" class="svg-t2">HEAD + 改动</text>
+
+          <rect x="1000" y="48" width="300" height="86" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="1018" y="78" class="svg-t">集成检出</text>
+          <text x="1018" y="104" class="svg-t2">游离 &mdash; 没有分支可选</text>
+
+          <!-- the boundary the whole design turns on -->
+          <line x1="20" y1="186" x2="1300" y2="186" class="svg-dash"/>
+          <text x="780" y="178" class="svg-note" text-anchor="middle">唯一一次向上跨越边界的写，就是那一次 reset</text>
+
+          <g class="svg-line">
+            <line x1="105" y1="134" x2="105" y2="230" marker-end="url(#ah-f)"/>
+            <line x1="291" y1="134" x2="291" y2="230" marker-end="url(#ah-f)"/>
+            <line x1="477" y1="134" x2="477" y2="230" marker-end="url(#ah-f)"/>
+          </g>
+          <text x="122" y="166" class="svg-lbl">临时索引</text>
+          <text x="308" y="166" class="svg-lbl">worktree 不受影响</text>
+
+          <!-- snapshots: a commit each, nothing checked out -->
+          <rect x="20"  y="234" width="170" height="54" rx="6" class="svg-box"/>
+          <text x="36" y="256" class="svg-t">快照</text>
+          <text x="36" y="277" class="svg-t2">+ 未跟踪文件</text>
+
+          <rect x="206" y="234" width="170" height="54" rx="6" class="svg-box"/>
+          <text x="222" y="256" class="svg-t">只取 HEAD</text>
+          <text x="222" y="277" class="svg-t2">还在干活</text>
+
+          <rect x="392" y="234" width="170" height="54" rx="6" class="svg-box"/>
+          <text x="408" y="256" class="svg-t">快照</text>
+          <text x="408" y="277" class="svg-t2">+ 未跟踪文件</text>
+
+          <!-- folded onto trunk, one merge-tree at a time -->
+          <rect x="20"  y="330" width="120" height="56" rx="6" class="svg-box"/>
+          <text x="36" y="364" class="svg-t">主干</text>
+
+          <rect x="200" y="330" width="170" height="56" rx="6" class="svg-box"/>
+          <text x="216" y="364" class="svg-t">+ feat/auth</text>
+
+          <rect x="430" y="330" width="170" height="56" rx="6" class="svg-box"/>
+          <text x="446" y="364" class="svg-t">+ feat/island</text>
+
+          <rect x="1000" y="330" width="300" height="56" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="1018" y="364" class="svg-t">集成后的 commit</text>
+
+          <g class="svg-line">
+            <line x1="105" y1="288" x2="230" y2="326" marker-end="url(#ah-f)"/>
+            <line x1="291" y1="288" x2="460" y2="326" marker-end="url(#ah-f)"/>
+            <line x1="140" y1="358" x2="194" y2="358" marker-end="url(#ah-f)"/>
+            <line x1="370" y1="358" x2="424" y2="358" marker-end="url(#ah-f)"/>
+            <line x1="600" y1="358" x2="994" y2="358" marker-end="url(#ah-f)"/>
+          </g>
+          <g class="svg-lbl" text-anchor="middle">
+            <text x="167" y="348">合并</text>
+            <text x="397" y="348">合并</text>
+            <text x="797" y="350">= 结果</text>
+          </g>
+
+          <!-- offered, collided, set aside — the round still finishes -->
+          <line x1="477" y1="288" x2="676" y2="306" stroke="var(--err)" stroke-width="1.3"
+                stroke-dasharray="5 4" fill="none" marker-end="url(#ah-x)"/>
+          <text x="694" y="302" class="svg-t"><tspan fill="var(--err)">&#10005;</tspan>  冲突 &mdash; Config.swift</text>
+          <text x="694" y="322" class="svg-t2">本轮排除，并如实报告</text>
+
+          <!-- the one write that crosses back -->
+          <line x1="1150" y1="326" x2="1150" y2="140" class="svg-accent" stroke-width="2" marker-end="url(#ah-g)"/>
+          <text x="1166" y="236" class="svg-lbl" fill="var(--accent)">reset --hard</text>
+          <text x="1166" y="254" class="svg-lbl">目标已经合并好了</text>
+
+          <text x="310" y="406" class="svg-lbl" text-anchor="middle">每一步都是：merge-tree --write-tree &#8594; commit-tree</text>
+
+          <defs>
+            <marker id="ah-f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+            </marker>
+            <marker id="ah-x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--err)"/>
+            </marker>
+            <marker id="ah-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        一轮的全过程。每个 worktree 被捕捉成一个 commit，这些 commit 再一次一个
+        <code>merge-tree</code> 地叠到主干上，最后把检出移到结果上。除了最后那一根箭头，
+        全部发生在 <code>.git</code> 里面 —— 所以一轮无论是冲突、挂起还是彻底失败，
+        每一个工作目录都还是原样。
+      </figcaption>
+    </figure>
+
+    <dl class="rows">
+      <div class="row">
+        <dt>谁都不用先提交</dt>
+        <dd>一个 agent 结束一轮时，成果是改好了但<em>没有</em>提交的。要求先提交，就会把 <code>git add -A &amp;&amp; git commit</code> 的所有毛病全都带回来：仓库的 pre-commit hook、<code>-A</code> 顺手扫进来的一切，以及一部塞满机器提交的历史。所以快照改在一个临时索引里做 —— <code>GIT_INDEX_FILE</code> 把 <code>read-tree</code> 和 <code>add -A</code> 指向一个临时文件，<code>write-tree</code> 生成 tree，<code>commit-tree</code> 生成 commit。worktree、真正的索引和 HEAD 全程没被碰过，所以在那个目录里干活的 agent 根本察觉不到发生过这件事。（<code>git stash create</code> 看着像是答案，其实不是：它会漏掉未跟踪文件，而那恰恰是 agent 产出的大头。）</dd>
+      </div>
+      <div class="row">
+        <dt>不需要检出的合并</dt>
+        <dd><code>merge-tree --write-tree</code> 合并两个 commit 并写出一个 tree；<code>commit-tree</code> 把它变成 commit；这个 commit 就是下一次合并的左边。整个过程不碰任何 worktree 或索引，所以也就不可能把哪个目录卡在合并到一半的状态 —— 这正是它可以无人值守运行的原因。在真实检出里跑 <code>git merge</code> 就不行：一旦冲突，那个目录就一直处于冲突状态，直到有人来收拾。</dd>
+      </div>
+      <div class="row">
+        <dt>冲突也是一种结果</dt>
+        <dd>而不是一个中止整轮的失败。撞上的那个 worktree 会被丢掉，并连同它冲突的路径一起报告出来；其余的照常集成，所以你手上仍然有一份能构建、能测试的东西。各个来源按稳定的顺序应用，所以同一支舰队跑两遍，报告是一样的。</dd>
+      </div>
+      <div class="row">
+        <dt>刻意保持游离</dt>
+        <dd>这个检出不落在任何分支上。分支意味着要管的东西 —— 一个要重置的名字、一个可推送的对象，以及 <code>git branch -a</code> 里的一条记录，而新建分支对话框正是从那里取候选基线的。从<em>那个</em>开一个 worktree，你就继承了一份大家工作混在一起、只测了一半的东西。保持游离，就没有 ref 可选。</dd>
+      </div>
+      <div class="row">
+        <dt>唯一不可逆的一步，永远不自动</dt>
+        <dd>发布只是一次 <code>reset --hard</code>，目标是一个<em>已经合并好</em>的 commit，所以它不会做到一半失败，也不会留下一个冲突状态的检出。但 <code>reset --hard</code> 会丢掉任何未提交的内容 —— 所以如果你一直在集成检出里改文件，这一轮会把 commit 造好、挂起、然后来问你。那唯一具有破坏性的一刻，永远需要一个人点头。</dd>
+      </div>
+    </dl>
+
+    <div class="lift">
+      <div>
+        <h3>比对 tree，而不是 commit</h3>
+        <p><code>commit-tree</code> 会打上时间戳，所以一支没有任何变化的舰队，一小时后重新构建会得到一个<em>不同</em>的 commit，而里面的文件一模一样。拿 commit 去比，每一轮看起来都像有改动，检出就被白白重置一次。真正的变更依据是 tree。</p>
+      </div>
+      <div>
+        <h3>一轮进行中的 worktree 只交 HEAD</h3>
+        <p>触发这一轮的是某一个 agent 结束，但这一轮要把所有人都叠进来 —— 而其他人可能正写到一半：半个文件、半个重命名。这些 worktree 交出的是它们最后一个自洽的状态，而不是一个撕裂的状态 —— 后者失败的样子会很像一次真实冲突。等它们自己那一轮结束时，会完整地进来。</p>
+      </div>
+      <div>
+        <h3>触发条件是一次状态跳变</h3>
+        <p>一个 agent 离开 <code>Running</code> —— 和驱动状态点的是同一个跳变 —— 意味着一段工作到了一个歇脚点。两秒内接连结束的多个 agent 会合并成一轮，而不是各触发一轮。</p>
+      </div>
+      <div>
+        <h3>以“存在”作为开关</h3>
+        <p>只有已经存在集成检出的仓库才会被碰。跑一次 <code>/integrate</code> 就是这个仓库的加入动作；没有任何东西会自作主张建目录，所以打开这个功能不会在你磁盘上凭空多出状态来。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+    <footer>
+      <div class="cmd" style="max-width:max-content"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
+      <div class="foot-links">
+        <a class="linkout" href="https://github.com/BetaYao/seahelm">源码与发布</a>
+        <a class="linkout" href="https://youtu.be/WUUcuglx_Ks">观看演示</a>
+        <a class="linkout" href="https://github.com/BetaYao/seahelm/blob/main/CLAUDE.md">架构笔记</a>
+      </div>
+      <p class="foot-meta">
+        Seahelm &mdash; sea + helm，海与舵。需要 macOS 14.0 Sonoma 或更高版本，支持 Apple silicon 与 Intel。<br>
+        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; zmx &middot; 247 个 Swift 文件，分四层。
+      </p>
+    </footer>
+  </div>
+</section>
+<script>
+// The poster is a plain link until it is clicked, so the page fetches nothing
+// from youtube.com on load. Modified clicks (new tab, etc.) fall through to the
+// href, and with JS off the link simply opens the video.
+var loop = document.getElementById('loop');
+if (loop && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Not autoplay= in the markup: that would download and move before we get a
+  // say. Reduced-motion visitors keep the poster frame and never fetch the mp4.
+  loop.preload = 'auto';
+  var go = loop.play();
+  if (go && go.catch) go.catch(function () {});
+}
+
+document.addEventListener('click', function (e) {
+  var face = e.target.closest && e.target.closest('.face');
+  if (!face || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  var frame = document.createElement('iframe');
+  frame.src = 'https://www.youtube-nocookie.com/embed/WUUcuglx_Ks?autoplay=1&rel=0&modestbranding=1';
+  frame.title = 'Seahelm 演示';
+  frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  frame.allowFullscreen = true;
+  document.getElementById('player').replaceChildren(frame);
+});
+</script>
+</body>
+</html>

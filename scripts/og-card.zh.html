@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- Source for site/og.zh.png. Regenerate with: scripts/build-og.sh -->
+<html lang="zh-Hans"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400&display=swap">
+<style>
+  :root{ --ink:#d8e8e8; --ink2:#8fb0b3; --accent:#1fc8da;
+         --run:#1bb062; --wait:#e0a458; --idle:#5d7b7a; }
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{
+    width:1200px; height:630px; overflow:hidden;
+    background-color:#08222a; color:var(--ink);
+    background-image:
+      repeating-linear-gradient(to right,  rgba(31,200,218,.055) 0 1px, transparent 1px 56px),
+      repeating-linear-gradient(to bottom, rgba(31,200,218,.055) 0 1px, transparent 1px 56px);
+    font-family:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;
+    padding:64px 72px; display:flex; flex-direction:column;
+  }
+  .top{display:flex;align-items:center;gap:18px}
+  .top svg{width:60px;height:60px;color:var(--ink)}
+  .mark{font:700 40px/1 "IBM Plex Sans Condensed","PingFang SC",sans-serif;letter-spacing:-.01em}
+  .eyebrow{margin-left:auto;font:500 15px/1 "IBM Plex Mono",monospace;
+           letter-spacing:.16em;text-transform:uppercase;color:var(--ink2)}
+  h1{margin:46px 0 0;font:700 76px/1.2 "IBM Plex Sans Condensed","PingFang SC",sans-serif;
+     letter-spacing:0;max-width:15em}
+  .sub{margin:26px 0 0;font-size:23px;line-height:1.75;color:var(--ink2);max-width:30em}
+  .strip{margin-top:auto;display:flex;gap:14px;align-items:stretch}
+  .card{flex:1;border:1px solid #1e5563;border-radius:9px;background:#0d2b34;
+        padding:15px 17px;display:grid;gap:7px;align-content:start}
+  .b{font:500 18px/1.2 "IBM Plex Mono",monospace}
+  .p{font:400 16px/1.2 "IBM Plex Mono",monospace;color:var(--ink2)}
+  .dom{margin-left:auto;align-self:flex-end;font:500 22px/1 "IBM Plex Mono",monospace;
+       color:var(--accent);white-space:nowrap;padding-bottom:4px}
+</style></head><body>
+  <div class="top">
+    <svg viewBox="0 0 100 100"><defs><clipPath id="h"><circle cx="50" cy="50" r="16"/></clipPath></defs>
+      <g stroke="currentColor" fill="none" stroke-width="3.4" stroke-linecap="round">
+        <circle cx="50" cy="50" r="30"/><line x1="50" y1="14" x2="50" y2="86"/>
+        <line x1="14" y1="50" x2="86" y2="50"/><line x1="24.5" y1="24.5" x2="75.5" y2="75.5"/>
+        <line x1="75.5" y1="24.5" x2="24.5" y2="75.5"/></g>
+      <g fill="currentColor"><circle cx="50" cy="13" r="3.2"/><circle cx="50" cy="87" r="3.2"/>
+        <circle cx="13" cy="50" r="3.2"/><circle cx="87" cy="50" r="3.2"/>
+        <circle cx="23.8" cy="23.8" r="3.2"/><circle cx="76.2" cy="76.2" r="3.2"/>
+        <circle cx="76.2" cy="23.8" r="3.2"/><circle cx="23.8" cy="76.2" r="3.2"/></g>
+      <g clip-path="url(#h)">
+        <path d="M34 34 H66 V66 H34 Z" fill="#101f8f"/>
+        <path d="M34 34 H66 V57 C58 61, 46 52, 34 56 Z" fill="#2f6fe0"/>
+        <path d="M34 34 H66 V49 C58 53, 46 44, 34 48 Z" fill="#22d3ee"/>
+        <path d="M34 34 H66 V44 C58 48, 46 40, 34 43 Z" fill="#12925a"/>
+        <path d="M34 34 H66 V40 C58 44, 46 36, 34 39 Z" fill="#f4571f"/>
+        <path d="M34 34 H66 V36 C58 40, 46 33, 34 35 Z" fill="#e03131"/></g>
+      <circle cx="50" cy="50" r="17.4" fill="none" stroke="#08222a" stroke-width="2.6"/></svg>
+    <span class="mark">Seahelm</span>
+    <span class="eyebrow">原生 macOS &middot; 12 种 coding agent</span>
+  </div>
+
+  <h1>一个窗口，管住所有在跑的 agent。</h1>
+  <p class="sub">一个仓库是一个 tab，一个 git worktree 是一张卡片，一个 split pane 就是一个 agent &mdash;&mdash;
+     跑在 Ghostty 引擎上，由 zmx 保持会话。</p>
+
+  <div class="strip">
+    <div class="card"><div class="b">main</div>
+      <div class="p"><span style="color:var(--idle)">&#9675;</span> claude &middot; 空闲</div></div>
+    <div class="card"><div class="b">feat/island-usage</div>
+      <div class="p"><span style="color:var(--run)">&#9686;</span> codex &middot; 运行中</div></div>
+    <div class="card"><div class="b">fix/zmx-recovery</div>
+      <div class="p"><span style="color:var(--wait)">&#9679;</span> claude &middot; 待输入</div></div>
+    <div class="dom">seahelm.dev/zh</div>
+  </div>
+</body></html>

@@ -2,7 +2,7 @@
 
 A native macOS workspace for coding agents, git worktrees, and parallel development.
 
-[中文文档](README.zh-CN.md)
+[中文文档](README.zh-CN.md) · [www.seahelm.dev](https://www.seahelm.dev/)
 
 ## Demo
 

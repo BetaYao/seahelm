@@ -2,7 +2,7 @@
 
 一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。
 
-[English](README.md)
+[English](README.md) · [网站](https://www.seahelm.dev/zh/)
 
 ## Demo
 
