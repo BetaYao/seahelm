@@ -87,7 +87,7 @@ final class IntegrationWorktreeTests: XCTestCase {
         XCTAssertTrue(IntegrationWorktree.hasLocalEdits(at: path))
         XCTAssertEqual(
             IntegrationWorktree.publish(commit: target, to: path),
-            .held(reason: .dirtyWorktree, commit: target)
+            .held(reason: .dirtyWorktree(paths: ["base.txt"]), commit: target)
         )
         XCTAssertEqual(gitOutput(["rev-parse", "HEAD"], in: path), headBefore, "a hold must not move HEAD")
         XCTAssertEqual(try String(contentsOfFile: path + "/base.txt", encoding: .utf8), "hand edit\n")
@@ -109,7 +109,7 @@ final class IntegrationWorktreeTests: XCTestCase {
         let target = gitOutput(["rev-parse", "agentA"], in: repo)
         XCTAssertEqual(
             IntegrationWorktree.publish(commit: target, to: path),
-            .held(reason: .dirtyWorktree, commit: target)
+            .held(reason: .dirtyWorktree(paths: ["scratch.txt"]), commit: target)
         )
     }
 
@@ -279,4 +279,224 @@ final class IntegrationWorktreeTests: XCTestCase {
     }
 
     private func runGit(_ args: [String], in directory: String) { gitOutput(args, in: directory) }
+
+    // MARK: - reset to trunk
+
+    func testResetTargetPrefersOriginMainOverLocalMain() throws {
+        let repo = try makeFleet()
+        XCTAssertEqual(IntegrationWorktree.resetTarget(repoPath: repo, fetch: false)?.ref, "main")
+
+        runGit(["update-ref", "refs/remotes/origin/main", "main"], in: repo)
+        let target = IntegrationWorktree.resetTarget(repoPath: repo, fetch: false)
+        XCTAssertEqual(target?.ref, "origin/main")
+        XCTAssertEqual(target?.commit, gitOutput(["rev-parse", "main"], in: repo))
+    }
+
+    /// The row's Reset: a checkout full of seahelm's own rounds goes straight
+    /// back to trunk — HEAD *is* trunk afterwards, not merely the same files.
+    func testResetMovesACheckoutSeahelmPublishedBackOntoTrunk() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let round = gitOutput(["rev-parse", "agentA"], in: repo)
+        XCTAssertEqual(IntegrationWorktree.publish(commit: round, to: path), .published(commit: round))
+
+        // Trunk moves on underneath.
+        try "trunk moved\n".write(toFile: repo + "/base.txt", atomically: true, encoding: .utf8)
+        commitAll(repo, "trunk moves")
+        runGit(["update-ref", "refs/remotes/origin/main", "main"], in: repo)
+        let target = try XCTUnwrap(IntegrationWorktree.resetTarget(repoPath: repo, fetch: false))
+
+        let outcome = IntegrationWorktree.reset(to: target, at: path, expectedHead: round)
+
+        XCTAssertEqual(outcome, .published(commit: target.commit))
+        XCTAssertEqual(gitOutput(["rev-parse", "HEAD"], in: path), gitOutput(["rev-parse", "main"], in: repo))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path + "/a.txt"), "the round's files are gone")
+    }
+
+    func testResetOfACheckoutAlreadyOnTrunkIsANoop() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let target = try XCTUnwrap(IntegrationWorktree.resetTarget(repoPath: repo, fetch: false))
+
+        XCTAssertEqual(IntegrationWorktree.reset(to: target, at: path), .unchanged(commit: target.commit))
+    }
+
+    /// Same rule as publish: a reset is the one irreversible step, and it does
+    /// not walk over edits made here without being told to.
+    func testResetHoldsOnLocalEditsUntilForced() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        try "hand edit\n".write(toFile: path + "/base.txt", atomically: true, encoding: .utf8)
+        let target = try XCTUnwrap(IntegrationWorktree.resetTarget(repoPath: repo, fetch: false))
+
+        XCTAssertEqual(
+            IntegrationWorktree.reset(to: target, at: path),
+            .held(reason: .dirtyWorktree(paths: ["base.txt"]), commit: target.commit)
+        )
+        XCTAssertEqual(IntegrationWorktree.reset(to: target, at: path, force: true), .published(commit: target.commit))
+        XCTAssertEqual(try String(contentsOfFile: path + "/base.txt"), "base\n")
+    }
+
+    func testResetHoldsOnACommitMadeInTheCheckout() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let created = gitOutput(["rev-parse", "HEAD"], in: path)
+        try "resolved by hand\n".write(toFile: path + "/shared.txt", atomically: true, encoding: .utf8)
+        commitAll(path, "hand-resolved")
+        let byHand = gitOutput(["rev-parse", "HEAD"], in: path)
+        let target = try XCTUnwrap(IntegrationWorktree.resetTarget(repoPath: repo, fetch: false))
+
+        XCTAssertEqual(
+            IntegrationWorktree.reset(to: target, at: path, expectedHead: created),
+            .held(reason: .movedHead(head: byHand), commit: target.commit)
+        )
+    }
+
+    // MARK: - delete assessment
+
+    /// A checkout sitting where seahelm left it is throwaway: it deletes
+    /// without a sheet, and never takes a branch with it (there is none).
+    func testDeletingAnUntouchedCheckoutIsSafe() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let round = gitOutput(["rev-parse", "agentA"], in: repo)
+        XCTAssertEqual(IntegrationWorktree.publish(commit: round, to: path), .published(commit: round))
+
+        let assessment = IntegrationWorktree.assessDeletion(path: path, repoPath: repo, expectedHead: round)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+        XCTAssertFalse(assessment.deletesBranch)
+    }
+
+    func testDeletingACheckoutWithHandEditsNamesThem() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        try "hand edit\n".write(toFile: path + "/base.txt", atomically: true, encoding: .utf8)
+
+        let assessment = IntegrationWorktree.assessDeletion(path: path, repoPath: repo, expectedHead: nil)
+
+        XCTAssertEqual(assessment.losses, [IntegrationHoldReason.dirtyWorktree(paths: ["base.txt"]).lossDescription])
+        XCTAssertTrue(assessment.losses[0].contains("base.txt"))
+    }
+
+    // MARK: - work that arrived by hand
+
+    /// The hole the dirty check cannot see: committing in the checkout leaves it
+    /// clean, so `reset --hard` used to walk straight over it. A hand-resolved
+    /// conflict is exactly the work that lands this way.
+    func testACommitMadeInTheCheckoutHoldsThePublish() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let published = gitOutput(["rev-parse", "HEAD"], in: path)
+
+        try "resolved by hand\n".write(toFile: path + "/shared.txt", atomically: true, encoding: .utf8)
+        runGit(["add", "-A"], in: path)
+        runGit(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "hand resolve"], in: path)
+        let handMade = gitOutput(["rev-parse", "HEAD"], in: path)
+        XCTAssertFalse(IntegrationWorktree.hasLocalEdits(at: path), "a commit leaves the checkout clean")
+
+        let target = gitOutput(["rev-parse", "agentA"], in: repo)
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: target, to: path, expectedHead: published),
+            .held(reason: .movedHead(head: handMade), commit: target)
+        )
+        XCTAssertEqual(gitOutput(["rev-parse", "HEAD"], in: path), handMade, "a hold must not move HEAD")
+
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: target, to: path, force: true, expectedHead: published),
+            .published(commit: target)
+        )
+    }
+
+    /// The case that matters on the first launch after an upgrade: a checkout
+    /// carrying a hand-made merge has no recorded head to compare against, and
+    /// waiting a round to learn one would be a round too late. The commit's own
+    /// identity answers instead — seahelm's rounds are committed as seahelm.
+    func testAHandMergeHoldsEvenWithNothingRecorded() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        runGit(["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-ff", "-m", "hand merge", "agentA"],
+               in: path)
+        let handMade = gitOutput(["rev-parse", "HEAD"], in: path)
+
+        let target = gitOutput(["rev-parse", "agentD"], in: repo)
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: target, to: path, expectedHead: nil, base: "main"),
+            .held(reason: .movedHead(head: handMade), commit: target)
+        )
+    }
+
+    /// The counterpart: a checkout still sitting where it was created holds
+    /// nothing of its own, so it must not hold just because trunk's tip is a
+    /// commit some human authored.
+    func testACheckoutStillAtTrunkPublishesWithNothingRecorded() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let target = gitOutput(["rev-parse", "agentA"], in: repo)
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: target, to: path, expectedHead: nil, base: "main"),
+            .published(commit: target)
+        )
+    }
+
+    /// With neither a recorded head nor a base there is nothing to reason from,
+    /// and a guard that guesses is worse than no guard.
+    func testNoRecordedHeadMeansNoMovedHeadHold() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let target = gitOutput(["rev-parse", "agentA"], in: repo)
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: target, to: path, expectedHead: nil),
+            .published(commit: target)
+        )
+    }
+
+    /// Same files, different commit: there is no reset to hold back, so a stray
+    /// commit that changed nothing must not freeze the checkout forever.
+    func testAMovedHeadWithTheSameTreeIsStillANoop() throws {
+        let repo = try makeFleet()
+        let path = tempDir.appendingPathComponent("integration").path
+        try IntegrationWorktree.create(repoPath: repo, at: path, base: "main")
+        let published = gitOutput(["rev-parse", "HEAD"], in: path)
+        runGit(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "empty"], in: path)
+
+        XCTAssertEqual(
+            IntegrationWorktree.publish(commit: published, to: path, expectedHead: published),
+            .unchanged(commit: published)
+        )
+    }
+
+    /// A checkout this round created is its own provenance — the first publish
+    /// into a brand new checkout must not hold on a head seahelm just wrote.
+    func testFirstRoundIntoAFreshCheckoutPublishes() throws {
+        let repo = try makeFleet()
+        let worktrees = try addWorktrees(["agentA"], in: repo)
+        let path = tempDir.appendingPathComponent("integration").path
+
+        let report = try IntegrationRunner.run(repoPath: repo, integrationPath: path, worktrees: worktrees)
+        XCTAssertEqual(report.outcome, .published(commit: report.result.commit))
+    }
+
+    // MARK: - status parsing
+
+    /// A rename appends its origin as a field of its own; reading that as
+    /// another entry would list a file that is not in the way at all.
+    func testStatusParsingSkipsRenameOrigins() {
+        let raw = "R  new.txt\0old.txt\0 M other.txt\0?? scratch.txt\0"
+        XCTAssertEqual(
+            IntegrationWorktree.parseStatusPaths(raw),
+            ["new.txt", "other.txt", "scratch.txt"]
+        )
+    }
+
 }

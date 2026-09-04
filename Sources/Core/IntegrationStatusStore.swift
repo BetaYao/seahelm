@@ -14,12 +14,31 @@ struct IntegrationPanelState: Codable, Equatable {
     var excluded: [Excluded]
     /// Paths carrying conflict markers, when the round kept conflicting sources.
     var conflictedPaths: [String]
-    /// The result was built but not checked out — local edits in the checkout.
+    /// The result was built but not checked out — something in the checkout
+    /// would have been destroyed by the reset.
     var isHeld: Bool
+    /// What was in the way. Optional so state written before this existed still
+    /// decodes — a card that falls back to the raw JSON reads far worse than a
+    /// card missing one line.
+    var heldPaths: [String]?
+    /// Set instead of `heldPaths` when the hold was a commit made in the
+    /// checkout rather than an uncommitted edit.
+    var heldHead: String?
 
     struct Excluded: Codable, Equatable {
         var label: String
         var paths: [String]
+    }
+
+    init(line: String, included: [String], excluded: [Excluded], conflictedPaths: [String],
+         isHeld: Bool, heldPaths: [String]? = nil, heldHead: String? = nil) {
+        self.line = line
+        self.included = included
+        self.excluded = excluded
+        self.conflictedPaths = conflictedPaths
+        self.isHeld = isHeld
+        self.heldPaths = heldPaths
+        self.heldHead = heldHead
     }
 }
 

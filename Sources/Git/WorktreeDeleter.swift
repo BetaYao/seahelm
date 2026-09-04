@@ -25,6 +25,25 @@ struct WorktreeMergeCheck: Equatable {
     let targetBranch: String?
 }
 
+/// What deleting a worktree would destroy, decided before anything is touched.
+///
+/// The row's Delete reads this to choose between deleting outright and asking
+/// first. A checkout with nothing of its own — clean, every commit already on
+/// trunk or its upstream — is just disk space, and a sheet in front of that is
+/// ceremony that teaches people to click through it, which is the one habit
+/// the sheet exists to prevent. So the sheet appears only when `losses` has
+/// something to say, and it says exactly that.
+struct WorktreeDeleteAssessment: Equatable {
+    /// One line per thing the delete would destroy. Empty means nothing would.
+    var losses: [String]
+    /// Whether the branch goes with the worktree. False for a detached
+    /// checkout (nothing to delete) and for a branch that is a trunk itself —
+    /// a worktree on `main` is removable, `main` is not.
+    var deletesBranch: Bool
+
+    var isSafe: Bool { losses.isEmpty }
+}
+
 struct WorktreeCleanupSummary: Equatable {
     struct Skipped: Equatable {
         let path: String
@@ -47,12 +66,18 @@ enum WorktreeDeleter {
     ///   - repoPath: Root repo path (for running git commands)
     ///   - deleteBranch: If true, also deletes the local branch
     ///   - force: If true, uses --force for dirty worktrees
+    ///   - forceBranch: `-D` rather than `-d` for the branch. Defaults to
+    ///     `force`. A caller that has already established the branch's commits
+    ///     are on trunk (`assessDeletion`) passes true: git's own `-d` check
+    ///     only looks at the upstream, so a branch merged through a PR but
+    ///     with unpushed commits would be kept for no reason.
     static func deleteWorktree(
         worktreePath: String,
         repoPath: String,
         branchName: String,
         deleteBranch: Bool = false,
-        force: Bool = false
+        force: Bool = false,
+        forceBranch: Bool? = nil
     ) throws -> WorktreeDeleteResult {
         // Don't allow deleting the main worktree.
         // Use the first entry from `git worktree list` which is always the main worktree.
@@ -86,11 +111,12 @@ enum WorktreeDeleter {
 
         // Optionally delete the branch
         var branchWarning: String?
-        if deleteBranch {
-            let flag = force ? "-D" : "-d"
+        if deleteBranch, !branchName.isEmpty {
+            let forced = forceBranch ?? force
+            let flag = forced ? "-D" : "-d"
             let (branchOk, branchErr) = runGitWithStderr(args: ["branch", flag, branchName], in: repoPath)
             if !branchOk {
-                branchWarning = classifyBranchDeleteError(branchErr, branch: branchName, forced: force)
+                branchWarning = classifyBranchDeleteError(branchErr, branch: branchName, forced: forced)
                 NSLog("Warning: worktree removed but branch delete failed: \(branchWarning ?? branchErr)")
             }
         }
@@ -101,6 +127,88 @@ enum WorktreeDeleter {
     static func hasUncommittedChanges(worktreePath: String) -> Bool {
         let output = runGit(args: ["status", "--porcelain"], in: worktreePath) ?? ""
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // MARK: - Delete assessment
+
+    static func assessDeletion(worktreePath: String, repoPath: String, branchName: String) -> WorktreeDeleteAssessment {
+        assessDeletion(
+            worktreePath: worktreePath,
+            repoPath: repoPath,
+            branchName: branchName,
+            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath)
+        )
+    }
+
+    /// Seam for tests, so they can name the base without writing to the
+    /// user's store. Local only — no fetch, so it answers in well under a
+    /// second and the same offline. What it cannot see is a branch merged on
+    /// the server since the last fetch; that one asks, and the answer is yes.
+    static func assessDeletion(
+        worktreePath: String,
+        repoPath: String,
+        branchName: String,
+        recordedBase: String?
+    ) -> WorktreeDeleteAssessment {
+        var losses: [String] = []
+        if hasUncommittedChanges(worktreePath: worktreePath) {
+            losses.append("It has uncommitted changes that will be lost.")
+        }
+
+        let trunk = GitDiff.resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase)
+        let branchIsTrunk = !branchName.isEmpty
+            && (isTrunkName(branchName) || trunk.map { sameBranch($0, branchName) } == true)
+        let deletesBranch = !branchName.isEmpty && !branchIsTrunk
+
+        switch unpublishedCommitCount(worktreePath: worktreePath, trunk: trunk) {
+        case .some(0):
+            break
+        case .some(let count):
+            // `trunk` is non-nil whenever a count is: the count is measured
+            // against it.
+            let subject = branchName.isEmpty ? "It has" : "Branch \u{201C}\(branchName)\u{201D} has"
+            var line = "\(subject) \(count) commit\(count == 1 ? "" : "s") not in \(trunk ?? "trunk") and not pushed"
+            line += deletesBranch ? "; the branch will be deleted with them." : "."
+            losses.append(line)
+        case .none:
+            losses.append("Seahelm could not check whether its commits are merged anywhere.")
+        }
+        return WorktreeDeleteAssessment(losses: losses, deletesBranch: deletesBranch)
+    }
+
+    /// Commits reachable from the worktree's HEAD that are on neither `trunk`
+    /// nor the branch's upstream — what deleting the branch would lose.
+    /// Patch-equivalent commits count as present, so a branch rebased onto
+    /// trunk reads as merged; a squash merge does not, and asks.
+    /// Nil when there is no trunk to measure against.
+    static func unpublishedCommitCount(worktreePath: String, trunk: String?) -> Int? {
+        var refs: [String] = []
+        if let trunk { refs.append(trunk) }
+        if let upstream = runGit(args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], in: worktreePath)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !upstream.isEmpty {
+            refs.append(upstream)
+        }
+        for ref in refs where runGitFull(args: ["merge-base", "--is-ancestor", "HEAD", ref], in: worktreePath).success {
+            return 0
+        }
+        guard let trunk,
+              let output = runGit(
+                args: ["rev-list", "--count", "--cherry-pick", "--right-only", "--no-merges", "\(trunk)...HEAD"],
+                in: worktreePath
+              ),
+              let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return count
+    }
+
+    private static func isTrunkName(_ branch: String) -> Bool {
+        GitDiff.preferredBaseRefs.contains { sameBranch($0, branch) }
+    }
+
+    /// `origin/main` and `main` name the same branch for the purpose of "is
+    /// this worktree sitting on trunk".
+    private static func sameBranch(_ ref: String, _ branch: String) -> Bool {
+        let stripped = ref.hasPrefix("origin/") ? String(ref.dropFirst("origin/".count)) : ref
+        return stripped == branch
     }
 
     /// Checks whether a linked worktree's committed code is already contained

@@ -36,8 +36,10 @@ struct IntegrationRunReport: Equatable {
             // and raising one every round would be pure noise.
             line += " · \(committedOnly.count) still working"
         }
-        if case .held = outcome {
-            line += " · pending"
+        switch outcome {
+        case .held(.dirtyWorktree, _): line += " · held · local edits"
+        case .held(.movedHead, _): line += " · held · commits made here"
+        case .published, .unchanged, .failed: break
         }
         return line
     }
@@ -46,7 +48,15 @@ struct IntegrationRunReport: Equatable {
     /// round, so they cannot disagree about it.
     var panelState: IntegrationPanelState {
         var held = false
-        if case .held = outcome { held = true }
+        var heldPaths: [String]?
+        var heldHead: String?
+        if case .held(let reason, _) = outcome {
+            held = true
+            switch reason {
+            case .dirtyWorktree(let paths): heldPaths = paths
+            case .movedHead(let head): heldHead = head
+            }
+        }
         return IntegrationPanelState(
             line: cardLine,
             included: result.included,
@@ -54,9 +64,34 @@ struct IntegrationRunReport: Equatable {
                 IntegrationPanelState.Excluded(label: $0.label, paths: $0.conflictingPaths)
             },
             conflictedPaths: result.conflictedPaths,
-            isHeld: held
+            isHeld: held,
+            heldPaths: heldPaths,
+            heldHead: heldHead
         )
     }
+
+    /// Whether the hold is one `force` would clear. Drives the card's options:
+    /// offering to discard is only honest when there is something to discard.
+    var isHeld: Bool {
+        if case .held = outcome { return true }
+        return false
+    }
+
+    /// Buttons for the report card. A held round is the only one with something
+    /// to decide — publishing would destroy what is in the checkout — and the
+    /// label has to name what goes, because that is the whole decision.
+    /// Everything else is a notice, and takes the default single button.
+    var cardOptions: [String]? {
+        switch outcome {
+        case .held(.dirtyWorktree, _): return ["Discard edits & update", "Leave it"]
+        case .held(.movedHead, _): return ["Discard commits & update", "Leave it"]
+        case .published, .unchanged, .failed: return nil
+        }
+    }
+
+    /// Whether a card option means "run it again with force". Matched on the
+    /// prefix the two discard labels share, so the wording stays free to change.
+    static func isDiscardOption(_ text: String) -> Bool { text.hasPrefix("Discard") }
 
     /// One line for a notification or the helm.
     var summary: String {
@@ -83,11 +118,24 @@ struct IntegrationRunReport: Equatable {
         switch outcome {
         case .published: break
         case .unchanged: parts.append("already current")
-        case .held(.dirtyWorktree, _):
-            parts.append("not checked out — local edits in the integration worktree; `/integrate force` to discard them")
+        case .held(.dirtyWorktree(let paths), _):
+            parts.append(
+                "not checked out — local edits in the integration worktree"
+                    + Self.pathList(paths)
+                    + "; `/integrate force` to discard them"
+            )
+        case .held(.movedHead(let head), _):
+            parts.append(
+                "not checked out — the checkout is at \(head.prefix(9)), which seahelm did not put there;"
+                    + " commit or move that work somewhere it will survive, or `/integrate force` to drop it"
+            )
         case .failed(let message): parts.append("checkout failed: \(message)")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private static func pathList(_ paths: [String], limit: Int = 4) -> String {
+        IntegrationWorktree.pathList(paths, limit: limit)
     }
 }
 
@@ -140,15 +188,22 @@ enum IntegrationRunner {
         worktrees: [WorktreeInfo],
         mode: IntegrationConflictMode = .excludeConflicting,
         force: Bool = false,
+        lastPublished: String? = nil,
         isBusy: (String) -> Bool = { _ in false }
     ) throws -> IntegrationRunReport {
         guard let base = GitDiff.resolveBaseRef(worktreePath: repoPath) else {
             throw IntegrationRunError.noBaseRef
         }
 
+        var createdHead: String?
         if !FileManager.default.fileExists(atPath: integrationPath) {
             do {
                 try IntegrationWorktree.create(repoPath: repoPath, at: integrationPath, base: base)
+                createdHead = GitProcess.run(
+                    ["rev-parse", "--verify", "--quiet", "HEAD"],
+                    in: integrationPath,
+                    timeout: IntegrationWorktree.timeout
+                )?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             } catch {
                 throw IntegrationRunError.worktreeUnavailable(error.localizedDescription)
             }
@@ -192,7 +247,16 @@ enum IntegrationRunner {
             throw IntegrationRunError.noBaseRef
         }
 
-        let outcome = IntegrationWorktree.publish(commit: result.commit, to: integrationPath, force: force)
+        let outcome = IntegrationWorktree.publish(
+            commit: result.commit,
+            to: integrationPath,
+            force: force,
+            // A checkout this round just created is at `base` and nothing else,
+            // so it is its own provenance — without this the very first round
+            // into a new checkout would hold on a head it wrote itself.
+            expectedHead: lastPublished ?? createdHead,
+            base: base
+        )
         return IntegrationRunReport(
             integrationWorktreePath: integrationPath,
             result: result,
@@ -201,4 +265,8 @@ enum IntegrationRunner {
             committedOnly: partial
         )
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

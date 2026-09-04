@@ -160,6 +160,133 @@ final class WorktreeDeleterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktreePath))
     }
 
+    // MARK: - delete assessment
+
+    /// Nothing of its own: clean, and every commit already on trunk. That is
+    /// the case that must not get a sheet.
+    func testAssessmentIsSafeForACleanMergedWorktree() throws {
+        let worktreePath = createWorktree(branch: "feature-safe")
+        try commitFile("safe.txt", in: worktreePath)
+        git(["merge", "--ff-only", "feature-safe"], in: repoPath)
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-safe", recordedBase: nil)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+        XCTAssertTrue(assessment.deletesBranch)
+    }
+
+    func testAssessmentCountsCommitsThatAreNowhereElse() throws {
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+        let worktreePath = createWorktree(branch: "feature-unpublished")
+        try commitFile("one.txt", in: worktreePath)
+        try commitFile("two.txt", in: worktreePath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-unpublished", recordedBase: nil)
+
+        XCTAssertFalse(assessment.isSafe)
+        XCTAssertTrue(assessment.deletesBranch)
+        XCTAssertEqual(assessment.losses.count, 1)
+        XCTAssertTrue(assessment.losses[0].contains("2 commits not in origin/main"), assessment.losses[0])
+        XCTAssertTrue(assessment.losses[0].contains("branch will be deleted"), assessment.losses[0])
+    }
+
+    func testAssessmentNamesUncommittedChanges() throws {
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+        let worktreePath = createWorktree(branch: "feature-dirty")
+        try "wip".write(toFile: worktreePath + "/wip.txt", atomically: true, encoding: .utf8)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-dirty", recordedBase: nil)
+
+        XCTAssertEqual(assessment.losses, ["It has uncommitted changes that will be lost."])
+    }
+
+    /// Pushed but unmerged: the remote still has every commit, so deleting
+    /// the local branch loses nothing.
+    func testAssessmentTreatsAFullyPushedBranchAsSafe() throws {
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+        let worktreePath = createWorktree(branch: "feature-pushed")
+        try commitFile("pushed.txt", in: worktreePath)
+        // `@{upstream}` needs the remote's fetch refspec to map the branch to
+        // its tracking ref; the URL is never contacted.
+        git(["remote", "add", "origin", repoPath], in: repoPath)
+        git(["update-ref", "refs/remotes/origin/feature-pushed", "feature-pushed"], in: repoPath)
+        git(["config", "branch.feature-pushed.remote", "origin"], in: repoPath)
+        git(["config", "branch.feature-pushed.merge", "refs/heads/feature-pushed"], in: repoPath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-pushed", recordedBase: nil)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+    }
+
+    /// A rebase rewrites hashes but not patches. The branch is merged in every
+    /// sense that matters, and must read that way.
+    func testAssessmentSeesARebasedBranchAsMerged() throws {
+        let worktreePath = createWorktree(branch: "feature-rebased")
+        try commitFile("rebased.txt", in: worktreePath)
+        // Land the same patch on main under a different hash.
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "cherry-pick", "feature-rebased"], in: repoPath)
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-rebased", recordedBase: nil)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+    }
+
+    /// A worktree checked out on trunk is removable; trunk is not.
+    func testAssessmentKeepsATrunkBranch() throws {
+        git(["checkout", "-b", "elsewhere"], in: repoPath)
+        let worktreePath = tempDir.appendingPathComponent("worktrees/on-main").path
+        git(["worktree", "add", worktreePath, "main"], in: repoPath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "main", recordedBase: nil)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+        XCTAssertFalse(assessment.deletesBranch)
+    }
+
+    func testAssessmentOfADetachedWorktreeDeletesNoBranch() throws {
+        let worktreePath = tempDir.appendingPathComponent("worktrees/detached").path
+        git(["worktree", "add", "--detach", worktreePath, "main"], in: repoPath)
+
+        let assessment = WorktreeDeleter.assessDeletion(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "", recordedBase: nil)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+        XCTAssertFalse(assessment.deletesBranch)
+    }
+
+    /// The assessment already established the commits are on trunk, so the
+    /// branch must go even where git's own `-d` check (upstream only) would
+    /// refuse: merged through a PR with an unpushed commit still on it.
+    func testForcedBranchDeleteIgnoresAStaleUpstream() throws {
+        let worktreePath = createWorktree(branch: "feature-stale-upstream")
+        git(["update-ref", "refs/remotes/origin/feature-stale-upstream", "feature-stale-upstream"], in: repoPath)
+        git(["config", "branch.feature-stale-upstream.remote", "origin"], in: repoPath)
+        git(["config", "branch.feature-stale-upstream.merge", "refs/heads/feature-stale-upstream"], in: repoPath)
+        try commitFile("late.txt", in: worktreePath)
+        git(["merge", "--ff-only", "feature-stale-upstream"], in: repoPath)
+
+        let result = try WorktreeDeleter.deleteWorktree(
+            worktreePath: worktreePath, repoPath: repoPath, branchName: "feature-stale-upstream",
+            deleteBranch: true, force: false, forceBranch: true)
+
+        XCTAssertNil(result.branchWarning)
+        XCTAssertFalse(git(["branch", "--list", "feature-stale-upstream"], in: repoPath).contains("feature-stale-upstream"))
+    }
+
+    private func commitFile(_ name: String, in worktreePath: String) throws {
+        try name.write(toFile: worktreePath + "/" + name, atomically: true, encoding: .utf8)
+        git(["add", name], in: worktreePath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "add \(name)"], in: worktreePath)
+    }
+
     // MARK: - merge check
 
     func testMergedWorktreeCanBeCleanedWhenHeadIsInOriginMain() throws {

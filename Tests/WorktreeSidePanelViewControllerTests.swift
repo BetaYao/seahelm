@@ -172,4 +172,44 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         // the card on upgrade.
         XCTAssertNil(IntegrationStatusStore.decode("integration · 3 worktrees"))
     }
+
+    /// "local edits here" was true but not actionable — the checkout is where
+    /// things get run, so something is nearly always dirty and the only
+    /// question is which files.
+    func testCompositionNamesWhatIsHoldingTheCheckout() {
+        let vc = makeIntegrationVC(IntegrationPanelState(
+            line: "integration · 1 worktree · held · local edits",
+            included: ["agentA"],
+            excluded: [],
+            conflictedPaths: [],
+            isHeld: true,
+            heldPaths: ["package.json", "pnpm-lock.yaml"]
+        ))
+        vc.loadViewIfNeeded()
+        vc.selectTab(.changes)
+
+        XCTAssertEqual(compositionLines(vc), [
+            "in: agentA",
+            "not checked out — local edits here (package.json, pnpm-lock.yaml) · /integrate force",
+        ])
+    }
+
+    /// A commit made in the checkout reads differently from an uncommitted
+    /// edit, and its remedy is not "discard your edits".
+    func testCompositionCallsOutCommitsMadeInTheCheckout() {
+        let vc = makeIntegrationVC(IntegrationPanelState(
+            line: "integration · 1 worktree · held · commits made here",
+            included: ["agentA"],
+            excluded: [],
+            conflictedPaths: [],
+            isHeld: true,
+            heldHead: "545c39d127ca11aa97d1ade5f298a0d5baf9dbc5"
+        ))
+        vc.loadViewIfNeeded()
+        vc.selectTab(.changes)
+
+        XCTAssertEqual(compositionLines(vc).last,
+                       "not checked out — commits made here (545c39d12) · /integrate force drops them")
+    }
+
 }

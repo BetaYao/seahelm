@@ -252,6 +252,50 @@ final class SeahelmControlDataSource: ControlDataSource {
         MemoryProbe.stats()
     }
 
+    /// The integration checkouts, live. Reads the stores rather than the app's
+    /// UI state, so it answers the same from any thread the socket serves.
+    func integrationStatus(path: String?) -> [String: Any]? {
+        let all = IntegrationWorktreeStore.shared.checkoutsByRepo
+        var wanted = all
+        if let path, !path.isEmpty {
+            // An unknown repo answers with an empty list rather than with every
+            // other repo's state: "this one has no checkout" is the true answer,
+            // and a fleet-wide dump would read as if it did.
+            let repo = WorktreeDiscovery.findRepoRoot(from: path).map(WorktreeDiscovery.canonicalPath)
+            wanted = all.filter { $0.key == repo }
+        }
+
+        let checkouts: [[String: Any]] = wanted.keys.sorted().compactMap { repo in
+            guard let checkout = wanted[repo] else { return nil }
+            var entry: [String: Any] = ["repo": repo, "checkout": checkout]
+            entry["exists"] = FileManager.default.fileExists(atPath: checkout)
+            let head = GitProcess.run(
+                ["rev-parse", "--verify", "--quiet", "HEAD"],
+                in: checkout,
+                timeout: IntegrationWorktree.timeout
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let head, !head.isEmpty { entry["head"] = head }
+            let published = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: checkout)
+            if let published {
+                entry["last_published"] = published
+                // The state the desktop card calls "commits made here": worth
+                // its own field, because it is the one an agent should react to.
+                entry["moved_by_hand"] = (head != nil && head != published)
+            }
+            if let state = IntegrationStatusStore.shared.state(forWorktree: checkout) {
+                entry["line"] = state.line
+                entry["included"] = state.included
+                entry["excluded"] = state.excluded.map { ["label": $0.label, "paths": $0.paths] }
+                entry["conflicted_paths"] = state.conflictedPaths
+                entry["held"] = state.isHeld
+                if let paths = state.heldPaths { entry["held_paths"] = paths }
+                if let heldHead = state.heldHead { entry["held_head"] = heldHead }
+            }
+            return entry
+        }
+        return ["checkouts": checkouts]
+    }
+
     func explainPane(paneId: String) -> [String: Any]? {
         guard let station = station(for: paneId) else { return nil }
         let pane = AgentRegistry.shared.pane(for: station.id)
