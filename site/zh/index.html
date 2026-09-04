@@ -132,7 +132,7 @@
           </div>
         </div>
       </div>
-      <p class="note">示意舰队。上面每一种状态都是这个 app 真实会报的状态。</p>
+      <p class="note">示例舰队。上面每一种状态都是这个 app 真实会报的状态。</p>
 
       <div class="hero-cta">
         <div class="cmd"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
@@ -172,7 +172,7 @@
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">甲板一 &middot; 甲板之上</p></div>
-      <h2>你操的是什么</h2>
+      <h2>你掌控的是什么</h2>
       <p class="lede prose">
         Seahelm 没有编辑器，也没有那套 diff review 的仪式。整个界面只做两件事：把 agent
         <em>放到位</em> —— 哪个仓库、哪个 worktree、哪个 pane —— 然后告诉你其中谁需要人。
@@ -198,7 +198,7 @@
 
           <!-- window -->
           <rect x="114" y="28" width="812" height="316" rx="10" class="svg-box-plain"/>
-          <text x="128" y="50" class="svg-t">seahelm &mdash; 一个窗口，一副键盘</text>
+          <text x="128" y="50" class="svg-t">seahelm &mdash; 一个窗口，一个键盘</text>
 
           <!-- project A -->
           <rect x="130" y="66" width="386" height="260" rx="8" class="svg-box"/>
@@ -526,7 +526,7 @@
       <div><span class="g s-err">&#10005;</span><span class="k">出错</span><span class="v">agent 挂了</span></div>
       <div><span class="g s-idle">&#9676;</span><span class="k">休眠</span><span class="v">进程已退出</span></div>
     </div>
-    <p class="note" style="margin-top:.8rem">同样这五种状态，驱动状态点、卡片、灵动岛和上卷汇总。没有第六种。</p>
+    <p class="note" style="margin-top:.8rem">同样这五种状态，驱动状态点、卡片、灵动岛，以及 worktree 那一层的汇总。没有第六种。</p>
 
     <div class="pair">
       <figure>
@@ -575,7 +575,7 @@
         </div>
         <figcaption>
           回路是闭合的。Seahelm 盯着 agent；而 agent 手里握着 <code>$SEAHELM_PANE_ID</code>，可以反过来
-          调回来分屏、在兄弟 pane 里跑命令、读它的回滚缓冲，或者一直阻塞到另一个 pane 变空闲为止。
+          调回来分屏、在兄弟 pane 里跑命令、读它的历史输出，或者一直阻塞到另一个 pane 变空闲为止。
         </figcaption>
       </figure>
       <div class="side">
@@ -771,7 +771,7 @@
       </div>
       <div class="row">
         <dt>不需要检出的合并</dt>
-        <dd><code>merge-tree --write-tree</code> 合并两个 commit 并写出一个 tree；<code>commit-tree</code> 把它变成 commit；这个 commit 就是下一次合并的左边。整个过程不碰任何 worktree 或索引，所以也就不可能把哪个目录卡在合并到一半的状态 —— 这正是它可以无人值守运行的原因。在真实检出里跑 <code>git merge</code> 就不行：一旦冲突，那个目录就一直处于冲突状态，直到有人来收拾。</dd>
+        <dd><code>merge-tree --write-tree</code> 合并两个 commit 并写出一个 tree；<code>commit-tree</code> 把它变成 commit；这个 commit 就是下一次合并的左侧。整个过程不碰任何 worktree 或索引，所以也就不可能把哪个目录卡在合并到一半的状态 —— 这正是它可以无人值守运行的原因。在真实检出里跑 <code>git merge</code> 就不行：一旦冲突，那个目录就一直处于冲突状态，直到有人来收拾。</dd>
       </div>
       <div class="row">
         <dt>冲突也是一种结果</dt>
