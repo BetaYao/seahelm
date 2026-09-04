@@ -19,7 +19,7 @@ Full walkthrough: [YouTube](https://youtu.be/WUUcuglx_Ks)
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+curl -fsSL https://seahelm.dev/install.sh | sh
 ```
 
 Or download from [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest).

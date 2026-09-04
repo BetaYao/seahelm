@@ -19,7 +19,7 @@
 ## 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh
+curl -fsSL https://seahelm.dev/install.sh | sh
 ```
 
 或从 [GitHub Releases](https://github.com/BetaYao/seahelm/releases/latest) 手动下载。
