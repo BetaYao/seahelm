@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><clipPath id="hub"><circle cx="50" cy="50" r="16"/></clipPath></defs>
+  <g stroke="#0e9bb5" fill="none" stroke-width="5" stroke-linecap="round">
+    <circle cx="50" cy="50" r="30"/>
+    <line x1="50" y1="14" x2="50" y2="86"/>
+    <line x1="14" y1="50" x2="86" y2="50"/>
+    <line x1="24.5" y1="24.5" x2="75.5" y2="75.5"/>
+    <line x1="75.5" y1="24.5" x2="24.5" y2="75.5"/>
+  </g>
+  <g fill="#0e9bb5">
+    <circle cx="50" cy="13" r="4"/><circle cx="50" cy="87" r="4"/>
+    <circle cx="13" cy="50" r="4"/><circle cx="87" cy="50" r="4"/>
+    <circle cx="23.8" cy="23.8" r="4"/><circle cx="76.2" cy="76.2" r="4"/>
+    <circle cx="76.2" cy="23.8" r="4"/><circle cx="23.8" cy="76.2" r="4"/>
+  </g>
+  <g clip-path="url(#hub)">
+    <path d="M34 34 H66 V66 H34 Z" fill="#101f8f"/>
+    <path d="M34 34 H66 V57 C58 61, 46 52, 34 56 Z" fill="#2f6fe0"/>
+    <path d="M34 34 H66 V49 C58 53, 46 44, 34 48 Z" fill="#22d3ee"/>
+    <path d="M34 34 H66 V44 C58 48, 46 40, 34 43 Z" fill="#12925a"/>
+    <path d="M34 34 H66 V40 C58 44, 46 36, 34 39 Z" fill="#f4571f"/>
+    <path d="M34 34 H66 V36 C58 40, 46 33, 34 35 Z" fill="#e03131"/>
+  </g>
+</svg>

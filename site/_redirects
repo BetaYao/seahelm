@@ -1,0 +1,8 @@
+# Short link for the installer. Points at the script in this repo so there is
+# only ever one copy of it — do not vendor install.sh into site/.
+/install.sh  https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh  302
+/install     https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh  302
+
+# Convenience redirects to the repo.
+/github      https://github.com/BetaYao/seahelm                    302
+/releases    https://github.com/BetaYao/seahelm/releases/latest    302

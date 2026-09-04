@@ -1,0 +1,933 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seahelm &mdash; a native macOS workspace for coding agents</title>
+<meta name="description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<link rel="canonical" href="https://www.seahelm.dev/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Seahelm">
+<meta property="og:url" content="https://www.seahelm.dev/">
+<meta property="og:title" content="Seahelm &mdash; one window for every agent you have running">
+<meta property="og:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<meta property="og:image" content="https://www.seahelm.dev/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Seahelm — a native macOS workspace for coding agents">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Seahelm &mdash; one window for every agent you have running">
+<meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A repo is a tab, a worktree is a card, a split pane is one agent — rendered on the Ghostty engine, persisted by zmx.">
+<meta name="twitter:image" content="https://www.seahelm.dev/og.png">
+
+<meta name="theme-color" content="#eaf1f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a2731" media="(prefers-color-scheme: dark)">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=Newsreader:ital,opsz,wght@1,6..72,400&display=swap">
+
+<style>
+/* ───────────────────────────────────────────────────────────────
+   Palette is lifted verbatim from the app's own Sources/UI/Shared/
+   SemanticColors.swift — deep TUI navy, cyan helm, and the four
+   status hues the status dots actually use.
+   ─────────────────────────────────────────────────────────────── */
+:root {
+  --sea-0:  #eaf1f9;
+  --sea-1:  #ffffff;
+  --sea-2:  #f4f8fd;
+  --ink:    #14232c;
+  --ink-2:  #566772;
+  --rule:   #ccd8e2;
+  --rule-2: #e2eaf2;
+  --accent: #0e9bb5;
+  --accent-soft: rgba(14,155,181,.10);
+  --run:    #1f9d63;
+  --wait:   #b0760a;
+  --err:    #cc2a22;
+  --idle:   #8a93a1;
+  --grid:   rgba(14,155,181,.075);
+  --shadow: 0 1px 2px rgba(8,34,42,.05), 0 10px 30px -18px rgba(8,34,42,.35);
+
+  --f-cond: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --f-note: "Newsreader", Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sea-0:  #0a2731;
+    --sea-1:  #0e323d;
+    --sea-2:  #123a46;
+    --ink:    #d6e6e6;
+    --ink-2:  #86a8ab;
+    --rule:   #1e5460;
+    --rule-2: #163f4a;
+    --accent: #1fc8da;
+    --accent-soft: rgba(31,200,218,.12);
+    --run:    #1bb062;
+    --wait:   #e0a458;
+    --err:    #ef5a4a;
+    --idle:   #6b8584;
+    --grid:   rgba(31,200,218,.06);
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 12px 34px -20px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --sea-0:  #0a2731;
+  --sea-1:  #0e323d;
+  --sea-2:  #123a46;
+  --ink:    #d6e6e6;
+  --ink-2:  #86a8ab;
+  --rule:   #1e5460;
+  --rule-2: #163f4a;
+  --accent: #1fc8da;
+  --accent-soft: rgba(31,200,218,.12);
+  --run:    #1bb062;
+  --wait:   #e0a458;
+  --err:    #ef5a4a;
+  --idle:   #6b8584;
+  --grid:   rgba(31,200,218,.06);
+  --shadow: 0 1px 2px rgba(0,0,0,.25), 0 12px 34px -20px rgba(0,0,0,.7);
+}
+
+/* Below deck: always the deeper surface, in either theme. */
+.hold {
+  --sea-0:  #08222a;
+  --sea-1:  #0d2b34;
+  --sea-2:  #11333d;
+  --ink:    #d8e8e8;
+  --ink-2:  #90b2b5;
+  --rule:   #1e5563;
+  --rule-2: #16414d;
+  --accent: #1fc8da;
+  --accent-soft: rgba(31,200,218,.12);
+  --run:    #1bb062;
+  --wait:   #e0a458;
+  --err:    #ef5a4a;
+  --idle:   #5d7b7a;
+  --grid:   rgba(31,200,218,.05);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 40px -22px rgba(0,0,0,.8);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hold { --sea-0: #04141a; --sea-1: #0a252d; --sea-2: #0e2c35; }
+}
+:root[data-theme="dark"] .hold { --sea-0: #04141a; --sea-1: #0a252d; --sea-2: #0e2c35; }
+
+/* ── base ─────────────────────────────────────────────────────── */
+body {
+  background: var(--sea-0);
+  color: var(--ink);
+  font: 400 16px/1.62 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+a { color: inherit; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+.wrap { width: min(1120px, 100% - 2.75rem); margin-inline: auto; }
+.prose { max-width: 66ch; }
+
+.deck {
+  background-color: var(--sea-0);
+  color: var(--ink);
+  background-image:
+    repeating-linear-gradient(to right,  var(--grid) 0 1px, transparent 1px 56px),
+    repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 56px);
+}
+
+h1, h2, h3 { font-family: var(--f-cond); font-weight: 700; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(2.35rem, 5.4vw, 3.85rem); line-height: .99; letter-spacing: -.015em; }
+h2 { font-size: clamp(1.85rem, 3.5vw, 2.6rem); line-height: 1.04; letter-spacing: -.01em; }
+h3 { font-size: 1.24rem; font-weight: 600; line-height: 1.2; letter-spacing: -.005em; }
+p  { margin: 0; }
+
+.eyebrow {
+  font: 500 .69rem/1 var(--f-mono);
+  letter-spacing: .17em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.eyebrow .mark { color: var(--accent); }
+.note { font: italic 400 1.02rem/1.5 var(--f-note); color: var(--ink-2); }
+.mono { font-family: var(--f-mono); font-size: .86em; }
+.lede { font-size: 1.12rem; line-height: 1.6; color: var(--ink-2); }
+
+/* ── header / hero ────────────────────────────────────────────── */
+.masthead {
+  display: flex; align-items: center; gap: .85rem;
+  padding: 2.4rem 0 0;
+}
+.wheel { width: 46px; height: 46px; color: var(--ink); flex: none; }
+.wordmark { font: 700 1.55rem/1 var(--f-cond); letter-spacing: -.01em; }
+.masthead .spec {
+  margin-left: auto; font: 400 .74rem/1 var(--f-mono); color: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: 999px; padding: .45rem .7rem;
+  white-space: nowrap;
+}
+.hero { padding: 2.1rem 0 2.2rem; display: grid; gap: 1.35rem; }
+.hero h1 { max-width: 17ch; }
+.hero .lede { max-width: 56ch; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .35rem; }
+.cmd {
+  font: 400 .82rem/1 var(--f-mono);
+  background: var(--sea-1); border: 1px solid var(--rule);
+  border-radius: 6px; padding: .7rem .85rem; overflow-x: auto; max-width: 100%;
+  white-space: nowrap; box-shadow: var(--shadow);
+}
+.cmd .prompt { color: var(--accent); }
+.linkout {
+  font: 500 .82rem/1 var(--f-mono); color: var(--accent);
+  text-decoration: none; border-bottom: 1px solid currentColor; padding-bottom: 2px;
+}
+.linkout:hover { color: var(--ink); }
+
+/* ── the at-rest fleet strip ──────────────────────────────────── */
+.fleet {
+  border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+  background: var(--sea-1); box-shadow: var(--shadow); margin-top: .5rem;
+}
+.fleet-bar {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .6rem .85rem; border-bottom: 1px solid var(--rule-2);
+  background: var(--sea-2); font: 400 .78rem/1 var(--f-mono); color: var(--ink-2);
+}
+.island {
+  margin-left: auto; display: inline-flex; align-items: center; gap: .6rem;
+  border: 1px solid var(--rule); border-radius: 999px; padding: .3rem .7rem;
+  background: var(--sea-1);
+}
+.fleet-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.wt { padding: .85rem .9rem 1rem; border-right: 1px solid var(--rule-2); display: grid; gap: .6rem; align-content: start; }
+.wt:last-child { border-right: 0; }
+.wt-head { display: flex; align-items: baseline; gap: .5rem; }
+.branch { font: 500 .84rem/1.2 var(--f-mono); }
+.wt-state { margin-left: auto; font: 400 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .09em; }
+.pane {
+  border: 1px solid var(--rule-2); border-radius: 6px; padding: .5rem .6rem;
+  background: var(--sea-2); display: grid; gap: .28rem;
+}
+.pane-top { display: flex; align-items: center; gap: .45rem; font: 500 .78rem/1 var(--f-mono); }
+.pane-msg { font: 400 .74rem/1.35 var(--f-mono); color: var(--ink-2); }
+.dot { font-size: .95em; line-height: 1; }
+.s-run  { color: var(--run); }
+.s-wait { color: var(--wait); }
+.s-idle { color: var(--idle); }
+.s-err  { color: var(--err); }
+.pulse { animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .42; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* ── deck sections ────────────────────────────────────────────── */
+.deck-head { display: grid; gap: .9rem; padding: 3.6rem 0 0; }
+.deck-head .rule-row { display: flex; align-items: center; gap: 1rem; }
+.deck-head .rule-row::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+section.deck { padding-bottom: 4rem; }
+.hold { border-block: 1px solid var(--rule); }
+
+/* ── figures ──────────────────────────────────────────────────── */
+figure { margin: 2.4rem 0 0; display: grid; gap: .9rem; }
+.fig-frame {
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--sea-1);
+  padding: 1.1rem; overflow-x: auto; box-shadow: var(--shadow);
+}
+.fig-frame svg { display: block; width: 100%; min-width: 560px; height: auto; color: var(--ink); }
+figcaption { font: italic 400 1.02rem/1.55 var(--f-note); color: var(--ink-2); max-width: 76ch; }
+figcaption code { font: 400 .82em/1 var(--f-mono); font-style: normal; color: var(--ink); }
+
+/* svg text conventions */
+.svg-box { fill: var(--sea-2); stroke: var(--rule); stroke-width: 1; }
+.svg-box-plain { fill: none; stroke: var(--rule); stroke-width: 1; }
+.svg-t  { font: 500 13px var(--f-mono); fill: var(--ink); }
+.svg-t2 { font: 400 12px var(--f-mono); fill: var(--ink-2); }
+.svg-lbl{ font: 500 10.5px var(--f-mono); fill: var(--ink-2); letter-spacing: .06em; }
+.svg-hd { font: 500 10.5px var(--f-mono); fill: var(--ink-2); letter-spacing: .14em; }
+.svg-note { font: italic 400 13px var(--f-note); fill: var(--ink-2); }
+.svg-line { stroke: var(--ink-2); stroke-width: 1.4; fill: none; }
+.svg-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.svg-dash { stroke: var(--ink-2); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+
+/* ── layer table ──────────────────────────────────────────────── */
+.tbl-scroll { overflow-x: auto; margin-top: 2rem; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; color: var(--ink); }
+th, td { text-align: left; padding: .72rem .9rem; border-bottom: 1px solid var(--rule-2); vertical-align: baseline; }
+thead th {
+  font: 500 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .14em;
+  color: var(--ink-2); border-bottom: 1px solid var(--rule); padding-bottom: .55rem;
+}
+tbody td:first-child { font: 600 .95rem/1.3 var(--f-cond); color: var(--ink); white-space: nowrap; }
+td.path { font: 400 .8rem/1.4 var(--f-mono); color: var(--accent); white-space: nowrap; }
+td.num  { font: 400 .82rem/1.4 var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-2); }
+td.desc { font-size: .93rem; line-height: 1.5; color: var(--ink-2); }
+td.tick { font: 400 .85rem/1.4 var(--f-mono); }
+
+/* ── feature rows ─────────────────────────────────────────────── */
+.rows { margin-top: 2rem; display: grid; gap: 0; }
+.row {
+  display: grid; grid-template-columns: minmax(150px, 200px) 1fr; gap: 1.4rem;
+  padding: .95rem 0; border-top: 1px solid var(--rule-2); align-items: baseline;
+}
+.row:last-child { border-bottom: 1px solid var(--rule-2); }
+.row dt { font: 600 1rem/1.3 var(--f-cond); letter-spacing: .01em; }
+.row dd { margin: 0; font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
+.row dd code, .desc code, .lede code { font: 400 .85em/1 var(--f-mono); color: var(--ink); }
+
+/* two lifted callouts — these get the border, the rows do not */
+.lift { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+.lift > div {
+  border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+  border-radius: 4px; padding: 1.1rem 1.2rem; background: var(--sea-1);
+  display: grid; gap: .5rem; align-content: start;
+}
+.lift h3 { font-size: 1.1rem; }
+.lift p { font-size: .93rem; line-height: 1.55; color: var(--ink-2); }
+
+/* ── status legend ────────────────────────────────────────────── */
+.legend {
+  margin-top: 1.6rem; display: grid; gap: 0;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--sea-1);
+}
+.legend > div { padding: .8rem .9rem; border-right: 1px solid var(--rule-2); display: grid; gap: .25rem; }
+.legend > div:last-child { border-right: 0; }
+.legend .g { font: 500 1rem/1 var(--f-mono); }
+.legend .k { font: 400 .78rem/1 var(--f-mono); color: var(--ink); }
+.legend .v { font: 400 .74rem/1.3 var(--f-mono); color: var(--ink-2); }
+
+/* ── code block ───────────────────────────────────────────────── */
+pre.code {
+  margin: 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--sea-1);
+  padding: 1rem 1.1rem; overflow-x: auto; font: 400 .82rem/1.85 var(--f-mono);
+  color: var(--ink); box-shadow: var(--shadow);
+}
+pre.code .c { color: var(--ink-2); }
+pre.code .p { color: var(--accent); }
+
+.pair { margin-top: 2.4rem; display: grid; grid-template-columns: 1fr; gap: 1.6rem; align-items: start; }
+@media (min-width: 900px) { .pair { grid-template-columns: 1.15fr .85fr; gap: 2rem; } }
+.pair figure { margin-top: 0; }
+.pair .side { display: grid; gap: .9rem; align-content: start; }
+.pair .side h3 { margin-bottom: -.2rem; }
+.pair .side p { font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
+
+/* ── footer ───────────────────────────────────────────────────── */
+footer { padding: 2.8rem 0 3.6rem; display: grid; gap: 1.1rem; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 1.3rem; }
+.foot-meta { font: 400 .78rem/1.7 var(--f-mono); color: var(--ink-2); }
+
+@media (max-width: 720px) {
+  .fleet-grid { grid-template-columns: 1fr; }
+  .wt { border-right: 0; border-bottom: 1px solid var(--rule-2); }
+  .wt:last-child { border-bottom: 0; }
+  .row { grid-template-columns: 1fr; gap: .3rem; }
+  .legend > div { border-right: 0; border-bottom: 1px solid var(--rule-2); }
+}
+</style>
+<style>
+/* Standalone reset. The Artifact host supplied one; a hosted page must not
+   assume it — without this the page carries the UA's 8px body margin. */
+html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+body { margin: 0; }
+img, svg { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<!-- ══════════════ MASTHEAD + HERO ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+
+    <div class="masthead">
+      <svg class="wheel" viewBox="0 0 100 100" role="img" aria-label="Seahelm — a ship's wheel with a wave-banded hub">
+        <defs>
+          <clipPath id="hub"><circle cx="50" cy="50" r="16"/></clipPath>
+        </defs>
+        <g stroke="currentColor" fill="none" stroke-width="3.4" stroke-linecap="round">
+          <circle cx="50" cy="50" r="30"/>
+          <g>
+            <line x1="50" y1="14" x2="50" y2="86"/>
+            <line x1="14" y1="50" x2="86" y2="50"/>
+            <line x1="24.5" y1="24.5" x2="75.5" y2="75.5"/>
+            <line x1="75.5" y1="24.5" x2="24.5" y2="75.5"/>
+          </g>
+        </g>
+        <g fill="currentColor">
+          <circle cx="50" cy="13" r="3.2"/><circle cx="50" cy="87" r="3.2"/>
+          <circle cx="13" cy="50" r="3.2"/><circle cx="87" cy="50" r="3.2"/>
+          <circle cx="23.8" cy="23.8" r="3.2"/><circle cx="76.2" cy="76.2" r="3.2"/>
+          <circle cx="76.2" cy="23.8" r="3.2"/><circle cx="23.8" cy="76.2" r="3.2"/>
+        </g>
+        <g clip-path="url(#hub)">
+          <path d="M34 34 H66 V66 H34 Z" fill="#101f8f"/>
+          <path d="M34 34 H66 V57 C58 61, 46 52, 34 56 Z" fill="#2f6fe0"/>
+          <path d="M34 34 H66 V49 C58 53, 46 44, 34 48 Z" fill="#22d3ee"/>
+          <path d="M34 34 H66 V44 C58 48, 46 40, 34 43 Z" fill="#12925a"/>
+          <path d="M34 34 H66 V40 C58 44, 46 36, 34 39 Z" fill="#f4571f"/>
+          <path d="M34 34 H66 V36 C58 40, 46 33, 34 35 Z" fill="#e03131"/>
+        </g>
+        <circle cx="50" cy="50" r="17.4" fill="none" stroke="var(--sea-0)" stroke-width="2.6"/>
+      </svg>
+      <span class="wordmark">Seahelm</span>
+      <span class="spec">macOS 14+ &middot; Swift + AppKit &middot; 247 files</span>
+    </div>
+
+    <div class="hero">
+      <p class="eyebrow"><span class="mark">&#9679;</span> A native macOS workspace for coding agents</p>
+      <h1>One window for every agent you have running.</h1>
+      <p class="lede">
+        A repo is a tab. A git worktree is a card. A split pane is one agent. Seahelm renders every
+        one of them on the Ghostty engine, watches what they are doing, and keeps their sessions
+        alive across a reboot. Twelve agent CLIs work out of the box.
+      </p>
+
+      <div class="fleet">
+        <div class="fleet-bar">
+          <span>openbeta/seahelm</span>
+          <span style="opacity:.5">&middot;</span>
+          <span>3 worktrees &middot; 5 panes</span>
+          <span class="island">
+            <span><span class="dot s-wait">&#9679;</span> 1 needs input</span>
+            <span><span class="dot s-run pulse">&#9686;</span> 2 running</span>
+          </span>
+        </div>
+        <div class="fleet-grid">
+          <div class="wt">
+            <div class="wt-head"><span class="branch">main</span><span class="wt-state s-idle">idle</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-idle">&#9675;</span> claude</div>
+              <div class="pane-msg">Idle &middot; 4m</div>
+            </div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-idle">&#9675;</span> codex</div>
+              <div class="pane-msg">Idle &middot; 22m</div>
+            </div>
+          </div>
+          <div class="wt">
+            <div class="wt-head"><span class="branch">feat/island-usage</span><span class="wt-state s-run">running</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> claude</div>
+              <div class="pane-msg">Edit &middot; UsageSummaryFormatter.swift</div>
+            </div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> codex</div>
+              <div class="pane-msg">Bash &middot; xcodebuild test</div>
+            </div>
+          </div>
+          <div class="wt">
+            <div class="wt-head"><span class="branch">fix/zmx-recovery</span><span class="wt-state s-wait">needs input</span></div>
+            <div class="pane">
+              <div class="pane-top"><span class="dot s-wait">&#9679;</span> claude</div>
+              <div class="pane-msg">Allow <span style="color:var(--ink)">rm -rf .build</span>?</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Example fleet. Every status above is one the app really reports.</p>
+
+      <div class="hero-cta">
+        <div class="cmd"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh</div>
+        <a class="linkout" href="https://github.com/BetaYao/seahelm">github.com/BetaYao/seahelm</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DECK ONE — ON DECK ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+    <div class="deck-head">
+      <div class="rule-row"><p class="eyebrow">Deck one &middot; on deck</p></div>
+      <h2>What you steer</h2>
+      <p class="lede prose">
+        Seahelm has no editor and no diff-review ceremony. The whole surface is about
+        <em>placing</em> agents &mdash; which repo, which worktree, which pane &mdash; and then
+        showing you which of them needs a human.
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 940 362" role="img" aria-label="Nesting diagram: one Seahelm window contains projects, which contain git worktrees, which contain panes running one agent each">
+          <!-- depth scale -->
+          <g class="svg-hd" text-anchor="end">
+            <text x="86" y="50">APP</text>
+            <text x="86" y="90">PROJECT</text>
+            <text x="86" y="130">WORKTREE</text>
+            <text x="86" y="168">PANE</text>
+          </g>
+          <g class="svg-dash" stroke-dasharray="3 3">
+            <line x1="94" y1="46" x2="112" y2="46"/>
+            <line x1="94" y1="86" x2="128" y2="86"/>
+            <line x1="94" y1="126" x2="144" y2="126"/>
+            <line x1="94" y1="164" x2="160" y2="164"/>
+          </g>
+
+          <!-- window -->
+          <rect x="114" y="28" width="812" height="316" rx="10" class="svg-box-plain"/>
+          <text x="128" y="50" class="svg-t">seahelm &mdash; one window, one keyboard</text>
+
+          <!-- project A -->
+          <rect x="130" y="66" width="386" height="260" rx="8" class="svg-box"/>
+          <text x="144" y="90" class="svg-t">openbeta/seahelm</text>
+          <rect x="146" y="104" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="160" y="128" class="svg-t2">main</text>
+          <rect x="162" y="140" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="176" y="169" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  claude</text>
+          <rect x="334" y="140" width="150" height="48" rx="5" class="svg-box"/>
+          <text x="348" y="169" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="146" y="212" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="160" y="236" class="svg-t2">feat/island-usage</text>
+          <rect x="162" y="248" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="176" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <rect x="334" y="248" width="150" height="48" rx="5" class="svg-box"/>
+          <text x="348" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  codex</text>
+
+          <!-- project B -->
+          <rect x="524" y="66" width="386" height="260" rx="8" class="svg-box"/>
+          <text x="538" y="90" class="svg-t">acme/api</text>
+          <rect x="540" y="104" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="554" y="128" class="svg-t2">fix/auth-retry</text>
+          <rect x="556" y="140" width="322" height="48" rx="5" class="svg-box"/>
+          <text x="570" y="169" class="svg-t"><tspan fill="var(--wait)">&#9679;</tspan>  claude &mdash; needs input</text>
+
+          <rect x="540" y="212" width="354" height="100" rx="6" class="svg-box-plain"/>
+          <text x="554" y="236" class="svg-t2">main</text>
+          <rect x="556" y="248" width="160" height="48" rx="5" class="svg-box"/>
+          <text x="570" y="277" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  aider</text>
+        </svg>
+      </div>
+      <figcaption>
+        Four tiers, one source of truth. A project is a git repo you added; its worktrees come from
+        <code>git worktree list --porcelain</code>; a pane is a leaf of that worktree's split tree, and
+        holds exactly one agent. <code>AgentRegistry.shared</code> knows the status of every leaf in the picture.
+      </figcaption>
+    </figure>
+
+    <dl class="rows">
+      <div class="row">
+        <dt>Splits &amp; layouts</dt>
+        <dd>A binary split tree per worktree, dragged by dividers or driven from the keyboard. Four dashboard layouts &mdash; grid, left/right, top-small, top-large &mdash; and the whole tree serializes to config, so relaunch restores it.</dd>
+      </div>
+      <div class="row">
+        <dt>Modal keyboard</dt>
+        <dd>NORMAL and INSERT, with <code>Space</code> as a which-key leader. <code>h j k l</code> moves focus, <code>Cmd+P</code> is the quick switcher, <code>Cmd+N</code> opens a new branch.</dd>
+      </div>
+      <div class="row">
+        <dt>Side panel</dt>
+        <dd>File tree, code editor, Markdown preview, and git diff review &mdash; without leaving the worktree or interrupting the agent in it.</dd>
+      </div>
+      <div class="row">
+        <dt>Token usage</dt>
+        <dd>Claude and Codex session logs parsed into token and quota figures, rotating one readout at a time in the status pill.</dd>
+      </div>
+      <div class="row">
+        <dt>Remote helm</dt>
+        <dd>Message the fleet from your phone. Commands arrive over iMessage prefixed <code>sea&nbsp;</code>; replies go back stamped <code>helm&nbsp;</code>, which is also what stops the bridge from answering itself.</dd>
+      </div>
+    </dl>
+
+    <div class="lift">
+      <div>
+        <h3>The Island</h3>
+        <p>A pill at the top of the screen that stays shut until a worktree needs you. It opens for one of three things: something is running, something is waiting, something broke. Agent suggestions arrive in it as clickable cards.</p>
+      </div>
+      <div>
+        <h3>First Mate</h3>
+        <p>An autonomous supervisor on status transitions. Green-zone actions it just takes &mdash; watch, inspect, auto-commit. Red-zone actions &mdash; broadcast an order, return a worktree to port &mdash; queue up for your approval first.</p>
+      </div>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 940 300" role="img" aria-label="Before and after: an agent that creates a worktree and cd's into it drags its own pane along, and the unused placeholder pane in the destination is destroyed">
+          <text x="10" y="30" class="svg-hd">BEFORE</text>
+          <text x="520" y="30" class="svg-hd">AFTER</text>
+
+          <!-- BEFORE -->
+          <rect x="10" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
+          <rect x="26" y="68" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="40" y="92" class="svg-t2">main</text>
+          <rect x="42" y="104" width="172" height="42" rx="5" class="svg-box"/>
+          <text x="56" y="131" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <rect x="226" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="240" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="26" y="174" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="40" y="198" class="svg-t2">feat/x &mdash; just created</text>
+          <rect x="42" y="210" width="172" height="42" rx="5" fill="none" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="4 4"/>
+          <text x="56" y="237" class="svg-t2">empty placeholder</text>
+
+          <!-- transition -->
+          <line x1="432" y1="160" x2="504" y2="160" class="svg-accent" marker-end="url(#ah-a)"/>
+          <text x="468" y="146" class="svg-lbl" text-anchor="middle">hook cwd</text>
+          <text x="468" y="182" class="svg-lbl" text-anchor="middle">moveLeaf</text>
+
+          <!-- AFTER -->
+          <rect x="520" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
+          <rect x="536" y="68" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="550" y="92" class="svg-t2">main</text>
+          <rect x="552" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+
+          <rect x="536" y="174" width="378" height="90" rx="6" class="svg-box"/>
+          <text x="550" y="198" class="svg-t2">feat/x</text>
+          <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <text x="914" y="231" class="svg-note" text-anchor="end">Station + zmx session kept</text>
+          <text x="914" y="250" class="svg-lbl" text-anchor="end">placeholder destroyed</text>
+
+          <defs>
+            <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        The pane follows its agent. Claude Code makes a worktree and works in it; every hook payload carries
+        <code>cwd</code>, so Seahelm matches the <em>longest</em> worktree prefix and moves that one pane &mdash;
+        keeping its Ghostty surface and its zmx session &mdash; instead of standing up a stranger beside it.
+        Two gates keep it honest: the destination must belong to the same repo, and after any move auto-follow
+        holds for ten minutes, because an agent's <code>cwd</code> bounces while it works.
+      </figcaption>
+    </figure>
+
+    <div class="tbl-scroll">
+      <table>
+        <caption class="eyebrow" style="text-align:left;padding-bottom:.9rem">Twelve agents, three depths of integration</caption>
+        <thead>
+          <tr><th>Agent</th><th>Status</th><th>Event hooks</th><th>Suggestion cards</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Claude Code</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; native</td><td class="tick" style="color:var(--run)">&#10003;</td></tr>
+          <tr><td>Codex</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; native</td><td class="tick" style="color:var(--run)">&#10003;</td></tr>
+          <tr><td>opencode</td><td class="tick" style="color:var(--run)">&#10003; manifest + hooks</td><td class="tick" style="color:var(--run)">&#10003; plugin</td><td class="tick" style="color:var(--wait)">model-volunteered</td></tr>
+          <tr><td>Nine more</td><td class="tick" style="color:var(--run)">&#10003; screen scan</td><td class="tick" style="color:var(--idle)">&mdash;</td><td class="tick" style="color:var(--idle)">&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:.9rem">agent &middot; aider &middot; amp &middot; claude &middot; cline &middot; codex &middot; cursor &middot; gemini &middot; goose &middot; kiro &middot; opencode &middot; pi</p>
+  </div>
+</section>
+
+<!-- ══════════════ DECK TWO — BELOW DECK ══════════════ -->
+<section class="deck hold">
+  <div class="wrap">
+    <div class="deck-head">
+      <div class="rule-row"><p class="eyebrow">Deck two &middot; below deck</p></div>
+      <h2>What runs it</h2>
+      <p class="lede prose">
+        247 Swift files in four layers, over the Ghostty terminal engine. No Combine, no SwiftUI &mdash;
+        AppKit and delegates, because the thing on screen is a Metal surface with a PTY behind it.
+      </p>
+    </div>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Path</th><th style="text-align:right">Files</th><th>What lives there</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Coordinators</td><td class="path">Sources/App/</td><td class="num">15</td>
+            <td class="desc">Window, tabs, split operations, side panels, the modal keyboard machine.</td>
+          </tr>
+          <tr>
+            <td>UI</td><td class="path">Sources/UI/</td><td class="num">75</td>
+            <td class="desc">Dashboard layouts, the Island, split container, worktree sidebar, diff viewer, settings, onboarding.</td>
+          </tr>
+          <tr>
+            <td>Core services</td><td class="path">Sources/Core/ &middot; Status/</td><td class="num">133</td>
+            <td class="desc"><code>AgentRegistry</code>, the detection pipeline, the manifest engine, First Mate, the control socket, hook installers.</td>
+          </tr>
+          <tr>
+            <td>Terminal &amp; git</td><td class="path">Sources/Terminal/ &middot; Git/</td><td class="num">19</td>
+            <td class="desc">The Ghostty C API bridge, <code>Station</code> surface lifecycle, the split tree, worktree discovery.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 1200 410" role="img" aria-label="Status detection pipeline: a hook lane and a screen-scan lane are each decoded into one normalized event shape, reduced into AgentRegistry, and published to the UI, First Mate and the event hub">
+          <g class="svg-hd" text-anchor="middle">
+            <text x="94"   y="30">SOURCE</text>
+            <text x="288"  y="30">BRIDGE</text>
+            <text x="493"  y="30">INTERPRET</text>
+            <text x="687"  y="30">DECODE</text>
+            <text x="872"  y="30">REDUCE</text>
+            <text x="1087" y="30">CONSUME</text>
+          </g>
+
+          <!-- hook lane -->
+          <rect x="20" y="62" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="90" class="svg-t">Claude Code</text>
+          <text x="34" y="112" class="svg-t2">Codex &middot; opencode</text>
+
+          <rect x="214" y="62" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="228" y="90" class="svg-t">seahelm-hook</text>
+          <text x="228" y="112" class="svg-t2">socket &#9656; webhook</text>
+
+          <rect x="408" y="54" width="170" height="84" rx="6" class="svg-box"/>
+          <text x="422" y="80" class="svg-t">hook events</text>
+          <text x="422" y="102" class="svg-t2">SessionStart &middot; Stop</text>
+          <text x="422" y="122" class="svg-t2">Pre/PostToolUse</text>
+
+          <rect x="624" y="76" width="126" height="40" rx="6" class="svg-box"/>
+          <text x="638" y="101" class="svg-t">HookDecoder</text>
+
+          <g class="svg-line">
+            <line x1="168" y1="96" x2="208" y2="96" marker-end="url(#ah-b)"/>
+            <line x1="362" y1="96" x2="402" y2="96" marker-end="url(#ah-b)"/>
+            <line x1="578" y1="96" x2="618" y2="96" marker-end="url(#ah-b)"/>
+          </g>
+          <g class="svg-lbl" text-anchor="middle">
+            <text x="191" y="86">exec</text>
+            <text x="385" y="86">JSON</text>
+            <text x="601" y="86">map</text>
+          </g>
+
+          <!-- scan lane -->
+          <rect x="20" y="272" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="300" class="svg-t">any of 12 CLIs</text>
+          <text x="34" y="322" class="svg-t2">no integration</text>
+
+          <rect x="214" y="272" width="148" height="68" rx="6" class="svg-box"/>
+          <text x="228" y="300" class="svg-t">Ghostty screen</text>
+          <text x="228" y="322" class="svg-t2">text under a lock</text>
+
+          <rect x="408" y="264" width="170" height="84" rx="6" class="svg-box"/>
+          <text x="422" y="290" class="svg-t">StatusDetector</text>
+          <text x="422" y="312" class="svg-t2">exit &#9656; OSC 133</text>
+          <text x="422" y="332" class="svg-t2">&#9656; text patterns</text>
+
+          <rect x="624" y="286" width="126" height="40" rx="6" class="svg-box"/>
+          <text x="638" y="311" class="svg-t">ScanDecoder</text>
+
+          <rect x="408" y="364" width="170" height="34" rx="6" class="svg-box"/>
+          <text x="422" y="386" class="svg-t2">12 JSON manifests</text>
+          <line x1="493" y1="348" x2="493" y2="360" class="svg-dash" marker-end="url(#ah-c)"/>
+          <text x="502" y="360" class="svg-lbl">rules</text>
+
+          <g class="svg-line">
+            <line x1="168" y1="306" x2="208" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="362" y1="306" x2="402" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="578" y1="306" x2="618" y2="306" marker-end="url(#ah-b)"/>
+          </g>
+          <g class="svg-lbl" text-anchor="middle">
+            <text x="191" y="296">renders</text>
+            <text x="385" y="296">poll</text>
+            <text x="601" y="296">verdict</text>
+          </g>
+
+          <!-- both lanes converge on one event shape -->
+          <line x1="750" y1="96"  x2="790" y2="150" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <line x1="750" y1="306" x2="790" y2="178" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="758" y="124" class="svg-lbl">per event</text>
+          <text x="758" y="288" class="svg-lbl">per poll</text>
+
+          <rect x="796" y="126" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="810" y="152" class="svg-t">NormalizedEvent</text>
+          <text x="810" y="174" class="svg-t2">PaneReducer &middot; pure</text>
+
+          <rect x="796" y="214" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="810" y="240" class="svg-t">AgentRegistry</text>
+          <text x="810" y="262" class="svg-t2">source of truth</text>
+
+          <line x1="872" y1="190" x2="872" y2="208" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="880" y="205" class="svg-lbl">delta</text>
+          <text x="872" y="306" class="svg-lbl" text-anchor="middle">publishes to all three</text>
+
+          <!-- consumers -->
+          <rect x="994" y="110" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="134" class="svg-t">Island &middot; dashboard</text>
+          <text x="1008" y="155" class="svg-t2">status bar</text>
+
+          <rect x="994" y="188" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="212" class="svg-t">First Mate</text>
+          <text x="1008" y="233" class="svg-t2">green &#9656; red zone</text>
+
+          <rect x="994" y="266" width="186" height="58" rx="6" class="svg-box"/>
+          <text x="1008" y="290" class="svg-t">EventHub</text>
+          <text x="1008" y="311" class="svg-t2">CLI subscribers</text>
+
+          <g class="svg-line">
+            <line x1="948" y1="246" x2="988" y2="142" marker-end="url(#ah-b)"/>
+            <line x1="948" y1="246" x2="988" y2="217" marker-end="url(#ah-b)"/>
+            <line x1="948" y1="246" x2="988" y2="292" marker-end="url(#ah-b)"/>
+          </g>
+
+          <defs>
+            <marker id="ah-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+            </marker>
+            <marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+            </marker>
+            <marker id="ah-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        Two lanes, one event shape. Agents that report hooks take the fast lane; the other nine are read off
+        the screen every two seconds and matched against a priority-ordered manifest &mdash; process exit beats
+        an OSC&nbsp;133 shell phase, which beats a text pattern. Both lanes decode into the same
+        <code>NormalizedEvent</code>, so the reducer stays a pure function and the UI never learns which lane
+        a status came from. Ask any pane which rule decided it: <code>seahelm pane explain &lt;pane&gt;</code>.
+      </figcaption>
+    </figure>
+
+    <div class="legend">
+      <div><span class="g s-run">&#9686;</span><span class="k">Running</span><span class="v">a tool call is in flight</span></div>
+      <div><span class="g s-wait">&#9679;</span><span class="k">Needs input</span><span class="v">blocked on a human</span></div>
+      <div><span class="g s-idle">&#9675;</span><span class="k">Idle</span><span class="v">prompt is back, waiting</span></div>
+      <div><span class="g s-err">&#10005;</span><span class="k">Error</span><span class="v">the agent broke</span></div>
+      <div><span class="g s-idle">&#9676;</span><span class="k">Dormant</span><span class="v">process exited</span></div>
+    </div>
+    <p class="note" style="margin-top:.8rem">The same five states drive the dot, the card, the Island and the rollup. There is no sixth.</p>
+
+    <div class="pair">
+      <figure>
+        <div class="fig-frame">
+          <svg viewBox="0 0 640 330" role="img" aria-label="Closed control loop: an agent in a pane runs the seahelm CLI, which speaks JSON-RPC over a private unix socket to the control server, which mutates panes and broadcasts events back to the agent through the event hub">
+            <rect x="28" y="42" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="44" y="68" class="svg-t">an agent, in a pane</text>
+            <text x="44" y="90" class="svg-t2">SEAHELM_PANE_ID</text>
+
+            <rect x="416" y="42" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="432" y="68" class="svg-t">seahelm CLI</text>
+            <text x="432" y="90" class="svg-t2">~/.local/bin/seahelm</text>
+
+            <rect x="416" y="226" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="432" y="252" class="svg-t">ControlSocketServer</text>
+            <text x="432" y="274" class="svg-t2">0600 unix socket</text>
+
+            <rect x="28" y="226" width="196" height="62" rx="6" class="svg-box"/>
+            <text x="44" y="252" class="svg-t">EventHub</text>
+            <text x="44" y="274" class="svg-t2">bounded ring buffer</text>
+
+            <rect x="246" y="128" width="154" height="76" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="262" y="150" class="svg-t2">pane.split</text>
+            <text x="262" y="168" class="svg-t2">pane.run</text>
+            <text x="262" y="186" class="svg-t2">wait.agent_status</text>
+
+            <g class="svg-line">
+              <line x1="224" y1="73"  x2="410" y2="73"  marker-end="url(#ah-d)"/>
+              <line x1="514" y1="104" x2="514" y2="220" marker-end="url(#ah-d)"/>
+              <line x1="410" y1="257" x2="230" y2="257" marker-end="url(#ah-d)"/>
+              <line x1="126" y1="220" x2="126" y2="110" marker-end="url(#ah-d)"/>
+            </g>
+            <text x="317" y="63"  class="svg-lbl" text-anchor="middle">runs</text>
+            <text x="522" y="166" class="svg-lbl">JSON-RPC</text>
+            <text x="320" y="247" class="svg-lbl" text-anchor="middle">mutates panes</text>
+            <text x="118" y="166" class="svg-lbl" text-anchor="end">events</text>
+
+            <text x="320" y="316" class="svg-note" text-anchor="middle">an agent can drive the app that is watching it</text>
+
+            <defs>
+              <marker id="ah-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <figcaption>
+          The loop closes. Seahelm watches the agent; the agent, holding <code>$SEAHELM_PANE_ID</code>, can
+          call back and split a pane, run a command in a sibling, read its scrollback, or block until
+          another pane goes idle.
+        </figcaption>
+      </figure>
+      <div class="side">
+        <h3>The surface an agent gets</h3>
+        <p>A python3 wrapper on <code>PATH</code>, newline-delimited JSON-RPC over a 0600 socket. Nothing to authenticate to, nothing on the network.</p>
+<pre class="code"><span class="p">$</span> seahelm pane list
+<span class="p">$</span> seahelm pane read &lt;pane&gt; --lines 50
+<span class="p">$</span> seahelm pane split &lt;pane&gt; --direction right
+<span class="p">$</span> seahelm pane run &lt;pane&gt; "npm test"
+<span class="p">$</span> seahelm wait agent-status &lt;pane&gt; --status Idle
+<span class="p">$</span> seahelm pane explain &lt;pane&gt;   <span class="c"># which rule?</span>
+<span class="p">$</span> seahelm layout export</pre>
+        <p>Hook shims install non-destructively into each tool's own config &mdash; and stay out of the way. <code>CwdChanged</code> is deliberately <em>not</em> registered: taking it made Claude Code hand worktree creation to us and broke <code>--worktree</code>.</p>
+      </div>
+    </div>
+
+    <div class="pair">
+      <figure>
+        <div class="fig-frame">
+          <svg viewBox="0 0 640 300" role="img" aria-label="Persistence boundary: the app's windows and Metal surfaces are discarded on quit, while the zmx session holding the PTY and the agent process, and the git worktree on disk, both survive and are re-attached by name on relaunch">
+            <rect x="20" y="28" width="600" height="76" rx="7" class="svg-box"/>
+            <text x="34" y="54" class="svg-t">seahelm.app</text>
+            <text x="34" y="80" class="svg-t2">window &middot; SplitTree &middot; Station &middot; Metal surface</text>
+            <text x="606" y="54" class="svg-lbl" text-anchor="end" fill="var(--idle)">GONE ON QUIT</text>
+
+            <line x1="20" y1="138" x2="620" y2="138" class="svg-dash"/>
+            <text x="606" y="130" class="svg-note" text-anchor="end">you quit the app &middot; the machine reboots</text>
+
+            <rect x="20" y="148" width="600" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="34" y="174" class="svg-t">zmx session &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
+            <text x="34" y="200" class="svg-t2">PTY &middot; shell &middot; the agent process, still thinking</text>
+            <text x="606" y="174" class="svg-lbl" text-anchor="end" fill="var(--run)">SURVIVES</text>
+
+            <rect x="20" y="240" width="600" height="48" rx="7" class="svg-box"/>
+            <text x="34" y="270" class="svg-t2">git worktree + branch on disk</text>
+            <text x="606" y="270" class="svg-lbl" text-anchor="end" fill="var(--run)">SURVIVES</text>
+
+            <line x1="66" y1="148" x2="66" y2="108" class="svg-accent" marker-end="url(#ah-e)"/>
+            <text x="78" y="130" class="svg-lbl">re-attach by name</text>
+
+            <defs>
+              <marker id="ah-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <figcaption>
+          Sessions outlive the app. Each split leaf claims a zmx session named for its worktree; a health
+          check three seconds after creation catches a stale one and rebuilds it. Quit, reboot, reopen &mdash;
+          the agent is where you left it, mid-thought.
+        </figcaption>
+      </figure>
+      <div class="side">
+        <h3>Two threads, one terminal engine</h3>
+        <p>The status poll runs on a background queue while you type on the main one, and both call into the
+        same C library. A single lock serializes them &mdash; except key input, which deliberately takes no
+        lock: Ghostty is thread-safe for keys, and holding it there would deadlock on a synchronous callback.</p>
+        <p>The poll is not uniform either. The worktree you are looking at is read every cycle; the rest
+        every third, so a fleet of twenty panes costs about what three do.</p>
+        <h3>Built on</h3>
+        <p><a class="linkout" href="https://ghostty.org">Ghostty</a> for the terminal engine, linked as a
+        C xcframework &mdash; <a class="linkout" href="https://zmx.sh">zmx</a> for session persistence &mdash;
+        Sparkle&nbsp;2 for updates, rendered into an inline banner instead of its own modals.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<section class="deck">
+  <div class="wrap">
+    <footer>
+      <div class="cmd" style="max-width:max-content"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/BetaYao/seahelm/main/scripts/install.sh | sh</div>
+      <div class="foot-links">
+        <a class="linkout" href="https://github.com/BetaYao/seahelm">Source &amp; releases</a>
+        <a class="linkout" href="https://youtu.be/WUUcuglx_Ks">Watch the tour</a>
+        <a class="linkout" href="https://github.com/BetaYao/seahelm/blob/main/CLAUDE.md">Architecture notes</a>
+      </div>
+      <p class="foot-meta">
+        Seahelm &mdash; sea + helm. macOS 14.0 Sonoma or later, Apple silicon and Intel.<br>
+        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; zmx &middot; 247 Swift files in four layers.
+      </p>
+    </footer>
+  </div>
+</section>
+</body>
+</html>
