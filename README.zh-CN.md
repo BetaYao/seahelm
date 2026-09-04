@@ -53,7 +53,7 @@ curl -fsSL https://seahelm.dev/install.sh | sh
 
 **侧边栏** — 文件树、代码编辑器(CodeEditSourceEditor)、Markdown 预览、git diff 审查,不离开当前 worktree。
 
-**灵动岛** — 屏幕顶部常驻药丸,平时安静,有事才展开:哪个 worktree 在跑、在等你、出错了。agent 建议弹成可点卡片。
+**灵动岛** — 屏幕顶部常驻胶囊,平时安静,有事才展开:哪个 worktree 在跑、在等你、出错了。agent 建议弹成可点卡片。
 
 **First Mate** — 观察 pane 状态迁移,生成建议卡片、等待/报错提醒、worktree 回收提示。
 
