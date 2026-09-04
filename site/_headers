@@ -10,3 +10,6 @@
 
 /poster.jpg
   Cache-Control: public, max-age=86400
+
+/tour-loop.mp4
+  Cache-Control: public, max-age=604800

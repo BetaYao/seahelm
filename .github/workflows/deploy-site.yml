@@ -43,3 +43,17 @@ jobs:
             pages deploy site
             --project-name=seahelm
             --branch=${{ github.head_ref || github.ref_name }}
+
+      # site/_headers puts a long cache on poster.jpg, og.png and tour-loop.mp4,
+      # so replacing any of them would otherwise stay invisible at the edge for
+      # a day. Previews live on pages.dev and are not behind this zone.
+      - name: Purge the edge cache
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sS -X POST --fail-with-body \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            --data '{"hosts":["www.seahelm.dev","seahelm.dev"]}' \
+            -o /dev/null
+          echo "edge cache purged"

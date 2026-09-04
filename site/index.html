@@ -225,41 +225,37 @@ p  { margin: 0; }
 /* ── the tour ─────────────────────────────────────────────────── */
 .film { padding: 2.6rem 0 0; display: grid; gap: 1rem; }
 .player {
-  position: relative; aspect-ratio: 16 / 9; border: 1px solid var(--rule);
+  position: relative; aspect-ratio: 1380 / 890; border: 1px solid var(--rule);
   border-radius: 10px; overflow: hidden; background: var(--sea-1);
   box-shadow: var(--shadow);
 }
 .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .face { position: absolute; inset: 0; display: block; text-decoration: none; }
-.face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.face video { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--sea-2); }
 /* The scrim and its text sit on the screenshot, not on a theme surface, so
    these are deliberately fixed colours rather than tokens. */
 .face .scrim {
   position: absolute; inset: 0;
-  background: linear-gradient(to bottom, rgba(4,20,26,.10) 0%, rgba(4,20,26,0) 34%, rgba(4,20,26,.72) 100%);
+  background: linear-gradient(to bottom, rgba(4,20,26,0) 62%, rgba(4,20,26,.66) 100%);
 }
-.face .play {
-  position: absolute; top: 50%; left: 50%; translate: -50% -50%;
-  width: 82px; height: 82px; border-radius: 50%;
-  background: var(--accent); display: grid; place-items: center;
-  box-shadow: 0 8px 30px -8px rgba(4,20,26,.75);
-  transition: scale .18s ease;
+.face .cta {
+  position: absolute; right: 18px; bottom: 16px;
+  display: inline-flex; align-items: center; gap: .55rem;
+  padding: .5rem .85rem; border-radius: 999px;
+  background: rgba(4,20,26,.74); border: 1px solid rgba(207,230,232,.28);
+  backdrop-filter: blur(8px);
+  font: 400 .82rem/1 var(--f-mono); color: #e4f2f3; white-space: nowrap;
+  transition: background-color .18s ease, border-color .18s ease;
 }
-.face .play svg { width: 30px; height: 30px; margin-left: 5px; fill: #04141a; }
-.face:hover .play, .face:focus-visible .play { scale: 1.07; }
-.face .meta {
-  position: absolute; left: 20px; bottom: 18px; display: flex; gap: .65rem;
-  align-items: baseline; font: 400 .84rem/1 var(--f-mono); color: #cfe6e8;
+.face .cta svg { width: 11px; height: 11px; fill: var(--accent); flex: none; }
+.face .cta b { font-weight: 500; color: #9fc4c7; }
+.face:hover .cta, .face:focus-visible .cta {
+  background: rgba(4,20,26,.9); border-color: rgba(31,200,218,.7);
 }
-.face .meta b { font-weight: 500; color: #fff; }
 .face:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) {
-  .face .play { transition: none; }
-  .face:hover .play, .face:focus-visible .play { scale: 1; }
-}
+@media (prefers-reduced-motion: reduce) { .face .cta { transition: none; } }
 @media (max-width: 620px) {
-  .face .play { width: 62px; height: 62px; }
-  .face .play svg { width: 23px; height: 23px; }
+  .face .cta { right: 10px; bottom: 10px; padding: .42rem .6rem; font-size: .72rem; }
 }
 
 /* ── deck sections ────────────────────────────────────────────── */
@@ -482,12 +478,15 @@ img, svg { max-width: 100%; }
     <div class="film">
       <p class="eyebrow"><span class="mark">&#9654;</span> Forty-seven seconds of it working</p>
       <div class="player" id="player">
-        <a class="face" href="https://youtu.be/WUUcuglx_Ks" rel="noopener">
-          <img src="/poster.jpg" width="1280" height="720" decoding="async"
-               alt="Seahelm running: a sidebar of git worktrees on the left, an agent mid-answer in the terminal, and a numbered suggestion card waiting on a decision">
+        <a class="face" href="https://youtu.be/WUUcuglx_Ks" rel="noopener"
+           aria-label="Seahelm running — worktrees down the sidebar, and the Island opening with a suggestion card and then the fleet list. Opens the full 47-second tour.">
+          <video id="loop" width="1380" height="890" muted loop playsinline
+                 preload="none" poster="/poster.jpg">
+            <source src="/tour-loop.mp4" type="video/mp4">
+          </video>
           <span class="scrim" aria-hidden="true"></span>
-          <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="5,3 21,12 5,21"/></svg></span>
-          <span class="meta"><b>Watch the tour</b> 0:47</span>
+          <span class="cta"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 21,12 5,21"/></svg>
+            Watch the full tour <b>0:47</b></span>
         </a>
       </div>
       <p class="note">
@@ -995,6 +994,15 @@ img, svg { max-width: 100%; }
 // The poster is a plain link until it is clicked, so the page fetches nothing
 // from youtube.com on load. Modified clicks (new tab, etc.) fall through to the
 // href, and with JS off the link simply opens the video.
+var loop = document.getElementById('loop');
+if (loop && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Not autoplay= in the markup: that would download and move before we get a
+  // say. Reduced-motion visitors keep the poster frame and never fetch the mp4.
+  loop.preload = 'auto';
+  var go = loop.play();
+  if (go && go.catch) go.catch(function () {});
+}
+
 document.addEventListener('click', function (e) {
   var face = e.target.closest && e.target.closest('.face');
   if (!face || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
