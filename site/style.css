@@ -9,78 +9,54 @@
    catch and this file exists to prevent.
    ─────────────────────────────────────────────────────────────── */
 /* ───────────────────────────────────────────────────────────────
-   Palette. The hues are still the app's own — Sources/UI/Shared/
-   SemanticColors.swift: sea-ink, cyan helm, the four status colours
-   the dots really use — but the surfaces have moved off blueprint
-   blue-grey toward sea-foam, and the page now has depth instead of
-   a grid: every surface runs from a brighter --surface-top down to
-   a deeper --surface-bottom, the way water does.
+   Palette. The page is a descent: sky, the waterline, the shallows,
+   then the drop-off into deep water, and the seabed under the footer.
+   Each depth sets its own surface and ink below; the hues are still
+   the app's own (Sources/UI/Shared/SemanticColors.swift — sea-ink,
+   cyan helm, the four status colours the dots really use).
+
+   There is deliberately no prefers-color-scheme branch. The surface
+   has to be light and the deep has to be dark or the descent is not
+   one; the OS theme does not get a vote. color-scheme is set per
+   depth instead, so form controls and scrollbars match their water.
    ─────────────────────────────────────────────────────────────── */
 :root {
-  --sea-0:  #e9f2f3;
+  --sea-0:  #f4f9fb;
   --sea-1:  #ffffff;
-  --sea-2:  #f3f8f8;
+  --sea-2:  #eef5f8;
   --ink:    #10282f;
   --ink-2:  #4f6970;
-  --rule:   #cddee1;
-  --rule-2: #e0ecee;
+  --rule:   #c9dde2;
+  --rule-2: #dcebef;
   --accent: #0b8fa6;
   --accent-soft: rgba(11,143,166,.10);
   --run:    #1f9d63;
   --wait:   #b0760a;
   --err:    #cc2a22;
   --idle:   #8a93a1;
-  --surface-top:    #f6fbfb;
-  --surface-bottom: #e2eeef;
-  /* A hairline of lift, not a floating card. */
-  --shadow: 0 1px 0 rgba(8,34,42,.045);
+  --shadow: 0 1px 0 rgba(8,34,42,.05);
 
   --f-cond: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
   --f-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --f-note: "Newsreader", Georgia, "Times New Roman", serif;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --sea-0:  #07222b;
-    --sea-1:  #0c2f39;
-    --sea-2:  #10363f;
-    --ink:    #d7e7e7;
-    --ink-2:  #86a6a9;
-    --rule:   #1d4f5a;
-    --rule-2: #163e47;
-    --accent: #22c5d6;
-    --accent-soft: rgba(34,197,214,.12);
-    --run:    #1bb062;
-    --wait:   #e0a458;
-    --err:    #ef5a4a;
-    --idle:   #6b8584;
-    --surface-top:    #0b2d37;
-    --surface-bottom: #041920;
-    --shadow: 0 1px 0 rgba(0,0,0,.28);
-  }
-}
-:root[data-theme="dark"] {
-  --sea-0:  #07222b;
-  --sea-1:  #0c2f39;
-  --sea-2:  #10363f;
-  --ink:    #d7e7e7;
-  --ink-2:  #86a6a9;
-  --rule:   #1d4f5a;
-  --rule-2: #163e47;
-  --accent: #22c5d6;
-  --accent-soft: rgba(34,197,214,.12);
-  --run:    #1bb062;
-  --wait:   #e0a458;
-  --err:    #ef5a4a;
-  --idle:   #6b8584;
-  --surface-top:    #0b2d37;
-  --surface-bottom: #041920;
-  --shadow: 0 1px 0 rgba(0,0,0,.28);
+
+/* The shallows: still light ink, but the water is unmistakably there. */
+.shallows {
+  --sea-1:  #e9f4f7;
+  --sea-2:  #d8eaef;
+  --ink:    #0b2630;
+  --ink-2:  #244b57;
+  --rule:   #86bfcc;
+  --rule-2: #9ccbd6;
+  --accent: #076c83;
+  --accent-soft: rgba(7,108,131,.12);
+  --shadow: 0 1px 0 rgba(6,40,52,.14);
 }
 
-/* Below deck: always deep water, in either theme, and deepening as it goes. */
-.hold {
+/* Deep water: the hold, the rendezvous, the seabed. */
+.hold, .deep, .seabed {
   --sea-0:  #061e26;
   --sea-1:  #0b2a33;
   --sea-2:  #0f313b;
@@ -94,21 +70,13 @@
   --wait:   #e0a458;
   --err:    #ef5a4a;
   --idle:   #5d7b7a;
-  --surface-top:    #0a2c36;
-  --surface-bottom: #03141a;
   --shadow: 0 1px 0 rgba(0,0,0,.35);
+  color-scheme: dark;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .hold { --surface-top: #06232c; --surface-bottom: #020f14; }
-}
-:root[data-theme="dark"] .hold { --surface-top: #06232c; --surface-bottom: #020f14; }
 
 /* ── base ─────────────────────────────────────────────────────── */
 body {
-  /* One slow fade for the whole page, pinned to the viewport so it reads as
-     light on the water rather than a stripe that scrolls past. Engines that
-     ignore `fixed` (iOS) get the same gradient over the document instead. */
-  background: linear-gradient(180deg, var(--surface-top) 0%, var(--surface-bottom) 100%) fixed;
+  background: #020c11;
   color: var(--ink);
   font: 400 16px/1.62 var(--f-body);
   -webkit-font-smoothing: antialiased;
@@ -121,21 +89,29 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 .prose { max-width: 66ch; }
 
 .deck { color: var(--ink); }
-/* The hold paints its own depth: it is the one section that is always dark,
-   and it gets deeper toward the bottom, which is what "below deck" means. */
+
+/* The descent, top to bottom. Each gradient ends on the colour the next one
+   starts with, so the only hard edges are the two that mean something. */
+.sky      { background: linear-gradient(180deg, #f6fafc 0%, #eaf3f7 100%); }
+/* The horizon. The seam between .sky and .surface is where the fleet sits;
+   a one-pixel darker line gives the edge the eye expects there. */
+.surface  { background: linear-gradient(180deg, #cfe5ea 0%, #b5d9e1 100%); }
+.sky + .surface { border-top: 1px solid #a3ccd6; }
+.surface + .surface { background: linear-gradient(180deg, #b5d9e1 0%, #a2cfda 100%); }
+.shallows { background: linear-gradient(180deg, #a2cfda 0%, #74b2c1 100%); }
+/* The drop-off: the hold is the one section that starts dark against light,
+   and the waterline across its top is the helm colour fading out either way. */
 .hold {
   position: relative;
-  background: linear-gradient(180deg, var(--surface-top) 0%, var(--surface-bottom) 100%);
+  background: linear-gradient(180deg, #1b5a6b 0%, #0b3442 32%, #06222c 100%);
 }
-/* Its edges are the waterline: a thin band of the helm colour fading out to
-   either side, instead of a hard rule across the page. */
-.hold::before, .hold::after {
-  content: ""; position: absolute; left: 0; right: 0; height: 1px;
+.hold::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px;
   background: linear-gradient(90deg, transparent 0%, var(--accent) 50%, transparent 100%);
-  opacity: .45;
+  opacity: .7;
 }
-.hold::before { top: 0; }
-.hold::after  { bottom: 0; }
+.deep     { background: linear-gradient(180deg, #06222c 0%, #041820 100%); }
+.seabed   { background: linear-gradient(180deg, #041820 0%, #020c11 100%); }
 
 h1, h2, h3 { font-family: var(--f-cond); font-weight: 700; margin: 0; text-wrap: balance; }
 h1 { font-size: clamp(2.35rem, 5.4vw, 3.85rem); line-height: .99; letter-spacing: -.015em; }
@@ -172,6 +148,10 @@ p  { margin: 0; }
    everything in the hero — the lede, the fleet strip — went with it. */
 .hero { padding: 2.1rem 0 2.2rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero h1 { max-width: 17ch; }
+/* The fleet strip, the caption and the install line, sitting on the water.
+   Same minmax as .hero and for the same reason: the install command is one
+   unbreakable line and must not widen the track on a phone. */
+.berth { padding: 1.8rem 0 2.4rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero .lede { max-width: 56ch; }
 .hero-cta { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .35rem; }
 .cmd {
@@ -365,7 +345,7 @@ footer { border-top: 1px solid var(--rule); padding: 2.8rem 0 3.6rem; display: g
 
 /* Standalone reset. The Artifact host supplied one; a hosted page must not
    assume it — without this the page carries the UA's 8px body margin. */
-html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+html { color-scheme: light; -webkit-text-size-adjust: 100%; }
 body { margin: 0; }
 img, svg { max-width: 100%; }
 [hidden] { display: none !important; }

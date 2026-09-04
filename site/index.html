@@ -28,8 +28,7 @@
 <meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.png">
 
-<meta name="theme-color" content="#f6fbfb" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0b2d37" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f9fb">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,8 +37,8 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<!-- ══════════════ MASTHEAD + HERO ══════════════ -->
-<section class="deck">
+<!-- ══════════════ MASTHEAD + HERO · above the waterline ══════════════ -->
+<section class="deck sky">
   <div class="wrap">
 
     <div class="masthead">
@@ -90,7 +89,14 @@
         watches who is working and who is waiting on you, and after a reboot every session is where
         you left it. Twelve agent CLIs work out of the box.
       </p>
+    </div>
+  </div>
+</section>
 
+<!-- ══════════════ THE WATERLINE · the fleet at rest ══════════════ -->
+<section class="deck surface">
+  <div class="wrap">
+    <div class="berth">
       <div class="fleet">
         <div class="fleet-bar">
           <span>openbeta/seahelm</span>
@@ -144,7 +150,7 @@
 </section>
 
 <!-- ══════════════ THE TOUR ══════════════ -->
-<section class="deck">
+<section class="deck surface">
   <div class="wrap">
     <div class="film">
       <p class="eyebrow"><span class="mark">&#9654;</span> Forty-seven seconds of it working</p>
@@ -169,7 +175,7 @@
 </section>
 
 <!-- ══════════════ DECK ONE — ON DECK ══════════════ -->
-<section class="deck">
+<section class="deck shallows">
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">Deck one &middot; on deck</p></div>
@@ -645,7 +651,7 @@
 </section>
 
 <!-- ══════════════ DECK THREE — THE RENDEZVOUS ══════════════ -->
-<section class="deck" id="rendezvous">
+<section class="deck deep" id="rendezvous">
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">Deck three &middot; the rendezvous</p></div>
@@ -811,7 +817,7 @@
 </section>
 
 <!-- ══════════════ FOOTER ══════════════ -->
-<section class="deck">
+<section class="deck seabed">
   <div class="wrap">
     <footer>
       <div class="cmd" style="max-width:max-content"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
