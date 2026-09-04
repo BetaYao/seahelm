@@ -7,8 +7,10 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidSelectProject(_ project: String, thread: String)
     func dashboardDidRequestEnterProject(_ project: String)
     func dashboardDidReorderCards(order: [String])
-    func dashboardDidRequestDelete(_ terminalID: String)
-    func dashboardDidRequestDeleteWithBranch(_ terminalID: String)
+    /// The row's Delete. Keyed by worktree path: a row is a worktree, and a
+    /// worktree with no registered agent (a pane that never spoke) must still
+    /// be deletable — the old pane-id key silently dropped those.
+    func dashboardDidRequestDeleteWorktree(path: String)
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
@@ -106,6 +108,8 @@ class DashboardViewController: NSViewController {
     /// Fold this project's worktrees into its integration checkout. Equivalent
     /// to typing `/integrate` with that repo selected.
     var onIntegrateProject: ((String) -> Void)?
+    /// Move an integration checkout (by path) back onto origin/main.
+    var onResetIntegration: ((String) -> Void)?
     /// Master switch for the integration feature, forwarded to the fleet view.
     var integrationEnabled: Bool = true {
         didSet { overviewView.integrationEnabled = integrationEnabled }
@@ -340,14 +344,12 @@ class DashboardViewController: NSViewController {
         overviewView.onSelectPane = { [weak self] path, stationId in
             self?.handlePaneRowClick(path: path, stationId: stationId)
         }
-        // Row context menu → the delegate's confirm-and-tear-down path.
+        // Row context menu → the delegate's assess-then-tear-down path.
         overviewView.onDeleteWorktree = { [weak self] path in
-            guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
-            self.dashboardDelegate?.dashboardDidRequestDelete(agent.id)
+            self?.dashboardDelegate?.dashboardDidRequestDeleteWorktree(path: path)
         }
-        overviewView.onDeleteWorktreeWithBranch = { [weak self] path in
-            guard let self, let agent = self.agents.first(where: { $0.worktreePath == path }) else { return }
-            self.dashboardDelegate?.dashboardDidRequestDeleteWithBranch(agent.id)
+        overviewView.onResetIntegration = { [weak self] path in
+            self?.onResetIntegration?(path)
         }
         overviewView.onCloseProject = { [weak self] project in
             self?.dashboardDelegate?.dashboardDidRequestCloseRepo(project)

@@ -688,7 +688,26 @@ final class WorktreeSidePanelViewController: NSViewController {
             lines.append(("conflict markers: " + state.conflictedPaths.joined(separator: ", "), .systemOrange))
         }
         if state.isHeld {
-            lines.append(("not checked out — local edits here · /integrate force", .systemOrange))
+            // Name what is in the way. "local edits here" was true but not
+            // actionable: the checkout is where things get run, so something is
+            // nearly always dirty and the question is only ever *what*.
+            if let head = state.heldHead {
+                lines.append((
+                    "not checked out — commits made here (\(head.prefix(9))) · /integrate force drops them",
+                    .systemOrange
+                ))
+            } else {
+                let paths = state.heldPaths ?? []
+                let shown = paths.prefix(3).joined(separator: ", ")
+                let rest = paths.count - min(3, paths.count)
+                let detail = paths.isEmpty
+                    ? ""
+                    : " (" + shown + (rest > 0 ? " +\(rest) more" : "") + ")"
+                lines.append((
+                    "not checked out — local edits here\(detail) · /integrate force",
+                    .systemOrange
+                ))
+            }
         }
 
         let stack = NSStackView(views: lines.map { text, color in

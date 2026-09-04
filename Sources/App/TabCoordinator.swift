@@ -144,10 +144,20 @@ class TabCoordinator {
             integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
             isCheckoutBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) },
             isWorktreeBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) },
-            onReport: { [weak self] report, _ in
+            lastPublished: { IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: $0) },
+            onReport: { [weak self] report, repo in
                 IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
+                if case .published(let commit) = report.outcome {
+                    IntegrationWorktreeStore.shared.recordPublished(
+                        commit, forCheckout: report.integrationWorktreePath)
+                }
                 guard report.needsAttention else { return }
-                self?.pendingOrders.enqueue(
+                // upsert, not enqueue: the key is (checkout, kind), so an
+                // enqueue would pin the card to the *first* round's summary
+                // while the side panel moved on with every later one — the two
+                // surfaces reading one round is the whole point of panelState.
+                // An unchanged report compares equal and does not re-pop.
+                self?.pendingOrders.upsert(
                     FirstMateAction(
                         kind: .integrationReport,
                         zone: .red,
@@ -155,7 +165,11 @@ class TabCoordinator {
                         branch: "",
                         project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
                         terminalID: "",
-                        message: report.summary
+                        message: report.summary,
+                        // The repo to re-run against: the card's own path is the
+                        // checkout, and resolving back from it is a guess.
+                        payload: repo,
+                        options: report.cardOptions
                     )
                 )
             }
@@ -1394,6 +1408,10 @@ class TabCoordinator {
         }
 
         config.workspacePaths.removeAll { $0 == tab.repoPath }
+        // The integration checkout goes with the repo. Nothing pruned these
+        // before, so a repo removed and re-added came back with a checkout
+        // pointing at a directory that had been deleted with it.
+        IntegrationWorktreeStore.shared.forget(repoPath: tab.repoPath)
         saveConfig()
 
         workspaceManager.removeTab(at: tabIndex)
@@ -1593,18 +1611,13 @@ class TabCoordinator {
         // Dashboard handles focus panel — no separate tab needed
     }
 
-    func dashboardDidRequestDelete(_ terminalID: String, window: NSWindow?) {
-        guard let agent = AgentRegistry.shared.pane(for: terminalID) else { return }
-        let worktreePath = agent.worktreePath
-        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
+    func dashboardDidRequestDeleteWorktree(path: String, window: NSWindow?) {
+        let wanted = WorktreeDiscovery.canonicalPath(path)
+        guard let item = allWorktrees.first(where: { WorktreeDiscovery.canonicalPath($0.info.path) == wanted }) else {
+            NSSound.beep()
+            return
+        }
         terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)
-    }
-
-    func dashboardDidRequestDeleteWithBranch(_ terminalID: String, window: NSWindow?) {
-        guard let agent = AgentRegistry.shared.pane(for: terminalID) else { return }
-        let worktreePath = agent.worktreePath
-        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
-        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window, preferredDeleteBranch: true)
     }
 
     // MARK: - New Branch Integration

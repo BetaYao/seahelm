@@ -38,7 +38,9 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
-    var onDeleteWorktreeWithBranch: ((String) -> Void)?
+    /// Move a repo's integration checkout back onto origin/main. Only offered
+    /// on rows that are one.
+    var onResetIntegration: ((String) -> Void)?
     /// Right-click "Close Project…" on a project group header. Untracks the repo
     /// and tears down its sessions; worktrees stay on disk.
     var onCloseProject: ((String) -> Void)?
@@ -538,10 +540,11 @@ final class DashboardOverviewView: NSView {
                 let row = RowView(pane: pane,
                                   status: groupedItem.status,
                                   selected: groupedItem.id == selectedId,
-                                  showsRepository: groupingMode != .repository)
+                                  showsRepository: groupingMode != .repository,
+                                  isIntegration: groupedItem.isIntegration)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
-                row.onDeleteWithBranch = { [weak self] path in self?.onDeleteWorktreeWithBranch?(path) }
+                row.onResetIntegration = { [weak self] path in self?.onResetIntegration?(path) }
                 row.onHoverChanged = { [weak self] row, entered in
                     self?.rowHoverChanged(row, entered: entered)
                 }
@@ -617,7 +620,8 @@ final class DashboardOverviewView: NSView {
             for item in group.items {
                 guard let pane = panesByPath[item.path] else { continue }
                 if let row = rowViewsByID[item.id] {
-                    row.update(pane: pane, status: item.status, selected: item.id == selectedId)
+                    row.update(pane: pane, status: item.status, selected: item.id == selectedId,
+                               isIntegration: item.isIntegration)
                 }
                 if groupingMode == .pane, pane.panes.count > 1 {
                     for paneInfo in pane.panes {
@@ -999,13 +1003,15 @@ final class DashboardOverviewView: NSView {
         /// row, decides what that means — see `FleetHoverRow`.
         var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         var onDelete: ((String) -> Void)?
-        var onDeleteWithBranch: ((String) -> Void)?
+        var onResetIntegration: ((String) -> Void)?
         /// Refreshed by `update` rather than fixed at init: a row is keyed by its
         /// station id, and a worktree transfer (`handleNewBranch`) re-registers the
         /// same stations under a new path. A reused row that kept its original
         /// `path` would open, reveal, and *delete* the worktree it used to be.
         private var path: String
         private var isMainWorktree: Bool
+        /// The repo's integration checkout, which gets a Reset in its menu.
+        private var isIntegration: Bool
         private var selected: Bool
         private let showsRepository: Bool
         private let staticDot: NSTextField
@@ -1054,9 +1060,10 @@ final class DashboardOverviewView: NSView {
         }
 
         init(pane: WorktreeRowInfo, status: AgentStatus, selected: Bool,
-             showsRepository: Bool) {
+             showsRepository: Bool, isIntegration: Bool = false) {
             self.path = pane.worktreePath
             self.isMainWorktree = pane.isMainWorktree
+            self.isIntegration = isIntegration
             self.selected = selected
             self.showsRepository = showsRepository
             self.staticDot = Self.label(status.glyph, status.color, 8)
@@ -1184,9 +1191,10 @@ final class DashboardOverviewView: NSView {
             return result
         }
 
-        func update(pane: WorktreeRowInfo, status: AgentStatus, selected: Bool) {
+        func update(pane: WorktreeRowInfo, status: AgentStatus, selected: Bool, isIntegration: Bool = false) {
             path = pane.worktreePath
             isMainWorktree = pane.isMainWorktree
+            self.isIntegration = isIntegration
             setSelected(selected, animated: false)
             setAccessibilityLabel(pane.name)
             applyContent(pane: pane, status: status)
@@ -1248,17 +1256,25 @@ final class DashboardOverviewView: NSView {
                 menu.addItem(item)
             }
             menu.addItem(.separator())
+            if isIntegration {
+                let resetItem = NSMenuItem(title: "Reset to origin/main",
+                                           action: #selector(resetIntegrationAction), keyEquivalent: "")
+                resetItem.target = self
+                resetItem.toolTip = "Fetch origin and move the integration checkout onto trunk."
+                    + " Asks first if edits or commits made here would be lost."
+                menu.addItem(resetItem)
+            }
+            // One Delete, and it takes the branch with it. Whether to ask is
+            // decided from what would be lost, not by a second menu item —
+            // see `TerminalCoordinator.confirmAndDeleteWorktree`.
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteAction), keyEquivalent: "")
             deleteItem.target = self
+            deleteItem.toolTip = "Remove the worktree and its branch."
+                + " Asks first if uncommitted changes or unmerged commits would be lost."
             menu.addItem(deleteItem)
-            let deleteBranchItem = NSMenuItem(title: "Delete + Branch", action: #selector(deleteWithBranchAction), keyEquivalent: "")
-            deleteBranchItem.target = self
-            menu.addItem(deleteBranchItem)
             if isMainWorktree {
                 deleteItem.isEnabled = false
-                deleteBranchItem.isEnabled = false
                 deleteItem.toolTip = "Main worktree cannot be deleted."
-                deleteBranchItem.toolTip = "Main worktree cannot be deleted."
             }
             return menu
         }
@@ -1278,7 +1294,7 @@ final class DashboardOverviewView: NSView {
 
         @objc private func deleteAction() { onDelete?(path) }
 
-        @objc private func deleteWithBranchAction() { onDeleteWithBranch?(path) }
+        @objc private func resetIntegrationAction() { onResetIntegration?(path) }
 
         private var tracking: NSTrackingArea?
         override func updateTrackingAreas() {

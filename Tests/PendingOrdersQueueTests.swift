@@ -203,4 +203,28 @@ final class PendingOrdersQueueTests: XCTestCase {
         q.resolvePane(terminalID: "t1")
         XCTAssertEqual(notifications, 1)
     }
+
+    /// Integration reports upsert rather than enqueue: the key is (checkout,
+    /// kind), so enqueueing pinned the card to the first round's summary while
+    /// the side panel moved on with every later one.
+    func testALaterIntegrationRoundRewritesTheCard() {
+        let q = PendingOrdersQueue()
+        let checkout = "/repo-worktrees/integration"
+        func report(_ message: String, options: [String]? = nil) -> FirstMateAction {
+            FirstMateAction(kind: .integrationReport, zone: .red, worktreePath: checkout,
+                            branch: "", project: "p", terminalID: "", message: message,
+                            payload: "/repo", options: options)
+        }
+
+        q.upsert(report("integrated agentA · excluded agentB"))
+        q.upsert(report("integrated agentA · not checked out — local edits (package.json)",
+                        options: ["Discard edits & update", "Leave it"]))
+
+        XCTAssertEqual(q.all().count, 1, "one card per checkout")
+        XCTAssertEqual(q.all().first?.action.message,
+                       "integrated agentA · not checked out — local edits (package.json)")
+        XCTAssertEqual(q.all().first?.action.options, ["Discard edits & update", "Leave it"])
+        XCTAssertEqual(q.all().first?.action.payload, "/repo")
+    }
+
 }

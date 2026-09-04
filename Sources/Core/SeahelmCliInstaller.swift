@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v8"
+    private static let versionMarker = "# seahelm-cli v9"
 
     static func scriptContents() -> String {
         return #"""
@@ -51,7 +51,7 @@ enum SeahelmCliInstaller {
         def main():
             argv = sys.argv[1:]
             if not argv:
-                die("usage: seahelm <ping|memory|session|pane|wait|events|layout> ...", 2)
+                die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration> ...", 2)
             g = argv[0]; a = argv[1:]
 
             if g == "ping":
@@ -83,6 +83,18 @@ enum SeahelmCliInstaller {
                 except Exception as e:
                     die("socket error: %s" % e)
                 return
+
+            if g == "integration":
+                # seahelm integration status [path]
+                # Defaults to the cwd's repo: an agent asking "did my work get
+                # folded in?" is asking about the repo it is standing in.
+                if a and a[0] not in ("status",):
+                    die("unknown integration subcommand: %s" % a[0])
+                rest = a[1:] if a else []
+                path = rest[0] if rest and not rest[0].startswith("--") else (
+                    None if has(rest, "--all") else os.getcwd())
+                p = {"path": path} if path else {}
+                print(json.dumps(call("integration.status", p).get("checkouts", []), indent=2)); return
 
             if g == "layout":
                 if not a: die("usage: seahelm layout <export|apply [file|-]>")

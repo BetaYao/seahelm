@@ -379,11 +379,18 @@ surface.reparent(to: newContainer)
 
 ### 工作树删除
 ```
-右键 → 确认（检查未提交更改）
-  → 3 选项：Delete / Delete + Branch / Cancel
+右键 Delete（只有一项，分支一起删）
+  → 后台评估 WorktreeDeleter.assessDeletion()
+      未提交改动？未合并到 trunk 且未推送的 commit？
+  → 没有损失：直接删（-D 分支，评估已确认 commit 都在 trunk/upstream 上）
+  → 有损失：一次确认弹窗，逐条列出会丢什么 → Delete 强删
   → surface.destroy()
   → WorktreeDeleter.deleteWorktree()
   → 更新 UI（dashboard, tabs, statusPublisher）
+
+integration checkout 的行另有 "Reset to origin/main"：
+  fetch → IntegrationWorktree.reset()，规则同 publish：
+  手改/手提交的内容会先弹确认，再 reset --hard
 ```
 
 ---

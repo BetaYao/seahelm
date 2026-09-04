@@ -39,6 +39,12 @@ final class PersistedStringMap {
         return Set(map.values)
     }
 
+    /// Snapshot of the whole map, for the callers that need the keys too.
+    var entries: [String: String] {
+        lock.lock(); defer { lock.unlock() }
+        return map
+    }
+
     /// Drop a key. Worktree paths get reused — a stale entry left behind by a
     /// deleted worktree would answer for whatever is created at that path next.
     func remove(forKey key: String) {

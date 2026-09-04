@@ -11,6 +11,10 @@ final class IntegrationWorktreeStore {
     static let shared = IntegrationWorktreeStore()
 
     private let store = PersistedStringMap(fileName: "integration-worktrees.json")
+    /// Checkout path → the commit seahelm last published there. Provenance,
+    /// not display: `IntegrationWorktree.publish` compares it against the
+    /// checkout's real HEAD to notice work that arrived by hand.
+    private let published = PersistedStringMap(fileName: "integration-published.json")
     /// Membership cache. `isIntegrationWorktree` is asked once per pane per
     /// render, on a two-second poll, so it must not rebuild a set each time.
     private var knownPaths: Set<String>
@@ -32,8 +36,34 @@ final class IntegrationWorktreeStore {
         refreshCache()
     }
 
+    /// Every repo's checkout, keyed by repo path.
+    var checkoutsByRepo: [String: String] { store.entries }
+
+    /// Which repo a checkout belongs to. The reverse lookup, for the paths that
+    /// arrive as a checkout — a card, a CLI call from inside one.
+    func repoPath(forCheckout path: String) -> String? {
+        let canonical = WorktreeDiscovery.canonicalPath(path)
+        return store.entries.first { $0.value == canonical }?.key
+    }
+
+    /// The commit seahelm last checked out there, or nil if it never has.
+    func lastPublishedCommit(forCheckout path: String) -> String? {
+        published[WorktreeDiscovery.canonicalPath(path)]?.nonEmptyTrimmed
+    }
+
+    func recordPublished(_ commit: String, forCheckout path: String) {
+        published.set(commit, forKey: WorktreeDiscovery.canonicalPath(path))
+    }
+
+    /// Drops everything remembered about a repo's checkout. Worktree paths get
+    /// reused, so a stale entry would answer for whatever lands there next.
     func forget(repoPath: String) {
-        store.remove(forKey: WorktreeDiscovery.canonicalPath(repoPath))
+        let key = WorktreeDiscovery.canonicalPath(repoPath)
+        if let checkout = store[key] {
+            published.remove(forKey: checkout)
+            IntegrationStatusStore.shared.forget(worktreePath: checkout)
+        }
+        store.remove(forKey: key)
         refreshCache()
     }
 

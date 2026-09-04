@@ -528,71 +528,62 @@ class TerminalCoordinator {
 
     // MARK: - Worktree Deletion
 
-    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?, preferredDeleteBranch: Bool? = nil) {
+    /// The row's Delete. Decides on its own whether to ask: a worktree with
+    /// nothing of its own — clean, every commit already on trunk or its
+    /// upstream — goes outright, branch included. Anything that would be lost
+    /// gets one sheet that names it, and a confirmed delete is a forced one.
+    /// See `WorktreeDeleteAssessment` for why there is no sheet on the safe
+    /// path.
+    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
         guard !info.isMainWorktree else { return }
         guard let window else { return }
 
-        // Both are synchronous git subprocesses (up to a 5s timeout on a wedged
-        // repo) — run them off the main thread, then present the alert.
+        // The integration checkout is detached and its commits are throwaway
+        // builds, so "what would be lost" is a different question there: only
+        // work that arrived by hand counts, which is what its hold logic knows.
+        let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(info.path)
+        let expectedHead = isIntegration
+            ? IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: info.path)
+            : nil
+
+        // Several synchronous git subprocesses (up to a 5s timeout each on a
+        // wedged repo) — run them off the main thread, then decide.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+            let assessment = isIntegration
+                ? IntegrationWorktree.assessDeletion(path: info.path, repoPath: repoPath, expectedHead: expectedHead)
+                : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath, branchName: info.branch)
             DispatchQueue.main.async {
-                self?.presentDeleteConfirmation(info, window: window,
-                                                hasChanges: hasChanges,
-                                                repoPath: repoPath,
-                                                preferredDeleteBranch: preferredDeleteBranch)
+                guard let self else { return }
+                if assessment.isSafe {
+                    // The assessment established the branch's commits are on
+                    // trunk or upstream, so `-D`: git's own `-d` only consults
+                    // the upstream and would keep a PR-merged branch with one
+                    // unpushed commit for no reason.
+                    self.performDeleteWorktree(info, repoPath: repoPath,
+                                               deleteBranch: assessment.deletesBranch,
+                                               force: false, forceBranch: true)
+                } else {
+                    self.presentDeleteConfirmation(info, window: window, repoPath: repoPath, assessment: assessment)
+                }
             }
         }
     }
 
     private func presentDeleteConfirmation(_ info: WorktreeInfo, window: NSWindow,
-                                           hasChanges: Bool, repoPath: String,
-                                           preferredDeleteBranch: Bool?) {
+                                           repoPath: String, assessment: WorktreeDeleteAssessment) {
         let alert = NSAlert()
-        alert.alertStyle = hasChanges ? .critical : .warning
-        alert.messageText = "Delete worktree \"\(info.branch)\"?"
-        let deleteBranch = preferredDeleteBranch ?? false
-        if hasChanges {
-            if deleteBranch {
-                alert.informativeText = "This worktree has uncommitted changes that will be lost. Seahelm will also try to delete the local branch."
-            } else {
-                alert.informativeText = "This worktree has uncommitted changes that will be lost."
-            }
-        } else {
-            if deleteBranch {
-                alert.informativeText = "The worktree directory will be removed, then Seahelm will try to delete the local branch."
-            } else {
-                alert.informativeText = "The worktree directory will be removed."
-            }
-        }
-        if let preferredDeleteBranch {
-            alert.addButton(withTitle: preferredDeleteBranch ? "Delete + Branch" : "Delete")
-            alert.addButton(withTitle: "Cancel")
-        } else {
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Delete + Branch")
-            alert.addButton(withTitle: "Cancel")
-        }
-
+        alert.alertStyle = .critical
+        alert.messageText = "Delete worktree \u{201C}\(info.displayName)\u{201D}?"
+        alert.informativeText = assessment.losses.joined(separator: "\n\n")
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
         alert.buttons[0].hasDestructiveAction = true
-        if preferredDeleteBranch == nil {
-            alert.buttons[1].hasDestructiveAction = true
-        }
 
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self else { return }
-            if let preferredDeleteBranch {
-                if response == .alertFirstButtonReturn {
-                    self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: preferredDeleteBranch, force: hasChanges)
-                }
-                return
-            }
-            if response == .alertFirstButtonReturn {
-                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
-            } else if response == .alertSecondButtonReturn {
-                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: true, force: hasChanges)
-            }
+            guard let self, response == .alertFirstButtonReturn else { return }
+            self.performDeleteWorktree(info, repoPath: repoPath,
+                                       deleteBranch: assessment.deletesBranch, force: true)
         }
     }
 
@@ -613,7 +604,8 @@ class TerminalCoordinator {
         }
     }
 
-    private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
+    private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool,
+                                       force: Bool, forceBranch: Bool? = nil) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 let result = try WorktreeDeleter.deleteWorktree(
@@ -621,7 +613,8 @@ class TerminalCoordinator {
                     repoPath: repoPath,
                     branchName: info.branch,
                     deleteBranch: deleteBranch,
-                    force: force
+                    force: force,
+                    forceBranch: forceBranch
                 )
                 DispatchQueue.main.async {
                     guard let self else { return }
@@ -652,6 +645,13 @@ class TerminalCoordinator {
         config.focusedPaneIds.removeValue(forKey: info.path)
         config.save()
         stationManager.removeTree(forPath: info.path)
+        // Deleting the integration checkout is opting the repo back out:
+        // automatic rounds already stop on a missing directory, and leaving
+        // the record behind would show a stale status line for a checkout that
+        // no longer exists. `/integrate` recreates and re-records it.
+        if let repo = IntegrationWorktreeStore.shared.repoPath(forCheckout: info.path) {
+            IntegrationWorktreeStore.shared.forget(repoPath: repo)
+        }
         delegate?.terminalCoordinator(self, didDeleteWorktree: info)
     }
 

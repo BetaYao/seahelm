@@ -32,6 +32,9 @@ final class IntegrationCoordinator {
     /// Whether a worktree has an agent mid-turn. Such a worktree contributes its
     /// HEAD rather than a live snapshot — see `IntegrationRunner.run`.
     private let isWorktreeBusy: (String) -> Bool
+    /// The commit seahelm last published into a checkout, so a round can tell
+    /// work that arrived by hand from work it put there itself.
+    private let lastPublished: (String) -> String?
     private let onReport: (IntegrationRunReport, String) -> Void
     private let runRound: (String, String, [WorktreeInfo]) throws -> IntegrationRunReport
 
@@ -46,6 +49,7 @@ final class IntegrationCoordinator {
         integrationPath: @escaping (String) -> String?,
         isCheckoutBusy: @escaping (String) -> Bool,
         isWorktreeBusy: @escaping (String) -> Bool = { _ in false },
+        lastPublished: @escaping (String) -> String? = { _ in nil },
         onReport: @escaping (IntegrationRunReport, String) -> Void,
         runRound: ((String, String, [WorktreeInfo]) throws -> IntegrationRunReport)? = nil
     ) {
@@ -56,10 +60,13 @@ final class IntegrationCoordinator {
         self.integrationPath = integrationPath
         self.isCheckoutBusy = isCheckoutBusy
         self.isWorktreeBusy = isWorktreeBusy
+        self.lastPublished = lastPublished
         self.onReport = onReport
         self.runRound = runRound ?? { repo, path, trees in
             try IntegrationRunner.run(repoPath: repo, integrationPath: path,
-                                      worktrees: trees, isBusy: isWorktreeBusy)
+                                      worktrees: trees,
+                                      lastPublished: lastPublished(path),
+                                      isBusy: isWorktreeBusy)
         }
     }
 

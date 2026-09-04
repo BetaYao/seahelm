@@ -41,6 +41,12 @@ private final class FakeDataSource: ControlDataSource {
     func focusPane(paneId: String) -> Bool { focused.append(paneId); return mutableOk }
     var explains: [String: [String: Any]] = [:]
     func explainPane(paneId: String) -> [String: Any]? { explains[paneId] }
+    var integrationPaths: [String?] = []
+    var integration: [String: Any]?
+    func integrationStatus(path: String?) -> [String: Any]? {
+        integrationPaths.append(path)
+        return integration
+    }
     var options: [String: [[String: Any]]] = [:]
     var knownForOptions: Set<String> = []
     func paneOptions(paneId: String) -> [[String: Any]]? {
@@ -567,4 +573,34 @@ final class ControlRouterTests: XCTestCase {
         XCTAssertNil(first["memory_mb"])
         XCTAssertNil(first["process_name"])
     }
+
+    // MARK: - integration.status
+
+    /// The one question an agent cannot answer from git: the round that folds
+    /// its work in is triggered by its own turn ending, so reading the checkout
+    /// from inside the turn always shows the round before.
+    func testIntegrationStatusPassesThePathThrough() {
+        let source = FakeDataSource()
+        source.integration = ["checkouts": [["repo": "/repo", "held": true]]]
+        let router = ControlRouter(dataSource: source)
+
+        guard case .ok(let payload) = router.handle(method: "integration.status",
+                                                    params: ["path": "/repo/worktrees/a"]) else {
+            return XCTFail("expected ok")
+        }
+        XCTAssertEqual(source.integrationPaths, ["/repo/worktrees/a"])
+        XCTAssertEqual((payload["checkouts"] as? [[String: Any]])?.count, 1)
+    }
+
+    func testIntegrationStatusWithoutAPathAsksForEverything() {
+        let source = FakeDataSource()
+        source.integration = ["checkouts": []]
+        let router = ControlRouter(dataSource: source)
+
+        guard case .ok = router.handle(method: "integration.status", params: [:]) else {
+            return XCTFail("expected ok")
+        }
+        XCTAssertEqual(source.integrationPaths, [nil])
+    }
+
 }
