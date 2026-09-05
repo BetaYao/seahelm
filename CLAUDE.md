@@ -65,7 +65,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `PanelCoordinator` — Manages side panels (AI panel, notification panel)
 
 2. **UI Layer** (`Sources/UI/`)
-   - `Dashboard/` — Four layout modes: Grid, LeftRight, TopSmall, TopLarge. Grid uses frame-based layout; focus layouts use Auto Layout with a `FocusPanelView` + mini card sidebar
+   - `Dashboard/` — One layout, left/right (`setupLeftRightLayout`, accessibility id `dashboard.layout.left-right`): the fleet overview on one side as navigator, a `FocusPanelView` hosting the selected terminal on the other. `DashboardOverviewView` is that overview — every worktree a row, grouped by `WorktreeGroupingMode` (repository, status, activity time, or `pane`, which expands to a third level of pane rows). Edit mode swaps in `EditLayoutContainerView`: a terminal column and a file-preview column, each with an `EditTabStripView`, split by a draggable divider. The former Grid / TopSmall / TopLarge modes and the mini-card sidebar are gone; the "grid-aware" wording left in `DashboardFocusController` is a remnant, not a feature.
    - `Repo/` — `RepoViewController` with `SidebarViewController` for worktree switching; `SplitContainerView` hosts split panes
    - `Split/` — `SplitContainerView` renders `SplitTree` as frame-based leaf views with `DividerView` drag handles and dim overlays on unfocused panes
    - `Chrome/` — Two-column `WindowChromeController` (sidebar/terminal headers, divider, collapse)
