@@ -12,9 +12,30 @@ Full walkthrough: [YouTube](https://youtu.be/WUUcuglx_Ks)
 
 ## Why Seahelm
 
-- **Minimal** — No bloated code editor or diff review. Everything is delegated to agents; the UI stays out of the way.
-- **Fast** — Native macOS, built on the Ghostty terminal and AppKit. Low latency, responsive rendering.
-- **Compatible** — Works with up to 12 coding agents out of the box. Not locked into any single platform.
+Several tools now run coding agents side by side on macOS. Seahelm shares the obvious
+parts with them — Swift, libghostty, one git worktree per agent, hooks for status.
+Three things are its own.
+
+**It lives outside the terminal.** A multiplexer puts status inside the window you
+are trying to stop watching. Seahelm's Island sits at the edge of the screen and
+stays quiet until a worktree needs you, blocked agents raise real system
+notifications, and you can answer one from your phone over iMessage. Claude and
+Codex token and quota usage are summarised in-app, so you also see when an agent is
+about to run out of budget rather than out of ideas.
+
+**Built around the decision, not the display.** Seahelm intercepts the Stop hook and
+makes the agent hand back its next-step options before it is allowed to stop. Those
+arrive as clickable cards. First Mate watches status transitions and either handles
+them or queues them for your approval. Showing "awaiting input" is the easy half; the
+question is what to do about it.
+
+**The pane follows its agent.** When an agent creates a worktree and starts working
+there, that pane moves to the new worktree's card instead of an empty pane appearing
+beside it. Keyed on the cwd every hook payload carries, with a same-repo gate and a
+cooldown so a `cd x && ...` tool call doesn't walk the pane back and forth.
+
+Beyond that: native rendering on the Ghostty engine rather than Electron, sessions
+that survive a reboot via zmx, and status detection for 12 agents out of the box.
 
 ## Install
 
