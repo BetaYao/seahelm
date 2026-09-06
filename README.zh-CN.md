@@ -32,6 +32,19 @@ pane 会迁移到新 worktree 的卡片上，而不是在旁边多出一个空�
 除此之外：基于 Ghostty 引擎的原生渲染而非 Electron、通过 zmx 让会话在重启后依然存活、
 开箱支持 12 种 agent 的状态识别。
 
+## 它是怎么写出来的
+
+Seahelm 是 vibe coding 的产物。几乎每一行都由 coding agent 写成 —— Claude Code 和
+Codex —— 我把控的是「应该发生什么」，而不是逐行审阅 diff。它还是在自己身上长出来的：
+下面讲的 worktree、split pane 和状态检测，正是由跑在 Seahelm 自己的 worktree、split
+pane 里、被它自己的状态检测盯着的 agent 写出来的。
+
+安装前值得知道：
+
+- 代码公开且是 MIT，所以你可以自己读，而不必听它自说自话。
+- 约 1900 个单元测试覆盖了那些事先能说清楚的行为。说不清楚的那部分，就是 bug 待的地方。
+- 带复现步骤的 bug 报告是你能给的最有用的东西 —— 它是把毛刺变成修复的关键。
+
 ## 安装
 
 ```bash
@@ -50,9 +63,9 @@ curl -fsSL https://seahelm.dev/install.sh | sh
 
 ![File browser and code editor](assets/screenshots/code-editor.png)
 
-### Tab 布局
+### 编辑模式
 
-![Tab layout](assets/screenshots/tab-layout.png)
+![编辑模式 —— 终端列与文件预览列，各自带一个 tab 条](assets/screenshots/edit-mode.png)
 
 ## 功能
 
