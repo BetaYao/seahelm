@@ -8,7 +8,6 @@ enum FirstMateActionKind: Equatable {
     case inspect
     case autoCommit
     case suggestNextOrder
-    case returnToPort
     case broadcastOrder
     /// An integration round that needs looking at — conflicts, or a checkout
     /// held back. A round that published cleanly says nothing.

@@ -1,33 +1,33 @@
 import XCTest
 @testable import seahelm
 
-final class IMessageRuleTests: XCTestCase {
+final class TelegramRuleTests: XCTestCase {
 
     private func rule(name: String = "r",
                       from: String? = nil,
                       match: String? = nil,
                       prompt: String = "{{text}}",
                       enabled: Bool? = nil,
-                      target: IMessageRuleTarget = .init(kind: .worktree, value: "/wt")) -> IMessageRule {
-        IMessageRule(name: name, enabled: enabled, from: from, match: match,
+                      target: TelegramRuleTarget = .init(kind: .worktree, value: "/wt")) -> TelegramRule {
+        TelegramRule(name: name, enabled: enabled, from: from, match: match,
                      prompt: prompt, target: target)
     }
 
     // MARK: - Matching
 
     func testEmptyPatternMatchesAnything() {
-        XCTAssertEqual(IMessageRuleEngine.matches(pattern: nil, in: "anything"), [])
-        XCTAssertEqual(IMessageRuleEngine.matches(pattern: "   ", in: "anything"), [])
+        XCTAssertEqual(TelegramRuleEngine.matches(pattern: nil, in: "anything"), [])
+        XCTAssertEqual(TelegramRuleEngine.matches(pattern: "   ", in: "anything"), [])
     }
 
     func testPatternReturnsCaptureGroups() {
-        let groups = IMessageRuleEngine.matches(pattern: "CPU.*?(\\d+)%.*?(\\w+)$",
+        let groups = TelegramRuleEngine.matches(pattern: "CPU.*?(\\d+)%.*?(\\w+)$",
                                                 in: "CPU 95% host web01")
         XCTAssertEqual(groups, ["95", "web01"])
     }
 
     func testPatternIsCaseInsensitive() {
-        XCTAssertNotNil(IMessageRuleEngine.matches(pattern: "alert", in: "ALERT: disk full"))
+        XCTAssertNotNil(TelegramRuleEngine.matches(pattern: "alert", in: "ALERT: disk full"))
     }
 
     /// Alert texts reflow. `^(?=.*A)(?=.*B).*` reads as "mentions both", and
@@ -35,46 +35,46 @@ final class IMessageRuleTests: XCTestCase {
     /// start failing silently the day the sender adds a line break.
     func testPatternSpansNewlines() {
         let body = "【阿里云】尊敬的 may_cauc@aliyun.com\n您的告警项 high-cpu 连续发生 1 次。"
-        XCTAssertNotNil(IMessageRuleEngine.matches(pattern: "^(?=.*阿里云)(?=.*告警).*",
+        XCTAssertNotNil(TelegramRuleEngine.matches(pattern: "^(?=.*阿里云)(?=.*告警).*",
                                                    in: body))
     }
 
     func testNonMatchingPatternReturnsNil() {
-        XCTAssertNil(IMessageRuleEngine.matches(pattern: "disk", in: "CPU high"))
+        XCTAssertNil(TelegramRuleEngine.matches(pattern: "disk", in: "CPU high"))
     }
 
     /// A typo'd regex that "matched everything" would fire an agent on every
     /// text the user receives, so an uncompilable pattern must fail closed.
     func testUncompilablePatternFailsClosed() {
-        XCTAssertNil(IMessageRuleEngine.matches(pattern: "([unclosed", in: "anything"))
+        XCTAssertNil(TelegramRuleEngine.matches(pattern: "([unclosed", in: "anything"))
     }
 
     // MARK: - Rule selection
 
     func testBothPatternsMustMatch() {
         let rules = [rule(from: "^106", match: "CPU")]
-        XCTAssertNil(IMessageRuleEngine.firstMatch(rules: rules, sender: "106900", text: "disk full"))
-        XCTAssertNil(IMessageRuleEngine.firstMatch(rules: rules, sender: "+8613800138000",
+        XCTAssertNil(TelegramRuleEngine.firstMatch(rules: rules, sender: "106900", text: "disk full"))
+        XCTAssertNil(TelegramRuleEngine.firstMatch(rules: rules, sender: "+8613800138000",
                                                    text: "CPU high"))
-        XCTAssertNotNil(IMessageRuleEngine.firstMatch(rules: rules, sender: "106900",
+        XCTAssertNotNil(TelegramRuleEngine.firstMatch(rules: rules, sender: "106900",
                                                       text: "CPU high"))
     }
 
     func testDisabledRuleIsSkipped() {
         let rules = [rule(name: "off", enabled: false), rule(name: "on")]
-        let match = IMessageRuleEngine.firstMatch(rules: rules, sender: "a", text: "b")
+        let match = TelegramRuleEngine.firstMatch(rules: rules, sender: "a", text: "b")
         XCTAssertEqual(match?.rule.name, "on")
     }
 
     /// Two rules firing on one alert would put the same text in two panes.
     func testFirstMatchWins() {
         let rules = [rule(name: "specific", match: "CPU"), rule(name: "catch-all")]
-        let match = IMessageRuleEngine.firstMatch(rules: rules, sender: "a", text: "CPU high")
+        let match = TelegramRuleEngine.firstMatch(rules: rules, sender: "a", text: "CPU high")
         XCTAssertEqual(match?.rule.name, "specific")
     }
 
     func testNoRulesMeansNoMatch() {
-        XCTAssertNil(IMessageRuleEngine.firstMatch(rules: [], sender: "a", text: "b"))
+        XCTAssertNil(TelegramRuleEngine.firstMatch(rules: [], sender: "a", text: "b"))
     }
 
     // MARK: - Prompt rendering
@@ -82,7 +82,7 @@ final class IMessageRuleTests: XCTestCase {
     func testPlaceholdersAreFilled() {
         let rules = [rule(match: "CPU.*?(\\d+)%",
                           prompt: "Alert from {{from}}: {{text}}\nCPU hit {{1}}%, investigate")]
-        let match = IMessageRuleEngine.firstMatch(rules: rules, sender: "106900",
+        let match = TelegramRuleEngine.firstMatch(rules: rules, sender: "106900",
                                                   text: "host web01 CPU 95% sustained")
 
         XCTAssertEqual(match?.prompt,
@@ -91,7 +91,7 @@ final class IMessageRuleTests: XCTestCase {
 
     /// An absent capture should vanish, not reach the agent as literal braces.
     func testUnfilledGroupPlaceholdersAreStripped() {
-        let rendered = IMessageRuleEngine.render("a {{1}} b {{3}} c", text: "t", from: "f",
+        let rendered = TelegramRuleEngine.render("a {{1}} b {{3}} c", text: "t", from: "f",
                                                  groups: ["X"])
         XCTAssertEqual(rendered, "a X b  c")
     }
@@ -106,23 +106,23 @@ final class IMessageRuleTests: XCTestCase {
 
     func testPaneTargetMatchesSessionKeyOrInstanceId() {
         let panes = [pane("inst-1", session: "seahelm-repo-main")]
-        XCTAssertEqual(IMessageRuleEngine.resolvePane(
+        XCTAssertEqual(TelegramRuleEngine.resolvePane(
             .init(kind: .pane, value: "seahelm-repo-main"), panes: panes)?.paneId, "inst-1")
-        XCTAssertEqual(IMessageRuleEngine.resolvePane(
+        XCTAssertEqual(TelegramRuleEngine.resolvePane(
             .init(kind: .pane, value: "inst-1"), panes: panes)?.paneId, "inst-1")
     }
 
     func testWorktreeTargetMatchesPathOrLeafName() {
         let panes = [pane("p1", worktree: "/work/repo-worktrees/task/fix")]
-        XCTAssertNotNil(IMessageRuleEngine.resolvePane(
+        XCTAssertNotNil(TelegramRuleEngine.resolvePane(
             .init(kind: .worktree, value: "/work/repo-worktrees/task/fix"), panes: panes))
-        XCTAssertNotNil(IMessageRuleEngine.resolvePane(
+        XCTAssertNotNil(TelegramRuleEngine.resolvePane(
             .init(kind: .worktree, value: "fix"), panes: panes))
     }
 
     func testProjectTargetMatchesProjectName() {
         let panes = [pane("p1", project: "seahelm")]
-        XCTAssertEqual(IMessageRuleEngine.resolvePane(
+        XCTAssertEqual(TelegramRuleEngine.resolvePane(
             .init(kind: .project, value: "seahelm"), panes: panes)?.paneId, "p1")
     }
 
@@ -130,13 +130,13 @@ final class IMessageRuleTests: XCTestCase {
     /// at a neighbouring pane.
     func testUnresolvableTargetReturnsNil() {
         let panes = [pane("p1", worktree: "/work/a")]
-        XCTAssertNil(IMessageRuleEngine.resolvePane(
+        XCTAssertNil(TelegramRuleEngine.resolvePane(
             .init(kind: .worktree, value: "/work/gone"), panes: panes))
     }
 
     func testEmptyTargetValueResolvesToNothing() {
         let panes = [pane("p1", worktree: "/work/a")]
-        XCTAssertNil(IMessageRuleEngine.resolvePane(
+        XCTAssertNil(TelegramRuleEngine.resolvePane(
             .init(kind: .worktree, value: "  "), panes: panes))
     }
 
@@ -156,7 +156,7 @@ final class IMessageRuleTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let cfg = try JSONDecoder().decode(IMessageConfig.self, from: json)
+        let cfg = try JSONDecoder().decode(TelegramConfig.self, from: json)
 
         XCTAssertEqual(cfg.resolvedRules.count, 1)
         XCTAssertEqual(cfg.resolvedRules[0].name, "aliyun-cpu")
@@ -165,7 +165,7 @@ final class IMessageRuleTests: XCTestCase {
     }
 
     func testConfigWithoutRulesIsEmptyNotNilCrash() throws {
-        let cfg = try JSONDecoder().decode(IMessageConfig.self, from: "{}".data(using: .utf8)!)
+        let cfg = try JSONDecoder().decode(TelegramConfig.self, from: "{}".data(using: .utf8)!)
         XCTAssertTrue(cfg.resolvedRules.isEmpty)
     }
 }

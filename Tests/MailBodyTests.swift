@@ -97,7 +97,7 @@ final class MailBodyTests: XCTestCase {
     /// and their client quotes it back, stripping must return the new text only.
     func testSignatureSurvivesARoundTrip() {
         let sent = MailSignature.appended(to: "Pane is waiting for you.")
-        XCTAssertTrue(sent.contains("/pane"), "the command list should ship with every mail")
+        XCTAssertTrue(sent.contains("/go"), "the command list should ship with every mail")
 
         let quoted = sent.split(separator: "\n", omittingEmptySubsequences: false)
             .map { "> \($0)" }

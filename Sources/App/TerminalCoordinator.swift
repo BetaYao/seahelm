@@ -537,6 +537,17 @@ class TerminalCoordinator {
     func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
         guard !info.isMainWorktree else { return }
         guard let window else { return }
+        // Same rule as `/return`: a worktree with an agent at work is not
+        // pulled out from under it. Close the pane first if that is meant.
+        if AgentRegistry.shared.hasRunningPane(inWorktree: info.path) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "\u{201C}\(info.displayName)\u{201D} has an agent running"
+            alert.informativeText = "Wait for it to finish, or close its pane, then delete the worktree."
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+            return
+        }
 
         // The integration checkout is detached and its commits are throwaway
         // builds, so "what would be lost" is a different question there: only
@@ -552,7 +563,8 @@ class TerminalCoordinator {
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
             let assessment = isIntegration
                 ? IntegrationWorktree.assessDeletion(path: info.path, repoPath: repoPath, expectedHead: expectedHead)
-                : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath, branchName: info.branch)
+                : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
+                                                 branchName: info.branch, refreshBase: true)
             DispatchQueue.main.async {
                 guard let self else { return }
                 if assessment.isSafe {
@@ -587,10 +599,10 @@ class TerminalCoordinator {
         }
     }
 
-    /// Delete a worktree without the confirm alert — caller already confirmed
-    /// (e.g. First Mate return-to-port approval). Does full surface teardown.
-    func deleteWorktreeForReturnToPort(path: String, branch: String,
-                                       deleteBranch: Bool = false, force: Bool = false) {
+    /// Delete a worktree without the confirm alert — the caller already asked
+    /// (`/return`, through its plan). Does full surface teardown.
+    func deleteWorktreeWithoutConfirm(path: String, branch: String,
+                                      deleteBranch: Bool = false, force: Bool = false) {
         let info = WorktreeInfo(path: path, branch: branch, commitHash: "", isMainWorktree: false)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let repoPath = WorktreeDiscovery.findRepoRoot(from: path) ?? path

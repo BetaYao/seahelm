@@ -64,7 +64,7 @@ class AgentRegistry {
     /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
-    /// External channels (iMessage, future: Slack, etc.) — keyed by channelId
+    /// External channels (Telegram, future: Slack, etc.) — keyed by channelId
     private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
@@ -757,7 +757,7 @@ class AgentRegistry {
         // `canDeliverInput`, not merely "a Station exists" — the two come apart
         // for any pane whose tab has not been opened in this run, and that gap
         // is what silently swallowed every message sent to a backgrounded pane
-        // from iMessage, mail, and the control socket alike.
+        // from Telegram, mail, and the control socket alike.
         if let station, station.canDeliverInput {
             // Send the text first, then the Enter as a separate write. Agent TUIs
             // (Claude Code, codex) treat a `\r` arriving in the same burst as the
@@ -1081,7 +1081,7 @@ class AgentRegistry {
 
     // MARK: - External Channel Management
 
-    /// Register an external channel (iMessage, Slack, etc.)
+    /// Register an external channel (Telegram, Slack, etc.)
     func registerChannel(_ channel: ExternalChannel) {
         lock.lock()
         externalChannels[channel.channelId] = channel
@@ -1115,34 +1115,24 @@ class AgentRegistry {
 
     // MARK: - Inbound Message Handling
 
-    /// Process an inbound message from an external channel.
-    /// Phase 1: slash command routing.
-    /// Phase 2 (future): LLM intent understanding.
-    /// Routes chat text through the cockpit's own command language, so a phone
-    /// and the desktop speak the same verbs instead of the two divergent sets
-    /// that used to exist (`/send` here vs `/order` there, and so on).
-    ///
-    /// Injected by MainWindowController because routing needs the worktree list
-    /// and the repo paths, which live up there — AgentRegistry stays free of UI. Returns
-    /// false for a verb it doesn't own, leaving the chat-only verbs below (`/status`,
-    /// `/idea`) to handle it: those have no cockpit equivalent because on the
-    /// desktop you just look at the dashboard.
-    ///
-    /// Nil in tests and headless runs, where only the chat-only verbs answer.
-    var chatCommandRoute: ((_ text: String, _ reply: @escaping (String) -> Void) -> Bool)?
+    /// Runs a chat line through the command language and replies. Set by
+    /// `MainWindowController`, which owns the executor and the fleet; until
+    /// then — tests, headless runs — a headless executor over an empty fleet
+    /// answers instead.
+    var commandRoute: ((_ text: String, _ surface: CommandSurface, _ reply: @escaping (CommandReply) -> Void) -> Void)?
 
     /// Injects a rule-matched prompt into the pane a target names. Set by
     /// `MainWindowController`, which owns the pane list. Returns false when the
     /// target resolves to nothing.
-    var ruleTriggerRoute: ((_ prompt: String, _ target: IMessageRuleTarget) -> Bool)?
+    var ruleTriggerRoute: ((_ prompt: String, _ target: TelegramRuleTarget) -> Bool)?
 
     /// Merges rapid rule hits aimed at the same pane (Aliyun multi-threshold
     /// SMS, etc.) into one inject. Owned here so every inbound path — live
     /// bridge, tests — gets the same window without MainWindow wiring it.
-    let ruleCoalescer = IMessageRuleCoalescer()
+    let ruleCoalescer = TelegramRuleCoalescer()
 
     func handleInbound(_ message: InboundMessage) {
-        // Channels deliver from their own poll threads, and `chatCommandRoute`
+        // Channels deliver from their own poll threads, and the executor
         // reads the dashboard's selection and moves it. Hop to main before any
         // of that touches AppKit.
         guard Thread.isMainThread else {
@@ -1159,101 +1149,36 @@ class AgentRegistry {
         //
         // Hits for one pane are coalesced for 30s so a same-second 80%+90%
         // alert burst becomes one agent turn instead of two overlapping ones.
-        if let target = message.metadata?["ruleTarget"] as? IMessageRuleTarget {
+        if let target = message.metadata?["ruleTarget"] as? TelegramRuleTarget {
             let ruleName = message.metadata?["ruleName"] as? String ?? "?"
             ruleCoalescer.enqueue(prompt: text, target: target, ruleName: ruleName) { [weak self] combined, t in
                 if self?.ruleTriggerRoute?(combined, t) != true {
-                    NSLog("[iMessage] Rule '\(ruleName)' matched but target \(t.kind.rawValue)=\(t.value) resolved to no pane")
+                    NSLog("[Telegram] Rule '\(ruleName)' matched but target \(t.kind.rawValue)=\(t.value) resolved to no pane")
                 }
             }
             return
         }
 
-        // Bare prose steers the worktree you last worked in — the phone equivalent
-        // of typing into its pane. It deliberately does NOT mean what it means in
-        // the desktop cockpit (create a worktree and staff it): a stray line in a
-        // group chat must not spawn worktrees.
-        if !text.hasPrefix("/") {
-            let handled = chatCommandRoute?(text) { [weak self] r in
-                self?.reply(to: message, content: r, format: .markdown)
-            } ?? false
-            if !handled {
-                reply(to: message, content: "No agent to steer. Use `/new <task>` to start one.")
-            }
-            return
-        }
-
-        if chatCommandRoute?(text, { [weak self] r in
-            self?.reply(to: message, content: r, format: .markdown)
-        }) == true {
-            return
-        }
-
-        if let cmd = CommandParser.parse(message) {
-            executeCommand(cmd)
-        } else {
-            reply(to: message, content: "Use /help to see supported commands")
+        // One executor for every surface: the chat speaks the same language as
+        // the desktop Helm line. The session is the chat, so each Telegram
+        // conversation keeps its own binding.
+        let surface = CommandSurface(
+            sessionKey: CommandSession.key(surface: message.channelId, id: message.chatId ?? message.senderId),
+            isDesktop: false,
+            commander: message.senderId)
+        let route = commandRoute ?? headlessCommandRoute
+        route(text, surface) { [weak self] result in
+            guard !result.text.isEmpty else { return }
+            self?.reply(to: message, content: result.text, format: .markdown)
         }
     }
 
-    private func executeCommand(_ cmd: ParsedCommand) {
-        switch cmd.command {
-        case "help":
-            // The cockpit verbs come first because they are the shared language;
-            // the rest are chat-only (the desktop reads them off the dashboard).
-            let help = """
-            **Seahelm Commands**
-
-            _Same as the desktop cockpit:_
-            `<anything>` — Steer the current agent
-            `/worktree` — List worktrees, numbered
-            `/worktree [@repo] <description>` — Start a worktree and switch to it
-            `/worktree #<code|name>` — Switch to that worktree
-            `/pane` — List this worktree's panes, numbered
-            `/pane #<code|name>` — Steer that pane
-            `/order #<code|name> <task>` — Send to one pane without switching
-            `/broadcast <task>` — Send a task to every pane
-            `/return [@target]` — Delete a worktree / drop a repo; bare sweeps finished ones
-            `/add` — Desktop only (needs a file picker)
-            `/feedback <description>` — Open a GitHub issue for seahelm
-
-            _Chat only:_
-            `/status` — Status of all agents
-            `/idea <description>` — Capture an idea
-            `/help` — This help
-            """
-            reply(to: cmd.rawMessage, content: help, format: .markdown)
-
-        case "idea":
-            guard !cmd.args.isEmpty else {
-                reply(to: cmd.rawMessage, content: "Usage: `/idea <description>`")
-                return
-            }
-            let item = IdeaStore.shared.add(
-                text: cmd.args,
-                project: "external",
-                // Channel id, not a hardcoded platform — an idea texted in over
-                // iMessage was being filed as "wecom:".
-                source: "\(cmd.rawMessage.channelId):\(cmd.rawMessage.senderId)",
-                tags: []
-            )
-            reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")
-
-        case "status":
-            let agents = allPanes()
-            if agents.isEmpty {
-                reply(to: cmd.rawMessage, content: "No agents running.")
-                return
-            }
-            var lines = ["**Agent Status**", ""]
-            for a in agents {
-                lines.append("\(a.status.icon) **\(a.project)** [\(a.branch)] — \(a.status.rawValue): \(a.lastMessage)")
-            }
-            reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
-
-        default:
-            reply(to: cmd.rawMessage, content: "Unknown command: /\(cmd.command)\nUse /help to see supported commands")
-        }
+    /// What answers before the window has wired a host — tests, headless runs:
+    /// the command language over an empty fleet, with nothing persisted.
+    private lazy var headlessExecutor = CommandExecutor(host: HeadlessCommandHost.shared,
+                                                        sessions: CommandSessionStore(url: nil, legacyMailURL: nil))
+    private var headlessCommandRoute: (String, CommandSurface, @escaping (CommandReply) -> Void) -> Void {
+        { [weak self] text, surface, reply in self?.headlessExecutor.run(text, surface: surface, reply: reply) }
     }
 
     /// Send a reply back through the same external channel

@@ -76,7 +76,7 @@ final class PendingOrdersQueue {
 
     /// Pane-scoped for actions that name a terminal (suggestions and questions come
     /// from one specific pane, and two panes of a worktree must be able to hold a
-    /// card each). Worktree- and app-scoped actions (returnToPort, broadcastOrder)
+    /// card each). Worktree- and app-scoped actions (integrationReport, broadcastOrder)
     /// carry no terminalID and keep their worktree-wide key.
     static func key(_ a: FirstMateAction) -> String {
         var base = "\(a.worktreePath)#\(a.kind)"
@@ -174,7 +174,7 @@ final class PendingOrdersQueue {
     /// screen naming a terminalID that no longer resolves, and tapping one of its
     /// options sent text to a terminal that isn't there.
     ///
-    /// Only pane-scoped cards match. `returnToPort` and `broadcastOrder` carry no
+    /// Only pane-scoped cards match. `integrationReport` and `broadcastOrder` carry no
     /// terminalID (see `key`) because they belong to the worktree or the whole
     /// app, and must outlive any single pane — the empty-id guard is what keeps
     /// one pane's death from sweeping them away.

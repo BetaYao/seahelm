@@ -38,6 +38,8 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
+    /// The row's Return — `/return @worktree` by another route.
+    var onReturnWorktree: ((String) -> Void)?
     /// Move a repo's integration checkout back onto origin/main. Only offered
     /// on rows that are one.
     var onResetIntegration: ((String) -> Void)?
@@ -462,13 +464,18 @@ final class DashboardOverviewView: NSView {
         }
     }
 
-    func update(_ panes: [WorktreeRowInfo]) {
+    /// `changedWorktreePath` names the only worktree whose status moved, when
+    /// the caller knows. An incremental pass then touches that row alone instead
+    /// of reassigning every label on every row — the rest of the list is
+    /// unchanged by definition, and rewriting it was most of what pinned the
+    /// main thread. Leave it nil to refresh all rows.
+    func update(_ panes: [WorktreeRowInfo], changedWorktreePath: String? = nil) {
         latestPanes = panes
         guard !isRenderPaused else { return }
-        render(panes, revealSelection: false)
+        render(panes, revealSelection: false, changedWorktreePath: changedWorktreePath)
     }
 
-    private func render(_ panes: [WorktreeRowInfo], revealSelection: Bool) {
+    private func render(_ panes: [WorktreeRowInfo], revealSelection: Bool, changedWorktreePath: String? = nil) {
         let running = panes.filter { $0.rolledUpStatus == .running }.count
         // Tight enough to survive the 300pt docked column next to two buttons:
         // total count, then only the running slice.
@@ -500,7 +507,8 @@ final class DashboardOverviewView: NSView {
             #if DEBUG
             let start = DispatchTime.now().uptimeNanoseconds
             #endif
-            applyIncrementalUpdates(groups: groups, panesByPath: panesByPath)
+            applyIncrementalUpdates(groups: groups, panesByPath: panesByPath,
+                                    changedWorktreePath: changedWorktreePath)
             #if DEBUG
             recordTelemetry(kind: "incremental",
                             elapsedMs: elapsedMilliseconds(since: start),
@@ -544,6 +552,7 @@ final class DashboardOverviewView: NSView {
                                   isIntegration: groupedItem.isIntegration)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
+                row.onReturn = { [weak self] path in self?.onReturnWorktree?(path) }
                 row.onResetIntegration = { [weak self] path in self?.onResetIntegration?(path) }
                 row.onHoverChanged = { [weak self] row, entered in
                     self?.rowHoverChanged(row, entered: entered)
@@ -611,13 +620,18 @@ final class DashboardOverviewView: NSView {
 
     private func applyIncrementalUpdates(
         groups: [WorktreeGroup],
-        panesByPath: [String: WorktreeRowInfo]
+        panesByPath: [String: WorktreeRowInfo],
+        changedWorktreePath: String? = nil
     ) {
         orderedRows = groups.flatMap { group in group.items.map { ($0.id, $0.path) } }
         renderedGroupTitles = groups.map(\.title)
 
         for group in groups {
             for item in group.items {
+                // One worktree's status edge leaves every other row identical:
+                // skipping them is skipping a label reassignment (and the
+                // layout invalidation behind it) per field per row.
+                if let changedWorktreePath, item.path != changedWorktreePath { continue }
                 guard let pane = panesByPath[item.path] else { continue }
                 if let row = rowViewsByID[item.id] {
                     row.update(pane: pane, status: item.status, selected: item.id == selectedId,
@@ -1003,6 +1017,7 @@ final class DashboardOverviewView: NSView {
         /// row, decides what that means — see `FleetHoverRow`.
         var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         var onDelete: ((String) -> Void)?
+        var onReturn: ((String) -> Void)?
         var onResetIntegration: ((String) -> Void)?
         /// Refreshed by `update` rather than fixed at init: a row is keyed by its
         /// station id, and a worktree transfer (`handleNewBranch`) re-registers the
@@ -1169,9 +1184,13 @@ final class DashboardOverviewView: NSView {
 
         /// Compact git summary "+adds −dels  ↑ahead↓behind", colored. Empty when
         /// there are no changes and no divergence (or stats not yet resolved).
+        /// Built once: `AppFont.mono` constructs a descriptor and resolves a font
+        /// each call, and this ran per row per repaint.
+        private static let gitFont = AppFont.mono(size: 10)
+
         static func gitInfoAttributed(_ stats: WorktreeGitStats?) -> NSAttributedString {
             guard let stats, !stats.isEmpty else { return NSAttributedString() }
-            let font = AppFont.mono(size: 10)
+            let font = gitFont
             let result = NSMutableAttributedString()
             func append(_ s: String, _ color: NSColor) {
                 result.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color]))
@@ -1204,12 +1223,28 @@ final class DashboardOverviewView: NSView {
         var titleTextForTesting: String { titleLabel.stringValue }
         var titleFrameForTesting: NSRect { titleLabel.frame }
 
+        /// The git summary this row last rendered, so an unchanged one is not
+        /// re-attributed. `hasRenderedGit` distinguishes "no stats yet" from
+        /// "stats resolved to nothing", which `nil` alone cannot.
+        private var renderedGitStats: WorktreeGitStats?
+        private var hasRenderedGit = false
+
+        /// `NSTextField.stringValue` invalidates layout and schedules display
+        /// whether or not the value differs, and the sampled main thread spent
+        /// its time in exactly that machinery (`_NSCGSTransaction`,
+        /// `CATransaction`). Most repaints rewrite a row with what it already
+        /// says, so compare first.
+        private static func setText(_ field: NSTextField, _ value: String) {
+            guard field.stringValue != value else { return }
+            field.stringValue = value
+        }
+
         private func applyContent(pane: WorktreeRowInfo, status: AgentStatus) {
             let nextTitle = pane.currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextTitle.isEmpty {
-                titleLabel.stringValue = nextTitle
+                Self.setText(titleLabel, nextTitle)
             } else if titleLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                titleLabel.stringValue = PaneTitleResolver.shortenPath(pane.worktreePath)
+                Self.setText(titleLabel, PaneTitleResolver.shortenPath(pane.worktreePath))
             }
 
             // Unlike the title, a duration must be allowed to disappear: it falls
@@ -1219,25 +1254,31 @@ final class DashboardOverviewView: NSView {
             // last known figure, so a live counter never blanks mid-flight.
             let nextRuntime = pane.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextRuntime.isEmpty || status != .running {
-                timeLabel.stringValue = nextRuntime
+                Self.setText(timeLabel, nextRuntime)
             }
 
             let nextBranch = (pane.thread.isEmpty ? pane.name : pane.thread)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextBranch.isEmpty {
-                branchLabel.stringValue = nextBranch
+                Self.setText(branchLabel, nextBranch)
             }
-            gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
-            paneCountLabel.stringValue = pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—"
+            if !hasRenderedGit || renderedGitStats != pane.gitStats {
+                hasRenderedGit = true
+                renderedGitStats = pane.gitStats
+                gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
+            }
+            Self.setText(paneCountLabel, pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—")
             if let repositoryLabel, showsRepository {
                 let project = pane.project.isEmpty ? "Unknown project" : pane.project
-                repositoryLabel.stringValue = project
-                repositoryLabel.textColor = ProjectColor.color(for: project)
+                Self.setText(repositoryLabel, project)
+                let color = ProjectColor.color(for: project)
+                if repositoryLabel.textColor != color { repositoryLabel.textColor = color }
             }
-            staticDot.stringValue = status.glyph
-            staticDot.textColor = status.color
-            staticDot.isHidden = status == .running
-            runningDot.isHidden = status != .running
+            Self.setText(staticDot, status.glyph)
+            if staticDot.textColor != status.color { staticDot.textColor = status.color }
+            // `isHidden` also invalidates display unconditionally.
+            if staticDot.isHidden != (status == .running) { staticDot.isHidden = status == .running }
+            if runningDot.isHidden != (status != .running) { runningDot.isHidden = status != .running }
         }
 
         override func mouseDown(with event: NSEvent) { onTap?(path) }
@@ -1264,6 +1305,14 @@ final class DashboardOverviewView: NSView {
                     + " Asks first if edits or commits made here would be lost."
                 menu.addItem(resetItem)
             }
+            // Two ways out. Return is the command: ship what the worktree has,
+            // then delete. Delete throws it away.
+            let returnItem = NSMenuItem(title: "Return…", action: #selector(returnAction), keyEquivalent: "")
+            returnItem.target = self
+            returnItem.toolTip = "Same as /return: delete outright when everything is merged;"
+                + " otherwise commit, push, open a PR, then delete. Asks first."
+            if isMainWorktree || isIntegration { returnItem.isEnabled = false }
+            menu.addItem(returnItem)
             // One Delete, and it takes the branch with it. Whether to ask is
             // decided from what would be lost, not by a second menu item —
             // see `TerminalCoordinator.confirmAndDeleteWorktree`.
@@ -1293,6 +1342,8 @@ final class DashboardOverviewView: NSView {
         @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
 
         @objc private func deleteAction() { onDelete?(path) }
+
+        @objc private func returnAction() { onReturn?(path) }
 
         @objc private func resetIntegrationAction() { onResetIntegration?(path) }
 
@@ -1362,6 +1413,8 @@ final class DashboardOverviewView: NSView {
         /// render now, and a transferred worktree keeps its station ids.
         private var worktreePath: String
         private let dotLabel: NSTextField
+        /// The pane's `#n` — the same number `/status` prints and `/go #n` takes.
+        private let handleLabel: NSTextField
         private let titleLabel: NSTextField
         private var hovered = false
 
@@ -1376,6 +1429,7 @@ final class DashboardOverviewView: NSView {
             self.stationId = pane.stationId
             self.worktreePath = worktreePath
             self.dotLabel = NSTextField(labelWithString: "\u{25CF}")
+            self.handleLabel = NSTextField(labelWithString: "#\(pane.handle)")
             self.titleLabel = NSTextField(labelWithString: pane.title)
             super.init(frame: .zero)
             wantsLayer = true
@@ -1390,18 +1444,27 @@ final class DashboardOverviewView: NSView {
             dotLabel.setContentHuggingPriority(.required, for: .horizontal)
             dotLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+            handleLabel.font = AppFont.mono(size: 11)
+            handleLabel.textColor = DashboardOverviewView.inkFaint
+            handleLabel.translatesAutoresizingMaskIntoConstraints = false
+            handleLabel.setContentHuggingPriority(.required, for: .horizontal)
+            handleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
             titleLabel.font = AppFont.mono(size: 11)
             titleLabel.lineBreakMode = .byTruncatingTail
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
             titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             addSubview(dotLabel)
+            addSubview(handleLabel)
             addSubview(titleLabel)
             NSLayoutConstraint.activate([
                 // Indent under the worktree row's status dot + text column.
                 dotLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 27),
                 dotLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-                titleLabel.leadingAnchor.constraint(equalTo: dotLabel.trailingAnchor, constant: 7),
+                handleLabel.leadingAnchor.constraint(equalTo: dotLabel.trailingAnchor, constant: 7),
+                handleLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+                titleLabel.leadingAnchor.constraint(equalTo: handleLabel.trailingAnchor, constant: 6),
                 titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
                 titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 4),
                 titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
@@ -1416,6 +1479,7 @@ final class DashboardOverviewView: NSView {
             self.worktreePath = worktreePath
             setAccessibilityLabel(pane.title)
             dotLabel.textColor = pane.status.color
+            handleLabel.stringValue = "#\(pane.handle)"
             titleLabel.stringValue = pane.title
             titleLabel.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
         }

@@ -67,7 +67,7 @@ final class FirstMateCoordinator {
                     notify(action)
                 case .inspect, .autoCommit:
                     runInspection(action)
-                case .suggestNextOrder, .returnToPort, .broadcastOrder, .integrationReport:
+                case .suggestNextOrder, .broadcastOrder, .integrationReport:
                     // Never adjudicated green: reports are raised directly by
                     // `/integrate`, and the rest are red-zone by construction.
                     break

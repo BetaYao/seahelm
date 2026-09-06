@@ -29,7 +29,7 @@ struct Config: Codable {
     /// fields are legacy and ignored — MQTT publisher was removed.
     /// Pairing identity. The JSON key stays `mqtt` — see `PairingIdentity`.
     var pairing: PairingIdentity?
-    var imessage: IMessageConfig?
+    var telegram: TelegramConfig?
     /// Gmail email channel configuration. OAuth credentials are held separately
     /// in Keychain, so this remains safe to serialize to config.json.
     var gmailMail: GmailMailConfig?
@@ -89,7 +89,7 @@ struct Config: Codable {
         case focusedPaneIds = "focused_pane_ids"
         case agentSessions = "agent_sessions"
         case pairing = "mqtt"
-        case imessage
+        case telegram
         case gmailMail = "gmail_mail"
         case hostGateway = "host_gateway"
         case firstMate
@@ -129,7 +129,7 @@ struct Config: Codable {
         focusedPaneIds = [:]
         agentSessions = [:]
         pairing = nil
-        imessage = nil
+        telegram = nil
         gmailMail = nil
         hostGateway = nil
         firstMate = .default
@@ -171,7 +171,7 @@ struct Config: Codable {
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
         agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
         pairing = try container.decodeIfPresent(PairingIdentity.self, forKey: .pairing)
-        imessage = try container.decodeIfPresent(IMessageConfig.self, forKey: .imessage)
+        telegram = try container.decodeIfPresent(TelegramConfig.self, forKey: .telegram)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
         hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default

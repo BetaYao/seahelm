@@ -73,8 +73,8 @@ final class SettingsRowLayoutTests: XCTestCase {
     /// the fixed-height fields survived, so the form rendered as bare inputs
     /// with no titles at all.
     func testRuleFormRowsKeepTheirLabelsWhenARuleIsSelected() {
-        let view = IMessageRulesView(rules: [
-            IMessageRule(name: "aliyun", prompt: "{{text}}",
+        let view = TelegramRulesView(rules: [
+            TelegramRule(name: "aliyun", prompt: "{{text}}",
                          target: .init(kind: .worktree, value: "/work/ops")),
         ])
         view.selectRule(at: 0)

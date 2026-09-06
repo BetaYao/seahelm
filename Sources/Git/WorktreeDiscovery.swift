@@ -40,6 +40,21 @@ enum WorktreeDiscovery {
 
     /// Cache for repo root lookups (path -> repo root)
     private static var repoRootCache: [String: String] = [:]
+    /// Paths known *not* to sit in a repo, and when that was established.
+    ///
+    /// Only hits used to be cached, so every lookup of a path that is not a
+    /// repo spawned a fresh `git` — and the caller that hurts is the
+    /// integration coordinator, which asks once per worktree per round, on the
+    /// main thread. Worse where it matters most: a path on a volume that has
+    /// gone away makes git block until `gitTimeout`, so one unreachable
+    /// worktree stalled the main thread for seconds, over and over. Sampling
+    /// the app found 78% of main-thread time inside `posix_spawn` and
+    /// `ulock_wait` under exactly this call.
+    ///
+    /// Time-limited because the answer can legitimately change — `git init` or
+    /// a clone turns a plain directory into a repo.
+    private static var repoRootMissCache: [String: Date] = [:]
+    static var repoRootMissTTL: TimeInterval = 60
     private static let cacheLock = NSLock()
 
     /// Find the git toplevel (repo root) from any path inside the repo
@@ -50,15 +65,31 @@ enum WorktreeDiscovery {
             cacheLock.unlock()
             return cached
         }
+        if let missedAt = repoRootMissCache[path],
+           Date().timeIntervalSince(missedAt) < repoRootMissTTL {
+            cacheLock.unlock()
+            return nil
+        }
         cacheLock.unlock()
 
         let result = _findRepoRootSync(from: path)
+        cacheLock.lock()
         if let result {
-            cacheLock.lock()
             repoRootCache[path] = result
-            cacheLock.unlock()
+            repoRootMissCache.removeValue(forKey: path)
+        } else {
+            repoRootMissCache[path] = Date()
         }
+        cacheLock.unlock()
         return result
+    }
+
+    /// Drops both caches. Tests only — a repo root does not move at runtime.
+    static func resetRepoRootCacheForTesting() {
+        cacheLock.lock()
+        repoRootCache.removeAll()
+        repoRootMissCache.removeAll()
+        cacheLock.unlock()
     }
 
     private static func _findRepoRootSync(from path: String) -> String? {

@@ -11,6 +11,8 @@ protocol DashboardDelegate: AnyObject {
     /// worktree with no registered agent (a pane that never spoke) must still
     /// be deletable — the old pane-id key silently dropped those.
     func dashboardDidRequestDeleteWorktree(path: String)
+    /// The row's Return: the same thing as `/return @worktree`.
+    func dashboardDidRequestReturnWorktree(path: String)
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
@@ -23,6 +25,7 @@ protocol DashboardDelegate: AnyObject {
 /// One split pane, for the fully-expanded "Group by Pane" fleet rows.
 struct PaneDisplayInfo {
     let stationId: String   // Station.id — the leaf's surface
+    let handle: Int         // stable #n — see PaneHandleRegistry
     let title: String       // per-pane title (PaneTitleResolver)
     let status: AgentStatus
     let isFocused: Bool      // the worktree's last-focused pane
@@ -187,11 +190,6 @@ class DashboardViewController: NSViewController {
     // Left-Right layout
     private let leftRightContainer = NSView()
     private let leftRightFocusPanel = FocusPanelView()
-    // The inline worktree creator is no longer shown (the cockpit `/new` command
-    // replaces it); the object is kept only so the existing setup/report wiring
-    // in MainWindowController still compiles.
-    private let inlineCreateView = InlineWorktreeCreateView()
-
     // Left column content host — overview + side panel swap (no outer width/collapse;
     // WindowChromeController owns column chrome). Exposed for MainWindow embedding.
     let navigatorHostView = NSView()
@@ -201,11 +199,6 @@ class DashboardViewController: NSViewController {
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
         let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
-        // First Mate titles follow the worktree's current pane, same as the
-        // terminal chrome header.
-        vc.currentPaneTitleProvider = { [weak self] path in
-            self?.currentPaneTitle(forWorktree: path)
-        }
         return vc
     }()
 
@@ -272,8 +265,8 @@ class DashboardViewController: NSViewController {
         return previewSets.isEditMode(for: wt) && editLayoutContainer?.superview != nil
     }
 
-    // `?` keyboard cheat-sheet overlay (the floating First Mate cockpit was
-    // removed; the command composer lives in the overview now).
+    // `?` keyboard cheat-sheet overlay. The command line itself is the Island's
+    // (the Helm); the fleet column has no composer of its own.
     private var helpOverlay: KeyboardHelpOverlay?
 
     // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
@@ -347,6 +340,9 @@ class DashboardViewController: NSViewController {
         // Row context menu → the delegate's assess-then-tear-down path.
         overviewView.onDeleteWorktree = { [weak self] path in
             self?.dashboardDelegate?.dashboardDidRequestDeleteWorktree(path: path)
+        }
+        overviewView.onReturnWorktree = { [weak self] path in
+            self?.dashboardDelegate?.dashboardDidRequestReturnWorktree(path: path)
         }
         overviewView.onResetIntegration = { [weak self] path in
             self?.onResetIntegration?(path)
@@ -433,7 +429,9 @@ class DashboardViewController: NSViewController {
         // at the state it had when opened.
         if firstMateSideOpen {
             overviewView.selectedId = overviewSelectedId
-            overviewView.update(agents)
+            // A structure change (a worktree came or went) has to repaint every
+            // row regardless of which one's status moved.
+            overviewView.update(agents, changedWorktreePath: structureChanged ? nil : changedWorktreePath)
             syncOverviewFocusCounts()
         }
 
@@ -735,35 +733,6 @@ class DashboardViewController: NSViewController {
     /// Fleet status line was removed with the left bottom bar; kept as a no-op so
     /// the existing caller compiles. (Could move into the status bar later.)
     func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {}
-
-    // MARK: - Inline worktree creation
-
-    func setupInlineCreate(repoPaths: [String],
-                           repoPathsProvider: @escaping () -> [String],
-                           onAddRepo: @escaping () -> Void,
-                           onSubmitCommand: @escaping (String) -> Void,
-                           onCreate: @escaping (String, String, AgentType, Bool) -> Void) {
-        inlineCreateView.configure(repoPaths: repoPaths)
-        inlineCreateView.repoPathsProvider = repoPathsProvider
-        inlineCreateView.onAddRepo = onAddRepo
-        inlineCreateView.onSubmitCommand = onSubmitCommand
-        inlineCreateView.onCreate = onCreate
-    }
-
-    func focusInlineCreate() {
-        // New-worktree creation lives in the overview composer: switch to the
-        // overview and prefill `/new ` so the user types the task and submits.
-        startNewCommand()
-    }
-
-    /// Called when the inline create form ends (submit or cancel) so the owner
-    /// can exit `.createForm` and restore the nav ring.
-    var onInlineCreateFormEnd: (() -> Void)? {
-        didSet { inlineCreateView.onFormEnd = onInlineCreateFormEnd }
-    }
-
-    func inlineCreateReportSuccess() { inlineCreateView.reportCreateSuccess() }
-    func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
 
     // MARK: - Layout
 
@@ -1140,9 +1109,6 @@ class DashboardViewController: NSViewController {
     func enterDashboardNavigation() {
         guard !isInDState else { return }
 
-        // Entering the ring drops any substate left over from a previous visit.
-        windowKeyboardSubstate?.reset()
-
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
             focusedWorktreePath: agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
@@ -1190,18 +1156,9 @@ class DashboardViewController: NSViewController {
         }
     }
 
-    /// Leave the nav focus ring WITHOUT touching `windowKeyboardSubstate`: opens the inline
-    /// create form. `beginCreateForm()` has already set `.normal` + `.createForm`; we only
-    /// drop the D-state focus ring so a stray key in the form can't be read as a nav chord
-    /// (e.g. `d` starting a delete). On form end, `enterDashboardNavigation()` re-enters.
-    func exitNavForCreateForm() {
-        guard isInDState else { return }
-        tearDownNavVisuals()
-    }
-
-    /// Visual/state teardown shared by `exitDashboardNavigation` and `exitNavForCreateForm`.
-    /// Drops the focus ring, dim overlays, and exits the focus controller. Deliberately does
-    /// NOT touch `windowKeyboardSubstate` or restore the first responder — callers own those decisions.
+    /// Visual/state teardown for `exitDashboardNavigation`. Drops the focus ring, dim
+    /// overlays, and exits the focus controller. Deliberately does NOT restore the
+    /// first responder — the caller owns that decision.
     private func tearDownNavVisuals() {
         focusController.exit()
         clearKeyboardFocusVisuals()
@@ -1255,10 +1212,6 @@ class DashboardViewController: NSViewController {
             toggleHelp(); return
         }
         super.keyDown(with: event)
-    }
-
-    private var windowKeyboardSubstate: KeyboardSubstateController? {
-        (view.window?.windowController as? MainWindowController)?.keyboardSubstate
     }
 
     /// The D-state card ring, in fleet-list display order.

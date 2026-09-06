@@ -99,7 +99,7 @@ final class MailHTMLTests: XCTestCase {
     func testPlainPartSurvivesAReplyRoundTrip() {
         let plain = part(mime(body: "Pane is waiting for you."), contentType: "text/plain")
         XCTAssertTrue(plain.contains("Pane is waiting for you."), plain)
-        XCTAssertTrue(plain.contains("/pane"), "command list rides along")
+        XCTAssertTrue(plain.contains("/go"), "command list rides along")
 
         let quoted = plain.split(separator: "\n", omittingEmptySubsequences: false)
             .map { "> \($0)" }.joined(separator: "\n")

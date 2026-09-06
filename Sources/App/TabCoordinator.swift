@@ -19,16 +19,18 @@ class TabCoordinator {
     private var pairRateLimiter: PairRateLimiter?
     private var zmxVTAttachManager: ZmxVTAttachManager?
     /// The live control data source. Also the pane lookup + write channel the
-    /// iMessage rule engine and Host Gateway dispatch through.
+    /// Telegram rule engine and Host Gateway dispatch through.
     private(set) var mqttDataSource: ControlDataSource?
     private var mailPaneRouter: MailPaneRouter?
-    /// Set by `MainWindowController`, which owns the fleet accessors and the
-    /// shared chat route mail commands are executed through.
-    weak var mailCommandContext: MailCommandContext? {
-        didSet { mailPaneRouter?.commandContext = mailCommandContext }
+    /// Set by `MainWindowController`, which owns the command executor every
+    /// mail line is run through.
+    var commandRoute: MailPaneRouter.Route? {
+        didSet { mailPaneRouter?.route = commandRoute }
     }
-    private let mailConversationStore = EmailConversationStore()
-    private lazy var mailPaneObserver = MailPaneObserver(conversations: mailConversationStore)
+    /// Which pane each chat and mail thread is talking to. Read by the
+    /// executor (through `MainWindowController`) and by the mail observer.
+    let commandSessions = CommandSessionStore()
+    private lazy var mailPaneObserver = MailPaneObserver(sessions: commandSessions)
 
     var activeTabIndex: Int = 0
     /// Every worktree across all repos. `tree` is optional because the tree is
@@ -135,11 +137,22 @@ class TabCoordinator {
                 guard let self else { return false }
                 return self.config.integrationEnabled && self.config.autoIntegrate
             },
-            repoRoot: { WorktreeDiscovery.findRepoRoot(from: $0) },
+            // Same reason as `worktrees` below: a worktree we already track
+            // names its repo without asking git. The fallback covers a path
+            // discovery has not filed yet.
+            repoRoot: { [weak self] path in
+                self?.workspaceManager.tabs
+                    .first(where: { $0.worktrees.contains(where: { $0.path == path }) })?.repoPath
+                    ?? WorktreeDiscovery.findRepoRoot(from: path)
+            },
+            // `workspaceManager` already files every worktree under the repo it
+            // belongs to, so answering from it is both exact and free. Asking
+            // git instead — once per worktree, on the main thread, every
+            // integration round — is what pinned the main thread at 78% inside
+            // `posix_spawn`, and each worktree on an unreachable volume added a
+            // full `gitTimeout` to that.
             worktrees: { [weak self] repo in
-                self?.allWorktrees
-                    .map(\.info)
-                    .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repo } ?? []
+                self?.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.worktrees ?? []
             },
             integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
             isCheckoutBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) },
@@ -471,6 +484,8 @@ class TabCoordinator {
                 let panePane = worktreePanes.first(where: { $0.id == paneStation.id })
                 return PaneDisplayInfo(
                     stationId: paneStation.id,
+                    handle: PaneHandleRegistry.shared.handle(
+                        for: PaneHandleRegistry.key(sessionKey: paneStation.paneSessionKey ?? "", paneId: paneStation.id)),
                     title: panePane.map { PaneTitleResolver.title(for: $0) }
                         ?? PaneTitleResolver.shortenPath(agent.worktreePath),
                     status: panePane?.status ?? .unknown,
@@ -809,8 +824,8 @@ class TabCoordinator {
                     // (The HTTP webhook was retired once the socket path was
                     // verified end-to-end.)
                     let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
-                    self.mailPaneRouter = MailPaneRouter(control: controlDataSource, store: self.mailConversationStore, accountEmail: self.config.gmailMail?.accountEmail)
-                    self.mailPaneRouter?.commandContext = self.mailCommandContext
+                    self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
+                    self.mailPaneRouter?.route = self.commandRoute
                     if let account = self.config.gmailMail?.accountEmail {
                         let sender = GmailRESTMailSender(account: account)
                         self.mailPaneObserver.onIntent = { intent, commander in
@@ -1638,9 +1653,44 @@ class TabCoordinator {
 
     // MARK: - Status Update Forwarding
 
+    /// Worktrees whose status changed since the last repaint, and whether a
+    /// repaint is already queued for the next turn of the runloop.
+    ///
+    /// Status edges arrive one pane at a time, and each one used to drive a full
+    /// dashboard rebuild *plus* a title-bar refresh — every row's labels
+    /// reassigned, every row's git summary re-attributed, synchronously on main.
+    /// With a dozen panes polling every 2s that pinned the main thread at 100%,
+    /// which is what made a Telegram command take 40s to answer: `handleInbound`
+    /// hops to main and could not get a turn.
+    ///
+    /// The edges are already de-duplicated upstream — `AgentRegistry` drops
+    /// unchanged scans, `WorktreeStatusAggregator` drops unchanged rollups — so
+    /// the fix is not more filtering but batching: note which worktrees changed
+    /// and repaint once.
+    private var pendingStatusWorktrees: Set<String> = []
+    private var statusRepaintScheduled = false
+
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updatePanes(buildWorktreeRowInfos(changedWorktreePath: status.worktreePath),
-                                   changedWorktreePath: status.worktreePath)
+        pendingStatusWorktrees.insert(status.worktreePath)
+        guard !statusRepaintScheduled else { return }
+        statusRepaintScheduled = true
+        // Hopping through main rather than repainting inline is the whole point:
+        // the sibling edges of this same poll are already queued behind us, so
+        // they land in `pendingStatusWorktrees` before this runs.
+        DispatchQueue.main.async { [weak self] in self?.flushStatusRepaint() }
+    }
+
+    /// Repaint for everything that changed since the last turn. A batch naming
+    /// exactly one worktree passes it down; a wider batch passes nil, which both
+    /// `buildWorktreeRowInfos` and the overview read as "refresh everything".
+    private func flushStatusRepaint() {
+        statusRepaintScheduled = false
+        let changed = pendingStatusWorktrees
+        pendingStatusWorktrees.removeAll()
+        guard !changed.isEmpty else { return }
+        let single = changed.count == 1 ? changed.first : nil
+        dashboardVC?.updatePanes(buildWorktreeRowInfos(changedWorktreePath: single),
+                                 changedWorktreePath: single)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
@@ -1874,7 +1924,6 @@ extension TabCoordinator {
     func routeMail(message: GmailInboundMessage) {
         mailPaneRouter?.route(message: message, text: message.bodyText)
     }
-    func closeMailPane(paneID: String) -> EmailConversation? { mailPaneRouter?.close(paneID: paneID) }
 }
 
 extension TabCoordinator {

@@ -91,7 +91,7 @@ enum MailHTML {
         """
     }
 
-    /// The small markdown subset `BridgeCommandFormatter` actually emits.
+    /// The small markdown subset `CommandFormatter` actually emits.
     /// Escaping runs first, so nothing in agent output can inject markup.
     static func render(markdown: String) -> String {
         var out = escape(markdown)

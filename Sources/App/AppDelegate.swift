@@ -79,12 +79,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationManager.shared.requestPermission()
         }
 
-        // iMessage is the phone-side remote-control transport.
-        if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
-            let channel = IMessageChannel(config: imessageConfig)
+        // Telegram is the phone-side remote-control transport.
+        if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
+            let channel = TelegramChannel(config: telegramConfig)
             AgentRegistry.shared.registerChannel(channel)
             channel.connect()
-            NSLog("[App] iMessage bridge connecting (\(imessageConfig.allowedHandles.count) allowed handles)")
+            NSLog("[App] Telegram bridge connecting (\(telegramConfig.allowedUsers.count) allowed users)")
         }
 
         GhosttyBridge.shared.initialize()

@@ -131,12 +131,14 @@ enum WorktreeDeleter {
 
     // MARK: - Delete assessment
 
-    static func assessDeletion(worktreePath: String, repoPath: String, branchName: String) -> WorktreeDeleteAssessment {
+    static func assessDeletion(worktreePath: String, repoPath: String, branchName: String,
+                               refreshBase: Bool = false) -> WorktreeDeleteAssessment {
         assessDeletion(
             worktreePath: worktreePath,
             repoPath: repoPath,
             branchName: branchName,
-            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath)
+            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath),
+            refreshBase: refreshBase
         )
     }
 
@@ -144,24 +146,41 @@ enum WorktreeDeleter {
     /// user's store. Local only — no fetch, so it answers in well under a
     /// second and the same offline. What it cannot see is a branch merged on
     /// the server since the last fetch; that one asks, and the answer is yes.
+    ///
+    /// `refreshBase` is the row's Delete asking for the same judgement
+    /// `/return` makes: fetch the base first, and read a squash merge as
+    /// merged — otherwise a branch merged on GitHub since the last fetch asks
+    /// about commits that are already in.
     static func assessDeletion(
         worktreePath: String,
         repoPath: String,
         branchName: String,
-        recordedBase: String?
+        recordedBase: String?,
+        refreshBase: Bool = false
     ) -> WorktreeDeleteAssessment {
         var losses: [String] = []
         if hasUncommittedChanges(worktreePath: worktreePath) {
             losses.append("It has uncommitted changes that will be lost.")
         }
 
-        let trunk = GitDiff.resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase)
+        var trunk = GitDiff.resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase)
+        if refreshBase,
+           let base = recordedBase.map(WorktreeReturnAssessor.stripOrigin)
+            ?? WorktreeReturnAssessor.defaultBaseName(worktreePath: worktreePath),
+           WorktreeReturnAssessor.fetch(base, worktreePath: worktreePath),
+           WorktreeReturnAssessor.refExists("origin/\(base)", worktreePath: worktreePath) {
+            trunk = "origin/\(base)"
+        }
         let branchIsTrunk = !branchName.isEmpty
             && (isTrunkName(branchName) || trunk.map { sameBranch($0, branchName) } == true)
         let deletesBranch = !branchName.isEmpty && !branchIsTrunk
 
         switch unpublishedCommitCount(worktreePath: worktreePath, trunk: trunk) {
         case .some(0):
+            break
+        case .some where refreshBase
+            && trunk.map({ WorktreeReturnAssessor.isSquashMerged(worktreePath: worktreePath, base: $0) }) == true:
+            // Squash-merged: no commit matches, but the branch's whole change does.
             break
         case .some(let count):
             // `trunk` is non-nil whenever a count is: the count is measured

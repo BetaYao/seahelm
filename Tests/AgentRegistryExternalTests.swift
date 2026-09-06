@@ -4,7 +4,7 @@ import XCTest
 /// Mock ExternalChannel for testing
 final class MockExternalChannel: ExternalChannel {
     let channelId: String
-    let channelType: ExternalChannelType = .imessage
+    let channelType: ExternalChannelType = .telegram
     var gatewayState: GatewayState = .disconnected
     var onMessage: ((InboundMessage) -> Void)?
     var sentMessages: [OutboundMessage] = []
@@ -83,12 +83,11 @@ final class AgentRegistryExternalTests: XCTestCase {
         AgentRegistry.shared.handleInbound(makeMessage(content: "/status"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("No agent"))
+        XCTAssertTrue(ch.sentMessages[0].content.contains("No panes"))
     }
 
-    /// `/list` became `/agents`, which `chatCommandRoute` owns because it marks
-    /// and moves the current selection. With no route injected (as here and in
-    /// any headless run), both verbs fall through to the unknown-command reply.
+    /// `/list` is no verb. With no route injected (as here and in any headless
+    /// run) the headless executor still answers, with the unknown-command reply.
     func testListVerbIsGone() {
         let ch = MockExternalChannel()
         AgentRegistry.shared.registerChannel(ch)

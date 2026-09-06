@@ -1,24 +1,24 @@
 import XCTest
 @testable import seahelm
 
-final class IMessageRuleCoalescerTests: XCTestCase {
+final class TelegramRuleCoalescerTests: XCTestCase {
 
     private var scheduled: [(delay: TimeInterval, work: () -> Void)] = []
-    private var fired: [(prompt: String, target: IMessageRuleTarget)] = []
+    private var fired: [(prompt: String, target: TelegramRuleTarget)] = []
 
-    private func makeCoalescer(window: TimeInterval = 30) -> IMessageRuleCoalescer {
+    private func makeCoalescer(window: TimeInterval = 30) -> TelegramRuleCoalescer {
         scheduled = []
         fired = []
-        return IMessageRuleCoalescer(window: window) { [weak self] delay, work in
+        return TelegramRuleCoalescer(window: window) { [weak self] delay, work in
             self?.scheduled.append((delay, work))
         }
     }
 
-    private func target(_ value: String = "seahelm-task-sre-monitoring") -> IMessageRuleTarget {
-        IMessageRuleTarget(kind: .pane, value: value)
+    private func target(_ value: String = "seahelm-task-sre-monitoring") -> TelegramRuleTarget {
+        TelegramRuleTarget(kind: .pane, value: value)
     }
 
-    private func enqueue(_ c: IMessageRuleCoalescer, prompt: String, pane: String = "seahelm-task-sre-monitoring") {
+    private func enqueue(_ c: TelegramRuleCoalescer, prompt: String, pane: String = "seahelm-task-sre-monitoring") {
         c.enqueue(prompt: prompt, target: target(pane), ruleName: "aliyun") { [weak self] combined, t in
             self?.fired.append((combined, t))
         }
@@ -81,10 +81,10 @@ final class IMessageRuleCoalescerTests: XCTestCase {
     }
 
     func testCombineHelperFormatsMultiAlertPrompt() {
-        let one = IMessageRuleCoalescer.combine(["only"])
+        let one = TelegramRuleCoalescer.combine(["only"])
         XCTAssertEqual(one, "only")
 
-        let two = IMessageRuleCoalescer.combine(["first", "second"])
+        let two = TelegramRuleCoalescer.combine(["first", "second"])
         XCTAssertTrue(two.hasPrefix("收到 2 条告警"))
         XCTAssertTrue(two.contains("—— 1/2 ——\nfirst"))
         XCTAssertTrue(two.contains("—— 2/2 ——\nsecond"))

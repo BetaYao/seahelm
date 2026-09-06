@@ -42,10 +42,10 @@ fi
 
 echo "==> Building Seahelm..."
 
-# The project defaults to Developer ID signing so TCC grants (Full Disk Access,
-# iMessage bridge) survive rebuilds. Contributors without that cert can still
-# build locally — ad-hoc works for UI work; re-grant FDA after each rebuild if
-# you need the iMessage bridge.
+# The project defaults to Developer ID signing so Keychain grants (the Gmail
+# credentials) survive rebuilds. Contributors without that cert can still build
+# locally — ad-hoc works for UI work; expect a Keychain prompt after each
+# rebuild if you use the Gmail channel.
 SIGN_ARGS=()
 if ! security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application'; then
   echo "    (no Developer ID cert — using ad-hoc signing for this build)"

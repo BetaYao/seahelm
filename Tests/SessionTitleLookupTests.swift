@@ -4,14 +4,42 @@ import XCTest
 final class SessionTitleLookupTests: XCTestCase {
     private var root: URL!
 
+    private var savedRescanInterval: TimeInterval = 0
+
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("seahelm-sessiontitle-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // These tests rewrite a transcript and read it back at once; the
+        // throttle that protects the main thread from a live transcript is
+        // exercised by its own test below.
+        savedRescanInterval = SessionTitleLookup.rescanInterval
+        SessionTitleLookup.rescanInterval = 0
     }
 
     override func tearDownWithError() throws {
+        SessionTitleLookup.rescanInterval = savedRescanInterval
         try? FileManager.default.removeItem(at: root)
+    }
+
+    /// A transcript being written to changes every few seconds, which would
+    /// otherwise defeat the cache and re-read the whole file on every title
+    /// lookup — on the main thread. Within the interval the last answer stands.
+    func testLiveTranscriptIsNotRescannedWithinTheInterval() throws {
+        SessionTitleLookup.rescanInterval = 30
+        let wt = "/Users/me/repo-worktrees/live-x"
+        let url = projectDir(for: wt).appendingPathComponent("sess-live.jsonl")
+        try #"{"type":"summary","summary":"Before"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-live", projectsRoot: root, synchronously: true), "Before")
+
+        try #"{"type":"summary","summary":"After"}"#.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: url.path)
+        XCTAssertEqual(SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-live", projectsRoot: root, synchronously: true), "Before",
+                       "a change inside the interval is not re-read")
+
+        SessionTitleLookup.rescanInterval = 0
+        XCTAssertEqual(SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-live", projectsRoot: root, synchronously: true), "After",
+                       "once the interval has passed the change is picked up")
     }
 
     private func projectDir(for worktreePath: String) -> URL {
@@ -30,12 +58,12 @@ final class SessionTitleLookupTests: XCTestCase {
 
         try #"{"type":"summary","summary":"Before"}"#.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertEqual(
-            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root, synchronously: true),
             "Before"
         )
         // Cached read: same file, same answer, no reparse required.
         XCTAssertEqual(
-            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root, synchronously: true),
             "Before"
         )
 
@@ -50,7 +78,7 @@ final class SessionTitleLookupTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root),
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "sess-1", projectsRoot: root, synchronously: true),
             "After"
         )
     }
@@ -65,7 +93,7 @@ final class SessionTitleLookupTests: XCTestCase {
         ].joined(separator: "\n")
         try lines.write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
 
-        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root)
+        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root, synchronously: true)
         XCTAssertEqual(title, "Refactor the parser")
     }
 
@@ -81,10 +109,10 @@ final class SessionTitleLookupTests: XCTestCase {
             .write(to: dir.appendingPathComponent("newer.jsonl"), atomically: true, encoding: .utf8)
 
         XCTAssertEqual(
-            SessionTitleLookup.title(worktreePath: wt, sessionId: "older", projectsRoot: root),
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "older", projectsRoot: root, synchronously: true),
             "Older agent")
         XCTAssertEqual(
-            SessionTitleLookup.title(worktreePath: wt, sessionId: "newer", projectsRoot: root),
+            SessionTitleLookup.title(worktreePath: wt, sessionId: "newer", projectsRoot: root, synchronously: true),
             "Newer agent")
     }
 
@@ -92,10 +120,10 @@ final class SessionTitleLookupTests: XCTestCase {
         let wt = "/Users/me/repo-worktrees/none"
         _ = projectDir(for: wt)
         // No transcript: agents that keep no session file under ~/.claude land here.
-        XCTAssertNil(SessionTitleLookup.title(worktreePath: wt, sessionId: "ghost", projectsRoot: root))
+        XCTAssertNil(SessionTitleLookup.title(worktreePath: wt, sessionId: "ghost", projectsRoot: root, synchronously: true))
         // The id arrives from a webhook payload, so it must not walk out of the dir.
         XCTAssertNil(SessionTitleLookup.title(
-            worktreePath: wt, sessionId: "../../escape", projectsRoot: root))
+            worktreePath: wt, sessionId: "../../escape", projectsRoot: root, synchronously: true))
     }
 
     func testReturnsAITitleFromModernSessionFormat() throws {
@@ -111,7 +139,7 @@ final class SessionTitleLookupTests: XCTestCase {
         ].joined(separator: "\n")
         try lines.write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
 
-        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root)
+        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root, synchronously: true)
         XCTAssertEqual(title, "测试 all-in-one 本地部署")
     }
 
@@ -125,7 +153,7 @@ final class SessionTitleLookupTests: XCTestCase {
         ].joined(separator: "\n")
         try lines.write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
 
-        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root)
+        let title = SessionTitleLookup.title(worktreePath: wt, projectsRoot: root, synchronously: true)
         XCTAssertEqual(title, "My name")
     }
 
@@ -135,11 +163,11 @@ final class SessionTitleLookupTests: XCTestCase {
         try #"{"type":"user","message":{"role":"user","content":"hi"}}"#
             .write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
 
-        XCTAssertNil(SessionTitleLookup.title(worktreePath: wt, projectsRoot: root))
+        XCTAssertNil(SessionTitleLookup.title(worktreePath: wt, projectsRoot: root, synchronously: true))
     }
 
     func testReturnsNilWhenDirMissing() {
-        XCTAssertNil(SessionTitleLookup.title(worktreePath: "/nope/missing", projectsRoot: root))
+        XCTAssertNil(SessionTitleLookup.title(worktreePath: "/nope/missing", projectsRoot: root, synchronously: true))
     }
 
     func testEncodingReplacesSlashesAndDots() {

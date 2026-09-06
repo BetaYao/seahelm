@@ -259,10 +259,13 @@ final class AddWorktreePopoverController: NSViewController {
         pendingImageURLs.remove(at: sender.tag)
     }
 
+    /// The agents a new worktree can be staffed with.
+    static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
+
     private func configureAgentPopup() {
         agentPopup.removeAllItems()
         let defaultAgent = AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
-        for choice in InlineWorktreeCreateView.agentChoices {
+        for choice in Self.agentChoices {
             let item = NSMenuItem(title: choice.displayName, action: nil, keyEquivalent: "")
             item.representedObject = choice.rawValue
             agentPopup.menu?.addItem(item)

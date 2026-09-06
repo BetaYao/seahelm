@@ -7,10 +7,15 @@ import Foundation
 enum SessionTitleLookup {
     /// Title from the most recently modified session JSONL in the worktree's
     /// project directory, or nil if none has a `summary` record.
+    /// - Parameter synchronously: read the transcript on this thread instead of
+    ///   answering from the cache and scanning in the background. Only for
+    ///   callers that cannot use a value that lands a moment later, and never
+    ///   from the main thread — see `scanQueue`.
     static func title(
         worktreePath: String,
         fileManager: FileManager = .default,
-        projectsRoot: URL = defaultProjectsRoot()
+        projectsRoot: URL = defaultProjectsRoot(),
+        synchronously: Bool = false
     ) -> String? {
         guard !worktreePath.isEmpty else { return nil }
         let dir = projectsRoot.appendingPathComponent(
@@ -33,7 +38,7 @@ enum SessionTitleLookup {
             }
 
         for session in sessions {
-            if let summary = lastSummary(in: session) {
+            if let summary = lastSummary(in: session, synchronously: synchronously) {
                 return summary
             }
         }
@@ -52,7 +57,8 @@ enum SessionTitleLookup {
         worktreePath: String,
         sessionId: String,
         fileManager: FileManager = .default,
-        projectsRoot: URL = defaultProjectsRoot()
+        projectsRoot: URL = defaultProjectsRoot(),
+        synchronously: Bool = false
     ) -> String? {
         guard !worktreePath.isEmpty, !sessionId.isEmpty else { return nil }
         // The id is a transcript stem, but it reaches us from a webhook payload:
@@ -62,7 +68,7 @@ enum SessionTitleLookup {
             .appendingPathComponent(encodedProjectComponent(worktreePath: worktreePath), isDirectory: true)
             .appendingPathComponent("\(sessionId).jsonl")
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        return lastSummary(in: url)
+        return lastSummary(in: url, synchronously: synchronously)
     }
 
     /// Encodes an absolute path the way Claude Code names its project directories.
@@ -79,62 +85,129 @@ enum SessionTitleLookup {
     /// title is resolved on every focus change, so re-reading one per click
     /// stalls the main thread — switching panes quickly visibly lagged the title.
     private static let summaryCacheLock = NSLock()
-    private static var summaryCache: [String: (size: Int, mtime: Date, summary: String?)] = [:]
+    private static var summaryCache: [String: (size: Int, mtime: Date, scannedAt: Date, summary: String?)] = [:]
+    /// A transcript that is being written to changes every few seconds, which
+    /// defeats the size + mtime stamp and had the whole file re-read on every
+    /// call — the branch-refresh timer, every notification, every title-bar
+    /// update — on the main thread, for as long as the agent kept talking. A
+    /// title changes far more slowly than a transcript grows.
+    static var rescanInterval: TimeInterval = 30
 
-    private static func lastSummary(in fileURL: URL) -> String? {
+    /// Scans run here, never on the caller's thread.
+    ///
+    /// The stamp and the rescan window bound how *often* a transcript is read,
+    /// but not what one read costs — and the caller is the main thread building
+    /// a dashboard row or a window title, once per pane per repaint. Transcripts
+    /// run to tens of megabytes (49MB in this fleet, 873MB across it) and a scan
+    /// searches the whole file for three markers. Sampling the app found the
+    /// main thread spending *all* of its time in exactly that, which starves
+    /// everything that hops to main: `seahelm pane list` took 40s, and a
+    /// Telegram command took 40s to answer.
+    ///
+    /// So `lastSummary` no longer reads anything. It answers from the cache and
+    /// queues a rescan when the file has moved on. A title changes far more
+    /// slowly than the transcript it is read from, so answering with the
+    /// previous scan's words costs nothing real, and every caller repaints on a
+    /// timer, which is what picks the new value up.
+    private static let scanQueue = DispatchQueue(label: "com.seahelm.session-title", qos: .utility)
+    /// Paths with a scan already queued, so a repaint storm queues one scan per
+    /// file rather than one per call.
+    private static var scansInFlight: Set<String> = []
+
+    private static func lastSummary(in fileURL: URL, synchronously: Bool) -> String? {
         let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let stamp = (values?.fileSize).flatMap { size in
             (values?.contentModificationDate).map { (size, $0) }
         }
 
-        if let stamp {
-            summaryCacheLock.lock()
-            let hit = summaryCache[fileURL.path]
-            summaryCacheLock.unlock()
-            if let hit, hit.size == stamp.0, hit.mtime == stamp.1 {
-                return hit.summary
-            }
+        summaryCacheLock.lock()
+        let hit = summaryCache[fileURL.path]
+        summaryCacheLock.unlock()
+
+        if let hit {
+            // Byte-for-byte what was scanned: the cached answer is exact.
+            if let stamp, hit.size == stamp.0, hit.mtime == stamp.1 { return hit.summary }
+            // Moved on, but not long enough ago to be worth re-reading.
+            if Date().timeIntervalSince(hit.scannedAt) < rescanInterval { return hit.summary }
         }
 
-        let summary = readLastSummary(in: fileURL)
-
-        if let stamp {
+        if synchronously {
+            let summary = readLastSummary(in: fileURL)
             summaryCacheLock.lock()
-            summaryCache[fileURL.path] = (stamp.0, stamp.1, summary)
+            summaryCache[fileURL.path] = (stamp?.0 ?? 0, stamp?.1 ?? .distantPast, Date(), summary)
             summaryCacheLock.unlock()
+            return summary
         }
-        return summary
+
+        scheduleScan(fileURL, stamp: stamp)
+        // nil only until the first scan lands; every caller has a fallback.
+        return hit?.summary
     }
 
+    /// Reads the transcript on `scanQueue` and publishes it to the cache.
+    /// Stamped with what the file looked like *before* the read, so anything
+    /// appended while it ran is caught by the next rescan rather than being
+    /// silently marked as already seen.
+    private static func scheduleScan(_ fileURL: URL, stamp: (size: Int, mtime: Date)?) {
+        let path = fileURL.path
+        summaryCacheLock.lock()
+        let alreadyQueued = scansInFlight.contains(path)
+        if !alreadyQueued { scansInFlight.insert(path) }
+        summaryCacheLock.unlock()
+        guard !alreadyQueued else { return }
+
+        scanQueue.async {
+            let summary = readLastSummary(in: fileURL)
+            summaryCacheLock.lock()
+            // No stamp means the file could not be stat'd; record the scan time
+            // anyway so a missing file does not spin the queue.
+            summaryCache[path] = (stamp?.size ?? 0, stamp?.mtime ?? .distantPast, Date(), summary)
+            scansInFlight.remove(path)
+            summaryCacheLock.unlock()
+        }
+    }
+
+    /// The byte patterns of the three title records. Searching the raw bytes
+    /// for these, then parsing only the lines that carry one, is what makes a
+    /// tens-of-megabytes transcript cheap to scan: the previous line-by-line
+    /// walk spent its time in string searches over every line of the file.
+    private static let titleMarkers: [(type: String, key: String, marker: Data)] = [
+        ("custom-title", "customTitle", Data("\"type\":\"custom-title\"".utf8)),
+        ("ai-title", "aiTitle", Data("\"type\":\"ai-title\"".utf8)),
+        ("summary", "summary", Data("\"type\":\"summary\"".utf8)),
+    ]
+
     private static func readLastSummary(in fileURL: URL) -> String? {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return nil }
         // Newer Claude Code writes `ai-title` records (and `custom-title` when the
         // user renames a session in the resume picker); older versions wrote
         // `summary`. Track the last of each and prefer the user's own rename.
-        var lastCustom: String?
-        var lastAI: String?
-        var lastLegacy: String?
-        contents.enumerateLines { line, _ in
-            // Cheap pre-filter: title records are rare, full JSON parse per line is not.
-            guard line.contains("\"type\":\"summary\"")
-                || line.contains("\"type\":\"ai-title\"")
-                || line.contains("\"type\":\"custom-title\"") else { return }
-            guard
-                let data = line.data(using: .utf8),
-                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let type = object["type"] as? String
-            else { return }
-            switch type {
-            case "custom-title":
-                if let t = object["customTitle"] as? String, !t.isEmpty { lastCustom = t }
-            case "ai-title":
-                if let t = object["aiTitle"] as? String, !t.isEmpty { lastAI = t }
-            case "summary":
-                if let t = object["summary"] as? String, !t.isEmpty { lastLegacy = t }
-            default: break
+        var found: [String: String] = [:]
+        for entry in titleMarkers {
+            var searchFrom = data.startIndex
+            var last: String?
+            while searchFrom < data.endIndex,
+                  let hit = data.range(of: entry.marker, in: searchFrom..<data.endIndex) {
+                searchFrom = hit.upperBound
+                // The marker can also sit inside a message body that quotes it;
+                // only a line whose own `type` is the record counts.
+                let line = data[lineRange(containing: hit.lowerBound, in: data)]
+                guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      object["type"] as? String == entry.type,
+                      let title = object[entry.key] as? String, !title.isEmpty else { continue }
+                last = title
             }
+            if let last { found[entry.type] = last }
         }
-        return lastCustom ?? lastAI ?? lastLegacy
+        return found["custom-title"] ?? found["ai-title"] ?? found["summary"]
+    }
+
+    private static func lineRange(containing index: Data.Index, in data: Data) -> Range<Data.Index> {
+        var start = index
+        while start > data.startIndex, data[start - 1] != 0x0A { start -= 1 }
+        var end = index
+        while end < data.endIndex, data[end] != 0x0A { end += 1 }
+        return start..<end
     }
 
     private static func defaultProjectsRoot() -> URL {

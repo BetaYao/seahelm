@@ -1,7 +1,6 @@
 import AppKit
 
 enum SidePanelTab: Int {
-    case firstMate = 0
     case files = 1
     case changes = 2
 }
@@ -78,9 +77,6 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     weak var delegate: WorktreeSidePanelDelegate?
 
-    /// Resolves a worktree's current-pane title for First Mate cards.
-    var currentPaneTitleProvider: ((String) -> String?)?
-
     private let tabBar = NSStackView()
 
     /// Fixed host holding one container per tab. Containers stay mounted across
@@ -112,18 +108,6 @@ final class WorktreeSidePanelViewController: NSViewController {
     }
 
     /// Host-provided view (the cross-project worktree card list) shown for the
-
-    // First Mate tab
-    private var bridgeVC: BridgePanelViewController?
-    var pendingOrdersQueue: PendingOrdersQueue? {
-        didSet { bridgeVC?.queue = pendingOrdersQueue }
-    }
-    var watchFeed: WatchFeed? {
-        didSet { bridgeVC?.watchFeed = watchFeed }
-    }
-    var onSuggestionTapped: ((PendingOrder, String) -> Void)?
-    var onBridgeNavigate: ((String) -> Void)?
-    var onBridgeApprove: ((PendingOrder) -> Void)?
 
     // Files tab
     private var fileTreeController: FileTreeOutlineController?
@@ -160,7 +144,7 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     init(
         worktreePath: String?,
-        initialTab: SidePanelTab = .firstMate,
+        initialTab: SidePanelTab = .files,
         integrationState: @escaping (String) -> IntegrationPanelState? = {
             IntegrationStatusStore.shared.state(forWorktree: $0)
         }
@@ -184,7 +168,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         tabBar.distribution = .fillEqually
         tabBar.translatesAutoresizingMaskIntoConstraints = false
 
-        // First Mate moved to the Helm cockpit; only Files + Changes remain here.
+        // Files + Changes only. Orders and the command line live in the Island.
         let tabs: [(SidePanelTab, String, String)] = [
             (.files, "folder", "Files"),
             (.changes, "list.bullet.rectangle", "Changes"),
@@ -316,9 +300,6 @@ final class WorktreeSidePanelViewController: NSViewController {
     /// Tear down every mounted tab. Only a worktree change warrants this; a tab
     /// switch must not, or the state this mounting exists to preserve is lost.
     private func discardAllTabs() {
-        bridgeVC?.view.removeFromSuperview()
-        bridgeVC?.removeFromParent()
-        bridgeVC = nil
         for container in tabContainers.values { container.removeFromSuperview() }
         tabContainers.removeAll()
         builtTabs.removeAll()
@@ -372,9 +353,9 @@ final class WorktreeSidePanelViewController: NSViewController {
             builtTabs.insert(selectedTab)
             buildSelectedTab()
         } else if selectedTab == .changes, let path = worktreePath {
-            // Files self-refreshes through its FSEvents watcher and First Mate is
-            // pushed from the queue, but branch diff has no such signal — re-scan
-            // on entry, restoring scroll so the refresh isn't felt as a reset.
+            // Files self-refreshes through its FSEvents watcher, but branch diff
+            // has no such signal — re-scan on entry, restoring scroll so the
+            // refresh isn't felt as a reset.
             showChangesTab(path)
         }
         for (tab, view) in tabContainers { view.isHidden = tab != selectedTab }
@@ -382,8 +363,6 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     private func buildSelectedTab() {
         switch selectedTab {
-        case .firstMate:
-            showFirstMateTab()
         case .files:
             guard let path = worktreePath else {
                 let header = makePaneHeader(title: "Files")
@@ -413,26 +392,6 @@ final class WorktreeSidePanelViewController: NSViewController {
         }
     }
 
-
-    private func showFirstMateTab() {
-        let vc = BridgePanelViewController()
-        vc.queue = pendingOrdersQueue
-        vc.currentPaneTitleProvider = currentPaneTitleProvider
-        vc.watchFeed = watchFeed
-        vc.onSuggestionTapped = { [weak self] order, optionText in self?.onSuggestionTapped?(order, optionText) }
-        vc.onNavigateToWorktree = { [weak self] path in self?.onBridgeNavigate?(path) }
-        vc.onApprove = { [weak self] order in self?.onBridgeApprove?(order) }
-        addChild(vc)
-        vc.view.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(vc.view)
-        NSLayoutConstraint.activate([
-            vc.view.topAnchor.constraint(equalTo: contentView.topAnchor),
-            vc.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            vc.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            vc.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-        bridgeVC = vc
-    }
 
     private func showFilesTab(_ path: String) {
         let controller = FileTreeOutlineController(rootPath: path)

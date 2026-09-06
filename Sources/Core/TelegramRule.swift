@@ -2,13 +2,13 @@ import Foundation
 
 /// One "a message arrived → put an agent on it" rule.
 ///
-/// This is the *signal* half of the iMessage bridge, and it is deliberately not
-/// the command half. A command (`sea status`) is you talking to seahelm and gets
+/// This is the *signal* half of the Telegram bridge, and it is deliberately not
+/// the command half. A command (`/status`) is you talking to seahelm and gets
 /// an answer; a signal is a third party — an Aliyun alert, a CI text, a person —
 /// that you want to turn into work without answering it. So rules never reply,
 /// and they never create anything: they route text into a pane that already
 /// exists.
-struct IMessageRule: Codable, Equatable {
+struct TelegramRule: Codable, Equatable {
     var name: String
     var enabled: Bool?
     /// Regex over the sender handle. Empty matches any sender.
@@ -19,7 +19,7 @@ struct IMessageRule: Codable, Equatable {
     /// The prompt injected into the target pane. Supports `{{text}}` (whole
     /// message), `{{from}}` (sender), and `{{1}}`…`{{9}}` (capture groups).
     var prompt: String
-    var target: IMessageRuleTarget
+    var target: TelegramRuleTarget
 
     var isEnabled: Bool { enabled ?? true }
 
@@ -28,7 +28,7 @@ struct IMessageRule: Codable, Equatable {
          from: String? = nil,
          match: String? = nil,
          prompt: String = "",
-         target: IMessageRuleTarget = IMessageRuleTarget(kind: .worktree, value: "")) {
+         target: TelegramRuleTarget = TelegramRuleTarget(kind: .worktree, value: "")) {
         self.name = name
         self.enabled = enabled
         self.from = from
@@ -45,7 +45,7 @@ struct IMessageRule: Codable, Equatable {
 /// a bad hour, and "create a worktree per alert" turns a noisy monitor into a
 /// disk-filling fork bomb. Routing into an existing pane makes the worst case a
 /// noisy pane.
-struct IMessageRuleTarget: Codable, Equatable {
+struct TelegramRuleTarget: Codable, Equatable {
     enum Kind: String, Codable, CaseIterable {
         /// A specific pane, by `SEAHELM_PANE_ID` (session key) or instance id.
         case pane
@@ -61,9 +61,9 @@ struct IMessageRuleTarget: Codable, Equatable {
 
 /// Matching and prompt rendering. Pure — the app layer owns pane lookup and
 /// injection.
-enum IMessageRuleEngine {
+enum TelegramRuleEngine {
     struct Match: Equatable {
-        let rule: IMessageRule
+        let rule: TelegramRule
         /// The prompt with placeholders filled in.
         let prompt: String
     }
@@ -73,7 +73,7 @@ enum IMessageRuleEngine {
     /// First-wins rather than all-match: two rules firing on one alert would put
     /// the same text into two panes, which reads as a bug every time. Order the
     /// list from most specific to least.
-    static func firstMatch(rules: [IMessageRule], sender: String, text: String) -> Match? {
+    static func firstMatch(rules: [TelegramRule], sender: String, text: String) -> Match? {
         for rule in rules where rule.isEnabled {
             guard matches(pattern: rule.from, in: sender) != nil,
                   let groups = matches(pattern: rule.match, in: text) else { continue }
@@ -132,7 +132,7 @@ enum IMessageRuleEngine {
     /// The pane a target names, or nil when nothing matches — a rule pointing at
     /// a worktree that has since been deleted does nothing rather than guessing
     /// at a neighbour.
-    static func resolvePane(_ target: IMessageRuleTarget,
+    static func resolvePane(_ target: TelegramRuleTarget,
                             panes: [PaneSnapshot]) -> PaneSnapshot? {
         let needle = target.value.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else { return nil }

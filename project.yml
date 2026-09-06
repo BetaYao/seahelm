@@ -65,9 +65,6 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
-        # Shown in the "Seahelm wants to control Messages" prompt. Required —
-        # without it the first Apple event from IMessageSender kills the app.
-        NSAppleEventsUsageDescription: "Seahelm sends agent updates and replies to your iMessage conversations through Messages."
         # Sparkle. The feed URL is deliberately absent — UpdateCoordinator supplies
         # it per CPU arch at runtime, because we ship arch-specific zips and Sparkle
         # has no built-in arch filtering, so there is one appcast per arch.
@@ -207,22 +204,17 @@ targets:
         MARKETING_VERSION: "2.0.57"
         CURRENT_PROJECT_VERSION: 1
         # Local builds sign with the same Developer ID as the shipped app, and
-        # deliberately not ad-hoc. TCC pins a Full Disk Access grant to a code
-        # requirement; for an ad-hoc bundle that requirement is its cdhash, so
-        # every rebuild invalidates the grant and the iMessage bridge goes deaf
-        # with nothing in the UI to say why ("Failed to match existing code
-        # requirement" is a tccd log line, not a prompt). Signed with the team
-        # identity, the requirement is identity-based and one grant covers both
-        # this build and /Applications.
+        # deliberately not ad-hoc. Keychain pins an item's access (the Gmail
+        # OAuth credentials) to a code requirement; for an ad-hoc bundle that
+        # requirement is its cdhash, so every rebuild would prompt again — or
+        # lose the item. Signed with the team identity, the requirement is
+        # identity-based and one grant covers both this build and /Applications.
         #
         # Manual, not Automatic: automatic resolves to an "Apple Development"
         # cert, and the ones in this keychain are revoked.
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: 43G5A6G9QV
         CODE_SIGN_IDENTITY: "Developer ID Application"
-        # Hardened-runtime exceptions only — the app is not sandboxed. Needed so
-        # signed builds can drive Messages.app for the iMessage bridge.
-        CODE_SIGN_ENTITLEMENTS: seahelm.entitlements
         COMBINE_HIDPI_IMAGES: YES
         SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/seahelm-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
