@@ -11,7 +11,7 @@ final class FirstMateActionPayloadTests: XCTestCase {
     }
 
     func testDefaultPayloadIsNil() {
-        let a = FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/w",
+        let a = FirstMateAction(kind: .integrationReport, zone: .red, worktreePath: "/w",
                                 branch: "b", project: "p", terminalID: "t", message: "m")
         XCTAssertNil(a.payload)
     }

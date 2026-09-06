@@ -107,6 +107,12 @@ class MainWindowController: NSWindowController {
     /// 4. 项目根目录的 .env / .env.local（需要选中 worktree）
     /// 5. 项目根目录的 git config --local github.token（需要选中 worktree）
     private var resolvedGitHubToken: String {
+        Self.resolveGitHubToken(repoPath: tabCoordinator.config.selectedWorktreePath)
+    }
+
+    /// Static so a background queue can call it with the path read on main;
+    /// two of the sources are subprocesses with a deadline.
+    static func resolveGitHubToken(repoPath selectedRepoPath: String?) -> String {
         // 1. 环境变量
         if let env = ProcessInfo.processInfo.environment["GITHUB_TOKEN"] ??
             ProcessInfo.processInfo.environment["GH_TOKEN"], !env.isEmpty {
@@ -516,28 +522,23 @@ class MainWindowController: NSWindowController {
         return (secret, mqtt)
     }
 
-    /// The iMessage bridge could not start. The only two real causes are
-    /// permissions the user has to grant by hand, so offer the pane that grants
-    /// them rather than just logging.
-    private func presentIMessageError(_ message: String) {
-        guard let window, lastIMessageError != message else { return }
-        lastIMessageError = message
-
-        let needsFullDisk = message.localizedCaseInsensitiveContains("full disk")
+    /// The Telegram bridge could not start. What reaches here is final — a
+    /// token Telegram rejects, a bot already polled elsewhere — and only the
+    /// user can fix it, so say it in a sheet rather than a log line the
+    /// channel would otherwise sit silently dead behind.
+    private func presentTelegramError(_ message: String) {
+        guard let window, lastTelegramError != message else { return }
+        lastTelegramError = message
 
         let alert = NSAlert()
-        alert.messageText = "iMessage bridge unavailable"
-        alert.informativeText = needsFullDisk
-            ? "Seahelm cannot read your Messages history. Grant Full Disk Access to Seahelm, then reopen Settings.\n\n\(message)"
-            : message
-        alert.addButton(withTitle: needsFullDisk ? "Open Privacy Settings" : "OK")
+        alert.messageText = "Telegram bridge unavailable"
+        alert.informativeText = "\(message)\n\nCheck the bot token and allowed users under Settings › Telegram."
+        alert.addButton(withTitle: "Open Settings")
         alert.addButton(withTitle: "Later")
 
-        alert.beginSheetModal(for: window) { response in
-            guard needsFullDisk, response == .alertFirstButtonReturn,
-                  let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
-            else { return }
-            NSWorkspace.shared.open(url)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.showSettings()
         }
     }
 
@@ -1064,328 +1065,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         return pool.filter { $0.name.lowercased().contains(query) }
     }
 
-    /// Routes a chat message through the cockpit's own verbs, so the phone and the
-    /// desktop share one command language.
-    ///
-    /// Deliberately not the cockpit's `BridgeCommandRouter` wiring: those handlers
-    /// open file panels and raise confirmation sheets. A phone can neither see nor
-    /// answer a sheet, so routing chat through them would park a dialog on the
-    /// desktop and read as a hang. These execute and report back in the reply.
-    ///
-    /// Returns false for verbs it doesn't own, so AgentRegistry's chat-only ones still run.
-    private func makeChatCommandRoute() -> (String, @escaping (String) -> Void) -> Bool {
-        { [weak self] text, reply in
-            guard let self else { return false }
-
-            // Bare prose steers the worktree you last worked in. NOT the cockpit's
-            // meaning (create a worktree and staff it) — see AgentRegistry.handleInbound.
-            guard text.hasPrefix("/") else {
-                guard let path = self.dashboardVC?.lastCommittedWorktreePath,
-                      let pane = AgentRegistry.shared.pane(forWorktree: path) else { return false }
-                AgentRegistry.shared.sendCommand(to: pane.id, command: text)
-                reply("→ **\(pane.project)** [\(pane.branch)]")
-                return true
-            }
-
-            // `force` suffix is chat-only: on the desktop the sheet asks instead.
-            var body = text
-            var force = false
-            if body.hasSuffix(" force") {
-                body = String(body.dropLast(" force".count))
-                force = true
-            }
-
-            switch BridgeCommandParser.parse(body, worktrees: self.currentWorktreeRefs(),
-                                             agents: self.fleetAgentRefs(),
-                                             repoPaths: self.tabCoordinator.config.workspacePaths) {
-            case .failure(.unknownCommand):
-                return false   // not ours — let /status, /idea, /help try
-            case .failure(let err):
-                reply(Self.describeChatError(err))
-                return true
-            case .success(let cmd):
-                self.routeChatCommand(cmd, force: force, reply: reply)
-                return true
-            }
-        }
-    }
-
-    /// The agents `/agents` and `/order #x` select from: the current worktree's
-    /// panes. Empty when nothing is current.
-    private func currentWorktreeAgentRefs() -> [AgentRef] {
-        guard let path = dashboardVC?.lastCommittedWorktreePath else { return [] }
-        return AgentRegistry.shared.panes(forWorktree: path).map {
-            AgentRef(id: $0.id,
-                     project: $0.project,
-                     branch: $0.branch,
-                     type: $0.agentType.displayName,
-                     title: Self.agentTitle(for: $0))
-        }
-    }
-
-    /// Every pane, grouped so one project's worktrees stay together — the order
-    /// the listing prints and therefore the order `/pane <n>` counts in.
-    ///
-    /// Chat surfaces select from this rather than from the current worktree: a
-    /// phone and a mail thread have no tab bar to say which worktree is meant.
-    func fleetAgentRefs() -> [AgentRef] {
-        AgentRegistry.shared.allPanes()
-            .sorted { ($0.project, $0.branch) < ($1.project, $1.branch) }
-            .map {
-                AgentRef(id: $0.id,
-                         project: $0.project,
-                         branch: $0.branch,
-                         type: $0.agentType.displayName,
-                         title: Self.agentTitle(for: $0),
-                         status: $0.status,
-                         // The assistant's own prose where there is any; a screen
-                         // scan makes poor reading in a chat or a mail.
-                         lastMessage: $0.lastAssistantMessage.isEmpty ? $0.lastMessage : $0.lastAssistantMessage)
-            }
-    }
-
-    /// Recent tool activity for one pane, as plain lines.
-    func fleetActivity(forPaneID paneID: String) -> [String] {
-        guard let pane = AgentRegistry.shared.pane(for: paneID) else { return [] }
-        return pane.activityEvents.map {
-            "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
-        }
-    }
-
-    /// Title for one agent/pane — see `PaneTitleResolver`.
-    private static func agentTitle(for pane: PaneInfo) -> String {
-        PaneTitleResolver.title(for: pane)
-    }
-
-    private static func describeChatError(_ err: BridgeCommandError) -> String {
-        switch err {
-        case .emptyTask:              return "Nothing to do — add a task."
-        case .unknownCommand(let c):  return "Unknown command: `\(c)`"
-        case .unknownBranch(let b):   return "No worktree on branch `\(b)`"
-        case .unknownTarget(let t):   return "No worktree or repo named `\(t)`"
-        case .missingArgument(let a): return "`\(a)` needs an argument."
-        }
-    }
-
-    private func routeChatCommand(_ cmd: BridgeCommand, force: Bool, reply: @escaping (String) -> Void) {
-        switch cmd {
-        case .newWorktree(let task, let repoHint):
-            let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
-            guard !repoPath.isEmpty else { reply("No repo configured."); return }
-            // Starting a task is also moving to it — the phone has no dashboard to
-            // click, so a create that left `current` behind would strand the reply.
-            performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
-                                  reuseEnv: false) { [weak self] path in
-                guard let path else { return }
-                self?.dashboardVC?.commitWorktreeSelection(path: path)
-            }
-            reply("Starting **\(URL(fileURLWithPath: repoPath).lastPathComponent)** — \(task)")
-
-        case .listWorktrees:
-            reply(BridgeCommandFormatter.worktreeList(
-                currentWorktreeRefs(), currentPath: dashboardVC?.lastCommittedWorktreePath))
-
-        case .selectWorktree(let path):
-            dashboardVC?.commitWorktreeSelection(path: path)
-            let branch = currentWorktreeRefs().first { $0.path == path }?.branch ?? path
-            if let s = AgentRegistry.shared.pane(forWorktree: path) {
-                reply("Now on **\(s.project)** [\(branch)]")
-            } else {
-                reply("Now on [\(branch)] — no agent there yet. `/worktree <description>` to start one.")
-            }
-
-        case .listAgents:
-            // Fleet-wide, not current-worktree: this listing's numbering is what
-            // `/pane <n>` and `/order <n>` resolve against.
-            reply(BridgeCommandFormatter.fleetList(
-                fleetAgentRefs(),
-                currentId: dashboardVC?.lastCommittedWorktreePath
-                    .flatMap { AgentRegistry.shared.pane(forWorktree: $0)?.id }))
-
-        case .selectAgent(let id):
-            guard let agent = fleetAgentRefs().first(where: { $0.id == id }),
-                  let pane = AgentRegistry.shared.pane(for: id) else {
-                reply("That agent is gone. `/pane` to see what's left.")
-                return
-            }
-            // Opening a pane is also steering it — reading it and then having to
-            // say so again is a round-trip this surface can't afford.
-            dashboardVC?.commitWorktreeSelection(path: pane.worktreePath)
-            reply(BridgeCommandFormatter.paneDetail(
-                agent, activity: fleetActivity(forPaneID: id),
-                transcript: ZmxChannel(paneSessionKey: pane.station?.paneSessionKey ?? "").recentTranscript(lines: 60),
-                joined: "Now steering **\(agent.project)** [\(agent.branch)] — reply to send it anything."))
-
-        case .orderAgent(let id, let task):
-            guard let s = AgentRegistry.shared.pane(for: id) else { reply("No such agent."); return }
-            AgentRegistry.shared.sendCommand(to: s.id, command: task)
-            reply("→ **\(s.project)** [\(s.branch)]")
-
-        case .broadcast(let task):
-            let all = AgentRegistry.shared.allPanes()
-            guard !all.isEmpty else { reply("No agents running."); return }
-            for s in all { AgentRegistry.shared.sendCommand(to: s.id, command: task) }
-            reply("Sent to \(all.count) agent\(all.count == 1 ? "" : "s").")
-
-        case .addRepo:
-            reply("`/add` is desktop only — it needs a file picker.")
-
-        case .flagIssue(let title):
-            openGitHubIssue(title: title)
-            reply("Opening GitHub issue for **seahelm**…")
-
-        case .integrate(let mode, let force):
-            // Nothing here can disturb a worktree until the final checkout, so
-            // this is safe to run straight from a message rather than carded.
-            guard config.integrationEnabled else {
-                reply("Integration is turned off in Settings.")
-                return
-            }
-            guard let selected = tabCoordinator.config.selectedWorktreePath,
-                  let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
-                reply("No repo selected.")
-                return
-            }
-            let worktrees = tabCoordinator.allWorktrees
-                .map(\.info)
-                .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
-            let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
-                ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
-            let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let report = try IntegrationRunner.run(
-                        repoPath: repoPath,
-                        integrationPath: integrationPath,
-                        worktrees: worktrees,
-                        mode: mode,
-                        force: force,
-                        lastPublished: lastPublished,
-                        // Typed by hand is exactly when an agent is most likely
-                        // to be mid-turn, so this needs the same guard the
-                        // automatic round has: a busy worktree comes in at HEAD
-                        // rather than as a half-written file that reads as a
-                        // conflict it is not.
-                        isBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) }
-                    )
-                    DispatchQueue.main.async {
-                        IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
-                        IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
-                        if case .published(let commit) = report.outcome {
-                            IntegrationWorktreeStore.shared.recordPublished(
-                                commit, forCheckout: report.integrationWorktreePath)
-                        }
-                    }
-                    reply(report.summary)
-                } catch {
-                    reply("Integration failed: \(error.localizedDescription)")
-                }
-            }
-
-        case .removeAll:
-            // Cards, exactly as on the desktop. A blind sweep is the one place
-            // direct execution could delete several worktrees from one stray line.
-            let targets = tabCoordinator.allWorktrees.map(\.info).filter { !$0.isMainWorktree }
-            for info in targets { enqueueReturnCard(forPath: info.path) }
-            reply("Reviewing \(targets.count) worktree\(targets.count == 1 ? "" : "s") — approve on the desktop.")
-
-        case .removeRepo(let path):
-            // lastPathComponent is what the parser matched to resolve `path`, so it
-            // is also the tab's displayName. Executed rather than confirmed: this
-            // only kills sessions and leaves every worktree on disk, so nothing
-            // unrecoverable rides on it.
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            tabCoordinator.performCloseRepo(projectName: name)
-            reply("Dropped **\(name)**. Its worktrees are still on disk.")
-
-        case .removeWorktree(let path):
-            let branch = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info.branch ?? ""
-            if AgentRegistry.shared.hasRunningPane(inWorktree: path) {
-                reply("**\(branch)** has an agent running — leaving it alone.")
-                return
-            }
-            // The desktop's sheet exists to stop uncommitted work being lost, not
-            // as ceremony. Chat keeps that guard and moves it into the reply.
-            // The dirty check is a synchronous git subprocess — run it off-thread.
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let dirty = !force && WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    if dirty {
-                        reply("**\(branch)** has uncommitted changes — they'd be lost.\nSend `/remove @\(branch) force` if you mean it.")
-                        return
-                    }
-                    self.terminalCoordinator.deleteWorktreeForReturnToPort(path: path, branch: branch, force: force)
-                    reply("Deleted **\(branch)**.")
-                }
-            }
-        }
-    }
-
-    private func makeBridgeRouter() -> BridgeCommandRouter {
-        BridgeCommandRouter(
-            queue: tabCoordinator.pendingOrders,
-            createWorktree: { [weak self] task, repoHint in
-                guard let self else { return }
-                let paths = self.tabCoordinator.config.workspacePaths
-                let repoPath = repoHint ?? paths.first ?? ""
-                self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
-            },
-            selectWorktree: { [weak self] path in
-                self?.dashboardVC?.commitWorktreeSelection(path: path)
-            },
-            selectAgent: { [weak self] id in
-                guard let path = AgentRegistry.shared.pane(for: id)?.worktreePath else { return }
-                self?.dashboardVC?.commitWorktreeSelection(path: path)
-            },
-            showOverview: { [weak self] in
-                // The dashboard IS the listing; the chat reply is its text stand-in.
-                self?.tabCoordinator.switchToTab(0)
-            },
-            orderAgent: { id, task in
-                AgentRegistry.shared.sendCommand(to: id, command: task)
-            },
-            removeAll: { [weak self] in
-                guard let self else { return }
-                let worktrees = self.tabCoordinator.allWorktrees
-                    .map(\.info)
-                    .filter { !$0.isMainWorktree }
-                for info in worktrees {
-                    self.enqueueReturnCard(forPath: info.path)
-                }
-            },
-            addRepo: { [weak self] in
-                self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window)
-            },
-            removeRepo: { [weak self] path in
-                guard let self else { return }
-                // Reuse the same confirmation the "Close Repo" context menu shows —
-                // this kills the repo's persisted sessions, so it must not be a
-                // silent one-liner. displayName is the repo's directory name, which
-                // is exactly what the parser matched to resolve `path`.
-                self.tabCoordinator.showCloseProjectModal(
-                    URL(fileURLWithPath: path).lastPathComponent, window: self.window)
-            },
-            removeWorktree: { [weak self] path in
-                guard let self,
-                      let item = self.tabCoordinator.allWorktrees.first(where: { $0.info.path == path })
-                else { return }
-                // Same confirm sheet as the sidebar's Delete: typing a branch name is
-                // easy to get wrong, and the work in that tree is unrecoverable.
-                self.terminalCoordinator.confirmAndDeleteWorktree(item.info, window: self.window)
-            },
-            flagIssue: { [weak self] title in
-                self?.openGitHubIssue(title: title)
-            },
-            integrate: { [weak self] mode, force in
-                self?.runIntegration(mode: mode, force: force)
-            },
-            activePaneCount: { AgentRegistry.shared.allPanes().count },
-            branchForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.branch ?? "" },
-            projectForPath: { path in AgentRegistry.shared.pane(forWorktree: path)?.project ?? "" }
-        )
-    }
-
     /// One `/integrate` round for the current repo.
     ///
     /// Snapshotting and merging shell out several times over, so it runs off
@@ -1569,58 +1248,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         )
     }
 
-    /// Run a merge check for `path` on a background thread and enqueue a
-    /// return-to-port card with appropriate options once the check completes.
-    /// Resolve a `/remove` sweep for one worktree. If it is clean AND fully merged,
-    /// remove it immediately (no confirmation). Otherwise enqueue a red
-    /// "Force remove" card requiring explicit confirmation. `onDone` fires on the
-    /// main thread once resolved (deleted or carded).
-    private func enqueueReturnCard(forPath path: String, onDone: (() -> Void)? = nil) {
-        let repoCache = tabCoordinator.worktreeRepoCache
-        let queue = tabCoordinator.pendingOrders
-        let coordinator = terminalCoordinator
-        let pane = AgentRegistry.shared.pane(forWorktree: path)
-
-        // A worktree with a live agent must never be reaped by /remove: neither
-        // deleted outright nor carded for "Force remove". Leave it untouched.
-        // Asked across every pane, not just `pane`: that one is the worktree's
-        // first, and a split whose second pane is working is just as live.
-        if AgentRegistry.shared.hasRunningPane(inWorktree: path) {
-            onDone?()
-            return
-        }
-
-        let branch = pane?.branch
-            ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
-            ?? URL(fileURLWithPath: path).lastPathComponent
-        let project = pane?.project
-            ?? tabCoordinator.allWorktrees.first(where: { $0.info.path == path })?.info.branch
-            ?? ""
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let repoPath = repoCache[path] ?? WorktreeDiscovery.findRepoRoot(from: path) ?? path
-            let check = WorktreeDeleter.mergeCheckForOnlineMainOrMaster(
-                worktreePath: path, repoPath: repoPath)
-
-            DispatchQueue.main.async {
-                if check.canDelete {
-                    // Clean + fully merged → safe to remove directly, no confirm.
-                    coordinator.deleteWorktreeForReturnToPort(
-                        path: path, branch: branch, deleteBranch: false, force: false)
-                } else {
-                    // Dirty or unmerged → require explicit "Force remove" confirmation.
-                    queue.enqueue(FirstMateAction(
-                        kind: .returnToPort, zone: .red,
-                        worktreePath: path, branch: branch, project: project,
-                        terminalID: "",
-                        message: check.reason,
-                        options: ["Force remove"]))
-                }
-                onDone?()
-            }
-        }
-    }
-
     /// Outcome of an async Helm command, reported back so the caller can drop its
     /// loading spinner and react.
     enum HelmCommandOutcome {
@@ -1631,42 +1258,57 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     /// Submit a Helm command. Returns `true` if it kicked off async work (so the
     /// caller shows a loading spinner); `onOutcome` then fires when the work
-    /// completes — `.navigated` for a new tab, `.presented` for an order card,
-    /// `.failed` on error. Synchronous commands route immediately and return `false`.
+    /// completes — `.navigated` for a new worktree, `.presented` for return
+    /// cards, `.failed` on error. Synchronous commands run immediately and
+    /// return `false`.
     @discardableResult
     func submitBridgeCommand(_ text: String, onOutcome: ((HelmCommandOutcome) -> Void)? = nil) -> Bool {
-        switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs(),
-                                         agents: currentWorktreeAgentRefs(),
-                                         repoPaths: tabCoordinator.config.workspacePaths) {
-        case .success(let command):
-            switch command {
-            case .newWorktree(let task, let repoHint):
-                let repoPath = repoHint ?? tabCoordinator.config.workspacePaths.first ?? ""
-                performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode,
-                                      reuseEnv: false) { [weak self] path in
-                    if let path { self?.dashboardVC?.commitWorktreeSelection(path: path) }
-                    onOutcome?(path != nil ? .navigated : .failed)
-                }
-                return true
-
-            case .removeAll:
-                let worktrees = tabCoordinator.allWorktrees.map(\.info).filter { !$0.isMainWorktree }
-                guard !worktrees.isEmpty else { NSSound.beep(); return false }
-                let group = DispatchGroup()
-                for info in worktrees {
-                    group.enter()
-                    enqueueReturnCard(forPath: info.path) { group.leave() }
-                }
-                group.notify(queue: .main) { onOutcome?(.presented) }
-                return true
-
-            default:
-                makeBridgeRouter().route(command)
-                return false
+        enum Kind { case new, sweep, other }
+        var kind = Kind.other
+        if case .success(let line) = CommandParser.parse(text, index: fleetIndex()) {
+            switch line.command {
+            case .new: kind = .new
+            case .returnAll: kind = .sweep
+            default: break
             }
-        case .failure:
-            NSSound.beep()
-            return false
+        }
+        var replies = 0
+        commandExecutor.run(text, surface: .desktop) { [weak self] reply in
+            guard let self else { return }
+            replies += 1
+            // The dashboard is the desktop's listing; text replies are for the
+            // surfaces that have nothing else to show.
+            if reply.showsOverview { self.tabCoordinator.switchToTab(0) }
+            if reply.isError { NSSound.beep() }
+            if !reply.text.isEmpty { NSLog("[Helm] \(reply.text)") }
+            if reply.presentsOnDesktop { self.presentCommandReply(reply) }
+            switch kind {
+            case .new:
+                if reply.isError { onOutcome?(.failed) } else if replies >= 2 { onOutcome?(.navigated) }
+            case .sweep:
+                onOutcome?(reply.isError ? .failed : .presented)
+            case .other:
+                if reply.isError { onOutcome?(.failed) }
+            }
+        }
+        return kind != .other
+    }
+
+    /// The desktop has no chat to read replies in; an outcome that carries
+    /// something to act on — a PR link, a worktree held back — gets a sheet.
+    private func presentCommandReply(_ reply: CommandReply) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = reply.isError ? .warning : .informational
+        alert.messageText = reply.isError ? "Return did not finish" : "Return"
+        alert.informativeText = reply.text
+        let prLink = reply.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            .first { $0.hasPrefix("https://github.com/") && $0.contains("/pull/") }
+        if prLink != nil { alert.addButton(withTitle: "Open PR") }
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window) { response in
+            guard let prLink, response == .alertFirstButtonReturn, let url = URL(string: prLink) else { return }
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -2332,6 +1974,17 @@ extension MainWindowController: DashboardDelegate {
         tabCoordinator.dashboardDidRequestDeleteWorktree(path: path, window: window)
     }
 
+    /// The row's Return is the command itself, so the sidebar and every chat
+    /// surface stay one behavior.
+    func dashboardDidRequestReturnWorktree(path: String) {
+        let index = fleetIndex()
+        guard let wt = index.worktree(path: path) else {
+            NSSound.beep()
+            return
+        }
+        submitBridgeCommand("/return \(index.label(for: wt))")
+    }
+
     func dashboardDidRequestAddProject() {
         tabCoordinator.addRepoViaOpenPanel(window: window)
     }
@@ -2956,17 +2609,19 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
         // Sweep the worktree's cards before the UI drops it: deleting a worktree
-        // takes every pane with it, so worktree-scoped cards (returnToPort in
-        // particular, which is usually what triggered the delete) are stale too.
+        // takes every pane with it, so worktree-scoped cards are stale too.
         tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
         worktreeDidDelete(info)
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String) {
         tabCoordinator.pendingOrders.resolvePane(terminalID: terminalID)
-        if let conversation = tabCoordinator.closeMailPane(paneID: terminalID),
-           let account = config.gmailMail?.accountEmail {
-            EmailAttachmentStore().remove(threadID: conversation.gmailThreadID, account: account)
+        // Every conversation bound to the pane is told, and a mail thread's
+        // attachments go with it.
+        for session in tabCoordinator.commandSessions.close(paneId: terminalID) where session.surface == "mail" {
+            if let account = config.gmailMail?.accountEmail {
+                EmailAttachmentStore().remove(threadID: session.id, account: account)
+            }
         }
     }
 }
@@ -2975,8 +2630,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
 extension MainWindowController {
     /// Routes a suggestion chip tap. `integrationReport` chips run or decline the
-    /// discard; `returnToPort` chips trigger actual deletion; all other kinds
-    /// forward the option text to the agent terminal.
+    /// discard; all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
         if order.action.kind == .integrationReport {
             // The card is the only place the discard is offered, and it is the
@@ -2991,21 +2645,6 @@ extension MainWindowController {
                 return
             }
             runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: true)
-        } else if order.action.kind == .returnToPort {
-            // Guard against a stale card: if the agent started running after the
-            // card was enqueued, refuse the reap and drop the card.
-            if AgentRegistry.shared.hasRunningPane(inWorktree: order.action.worktreePath) {
-                NSSound.beep()
-                tabCoordinator.pendingOrders.resolve(id: order.id)
-                return
-            }
-            let deleteBranch = optionText.contains("Branch")
-            let force = optionText.lowercased().contains("force")
-            terminalCoordinator.deleteWorktreeForReturnToPort(
-                path: order.action.worktreePath,
-                branch: order.action.branch,
-                deleteBranch: deleteBranch,
-                force: force)
         } else if order.action.payload == FirstMateAction.screenChoicePayload {
             // Permission prompts discovered from the viewport are not guaranteed
             // to support digit shortcuts (Codex advertises y/p/esc). Drive the
@@ -3048,36 +2687,244 @@ extension MainWindowController {
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }
 
-    func handleBridgeApprove(_ order: PendingOrder) {
-        switch order.action.kind {
-        case .suggestNextOrder:
-            // Send to the pane that raised the suggestion. Re-resolving the
-            // worktree here would pick its *first* pane, so a suggestion from a
-            // split pane got answered in a sibling.
-            let worktreePath = order.action.worktreePath
-            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath) else { return }
-            let terminalID = order.action.terminalID.isEmpty
-                ? AgentRegistry.shared.pane(forWorktree: worktreePath)?.id
-                : order.action.terminalID
-            guard let terminalID else { return }
-            AgentRegistry.shared.sendCommand(to: terminalID, command: task)
-        case .returnToPort:
-            // Never reap a worktree whose agent is now running.
-            if AgentRegistry.shared.hasRunningPane(inWorktree: order.action.worktreePath) {
-                NSSound.beep()
-                break
+}
+
+// MARK: - CommandHost
+
+extension MainWindowController: CommandHost {
+    /// The fleet as the command language sees it, with every pane's stable
+    /// handle minted on sight.
+    func fleetIndex() -> FleetIndex {
+        let registry = PaneHandleRegistry.shared
+        let panes = AgentRegistry.shared.allPanes().map { pane -> PaneRef in
+            let sessionKey = pane.station?.paneSessionKey ?? ""
+            let key = PaneHandleRegistry.key(sessionKey: sessionKey, paneId: pane.id)
+            return PaneRef(handle: registry.handle(for: key), handleKey: key, id: pane.id, sessionKey: sessionKey,
+                           project: pane.project, branch: pane.branch, worktreePath: pane.worktreePath,
+                           type: pane.agentType.displayName, title: PaneTitleResolver.title(for: pane),
+                           // `displayStatus`, the same field the dashboard
+                           // draws — a pane whose agent is idle while its
+                           // background work runs reads as busy on both. The
+                           // raw `status` is for edges and notifications; using
+                           // it here made `/status` on a phone disagree with
+                           // the fleet on screen, which is the one thing a
+                           // remote listing must not do.
+                           status: pane.displayStatus,
+                           // The assistant's own prose where there is any; a screen
+                           // scan makes poor reading in a chat or a mail.
+                           lastMessage: pane.lastAssistantMessage.isEmpty ? pane.lastMessage : pane.lastAssistantMessage)
+        }
+        let worktrees = tabCoordinator.allWorktrees.map {
+            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+                        branch: $0.info.branch, path: $0.info.path, isMain: $0.info.isMainWorktree)
+        }
+        let repos = tabCoordinator.config.workspacePaths.map {
+            RepoRef(name: URL(fileURLWithPath: $0).lastPathComponent, path: $0)
+        }
+        return FleetIndex(panes: panes, worktrees: worktrees, repos: repos)
+    }
+
+    /// The desktop talks to the selected worktree's pane.
+    var desktopBoundPaneKey: String? {
+        guard let path = dashboardVC?.lastCommittedWorktreePath,
+              let pane = AgentRegistry.shared.pane(forWorktree: path) else { return nil }
+        return PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
+    }
+
+    var integrationEnabled: Bool { config.integrationEnabled }
+
+    func createWorktree(task: String, repoPath: String, completion: @escaping (String?) -> Void) {
+        performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false,
+                              onComplete: completion)
+    }
+
+    func selectWorktree(path: String) {
+        dashboardVC?.commitWorktreeSelection(path: path)
+    }
+
+    func sendText(paneId: String, text: String) -> Bool {
+        guard AgentRegistry.shared.pane(for: paneId) != nil else { return false }
+        AgentRegistry.shared.sendCommand(to: paneId, command: text)
+        return true
+    }
+
+    func transcript(paneSessionKey: String) -> String? {
+        ZmxChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
+    }
+
+    /// Recent tool activity for one pane, as plain lines.
+    func activity(paneId: String) -> [String] {
+        guard let pane = AgentRegistry.shared.pane(for: paneId) else { return [] }
+        return pane.activityEvents.map {
+            "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
+        }
+    }
+
+    func isIntegrationCheckout(worktreePath: String) -> Bool {
+        IntegrationWorktreeStore.shared.isIntegrationWorktree(worktreePath)
+    }
+
+    /// Git subprocesses plus one network round trip (the fetch, and a PR
+    /// lookup when origin is GitHub) — off the main thread, with every piece
+    /// of main-thread state read first.
+    func assessReturn(worktreePath path: String, completion: @escaping (WorktreeReturnFacts) -> Void) {
+        let info = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info
+        let running = AgentRegistry.shared.hasRunningPane(inWorktree: path)
+        let task = WorktreeTaskStore.shared.task(forWorktree: path)
+        let recordedBase = WorktreeBaseBranchStore.shared.baseBranch(forWorktree: path)
+        let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(path)
+        let repoCache = tabCoordinator.worktreeRepoCache
+        let tokenRepoPath = tabCoordinator.config.selectedWorktreePath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let repoPath = repoCache[path] ?? WorktreeDiscovery.findRepoRoot(from: path) ?? path
+            var facts = WorktreeReturnAssessor.assess(
+                worktreePath: path, repoPath: repoPath, branch: info?.branch ?? "",
+                isMain: info?.isMainWorktree ?? false, isDetached: info?.isDetached ?? false,
+                recordedBase: recordedBase)
+            facts.agentRunning = running
+            facts.isIntegration = isIntegration
+            facts.taskDescription = task
+            if case .github(let owner, let repo) = facts.remote {
+                let token = Self.resolveGitHubToken(repoPath: tokenRepoPath)
+                facts.hasGitHubToken = !token.isEmpty
+                if !token.isEmpty, !facts.branch.isEmpty {
+                    let client = GitHubReturnPRClient(
+                        service: GitHubPRService(token: token, owner: owner, repo: repo), owner: owner)
+                    facts.existingPRURL = client.openPRURL(branch: facts.branch)
+                }
             }
-            terminalCoordinator.deleteWorktreeForReturnToPort(
-                path: order.action.worktreePath,
-                branch: order.action.branch
-            )
-        case .broadcastOrder:
-            guard let task = order.action.payload else { return }
-            for agent in AgentRegistry.shared.allPanes() {
-                AgentRegistry.shared.sendCommand(to: agent.id, command: task)
+            DispatchQueue.main.async { completion(facts) }
+        }
+    }
+
+    /// Commit, push and PR run on a background queue; the delete goes through
+    /// the coordinator so the panes and sessions come down with the tree.
+    func performReturn(_ plan: WorktreeReturnPlan, worktree: WorktreeRef,
+                       completion: @escaping (WorktreeReturnOutcome) -> Void) {
+        let path = worktree.path
+        let branch = worktree.branch
+        let task = WorktreeTaskStore.shared.task(forWorktree: path)
+        let tokenRepoPath = tabCoordinator.config.selectedWorktreePath
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var pr: WorktreeReturnPRClient?
+            if let url = GitProcess.run(["remote", "get-url", "origin"], in: path),
+               let remote = GitRemote.parse(url), case .github(let owner, let repo) = remote.kind {
+                let token = Self.resolveGitHubToken(repoPath: tokenRepoPath)
+                if !token.isEmpty {
+                    pr = GitHubReturnPRClient(
+                        service: GitHubPRService(token: token, owner: owner, repo: repo), owner: owner)
+                }
             }
-        default:
-            break
+            let outcome = WorktreeReturnRunner.run(plan, branch: branch, task: task,
+                                                   git: WorktreeReturnGitProcess(worktreePath: path), pr: pr)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if outcome.deletesWorktree {
+                    self.terminalCoordinator.deleteWorktreeWithoutConfirm(
+                        path: path, branch: branch, deleteBranch: outcome.deletesBranch, force: true)
+                }
+                completion(outcome)
+            }
+        }
+    }
+
+    /// lastPathComponent is what the parser matched, so it is also the tab's
+    /// displayName. Kills sessions, leaves every worktree on disk.
+    func forgetRepo(path: String) {
+        tabCoordinator.performCloseRepo(projectName: URL(fileURLWithPath: path).lastPathComponent)
+    }
+
+    func integrate(mode: IntegrationConflictMode, force: Bool,
+                   completion: @escaping (String, Bool) -> Void) {
+        guard let selected = tabCoordinator.config.selectedWorktreePath,
+              let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
+            completion("No repo selected.", false)
+            return
+        }
+        let worktrees = tabCoordinator.allWorktrees
+            .map(\.info)
+            .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
+        let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
+            ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
+        let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome: Result<IntegrationRunReport, Error>
+            do {
+                outcome = .success(try IntegrationRunner.run(
+                    repoPath: repoPath,
+                    integrationPath: integrationPath,
+                    worktrees: worktrees,
+                    mode: mode,
+                    force: force,
+                    lastPublished: lastPublished,
+                    // A busy worktree comes in at HEAD rather than as a
+                    // half-written file that reads as a conflict it is not.
+                    isBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) }
+                ))
+            } catch {
+                outcome = .failure(error)
+            }
+            DispatchQueue.main.async { [weak self] in
+                switch outcome {
+                case .success(let report):
+                    IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
+                    IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
+                    if case .published(let commit) = report.outcome {
+                        IntegrationWorktreeStore.shared.recordPublished(commit, forCheckout: report.integrationWorktreePath)
+                    }
+                    // The desktop learns of a round that needs a decision from
+                    // its card, whichever surface asked for the round.
+                    if report.needsAttention {
+                        self?.enqueueIntegrationReport(report.summary, repoPath: repoPath,
+                                                       checkoutPath: report.integrationWorktreePath,
+                                                       options: report.cardOptions)
+                    }
+                    completion(report.summary, report.isHeld)
+                case .failure(let error):
+                    completion("Integration failed: \(error.localizedDescription)", false)
+                }
+            }
+        }
+    }
+
+    func addIdea(text: String, source: String) -> String {
+        IdeaStore.shared.add(text: text, project: "external", source: source, tags: []).text
+    }
+
+    func openIssue(title: String) {
+        openGitHubIssue(title: title)
+    }
+
+    func addRepo() {
+        tabCoordinator.addRepoViaOpenPanel(window: window)
+    }
+
+    /// The desktop's `/yes`: one sheet, same wording as the chat question.
+    func confirm(_ summary: String, completion: @escaping (Bool) -> Void) {
+        guard let window else {
+            completion(false)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = summary
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Go ahead")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { completion($0 == .alertFirstButtonReturn) }
+    }
+
+    /// Telegram chats bound to this pane get the notification in their own
+    /// thread. Mail threads have their own observer for the same edge.
+    private func notifyBoundSessions(terminalID: String, text: String) {
+        guard !terminalID.isEmpty, let pane = AgentRegistry.shared.pane(for: terminalID) else { return }
+        let key = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
+        let defaultChat = config.telegram?.resolvedDefaultChatId
+        for session in tabCoordinator.commandSessions.sessions(boundToPaneKey: key)
+        where session.surface == "telegram" && session.id != defaultChat {
+            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+                channelId: "telegram", targetChatId: session.id, content: text, format: .markdown))
         }
     }
 }

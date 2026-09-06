@@ -161,21 +161,21 @@ final class PendingOrdersQueueTests: XCTestCase {
     }
 
     func testResolvePaneSparesWorktreeScopedCards() {
-        // returnToPort carries no terminalID because it belongs to the whole
+        // integrationReport carries no terminalID because it belongs to the whole
         // worktree; one pane closing must not sweep it away.
         let q = PendingOrdersQueue()
-        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/x",
+        q.enqueue(FirstMateAction(kind: .integrationReport, zone: .red, worktreePath: "/wt/x",
                                   branch: "b", project: "p", terminalID: "", message: "m"))
         q.upsert(paneAction(.suggestNextOrder, terminalID: "t1"))
         q.resolvePane(terminalID: "t1")
         XCTAssertEqual(q.all().count, 1)
-        XCTAssertEqual(q.all().first?.action.kind, .returnToPort)
+        XCTAssertEqual(q.all().first?.action.kind, .integrationReport)
     }
 
     func testResolvePaneWithEmptyIDIsANoOp() {
         // Guards the above: an empty id must not match every worktree-scoped card.
         let q = PendingOrdersQueue()
-        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/x",
+        q.enqueue(FirstMateAction(kind: .integrationReport, zone: .red, worktreePath: "/wt/x",
                                   branch: "b", project: "p", terminalID: "", message: "m"))
         q.resolvePane(terminalID: "")
         XCTAssertEqual(q.all().count, 1)
@@ -184,7 +184,7 @@ final class PendingOrdersQueueTests: XCTestCase {
     func testResolveWorktreeDropsPaneAndWorktreeScopedCards() {
         let q = PendingOrdersQueue()
         q.upsert(paneAction(.suggestNextOrder, terminalID: "t1", wt: "/wt/gone"))
-        q.enqueue(FirstMateAction(kind: .returnToPort, zone: .red, worktreePath: "/wt/gone",
+        q.enqueue(FirstMateAction(kind: .integrationReport, zone: .red, worktreePath: "/wt/gone",
                                   branch: "b", project: "p", terminalID: "", message: "m"))
         q.upsert(paneAction(.suggestNextOrder, terminalID: "t9", wt: "/wt/kept"))
         q.resolveWorktree(path: "/wt/gone")

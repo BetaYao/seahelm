@@ -38,6 +38,8 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
+    /// The row's Return — `/return @worktree` by another route.
+    var onReturnWorktree: ((String) -> Void)?
     /// Move a repo's integration checkout back onto origin/main. Only offered
     /// on rows that are one.
     var onResetIntegration: ((String) -> Void)?
@@ -550,6 +552,7 @@ final class DashboardOverviewView: NSView {
                                   isIntegration: groupedItem.isIntegration)
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
+                row.onReturn = { [weak self] path in self?.onReturnWorktree?(path) }
                 row.onResetIntegration = { [weak self] path in self?.onResetIntegration?(path) }
                 row.onHoverChanged = { [weak self] row, entered in
                     self?.rowHoverChanged(row, entered: entered)
@@ -1014,6 +1017,7 @@ final class DashboardOverviewView: NSView {
         /// row, decides what that means — see `FleetHoverRow`.
         var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         var onDelete: ((String) -> Void)?
+        var onReturn: ((String) -> Void)?
         var onResetIntegration: ((String) -> Void)?
         /// Refreshed by `update` rather than fixed at init: a row is keyed by its
         /// station id, and a worktree transfer (`handleNewBranch`) re-registers the
@@ -1301,6 +1305,14 @@ final class DashboardOverviewView: NSView {
                     + " Asks first if edits or commits made here would be lost."
                 menu.addItem(resetItem)
             }
+            // Two ways out. Return is the command: ship what the worktree has,
+            // then delete. Delete throws it away.
+            let returnItem = NSMenuItem(title: "Return…", action: #selector(returnAction), keyEquivalent: "")
+            returnItem.target = self
+            returnItem.toolTip = "Same as /return: delete outright when everything is merged;"
+                + " otherwise commit, push, open a PR, then delete. Asks first."
+            if isMainWorktree || isIntegration { returnItem.isEnabled = false }
+            menu.addItem(returnItem)
             // One Delete, and it takes the branch with it. Whether to ask is
             // decided from what would be lost, not by a second menu item —
             // see `TerminalCoordinator.confirmAndDeleteWorktree`.
@@ -1330,6 +1342,8 @@ final class DashboardOverviewView: NSView {
         @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
 
         @objc private func deleteAction() { onDelete?(path) }
+
+        @objc private func returnAction() { onReturn?(path) }
 
         @objc private func resetIntegrationAction() { onResetIntegration?(path) }
 

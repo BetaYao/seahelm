@@ -11,6 +11,8 @@ protocol DashboardDelegate: AnyObject {
     /// worktree with no registered agent (a pane that never spoke) must still
     /// be deletable — the old pane-id key silently dropped those.
     func dashboardDidRequestDeleteWorktree(path: String)
+    /// The row's Return: the same thing as `/return @worktree`.
+    func dashboardDidRequestReturnWorktree(path: String)
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
@@ -338,6 +340,9 @@ class DashboardViewController: NSViewController {
         // Row context menu → the delegate's assess-then-tear-down path.
         overviewView.onDeleteWorktree = { [weak self] path in
             self?.dashboardDelegate?.dashboardDidRequestDeleteWorktree(path: path)
+        }
+        overviewView.onReturnWorktree = { [weak self] path in
+            self?.dashboardDelegate?.dashboardDidRequestReturnWorktree(path: path)
         }
         overviewView.onResetIntegration = { [weak self] path in
             self?.onResetIntegration?(path)

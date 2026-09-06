@@ -118,6 +118,30 @@ final class GitHubPRService {
         return try await post(url, body: payload)
     }
 
+    // MARK: - Opening PRs
+
+    /// The open PR whose head is `head` (`owner:branch`), if there is one.
+    func findOpenPR(head: String) async throws -> GitHubPR? {
+        var params = GitHubPRListParams()
+        params.state = "open"
+        params.head = head
+        params.perPage = 1
+        return try await listPRs(params: params).first
+    }
+
+    /// Opens a ready (non-draft) PR from `head` onto `base`.
+    func createPR(title: String, body: String, head: String, base: String) async throws -> GitHubPR {
+        let url = URL(string: "\(baseURL)/repos/\(owner)/\(repo)/pulls")!
+        let payload: [String: Any] = [
+            "title": title,
+            "body": body,
+            "head": head,
+            "base": base,
+            "draft": false,
+        ]
+        return try await post(url, body: payload)
+    }
+
     // MARK: - Private networking
 
     private var authHeader: String {
