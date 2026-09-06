@@ -7,7 +7,6 @@ enum ChromeLeftPane: String, Equatable, Codable {
 
 /// Legacy left-column pane tags used by dashboard keymap shortcuts (files / changes).
 enum LeftPane: Int, CaseIterable {
-    case bridge = 0
     case file = 1
     case change = 2
 }

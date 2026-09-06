@@ -84,7 +84,6 @@ class SeahelmWindow: NSWindow {
             // regions (dashboard's keyDown won't see these — icons are first responder).
             if event.keyCode == 48,
                let mwc = windowController as? MainWindowController,
-               mwc.keyboardSubstate.isIdle,
                mwc.regionFocus.current == .titlebar {
                 let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 if flags.isDisjoint(with: [.command, .control, .option]) {

@@ -12,7 +12,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         let vc = makeVC(worktreePath: "/tmp/wt-a")
         vc.loadViewIfNeeded()
         XCTAssertEqual(vc.worktreePathForTesting, "/tmp/wt-a")
-        XCTAssertEqual(vc.selectedTabForTesting, .firstMate)
+        XCTAssertEqual(vc.selectedTabForTesting, .files)
     }
 
     func testSetWorktreeUpdatesHeldPath() {
@@ -59,7 +59,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         vc.loadViewIfNeeded()
         vc.selectTab(.files)
         vc.selectTab(.changes)
-        XCTAssertEqual(vc.mountedTabsForTesting.count, 3)
+        XCTAssertEqual(vc.mountedTabsForTesting.count, 2)
 
         vc.setWorktree("/tmp/wt-b")
         XCTAssertEqual(vc.mountedTabsForTesting, [.changes],

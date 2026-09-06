@@ -92,7 +92,7 @@ final class AddWorktreePopoverTests: XCTestCase {
     func testAgentChoicesAreTheAIAgents() {
         let controller = makeLoadedController()
         XCTAssertEqual(controller.agentChoiceTitlesForTesting,
-                       InlineWorktreeCreateView.agentChoices.map(\.displayName))
+                       AddWorktreePopoverController.agentChoices.map(\.displayName))
     }
 
     private func makeLoadedController() -> AddWorktreePopoverController {

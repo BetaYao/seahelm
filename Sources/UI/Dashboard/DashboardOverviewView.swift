@@ -1250,25 +1250,31 @@ final class DashboardOverviewView: NSView {
             // last known figure, so a live counter never blanks mid-flight.
             let nextRuntime = pane.currentPaneRunTime.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextRuntime.isEmpty || status != .running {
-                timeLabel.stringValue = nextRuntime
+                Self.setText(timeLabel, nextRuntime)
             }
 
             let nextBranch = (pane.thread.isEmpty ? pane.name : pane.thread)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextBranch.isEmpty {
-                branchLabel.stringValue = nextBranch
+                Self.setText(branchLabel, nextBranch)
             }
-            gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
-            paneCountLabel.stringValue = pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—"
+            if !hasRenderedGit || renderedGitStats != pane.gitStats {
+                hasRenderedGit = true
+                renderedGitStats = pane.gitStats
+                gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
+            }
+            Self.setText(paneCountLabel, pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—")
             if let repositoryLabel, showsRepository {
                 let project = pane.project.isEmpty ? "Unknown project" : pane.project
-                repositoryLabel.stringValue = project
-                repositoryLabel.textColor = ProjectColor.color(for: project)
+                Self.setText(repositoryLabel, project)
+                let color = ProjectColor.color(for: project)
+                if repositoryLabel.textColor != color { repositoryLabel.textColor = color }
             }
-            staticDot.stringValue = status.glyph
-            staticDot.textColor = status.color
-            staticDot.isHidden = status == .running
-            runningDot.isHidden = status != .running
+            Self.setText(staticDot, status.glyph)
+            if staticDot.textColor != status.color { staticDot.textColor = status.color }
+            // `isHidden` also invalidates display unconditionally.
+            if staticDot.isHidden != (status == .running) { staticDot.isHidden = status == .running }
+            if runningDot.isHidden != (status != .running) { runningDot.isHidden = status != .running }
         }
 
         override func mouseDown(with event: NSEvent) { onTap?(path) }

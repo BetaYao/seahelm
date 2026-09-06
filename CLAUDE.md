@@ -70,9 +70,9 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `Split/` — `SplitContainerView` renders `SplitTree` as frame-based leaf views with `DividerView` drag handles and dim overlays on unfocused panes
    - `Chrome/` — Two-column `WindowChromeController` (sidebar/terminal headers, divider, collapse)
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
-   - `SidePanel/` — Per-worktree right panel with First Mate / Files / Changes tabs (`WorktreeSidePanelViewController`, `BridgePanelViewController` for red/green-zone orders)
+   - `SidePanel/` — Per-worktree side panel with Files / Changes tabs (`WorktreeSidePanelViewController`). The old First Mate orders tab (`BridgePanelViewController`) and the inline command composer (`InlineWorktreeCreateView`) are gone: pending orders and the command line both live in `Island/`.
    - `Diff/` — Code-review diff viewer (`DiffReviewView` + `DiffSyntaxHighlighter`)
-   - `Helm/` — The command-line "helm" input (`CommandInputView` with `/command · @repo · #agent` autocomplete) + keyboard-help overlay
+   - `Helm/` — `GrowingTextView` (extracted from the former `CommandInputView`), the keyboard-help overlay and the shortcut hint bar. The command line itself is the Island's (`Island/OpenedSurfaceView`, `/ @ #` autocomplete); the sidebar has no composer.
    - `StatusBar/` — Fixed 26pt bottom bar: mode indicator, global Claude/Codex usage, notification summary, shortcuts
    - `Island/` — Floating "dynamic island" panel (morphs closed pill ↔ open surface) for notifications/status
    - `Settings/`, `Onboarding/` — Tabbed settings window and the first-run wizard

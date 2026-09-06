@@ -3,8 +3,8 @@ import AppKit
 /// Stable per-repo accent color, derived from the repo name so the same repo
 /// always gets the same swatch without any stored state.
 ///
-/// Survivor of the deleted mini-card UI — `BridgePanelViewController` still
-/// tints rows with it.
+/// Survivor of the deleted mini-card UI — the fleet overview still tints
+/// project glyphs and group headers with it.
 enum ProjectColor {
     static func color(for project: String) -> NSColor {
         let palette = [0xd97757, 0x10a37f, 0x8b7fd9, 0x4285f4, 0x6aa84f,

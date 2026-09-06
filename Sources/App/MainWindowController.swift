@@ -43,12 +43,11 @@ enum WindowStyling {
     }
 }
 
-class MainWindowController: NSWindowController, MailCommandContext {
+class MainWindowController: NSWindowController {
     private static let primaryCapsuleDisplayDuration: TimeInterval = 8.0
 
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
-    let keyboardSubstate = KeyboardSubstateController()
     /// Outer Tab-cycle focus among panes / sidebar / chrome header / helm.
     let regionFocus = RegionFocusController()
     private var windowTrackingArea: NSTrackingArea?
@@ -875,18 +874,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
 
-        dashboard.sidePanelVC.pendingOrdersQueue = tabCoordinator.pendingOrders
-        dashboard.sidePanelVC.watchFeed = tabCoordinator.watchFeed
-        dashboard.sidePanelVC.onSuggestionTapped = { [weak self] order, optionText in
-            self?.handleSuggestionTapped(order: order, optionText: optionText)
-        }
-        dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
-            self?.tabCoordinator.selectTab(forWorktree: path)
-        }
-        dashboard.sidePanelVC.onBridgeApprove = { [weak self] order in
-            self?.handleBridgeApprove(order)
-        }
-
         // Every command entry point in the dashboard (n, `/ @ #`, Cmd+N) opens the
         // island's command bar — the fleet column has no composer of its own.
         dashboard.onRequestCommandBar = { [weak self] prefill in
@@ -937,9 +924,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self.windowChrome?.applyState(self.chromeState, animated: false)
         }
         dashboard.onRequestNewWorktree = { [weak self] in
-            // Opens the Helm cockpit with `/new ` prefilled (the inline creator and
-            // its createForm keyboard substate were removed).
-            self?.tabCoordinator.dashboardVC?.focusInlineCreate()
+            // Opens the Island's command line with `/new ` prefilled.
+            self?.tabCoordinator.dashboardVC?.startNewCommand()
         }
         dashboard.onIntegrateProject = { [weak self] project in
             guard let self, let repoPath = self.tabCoordinator.repoPath(forProject: project) else {
@@ -957,20 +943,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onRequestAddRepo = { [weak self] in
             self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window)
         }
-        dashboard.onInlineCreateFormEnd = { [weak self] in
-            self?.keyboardSubstate.endCreateForm()
-            self?.tabCoordinator.dashboardVC?.enterDashboardNavigation()
-        }
-
-        dashboard.setupInlineCreate(
-            repoPaths: config.workspacePaths,
-            repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
-            onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) },
-            onSubmitCommand: { [weak self] text in self?.submitBridgeCommand(text) }
-        ) { [weak self] taskDescription, repoPath, agentType, reuseEnv in
-            self?.performWorktreeCreate(task: taskDescription, repoPath: repoPath, agentType: agentType, reuseEnv: reuseEnv)
-        }
-
         embedChromeShell(dashboard: dashboard)
         updateTitleBar()
 
@@ -1050,13 +1022,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 }
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
-                    self.dashboardVC?.inlineCreateReportSuccess()
                     onComplete?(info.path)
                 }
             } catch {
                 DispatchQueue.main.async {
                     NSSound.beep()
-                    self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
                     onError?(error.localizedDescription)
                     onComplete?(nil)
                 }
