@@ -175,8 +175,14 @@ class Station {
     /// against a leaked ZMX_SESSION (e.g. app relaunched from inside a pane):
     /// zmx attach prefers $ZMX_SESSION over its argument, which would silently
     /// attach every pane to the wrong session.
+    ///
+    /// The session key is single-quoted: this string is handed to a shell, and a
+    /// workspace directory with a space in it (`~/My Project`) yields a key with a
+    /// space in it. Unquoted, the shell splits it and zmx reads the tail as the
+    /// command to run — `zmx attach seahelm-me-My Project` means session
+    /// `seahelm-me-My`, command `Project` — so the pane dies on launch.
     static func zmxAttachCommand(paneSessionKey: String) -> String {
-        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(paneSessionKey)"
+        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
     }
 
     private func attachZmx(
