@@ -71,9 +71,9 @@ Or download from [GitHub Releases](https://github.com/BetaYao/seahelm/releases/l
 
 ![File browser and code editor](assets/screenshots/code-editor.png)
 
-### Tab layout
+### Edit mode
 
-![Tab layout](assets/screenshots/tab-layout.png)
+![Edit mode — a terminal column and a file-preview column, each with its own tab strip](assets/screenshots/edit-mode.png)
 
 ## Features
 

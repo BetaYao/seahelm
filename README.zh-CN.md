@@ -63,9 +63,9 @@ curl -fsSL https://seahelm.dev/install.sh | sh
 
 ![File browser and code editor](assets/screenshots/code-editor.png)
 
-### Tab 布局
+### 编辑模式
 
-![Tab layout](assets/screenshots/tab-layout.png)
+![编辑模式 —— 终端列与文件预览列，各自带一个 tab 条](assets/screenshots/edit-mode.png)
 
 ## 功能
 
