@@ -87,6 +87,10 @@ final class IslandPanelController {
     }
 
     @objc private func activeSpaceChanged() {
+        // Entering or leaving a fullscreen app makes a space, so this is the
+        // edge the cached answer below is stale on. Drop it and re-measure now,
+        // which is what lets the TTL be long enough to matter.
+        Self.fullscreenCache = nil
         updateVisibility()
     }
 
@@ -170,12 +174,33 @@ final class IslandPanelController {
         }
     }
 
+    /// Last answer from `computeHasFullscreenWindow`, and when it was taken.
+    /// Main-thread only, like everything else on this panel controller.
+    private static var fullscreenCache: (screen: CGRect, takenAt: Date, value: Bool)?
+    /// A fresh answer costs a cross-process enumeration of every window on
+    /// screen — measured at several hundred milliseconds on a busy desktop —
+    /// and this ran on every title-bar refresh, which is every agent status
+    /// edge. Going fullscreen always makes a space, so `activeSpaceChanged` is
+    /// the real invalidation and fires exactly when the answer changes; this
+    /// interval is only a backstop for anything that edge misses.
+    private static let fullscreenCacheTTL: TimeInterval = 30.0
+
+    private static func hasFullscreenWindow(on screen: NSScreen) -> Bool {
+        if let cached = fullscreenCache, cached.screen == screen.frame,
+           Date().timeIntervalSince(cached.takenAt) < fullscreenCacheTTL {
+            return cached.value
+        }
+        let value = computeHasFullscreenWindow(on: screen)
+        fullscreenCache = (screen.frame, Date(), value)
+        return value
+    }
+
     /// True when another app's normal-layer window fully covers the screen
     /// in the current space. Fullscreen windows cover the whole frame
     /// including the menu-bar band; ordinary maximized windows don't, so
     /// they never match. (`visibleFrame` is not reliable here — AppKit often
     /// doesn't refresh it for fullscreen spaces.)
-    private static func hasFullscreenWindow(on screen: NSScreen) -> Bool {
+    private static func computeHasFullscreenWindow(on screen: NSScreen) -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
         ) as? [[String: Any]] else { return false }

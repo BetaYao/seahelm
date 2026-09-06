@@ -7,10 +7,15 @@ import Foundation
 enum SessionTitleLookup {
     /// Title from the most recently modified session JSONL in the worktree's
     /// project directory, or nil if none has a `summary` record.
+    /// - Parameter synchronously: read the transcript on this thread instead of
+    ///   answering from the cache and scanning in the background. Only for
+    ///   callers that cannot use a value that lands a moment later, and never
+    ///   from the main thread — see `scanQueue`.
     static func title(
         worktreePath: String,
         fileManager: FileManager = .default,
-        projectsRoot: URL = defaultProjectsRoot()
+        projectsRoot: URL = defaultProjectsRoot(),
+        synchronously: Bool = false
     ) -> String? {
         guard !worktreePath.isEmpty else { return nil }
         let dir = projectsRoot.appendingPathComponent(
@@ -33,7 +38,7 @@ enum SessionTitleLookup {
             }
 
         for session in sessions {
-            if let summary = lastSummary(in: session) {
+            if let summary = lastSummary(in: session, synchronously: synchronously) {
                 return summary
             }
         }
@@ -52,7 +57,8 @@ enum SessionTitleLookup {
         worktreePath: String,
         sessionId: String,
         fileManager: FileManager = .default,
-        projectsRoot: URL = defaultProjectsRoot()
+        projectsRoot: URL = defaultProjectsRoot(),
+        synchronously: Bool = false
     ) -> String? {
         guard !worktreePath.isEmpty, !sessionId.isEmpty else { return nil }
         // The id is a transcript stem, but it reaches us from a webhook payload:
@@ -62,7 +68,7 @@ enum SessionTitleLookup {
             .appendingPathComponent(encodedProjectComponent(worktreePath: worktreePath), isDirectory: true)
             .appendingPathComponent("\(sessionId).jsonl")
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        return lastSummary(in: url)
+        return lastSummary(in: url, synchronously: synchronously)
     }
 
     /// Encodes an absolute path the way Claude Code names its project directories.

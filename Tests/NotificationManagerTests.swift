@@ -61,6 +61,52 @@ final class NotificationManagerTests: XCTestCase {
         XCTAssertEqual(body, "fix the flaky dashboard notification")
     }
 
+    /// The banner falls back to the user's own prompt, which is right on a
+    /// desktop and wrong on a phone: there it reads as the bot repeating the
+    /// message you just sent it.
+    func testExternalBodyNeverEchoesTheUsersOwnPrompt() {
+        let body = NotificationManager.formatExternalBody(
+            status: .idle,
+            workspaceName: "workspace",
+            branch: "feature/article",
+            lastMessage: "Task completed",
+            lastAssistantMessage: ""
+        )
+
+        XCTAssertFalse(body.contains("fix the flaky dashboard notification"), body)
+        XCTAssertFalse(body.isEmpty)
+    }
+
+    /// A chat message holds 4096 characters and chunks past that; cutting the
+    /// agent's answer to the banner's 80 is what made replies arrive truncated.
+    func testExternalBodyKeepsTheWholeAnswer() {
+        let long = String(repeating: "The dashboard now repaints once per batch. ", count: 12)
+        let body = NotificationManager.formatExternalBody(
+            status: .idle,
+            workspaceName: "workspace",
+            branch: "feature/article",
+            lastMessage: "Task completed",
+            lastAssistantMessage: long
+        )
+
+        XCTAssertEqual(body, long.trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertFalse(body.hasSuffix("..."), "answer was truncated: \(body)")
+    }
+
+    /// Newlines survive: a banner collapses them to fit one line, a chat shows
+    /// the agent's paragraphs and code blocks as written.
+    func testExternalBodyKeepsLineBreaks() {
+        let body = NotificationManager.formatExternalBody(
+            status: .idle,
+            workspaceName: "w",
+            branch: "b",
+            lastMessage: "done",
+            lastAssistantMessage: "First line.\n\nSecond line."
+        )
+
+        XCTAssertTrue(body.contains("\n"), body)
+    }
+
     func testSystemSubtitleUsesTarget() {
         let subtitle = NotificationManager.formatSystemSubtitle(
             workspaceName: "workspace",

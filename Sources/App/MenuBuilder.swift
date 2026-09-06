@@ -28,13 +28,13 @@ enum MenuBuilder {
         mainMenu.addItem(appMenuItem)
 
         // First Mate menu — opens the Helm cockpit with a slash command prefilled.
-        // Aligned with BridgeCommand verbs. Cmd+R is plain; letter chords take
+        // Aligned with the `CommandSpecs` verbs. Cmd+R is plain; letter chords take
         // Shift to avoid Cmd+C (copy), Cmd+B (sidebar), and Cmd+A (select all).
         let firstMateMenuItem = NSMenuItem()
         let firstMateMenu = NSMenu(title: "First Mate")
         let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
-            ("Worktree (/worktree)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
-            ("Pane (/pane)", #selector(MainWindowController.helmAgentsCommand), "", []),
+            ("New Worktree (/new)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
+            ("Status (/status)", #selector(MainWindowController.helmAgentsCommand), "", []),
             ("Order (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
             ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
             ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),

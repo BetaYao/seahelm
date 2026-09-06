@@ -54,21 +54,11 @@ enum MailBody {
 /// which is exactly what `MailBody.newContent` cuts at — so quoting it back in a
 /// reply costs nothing.
 enum MailSignature {
-    /// One source of truth: the plain-text signature and the HTML one are both
-    /// rendered from this, so they cannot list different commands.
-    static let entries: [(command: String, detail: String)] = [
-        ("/pane", "every pane, numbered"),
-        ("/pane <n>", "that pane's latest — and this thread starts talking to it"),
-        ("/order <n> <task>", "send one pane a task without switching to it"),
-        ("/worktree", "every worktree, numbered"),
-        ("/worktree <desc>", "start a new worktree and staff it"),
-        ("/broadcast <task>", "send every pane the same task"),
-        ("/status", "the whole fleet at a glance"),
-        ("/return", "clean up finished worktrees"),
-        ("/help", "this list"),
-    ]
+    /// Straight from the verb table, so the plain-text signature, the HTML one
+    /// and `/help` cannot list different commands.
+    static var entries: [(command: String, detail: String)] { CommandSpecs.mailEntries }
 
-    static let closing = "Anything that isn't a command goes straight to this thread's pane."
+    static let closing = "Anything that isn't a command goes to the pane this thread is talking to; `/go #n` picks one."
 
     static var commands: String {
         let width = entries.map(\.command.count).max() ?? 0

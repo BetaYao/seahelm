@@ -74,14 +74,17 @@ class MainWindowController: NSWindowController, MailCommandContext {
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
-    /// Live iMessage bridge, held so a Settings save can tear the old one down.
+    /// Live Telegram bridge, held so a Settings save can tear the old one down.
     /// Nil when the bridge is unconfigured or was started by AppDelegate and
-    /// never reconfigured — `unregisterChannel("imessage")` covers that case.
-    private var imessageChannel: IMessageChannel?
+    /// never reconfigured — `unregisterChannel("telegram")` covers that case.
+    private var telegramChannel: TelegramChannel?
+    /// One executor for every surface: the Helm line, Telegram and mail all
+    /// run their lines through it, so a command means one thing everywhere.
+    private lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
     private var gmailOAuthCoordinator: GmailOAuthCoordinator?
     private var gmailMailPoller: GmailMailPoller?
-    /// Suppresses repeat alerts while the same permission is still missing.
-    private var lastIMessageError: String?
+    /// Suppresses repeat alerts while the same failure persists.
+    private var lastTelegramError: String?
     private var runtimeBackend: String = "zmx"
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
@@ -122,7 +125,7 @@ class MainWindowController: NSWindowController, MailCommandContext {
         }
 
         // 4-5. 需要 project 目录的来源，有 worktree path 才尝试
-        guard let repoPath = tabCoordinator.config.selectedWorktreePath else { return "" }
+        guard let repoPath = selectedRepoPath else { return "" }
 
         for envFile in [".env", ".env.local"] {
             let url = URL(fileURLWithPath: repoPath).appendingPathComponent(envFile)
@@ -276,13 +279,20 @@ class MainWindowController: NSWindowController, MailCommandContext {
         // Every desktop banner also goes to whatever chat channels are registered,
         // so a phone hears "agent finished" without seahelm owning a transport or
         // push certificate. No-op until a channel is registered.
-        NotificationManager.shared.onDeliverExternal = { status, title, subtitle, body in
-            AgentRegistry.shared.broadcast(
-                "\(status.icon) **\(title)**\n\(subtitle)\n\n\(body)",
-                format: .markdown
-            )
+        NotificationManager.shared.onDeliverExternal = { [weak self] status, title, subtitle, body, terminalID in
+            let text = "\(status.icon) **\(title)**\n\(subtitle)\n\n\(body)"
+            AgentRegistry.shared.broadcast(text, format: .markdown)
+            // A chat that bound itself to this pane hears it too, not only the
+            // configured default — that is what binding is for.
+            self?.notifyBoundSessions(terminalID: terminalID, text: text)
         }
-        AgentRegistry.shared.chatCommandRoute = makeChatCommandRoute()
+        // Not `tabCoordinator.commandRoute` here: that coordinator's own
+        // initializer reads `statusPublisher`, and two lazy vars that reach
+        // for each other recurse until the stack goes. Mail is wired in
+        // `startGmailMailChannel`, after both exist.
+        AgentRegistry.shared.commandRoute = { [weak self] text, surface, reply in
+            self?.commandExecutor.run(text, surface: surface, reply: reply)
+        }
         AgentRegistry.shared.ruleTriggerRoute = { [weak self] prompt, target in
             self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
         }
@@ -546,8 +556,8 @@ class MainWindowController: NSWindowController, MailCommandContext {
         islandController.openCommandBar(prefill: prefill)
     }
 
-    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/worktree ") }
-    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/pane") }
+    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/new ") }
+    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/status") }
     @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
     @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
     @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
@@ -1058,47 +1068,25 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// every worktree, not just the staffed ones, so an idle tree is still
     /// reachable and still sweepable. Both surfaces read this, which is what
     /// keeps their numbering identical.
-    private func currentWorktreeRefs() -> [WorktreeRef] {
-        tabCoordinator.allWorktrees.map {
-            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
-                        branch: $0.info.branch,
-                        path: $0.info.path)
-        }
-    }
-
     /// Autocomplete data for the Helm command line.
-    /// `/` commands · `@` repos/branches · `#` task and agent codes.
+    /// `/` commands · `@` repos and worktrees · `#` pane handles.
     private func helmMenuItems(trigger: Character, query: String) -> [(name: String, desc: String)] {
+        let index = fleetIndex()
         let pool: [(name: String, desc: String)]
         switch trigger {
         case "/":
-            pool = [
-                ("worktree", "bare lists worktrees · <description> starts one · #code switches"),
-                ("pane", "bare lists this worktree's panes · #code steers one"),
-                ("order", "#code <task> — send to one pane without switching"),
-                ("broadcast", "Broadcast to everyone"),
-                ("add", "Add a project"),
-                // Both kinds of `@` name are valid — the kind picks the verb,
-                // and no name at all sweeps every worktree.
-                ("return", "bare sweeps all · @worktree deletes it · @repo drops the repo"),
-                ("feedback", "<description> — open a GitHub issue for seahelm"),
-            ]
+            pool = CommandSpecs.menu
         case "@":
-            let repos = tabCoordinator.config.workspacePaths.map {
-                (URL(fileURLWithPath: $0).lastPathComponent, "repo · \($0)")
+            let repos = index.repos.map { ($0.name, "repo · \($0.path)") }
+            let worktrees = index.worktrees.map { wt in
+                (String(index.label(for: wt).dropFirst()), "worktree · \(wt.repo)")
             }
-            let worktrees = AgentRegistry.shared.allPanes().map { ($0.branch, "worktree · \($0.project)") }
             pool = repos + worktrees
         case "#":
-            // The codes `/worktree #x` and `/pane #x` take, in the order the
-            // listings print them, so the menu and the reply always agree.
-            let tasks = currentWorktreeRefs().enumerated().map { index, wt in
-                ("\(index + 1)", "worktree · \(wt.repo) / \(wt.branch)")
+            // Stable handles — the same numbers the pane rows and `/status` show.
+            pool = index.panes.sorted { $0.handle < $1.handle }.map { pane in
+                ("\(pane.handle)", "\(pane.status.icon) \(pane.project)/\(pane.branch) · \(pane.title)")
             }
-            let agents = currentWorktreeAgentRefs().enumerated().map { index, agent in
-                (agent.branch, "pane \(index + 1) · \(agent.project)")
-            }
-            pool = tasks + agents
         default:
             pool = []
         }
@@ -2198,7 +2186,11 @@ extension MainWindowController: NSWindowDelegate {
     func startGmailMailChannel(config gmailConfig: GmailMailConfig?) {
         gmailMailPoller?.stop()
         gmailMailPoller = nil
-        tabCoordinator.mailCommandContext = self
+        // Mail runs its lines through the same executor as the Helm line and
+        // Telegram; wired here, once both coordinators exist.
+        tabCoordinator.commandRoute = { [weak self] text, surface, reply in
+            self?.commandExecutor.run(text, surface: surface, reply: reply)
+        }
         guard let gmailConfig, gmailConfig.enabled, gmailConfig.validationError == nil else { return }
         let poller = GmailMailPoller(client: GmailRESTMailClient(accountEmail: gmailConfig.accountEmail))
         poller.onAcceptedMessage = { [weak self] message in
@@ -2207,50 +2199,6 @@ extension MainWindowController: NSWindowDelegate {
         poller.onStateChange = { code in NSLog("[App] Gmail mail channel state: \(code.rawValue)") }
         poller.start(config: gmailConfig)
         gmailMailPoller = poller
-    }
-
-    /// Mail speaks the same grammar as the Helm line and iMessage; only the
-    /// binding is its own, because "the pane I'm talking to" is a thread here
-    /// and a focused pane on the desktop.
-    ///
-    /// Returns nil for anything that isn't a command — that gets delivered to
-    /// the thread's pane as prose.
-    func interpret(_ text: String) -> MailCommandResult? {
-        precondition(Thread.isMainThread)
-        guard text.hasPrefix("/") else { return nil }
-        let fleet = fleetAgentRefs()
-
-        // `/pane <n>` binds this thread, so mail resolves that one itself.
-        // Everything else runs through the very closure iMessage uses.
-        if case .success(.selectAgent(let id)) = BridgeCommandParser.parse(text, worktrees: [], agents: fleet) {
-            guard let agent = fleet.first(where: { $0.id == id }),
-                  let pane = AgentRegistry.shared.pane(for: id) else {
-                return .reply("That pane is gone. `/pane` to see what's left.")
-            }
-            let sessionKey = pane.station?.paneSessionKey ?? ""
-            return .bind(paneID: pane.id,
-                         sessionKey: sessionKey,
-                         worktreePath: pane.worktreePath,
-                         reply: BridgeCommandFormatter.paneDetail(
-                            agent, activity: fleetActivity(forPaneID: id),
-                            transcript: ZmxChannel(paneSessionKey: sessionKey).recentTranscript(lines: 60),
-                            joined: "This thread now talks to **\(agent.project)** [\(agent.branch)] — reply to send it anything."))
-        }
-
-        var answer: String?
-        // The shared grammar answers synchronously for every verb it owns.
-        let owned = AgentRegistry.shared.chatCommandRoute?(text, { answer = $0 }) ?? false
-        guard owned, let answer else { return .reply("Unknown command.\n\n\(MailSignature.commands)") }
-        return .reply(answer)
-    }
-
-    func steerCurrent(_ text: String) -> String? {
-        precondition(Thread.isMainThread)
-        var answer: String?
-        // The same closure that routes bare prose from iMessage, so an unbound
-        // mail thread behaves exactly like a phone conversation.
-        guard AgentRegistry.shared.chatCommandRoute?(text, { answer = $0 }) ?? false else { return nil }
-        return answer
     }
 
     func cleanupBeforeTermination() {

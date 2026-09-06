@@ -40,15 +40,19 @@ final class MailPaneObserver {
     /// `(intent, recipient)` — the recipient is the thread's commander, so an
     /// agent's output reaches whoever is actually running it.
     var onIntent: ((OutboundMailIntent, String?) -> Void)?
-    private let conversations: EmailConversationStore
+    private let sessions: CommandSessionStore
     private var emitted: Set<String> = []
     private let intentStore: OutboundMailIntentStore
 
-    init(conversations: EmailConversationStore, intentStore: OutboundMailIntentStore = OutboundMailIntentStore()) { self.conversations = conversations; self.intentStore = intentStore }
+    init(sessions: CommandSessionStore, intentStore: OutboundMailIntentStore = OutboundMailIntentStore()) { self.sessions = sessions; self.intentStore = intentStore }
 
     func ingest(_ outcome: IngestOutcome) {
         let key = outcome.info.station?.paneSessionKey ?? ""
-        guard !key.isEmpty, let conversation = conversations.conversation(forPaneSessionKey: key), !conversation.closed else { return }
+        guard !key.isEmpty else { return }
+        // Every mail thread talking to this pane hears it, each in its own thread.
+        let threads = sessions.sessions(boundToPaneKey: PaneHandleRegistry.key(sessionKey: key, paneId: outcome.info.id))
+            .filter { $0.surface == "mail" }
+        guard !threads.isEmpty else { return }
         let kind: OutboundMailIntent.Kind?
         if outcome.isCompletionSignal { kind = .completion }
         else if outcome.statusChanged && outcome.newStatus == .waiting { kind = .waiting }
@@ -60,16 +64,18 @@ final class MailPaneObserver {
         else if outcome.statusChanged && outcome.oldStatus == .running && outcome.newStatus == .idle { kind = .completion }
         else { kind = nil }
         guard let kind else { return }
-        let id = "\(key):\(outcome.seq):\(kind.rawValue)"
-        guard emitted.insert(id).inserted else { return }
         let text = outcome.isCompletionSignal ? outcome.info.lastAssistantMessage : outcome.info.lastMessage
         let body = MailContentRedactor.summary(text.isEmpty ? "Seahelm pane status: \(outcome.newStatus.groupLabel)." : text)
-        let intent = OutboundMailIntent(id: id, threadID: conversation.gmailThreadID, paneSessionKey: key, sequence: outcome.seq, kind: kind,
-                                        // Nothing parses the subject any more — the recipient alias is
-                                        // the gate — so it just has to read well in a thread list.
-                                        subject: "Seahelm — \(outcome.newStatus.groupLabel)", body: body, state: "pending")
-        guard intentStore.insertIfAbsent(intent) else { return }
-        onIntent?(intent, conversation.commander)
+        for thread in threads {
+            let id = "\(key):\(outcome.seq):\(kind.rawValue):\(thread.id)"
+            guard emitted.insert(id).inserted else { continue }
+            let intent = OutboundMailIntent(id: id, threadID: thread.id, paneSessionKey: key, sequence: outcome.seq, kind: kind,
+                                            // Nothing parses the subject any more — the recipient alias is
+                                            // the gate — so it just has to read well in a thread list.
+                                            subject: "Seahelm — \(outcome.newStatus.groupLabel)", body: body, state: "pending")
+            guard intentStore.insertIfAbsent(intent) else { continue }
+            onIntent?(intent, thread.commander)
+        }
     }
 }
 

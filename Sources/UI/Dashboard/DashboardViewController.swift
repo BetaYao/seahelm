@@ -23,6 +23,7 @@ protocol DashboardDelegate: AnyObject {
 /// One split pane, for the fully-expanded "Group by Pane" fleet rows.
 struct PaneDisplayInfo {
     let stationId: String   // Station.id — the leaf's surface
+    let handle: Int         // stable #n — see PaneHandleRegistry
     let title: String       // per-pane title (PaneTitleResolver)
     let status: AgentStatus
     let isFocused: Bool      // the worktree's last-focused pane
@@ -201,11 +202,6 @@ class DashboardViewController: NSViewController {
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
         let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
-        // First Mate titles follow the worktree's current pane, same as the
-        // terminal chrome header.
-        vc.currentPaneTitleProvider = { [weak self] path in
-            self?.currentPaneTitle(forWorktree: path)
-        }
         return vc
     }()
 
@@ -433,7 +429,9 @@ class DashboardViewController: NSViewController {
         // at the state it had when opened.
         if firstMateSideOpen {
             overviewView.selectedId = overviewSelectedId
-            overviewView.update(agents)
+            // A structure change (a worktree came or went) has to repaint every
+            // row regardless of which one's status moved.
+            overviewView.update(agents, changedWorktreePath: structureChanged ? nil : changedWorktreePath)
             syncOverviewFocusCounts()
         }
 
