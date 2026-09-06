@@ -64,7 +64,7 @@ class AgentRegistry {
     /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
-    /// External channels (iMessage, future: Slack, etc.) — keyed by channelId
+    /// External channels (Telegram, future: Slack, etc.) — keyed by channelId
     private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
@@ -757,7 +757,7 @@ class AgentRegistry {
         // `canDeliverInput`, not merely "a Station exists" — the two come apart
         // for any pane whose tab has not been opened in this run, and that gap
         // is what silently swallowed every message sent to a backgrounded pane
-        // from iMessage, mail, and the control socket alike.
+        // from Telegram, mail, and the control socket alike.
         if let station, station.canDeliverInput {
             // Send the text first, then the Enter as a separate write. Agent TUIs
             // (Claude Code, codex) treat a `\r` arriving in the same burst as the
@@ -1081,7 +1081,7 @@ class AgentRegistry {
 
     // MARK: - External Channel Management
 
-    /// Register an external channel (iMessage, Slack, etc.)
+    /// Register an external channel (Telegram, Slack, etc.)
     func registerChannel(_ channel: ExternalChannel) {
         lock.lock()
         externalChannels[channel.channelId] = channel

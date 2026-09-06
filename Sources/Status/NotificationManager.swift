@@ -411,7 +411,7 @@ class NotificationManager: NSObject {
     }
 
     /// Mirrors a delivered banner out to the registered chat channels
-    /// (iMessage), so a phone learns an agent finished without seahelm having to own
+    /// (Telegram), so a phone learns an agent finished without seahelm having to own
     /// a transport, a relay, or push certificates — the IM app already has all
     /// three.
     ///
@@ -422,7 +422,7 @@ class NotificationManager: NSObject {
     /// completion at all.
     ///
     /// Set by MainWindowController; nil in tests and headless runs.
-    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String) -> Void)?
+    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String, _ terminalID: String) -> Void)?
 
     /// Whether a suggestion card for this pane is already expanded on screen (the
     /// island popped open with it). Set by MainWindowController; nil in tests and
@@ -475,6 +475,32 @@ class NotificationManager: NSObject {
             return truncateBody(sanitizeMessage(trimmedPrompt))
         }
         return formatBody(status: status, workspaceName: workspaceName, branch: branch, lastMessage: lastMessage)
+    }
+
+    /// What a chat channel gets, which is deliberately not what a banner gets.
+    ///
+    /// A macOS banner has two lines, so `formatSystemBody` collapses newlines,
+    /// shortens paths and cuts to `maxBodyLength` (80) — and, when the agent
+    /// produced no prose of its own, falls back to the user's *own* last
+    /// prompt. On a desktop banner that reads as "this is the task you asked
+    /// for"; mirrored to a phone it reads as the bot repeating back the message
+    /// you just sent it, followed by an ellipsis where the rest should be.
+    ///
+    /// A chat has 4096 characters per message (and `TelegramFormatter.chunk`
+    /// past that), keeps its line breaks, and is being read by the person who
+    /// typed the prompt. So: the agent's own words, whole, or a plain statement
+    /// of what happened — never an echo.
+    static func formatExternalBody(
+        status: AgentStatus,
+        workspaceName: String,
+        branch: String,
+        lastMessage: String,
+        lastAssistantMessage: String
+    ) -> String {
+        let prose = lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prose.isEmpty { return prose }
+        return formatBody(status: status, workspaceName: workspaceName,
+                          branch: branch, lastMessage: lastMessage)
     }
 
     /// The single notification entry point for the whole app.
@@ -631,7 +657,13 @@ class NotificationManager: NSObject {
         // edges that earn a banner, and is skipped by the return above when the
         // user is already looking at the pane — a phone ping for something on
         // screen in front of them is noise.
-        onDeliverExternal?(newStatus, content.title, content.subtitle, content.body)
+        onDeliverExternal?(newStatus, content.title, content.subtitle,
+                           Self.formatExternalBody(status: newStatus,
+                                                   workspaceName: workspaceName,
+                                                   branch: branch,
+                                                   lastMessage: lastMessage,
+                                                   lastAssistantMessage: lastAssistantMessage),
+                           terminalID)
 
         var userInfo: [String: Any] = ["worktreePath": worktreePath]
         if let historyPaneIndex { userInfo["paneIndex"] = historyPaneIndex }

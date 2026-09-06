@@ -53,7 +53,7 @@ struct OutboundMessage {
 // MARK: - ExternalChannel Protocol
 
 enum ExternalChannelType: String {
-    case imessage
+    case telegram
 }
 
 protocol ExternalChannel: AnyObject {

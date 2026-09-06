@@ -24,8 +24,6 @@
 	<string>$(GMAIL_OAUTH_CLIENT_SECRET)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Seahelm sends agent updates and replies to your iMessage conversations through Messages.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUPublicEDKey</key>

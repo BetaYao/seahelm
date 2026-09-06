@@ -1638,9 +1638,44 @@ class TabCoordinator {
 
     // MARK: - Status Update Forwarding
 
+    /// Worktrees whose status changed since the last repaint, and whether a
+    /// repaint is already queued for the next turn of the runloop.
+    ///
+    /// Status edges arrive one pane at a time, and each one used to drive a full
+    /// dashboard rebuild *plus* a title-bar refresh — every row's labels
+    /// reassigned, every row's git summary re-attributed, synchronously on main.
+    /// With a dozen panes polling every 2s that pinned the main thread at 100%,
+    /// which is what made a Telegram command take 40s to answer: `handleInbound`
+    /// hops to main and could not get a turn.
+    ///
+    /// The edges are already de-duplicated upstream — `AgentRegistry` drops
+    /// unchanged scans, `WorktreeStatusAggregator` drops unchanged rollups — so
+    /// the fix is not more filtering but batching: note which worktrees changed
+    /// and repaint once.
+    private var pendingStatusWorktrees: Set<String> = []
+    private var statusRepaintScheduled = false
+
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updatePanes(buildWorktreeRowInfos(changedWorktreePath: status.worktreePath),
-                                   changedWorktreePath: status.worktreePath)
+        pendingStatusWorktrees.insert(status.worktreePath)
+        guard !statusRepaintScheduled else { return }
+        statusRepaintScheduled = true
+        // Hopping through main rather than repainting inline is the whole point:
+        // the sibling edges of this same poll are already queued behind us, so
+        // they land in `pendingStatusWorktrees` before this runs.
+        DispatchQueue.main.async { [weak self] in self?.flushStatusRepaint() }
+    }
+
+    /// Repaint for everything that changed since the last turn. A batch naming
+    /// exactly one worktree passes it down; a wider batch passes nil, which both
+    /// `buildWorktreeRowInfos` and the overview read as "refresh everything".
+    private func flushStatusRepaint() {
+        statusRepaintScheduled = false
+        let changed = pendingStatusWorktrees
+        pendingStatusWorktrees.removeAll()
+        guard !changed.isEmpty else { return }
+        let single = changed.count == 1 ? changed.first : nil
+        dashboardVC?.updatePanes(buildWorktreeRowInfos(changedWorktreePath: single),
+                                 changedWorktreePath: single)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 

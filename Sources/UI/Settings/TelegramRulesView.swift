@@ -8,11 +8,11 @@ import AppKit
 /// goes.
 ///
 /// Edits write straight back through `onChange`; there is no Save here either.
-final class IMessageRulesView: NSView {
+final class TelegramRulesView: NSView {
     /// Fired whenever the rule set changes. The owner persists.
-    var onChange: (([IMessageRule]) -> Void)?
+    var onChange: (([TelegramRule]) -> Void)?
 
-    private(set) var rules: [IMessageRule]
+    private(set) var rules: [TelegramRule]
 
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
@@ -62,7 +62,7 @@ final class IMessageRulesView: NSView {
         return rules.indices.contains(row) ? row : nil
     }
 
-    init(rules: [IMessageRule]) {
+    init(rules: [TelegramRule]) {
         self.rules = rules
         super.init(frame: .zero)
         build()
@@ -81,7 +81,7 @@ final class IMessageRulesView: NSView {
         tableView.backgroundColor = .clear
         tableView.delegate = self
         tableView.dataSource = self
-        tableView.setAccessibilityIdentifier("settings.imessage.rules")
+        tableView.setAccessibilityIdentifier("settings.telegram.rules")
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("rule"))
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
@@ -92,7 +92,7 @@ final class IMessageRulesView: NSView {
         scrollView.documentView = tableView
 
         let addButton = SettingsControls.button("+", target: self, action: #selector(addRule))
-        addButton.setAccessibilityIdentifier("settings.imessage.addRule")
+        addButton.setAccessibilityIdentifier("settings.telegram.addRule")
         removeButton.title = "−"
         removeButton.bezelStyle = .rounded
         removeButton.font = .systemFont(ofSize: 12)
@@ -118,7 +118,7 @@ final class IMessageRulesView: NSView {
             field.target = self
             field.action = #selector(formChanged)
         }
-        nameField.setAccessibilityIdentifier("settings.imessage.ruleName")
+        nameField.setAccessibilityIdentifier("settings.telegram.ruleName")
 
         promptView.isEditable = true
         promptView.font = AppFont.mono(size: 11, weight: .regular)
@@ -138,7 +138,7 @@ final class IMessageRulesView: NSView {
                             (panePopup, "Pane")] {
             popup.target = self
             popup.action = #selector(targetChanged(_:))
-            popup.setAccessibilityIdentifier("settings.imessage.ruleTarget\(id)")
+            popup.setAccessibilityIdentifier("settings.telegram.ruleTarget\(id)")
             // Three popups share one line, so each must be willing to shrink and
             // truncate rather than push its neighbours off the card.
             (popup.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingTail
@@ -270,9 +270,9 @@ final class IMessageRulesView: NSView {
     /// A saved target whose pane is gone is kept as its own item rather than
     /// silently reset — a worktree you closed for the day should not quietly
     /// re-point a rule at some other project's pane.
-    private func rebuildTargetPopups(for target: IMessageRuleTarget) {
+    private func rebuildTargetPopups(for target: TelegramRuleTarget) {
         let stored = target.value.trimmingCharacters(in: .whitespaces)
-        let storedPane = IMessageRuleEngine.resolvePane(target, panes: panes)
+        let storedPane = TelegramRuleEngine.resolvePane(target, panes: panes)
 
         var projects = Array(Set(panes.map(\.project))).sorted()
         let selectedProject: String
@@ -357,7 +357,7 @@ final class IMessageRulesView: NSView {
 
     /// How a target reads in the rule list — the same branch/title names the
     /// popups use, so the list and the form agree.
-    private func label(for target: IMessageRuleTarget) -> String {
+    private func label(for target: TelegramRuleTarget) -> String {
         switch target.kind {
         case .project:
             return target.value
@@ -390,15 +390,15 @@ final class IMessageRulesView: NSView {
         // win, and the change would appear to snap back — most visibly when the
         // rule points at a pane that is no longer running, so its key sits in
         // the pane popup while the worktree above reads "Any worktree".
-        let target: IMessageRuleTarget
+        let target: TelegramRuleTarget
         switch sender {
         case projectPopup:
-            target = IMessageRuleTarget(kind: .project, value: selectedValue(projectPopup))
+            target = TelegramRuleTarget(kind: .project, value: selectedValue(projectPopup))
         case worktreePopup:
             if let worktree = resolvedWorktreePath() {
-                target = IMessageRuleTarget(kind: .worktree, value: worktree)
+                target = TelegramRuleTarget(kind: .worktree, value: worktree)
             } else {
-                target = IMessageRuleTarget(kind: .project, value: selectedValue(projectPopup))
+                target = TelegramRuleTarget(kind: .project, value: selectedValue(projectPopup))
             }
         default:
             target = currentTarget()
@@ -414,21 +414,21 @@ final class IMessageRulesView: NSView {
 
     /// Deepest concrete choice wins: a named pane beats its worktree, which
     /// beats its project.
-    private func currentTarget() -> IMessageRuleTarget {
+    private func currentTarget() -> TelegramRuleTarget {
         let paneKey = selectedValue(panePopup)
         if !paneKey.isEmpty {
-            return IMessageRuleTarget(kind: .pane, value: paneKey)
+            return TelegramRuleTarget(kind: .pane, value: paneKey)
         }
         if let worktree = resolvedWorktreePath() {
-            return IMessageRuleTarget(kind: .worktree, value: worktree)
+            return TelegramRuleTarget(kind: .worktree, value: worktree)
         }
-        return IMessageRuleTarget(kind: .project, value: selectedValue(projectPopup))
+        return TelegramRuleTarget(kind: .project, value: selectedValue(projectPopup))
     }
 
-    private func commit(target: IMessageRuleTarget) {
+    private func commit(target: TelegramRuleTarget) {
         guard let index = selectedIndex else { return }
 
-        rules[index] = IMessageRule(
+        rules[index] = TelegramRule(
             name: nameField.stringValue,
             enabled: enabledToggle.state == .on,
             from: nonEmpty(fromField.stringValue),
@@ -449,7 +449,7 @@ final class IMessageRulesView: NSView {
     // MARK: - List actions
 
     @objc private func addRule() {
-        rules.append(IMessageRule(name: "New rule", enabled: true, prompt: "{{text}}"))
+        rules.append(TelegramRule(name: "New rule", enabled: true, prompt: "{{text}}"))
         tableView.reloadData()
         tableView.selectRowIndexes(IndexSet(integer: rules.count - 1), byExtendingSelection: false)
         renderForm()
@@ -467,7 +467,7 @@ final class IMessageRulesView: NSView {
 
 // MARK: - Table
 
-extension IMessageRulesView: NSTableViewDataSource, NSTableViewDelegate {
+extension TelegramRulesView: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int { rules.count }
 
     func tableView(_ tableView: NSTableView,
@@ -494,7 +494,7 @@ extension IMessageRulesView: NSTableViewDataSource, NSTableViewDelegate {
 
 // MARK: - Prompt editing
 
-extension IMessageRulesView: NSTextViewDelegate {
+extension TelegramRulesView: NSTextViewDelegate {
     func textDidEndEditing(_ notification: Notification) {
         guard notification.object as? NSTextView === promptView else { return }
         formChanged()

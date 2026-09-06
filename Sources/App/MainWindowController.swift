@@ -481,9 +481,9 @@ class MainWindowController: NSWindowController, MailCommandContext {
     /// Goes through `sendText(enter: true)` — the same write channel the control
     /// socket uses — so a triggered prompt is indistinguishable from one typed
     /// by hand, and lands whatever agent already owns that pane.
-    private func dispatchRuleTrigger(prompt: String, target: IMessageRuleTarget) -> Bool {
+    private func dispatchRuleTrigger(prompt: String, target: TelegramRuleTarget) -> Bool {
         guard let dataSource = tabCoordinator.mqttDataSource else { return false }
-        guard let pane = IMessageRuleEngine.resolvePane(target,
+        guard let pane = TelegramRuleEngine.resolvePane(target,
                                                         panes: dataSource.snapshotPanes())
         else { return false }
         return dataSource.sendText(paneId: pane.paneId, text: prompt, enter: true)
@@ -2916,7 +2916,7 @@ extension MainWindowController: SettingsDelegate {
 
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
-        let oldIMessage = self.config.imessage
+        let oldTelegram = self.config.telegram
         let oldGmail = self.config.gmailMail
         let oldGateway = self.config.hostGateway ?? HostGatewayConfig()
         // Preserve split layouts — SettingsVC doesn't track them
@@ -2952,23 +2952,25 @@ extension MainWindowController: SettingsDelegate {
             startGmailMailChannel(config: config.gmailMail)
         }
 
-        // Hot-reload the iMessage bridge on config change.
-        if oldIMessage != config.imessage {
-            AgentRegistry.shared.unregisterChannel(imessageChannel?.channelId ?? "imessage")
-            imessageChannel = nil
+        // Hot-reload the Telegram bridge on config change.
+        if oldTelegram != config.telegram {
+            AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
+            telegramChannel = nil
+            // A fresh save deserves a fresh alert, even for the same mistake.
+            lastTelegramError = nil
 
-            if let imessageConfig = config.imessage, imessageConfig.resolvedAutoConnect {
-                let channel = IMessageChannel(config: imessageConfig)
+            if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
+                let channel = TelegramChannel(config: telegramConfig)
                 channel.onStateChange = { [weak self] state in
-                    // Both halves of the bridge depend on permissions only the
-                    // user can grant, so a failure has to be said out loud —
-                    // otherwise the channel is just silently dead.
-                    if case .error(let msg) = state { self?.presentIMessageError(msg) }
+                    // A rejected token or a bot polled elsewhere is something
+                    // only the user can fix, so a failure has to be said out
+                    // loud — otherwise the channel is just silently dead.
+                    if case .error(let msg) = state { self?.presentTelegramError(msg) }
                 }
                 AgentRegistry.shared.registerChannel(channel)
                 channel.connect()
-                imessageChannel = channel
-                NSLog("[Settings] iMessage bridge reconnecting")
+                telegramChannel = channel
+                NSLog("[Settings] Telegram bridge reconnecting")
             }
         }
     }

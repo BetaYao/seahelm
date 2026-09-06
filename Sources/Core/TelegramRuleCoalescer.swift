@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Window is fixed from the *first* hit: later hits in the same bucket append
 /// without sliding the deadline, so a noisy source can't delay forever.
-final class IMessageRuleCoalescer {
-    typealias Fire = (_ prompt: String, _ target: IMessageRuleTarget) -> Void
+final class TelegramRuleCoalescer {
+    typealias Fire = (_ prompt: String, _ target: TelegramRuleTarget) -> Void
     typealias Scheduler = (_ delay: TimeInterval, _ work: @escaping () -> Void) -> Void
 
     let window: TimeInterval
@@ -16,7 +16,7 @@ final class IMessageRuleCoalescer {
     private var buckets: [String: Bucket] = [:]
 
     private struct Bucket {
-        var target: IMessageRuleTarget
+        var target: TelegramRuleTarget
         var prompts: [String]
         var armed: Bool
     }
@@ -32,7 +32,7 @@ final class IMessageRuleCoalescer {
     /// timer; further hits only append. `onFire` runs once with the combined
     /// prompt when the window elapses.
     func enqueue(prompt: String,
-                 target: IMessageRuleTarget,
+                 target: TelegramRuleTarget,
                  ruleName: String,
                  onFire: @escaping Fire) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,11 +51,11 @@ final class IMessageRuleCoalescer {
         lock.unlock()
 
         guard shouldArm else {
-            NSLog("[iMessage] Rule '\(ruleName)' coalesced into pending pane \(key) (\(bufferedCount) buffered)")
+            NSLog("[Telegram] Rule '\(ruleName)' coalesced into pending pane \(key) (\(bufferedCount) buffered)")
             return
         }
 
-        NSLog("[iMessage] Rule '\(ruleName)' armed \(Int(window))s coalesce for pane \(key)")
+        NSLog("[Telegram] Rule '\(ruleName)' armed \(Int(window))s coalesce for pane \(key)")
         schedule(window) { [weak self] in
             self?.flush(key: key, onFire: onFire)
         }
@@ -76,7 +76,7 @@ final class IMessageRuleCoalescer {
         return lines.joined(separator: "\n\n")
     }
 
-    static func key(for target: IMessageRuleTarget) -> String {
+    static func key(for target: TelegramRuleTarget) -> String {
         let value = target.value.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(target.kind.rawValue):\(value)"
     }

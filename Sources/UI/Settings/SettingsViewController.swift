@@ -66,9 +66,9 @@ class SettingsViewController: NSViewController {
                          "copy", "select", "clipboard", "ghostty"]),
         .init(id: "agents", title: "Agents", symbol: "bolt.horizontal",
               keywords: ["detection", "rules", "status", "claude", "codex", "json"]),
-        .init(id: "imessage", title: "iMessage", symbol: "message",
-              keywords: ["messages", "sms", "phone", "prefix", "sea", "helm",
-                         "full disk access", "permission", "bridge"]),
+        .init(id: "telegram", title: "Telegram", symbol: "paperplane",
+              keywords: ["bot", "botfather", "token", "phone", "chat", "remote",
+                         "bridge", "rules", "trigger"]),
         .init(id: "gmail", title: "Gmail", symbol: "envelope",
               keywords: ["email", "mail", "oauth", "google", "alias"]),
         .init(id: "pairing", title: "Pairing", symbol: "qrcode",
@@ -105,16 +105,15 @@ class SettingsViewController: NSViewController {
     private let ruleTextView = NSTextView()
     private let ruleScrollView = NSScrollView()
 
-    // iMessage tab controls
-    private let imessageHandlesView = NSTextView()
-    private let imessageHandlesScrollView = NSScrollView()
-    private let imessageDefaultRecipientField = SettingsTextField()
-    private let imessageCommandPrefixField = SettingsTextField()
-    private let imessageReplyPrefixField = SettingsTextField()
-    private lazy var imessageAutoConnectToggle = SettingsControls.toggle(
-        on: config.imessage?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
-    private let imessagePermissionLabel = NSTextField(labelWithString: "")
-    private lazy var imessageRulesView = IMessageRulesView(rules: config.imessage?.resolvedRules ?? [])
+    // Telegram tab controls
+    private let telegramTokenField = SettingsTextField()
+    private let telegramUsersView = NSTextView()
+    private let telegramUsersScrollView = NSScrollView()
+    private let telegramDefaultChatField = SettingsTextField()
+    private lazy var telegramAutoConnectToggle = SettingsControls.toggle(
+        on: config.telegram?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
+    private let telegramStatusLabel = NSTextField(labelWithString: "")
+    private lazy var telegramRulesView = TelegramRulesView(rules: config.telegram?.resolvedRules ?? [])
     private let gmailAccountField = SettingsTextField()
     private let gmailAliasLabel = NSTextField(labelWithString: "")
     private let gmailAllowedSendersField = SettingsTextField()
@@ -216,7 +215,7 @@ class SettingsViewController: NSViewController {
     private func buildPage(_ id: String) -> NSView {
         switch id {
         case "agents":   return makePage(buildAgentGroups())
-        case "imessage": return makePage(buildIMessageGroups())
+        case "telegram": return makePage(buildTelegramGroups())
         case "gmail":    return makePage(buildGmailGroups())
         case "pairing":  return makePage(buildPairingGroups())
         case "sessions": return makePage(buildSessionGroups())
@@ -405,92 +404,81 @@ class SettingsViewController: NSViewController {
         ]
     }
 
-    // MARK: - iMessage
+    // MARK: - Telegram
 
-    private func buildIMessageGroups() -> [NSView] {
-        let cfg = config.imessage
+    private func buildTelegramGroups() -> [NSView] {
+        let cfg = config.telegram
 
-        imessageHandlesView.font = AppFont.mono(size: 12, weight: .regular)
-        imessageHandlesView.isRichText = false
-        imessageHandlesView.isAutomaticQuoteSubstitutionEnabled = false
-        imessageHandlesView.string = (cfg?.allowedHandles ?? []).joined(separator: "\n")
-        imessageHandlesView.setAccessibilityIdentifier("settings.imessage.handles")
-        imessageHandlesView.drawsBackground = false
-        imessageHandlesView.textColor = SettingsPalette.text
-        imessageHandlesView.textContainerInset = NSSize(width: 6, height: 6)
-        imessageHandlesView.delegate = self
-        imessageHandlesScrollView.hasVerticalScroller = true
-        imessageHandlesScrollView.borderType = .noBorder
-        imessageHandlesScrollView.drawsBackground = false
-        imessageHandlesScrollView.documentView = imessageHandlesView
-        imessageHandlesScrollView.translatesAutoresizingMaskIntoConstraints = false
+        telegramTokenField.placeholderString = "123456789:AAF\u{2026}"
+        telegramTokenField.font = AppFont.mono(size: 12, weight: .regular)
+        telegramTokenField.stringValue = cfg?.botToken ?? ""
+        telegramTokenField.setAccessibilityIdentifier("settings.telegram.token")
+        telegramTokenField.target = self
+        telegramTokenField.action = #selector(controlChanged)
 
-        imessageDefaultRecipientField.placeholderString = "First allowed sender"
-        imessageDefaultRecipientField.font = AppFont.mono(size: 12, weight: .regular)
-        imessageDefaultRecipientField.stringValue = cfg?.defaultRecipient ?? ""
-        imessageDefaultRecipientField.setAccessibilityIdentifier("settings.imessage.recipient")
-        imessageDefaultRecipientField.target = self
-        imessageDefaultRecipientField.action = #selector(controlChanged)
+        telegramUsersView.font = AppFont.mono(size: 12, weight: .regular)
+        telegramUsersView.isRichText = false
+        telegramUsersView.isAutomaticQuoteSubstitutionEnabled = false
+        telegramUsersView.string = (cfg?.allowedUsers ?? []).joined(separator: "\n")
+        telegramUsersView.setAccessibilityIdentifier("settings.telegram.users")
+        telegramUsersView.drawsBackground = false
+        telegramUsersView.textColor = SettingsPalette.text
+        telegramUsersView.textContainerInset = NSSize(width: 6, height: 6)
+        telegramUsersView.delegate = self
+        telegramUsersScrollView.hasVerticalScroller = true
+        telegramUsersScrollView.borderType = .noBorder
+        telegramUsersScrollView.drawsBackground = false
+        telegramUsersScrollView.documentView = telegramUsersView
+        telegramUsersScrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        imessageCommandPrefixField.placeholderString = "sea"
-        imessageCommandPrefixField.font = AppFont.mono(size: 12, weight: .regular)
-        imessageCommandPrefixField.stringValue = cfg?.commandPrefix ?? ""
-        imessageCommandPrefixField.setAccessibilityIdentifier("settings.imessage.commandPrefix")
-        imessageCommandPrefixField.target = self
-        imessageCommandPrefixField.action = #selector(controlChanged)
+        telegramDefaultChatField.placeholderString = "First allowed user id"
+        telegramDefaultChatField.font = AppFont.mono(size: 12, weight: .regular)
+        telegramDefaultChatField.stringValue = cfg?.defaultChatId ?? ""
+        telegramDefaultChatField.setAccessibilityIdentifier("settings.telegram.chat")
+        telegramDefaultChatField.target = self
+        telegramDefaultChatField.action = #selector(controlChanged)
 
-        imessageReplyPrefixField.placeholderString = "helm"
-        imessageReplyPrefixField.font = AppFont.mono(size: 12, weight: .regular)
-        imessageReplyPrefixField.stringValue = cfg?.replyPrefix ?? ""
-        imessageReplyPrefixField.setAccessibilityIdentifier("settings.imessage.replyPrefix")
-        imessageReplyPrefixField.target = self
-        imessageReplyPrefixField.action = #selector(controlChanged)
+        telegramAutoConnectToggle.setAccessibilityIdentifier("settings.telegram.autoConnect")
 
-        imessageAutoConnectToggle.setAccessibilityIdentifier("settings.imessage.autoConnect")
+        telegramStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        telegramStatusLabel.preferredMaxLayoutWidth = 460
+        telegramStatusLabel.lineBreakMode = .byWordWrapping
+        telegramStatusLabel.maximumNumberOfLines = 3
+        telegramStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        telegramStatusLabel.textColor = Theme.textSecondary
+        telegramStatusLabel.stringValue = cfg?.resolvedBotToken == nil
+            ? "Paste a bot token to get started."
+            : "Token saved. Test to confirm Telegram accepts it."
 
-        imessagePermissionLabel.font = NSFont.systemFont(ofSize: 11)
-        imessagePermissionLabel.preferredMaxLayoutWidth = 460
-        imessagePermissionLabel.lineBreakMode = .byWordWrapping
-        imessagePermissionLabel.maximumNumberOfLines = 3
-        imessagePermissionLabel.translatesAutoresizingMaskIntoConstraints = false
+        let testButton = SettingsControls.button("Test connection", target: self,
+                                                 action: #selector(testTelegramClicked))
+        let statusStack = NSStackView(views: [telegramStatusLabel, testButton])
+        statusStack.orientation = .vertical
+        statusStack.alignment = .leading
+        statusStack.spacing = 6
 
-        let permissionButton = SettingsControls.button("Open Full Disk Access", target: self,
-                                                       action: #selector(openFullDiskAccessClicked))
-
-        let permissionStack = NSStackView(views: [imessagePermissionLabel, permissionButton])
-        permissionStack.orientation = .vertical
-        permissionStack.alignment = .leading
-        permissionStack.spacing = 6
-
-        refreshIMessagePermissionUI()
-
-        imessageRulesView.panes = settingsDelegate?.settingsPaneTargets(self) ?? []
-        imessageRulesView.onChange = { [weak self] _ in self?.applyChanges() }
+        telegramRulesView.panes = settingsDelegate?.settingsPaneTargets(self) ?? []
+        telegramRulesView.onChange = { [weak self] _ in self?.applyChanges() }
 
         return [
-            SettingsGroupView(title: "Bridge", rows: [
-                SettingsRow.stacked("Allowed senders",
-                                    subtitle: "One per line: phone numbers (+8613800138000) or Apple IDs. Gates who may command you, and \u{2014} for commands you text yourself \u{2014} which thread counts. Empty ignores everyone.",
-                                    content: SettingsControls.surface(imessageHandlesScrollView),
+            SettingsGroupView(title: "Bot", rows: [
+                SettingsRow.make("Bot token",
+                                 subtitle: "Create a bot with @BotFather and paste its token here. Kept in config.json.",
+                                 control: telegramTokenField),
+                SettingsRow.stacked("Allowed users",
+                                    subtitle: "One per line: numeric user IDs (ask @userinfobot for yours) or @usernames. Only these may command the fleet; anyone else who messages the bot is ignored \u{2014} or matched against the triggers below. Empty ignores everyone.",
+                                    content: SettingsControls.surface(telegramUsersScrollView),
                                     height: 90),
                 SettingsRow.make("Notify",
-                                 subtitle: "Where agent-finished notifications are sent.",
-                                 control: imessageDefaultRecipientField),
-                SettingsRow.make("Connect at launch", control: imessageAutoConnectToggle),
-            ]),
-            SettingsGroupView(title: "Prefixes", rows: [
-                SettingsRow.make("Command", control: imessageCommandPrefixField),
-                SettingsRow.make("Reply",
-                                 subtitle: "You text \"sea status\"; seahelm answers \"helm \u{2026}\". Lines without the command prefix are left alone, so the thread stays usable for notes \u{2014} and the reply prefix is how seahelm knows not to obey itself.",
-                                 control: imessageReplyPrefixField),
+                                 subtitle: "Chat id where agent-finished notifications go. Empty means the first numeric allowed user, or failing that the chat your last command came from.",
+                                 control: telegramDefaultChatField),
+                SettingsRow.make("Connect at launch", control: telegramAutoConnectToggle),
+                SettingsRow.stacked(nil, content: statusStack),
             ]),
             SettingsGroupView(title: "Triggers", rows: [
                 SettingsRow.stacked(nil,
-                                    subtitle: "Messages that are not commands \u{2014} alerts, texts from other people \u{2014} can put an agent to work. The first matching rule wins; nothing is replied to, and no pane or worktree is ever created.",
-                                    content: imessageRulesView),
-            ]),
-            SettingsGroupView(title: "Permissions", rows: [
-                SettingsRow.stacked("Messages database", content: permissionStack),
+                                    subtitle: "Messages from anyone not on the allowed list \u{2014} a monitoring channel the bot sits in, a colleague in a group \u{2014} can put an agent to work. The first matching rule wins; nothing is replied to, and no pane or worktree is ever created.",
+                                    content: telegramRulesView),
             ]),
         ]
     }
@@ -676,25 +664,35 @@ class SettingsViewController: NSViewController {
         }
     }
 
-    /// Reading chat.db is the half that fails silently, so check it up front and
-    /// say so here rather than letting the bridge look connected but deaf.
-    private func refreshIMessagePermissionUI() {
-        switch IMessageChatDB().probe() {
-        case .ok:
-            imessagePermissionLabel.stringValue = "Messages database readable. Sending will ask for permission to control Messages the first time."
-            imessagePermissionLabel.textColor = Theme.textSecondary
-        case .missing:
-            imessagePermissionLabel.stringValue = "No Messages database found — sign in to iMessage in Messages.app first."
-            imessagePermissionLabel.textColor = .systemOrange
-        case .denied:
-            imessagePermissionLabel.stringValue = "Seahelm cannot read Messages. Grant Full Disk Access, then reopen Settings."
-            imessagePermissionLabel.textColor = .systemRed
+    /// `getMe` is the cheapest call that proves a token: it needs no chat, and
+    /// nobody has to have messaged the bot yet.
+    @objc private func testTelegramClicked() {
+        let token = telegramTokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            telegramStatusLabel.stringValue = "Enter a bot token first."
+            telegramStatusLabel.textColor = .systemOrange
+            return
         }
-    }
+        telegramStatusLabel.stringValue = "Contacting Telegram\u{2026}"
+        telegramStatusLabel.textColor = Theme.textSecondary
 
-    @objc private func openFullDiskAccessClicked() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
-        NSWorkspace.shared.open(url)
+        let api = TelegramBotAPI(token: token)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let outcome = Result { try api.getMe() }
+            api.invalidate()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch outcome {
+                case .success(let me):
+                    let name = me.username.map { "@\($0)" } ?? me.firstName ?? String(me.id)
+                    self.telegramStatusLabel.stringValue = "Connected as \(name). Message it from an allowed account to start."
+                    self.telegramStatusLabel.textColor = Theme.textSecondary
+                case .failure(let error):
+                    self.telegramStatusLabel.stringValue = error.localizedDescription
+                    self.telegramStatusLabel.textColor = .systemRed
+                }
+            }
+        }
     }
 
     // MARK: - Actions
@@ -773,37 +771,33 @@ class SettingsViewController: NSViewController {
             config.agentDetect = agentConfig
         }
 
-        // iMessage config
-        let handles = imessageHandlesView.string
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        let recipient = imessageDefaultRecipientField.stringValue.trimmingCharacters(in: .whitespaces)
-        let commandPrefix = imessageCommandPrefixField.stringValue.trimmingCharacters(in: .whitespaces)
-        let replyPrefix = imessageReplyPrefixField.stringValue.trimmingCharacters(in: .whitespaces)
-        // Keep the row even with no handles: the user may be turning the bridge
-        // off by clearing the list, and dropping to nil would silently re-enable
-        // the default-on autoConnect next launch.
-        if handles.isEmpty && recipient.isEmpty && config.imessage == nil {
-            config.imessage = nil
-        } else {
-            config.imessage = IMessageConfig(
-                allowedHandles: handles,
-                defaultRecipient: recipient.isEmpty ? nil : recipient,
-                autoConnect: imessageAutoConnectToggle.state == .on,
-                // Carried through rather than re-read: no field in this tab, so
-                // rebuilding the struct would erase it.
-                backfillSeconds: config.imessage?.backfillSeconds,
-                // Blank means "use the default", which is what the placeholder
-                // already shows — storing "" would resolve to the default anyway
-                // but would read as a deliberate empty prefix in the JSON.
-                commandPrefix: commandPrefix.isEmpty ? nil : commandPrefix,
-                replyPrefix: replyPrefix.isEmpty ? nil : replyPrefix,
-                // `pages` is lazy, so an untouched iMessage page must not wipe
-                // rules the config already carries.
-                rules: pages["imessage"] == nil ? config.imessage?.rules
-                                                : imessageRulesView.rules
-            )
+        // Telegram config — only once the page has been built. `pages` is
+        // lazy, and reading never-populated fields would wipe the token and
+        // the allowlist on a save from any other tab.
+        if pages["telegram"] != nil {
+            let token = telegramTokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let users = telegramUsersView.string
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            let chat = telegramDefaultChatField.stringValue.trimmingCharacters(in: .whitespaces)
+            // Keep the row even when everything is cleared: the user may be
+            // turning the bridge off, and dropping to nil would silently
+            // re-enable the default-on autoConnect next launch.
+            if token.isEmpty && users.isEmpty && chat.isEmpty && config.telegram == nil {
+                config.telegram = nil
+            } else {
+                config.telegram = TelegramConfig(
+                    botToken: token.isEmpty ? nil : token,
+                    allowedUsers: users,
+                    defaultChatId: chat.isEmpty ? nil : chat,
+                    autoConnect: telegramAutoConnectToggle.state == .on,
+                    // Carried through rather than re-read: no field in this
+                    // tab, so rebuilding the struct would erase it.
+                    backfillSeconds: config.telegram?.backfillSeconds,
+                    rules: telegramRulesView.rules
+                )
+            }
         }
 
         if pages["gmail"] != nil {
@@ -861,7 +855,7 @@ extension SettingsViewController: NSTextViewDelegate {
     /// leaves, not per keystroke: half-typed JSON is not a config, and
     /// re-encoding on every character would fight the caret.
     func textDidEndEditing(_ notification: Notification) {
-        guard notification.object as? NSTextView === imessageHandlesView
+        guard notification.object as? NSTextView === telegramUsersView
                 || notification.object as? NSTextView === ruleTextView else { return }
         applyChanges()
     }

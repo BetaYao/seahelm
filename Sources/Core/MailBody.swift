@@ -1,7 +1,7 @@
 import Foundation
 
 /// The two things that are genuinely mail's own, as opposed to the command
-/// grammar it shares with the Helm line and iMessage: getting the new text out
+/// grammar it shares with the Helm line and Telegram: getting the new text out
 /// of a reply, and stamping the command list onto everything we send.
 enum MailBody {
     /// Strips the quoted history a mail client stacks below a reply.
