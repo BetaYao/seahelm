@@ -37,6 +37,22 @@ cooldown so a `cd x && ...` tool call doesn't walk the pane back and forth.
 Beyond that: native rendering on the Ghostty engine rather than Electron, sessions
 that survive a reboot via zmx, and status detection for 12 agents out of the box.
 
+## How It Was Built
+
+Seahelm is vibe-coded. Nearly every line was written by coding agents — Claude Code and
+Codex — directed at the level of what should happen, not reviewed diff by diff. It was
+also built inside itself: the worktrees, split panes and status detection described below
+were written by agents running in Seahelm's own worktrees, split panes and status
+detection.
+
+Worth knowing before you install it:
+
+- The code is public and MIT so you can read it instead of taking its word for anything.
+- Roughly 1,900 unit tests cover the behaviour that could be specified up front. The paths
+  that could not are where the bugs are.
+- A bug report with a reproduction is the single most useful thing you can send. It is
+  what turns a rough edge into a fix.
+
 ## Install
 
 ```bash
