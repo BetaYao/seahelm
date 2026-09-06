@@ -12,9 +12,25 @@
 
 ## 为什么选择 Seahelm
 
-- **简洁** — 没有复杂的代码编辑和 diff review,一切都交给 agent,界面不挡路。
-- **高性能** — macOS 原生,基于 Ghostty 终端和 AppKit 渲染,低延迟、响应快。
-- **兼容性** — 兼容多达 12 种 coding agent,不绑死在单一平台。
+macOS 上并行跑 coding agent 的工具已经不止一个。相同的部分 Seahelm 并不回避：Swift、
+libghostty、每个 agent 一个 git worktree、用 hook 上报状态。真正属于自己的有三点。
+
+**它活在终端之外。** 多路复用器把状态放在你正想别再盯着的那个窗口里。Seahelm 的 Island
+停在屏幕边缘，只有 worktree 需要你时才出声；被卡住的 agent 会触发真正的系统通知；你还能
+用 iMessage 从手机上回复它。Claude 和 Codex 的 token 与额度消耗也在 App 里汇总，所以你
+能提前看到某个 agent 快把预算跑光，而不是等它停下来才知道。
+
+**围绕决策设计，而不是围绕展示。** Seahelm 会拦截 Stop hook，逼 agent 在停下之前交出
+下一步的选项，这些选项以可点击的卡片送到你面前。First Mate 监听状态变化，要么自动处理，
+要么排进待批准队列。显示「正在等你」是容易的那一半，难的是接下来该做什么。
+
+**pane 跟着它的 agent 走。** 当一个 agent 创建了新的 worktree 并开始在里面工作，这个
+pane 会迁移到新 worktree 的卡片上，而不是在旁边多出一个空终端。依据是每个 hook 负载都
+携带的 cwd，配合同仓库判定和冷却时间，这样 agent 执行 `cd x && ...` 这类单次调用不会
+把 pane 来回拖动。
+
+除此之外：基于 Ghostty 引擎的原生渲染而非 Electron、通过 zmx 让会话在重启后依然存活、
+开箱支持 12 种 agent 的状态识别。
 
 ## 安装
 
