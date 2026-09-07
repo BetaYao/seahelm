@@ -77,6 +77,9 @@ class MainWindowController: NSWindowController {
     /// Nil when the bridge is unconfigured or was started by AppDelegate and
     /// never reconfigured — `unregisterChannel("telegram")` covers that case.
     private var telegramChannel: TelegramChannel?
+    /// Fleet row lit while a context-menu `/return` is assessing. Cleared when
+    /// a sheet appears, the command fails, or the tear-down finishes.
+    private var pendingReturnPath: String?
     /// One executor for every surface: the Helm line, Telegram and mail all
     /// run their lines through it, so a command means one thing everywhere.
     private lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
@@ -1982,7 +1985,17 @@ extension MainWindowController: DashboardDelegate {
             NSSound.beep()
             return
         }
-        submitBridgeCommand("/return \(index.label(for: wt))")
+        pendingReturnPath = wt.path
+        dashboardVC?.setWorktreePending(path: wt.path, pending: true)
+        submitBridgeCommand("/return \(index.label(for: wt))") { [weak self] outcome in
+            if case .failed = outcome { self?.clearPendingReturn() }
+        }
+    }
+
+    private func clearPendingReturn() {
+        guard let path = pendingReturnPath else { return }
+        pendingReturnPath = nil
+        dashboardVC?.setWorktreePending(path: path, pending: false)
     }
 
     func dashboardDidRequestAddProject() {
@@ -2820,8 +2833,15 @@ extension MainWindowController: CommandHost {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if outcome.deletesWorktree {
+                    // Row pending through the tear-down; clears when git finishes.
+                    self.pendingReturnPath = nil
                     self.terminalCoordinator.deleteWorktreeWithoutConfirm(
-                        path: path, branch: branch, deleteBranch: outcome.deletesBranch, force: true)
+                        path: path, branch: branch, deleteBranch: outcome.deletesBranch, force: true
+                    ) { [weak self] pending in
+                        self?.dashboardVC?.setWorktreePending(path: path, pending: pending)
+                    }
+                } else {
+                    self.clearPendingReturn()
                 }
                 completion(outcome)
             }
@@ -2901,6 +2921,8 @@ extension MainWindowController: CommandHost {
 
     /// The desktop's `/yes`: one sheet, same wording as the chat question.
     func confirm(_ summary: String, completion: @escaping (Bool) -> Void) {
+        // A confirmation sheet replaces the row spinner as feedback.
+        clearPendingReturn()
         guard let window else {
             completion(false)
             return

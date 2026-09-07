@@ -1632,7 +1632,10 @@ class TabCoordinator {
             NSSound.beep()
             return
         }
-        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)
+        let worktreePath = item.info.path
+        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window) { [weak self] pending in
+            self?.dashboardVC?.setWorktreePending(path: worktreePath, pending: pending)
+        }
     }
 
     // MARK: - New Branch Integration
