@@ -43,6 +43,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Replace the editable config when the window is reused (⌘, again).
+    func reload(config: Config) {
+        settingsViewController.reload(config: config)
+    }
+
     /// A field still being edited has not fired its action yet, and closing the
     /// window would drop it. Commit first.
     func windowWillClose(_ notification: Notification) {

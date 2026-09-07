@@ -33,6 +33,13 @@ final class TelegramChannel: ExternalChannel {
 
     /// So `/status@seahelm_bot` in a group parses as `/status`.
     private(set) var botUsername: String?
+    /// Armed while the setup wizard is waiting for someone to tap Start.
+    /// Consulted *before* the allowlist, which is the whole point: the person
+    /// pairing is by definition not on it yet.
+    private var pairing: TelegramPairingSession?
+    /// Fires on the main thread when a code is claimed. The owner writes the
+    /// allowlist; the channel only reports who it was.
+    var onPaired: ((TelegramPairingResult) -> Void)?
     /// Chat each user last gave an order from, so a reply addressed to a user
     /// lands where they were talking.
     private var chatIdBySender: [String: String] = [:]
@@ -178,6 +185,15 @@ final class TelegramChannel: ExternalChannel {
         lock.unlock()
     }
 
+    /// Arm (or, with nil, disarm) pairing. Live for as long as the wizard is on
+    /// screen: a code that outlived its window would be a second, quieter
+    /// allowlist.
+    func armPairing(_ session: TelegramPairingSession?) {
+        lock.lock()
+        pairing = session
+        lock.unlock()
+    }
+
     // MARK: - Poll loop
 
     private func isCurrent(_ gen: Int) -> Bool {
@@ -266,6 +282,16 @@ final class TelegramChannel: ExternalChannel {
               !text.isEmpty else { return }
         let chatId = String(message.chat.id)
 
+        // `/start` is Telegram's own front door: the Start button sends it, and
+        // a `t.me/<bot>?start=<code>` deep link sends it with the pairing code
+        // attached. It is answered here and never reaches the verb table, which
+        // has no such verb and would only reply "unknown command".
+        if let payload = TelegramPairingCode.startPayload(
+            in: Self.stripBotMention(text, botUsername: botUsername)) {
+            handleStart(payload: payload, message: message, config: cfg)
+            return
+        }
+
         if let command = Self.command(in: message, config: cfg, botUsername: botUsername) {
             lock.lock()
             chatIdBySender[command.senderId] = chatId
@@ -289,6 +315,66 @@ final class TelegramChannel: ExternalChannel {
         }
 
         deliverSignal(message, text: text, config: cfg)
+    }
+
+    /// Answer `/start`.
+    ///
+    /// Which of the three cases applies turns on whether a code is armed, not
+    /// on who sent the message: pairing exists precisely because the sender is
+    /// a stranger to the allowlist at the moment they use it.
+    private func handleStart(payload: String, message: TelegramMessage, config cfg: TelegramConfig) {
+        // A channel post carries no user, and an allowlist entry has to name
+        // one. Nothing to pair with.
+        guard let from = message.from else { return }
+        let chatId = String(message.chat.id)
+
+        lock.lock()
+        let session = pairing
+        lock.unlock()
+
+        if let session {
+            if !payload.isEmpty {
+                guard session.claim(payload) else {
+                    // Wrong, spent or expired — but a code *is* armed and this
+                    // person is looking at a QR that just failed them, so say
+                    // so rather than leave them tapping Start again.
+                    reply(chatId, "That pairing code has expired or was already used. "
+                                + "Generate a new one in seahelm ▸ Settings ▸ Telegram.")
+                    return
+                }
+                let result = TelegramPairingResult(userId: String(from.id),
+                                                   displayName: from.displayName,
+                                                   chatId: chatId)
+                NSLog("[Telegram] Paired with \(from.displayName) (\(from.id)) in chat \(chatId)")
+                reply(chatId, "**Paired.** This chat can command the fleet now.\n\n"
+                            + "`/status` lists what is running, `/help` lists the commands, "
+                            + "and anything without a slash goes straight to the agent you are talking to.")
+                DispatchQueue.main.async { [weak self] in self?.onPaired?(result) }
+                return
+            }
+            if !cfg.allows(user: from) {
+                // Found the bot without the deep link — an easy thing to do,
+                // since Telegram opens a Start button on any bot you search
+                // for. Point them at the code rather than stonewall.
+                reply(chatId, "Send me the 8-character pairing code shown in "
+                            + "seahelm ▸ Settings ▸ Telegram to connect this chat.")
+                return
+            }
+        }
+
+        // A bare Start from someone already trusted gets the usual Telegram
+        // greeting. From anyone else, silence: an unpaired bot must not confirm
+        // to a stranger that it is attached to a working fleet.
+        if cfg.allows(user: from) {
+            reply(chatId, "**seahelm** is connected. `/status` lists the fleet, `/help` lists the commands.")
+        } else {
+            NSLog("[Telegram] Ignoring /start from unlisted user \(from.displayName) (\(from.id))")
+        }
+    }
+
+    private func reply(_ chatId: String, _ markdown: String) {
+        send(OutboundMessage(channelId: channelId, targetChatId: chatId,
+                             content: markdown, format: .markdown))
     }
 
     /// A message that is not an order may still be work: a monitoring channel

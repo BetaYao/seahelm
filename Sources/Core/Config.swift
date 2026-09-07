@@ -261,6 +261,35 @@ struct Config: Codable {
     private static let saveQueue = DispatchQueue(label: "com.seahelm.config-save", qos: .utility)
     private static let pendingSaveLock = NSLock()
     private static var pendingSaveWorkItem: DispatchWorkItem?
+    /// The config the pending debounced write will persist. Kept so a later
+    /// `save()` from a stale coordinator copy can keep secrets (telegram token,
+    /// gmail, mqtt) that this writer never carried.
+    private static var pendingSaveConfig: Config?
+    /// Identity of the currently scheduled debounced write — used so a finishing
+    /// write does not clear a newer pendingSaveConfig.
+    private static var pendingSaveGeneration = UUID()
+
+    /// Fields owned by Settings (and similar) that a layout/activity save must
+    /// not erase. `nil` on the writer means "I never heard of this", not "clear
+    /// it" — a deliberate clear writes an empty struct (non-nil).
+    func preservingSettingsOwnedSecrets(from other: Config?) -> Config {
+        guard let other else { return self }
+        var out = self
+        if out.telegram == nil { out.telegram = other.telegram }
+        if out.gmailMail == nil { out.gmailMail = other.gmailMail }
+        if out.pairing == nil { out.pairing = other.pairing }
+        if out.hostGateway == nil { out.hostGateway = other.hostGateway }
+        return out
+    }
+
+    /// Disk snapshot for merge-on-write. Nil when the file is missing or undecodable —
+    /// callers then write `self` as-is.
+    private static func diskSnapshot() -> Config? {
+        guard FileManager.default.fileExists(atPath: configPath.path),
+              let data = try? Data(contentsOf: configPath),
+              let disk = try? JSONDecoder().decode(Config.self, from: data) else { return nil }
+        return disk
+    }
 
     /// Synchronous write. Use when a later `Config.load()` on this same turn of
     /// the run loop must observe the change — the debounced `save()` would still
@@ -270,12 +299,17 @@ struct Config: Codable {
         Config.pendingSaveLock.lock()
         Config.pendingSaveWorkItem?.cancel()
         Config.pendingSaveWorkItem = nil
+        let pending = Config.pendingSaveConfig
+        Config.pendingSaveConfig = nil
+        Config.pendingSaveGeneration = UUID()
         Config.pendingSaveLock.unlock()
+        let toWrite = preservingSettingsOwnedSecrets(from: pending)
+            .preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
         do {
             try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(self).write(to: Config.configPath, options: .atomic)
+            try encoder.encode(toWrite).write(to: Config.configPath, options: .atomic)
         } catch {
             NSLog("Failed to save config: \(error)")
         }
@@ -289,21 +323,41 @@ struct Config: Codable {
         // Debounced async save: coalesces rapid saves into a single write.
         // The pending-item swap is lock-protected — save() has many call sites
         // and an unsynchronized cancel/reassign race can drop a save.
-        let configCopy = self
+        //
+        // Merge secrets from the canceled pending write *and* from disk so a
+        // TerminalCoordinator layout save (Config is a value type per owner)
+        // cannot wipe a Telegram token Settings just scheduled.
+        Config.pendingSaveLock.lock()
+        let previousPending = Config.pendingSaveConfig
+        Config.pendingSaveLock.unlock()
+        let configCopy = preservingSettingsOwnedSecrets(from: previousPending)
+            .preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
+        let generation = UUID()
         let workItem = DispatchWorkItem {
             do {
                 try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let data = try encoder.encode(configCopy)
+                // Re-merge disk at write time: another saveNow may have landed
+                // secrets since this item was scheduled.
+                let toWrite = configCopy.preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
+                let data = try encoder.encode(toWrite)
                 try data.write(to: Config.configPath, options: .atomic)
             } catch {
                 NSLog("Failed to save config: \(error)")
             }
+            Config.pendingSaveLock.lock()
+            if Config.pendingSaveGeneration == generation {
+                Config.pendingSaveWorkItem = nil
+                Config.pendingSaveConfig = nil
+            }
+            Config.pendingSaveLock.unlock()
         }
         Config.pendingSaveLock.lock()
         Config.pendingSaveWorkItem?.cancel()
         Config.pendingSaveWorkItem = workItem
+        Config.pendingSaveConfig = configCopy
+        Config.pendingSaveGeneration = generation
         Config.pendingSaveLock.unlock()
         Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }

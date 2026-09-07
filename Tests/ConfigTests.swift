@@ -536,4 +536,56 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(out.contains("broker.example.com"), out)
         XCTAssertFalse(out.contains("ws_path"), out)
     }
+
+    // MARK: - Settings-owned secrets vs stale writers
+
+    /// A layout/activity save carries `telegram == nil` because that coordinator
+    /// never opened Settings. Nil means "unknown", not "clear" — keep the other.
+    func testPreservingSecretsKeepsTelegramFromOtherCopy() {
+        var writer = Config()
+        writer.workspacePaths = ["/tmp/a"]
+        writer.telegram = nil
+
+        var disk = Config()
+        disk.telegram = TelegramConfig(botToken: "1:AA", allowedUsers: ["42"],
+                                       defaultChatId: "42", autoConnect: true)
+
+        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
+        XCTAssertEqual(merged.telegram?.botToken, "1:AA")
+        XCTAssertEqual(merged.telegram?.allowedUsers, ["42"])
+        XCTAssertEqual(merged.workspacePaths, ["/tmp/a"])
+    }
+
+    /// Clearing Settings writes an empty `TelegramConfig` (non-nil). That must
+    /// not be restored from an older disk snapshot.
+    func testPreservingSecretsDoesNotRestoreDeliberateTelegramClear() {
+        var writer = Config()
+        writer.telegram = TelegramConfig(botToken: nil, allowedUsers: [],
+                                         defaultChatId: nil, autoConnect: false)
+
+        var disk = Config()
+        disk.telegram = TelegramConfig(botToken: "1:AA", allowedUsers: ["42"])
+
+        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
+        XCTAssertEqual(merged.telegram?.botToken, nil)
+        XCTAssertEqual(merged.telegram?.allowedUsers, [])
+        XCTAssertEqual(merged.telegram?.autoConnect, false)
+    }
+
+    /// TelegramConfig only has a custom decoder; encoding must still emit
+    /// `bot_token` or a save looks successful while the file never stores it.
+    func testTelegramConfigRoundTripsThroughJSON() throws {
+        var config = Config()
+        config.telegram = TelegramConfig(botToken: "123:ABC", allowedUsers: ["9"],
+                                         defaultChatId: "9", autoConnect: true)
+        let data = try JSONEncoder().encode(config)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("\"telegram\""), json)
+        XCTAssertTrue(json.contains("\"bot_token\""), json)
+        XCTAssertTrue(json.contains("123:ABC"), json)
+
+        let decoded = try JSONDecoder().decode(Config.self, from: data)
+        XCTAssertEqual(decoded.telegram?.botToken, "123:ABC")
+        XCTAssertEqual(decoded.telegram?.allowedUsers, ["9"])
+    }
 }

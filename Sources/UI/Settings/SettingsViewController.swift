@@ -28,6 +28,22 @@ protocol SettingsDelegate: AnyObject {
     /// Whether the Host Gateway listener is actually up, so the page reports what
     /// happened rather than what was asked for.
     func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool
+
+    /// Bring a Telegram bridge up on `token` with `session` armed, so the setup
+    /// wizard's QR can be claimed. Nothing is persisted: the wizard writes the
+    /// config through `settingsDidUpdateConfig` like every other change.
+    ///
+    /// Pairing needs a live poller and Telegram allows exactly one per bot, so
+    /// the wizard borrows the app's channel rather than opening a second one
+    /// that would collide with it (409).
+    func settings(_ settings: SettingsViewController,
+                  beginTelegramPairing token: String,
+                  session: TelegramPairingSession,
+                  onPaired: @escaping (TelegramPairingResult) -> Void)
+
+    /// Drop the pairing bridge and put back whatever the saved config asks for.
+    /// Safe to call when no pairing is running.
+    func settingsEndTelegramPairing(_ settings: SettingsViewController)
 }
 
 /// Optional halves of the protocol: only the main window can answer them, and
@@ -47,6 +63,11 @@ extension SettingsDelegate {
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
     func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {}
     func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool { false }
+    func settings(_ settings: SettingsViewController,
+                  beginTelegramPairing token: String,
+                  session: TelegramPairingSession,
+                  onPaired: @escaping (TelegramPairingResult) -> Void) {}
+    func settingsEndTelegramPairing(_ settings: SettingsViewController) {}
 }
 
 /// Settings, as a sidebar of pages built from `SettingsChrome` groups.
@@ -113,6 +134,9 @@ class SettingsViewController: NSViewController {
     private lazy var telegramAutoConnectToggle = SettingsControls.toggle(
         on: config.telegram?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
     private let telegramStatusLabel = NSTextField(labelWithString: "")
+    private let telegramSetupSummary = NSTextField(labelWithString: "")
+    private lazy var telegramSetupButton = SettingsControls.button(
+        "Set up Telegram\u{2026}", target: self, action: #selector(telegramSetupClicked))
     private lazy var telegramRulesView = TelegramRulesView(rules: config.telegram?.resolvedRules ?? [])
     private let gmailAccountField = SettingsTextField()
     private let gmailAliasLabel = NSTextField(labelWithString: "")
@@ -460,7 +484,30 @@ class SettingsViewController: NSViewController {
         telegramRulesView.panes = settingsDelegate?.settingsPaneTargets(self) ?? []
         telegramRulesView.onChange = { [weak self] _ in self?.applyChanges() }
 
+        telegramSetupSummary.font = NSFont.systemFont(ofSize: 11)
+        telegramSetupSummary.textColor = Theme.textSecondary
+        telegramSetupSummary.lineBreakMode = .byWordWrapping
+        telegramSetupSummary.maximumNumberOfLines = 2
+        telegramSetupSummary.preferredMaxLayoutWidth = 460
+        telegramSetupSummary.translatesAutoresizingMaskIntoConstraints = false
+        telegramSetupButton.setAccessibilityIdentifier("settings.telegram.setup")
+        refreshTelegramSetupSummary()
+
+        let setupStack = NSStackView(views: [telegramSetupSummary, telegramSetupButton])
+        setupStack.orientation = .vertical
+        setupStack.alignment = .leading
+        setupStack.spacing = 8
+
         return [
+            // First, because it is what almost everyone should use. The fields
+            // below are the same values by hand, kept for a config edited from
+            // a script or a second account added without re-pairing.
+            SettingsGroupView(title: "Setup", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Walks through creating a bot with @BotFather, checks the token, "
+                                            + "and pairs your Telegram account by QR code \u{2014} no user IDs to look up.",
+                                    content: setupStack),
+            ]),
             SettingsGroupView(title: "Bot", rows: [
                 SettingsRow.make("Bot token",
                                  subtitle: "Create a bot with @BotFather and paste its token here. Kept in config.json.",
@@ -473,6 +520,8 @@ class SettingsViewController: NSViewController {
                                  subtitle: "Chat id where agent-finished notifications go. Empty means the first numeric allowed user, or failing that the chat your last command came from.",
                                  control: telegramDefaultChatField),
                 SettingsRow.make("Connect at launch", control: telegramAutoConnectToggle),
+                SettingsRow.make("In a group",
+                                 subtitle: "Send a slash command: /status, /help. Telegram's privacy mode hands a bot only the group messages that begin with a slash, so \u{201C}@yourbot /status\u{201D} never arrives at all \u{2014} put the mention last instead, /status@yourbot, when several bots share the group. Plain prose is an order in a private chat only; in a group it stays conversation."),
                 SettingsRow.stacked(nil, content: statusStack),
             ]),
             SettingsGroupView(title: "Triggers", rows: [
@@ -664,6 +713,81 @@ class SettingsViewController: NSViewController {
         }
     }
 
+    // MARK: - Telegram setup wizard
+
+    private func refreshTelegramSetupSummary() {
+        let cfg = config.telegram
+        let paired = cfg?.allowedUsers.filter { !$0.isEmpty }.count ?? 0
+        switch (cfg?.resolvedBotToken != nil, paired) {
+        case (false, _):
+            telegramSetupSummary.stringValue = "Not set up yet."
+            telegramSetupButton.title = "Set up Telegram\u{2026}"
+        case (true, 0):
+            // The state that used to be silent and baffling: a valid token, a
+            // bridge that connects, and a bot that answers nobody.
+            telegramSetupSummary.stringValue =
+                "A bot token is saved, but nobody is allowed to command it yet."
+            telegramSetupButton.title = "Pair an account\u{2026}"
+        case (true, let count):
+            telegramSetupSummary.stringValue = count == 1
+                ? "Paired with 1 account."
+                : "Paired with \(count) accounts."
+            telegramSetupButton.title = "Pair another account\u{2026}"
+        }
+    }
+
+    @objc private func telegramSetupClicked() {
+        let services = TelegramSetupServices(
+            beginPairing: { [weak self] token, session, onPaired in
+                guard let self else { return }
+                self.settingsDelegate?.settings(self, beginTelegramPairing: token,
+                                                session: session, onPaired: onPaired)
+            },
+            endPairing: { [weak self] in
+                guard let self else { return }
+                self.settingsDelegate?.settingsEndTelegramPairing(self)
+            })
+
+        let wizard = TelegramSetupWizard(services: services)
+        wizard.onFinish = { [weak self] result in self?.applyTelegramSetup(result) }
+        presentAsSheet(wizard)
+    }
+
+    /// Fold a finished pairing into the editable config and save it.
+    ///
+    /// Whether the allowlist is replaced or added to turns on the bot: pairing
+    /// against the same token again is someone adding a teammate's phone, and
+    /// wiping their own id would lock them out of the bot they just shared. A
+    /// different token is a different bot, where the old ids mean nothing.
+    private func applyTelegramSetup(_ result: TelegramSetupResult) {
+        let sameBot = config.telegram?.resolvedBotToken == result.token
+        var users = sameBot
+            ? telegramUsersView.string
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            : []
+        if !users.contains(where: { TelegramConfig.normalize($0) == result.userId }) {
+            users.append(result.userId)
+        }
+
+        telegramTokenField.stringValue = result.token
+        telegramUsersView.string = users.joined(separator: "\n")
+        // Only claim the notification chat when nothing else has it: on a
+        // second pairing that chat belongs to whoever set the bot up first.
+        let existingChat = telegramDefaultChatField.stringValue.trimmingCharacters(in: .whitespaces)
+        if !sameBot || existingChat.isEmpty {
+            telegramDefaultChatField.stringValue = result.chatId
+        }
+        telegramAutoConnectToggle.state = result.autoConnect ? .on : .off
+        telegramStatusLabel.stringValue =
+            "Paired with \(result.displayName). Send /status from Telegram to check."
+        telegramStatusLabel.textColor = Theme.textSecondary
+
+        applyChanges()
+        refreshTelegramSetupSummary()
+    }
+
     /// `getMe` is the cheapest call that proves a token: it needs no chat, and
     /// nobody has to have messaged the bot yet.
     @objc private func testTelegramClicked() {
@@ -822,7 +946,10 @@ class SettingsViewController: NSViewController {
                 from: config.hostGateway)
         }
 
-        config.save()
+        // Flush immediately. Config is a value type per coordinator; a later
+        // debounced layout save from a stale copy used to cancel this write and
+        // persist without telegram / gmail / gateway.
+        config.saveNow()
         settingsDelegate?.settingsDidUpdateConfig(self, config: config)
     }
 
@@ -845,6 +972,31 @@ class SettingsViewController: NSViewController {
     func commitPendingEdits() {
         view.window?.makeFirstResponder(nil)   // force-ends field editing
         applyChanges()
+    }
+
+    /// Replace the editable copy when Settings is reused (⌘, again). Syncs any
+    /// already-built page controls so a later apply does not write stale blanks
+    /// over secrets that landed after this window was first opened.
+    func reload(config: Config) {
+        self.config = config
+        workspacePaths = config.workspacePaths
+        if isViewLoaded {
+            pathListView.reloadData()
+        }
+        if pages["telegram"] != nil {
+            let cfg = config.telegram
+            telegramTokenField.stringValue = cfg?.botToken ?? ""
+            telegramUsersView.string = (cfg?.allowedUsers ?? []).joined(separator: "\n")
+            telegramDefaultChatField.stringValue = cfg?.defaultChatId ?? ""
+            telegramAutoConnectToggle.state = (cfg?.resolvedAutoConnect ?? true) ? .on : .off
+            // Rules editor has no public setter; leaving it alone is fine — apply
+            // still reads `telegramRulesView.rules`, and a token wipe is the bug.
+        }
+        if pages["gmail"] != nil {
+            gmailAccountField.stringValue = config.gmailMail?.accountEmail ?? ""
+            gmailAllowedSendersField.stringValue = (config.gmailMail?.allowedSenders ?? []).joined(separator: ", ")
+            gmailEnabledToggle.state = (config.gmailMail?.enabled ?? false) ? .on : .off
+        }
     }
 }
 
