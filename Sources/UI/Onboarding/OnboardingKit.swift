@@ -237,14 +237,29 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         isBordered = false
+        focusRingType = .none
         wantsLayer = true
+        // Custom `draw(_:)` must repaint when the layer is backed, or AppKit
+        // keeps the cell's bezel and our fill fight each other.
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         layer?.cornerRadius = 9
+        layer?.masksToBounds = true
         translatesAutoresizingMaskIntoConstraints = false
         applyTheme()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override var isEnabled: Bool { didSet { applyTheme() } }
+
+    /// Borderless buttons hug the title; pad so the pill does not clip the label.
+    override var intrinsicContentSize: NSSize {
+        var size = attributedTitle.size()
+        size.width += 28
+        size.height = 34
+        return size
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -261,6 +276,18 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyTheme()
+    }
+
+    /// Skip `super.draw`: a Return `keyEquivalent` makes AppKit paint the
+    /// default-button bezel under our layer fill. That bezel uses a different
+    /// corner radius, so it peeks out as blue tabs on either end of the pill.
+    override func draw(_ dirtyRect: NSRect) {
+        let titleSize = attributedTitle.size()
+        let origin = NSPoint(
+            x: ((bounds.width - titleSize.width) / 2).rounded(.down),
+            y: ((bounds.height - titleSize.height) / 2).rounded(.down)
+        )
+        attributedTitle.draw(at: origin)
     }
 
     func applyTheme() {
@@ -280,6 +307,8 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
             ]))
         }
         attributedTitle = composed
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 }
 
