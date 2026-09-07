@@ -407,6 +407,13 @@ class DashboardViewController: NSViewController {
 
     // MARK: - Public API
 
+    /// Light the fleet row while Delete (or Return's tear-down) is assessing or
+    /// removing the worktree — a `git fetch` can sit for seconds with nothing
+    /// else on screen.
+    func setWorktreePending(path: String, pending: Bool) {
+        overviewView.setWorktreePending(path, pending: pending)
+    }
+
     /// `changedWorktreePath` narrows the in-place refresh to one card when the
     /// caller knows only that worktree's status changed; nil refreshes all cards.
     func updatePanes(_ newPanes: [WorktreeRowInfo], changedWorktreePath: String? = nil) {

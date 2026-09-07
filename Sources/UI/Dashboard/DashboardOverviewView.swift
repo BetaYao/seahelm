@@ -40,6 +40,9 @@ final class DashboardOverviewView: NSView {
     var onDeleteWorktree: ((String) -> Void)?
     /// The row's Return — `/return @worktree` by another route.
     var onReturnWorktree: ((String) -> Void)?
+    /// Worktree paths whose Delete/Return is in flight. Survives a full list
+    /// rebuild so a status poll mid-fetch does not extinguish the spinner.
+    private var pendingWorktreePaths: Set<String> = []
     /// Move a repo's integration checkout back onto origin/main. Only offered
     /// on rows that are one.
     var onResetIntegration: ((String) -> Void)?
@@ -557,6 +560,7 @@ final class DashboardOverviewView: NSView {
                 row.onHoverChanged = { [weak self] row, entered in
                     self?.rowHoverChanged(row, entered: entered)
                 }
+                row.setPending(pendingWorktreePaths.contains(pane.worktreePath))
                 rowsBox.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsBox.widthAnchor).isActive = true
                 orderedRows.append((groupedItem.id, groupedItem.path))
@@ -592,6 +596,8 @@ final class DashboardOverviewView: NSView {
             selectedRow.scrollToVisible(selectedRow.bounds)
             revealedRowID = selectedId
         }
+        // Drop pending marks for rows that left the fleet (deleted mid-fetch).
+        pendingWorktreePaths = pendingWorktreePaths.intersection(Set(panesByPath.keys))
         #if DEBUG
         recordTelemetry(kind: "full",
                         elapsedMs: elapsedMilliseconds(since: start),
@@ -636,6 +642,7 @@ final class DashboardOverviewView: NSView {
                 if let row = rowViewsByID[item.id] {
                     row.update(pane: pane, status: item.status, selected: item.id == selectedId,
                                isIntegration: item.isIntegration)
+                    row.setPending(pendingWorktreePaths.contains(pane.worktreePath))
                 }
                 if groupingMode == .pane, pane.panes.count > 1 {
                     for paneInfo in pane.panes {
@@ -668,6 +675,25 @@ final class DashboardOverviewView: NSView {
               rowCount, fullRenderCount, fullAvg, incrementalUpdateCount, incrementalAvg, kind, elapsedMs)
     }
     #endif
+
+    /// Show (or clear) the in-flight spinner on a worktree row. Assessment and
+    /// delete both take wall-clock time; without this the click looks dead.
+    func setWorktreePending(_ path: String, pending: Bool) {
+        if pending {
+            pendingWorktreePaths.insert(path)
+        } else {
+            pendingWorktreePaths.remove(path)
+        }
+        if let row = rowViewsByID[path] {
+            row.setPending(pending)
+            return
+        }
+        // Row id is the path, but a rebuild may still be keyed under a prior
+        // spelling; fall back to a scan.
+        for (id, row) in rowViewsByID where id == path || row.worktreePathForPending == path {
+            row.setPending(pending)
+        }
+    }
 
     /// Move the highlight to `id` in place, cross-fading between the two rows and
     /// scrolling the new one into view.
@@ -1031,6 +1057,9 @@ final class DashboardOverviewView: NSView {
         private let showsRepository: Bool
         private let staticDot: NSTextField
         private let runningDot: SpinnerDotView
+        /// Shown while Delete/Return is assessing or tearing the worktree down —
+        /// a muted spinner so it is not mistaken for an agent that is running.
+        private let busySpinner: SpinnerDotView
         private let titleLabel: NSTextField
         private let timeLabel: NSTextField
         private let branchLabel: NSTextField
@@ -1040,8 +1069,11 @@ final class DashboardOverviewView: NSView {
         /// Whether the pointer is currently inside, so a selection change can
         /// repaint without losing the hover tint on the row being left behind.
         private var hovered = false
+        private var pending = false
+        private var lastStatus: AgentStatus = .unknown
 
         private static let cornerRadius: CGFloat = 8
+        private static let pendingPulseKey = "seahelm.pendingPulse"
         /// One beat, matched to the fleet list's other selection feedback.
         static let selectionFadeDuration: CFTimeInterval = 0.18
         private static let highlightFill = NSColor(name: nil) { appearance in
@@ -1087,6 +1119,7 @@ final class DashboardOverviewView: NSView {
             // incremental updates), so pin it to `.running`'s colour rather than
             // whatever status happened to be current at construction time.
             self.runningDot = SpinnerDotView(color: AgentStatus.running.color)
+            self.busySpinner = SpinnerDotView(color: DashboardOverviewView.inkDim)
             self.titleLabel = Self.label(pane.currentPaneTitle, DashboardOverviewView.ink, 12)
             self.timeLabel = Self.label(pane.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
             let branch = pane.thread.isEmpty ? pane.name : pane.thread
@@ -1117,6 +1150,9 @@ final class DashboardOverviewView: NSView {
             staticDot.setContentCompressionResistancePriority(.required, for: .horizontal)
             runningDot.setContentHuggingPriority(.required, for: .horizontal)
             runningDot.setContentCompressionResistancePriority(.required, for: .horizontal)
+            busySpinner.setContentHuggingPriority(.required, for: .horizontal)
+            busySpinner.setContentCompressionResistancePriority(.required, for: .horizontal)
+            busySpinner.isHidden = true
             titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             timeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -1163,6 +1199,7 @@ final class DashboardOverviewView: NSView {
 
             addSubview(staticDot)
             addSubview(runningDot)
+            addSubview(busySpinner)
             addSubview(textCol)
             NSLayoutConstraint.activate([
                 textCol.leadingAnchor.constraint(equalTo: staticDot.trailingAnchor, constant: 7),
@@ -1174,6 +1211,8 @@ final class DashboardOverviewView: NSView {
                 staticDot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
                 runningDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
                 runningDot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
+                busySpinner.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                busySpinner.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
 
                 line1.widthAnchor.constraint(equalTo: textCol.widthAnchor),
                 line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
@@ -1181,6 +1220,9 @@ final class DashboardOverviewView: NSView {
             applyContent(pane: pane, status: status)
         }
         required init?(coder: NSCoder) { fatalError() }
+
+        /// Path the pending set matches against after a rebuild.
+        var worktreePathForPending: String { path }
 
         /// Compact git summary "+adds −dels  ↑ahead↓behind", colored. Empty when
         /// there are no changes and no divergence (or stats not yet resolved).
@@ -1276,9 +1318,40 @@ final class DashboardOverviewView: NSView {
             }
             Self.setText(staticDot, status.glyph)
             if staticDot.textColor != status.color { staticDot.textColor = status.color }
-            // `isHidden` also invalidates display unconditionally.
-            if staticDot.isHidden != (status == .running) { staticDot.isHidden = status == .running }
-            if runningDot.isHidden != (status != .running) { runningDot.isHidden = status != .running }
+            lastStatus = status
+            applyDotVisibility()
+        }
+
+        /// Status vs busy: only one of the three leading marks is visible.
+        private func applyDotVisibility() {
+            if pending {
+                if !staticDot.isHidden { staticDot.isHidden = true }
+                if !runningDot.isHidden { runningDot.isHidden = true }
+                if busySpinner.isHidden { busySpinner.isHidden = false }
+            } else {
+                if !busySpinner.isHidden { busySpinner.isHidden = true }
+                let running = lastStatus == .running
+                if staticDot.isHidden != running { staticDot.isHidden = running }
+                if runningDot.isHidden != !running { runningDot.isHidden = !running }
+            }
+        }
+
+        /// Assessment / delete in flight: muted spinner, dimmed labels, soft pulse.
+        func setPending(_ isPending: Bool) {
+            guard pending != isPending else { return }
+            pending = isPending
+            applyDotVisibility()
+            let alpha: CGFloat = isPending ? 0.55 : 1
+            for view in [titleLabel, timeLabel, branchLabel, gitLabel, paneCountLabel] as [NSView] {
+                view.alphaValue = alpha
+            }
+            repositoryLabel?.alphaValue = alpha
+            if isPending {
+                startPendingPulse()
+            } else {
+                stopPendingPulse()
+                applyBackground(hovered: hovered)
+            }
         }
 
         override func mouseDown(with event: NSEvent) { onTap?(path) }
@@ -1320,10 +1393,14 @@ final class DashboardOverviewView: NSView {
             deleteItem.target = self
             deleteItem.toolTip = "Remove the worktree and its branch."
                 + " Asks first if uncommitted changes or unmerged commits would be lost."
+            deleteItem.isEnabled = !pending && !isMainWorktree
             menu.addItem(deleteItem)
             if isMainWorktree {
                 deleteItem.isEnabled = false
                 deleteItem.toolTip = "Main worktree cannot be deleted."
+            }
+            if pending {
+                returnItem.isEnabled = false
             }
             return menu
         }
@@ -1341,9 +1418,15 @@ final class DashboardOverviewView: NSView {
 
         @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
 
-        @objc private func deleteAction() { onDelete?(path) }
+        @objc private func deleteAction() {
+            guard !pending else { return }
+            onDelete?(path)
+        }
 
-        @objc private func returnAction() { onReturn?(path) }
+        @objc private func returnAction() {
+            guard !pending else { return }
+            onReturn?(path)
+        }
 
         @objc private func resetIntegrationAction() { onResetIntegration?(path) }
 
@@ -1383,6 +1466,8 @@ final class DashboardOverviewView: NSView {
 
         private func applyBackground(hovered: Bool) {
             self.hovered = hovered
+            // Pending pulse owns the fill while assessment/delete runs.
+            guard !pending else { return }
             if selected {
                 layer?.backgroundColor = resolvedCGColor(Self.highlightFill)
             } else if hovered {
@@ -1392,9 +1477,35 @@ final class DashboardOverviewView: NSView {
             }
         }
 
+        private func startPendingPulse() {
+            layer?.removeAnimation(forKey: "selectionFade")
+            guard layer?.animation(forKey: Self.pendingPulseKey) == nil else { return }
+            let soft = resolvedCGColor(Self.hoverFill)
+            let strong = resolvedCGColor(Self.highlightFill)
+            layer?.backgroundColor = soft
+            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+            let pulse = CABasicAnimation(keyPath: "backgroundColor")
+            pulse.fromValue = soft
+            pulse.toValue = strong
+            pulse.duration = 0.75
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer?.add(pulse, forKey: Self.pendingPulseKey)
+        }
+
+        private func stopPendingPulse() {
+            layer?.removeAnimation(forKey: Self.pendingPulseKey)
+        }
+
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
-            applyBackground(hovered: hovered)
+            if pending {
+                stopPendingPulse()
+                startPendingPulse()
+            } else {
+                applyBackground(hovered: hovered)
+            }
         }
 
         var isHoveredForTesting: Bool { hovered }

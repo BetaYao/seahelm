@@ -534,7 +534,12 @@ class TerminalCoordinator {
     /// gets one sheet that names it, and a confirmed delete is a forced one.
     /// See `WorktreeDeleteAssessment` for why there is no sheet on the safe
     /// path.
-    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?) {
+    ///
+    /// `onPendingChange` lights the fleet row while assessment (a `git fetch`
+    /// that can take seconds) or the delete itself is in flight — without it
+    /// the click reads as a no-op until a sheet finally appears.
+    func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?,
+                                  onPendingChange: ((Bool) -> Void)? = nil) {
         guard !info.isMainWorktree else { return }
         guard let window else { return }
         // Same rule as `/return`: a worktree with an agent at work is not
@@ -557,8 +562,10 @@ class TerminalCoordinator {
             ? IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: info.path)
             : nil
 
+        onPendingChange?(true)
         // Several synchronous git subprocesses (up to a 5s timeout each on a
-        // wedged repo) — run them off the main thread, then decide.
+        // wedged repo, plus a fetch of the base) — run them off the main
+        // thread, then decide.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
             let assessment = isIntegration
@@ -566,24 +573,31 @@ class TerminalCoordinator {
                 : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
                                                  branchName: info.branch, refreshBase: true)
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self else {
+                    onPendingChange?(false)
+                    return
+                }
                 if assessment.isSafe {
-                    // The assessment established the branch's commits are on
-                    // trunk or upstream, so `-D`: git's own `-d` only consults
-                    // the upstream and would keep a PR-merged branch with one
-                    // unpushed commit for no reason.
+                    // Keep the row lit through the delete itself.
                     self.performDeleteWorktree(info, repoPath: repoPath,
                                                deleteBranch: assessment.deletesBranch,
-                                               force: false, forceBranch: true)
+                                               force: false, forceBranch: true) {
+                        onPendingChange?(false)
+                    }
                 } else {
-                    self.presentDeleteConfirmation(info, window: window, repoPath: repoPath, assessment: assessment)
+                    // The sheet is the feedback now; clear the spinner so the
+                    // row does not keep pulsing behind the modal.
+                    onPendingChange?(false)
+                    self.presentDeleteConfirmation(info, window: window, repoPath: repoPath,
+                                                   assessment: assessment, onPendingChange: onPendingChange)
                 }
             }
         }
     }
 
     private func presentDeleteConfirmation(_ info: WorktreeInfo, window: NSWindow,
-                                           repoPath: String, assessment: WorktreeDeleteAssessment) {
+                                           repoPath: String, assessment: WorktreeDeleteAssessment,
+                                           onPendingChange: ((Bool) -> Void)? = nil) {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = "Delete worktree \u{201C}\(info.displayName)\u{201D}?"
@@ -594,16 +608,21 @@ class TerminalCoordinator {
 
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .alertFirstButtonReturn else { return }
+            onPendingChange?(true)
             self.performDeleteWorktree(info, repoPath: repoPath,
-                                       deleteBranch: assessment.deletesBranch, force: true)
+                                       deleteBranch: assessment.deletesBranch, force: true) {
+                onPendingChange?(false)
+            }
         }
     }
 
     /// Delete a worktree without the confirm alert — the caller already asked
     /// (`/return`, through its plan). Does full surface teardown.
     func deleteWorktreeWithoutConfirm(path: String, branch: String,
-                                      deleteBranch: Bool = false, force: Bool = false) {
+                                      deleteBranch: Bool = false, force: Bool = false,
+                                      onPendingChange: ((Bool) -> Void)? = nil) {
         let info = WorktreeInfo(path: path, branch: branch, commitHash: "", isMainWorktree: false)
+        onPendingChange?(true)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let repoPath = WorktreeDiscovery.findRepoRoot(from: path) ?? path
             // If the caller didn't request force, check for uncommitted changes and
@@ -611,13 +630,16 @@ class TerminalCoordinator {
             let shouldForce = force || WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
             DispatchQueue.main.async {
                 self?.performDeleteWorktree(info, repoPath: repoPath,
-                                            deleteBranch: deleteBranch, force: shouldForce)
+                                            deleteBranch: deleteBranch, force: shouldForce) {
+                    onPendingChange?(false)
+                }
             }
         }
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool,
-                                       force: Bool, forceBranch: Bool? = nil) {
+                                       force: Bool, forceBranch: Bool? = nil,
+                                       completion: (() -> Void)? = nil) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 let result = try WorktreeDeleter.deleteWorktree(
@@ -629,6 +651,7 @@ class TerminalCoordinator {
                     forceBranch: forceBranch
                 )
                 DispatchQueue.main.async {
+                    defer { completion?() }
                     guard let self else { return }
                     self.finalizeDeletedWorktree(info)
                     if let warning = result.branchWarning {
@@ -637,6 +660,7 @@ class TerminalCoordinator {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    defer { completion?() }
                     self?.presentDeleteError(error)
                 }
             }

@@ -66,7 +66,11 @@ struct CommandReply: Equatable {
         self.buttons = buttons
     }
 
-    static func error(_ text: String) -> CommandReply { CommandReply(text, isError: true) }
+    /// Errors surface on the desktop too: a right-click Return that fails to
+    /// parse or is refused used to only beep, which reads as "nothing happened".
+    static func error(_ text: String) -> CommandReply {
+        CommandReply(text, isError: true, presentsOnDesktop: true)
+    }
 }
 
 /// The side effects a command can have. Implemented by the app layer; a test
