@@ -234,14 +234,24 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
     var text = "" { didSet { applyTheme() } }
     var fontSize: CGFloat = 13.5 { didSet { applyTheme() } }
 
+    /// Draws no bezel: a Return `keyEquivalent` otherwise makes AppKit paint the
+    /// default-button chrome under our layer fill, which peeks out past the pill.
+    private final class PillCell: NSButtonCell {
+        override func drawBezel(withFrame cellFrame: NSRect, in controlView: NSView) {}
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        let pill = PillCell()
+        pill.isBordered = false
+        pill.backgroundColor = .clear
+        pill.highlightsBy = []
+        pill.showsStateBy = []
+        cell = pill
         isBordered = false
         focusRingType = .none
+        alignment = .center
         wantsLayer = true
-        // Custom `draw(_:)` must repaint when the layer is backed, or AppKit
-        // keeps the cell's bezel and our fill fight each other.
-        layerContentsRedrawPolicy = .onSetNeedsDisplay
         layer?.cornerRadius = 9
         layer?.masksToBounds = true
         translatesAutoresizingMaskIntoConstraints = false
@@ -255,7 +265,7 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
 
     /// Borderless buttons hug the title; pad so the pill does not clip the label.
     override var intrinsicContentSize: NSSize {
-        var size = attributedTitle.size()
+        var size = super.intrinsicContentSize
         size.width += 28
         size.height = 34
         return size
@@ -278,18 +288,6 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
         applyTheme()
     }
 
-    /// Skip `super.draw`: a Return `keyEquivalent` makes AppKit paint the
-    /// default-button bezel under our layer fill. That bezel uses a different
-    /// corner radius, so it peeks out as blue tabs on either end of the pill.
-    override func draw(_ dirtyRect: NSRect) {
-        let titleSize = attributedTitle.size()
-        let origin = NSPoint(
-            x: ((bounds.width - titleSize.width) / 2).rounded(.down),
-            y: ((bounds.height - titleSize.height) / 2).rounded(.down)
-        )
-        attributedTitle.draw(at: origin)
-    }
-
     func applyTheme() {
         let ink = OnboardingStyle.inkOnAccent(for: effectiveAppearance)
         let fill = isEnabled
@@ -308,7 +306,6 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
         }
         attributedTitle = composed
         invalidateIntrinsicContentSize()
-        needsDisplay = true
     }
 }
 
