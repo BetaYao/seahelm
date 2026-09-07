@@ -152,6 +152,43 @@ final class CommandParserTests: XCTestCase {
                        .success(ParsedLine(.returnWorktree(CommandFixture.featX), force: true)))
     }
 
+    /// Branch names with `/` are common (`fix/…`, `feat/…`). The row menu builds
+    /// `/return @fix/foo` from `label(for:)`; that must resolve to the branch,
+    /// not to a fictional repo named `fix`.
+    func testReturnResolvesBranchNamesThatContainSlashes() {
+        let slashBranch = WorktreeRef(repo: "alpha", branch: "fix/foreign-worktree-path",
+                                      path: "/tmp/wt2")
+        let index = FleetIndex(panes: [CommandFixture.paneA, CommandFixture.paneB, CommandFixture.paneC],
+                               worktrees: [CommandFixture.alphaMain, CommandFixture.featX,
+                                           CommandFixture.betaMain, CommandFixture.fixY, slashBranch],
+                               repos: [CommandFixture.alpha, CommandFixture.beta])
+        let label = index.label(for: slashBranch)
+        XCTAssertEqual(label, "@fix/foreign-worktree-path",
+                       "a unique slash-branch keeps the short label")
+        let parsed = CommandParser.parse("/return \(label)", index: index)
+        guard case .success(let line) = parsed,
+              case .returnWorktree(let wt) = line.command else {
+            return XCTFail("expected return of slash-branch, got \(parsed)")
+        }
+        XCTAssertEqual(wt.path, slashBranch.path)
+    }
+
+    /// When two repos share a slash-branch name, the disambiguated
+    /// `@repo/fix/foo` form still has to round-trip (first slash = repo).
+    func testReturnResolvesDisambiguatedSlashBranch() {
+        let a = WorktreeRef(repo: "alpha", branch: "fix/shared", path: "/a/fix-shared")
+        let b = WorktreeRef(repo: "beta", branch: "fix/shared", path: "/b/fix-shared")
+        let index = FleetIndex(panes: [], worktrees: [a, b],
+                               repos: [CommandFixture.alpha, CommandFixture.beta])
+        XCTAssertEqual(index.label(for: a), "@alpha/fix/shared")
+        let parsed = CommandParser.parse("/return @alpha/fix/shared", index: index)
+        guard case .success(let line) = parsed,
+              case .returnWorktree(let wt) = line.command else {
+            return XCTFail("expected disambiguated return, got \(parsed)")
+        }
+        XCTAssertEqual(wt.path, a.path)
+    }
+
     /// The old `/return @repo` overload is gone: a repo name says so.
     func testReturnRefusesARepoAndMain() {
         XCTAssertEqual(error("/return @alpha"), .repoNotWorktree("alpha"))
