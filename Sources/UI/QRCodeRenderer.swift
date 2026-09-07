@@ -25,31 +25,40 @@ enum QRCodeRenderer {
         // Medium recovers ~15% of the symbol. The link is short, so the extra
         // modules cost nothing, and a screen photographed at an angle needs it.
         filter.correctionLevel = "M"
-        guard let coreImage = filter.outputImage else { return nil }
+        guard let raw = filter.outputImage else { return nil }
 
-        let moduleCount = max(coreImage.extent.width, 1)
+        let moduleCount = max(raw.extent.width, 1)
         // Round up so the whole code always fills the requested box, then let
         // the NSImage size do the final (still integral-module) scaling.
         let scale = max(1, (points / moduleCount).rounded(.up))
-        let scaled = coreImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let scaled = raw.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
-        let rep = NSCIImageRep(ciImage: scaled)
-        let source = NSImage(size: rep.size)
-        source.addRepresentation(rep)
+        // The generator is black modules on transparent. Flatten onto white so
+        // `CIFalseColor` can map black→foreground and white→background — the
+        // earlier AppKit path painted the background first then `sourceAtop`'d
+        // the whole rect with foreground, which turned the card into a solid
+        // black square.
+        let white = CIImage(color: .white).cropped(to: scaled.extent)
+        let opaque = scaled.composited(over: white)
+        let colorize = CIFilter.falseColor()
+        colorize.inputImage = opaque
+        colorize.color0 = CIColor(color: foreground) ?? .black
+        colorize.color1 = CIColor(color: background) ?? .white
+        guard let colored = colorize.outputImage?.cropped(to: scaled.extent) else { return nil }
 
-        // The generator's output is black-on-transparent. Tinting through
-        // CIFalseColor would work, but drawing it as a mask keeps the colors as
-        // resolved `NSColor`s, so a theme change repaints correctly.
-        let output = NSImage(size: NSSize(width: points, height: points), flipped: false) { rect in
-            background.setFill()
-            rect.fill()
+        // Rasterize through CIContext. `NSCIImageRep` + `NSImage.draw` was
+        // unreliable for the transparent quiet zone and made the tint bug above
+        // harder to see in isolation.
+        let ciContext = CIContext(options: nil)
+        guard let cgImage = ciContext.createCGImage(colored, from: scaled.extent) else { return nil }
+
+        let size = NSSize(width: points, height: points)
+        return NSImage(size: size, flipped: false) { rect in
             NSGraphicsContext.current?.imageInterpolation = .none
-            source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-            foreground.setFill()
-            rect.fill(using: .sourceAtop)
+            NSGraphicsContext.current?.cgContext.interpolationQuality = .none
+            NSGraphicsContext.current?.cgContext.draw(cgImage, in: rect)
             return true
         }
-        return output
     }
 }
 
