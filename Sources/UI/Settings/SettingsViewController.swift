@@ -822,7 +822,10 @@ class SettingsViewController: NSViewController {
                 from: config.hostGateway)
         }
 
-        config.save()
+        // Flush immediately. Config is a value type per coordinator; a later
+        // debounced layout save from a stale copy used to cancel this write and
+        // persist without telegram / gmail / gateway.
+        config.saveNow()
         settingsDelegate?.settingsDidUpdateConfig(self, config: config)
     }
 
@@ -845,6 +848,31 @@ class SettingsViewController: NSViewController {
     func commitPendingEdits() {
         view.window?.makeFirstResponder(nil)   // force-ends field editing
         applyChanges()
+    }
+
+    /// Replace the editable copy when Settings is reused (⌘, again). Syncs any
+    /// already-built page controls so a later apply does not write stale blanks
+    /// over secrets that landed after this window was first opened.
+    func reload(config: Config) {
+        self.config = config
+        workspacePaths = config.workspacePaths
+        if isViewLoaded {
+            pathListView.reloadData()
+        }
+        if pages["telegram"] != nil {
+            let cfg = config.telegram
+            telegramTokenField.stringValue = cfg?.botToken ?? ""
+            telegramUsersView.string = (cfg?.allowedUsers ?? []).joined(separator: "\n")
+            telegramDefaultChatField.stringValue = cfg?.defaultChatId ?? ""
+            telegramAutoConnectToggle.state = (cfg?.resolvedAutoConnect ?? true) ? .on : .off
+            // Rules editor has no public setter; leaving it alone is fine — apply
+            // still reads `telegramRulesView.rules`, and a token wipe is the bug.
+        }
+        if pages["gmail"] != nil {
+            gmailAccountField.stringValue = config.gmailMail?.accountEmail ?? ""
+            gmailAllowedSendersField.stringValue = (config.gmailMail?.allowedSenders ?? []).joined(separator: ", ")
+            gmailEnabledToggle.state = (config.gmailMail?.enabled ?? false) ? .on : .off
+        }
     }
 }
 

@@ -466,6 +466,10 @@ class MainWindowController: NSWindowController {
     /// config.
     @objc func showSettings() {
         if let existing = settingsWindowController {
+            // Reused windows still hold the SettingsVC's private Config copy from
+            // first open — refresh so a telegram token written after that open
+            // (or restored from disk via merge-on-write) shows up.
+            existing.reload(config: config)
             existing.show()
             return
         }
