@@ -179,4 +179,54 @@ final class CommandFormatterTests: XCTestCase {
         XCTAssertFalse(CommandSpecs.menu.contains { $0.name == "yes" }, "the Helm line has sheets, not /yes")
         XCTAssertTrue(CommandSpecs.menu.contains { $0.name == "new" })
     }
+    // MARK: - Listing buttons
+
+    /// The button and the printed handle must mean the same pane: a phone taps
+    /// what a laptop types.
+    func testEveryPaneButtonIsALineTheParserReadsBack() {
+        let buttons = CommandFormatter.paneButtons(index, bound: nil)
+        XCTAssertEqual(buttons.count, index.panes.count)
+        for button in buttons {
+            guard case .line(let line) = button.effect else { return XCTFail("not a line: \(button)") }
+            guard case .go(.pane(let pane))? = try? CommandParser.parse(line, index: index).get().command else {
+                return XCTFail("did not parse to a pane: \(line)")
+            }
+            XCTAssertTrue(button.label.contains("#\(pane.handle)"), button.label)
+        }
+    }
+
+    func testThePaneAlreadyBoundGetsNoButton() {
+        let lines = CommandFormatter.paneButtons(index, bound: CommandFixture.paneB).map(\.effect)
+        XCTAssertFalse(lines.contains(.line("/go #7")), "\(lines)")
+        XCTAssertTrue(lines.contains(.line("/go #3")), "\(lines)")
+    }
+
+    /// A big fleet would bury its own listing under shortcuts; the text above
+    /// still names every pane.
+    func testButtonsAreCapped() {
+        let panes = (1...30).map {
+            PaneRef(handle: $0, handleKey: "k\($0)", id: "\($0)", project: "p", branch: "b\($0)",
+                    worktreePath: "/p/b\($0)", type: "Claude", title: "")
+        }
+        let big = FleetIndex(panes: panes)
+        XCTAssertEqual(CommandFormatter.paneButtons(big, bound: nil).count, CommandFormatter.buttonLimit)
+    }
+
+    /// `/go @somewhere-with-no-pane` has nothing to talk to, so it is not offered.
+    func testWorktreeButtonsSkipTheOnesWithNoPane() {
+        let buttons = CommandFormatter.worktreeButtons(index, bound: nil)
+        XCTAssertEqual(buttons.map(\.label).sorted(), ["beta/main", "feat-x"])
+        for button in buttons {
+            guard case .line(let line) = button.effect else { return XCTFail("not a line: \(button)") }
+            guard case .go(.worktree)? = try? CommandParser.parse(line, index: index).get().command else {
+                return XCTFail("did not parse to a worktree: \(line)")
+            }
+        }
+    }
+
+    func testWorktreeButtonsSkipTheOneAlreadyHere() {
+        let buttons = CommandFormatter.worktreeButtons(index, bound: CommandFixture.paneB)
+        XCTAssertEqual(buttons.map(\.label), ["beta/main"])
+    }
+
 }

@@ -83,6 +83,40 @@ enum CommandFormatter {
         return out.joined(separator: "\n")
     }
 
+    // MARK: - Listing buttons
+
+    /// How many buttons a listing offers. A fleet of thirty panes would bury
+    /// the listing itself under its own shortcuts, and the text above them is
+    /// complete either way — `/go #24` still works for the ones left out.
+    static let buttonLimit = 8
+
+    /// `/go` for each pane a `/status` listing showed, newest handles first.
+    /// The pane already being talked to is left out: its button would do
+    /// nothing.
+    static func paneButtons(_ index: FleetIndex, bound: PaneRef?) -> [CommandButton] {
+        index.panes
+            .filter { $0.handleKey != bound?.handleKey }
+            .sorted { $0.handle > $1.handle }
+            .prefix(buttonLimit)
+            .map { pane in
+                CommandButton.line("\(pane.status.icon) #\(pane.handle) \(pane.branch)",
+                                   "/go #\(pane.handle)")
+            }
+    }
+
+    /// `/go` for each worktree a `/status worktrees` listing showed. Worktrees
+    /// with no pane are skipped — `/go` there has nothing to talk to.
+    static func worktreeButtons(_ index: FleetIndex, bound: PaneRef?) -> [CommandButton] {
+        index.worktrees
+            .filter { $0.path != bound?.worktreePath && !index.panes(inWorktree: $0.path).isEmpty }
+            .sorted { ($0.repo.lowercased(), $0.name.lowercased()) < ($1.repo.lowercased(), $1.name.lowercased()) }
+            .prefix(buttonLimit)
+            .map { wt in
+                let label = index.label(for: wt)
+                return CommandButton.line(String(label.dropFirst()), "/go \(label)")
+            }
+    }
+
     /// Keeps one listing row to one line.
     static func truncated(_ title: String, limit: Int = 60) -> String {
         title.count <= limit ? title : "\(title.prefix(limit - 1))…"

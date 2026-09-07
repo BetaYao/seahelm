@@ -11,6 +11,14 @@
 | 邮件 | `mail:<thread_id>` | 这个线程用 `/go` 绑定的 pane | 回 `/yes`，或命令末尾加 `force`（推荐，邮件往返慢） |
 | First Mate（侧栏的舰队总览） | 无输入框 | 不适用 | Island 卡片上的按钮 |
 
+### Telegram：私聊 vs 群聊
+
+- **私聊**里任何一行都是命令：裸文本发给绑定的 pane，`/…` 走动词表。
+- **群里只有 `/命令` 算命令**，裸文本是闲聊——共享群里随口一句话不该驱动 agent（`TelegramChannel.command`）。
+- 群里的命令**必须以 `/` 开头**。Telegram 的 privacy mode 默认开着（`getMe` 里 `can_read_all_group_messages: false`），bot 在群里只收得到以斜杠开头的消息、对它自己消息的回复、以及服务消息；`@yourbot /status` 这种把提及写在前面的形式 **Telegram 根本不会投递**，seahelm 这边连日志都不会有。群里有多个 bot 时用后缀形式 `/status@yourbot`，`TelegramChannel.stripBotMention` 会把后缀去掉。
+- 只有要用 Triggers（让 bot 读群里其他人的普通消息去触发 agent）时，才需要在 @BotFather 里 `/setprivacy` → Disable，并且**把 bot 移出群再重新加回去**才生效。即便如此 seahelm 在群里仍然只把 `/命令` 当命令，其余走规则匹配。
+- 白名单（`allowed_users`）按发消息的**用户**判定，与在私聊还是群里无关；不在白名单的人发的 `/命令` 会被忽略。
+
 三个文字入口共用同一个 `CommandExecutor`，差别只在确认方式和"当前"的定义。First Mate 是侧栏的舰队总览加上背后的监督者，不接受文字命令；监督者发起的动作以卡片形式出现在 Island 里，下表最后一列写的是它会不会自己做这件事。目前 Island 只渲染 suggestNextOrder 一类卡片；integrationReport 会进队列，但没有界面把它画出来。
 
 ## 矩阵

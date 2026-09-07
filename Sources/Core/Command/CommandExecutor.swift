@@ -19,6 +19,31 @@ struct CommandSurface: Equatable {
     }
 }
 
+/// A button offered beside a reply.
+///
+/// The command language has no idea how a surface draws one: Telegram makes it
+/// an inline keyboard, the desktop ignores it (its answer is the dashboard) and
+/// mail drops it (a mail client cannot call back). What the layer below is told
+/// is only what the button *means*.
+struct CommandButton: Equatable {
+    enum Effect: Equatable {
+        /// Run this line, as if the tapper had typed it.
+        case line(String)
+        /// Withdraw the question this reply asked. Not a verb: any other
+        /// message already withdraws a pending question, so the language never
+        /// needed one — but a button has to name what it does.
+        case cancelPending
+    }
+
+    let label: String
+    let effect: Effect
+
+    /// The common case: the button is the line it says.
+    static func line(_ label: String, _ line: String) -> CommandButton {
+        CommandButton(label: label, effect: .line(line))
+    }
+}
+
 struct CommandReply: Equatable {
     let text: String
     let isError: Bool
@@ -27,12 +52,18 @@ struct CommandReply: Equatable {
     /// The desktop drops reply text — the dashboard is its answer — except an
     /// outcome with something to act on: a PR link, a worktree held back.
     let presentsOnDesktop: Bool
+    /// Offered beside the text on surfaces that can draw buttons. Always a
+    /// shortcut for something the text already says how to type, so a surface
+    /// that drops them loses nothing.
+    let buttons: [CommandButton]
 
-    init(_ text: String, isError: Bool = false, showsOverview: Bool = false, presentsOnDesktop: Bool = false) {
+    init(_ text: String, isError: Bool = false, showsOverview: Bool = false,
+         presentsOnDesktop: Bool = false, buttons: [CommandButton] = []) {
         self.text = text
         self.isError = isError
         self.showsOverview = showsOverview
         self.presentsOnDesktop = presentsOnDesktop
+        self.buttons = buttons
     }
 
     static func error(_ text: String) -> CommandReply { CommandReply(text, isError: true) }
@@ -200,12 +231,18 @@ final class CommandExecutor {
         case .status(let scope):
             let bound = boundPane(surface, index: index)
             let text: String
+            var buttons: [CommandButton] = []
             switch scope {
-            case .panes:     text = CommandFormatter.panes(index, bound: bound)
-            case .worktrees: text = CommandFormatter.worktrees(index, bound: bound)
-            case .repos:     text = CommandFormatter.repos(index)
+            case .panes:
+                text = CommandFormatter.panes(index, bound: bound)
+                buttons = CommandFormatter.paneButtons(index, bound: bound)
+            case .worktrees:
+                text = CommandFormatter.worktrees(index, bound: bound)
+                buttons = CommandFormatter.worktreeButtons(index, bound: bound)
+            case .repos:
+                text = CommandFormatter.repos(index)
             }
-            reply(CommandReply(text, showsOverview: surface.isDesktop))
+            reply(CommandReply(text, showsOverview: surface.isDesktop, buttons: buttons))
 
         case .returnAll:
             // Only what nothing would be lost by goes without asking; the rest
@@ -425,7 +462,9 @@ final class CommandExecutor {
                                           summary: summary,
                                           expiresAt: Date().addingTimeInterval(PendingAction.lifetime)),
                             for: surface.sessionKey)
-        reply(CommandReply("\(summary)\nReply `/yes` within \(Int(PendingAction.lifetime))s to go ahead."))
+        reply(CommandReply("\(summary)\nReply `/yes` within \(Int(PendingAction.lifetime))s to go ahead.",
+                           buttons: [.line("Go ahead", "/yes"),
+                                     CommandButton(label: "Cancel", effect: .cancelPending)]))
     }
 
     private func confirmPending(surface: CommandSurface, reply: @escaping (CommandReply) -> Void) {

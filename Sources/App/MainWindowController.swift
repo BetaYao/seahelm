@@ -77,6 +77,10 @@ class MainWindowController: NSWindowController {
     /// Nil when the bridge is unconfigured or was started by AppDelegate and
     /// never reconfigured — `unregisterChannel("telegram")` covers that case.
     private var telegramChannel: TelegramChannel?
+    /// The throwaway bridge the setup wizard runs on. Held apart from
+    /// `telegramChannel` so ending pairing restores the configured bridge
+    /// rather than leaving the wizard's token in place.
+    private var telegramPairingChannel: TelegramChannel?
     /// One executor for every surface: the Helm line, Telegram and mail all
     /// run their lines through it, so a command means one thing everywhere.
     private lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
@@ -2523,27 +2527,88 @@ extension MainWindowController: SettingsDelegate {
             startGmailMailChannel(config: config.gmailMail)
         }
 
-        // Hot-reload the Telegram bridge on config change.
-        if oldTelegram != config.telegram {
-            AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
-            telegramChannel = nil
-            // A fresh save deserves a fresh alert, even for the same mistake.
-            lastTelegramError = nil
-
-            if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
-                let channel = TelegramChannel(config: telegramConfig)
-                channel.onStateChange = { [weak self] state in
-                    // A rejected token or a bot polled elsewhere is something
-                    // only the user can fix, so a failure has to be said out
-                    // loud — otherwise the channel is just silently dead.
-                    if case .error(let msg) = state { self?.presentTelegramError(msg) }
-                }
-                AgentRegistry.shared.registerChannel(channel)
-                channel.connect()
-                telegramChannel = channel
-                NSLog("[Settings] Telegram bridge reconnecting")
-            }
+        // Hot-reload the Telegram bridge on config change. Not while the setup
+        // wizard is pairing: that bridge is holding the bot's single poll slot,
+        // and its own teardown brings the configured one back.
+        if oldTelegram != config.telegram, telegramPairingChannel == nil {
+            restartTelegramBridge()
         }
+    }
+
+    /// Tear the Telegram bridge down and stand it back up from `config`.
+    ///
+    /// `disconnect()` rather than a bare release: the old poller is parked in a
+    /// `getUpdates` that Telegram holds open for twenty seconds, and a
+    /// successor that starts while it is still in flight is the 409 the error
+    /// text blames on "a second seahelm running".
+    private func restartTelegramBridge() {
+        AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
+        telegramChannel?.disconnect()
+        telegramChannel = nil
+        // A fresh save deserves a fresh alert, even for the same mistake.
+        lastTelegramError = nil
+
+        guard let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect else { return }
+        let channel = TelegramChannel(config: telegramConfig)
+        channel.onStateChange = { [weak self] state in
+            // A rejected token or a bot polled elsewhere is something only the
+            // user can fix, so a failure has to be said out loud — otherwise
+            // the channel is just silently dead.
+            if case .error(let msg) = state { self?.presentTelegramError(msg) }
+        }
+        AgentRegistry.shared.registerChannel(channel)
+        channel.connect()
+        telegramChannel = channel
+        NSLog("[Settings] Telegram bridge reconnecting")
+    }
+
+    func settings(_ settings: SettingsViewController,
+                  beginTelegramPairing token: String,
+                  session: TelegramPairingSession,
+                  onPaired: @escaping (TelegramPairingResult) -> Void) {
+        // One poller per bot. Whatever is live has to go first, or Telegram
+        // answers 409 and the QR on screen never resolves.
+        AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
+        telegramChannel?.disconnect()
+        telegramChannel = nil
+        telegramPairingChannel?.disconnect()
+
+        // The token is not in the saved config yet — the wizard writes it only
+        // when it finishes — so this bridge runs on a config that lives exactly
+        // as long as the pairing. Empty allowlist and no rules on purpose:
+        // until someone claims the code this bot obeys nobody, and a stray
+        // message must not trip a trigger. A zero backfill keeps a stale
+        // `/start` from before the wizard opened out of the pairing.
+        var pairingConfig = config.telegram ?? TelegramConfig()
+        pairingConfig.botToken = token
+        pairingConfig.allowedUsers = []
+        pairingConfig.rules = []
+        pairingConfig.backfillSeconds = 0
+
+        let channel = TelegramChannel(config: pairingConfig)
+        channel.armPairing(session)
+        channel.onPaired = onPaired
+        channel.onStateChange = { [weak self] state in
+            if case .error(let msg) = state { self?.presentTelegramError(msg) }
+        }
+        // Deliberately not registered with AgentRegistry: this bridge exists to
+        // receive one `/start`, and a registered channel could carry orders
+        // from a bot nobody has been allowed on yet.
+        telegramPairingChannel = channel
+        lastTelegramError = nil
+        channel.connect()
+        NSLog("[Settings] Telegram pairing bridge up")
+    }
+
+    func settingsEndTelegramPairing(_ settings: SettingsViewController) {
+        guard let channel = telegramPairingChannel else { return }
+        channel.armPairing(nil)
+        channel.disconnect()
+        telegramPairingChannel = nil
+        // Back to whatever is saved. On the wizard's success path this is the
+        // pre-pairing config and the save that follows immediately restarts the
+        // bridge again with the new one; on cancel it is the only restart.
+        restartTelegramBridge()
     }
 }
 

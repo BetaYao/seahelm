@@ -234,17 +234,42 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
     var text = "" { didSet { applyTheme() } }
     var fontSize: CGFloat = 13.5 { didSet { applyTheme() } }
 
+    /// Draws no bezel: a Return `keyEquivalent` otherwise makes AppKit paint the
+    /// default-button chrome under our layer fill, which peeks out past the pill.
+    private final class PillCell: NSButtonCell {
+        override func drawBezel(withFrame cellFrame: NSRect, in controlView: NSView) {}
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        let pill = PillCell()
+        pill.isBordered = false
+        pill.backgroundColor = .clear
+        pill.highlightsBy = []
+        pill.showsStateBy = []
+        cell = pill
         isBordered = false
+        focusRingType = .none
+        alignment = .center
         wantsLayer = true
         layer?.cornerRadius = 9
+        layer?.masksToBounds = true
         translatesAutoresizingMaskIntoConstraints = false
         applyTheme()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override var isEnabled: Bool { didSet { applyTheme() } }
+
+    /// Borderless buttons hug the title; pad so the pill does not clip the label.
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += 28
+        size.height = 34
+        return size
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -280,6 +305,7 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
             ]))
         }
         attributedTitle = composed
+        invalidateIntrinsicContentSize()
     }
 }
 

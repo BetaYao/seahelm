@@ -212,6 +212,29 @@ final class TelegramBotAPI {
         let _: TelegramMessage = try call("sendMessage", params: params, deadline: Self.stallSeconds)
     }
 
+    /// Publish the verb table to Telegram, so typing `/` in the chat lists the
+    /// commands instead of requiring the user to have read `/help` once.
+    ///
+    /// Set at setup rather than on every connect: it is per-bot state Telegram
+    /// keeps, not per-session, and re-sending it on each launch would spend a
+    /// round trip to write what is already there.
+    func setMyCommands(_ commands: [(command: String, description: String)]) throws {
+        let payload = commands.map { ["command": $0.command, "description": $0.description] }
+        let _: Bool = try call("setMyCommands", params: ["commands": payload],
+                               deadline: Self.stallSeconds)
+    }
+
+    /// Drop any webhook registered against this bot.
+    ///
+    /// A webhook and `getUpdates` are mutually exclusive — the second one to
+    /// ask gets 409 — and a bot that was once wired to something else keeps its
+    /// webhook forever. Clearing it during setup turns a confusing "another
+    /// client is already polling" into a bot that simply works.
+    func deleteWebhook() throws {
+        let _: Bool = try call("deleteWebhook", params: ["drop_pending_updates": false],
+                               deadline: Self.stallSeconds)
+    }
+
     // MARK: - Transport
 
     private func call<T: Decodable>(_ method: String, params: [String: Any], deadline: Int) throws -> T {
