@@ -34,7 +34,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=Newsreader:ital,opsz,wght@1,6..72,400&display=swap">
 
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=20260908">
 </head>
 <body>
 <!-- ══════════════ MASTHEAD + HERO · above the waterline ══════════════ -->
@@ -93,60 +93,10 @@
   </div>
 </section>
 
-<!-- ══════════════ THE WATERLINE · the fleet at rest ══════════════ -->
+<!-- ══════════════ THE WATERLINE · getting aboard ══════════════ -->
 <section class="deck surface">
   <div class="wrap">
     <div class="berth">
-      <div class="fleet">
-        <div class="fleet-bar">
-          <span>openbeta/seahelm</span>
-          <span style="opacity:.5">&middot;</span>
-          <span>3 worktrees &middot; 5 panes</span>
-          <span class="island">
-            <span><span class="dot s-wait">&#9679;</span> 1 needs input</span>
-            <span><span class="dot s-run pulse">&#9680;</span> 2 running</span>
-          </span>
-        </div>
-        <div class="fleet-grid">
-          <div class="wt">
-            <div class="wt-head"><span class="branch">main</span><span class="wt-state s-idle">idle</span></div>
-            <div class="wt-panes">
-              <div class="pane">
-                <div class="pane-top"><span class="dot s-idle">&#9675;</span> claude</div>
-                <div class="pane-msg">Idle &middot; 4m</div>
-              </div>
-              <div class="pane">
-                <div class="pane-top"><span class="dot s-idle">&#9675;</span> codex</div>
-                <div class="pane-msg">Idle &middot; 22m</div>
-              </div>
-            </div>
-          </div>
-          <div class="wt">
-            <div class="wt-head"><span class="branch">feat/island-usage</span><span class="wt-state s-run">running</span></div>
-            <div class="wt-panes">
-              <div class="pane">
-                <div class="pane-top"><span class="dot s-run pulse">&#9680;</span> claude</div>
-                <div class="pane-msg">Edit &middot; UsageSummaryFormatter.swift</div>
-              </div>
-              <div class="pane">
-                <div class="pane-top"><span class="dot s-run pulse">&#9680;</span> codex</div>
-                <div class="pane-msg">Bash &middot; xcodebuild test</div>
-              </div>
-            </div>
-          </div>
-          <div class="wt">
-            <div class="wt-head"><span class="branch">fix/zmx-recovery</span><span class="wt-state s-wait">needs input</span></div>
-            <div class="wt-panes">
-              <div class="pane">
-                <div class="pane-top"><span class="dot s-wait">&#9679;</span> claude</div>
-                <div class="pane-msg">Allow <span style="color:var(--ink)">rm -rf .build</span>?</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <p class="note">Example fleet. Every status above is one the app really reports.</p>
-
       <div class="hero-cta">
         <div class="cmd"><span class="prompt">$</span> curl -fsSL https://seahelm.dev/install.sh | sh</div>
         <a class="linkout" href="https://github.com/BetaYao/seahelm">github.com/BetaYao/seahelm</a>
