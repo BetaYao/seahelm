@@ -162,17 +162,48 @@ final class ProcessProbeTests: XCTestCase {
         XCTAssertEqual(argv, ProcessProbe.argv(of: getpid()), "parse must be stable across calls")
     }
 
-    func testArgvIsStableWhenABufferIsReusedAcrossProcesses() {
-        // The batch path reuses one buffer, so a long argv followed by a short one
-        // must not leave the earlier process's bytes visible in the second result.
-        let table = ProcessProbe.processTable()
-        XCTAssertFalse(table.isEmpty)
-        let sampled = Array(table.prefix(40))
-        let batch = ProcessProbe.withArgv(sampled)
-        for proc in batch {
-            XCTAssertEqual(proc.argv, ProcessProbe.argv(of: proc.pid),
-                           "pid \(proc.pid) parsed differently in the batch than on its own")
+    func testArgvIsStableWhenABufferIsReusedAcrossProcesses() throws {
+        // Two children of this test, not a sample of the machine's process table.
+        // The property under test is that the shared buffer leaves nothing of a
+        // long argv in the short one read after it. Demonstrating that against
+        // live processes meant re-reading a pid later and trusting it still named
+        // the same process — on a busy machine it may have exited, or had its pid
+        // reused by something unrelated, and the comparison then failed over
+        // process mortality rather than buffer hygiene.
+        let padding = String(repeating: "Z", count: 4096)
+        let long = Process()
+        long.executableURL = URL(fileURLWithPath: "/bin/sh")
+        long.arguments = ["-c", "sleep 5 # \(padding)"]
+        let short = Process()
+        short.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        short.arguments = ["5"]
+        try long.run()
+        try short.run()
+        defer { long.terminate(); short.terminate() }
+
+        // `run()` returns once the fork is under way; argv is only readable after
+        // the exec has landed.
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline,
+              ProcessProbe.argv(of: long.processIdentifier).isEmpty
+                || ProcessProbe.argv(of: short.processIdentifier).isEmpty {
+            usleep(20_000)
         }
+
+        // Long first: the short read that follows is the one that could inherit
+        // whatever the long one left behind.
+        let batch = ProcessProbe.withArgv([
+            ProcessProbe.Proc(pid: long.processIdentifier, ppid: getpid(), argv: []),
+            ProcessProbe.Proc(pid: short.processIdentifier, ppid: getpid(), argv: []),
+        ])
+
+        XCTAssertTrue(batch[0].argv.joined(separator: " ").contains(padding),
+                      "the long argv must really be long, or the short read proves nothing")
+        XCTAssertEqual(batch[1].argv.count, 2, "short argv came back as \(batch[1].argv)")
+        XCTAssertTrue(batch[1].argv[0].hasSuffix("sleep"))
+        XCTAssertEqual(batch[1].argv[1], "5")
+        XCTAssertFalse(batch[1].argv.joined().contains("Z"),
+                       "the previous process's bytes bled through the reused buffer")
     }
 
     func testProcessTableCarriesTreeShapeWithoutArgv() {
