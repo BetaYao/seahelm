@@ -103,37 +103,43 @@
           <span>3 个 worktree &middot; 5 个 pane</span>
           <span class="island">
             <span><span class="dot s-wait">&#9679;</span> 1 个待输入</span>
-            <span><span class="dot s-run pulse">&#9686;</span> 2 个在跑</span>
+            <span><span class="dot s-run pulse">&#9680;</span> 2 个在跑</span>
           </span>
         </div>
         <div class="fleet-grid">
           <div class="wt">
             <div class="wt-head"><span class="branch">main</span><span class="wt-state s-idle">空闲</span></div>
-            <div class="pane">
-              <div class="pane-top"><span class="dot s-idle">&#9675;</span> claude</div>
-              <div class="pane-msg">空闲 &middot; 4 分钟</div>
-            </div>
-            <div class="pane">
-              <div class="pane-top"><span class="dot s-idle">&#9675;</span> codex</div>
-              <div class="pane-msg">空闲 &middot; 22 分钟</div>
+            <div class="wt-panes">
+              <div class="pane">
+                <div class="pane-top"><span class="dot s-idle">&#9675;</span> claude</div>
+                <div class="pane-msg">空闲 &middot; 4 分钟</div>
+              </div>
+              <div class="pane">
+                <div class="pane-top"><span class="dot s-idle">&#9675;</span> codex</div>
+                <div class="pane-msg">空闲 &middot; 22 分钟</div>
+              </div>
             </div>
           </div>
           <div class="wt">
             <div class="wt-head"><span class="branch">feat/island-usage</span><span class="wt-state s-run">运行中</span></div>
-            <div class="pane">
-              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> claude</div>
-              <div class="pane-msg">Edit &middot; UsageSummaryFormatter.swift</div>
-            </div>
-            <div class="pane">
-              <div class="pane-top"><span class="dot s-run pulse">&#9686;</span> codex</div>
-              <div class="pane-msg">Bash &middot; xcodebuild test</div>
+            <div class="wt-panes">
+              <div class="pane">
+                <div class="pane-top"><span class="dot s-run pulse">&#9680;</span> claude</div>
+                <div class="pane-msg">Edit &middot; UsageSummaryFormatter.swift</div>
+              </div>
+              <div class="pane">
+                <div class="pane-top"><span class="dot s-run pulse">&#9680;</span> codex</div>
+                <div class="pane-msg">Bash &middot; xcodebuild test</div>
+              </div>
             </div>
           </div>
           <div class="wt">
             <div class="wt-head"><span class="branch">fix/zmx-recovery</span><span class="wt-state s-wait">待输入</span></div>
-            <div class="pane">
-              <div class="pane-top"><span class="dot s-wait">&#9679;</span> claude</div>
-              <div class="pane-msg">允许执行 <span style="color:var(--ink)">rm -rf .build</span> 吗？</div>
+            <div class="wt-panes">
+              <div class="pane">
+                <div class="pane-top"><span class="dot s-wait">&#9679;</span> claude</div>
+                <div class="pane-msg">允许执行 <span style="color:var(--ink)">rm -rf .build</span> 吗？</div>
+              </div>
             </div>
           </div>
         </div>
@@ -220,9 +226,9 @@
           <rect x="146" y="212" width="354" height="100" rx="6" class="svg-box-plain"/>
           <text x="160" y="236" class="svg-t2">feat/island-usage</text>
           <rect x="162" y="248" width="160" height="48" rx="5" class="svg-box"/>
-          <text x="176" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <text x="176" y="277" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
           <rect x="334" y="248" width="150" height="48" rx="5" class="svg-box"/>
-          <text x="348" y="277" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  codex</text>
+          <text x="348" y="277" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  codex</text>
 
           <!-- project B -->
           <rect x="524" y="66" width="386" height="260" rx="8" class="svg-box"/>
@@ -290,7 +296,7 @@
           <rect x="26" y="68" width="378" height="90" rx="6" class="svg-box"/>
           <text x="40" y="92" class="svg-t2">main</text>
           <rect x="42" y="104" width="172" height="42" rx="5" class="svg-box"/>
-          <text x="56" y="131" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <text x="56" y="131" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
           <rect x="226" y="104" width="162" height="42" rx="5" class="svg-box"/>
           <text x="240" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
 
@@ -314,7 +320,7 @@
           <rect x="536" y="174" width="378" height="90" rx="6" class="svg-box"/>
           <text x="550" y="198" class="svg-t2">feat/x</text>
           <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
-          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  claude</text>
+          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
           <text x="914" y="231" class="svg-note" text-anchor="end">Station 与 zmx 会话都留着</text>
           <text x="914" y="250" class="svg-lbl" text-anchor="end">占位 pane 被销毁</text>
 
@@ -523,7 +529,7 @@
     </figure>
 
     <div class="legend">
-      <div><span class="g s-run">&#9686;</span><span class="k">运行中</span><span class="v">有一次工具调用在途</span></div>
+      <div><span class="g s-run">&#9680;</span><span class="k">运行中</span><span class="v">有一次工具调用在途</span></div>
       <div><span class="g s-wait">&#9679;</span><span class="k">待输入</span><span class="v">卡在等人</span></div>
       <div><span class="g s-idle">&#9675;</span><span class="k">空闲</span><span class="v">提示符回来了，等着</span></div>
       <div><span class="g s-err">&#10005;</span><span class="k">出错</span><span class="v">agent 挂了</span></div>
@@ -671,7 +677,7 @@
           <text x="36" y="104" class="svg-t2">HEAD + 改动</text>
 
           <rect x="206" y="48" width="170" height="86" rx="7" class="svg-box"/>
-          <text x="222" y="78" class="svg-t"><tspan fill="var(--run)">&#9686;</tspan>  feat/island</text>
+          <text x="222" y="78" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  feat/island</text>
           <text x="222" y="104" class="svg-t2">一轮进行中</text>
 
           <rect x="392" y="48" width="170" height="86" rx="7" class="svg-box"/>

@@ -182,12 +182,19 @@ p  { margin: 0; }
   border: 1px solid var(--rule); border-radius: 999px; padding: .3rem .7rem;
   background: var(--sea-1);
 }
-.fleet-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
-.wt { padding: .85rem .9rem 1rem; border-right: 1px solid var(--rule-2); display: grid; gap: .6rem; align-content: start; }
-.wt:last-child { border-right: 0; }
-.wt-head { display: flex; align-items: baseline; gap: .5rem; }
+/* A roster, not a grid of cards: one row per worktree, its panes side by side
+   inside the row — which is what a split actually is. */
+.fleet-grid { display: grid; }
+.wt {
+  padding: .7rem .9rem; border-bottom: 1px solid var(--rule-2);
+  display: grid; grid-template-columns: minmax(9.5rem, 14rem) 1fr;
+  gap: .75rem; align-items: center;
+}
+.wt:last-child { border-bottom: 0; }
+.wt-head { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+.wt-panes { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .5rem; min-width: 0; }
 .branch { font: 500 .84rem/1.2 var(--f-mono); }
-.wt-state { margin-left: auto; font: 400 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .09em; }
+.wt-state { margin-left: .1rem; font: 400 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .09em; }
 .pane {
   border: 1px solid var(--rule-2); border-radius: 6px; padding: .5rem .6rem;
   background: var(--sea-2); display: grid; gap: .28rem;
@@ -336,9 +343,8 @@ footer { border-top: 1px solid var(--rule); padding: 2.8rem 0 3.6rem; display: g
 .foot-meta { font: 400 .78rem/1.7 var(--f-mono); color: var(--ink-2); }
 
 @media (max-width: 720px) {
-  .fleet-grid { grid-template-columns: 1fr; }
-  .wt { border-right: 0; border-bottom: 1px solid var(--rule-2); }
-  .wt:last-child { border-bottom: 0; }
+  .wt { grid-template-columns: 1fr; align-items: start; gap: .5rem; }
+  .wt-panes { grid-auto-flow: row; }
   .row { grid-template-columns: 1fr; gap: .3rem; }
   .legend > div { border-right: 0; border-bottom: 1px solid var(--rule-2); }
 }
