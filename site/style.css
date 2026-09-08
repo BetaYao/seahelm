@@ -257,11 +257,14 @@ td.tick { font: 400 .85rem/1.4 var(--f-mono); }
 .row dd { margin: 0; font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
 .row dd code, .desc code, .lede code { font: 400 .85em/1 var(--f-mono); color: var(--ink); }
 
-/* two lifted callouts — these get the border, the rows do not */
+/* Notes lifted out of the prose, in the same panel the legend and the code
+   blocks use: a hairline border, the pale sea fill, no accent stripe down the
+   side. The panel is what marks them as lifted; a coloured bar on top of it is
+   decoration that says "look here" without saying anything more. */
 .lift { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .lift > div {
-  border-left: 3px solid var(--accent);
-  border-radius: 0 6px 6px 0; padding: 1.1rem 1.2rem; background: var(--sea-1);
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--sea-1); padding: 1.1rem 1.2rem;
   display: grid; gap: .5rem; align-content: start;
 }
 .lift h3 { font-size: 1.1rem; }
