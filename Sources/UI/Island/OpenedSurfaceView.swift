@@ -397,18 +397,34 @@ private struct SuggestionCard: View {
     private var isQuestion: Bool {
         FirstMateAction.isQuestionPayload(order.action.payload)
     }
+    /// An integration round, which belongs to a repo rather than to a pane:
+    /// no agent raised it and there is no branch behind it.
+    private var isIntegration: Bool {
+        order.action.kind == .integrationReport
+    }
+
+    private var icon: String {
+        if isIntegration { return "arrow.triangle.merge" }
+        return isQuestion ? "questionmark.circle.fill" : "lightbulb.fill"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: isQuestion ? "questionmark.circle.fill" : "lightbulb.fill")
+                Image(systemName: icon)
                     .font(.system(size: 11))
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(isIntegration ? .orange : .yellow)
                 Text(order.action.project)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
                 if !order.action.branch.isEmpty {
                     Text(order.action.branch)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                } else if isIntegration {
+                    // The card names what it is about: without this it reads as
+                    // the repo saying something, and a repo never speaks.
+                    Text("integration")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
                 }
