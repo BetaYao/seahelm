@@ -130,43 +130,51 @@ final class PendingOrdersQueue {
         if changed { notify() }
     }
 
+    /// Every removal goes through here, so a card that leaves the queue takes
+    /// its chat buttons with it.
+    ///
+    /// A card mirrored to a phone leaves a message that keeps its keyboard for
+    /// as long as the chat exists. Stripping the buttons off that message is
+    /// best effort and races a tap already in flight; retiring the tokens is
+    /// not — it is the one thing that makes a tap on an answered card inert
+    /// instead of typing the option into the pane a second time.
+    @discardableResult
+    private func remove(where predicate: (PendingOrder) -> Bool) -> Bool {
+        let dropped = orders.filter(predicate)
+        guard !dropped.isEmpty else { return false }
+        orders.removeAll(where: predicate)
+        for order in dropped { ChatCallbackRegistry.shared.retire(orderId: order.id) }
+        notify()
+        return true
+    }
+
     /// Drop a pane's open suggestion without acting on it. Returns whether
     /// anything went, so a remote caller can tell "declined" from "already gone".
     @discardableResult
     func dismissSuggestion(terminalID: String) -> Bool {
-        let before = orders.count
-        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
-        guard orders.count != before else { return false }
-        notify()
-        return true
+        remove { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
     }
 
     func all() -> [PendingOrder] { orders }
 
     func resolve(id: String) {
-        let before = orders.count
-        orders.removeAll { $0.id == id }
-        if orders.count != before { notify() }
+        remove { $0.id == id }
     }
 
     /// Remove the pending AskUserQuestion card for the given pane — its agent moved
     /// past the question (it was answered in the TUI), so the card is stale.
     /// Pane-scoped: a sibling pane's unanswered question must survive.
     func resolveQuestion(terminalID: String) {
-        let before = orders.count
-        orders.removeAll {
+        remove {
             FirstMateAction.isQuestionPayload($0.action.payload)
                 && $0.action.terminalID == terminalID
         }
-        if orders.count != before { notify() }
     }
 
     /// Remove the pending suggest order for the given pane. Pane-scoped: typing in
     /// one pane must not clear a sibling pane's suggestions.
     func resolveSuggest(terminalID: String) {
-        let before = orders.count
-        orders.removeAll { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
-        if orders.count != before { notify() }
+        remove { $0.action.kind == .suggestNextOrder && $0.action.terminalID == terminalID }
     }
 
     /// Drop every card belonging to a pane that is gone — closed, or its agent
@@ -180,9 +188,7 @@ final class PendingOrdersQueue {
     /// one pane's death from sweeping them away.
     func resolvePane(terminalID: String) {
         guard !terminalID.isEmpty else { return }
-        let before = orders.count
-        orders.removeAll { $0.action.terminalID == terminalID }
-        if orders.count != before { notify() }
+        remove { $0.action.terminalID == terminalID }
     }
 
     /// Drop every card for a worktree that is gone. Used when a whole worktree is
@@ -190,8 +196,6 @@ final class PendingOrdersQueue {
     /// worktree-scoped cards `resolvePane` deliberately spares.
     func resolveWorktree(path: String) {
         guard !path.isEmpty else { return }
-        let before = orders.count
-        orders.removeAll { $0.action.worktreePath == path }
-        if orders.count != before { notify() }
+        remove { $0.action.worktreePath == path }
     }
 }

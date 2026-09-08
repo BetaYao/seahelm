@@ -1090,6 +1090,9 @@ class AgentRegistry {
         channel.onMessage = { [weak self] message in
             self?.handleInbound(message)
         }
+        channel.onCallback = { [weak self] callback in
+            self?.handleCallback(callback)
+        }
     }
 
     /// Unregister and disconnect an external channel
@@ -1120,6 +1123,12 @@ class AgentRegistry {
     /// then — tests, headless runs — a headless executor over an empty fleet
     /// answers instead.
     var commandRoute: ((_ text: String, _ surface: CommandSurface, _ reply: @escaping (CommandReply) -> Void) -> Void)?
+
+    /// Resolves a chat button tap: what the token meant, and doing it. Set by
+    /// `MainWindowController`, which owns the card queue and the panes. Until
+    /// then a tap is answered as stale, which is also what an unrecognised
+    /// token gets — the two are the same thing to the tapper.
+    var callbackRoute: ((InboundCallback) -> Void)?
 
     /// Injects a rule-matched prompt into the pane a target names. Set by
     /// `MainWindowController`, which owns the pane list. Returns false when the
@@ -1173,6 +1182,16 @@ class AgentRegistry {
         }
     }
 
+    /// A button tap, on the main thread. The channel reports it from its poll
+    /// thread and the router walks the fleet and the card queue.
+    func handleCallback(_ callback: InboundCallback) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.handleCallback(callback) }
+            return
+        }
+        callbackRoute?(callback)
+    }
+
     /// What answers before the window has wired a host — tests, headless runs:
     /// the command language over an empty fleet, with nothing persisted.
     private lazy var headlessExecutor = CommandExecutor(host: HeadlessCommandHost.shared,
@@ -1194,22 +1213,45 @@ class AgentRegistry {
         pushToChannel(message.channelId, message: outbound)
     }
 
-    /// Push a message to a specific external channel
-    func pushToChannel(_ channelId: String, message: OutboundMessage) {
+    /// Push a message to a specific external channel. `completion` carries the
+    /// sent message's id where the channel can report one — what a caller needs
+    /// to come back and change that message's buttons.
+    func pushToChannel(_ channelId: String, message: OutboundMessage,
+                       completion: ((String?) -> Void)? = nil) {
         lock.lock()
         let channel = externalChannels[channelId]
         lock.unlock()
 
-        channel?.send(message)
+        guard let channel else {
+            completion?(nil)
+            return
+        }
+        channel.send(message, completion: completion)
+    }
+
+    /// Change the buttons on a message a channel already sent; `[]` takes them
+    /// off. Channels that cannot edit their own messages do nothing.
+    func setButtons(channelId: String, chatId: String, messageId: String, buttons: [MessageButton]) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        channel?.setButtons(chatId: chatId, messageId: messageId, buttons: buttons)
     }
 
     /// Broadcast a message to all registered external channels
     func broadcast(_ content: String, format: MessageFormat = .text) {
+        broadcast(content, format: format, excluding: [])
+    }
+
+    /// Like `broadcast`, but skip channel ids in `excluding` — used when the
+    /// caller delivers Telegram itself with pane-scoped routing.
+    func broadcast(_ content: String, format: MessageFormat = .text, excluding: Set<String>) {
         lock.lock()
         let channels = Array(externalChannels.values)
         lock.unlock()
 
-        for channel in channels {
+        for channel in channels where !excluding.contains(channel.channelId) {
             let message = OutboundMessage(
                 channelId: channel.channelId,
                 content: content,

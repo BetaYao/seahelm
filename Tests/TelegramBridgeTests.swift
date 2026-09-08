@@ -135,9 +135,15 @@ final class TelegramBridgeTests: XCTestCase {
                          from: TelegramUser? = TelegramUser(id: 42, isBot: false, firstName: "Matt", username: "matt_c"),
                          chat: TelegramChat = TelegramChat(id: 42, type: "private", title: nil, username: nil),
                          senderChat: TelegramChat? = nil,
-                         caption: String? = nil) -> TelegramMessage {
-        TelegramMessage(messageId: 1, date: 1_757_000_000, chat: chat, from: from,
-                        senderChat: senderChat, text: text, caption: caption)
+                         caption: String? = nil,
+                         replyingTo: String? = nil) -> TelegramMessage {
+        let target = replyingTo.map {
+            TelegramReplyTarget(messageId: 9,
+                                from: TelegramUser(id: 999, isBot: true, firstName: "bot", username: $0))
+        }
+        return TelegramMessage(messageId: 1, date: 1_757_000_000, chat: chat, from: from,
+                               senderChat: senderChat, text: text, caption: caption,
+                               replyToMessage: target)
     }
 
     private let group = TelegramChat(id: -100, type: "supergroup", title: "Team", username: nil)
@@ -164,6 +170,44 @@ final class TelegramBridgeTests: XCTestCase {
         XCTAssertNil(TelegramChannel.command(in: message("lunch?", chat: group), config: ownerConfig, botUsername: nil))
         let cmd = TelegramChannel.command(in: message("/status", chat: group), config: ownerConfig, botUsername: nil)
         XCTAssertEqual(cmd?.body, "/status")
+    }
+
+    /// Naming the bot is as deliberate as a slash: `@thebot ship it` in a group
+    /// is an order, and the bot's own name does not travel on to the agent.
+    func testGroupMentionOfTheBotIsAnOrder() {
+        let cmd = TelegramChannel.command(in: message("@seahelm_bot ship it", chat: group),
+                                          config: ownerConfig, botUsername: "seahelm_bot")
+        XCTAssertEqual(cmd?.body, "ship it")
+        // Telegram's own capitalisation of a mention is whatever the user typed.
+        XCTAssertEqual(TelegramChannel.command(in: message("@SeaHelm_Bot ship it", chat: group),
+                                               config: ownerConfig, botUsername: "seahelm_bot")?.body,
+                       "ship it")
+    }
+
+    /// Replying to something the bot said is the other way a room addresses it.
+    func testGroupReplyToTheBotIsAnOrder() {
+        let cmd = TelegramChannel.command(in: message("yes, do that", chat: group, replyingTo: "seahelm_bot"),
+                                          config: ownerConfig, botUsername: "seahelm_bot")
+        XCTAssertEqual(cmd?.body, "yes, do that")
+    }
+
+    /// The gate the group rule was always protecting: prose aimed at somebody
+    /// else — another bot, a colleague's message — must not reach an agent.
+    func testGroupProseAimedElsewhereIsStillNotAnOrder() {
+        XCTAssertNil(TelegramChannel.command(in: message("@other_bot deploy", chat: group),
+                                             config: ownerConfig, botUsername: "seahelm_bot"))
+        XCTAssertNil(TelegramChannel.command(in: message("sure", chat: group, replyingTo: "other_bot"),
+                                             config: ownerConfig, botUsername: "seahelm_bot"))
+        // The bot's name with nothing after it is someone talking *about* it.
+        XCTAssertNil(TelegramChannel.command(in: message("@seahelm_bot", chat: group),
+                                             config: ownerConfig, botUsername: "seahelm_bot"))
+    }
+
+    /// A mention is not a way past the allowlist.
+    func testGroupMentionFromUnlistedUserIsIgnored() {
+        let stranger = TelegramUser(id: 7, isBot: false, firstName: "X", username: nil)
+        XCTAssertNil(TelegramChannel.command(in: message("@seahelm_bot deploy", from: stranger, chat: group),
+                                             config: ownerConfig, botUsername: "seahelm_bot"))
     }
 
     /// Telegram appends `@botname` to commands in groups with several bots.

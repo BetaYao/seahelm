@@ -96,15 +96,26 @@ protocol ExternalChannel: AnyObject {
     /// Called by the channel when a message arrives from the external platform
     var onMessage: ((InboundMessage) -> Void)? { get set }
 
+    /// Called when someone taps a button on a message this channel sent.
+    /// Separate from `onMessage` because nothing was said: see `InboundCallback`.
+    var onCallback: ((InboundCallback) -> Void)? { get set }
+
     /// Send a message out to the external platform
     func send(_ message: OutboundMessage)
 
-    /// Take the buttons off a message this channel already sent.
+    /// Send, and report the id of the message the buttons hang under, so the
+    /// caller can come back and change them. Nil when nothing was sent.
+    func send(_ message: OutboundMessage, completion: ((String?) -> Void)?)
+
+    /// Change the buttons on a message this channel already sent; `[]` takes
+    /// them off. Channels that cannot edit what they sent do nothing.
     ///
-    /// A card that has been answered must not go on offering its options — on
-    /// the phone that message stays in the history forever. Channels that
-    /// cannot edit what they sent do nothing.
-    func retireButtons(chatId: String, messageId: String)
+    /// Both directions are needed. A card that has been answered must not go
+    /// on offering its options — on the phone that message stays in the
+    /// history forever — and an agent's suggested next steps are added to the
+    /// completion notice they belong under rather than sent as a second
+    /// message repeating it.
+    func setButtons(chatId: String, messageId: String, buttons: [MessageButton])
 
     /// Connection management
     func connect()
@@ -112,5 +123,15 @@ protocol ExternalChannel: AnyObject {
 }
 
 extension ExternalChannel {
-    func retireButtons(chatId: String, messageId: String) {}
+    func send(_ message: OutboundMessage, completion: ((String?) -> Void)?) {
+        send(message)
+        completion?(nil)
+    }
+
+    func setButtons(chatId: String, messageId: String, buttons: [MessageButton]) {}
+
+    /// The common direction, named for what it means.
+    func retireButtons(chatId: String, messageId: String) {
+        setButtons(chatId: chatId, messageId: messageId, buttons: [])
+    }
 }

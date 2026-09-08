@@ -7,6 +7,32 @@ final class PendingOrdersQueueTests: XCTestCase {
                         project: "p", terminalID: "t", message: "m")
     }
 
+    /// A card that leaves the queue takes its chat buttons with it. The message
+    /// carrying them stays in the chat's history for good, so the token dying is
+    /// the only thing between a second tap and the option being typed into the
+    /// pane twice.
+    func testResolvingACardRetiresItsChatButtons() {
+        let q = PendingOrdersQueue()
+        q.enqueue(action(.suggestNextOrder))
+        let id = q.all()[0].id
+        let token = ChatCallbackRegistry.shared.mint(.suggestionOption(orderId: id, index: 0))
+        XCTAssertNotNil(ChatCallbackRegistry.shared.action(for: token))
+
+        q.resolve(id: id)
+        XCTAssertNil(ChatCallbackRegistry.shared.action(for: token))
+    }
+
+    /// Every removal path, not just `resolve`: a pane that closes takes its
+    /// buttons with it too.
+    func testClosingAPaneRetiresItsChatButtons() {
+        let q = PendingOrdersQueue()
+        q.enqueue(action(.suggestNextOrder))
+        let token = ChatCallbackRegistry.shared.mint(.dismissSuggestion(orderId: q.all()[0].id))
+
+        q.resolvePane(terminalID: "t")
+        XCTAssertNil(ChatCallbackRegistry.shared.action(for: token))
+    }
+
     func testEnqueueAddsOrder() {
         let q = PendingOrdersQueue()
         q.enqueue(action(.suggestNextOrder))

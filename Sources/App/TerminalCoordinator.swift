@@ -90,6 +90,9 @@ class TerminalCoordinator {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
 
+        // Read before the tree changes: the new pane opens where the pane it
+        // came from is standing, not at the worktree root.
+        let inherited = inheritedWorkingDirectory(leafId: tree.focusedId, tree: tree)
         let paneSessionKey = tree.nextSessionName()
         let station = Station()
         station.paneSessionKey = paneSessionKey
@@ -106,7 +109,8 @@ class TerminalCoordinator {
             tree: tree,
             newStation: station,
             newLeafId: leafId,
-            focusNew: true
+            focusNew: true,
+            workingDirectory: inherited
         )
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
@@ -146,6 +150,7 @@ class TerminalCoordinator {
             targetLeafId = tree.focusedId
         }
 
+        let inherited = inheritedWorkingDirectory(leafId: targetLeafId, tree: tree)
         let paneSessionKey = paneSessionKeyOverride ?? tree.nextSessionName()
         let station = Station()
         station.paneSessionKey = paneSessionKey
@@ -168,13 +173,22 @@ class TerminalCoordinator {
             newStation: station,
             newLeafId: leafId,
             focusNew: focus,
-            restoreFocusLeafId: focus ? nil : previousFocus
+            restoreFocusLeafId: focus ? nil : previousFocus,
+            workingDirectory: inherited
         )
 
         delegate?.terminalCoordinatorDidUpdateSurfaces(self)
         saveSplitLayout(tree)
         announceFocusChange(container)
         return station.id
+    }
+
+    /// Where a split off `leafId` should open. The worktree root is the floor,
+    /// so a pane whose directory cannot be read behaves as it always did.
+    private func inheritedWorkingDirectory(leafId: String, tree: SplitTree) -> String {
+        let station = tree.allLeaves.first { $0.id == leafId }
+            .flatMap { StationRegistry.shared.station(forId: $0.stationId) }
+        return PaneWorkingDirectory.resolve(station: station, worktreePath: tree.worktreePath)
     }
 
     /// Whether an existing pane should adopt the new frame *without* a PTY
@@ -199,7 +213,8 @@ class TerminalCoordinator {
         newStation: Station,
         newLeafId: String,
         focusNew: Bool,
-        restoreFocusLeafId: String? = nil
+        restoreFocusLeafId: String? = nil,
+        workingDirectory: String? = nil
     ) {
         let frames = SplitContainerView.computeFrames(node: tree.root, in: container.bounds)
         let newFrame = frames[newLeafId] ?? container.bounds
@@ -219,7 +234,7 @@ class TerminalCoordinator {
         }
         _ = newStation.create(
             in: container,
-            workingDirectory: tree.worktreePath,
+            workingDirectory: workingDirectory ?? tree.worktreePath,
             paneSessionKey: newStation.paneSessionKey,
             initialFrame: newFrame
         )

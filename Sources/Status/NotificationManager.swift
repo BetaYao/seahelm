@@ -421,8 +421,19 @@ class NotificationManager: NSObject {
     /// The AgentRegistry broadcast this replaced had none of those, and never fired on
     /// completion at all.
     ///
+    /// Fires on every edge that earns a banner, whether or not the banner is
+    /// actually shown, and reports which via `bannerSuppressed`. Suppression is
+    /// a statement about *this screen* — the pane is on it, frontmost — and the
+    /// phone is not this screen: a chat that bound itself to the pane with
+    /// `/go #n` asked for its answers from somewhere else and must still get
+    /// them. Deciding it here would silence that chat too, which is the bug
+    /// where an order sent from Telegram was answered only in the terminal the
+    /// sender happened to be sitting in front of. The receiver draws the line
+    /// between a bound conversation and a fleet-wide listener.
+    ///
     /// Set by MainWindowController; nil in tests and headless runs.
-    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String, _ terminalID: String) -> Void)?
+    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String,
+                             _ terminalID: String, _ bannerSuppressed: Bool) -> Void)?
 
     /// Whether a suggestion card for this pane is already expanded on screen (the
     /// island popped open with it). Set by MainWindowController; nil in tests and
@@ -649,21 +660,24 @@ class NotificationManager: NSObject {
         // expanded showing this pane's suggestion card (the same completion,
         // rendered with the buttons that act on it).
         let cardOnScreen = !terminalID.isEmpty && isCardOnScreen?(terminalID) == true
-        if Self.shouldSuppressBanner(appActive: NSApp.isActive,
-                                     targetVisible: isTargetVisible,
-                                     cardOnScreen: cardOnScreen) { return }
+        let bannerSuppressed = Self.shouldSuppressBanner(appActive: NSApp.isActive,
+                                                         targetVisible: isTargetVisible,
+                                                         cardOnScreen: cardOnScreen)
 
         // Mirror the banner, not the history entry: this fires on exactly the
-        // edges that earn a banner, and is skipped by the return above when the
-        // user is already looking at the pane — a phone ping for something on
-        // screen in front of them is noise.
+        // edges that earn a banner, so the chat inherits the same gating. It is
+        // handed the suppression flag rather than gated by it — see the
+        // property's note: a chat bound to this pane hears it even while the
+        // pane is on screen, a fleet-wide listener still yields to the screen.
         onDeliverExternal?(newStatus, content.title, content.subtitle,
                            Self.formatExternalBody(status: newStatus,
                                                    workspaceName: workspaceName,
                                                    branch: branch,
                                                    lastMessage: lastMessage,
                                                    lastAssistantMessage: lastAssistantMessage),
-                           terminalID)
+                           terminalID, bannerSuppressed)
+
+        if bannerSuppressed { return }
 
         var userInfo: [String: Any] = ["worktreePath": worktreePath]
         if let historyPaneIndex { userInfo["paneIndex"] = historyPaneIndex }

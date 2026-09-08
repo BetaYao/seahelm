@@ -16,6 +16,7 @@ final class TelegramChannel: ExternalChannel {
     let channelId: String
     let channelType: ExternalChannelType = .telegram
     var onMessage: ((InboundMessage) -> Void)?
+    var onCallback: ((InboundCallback) -> Void)?
     var onStateChange: ((GatewayState) -> Void)?
 
     private var config: TelegramConfig
@@ -46,6 +47,14 @@ final class TelegramChannel: ExternalChannel {
     /// The chat the most recent order came from: the broadcast fallback when
     /// the config names no chat and no allowed user is numeric.
     private var lastCommandChatId: String?
+
+    /// Where unbound fleet notifications go: configured default, else the chat
+    /// that last issued an order.
+    var fleetNotifyChatId: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return config.resolvedDefaultChatId ?? lastCommandChatId
+    }
 
     private static let maxBackoff: TimeInterval = 30
     /// Attempts per outbound chunk before the rest of the message is abandoned.
@@ -103,6 +112,13 @@ final class TelegramChannel: ExternalChannel {
     }
 
     func send(_ message: OutboundMessage) {
+        send(message, completion: nil)
+    }
+
+    /// `completion` reports the id of the message that carries the buttons —
+    /// the last chunk — so a caller can come back and change them later. It
+    /// fires with nil when nothing was sent.
+    func send(_ message: OutboundMessage, completion: ((String?) -> Void)?) {
         lock.lock()
         let cfg = config
         let api = self.api
@@ -112,6 +128,7 @@ final class TelegramChannel: ExternalChannel {
 
         guard let api else {
             NSLog("[Telegram] Dropping outbound: bridge not connected")
+            completion?(nil)
             return
         }
 
@@ -125,6 +142,7 @@ final class TelegramChannel: ExternalChannel {
 
         guard let target, !target.isEmpty else {
             NSLog("[Telegram] Dropping outbound: no recipient configured")
+            completion?(nil)
             return
         }
 
@@ -132,47 +150,85 @@ final class TelegramChannel: ExternalChannel {
         let rendered = parseMode == nil ? message.content : TelegramFormatter.html(from: message.content)
 
         sendQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                completion?(nil)
+                return
+            }
             let chunks = TelegramFormatter.chunk(rendered)
+            var lastId: Int?
             for (index, chunk) in chunks.enumerated() {
-                guard self.sendChunk(api: api, target: target, chunk: chunk, parseMode: parseMode) else {
+                // The keyboard belongs to the end of what it is about: on a
+                // long card, the options must sit under the last screenful,
+                // not three messages above it. That last chunk is also the one
+                // reported back, for the same reason.
+                let buttons = index == chunks.count - 1 ? message.buttons : []
+                guard let id = self.sendChunk(api: api, target: target, chunk: chunk,
+                                              parseMode: parseMode, buttons: buttons) else {
                     // Say how much was lost. A long answer that stops mid-way
                     // with nothing to mark the cut reads as the agent having
                     // said only that much.
                     NSLog("[Telegram] Gave up with \(chunks.count - index) of \(chunks.count) chunk(s) unsent")
+                    completion?(nil)
                     return
                 }
+                lastId = id
             }
+            completion?(lastId.map(String.init))
         }
     }
 
     /// One chunk, retried. A multi-part answer that loses its second part to a
     /// transient network error is worse than one that arrives late: the reader
     /// gets a truncated message and nothing tells them it was cut.
-    private func sendChunk(api: TelegramBotAPI, target: String, chunk: String, parseMode: String?) -> Bool {
+    /// The sent message's id, or nil if the chunk was lost.
+    private func sendChunk(api: TelegramBotAPI, target: String, chunk: String, parseMode: String?,
+                          buttons: [MessageButton] = []) -> Int? {
         for attempt in 1...Self.sendAttempts {
             do {
-                try api.sendMessage(chatId: target, text: chunk, parseMode: parseMode)
+                let id = try api.sendMessage(chatId: target, text: chunk, parseMode: parseMode,
+                                             buttons: buttons)
                 NSLog("[Telegram] → \(target): \(chunk.count) chars")
-                return true
+                return id
             } catch let error as TelegramAPIError where error.isBadRequest && parseMode != nil {
                 // Telegram is strict about its HTML. Rather than lose the
                 // message over a stray tag, resend the same words flat.
                 do {
-                    try api.sendMessage(chatId: target, text: TelegramFormatter.stripHTML(chunk), parseMode: nil)
-                    return true
+                    return try api.sendMessage(chatId: target, text: TelegramFormatter.stripHTML(chunk),
+                                               parseMode: nil, buttons: buttons)
                 } catch {
                     NSLog("[Telegram] Send failed (flat): \(error.localizedDescription)")
-                    return false
+                    return nil
                 }
             } catch TelegramAPIError.cancelled {
-                return false
+                return nil
             } catch {
                 NSLog("[Telegram] Send attempt \(attempt)/\(Self.sendAttempts) failed: \(error.localizedDescription)")
                 if attempt < Self.sendAttempts { Thread.sleep(forTimeInterval: Self.sendRetryDelay) }
             }
         }
-        return false
+        return nil
+    }
+
+    /// Put the buttons on a message already sent, or take them off with `[]`.
+    ///
+    /// Best effort: a message Telegram will not let us edit (too old, deleted,
+    /// or already carrying exactly this keyboard) is not worth a retry — for
+    /// the taking-off direction `ChatCallbackRegistry` has already made the
+    /// buttons inert, and for the putting-on direction the options are still
+    /// in the message's own text.
+    func setButtons(chatId: String, messageId: String, buttons: [MessageButton]) {
+        guard let id = Int(messageId) else { return }
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        guard let api else { return }
+        sendQueue.async {
+            do {
+                try api.setReplyMarkup(chatId: chatId, messageId: id, buttons: buttons)
+            } catch {
+                NSLog("[Telegram] Could not set buttons on \(chatId)/\(id): \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Config
@@ -227,7 +283,11 @@ final class TelegramChannel: ExternalChannel {
             lock.unlock()
             for update in updates {
                 offset = max(offset ?? 0, update.updateId + 1)
-                if let message = update.payload { handle(message, config: live) }
+                if let message = update.payload {
+                    handle(message, config: live)
+                } else if let callback = update.callbackQuery {
+                    handle(callback: callback, config: live)
+                }
             }
         }
     }
@@ -377,6 +437,45 @@ final class TelegramChannel: ExternalChannel {
                              content: markdown, format: .markdown))
     }
 
+    /// Someone tapped a button on a card the bridge sent.
+    ///
+    /// The tap is answered here and immediately — Telegram spins the button
+    /// until it is, and an unanswered query reads as the bot having died
+    /// mid-tap — while what the button *means* is resolved upstairs, where the
+    /// fleet is. The outcome comes back as an ordinary message rather than a
+    /// toast: on a card that moved an agent, "which option did I pick" is worth
+    /// keeping in the chat, and a toast is gone the moment you look away.
+    private func handle(callback: TelegramCallbackQuery, config cfg: TelegramConfig) {
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+
+        guard cfg.allows(user: callback.from) else {
+            NSLog("[Telegram] Ignoring button tap from unlisted user \(callback.from.displayName) (\(callback.from.id))")
+            try? api?.answerCallbackQuery(id: callback.id, text: "Not for you.")
+            return
+        }
+        try? api?.answerCallbackQuery(id: callback.id, text: nil)
+
+        guard let token = callback.data, !token.isEmpty, let message = callback.message else { return }
+        let chatId = String(message.chat.id)
+
+        lock.lock()
+        chatIdBySender[String(callback.from.id)] = chatId
+        lastCommandChatId = chatId
+        lock.unlock()
+
+        NSLog("[Telegram] ← \(callback.from.displayName) tapped \(token) in \(chatId)")
+        onCallback?(InboundCallback(
+            channelId: channelId,
+            senderId: String(callback.from.id),
+            senderName: callback.from.displayName,
+            chatId: chatId,
+            messageId: String(message.messageId),
+            token: token
+        ))
+    }
+
     /// A message that is not an order may still be work: a monitoring channel
     /// the bot was added to, a colleague in a group, a stranger asking. Run it
     /// past the rules and, on a match, hand the rendered prompt up as an
@@ -429,8 +528,12 @@ final class TelegramChannel: ExternalChannel {
     ///    never be orders, only signals.
     /// 2. **Chat** — in a private chat with the bot everything is an order,
     ///    prose included, because there is nobody else to be talking to. In a
-    ///    group only a `/command` is: bare prose there is conversation, and a
-    ///    stray line in a shared group must not steer an agent.
+    ///    group it must be *addressed to the bot*: a `/command`, a line
+    ///    starting `@thebot`, or a reply to something the bot itself said.
+    ///    What stays out is bare prose — a stray line in a shared group must
+    ///    not steer an agent — and that is the only thing the group rule was
+    ///    ever protecting. Naming the bot is as deliberate as a slash, so
+    ///    refusing it only taught people that the bot was broken in groups.
     ///
     /// No echo guard is needed. The bot's own messages never come back as
     /// updates — that was the whole trouble with a transport that shared the
@@ -451,8 +554,40 @@ final class TelegramChannel: ExternalChannel {
         }
 
         let body = stripBotMention(text, botUsername: botUsername)
-        guard message.chat.isPrivate || body.hasPrefix("/") else { return nil }
-        return Command(body: body, senderId: String(from.id), senderName: from.displayName)
+        if message.chat.isPrivate || body.hasPrefix("/") {
+            return Command(body: body, senderId: String(from.id), senderName: from.displayName)
+        }
+        guard let addressed = addressedProse(body, message: message, botUsername: botUsername) else {
+            return nil
+        }
+        return Command(body: addressed, senderId: String(from.id), senderName: from.displayName)
+    }
+
+    /// Group prose aimed at the bot, with the address taken off; nil when the
+    /// line was not aimed at it.
+    ///
+    /// Telegram gives a room two ways to talk *to* a bot rather than about it,
+    /// and both are explicit enough to carry an order:
+    ///
+    ///   - a leading `@thebot` — what Telegram's own mention autocomplete
+    ///     inserts, and stripped here so the agent is not handed its own name;
+    ///   - a reply to one of the bot's messages, which is how you answer a
+    ///     card or follow up on an agent's report without naming anyone.
+    ///
+    /// A mention with nothing after it is not an order: it is someone typing
+    /// the bot's name, usually about it.
+    static func addressedProse(_ body: String, message: TelegramMessage, botUsername: String?) -> String? {
+        guard let name = botUsername, !name.isEmpty else { return nil }
+        let mention = "@\(name)"
+        if body.lowercased().hasPrefix(mention.lowercased()) {
+            let rest = String(body.dropFirst(mention.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return rest.isEmpty ? nil : rest
+        }
+        if let replied = message.replyToMessage?.from?.username,
+           replied.lowercased() == name.lowercased() {
+            return body
+        }
+        return nil
     }
 
     /// `/status@seahelm_bot` is how Telegram disambiguates commands in a group

@@ -138,6 +138,35 @@ final class CommandSessionStore {
         queue.sync { sessions.values.filter { $0.boundPaneKey == paneKey && !$0.closed } }
     }
 
+    /// Telegram chats that should hear a pane-status notification.
+    ///
+    /// Bound chats for `paneKey` always hear it. `fleetListenerChatIds` (the
+    /// configured default / last-order chat) hear the whole fleet only while
+    /// unbound — after `/go #n` they are silenced for every other pane, which
+    /// is what binding is for.
+    func telegramChatsToNotify(paneKey: String?,
+                               fleetListenerChatIds: [String]) -> [String] {
+        queue.sync {
+            var chats = Set<String>()
+            if let paneKey {
+                for session in sessions.values
+                where session.surface == "telegram"
+                    && !session.closed
+                    && session.boundPaneKey == paneKey {
+                    chats.insert(session.id)
+                }
+            }
+            for chatId in fleetListenerChatIds {
+                let session = sessions[CommandSession.key(surface: "telegram", id: chatId)]
+                    ?? CommandSession(key: CommandSession.key(surface: "telegram", id: chatId))
+                if session.boundPaneKey == nil || session.closed {
+                    chats.insert(chatId)
+                }
+            }
+            return Array(chats)
+        }
+    }
+
     /// Mark every session bound to this pane closed. Returns them, so the
     /// caller can clean up whatever else the binding owned.
     @discardableResult

@@ -87,6 +87,41 @@ final class CommandSessionStoreTests: XCTestCase {
         try Data("{}".utf8).write(to: legacy)
         XCTAssertEqual(CommandSessionStore(url: url, legacyMailURL: legacy).session(for: "mail:thread-1").commander, "me@x.y")
     }
+
+    /// Unbound default chat hears every pane; after `/go` it only hears that pane.
+    func testTelegramNotifyRoutingRespectsGoBinding() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let me = "42"
+        // Unbound: fleet listener gets every event.
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me])), [me])
+
+        store.bind("telegram:\(me)", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
+        // Bound to #16: only #16 events.
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me]).isEmpty)
+
+        // A group bound to the same pane still hears it; the personal chat does too.
+        store.bind("telegram:group99", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])),
+                       Set([me, "group99"]))
+    }
+
+    /// The desk looking at a pane must not silence the chat that ordered it.
+    ///
+    /// When the pane is on screen and frontmost the banner is suppressed, and
+    /// with it the fleet-wide listeners — `fleetListenerChatIds` arrives empty.
+    /// A chat bound with `/go` still hears its pane: it sent the order from a
+    /// phone that is not looking at this screen, and its answer used to be lost
+    /// entirely, delivered only to the terminal the sender happened to be
+    /// sitting in front of.
+    func testBoundChatHearsItsPaneWithNoFleetListeners() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:42", toPaneKey: "k12", paneId: "p12", worktreePath: "/w")
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "k12", fleetListenerChatIds: []), ["42"])
+        // Another pane's event still says nothing while the fleet is silenced.
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: []).isEmpty)
+    }
 }
 
 final class PaneHandleRegistryTests: XCTestCase {
