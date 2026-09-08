@@ -7,6 +7,7 @@ final class MockExternalChannel: ExternalChannel {
     let channelType: ExternalChannelType = .telegram
     var gatewayState: GatewayState = .disconnected
     var onMessage: ((InboundMessage) -> Void)?
+    var onCallback: ((InboundCallback) -> Void)?
     var sentMessages: [OutboundMessage] = []
     var connectCalled = false
     var disconnectCalled = false

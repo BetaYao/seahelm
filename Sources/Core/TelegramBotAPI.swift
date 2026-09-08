@@ -27,6 +27,16 @@ struct TelegramChat: Decodable, Equatable {
     var isPrivate: Bool { type == "private" }
 }
 
+/// The slice of a message the bridge needs when it is the *target* of a reply.
+///
+/// Not a `TelegramMessage`: a value type cannot contain itself, and the only
+/// question ever asked of a reply target is who sent it — replying to the
+/// bot's own message is how you address it in a group without typing its name.
+struct TelegramReplyTarget: Decodable, Equatable {
+    let messageId: Int
+    let from: TelegramUser?
+}
+
 struct TelegramMessage: Decodable, Equatable {
     let messageId: Int
     /// Unix seconds.
@@ -39,15 +49,40 @@ struct TelegramMessage: Decodable, Equatable {
     let text: String?
     /// A photo or document sent with a note carries the note here, not in `text`.
     let caption: String?
+    /// The message this one replies to, when it replies to anything.
+    let replyToMessage: TelegramReplyTarget?
+
+    init(messageId: Int, date: TimeInterval, chat: TelegramChat, from: TelegramUser?,
+         senderChat: TelegramChat?, text: String?, caption: String?,
+         replyToMessage: TelegramReplyTarget? = nil) {
+        self.messageId = messageId
+        self.date = date
+        self.chat = chat
+        self.from = from
+        self.senderChat = senderChat
+        self.text = text
+        self.caption = caption
+        self.replyToMessage = replyToMessage
+    }
 
     var body: String? { text ?? caption }
     var timestamp: Date { Date(timeIntervalSince1970: date) }
+}
+
+/// Someone tapped an inline button. `data` is the token the button carried out;
+/// `message` is the one it hangs under, so the buttons can be taken off it.
+struct TelegramCallbackQuery: Decodable, Equatable {
+    let id: String
+    let from: TelegramUser
+    let message: TelegramMessage?
+    let data: String?
 }
 
 struct TelegramUpdate: Decodable, Equatable {
     let updateId: Int
     let message: TelegramMessage?
     let channelPost: TelegramMessage?
+    let callbackQuery: TelegramCallbackQuery?
 
     /// The one kind of payload the bridge acts on. Edits, reactions and the
     /// rest are deliberately not requested (`allowedUpdates`), so they never
@@ -84,7 +119,7 @@ private struct LenientUpdate: Decodable {
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         update = TelegramUpdate(updateId: try c.decode(Int.self, forKey: .updateId),
-                                message: nil, channelPost: nil)
+                                message: nil, channelPost: nil, callbackQuery: nil)
     }
 }
 
@@ -189,8 +224,10 @@ final class TelegramBotAPI {
             "timeout": timeout,
             "limit": limit,
             // Only what the bridge acts on. Asking for less also means a bot
-            // added to a busy group is not woken for every reaction.
-            "allowed_updates": ["message", "channel_post"],
+            // added to a busy group is not woken for every reaction. A button
+            // tap is a `callback_query` and arrives on no other channel — leave
+            // it out and the inline keyboards below are decorative.
+            "allowed_updates": ["message", "channel_post", "callback_query"],
         ]
         if let offset { params["offset"] = offset }
         let lenient: [LenientUpdate] = try call("getUpdates", params: params,
@@ -200,7 +237,13 @@ final class TelegramBotAPI {
 
     /// `parseMode` is `"HTML"` or nil for plain text. Callers chunk to
     /// `TelegramFormatter.maxMessageLength` first; this sends one message.
-    func sendMessage(chatId: String, text: String, parseMode: String?) throws {
+    ///
+    /// `buttons` become a one-per-row inline keyboard. Returns the sent
+    /// message's id, which is what a later `editMessageReplyMarkup` needs to
+    /// take those buttons off again.
+    @discardableResult
+    func sendMessage(chatId: String, text: String, parseMode: String?,
+                     buttons: [MessageButton] = []) throws -> Int {
         var params: [String: Any] = [
             "chat_id": chatId,
             "text": text,
@@ -209,7 +252,56 @@ final class TelegramBotAPI {
             "link_preview_options": ["is_disabled": true],
         ]
         if let parseMode { params["parse_mode"] = parseMode }
-        let _: TelegramMessage = try call("sendMessage", params: params, deadline: Self.stallSeconds)
+        if !buttons.isEmpty {
+            params["reply_markup"] = ["inline_keyboard": Self.keyboard(buttons)]
+        }
+        let sent: TelegramMessage = try call("sendMessage", params: params, deadline: Self.stallSeconds)
+        return sent.messageId
+    }
+
+    /// One button per row: an option is a sentence, and Telegram truncates a
+    /// row it cannot fit rather than wrapping it.
+    static func keyboard(_ buttons: [MessageButton]) -> [[[String: String]]] {
+        buttons.map { [["text": trimLabel($0.label), "callback_data": $0.token]] }
+    }
+
+    /// Telegram's own cap is generous but a button wider than the phone reads
+    /// as a wall of text. Cut on a whole character, keeping the front, which is
+    /// where an option says what it does.
+    static func trimLabel(_ label: String, limit: Int = 48) -> String {
+        let flat = label.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard flat.count > limit else { return flat }
+        return String(flat.prefix(limit - 1)) + "\u{2026}"
+    }
+
+    /// Stop the spinner on the tapper's phone, optionally with a toast.
+    ///
+    /// Telegram shows a button as pending until this lands, so it is answered
+    /// even when the tap turned out to be stale: an unanswered query reads as
+    /// the bot having died mid-tap.
+    func answerCallbackQuery(id: String, text: String?) throws {
+        var params: [String: Any] = ["callback_query_id": id]
+        if let text, !text.isEmpty { params["text"] = String(text.prefix(200)) }
+        let _: Bool = try call("answerCallbackQuery", params: params, deadline: Self.stallSeconds)
+    }
+
+    /// Put a keyboard on a message already sent, or take one off with `[]`.
+    ///
+    /// Both directions matter. An answered card must stop offering its options
+    /// — the message stays in the chat's history forever and a second tap would
+    /// drive the pane's TUI again — and an agent's suggested next steps arrive
+    /// a beat after the completion notice they belong under, so they are added
+    /// to that message rather than sent as a second one saying the same words.
+    func setReplyMarkup(chatId: String, messageId: Int, buttons: [MessageButton]) throws {
+        var params: [String: Any] = ["chat_id": chatId, "message_id": messageId]
+        if !buttons.isEmpty {
+            params["reply_markup"] = ["inline_keyboard": Self.keyboard(buttons)]
+        }
+        // Editing a chat message answers with the edited message, not `true`
+        // — that shape is only for inline-mode messages, which this is not.
+        let _: TelegramMessage = try call("editMessageReplyMarkup", params: params,
+                                          deadline: Self.stallSeconds)
     }
 
     /// Publish the verb table to Telegram, so typing `/` in the chat lists the

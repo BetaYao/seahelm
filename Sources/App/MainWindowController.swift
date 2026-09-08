@@ -105,6 +105,17 @@ class MainWindowController: NSWindowController {
     /// separately from `islandSeenSuggestions`: the island's set is also advanced by
     /// its 10s fallback timer, which would eat the "new order" edge this needs.
     private var revealedSuggestions = SuggestionSeenSet()
+    /// Cards already mirrored to chat. Its own set: a card the island has shown
+    /// still has to reach the phone, and the phone must not be sent the same
+    /// question twice because the desktop happened to re-pop it.
+    private var chatSeenCards = SuggestionSeenSet()
+    /// Where each card's buttons are drawn right now, so they can be taken down
+    /// when the card goes — answered on the Mac, or the agent moved past it.
+    private var cardButtonMessages: [String: [ChatNoticeBook.Ref]] = [:]
+    /// The last thing said about a pane in each chat. An agent's suggested next
+    /// steps are added to that message as buttons rather than arriving as a
+    /// second message repeating the words it already carries.
+    private var noticeBook = ChatNoticeBook()
 
     // Terminal management
     /// GitHub token 解析，来源优先级：
@@ -314,6 +325,9 @@ class MainWindowController: NSWindowController {
         }
         AgentRegistry.shared.ruleTriggerRoute = { [weak self] prompt, target in
             self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
+        }
+        AgentRegistry.shared.callbackRoute = { [weak self] callback in
+            self?.handleChatCallback(callback)
         }
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
@@ -2310,6 +2324,8 @@ extension MainWindowController {
         // Notification Center's job. Frontmost, this yields to the First Mate
         // sidebar only for a card that sidebar is actually showing — a
         // suggestion raised in a worktree that isn't on screen pops here.
+        publishCardsToChat(tabCoordinator.pendingOrders.all())
+
         let fresh = islandSeenSuggestions.absorb(orders)
         if !fresh.isEmpty, !model.isOpened {
             let targetVisible = fresh.allSatisfy {
@@ -3037,7 +3053,243 @@ extension MainWindowController: CommandHost {
             paneKey: paneKey, fleetListenerChatIds: fleet)
         for chatId in chats {
             AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown))
+                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
+            ) { [weak self] messageId in
+                // Remembered so an agent's next-step options, which land a beat
+                // after this, can be added to it as buttons.
+                guard !terminalID.isEmpty, let messageId else { return }
+                DispatchQueue.main.async {
+                    self?.rememberNotice(terminalID: terminalID, chatId: chatId, messageId: messageId)
+                }
+            }
         }
+    }
+}
+
+
+// MARK: - Chat cards
+
+extension MainWindowController {
+    /// One message per card, and only when there is something to say.
+    ///
+    /// Both kinds of card carry options, but they earn their place on a phone
+    /// differently:
+    ///
+    ///   - A **question** is a stop. The pane sits at its prompt until someone
+    ///     picks, and until this existed the only place to pick was this Mac,
+    ///     which made every approval a walk back to the desk. It gets a message
+    ///     of its own.
+    ///   - A **suggestion** is an offer, and its words have already been sent:
+    ///     the card's summary and the completion notice are both the agent's
+    ///     final prose. So it gets no message — its options are added to that
+    ///     notice as buttons. No notice, no buttons: if the completion was
+    ///     never worth telling the phone about, neither are its next steps.
+    ///
+    /// A suggestion whose notice has not come back with an id yet is left out
+    /// of the seen set rather than dropped, so the next pass picks it up.
+    func publishCardsToChat(_ orders: [PendingOrder]) {
+        retireVanishedCardButtons(live: Set(orders.map(\.id)))
+
+        let attachable = orders.filter { order in
+            guard !(order.action.options ?? []).isEmpty else { return false }
+            return FirstMateAction.isQuestionPayload(order.action.payload)
+                || !noticeBook.recent(pane: order.action.terminalID).isEmpty
+        }
+        for order in chatSeenCards.absorb(attachable) {
+            if FirstMateAction.isQuestionPayload(order.action.payload) {
+                sendCardToChat(order)
+            } else {
+                attachOptionsToNotice(order)
+            }
+        }
+    }
+
+    /// Add a suggestion's options to the completion notice they belong under.
+    private func attachOptionsToNotice(_ order: PendingOrder) {
+        let targets = noticeBook.recent(pane: order.action.terminalID)
+        guard !targets.isEmpty else { return }
+        let buttons = optionButtons(for: order)
+        for target in targets {
+            AgentRegistry.shared.setButtons(channelId: "telegram", chatId: target.chatId,
+                                            messageId: target.messageId, buttons: buttons)
+        }
+        cardButtonMessages[order.id] = targets
+    }
+
+    func rememberNotice(terminalID: String, chatId: String, messageId: String) {
+        noticeBook.record(pane: terminalID, chatId: chatId, messageId: messageId)
+    }
+
+    /// Take the buttons off cards that have left the queue, and forget notices
+    /// too old to attach to. Runs on the island's refresh, which is the only
+    /// place that sees the queue as a whole.
+    private func retireVanishedCardButtons(live: Set<String>) {
+        for orderId in cardButtonMessages.keys where !live.contains(orderId) {
+            retireCardButtons(orderId)
+        }
+        noticeBook.prune()
+    }
+
+    /// Take one card's buttons down everywhere they were drawn — answering it
+    /// in one chat must not leave it on offer in another.
+    private func retireCardButtons(_ orderId: String) {
+        for ref in cardButtonMessages.removeValue(forKey: orderId) ?? [] {
+            AgentRegistry.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
+                                            messageId: ref.messageId, buttons: [])
+        }
+    }
+
+    /// The card's options as buttons. `dismissable` adds a way to clear a card
+    /// without answering it — worth offering on a question, which otherwise
+    /// sits there, and not on a suggestion, where not tapping *is* declining.
+    private func optionButtons(for order: PendingOrder, dismissable: Bool = false) -> [MessageButton] {
+        // Minted once and shared by every chat the card reaches: a token says
+        // what the button means, not who tapped it.
+        var buttons = (order.action.options ?? []).enumerated().map { index, label in
+            MessageButton(label: label, token: ChatCallbackRegistry.shared.mint(
+                .suggestionOption(orderId: order.id, index: index)))
+        }
+        if dismissable {
+            buttons.append(MessageButton(label: "Leave it waiting",
+                                         token: ChatCallbackRegistry.shared.mint(
+                                            .dismissSuggestion(orderId: order.id))))
+        }
+        return buttons
+    }
+
+    private func sendCardToChat(_ order: PendingOrder) {
+        let pane = AgentRegistry.shared.pane(for: order.action.terminalID)
+        let paneKey = pane.map {
+            PaneHandleRegistry.key(sessionKey: $0.station?.paneSessionKey ?? "", paneId: $0.id)
+        }
+        // Unlike a completion notice, a card is not silenced by `/go`. Binding
+        // says "route my conversation to #12"; it does not say "don't tell me
+        // when the fleet stops". A blocked agent is the one thing that never
+        // resolves itself, and a chat bound to another pane is still the only
+        // way its owner can answer this one without walking back to the Mac.
+        var chats = Set(tabCoordinator.commandSessions.telegramChatsToNotify(
+            paneKey: paneKey, fleetListenerChatIds: []))
+        if let chat = config.telegram?.resolvedDefaultChatId { chats.insert(chat) }
+        if let chat = telegramChannel?.fleetNotifyChatId { chats.insert(chat) }
+        guard !chats.isEmpty else { return }
+
+        let buttons = optionButtons(for: order, dismissable: true)
+        let text = Self.questionCardText(
+            handle: paneKey.map { PaneHandleRegistry.shared.handle(for: $0) },
+            project: order.action.project, branch: order.action.branch,
+            message: order.action.message, options: order.action.options ?? [])
+        for chatId in chats {
+            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+                channelId: "telegram", targetChatId: chatId, content: text,
+                format: .markdown, buttons: buttons)
+            ) { [weak self] messageId in
+                guard let messageId else { return }
+                DispatchQueue.main.async {
+                    self?.cardButtonMessages[order.id, default: []].append(
+                        ChatNoticeBook.Ref(chatId: chatId, messageId: messageId))
+                }
+            }
+        }
+    }
+
+
+    /// The card as a chat message. Pure, so its shape is testable.
+    ///
+    /// The options are spelled out in the text as well as drawn as buttons: a
+    /// button label is trimmed to fit a phone's width, and the difference
+    /// between two options is often in the part that gets trimmed.
+    static func questionCardText(handle: Int?, project: String, branch: String,
+                                 message: String, options: [String]) -> String {
+        let target = [project, branch].filter { !$0.isEmpty }.joined(separator: " / ")
+        let head = [handle.map { "#\($0)" }, target.isEmpty ? nil : target]
+            .compactMap { $0 }.joined(separator: " · ")
+        var lines = ["\(AgentStatus.waiting.icon) **Waiting on you**"]
+        if !head.isEmpty { lines.append(head) }
+        let prompt = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty { lines.append("\n\(prompt)") }
+        if !options.isEmpty {
+            lines.append("")
+            for (index, option) in options.enumerated() {
+                lines.append("\(index + 1). \(option)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Someone tapped a button in a chat.
+    ///
+    /// A token that no longer resolves is not an error: the tokens live only as
+    /// long as the run, and a card's message sits in the chat's history forever,
+    /// so a tap can arrive from last week or from before a relaunch. Say so and
+    /// change nothing — replaying it against a fleet that has moved on is how a
+    /// stale button ends up typing into somebody else's pane.
+    func handleChatCallback(_ callback: InboundCallback) {
+        guard let action = ChatCallbackRegistry.shared.action(for: callback.token) else {
+            replyToChat(callback, "That card has already been answered — or it is from before seahelm last started.")
+            return
+        }
+        switch action {
+        case .command(let line):
+            // A line's buttons are a listing's shortcuts — `/go #7` beside each
+            // pane — and stay tappable: picking one is not answering anything.
+            let surface = CommandSurface(
+                sessionKey: CommandSession.key(surface: "telegram", id: callback.chatId),
+                isDesktop: false, commander: callback.senderId)
+            commandExecutor.run(line, surface: surface) { [weak self] reply in
+                guard !reply.text.isEmpty else { return }
+                self?.replyToChat(callback, reply.text)
+            }
+            return
+        case .suggestionOption(let orderId, let index):
+            guard let order = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }),
+                  let options = order.action.options, index < options.count else {
+                replyToChat(callback, "That card is gone — the agent moved on.")
+                return
+            }
+            let option = options[index]
+            // Retire first: answering the card re-enqueues the next question of
+            // a multi-part ask under the same id, and its fresh tokens must not
+            // be swept away by the resolve that follows.
+            ChatCallbackRegistry.shared.retire(orderId: orderId)
+            handleSuggestionTapped(order: order, optionText: option)
+            replyToChat(callback, "Picked **\(option)**.")
+        case .dismissSuggestion(let orderId):
+            tabCoordinator.pendingOrders.resolve(id: orderId)
+            replyToChat(callback, "Left it. The agent is still waiting — answer it on the Mac when you get there.")
+        }
+        // The card has been dealt with; its buttons must stop offering options
+        // in a message that stays in the chat's history for good — in *every*
+        // chat that was shown it, not only the one that answered. (A `.command`
+        // button returned above; nothing was answered.)
+        let orderId = Self.orderId(of: action)
+        let tapped = ChatNoticeBook.Ref(chatId: callback.chatId, messageId: callback.messageId)
+        if let orderId {
+            // Matched on the message, not the whole ref: `at` is "now" here and
+            // would never equal the moment the card was sent, so an identity
+            // comparison would book the same message twice and edit it twice.
+            let known = cardButtonMessages[orderId]?.contains {
+                $0.chatId == tapped.chatId && $0.messageId == tapped.messageId
+            } ?? false
+            if !known { cardButtonMessages[orderId, default: []].append(tapped) }
+            retireCardButtons(orderId)
+        } else {
+            AgentRegistry.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
+                                            messageId: callback.messageId, buttons: [])
+        }
+    }
+
+    /// Which card a tap belongs to, when it belongs to one.
+    private static func orderId(of action: ChatCallbackAction) -> String? {
+        switch action {
+        case .command: return nil
+        case .suggestionOption(let orderId, _): return orderId
+        case .dismissSuggestion(let orderId): return orderId
+        }
+    }
+
+    private func replyToChat(_ callback: InboundCallback, _ markdown: String) {
+        AgentRegistry.shared.pushToChannel(callback.channelId, message: OutboundMessage(
+            channelId: callback.channelId, targetChatId: callback.chatId,
+            content: markdown, format: .markdown))
     }
 }

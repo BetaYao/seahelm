@@ -37,6 +37,7 @@
 		0F486115B10D4353770B261C /* SessionRestoreConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFFAE60D0EF11A5DC22B2B73 /* SessionRestoreConfigTests.swift */; };
 		0F78AFF34ACE62201D0582E6 /* IntegrationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09F9C5F9EE967F8B87332014 /* IntegrationCoordinatorTests.swift */; };
 		0FDF118A34CA87216F2FD70D /* GitProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2BAEF3139798D53AE355496 /* GitProcess.swift */; };
+		1055CF6524AAB2DC4EE2C835 /* ChatNoticeBookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8816ECB0847ABFD594B1AB3 /* ChatNoticeBookTests.swift */; };
 		1063EE7F5505310F9DEE6E07 /* SuggestGuidanceWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159B10196D13B333CFC76E1D /* SuggestGuidanceWriter.swift */; };
 		10D70ABC6FF1371989A62258 /* ClaudeUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 258A1C3E5F11466A79C1CAF3 /* ClaudeUsageSummaryProvider.swift */; };
 		12348F72590729F9B44FC244 /* HostGatewayStaticFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAB7F280D7925E9A0CD660C /* HostGatewayStaticFiles.swift */; };
@@ -220,6 +221,7 @@
 		7839409D46CC0B8E4810B869 /* WorktreeCreatorEnvCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */; };
 		785DB0B4417DD04E94CD58AD /* HostGatewayDecisionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */; };
 		7906BA09A1F8FE6C728AD72C /* TelegramSetupWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B4705665C97FD7F9A95FDFC /* TelegramSetupWizard.swift */; };
+		79A076BEF314843CD19EE657 /* ChatNoticeBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2F4C9A4491CF0E397E1D0F /* ChatNoticeBook.swift */; };
 		79F532FA70B21691FB226AF8 /* GitHubDiffAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3492399099DDDAE527C6CA /* GitHubDiffAdapter.swift */; };
 		7A34C1A6124339C30D0EC84C /* PRListCellLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC46DE31056D710E7F3BF1E2 /* PRListCellLayoutTests.swift */; };
 		7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */; };
@@ -468,6 +470,7 @@
 		F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15A95E0337AEDBCE9546B8F /* SemanticColors.swift */; };
 		F822A1F30137CB7940F82296 /* PRListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF331BF96A89F1DC3E9C1BD /* PRListView.swift */; };
 		F88018C1DE074B7B23AABDA3 /* SplitPaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D06307CBEFF44025C8E9AD3 /* SplitPaneTests.swift */; };
+		F8D552BE492D81AD67DBB488 /* ChatQuestionCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C257053E5A9E9DC19BB550EB /* ChatQuestionCardTests.swift */; };
 		F8E50AFAEFE6FB68CF09D75A /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF702127762EBDF898385B56 /* Analytics.swift */; };
 		F9C679963A114DDEAE7A9861 /* FuzzyMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71C3A59719695387993016D /* FuzzyMatch.swift */; };
 		F9F0C36BE9EDF1F4B6D49AD8 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = D644401EFC00C60C7F075E6D /* CodeEditSourceEditor */; };
@@ -537,6 +540,7 @@
 		1A9D36C4513804B095CBABA5 /* PairRateLimiterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairRateLimiterTests.swift; sourceTree = "<group>"; };
 		1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayStateTests.swift; sourceTree = "<group>"; };
 		1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateConfigTests.swift; sourceTree = "<group>"; };
+		1B2F4C9A4491CF0E397E1D0F /* ChatNoticeBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNoticeBook.swift; sourceTree = "<group>"; };
 		1B81039609F254AED8BCEC72 /* CommandFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandFormatterTests.swift; sourceTree = "<group>"; };
 		1C0F7D7F30A3F031DC191AFF /* StationHealthCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationHealthCheckTests.swift; sourceTree = "<group>"; };
 		1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySessionTests.swift; sourceTree = "<group>"; };
@@ -829,6 +833,7 @@
 		B7A33515B716406497BF7E74 /* ShortcutHintBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHintBarTests.swift; sourceTree = "<group>"; };
 		B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalDecoder.swift; sourceTree = "<group>"; };
 		B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalKeymap.swift; sourceTree = "<group>"; };
+		B8816ECB0847ABFD594B1AB3 /* ChatNoticeBookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNoticeBookTests.swift; sourceTree = "<group>"; };
 		B88BC86C7B6B48D00A1F8059 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		B8E255132C2399E444871CFA /* OnboardingThemeStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingThemeStepView.swift; sourceTree = "<group>"; };
 		B93F28C39550D1DFF047CEC1 /* CommandSessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSessionStoreTests.swift; sourceTree = "<group>"; };
@@ -860,6 +865,7 @@
 		C122F14B425BC7F3DF1FEB8B /* WorktreeDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscovery.swift; sourceTree = "<group>"; };
 		C1768F75790892B5D280CBC0 /* NewBranchDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBranchDialog.swift; sourceTree = "<group>"; };
 		C197F88AECB09C7C3D4449DE /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
+		C257053E5A9E9DC19BB550EB /* ChatQuestionCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatQuestionCardTests.swift; sourceTree = "<group>"; };
 		C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		C30353E5B3401026090F247F /* CommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandParserTests.swift; sourceTree = "<group>"; };
 		C343A8D3A5164AA2BF4DB650 /* CommandSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSession.swift; sourceTree = "<group>"; };
@@ -1031,6 +1037,7 @@
 				AEC631B07301756615C755E6 /* AgentType.swift */,
 				BF702127762EBDF898385B56 /* Analytics.swift */,
 				81F38890EF85FE22F83ED385 /* ChatCallbackRegistry.swift */,
+				1B2F4C9A4491CF0E397E1D0F /* ChatNoticeBook.swift */,
 				2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */,
 				26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */,
 				A51B009382FE3586E735355D /* CodexHooksSetup.swift */,
@@ -1431,6 +1438,8 @@
 				6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */,
 				F4D445453693B8D5A3D088F1 /* AgentTypeTests.swift */,
 				01DB279E827314DBFA97331B /* ChatCallbackRegistryTests.swift */,
+				B8816ECB0847ABFD594B1AB3 /* ChatNoticeBookTests.swift */,
+				C257053E5A9E9DC19BB550EB /* ChatQuestionCardTests.swift */,
 				5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */,
 				38FD43578EB5A227077BAA11 /* ChromeCollapseAnimationTests.swift */,
 				4890F1362CCDACF15E685662 /* ChromeLayoutMetricsTests.swift */,
@@ -1989,6 +1998,8 @@
 				F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */,
 				53D46BF1B3E00A35B53A86C4 /* AgentTypeTests.swift in Sources */,
 				E898E9379622EC8D16777977 /* ChatCallbackRegistryTests.swift in Sources */,
+				1055CF6524AAB2DC4EE2C835 /* ChatNoticeBookTests.swift in Sources */,
+				F8D552BE492D81AD67DBB488 /* ChatQuestionCardTests.swift in Sources */,
 				9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */,
 				3D18A10A7522058688B2A1F7 /* ChromeCollapseAnimationTests.swift in Sources */,
 				12B626905E1B75F6419CD452 /* ChromeLayoutMetricsTests.swift in Sources */,
@@ -2200,6 +2211,7 @@
 				646692CC7C11231CC40284EC /* Array+SafeIndex.swift in Sources */,
 				7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */,
 				0AE7E3F52B1D7EFFF5D01E6A /* ChatCallbackRegistry.swift in Sources */,
+				79A076BEF314843CD19EE657 /* ChatNoticeBook.swift in Sources */,
 				72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */,
 				3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */,
 				DCD355D8BE1EF13AECD21332 /* ChromeHeaderDelegate.swift in Sources */,
@@ -2483,7 +2495,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.58;
+				MARKETING_VERSION = 2.0.59;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2720,7 +2732,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.58;
+				MARKETING_VERSION = 2.0.59;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
