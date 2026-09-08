@@ -124,6 +124,7 @@
 		4670998F86598F2E5C84ACD3 /* StationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F9565C3156144526A74B08 /* StationManager.swift */; };
 		47229EE74F8F3BEA93AB0B6A /* TelegramRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BC6460413988FF775BDA1B3 /* TelegramRuleTests.swift */; };
 		476D67C49BFE7D8093D880F3 /* QuitConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */; };
+		47759F5CFF91DF5045DB4658 /* PaneWorkingDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730849EDAF323B0D541E397C /* PaneWorkingDirectoryTests.swift */; };
 		478A900B42820F9CAC0829BF /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = 3C22FD399E95F8A453F40C3A /* ghostty */; };
 		478BA84CC6F98EA5F7F73B73 /* QRCodeRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D89A6016405AEDB17C3FB5E /* QRCodeRenderer.swift */; };
 		489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */; };
@@ -234,6 +235,7 @@
 		7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */; };
 		7DD2666A7F2FE0E895A38F8B /* WorktreeTaskStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2F9EA56DB31E6555203E06 /* WorktreeTaskStoreTests.swift */; };
 		7E73C1FAA15054E71BDFDEF8 /* GitHubReturnPRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E584B1D165D21C28521196B /* GitHubReturnPRClient.swift */; };
+		7ED2875B97C74F9DF0DF3F79 /* PaneWorkingDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5DCCDD64708BEB08D20C0A /* PaneWorkingDirectory.swift */; };
 		7F9546C174F5D5E52457F7A8 /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */; };
 		7FAB179ADDFF8EF7D3B14D93 /* DashboardOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */; };
 		80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C97F6C22C29552377720F4D /* WorktreePathNavigationTests.swift */; };
@@ -710,6 +712,7 @@
 		724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPRDecodingTests.swift; sourceTree = "<group>"; };
 		7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventExtractor.swift; sourceTree = "<group>"; };
 		72D7AE18D546D48E83055667 /* github-pr-detail.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-pr-detail.json"; sourceTree = "<group>"; };
+		730849EDAF323B0D541E397C /* PaneWorkingDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneWorkingDirectoryTests.swift; sourceTree = "<group>"; };
 		73FDA109B06DD6B1F279D87A /* PaneReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneReducerTests.swift; sourceTree = "<group>"; };
 		755D82DD1EFBD20111AC9BF2 /* RepoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPage.swift; sourceTree = "<group>"; };
 		75619FAA0B399E6EFEFD58ED /* WorktreeFileIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeFileIndexTests.swift; sourceTree = "<group>"; };
@@ -887,6 +890,7 @@
 		CB28B1CB12CE417A892A04C4 /* VTPipelineBenchmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTPipelineBenchmarks.swift; sourceTree = "<group>"; };
 		CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayFrameTests.swift; sourceTree = "<group>"; };
 		CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiExtensionInstaller.swift; sourceTree = "<group>"; };
+		CC5DCCDD64708BEB08D20C0A /* PaneWorkingDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneWorkingDirectory.swift; sourceTree = "<group>"; };
 		CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		CCF6409060B18FD8F316245D /* PairingCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCrypto.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
@@ -1522,6 +1526,7 @@
 				63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */,
 				49437644810F143C24E9273B /* PaneTitleResolverTests.swift */,
 				5CF8D45DC59BA85924DB8D9E /* PaneTransferTests.swift */,
+				730849EDAF323B0D541E397C /* PaneWorkingDirectoryTests.swift */,
 				D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */,
 				4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */,
 				DC46DE31056D710E7F3BF1E2 /* PRListCellLayoutTests.swift */,
@@ -1651,6 +1656,7 @@
 				05F3C2A8D8BBDA9181C858E4 /* GhosttyNSView.swift */,
 				BB9854E3679A7AF9524F5077 /* LayoutNode.swift */,
 				9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */,
+				CC5DCCDD64708BEB08D20C0A /* PaneWorkingDirectory.swift */,
 				5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */,
 				849C6707188E7E90997D691A /* SplitTree.swift */,
 				40CAD3E9929AC9E5E32EBA9F /* Station.swift */,
@@ -2085,6 +2091,7 @@
 				371A789DDD991B083F733DB8 /* PaneStatusTests.swift in Sources */,
 				6AC11D3AF38BF0EEAD1C57F3 /* PaneTitleResolverTests.swift in Sources */,
 				B192412250A276B2421D9AEB /* PaneTransferTests.swift in Sources */,
+				47759F5CFF91DF5045DB4658 /* PaneWorkingDirectoryTests.swift in Sources */,
 				9B491C853EC9D44767FD6F90 /* PanelCoordinatorTests.swift in Sources */,
 				58A4DC34C98D37D2E6B90D09 /* PendingOrdersQueueTests.swift in Sources */,
 				34295E2A78AAF5B432E08698 /* PiExtensionInstallerTests.swift in Sources */,
@@ -2363,6 +2370,7 @@
 				3D2531372E08D4B5475FF17A /* PaneReducer.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,
 				CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */,
+				7ED2875B97C74F9DF0DF3F79 /* PaneWorkingDirectory.swift in Sources */,
 				5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */,
 				9C55DE7AD6C3DCE23F18B842 /* PendingOrdersQueue.swift in Sources */,
 				DA2A0458E60D38BD6F7C9649 /* PendingWorktreeTransfer.swift in Sources */,
