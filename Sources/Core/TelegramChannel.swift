@@ -47,6 +47,14 @@ final class TelegramChannel: ExternalChannel {
     /// the config names no chat and no allowed user is numeric.
     private var lastCommandChatId: String?
 
+    /// Where unbound fleet notifications go: configured default, else the chat
+    /// that last issued an order.
+    var fleetNotifyChatId: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return config.resolvedDefaultChatId ?? lastCommandChatId
+    }
+
     private static let maxBackoff: TimeInterval = 30
     /// Attempts per outbound chunk before the rest of the message is abandoned.
     private static let sendAttempts = 3

@@ -62,5 +62,6 @@
 ## 通知走向
 
 - agent 完成的通知发到 Telegram 的默认 chat（`default_chat_id`，缺省为第一个数字 id 的白名单用户）。
-- 凡是用 `/go` 绑定了那个 pane 的会话（某个 Telegram 群、某个邮件线程）也各收一份。
+- 该 chat 若已 `/go` 到某个 pane，则**只**收那个 pane 的完成/报错通知；解绑后恢复收全舰队。
+- 凡是用 `/go` 绑定了那个 pane 的其它会话（某个 Telegram 群、某个邮件线程）也各收一份。
 - 桌面上就是 Island 和系统横幅。

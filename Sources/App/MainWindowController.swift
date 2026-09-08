@@ -288,15 +288,22 @@ class MainWindowController: NSWindowController {
             guard let self, self.islandController.model.isOpened else { return false }
             return self.islandController.model.orders.contains { $0.action.terminalID == terminalID }
         }
-        // Every desktop banner also goes to whatever chat channels are registered,
-        // so a phone hears "agent finished" without seahelm owning a transport or
-        // push certificate. No-op until a channel is registered.
-        NotificationManager.shared.onDeliverExternal = { [weak self] status, title, subtitle, body, terminalID in
+        // Pane-status banners go to Telegram with binding awareness: after
+        // `/go #n` that chat only hears #n, not the rest of the fleet. Other
+        // external channels still get every event.
+        //
+        // `bannerSuppressed` means the user is looking at this very pane, so
+        // the audiences that hear the whole fleet stay quiet — a phone ping for
+        // something already on screen is noise. It does not silence a chat
+        // bound to the pane: that conversation is happening away from this
+        // desk, and its own order's answer must reach it.
+        NotificationManager.shared.onDeliverExternal = { [weak self] status, title, subtitle, body, terminalID, bannerSuppressed in
             let text = "\(status.icon) **\(title)**\n\(subtitle)\n\n\(body)"
-            AgentRegistry.shared.broadcast(text, format: .markdown)
-            // A chat that bound itself to this pane hears it too, not only the
-            // configured default — that is what binding is for.
-            self?.notifyBoundSessions(terminalID: terminalID, text: text)
+            if !bannerSuppressed {
+                AgentRegistry.shared.broadcast(text, format: .markdown, excluding: ["telegram"])
+            }
+            self?.notifyTelegramSessions(terminalID: terminalID, text: text,
+                                         fleetSilenced: bannerSuppressed)
         }
         // Not `tabCoordinator.commandRoute` here: that coordinator's own
         // initializer reads `statusPublisher`, and two lazy vars that reach
@@ -3006,16 +3013,31 @@ extension MainWindowController: CommandHost {
         alert.beginSheetModal(for: window) { completion($0 == .alertFirstButtonReturn) }
     }
 
-    /// Telegram chats bound to this pane get the notification in their own
-    /// thread. Mail threads have their own observer for the same edge.
-    private func notifyBoundSessions(terminalID: String, text: String) {
-        guard !terminalID.isEmpty, let pane = AgentRegistry.shared.pane(for: terminalID) else { return }
-        let key = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
-        let defaultChat = config.telegram?.resolvedDefaultChatId
-        for session in tabCoordinator.commandSessions.sessions(boundToPaneKey: key)
-        where session.surface == "telegram" && session.id != defaultChat {
+    /// Telegram delivery for a pane-status banner. Bound chats hear only their
+    /// pane; the default / last-order chat hears the whole fleet while unbound.
+    ///
+    /// `fleetSilenced` drops the fleet-wide listeners for this one event — the
+    /// desktop already showed it. Chats bound to the pane are never dropped.
+    private func notifyTelegramSessions(terminalID: String, text: String, fleetSilenced: Bool = false) {
+        let paneKey: String?
+        if !terminalID.isEmpty, let pane = AgentRegistry.shared.pane(for: terminalID) {
+            paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
+                                             paneId: pane.id)
+        } else {
+            paneKey = nil
+        }
+        var fleet: [String] = []
+        if !fleetSilenced {
+            if let chat = config.telegram?.resolvedDefaultChatId { fleet.append(chat) }
+            if let chat = telegramChannel?.fleetNotifyChatId, !fleet.contains(chat) {
+                fleet.append(chat)
+            }
+        }
+        let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
+            paneKey: paneKey, fleetListenerChatIds: fleet)
+        for chatId in chats {
             AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: session.id, content: text, format: .markdown))
+                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown))
         }
     }
 }

@@ -1205,11 +1205,17 @@ class AgentRegistry {
 
     /// Broadcast a message to all registered external channels
     func broadcast(_ content: String, format: MessageFormat = .text) {
+        broadcast(content, format: format, excluding: [])
+    }
+
+    /// Like `broadcast`, but skip channel ids in `excluding` — used when the
+    /// caller delivers Telegram itself with pane-scoped routing.
+    func broadcast(_ content: String, format: MessageFormat = .text, excluding: Set<String>) {
         lock.lock()
         let channels = Array(externalChannels.values)
         lock.unlock()
 
-        for channel in channels {
+        for channel in channels where !excluding.contains(channel.channelId) {
             let message = OutboundMessage(
                 channelId: channel.channelId,
                 content: content,
