@@ -39,7 +39,8 @@ struct IntegrationRunReport: Equatable {
         switch outcome {
         case .held(.dirtyWorktree, _): line += " · held · local edits"
         case .held(.movedHead, _): line += " · held · commits made here"
-        case .published, .unchanged, .failed: break
+        case .failed(let reason): line += " · failed · \(reason)"
+        case .published, .unchanged: break
         }
         return line
     }
@@ -66,7 +67,11 @@ struct IntegrationRunReport: Equatable {
             conflictedPaths: result.conflictedPaths,
             isHeld: held,
             heldPaths: heldPaths,
-            heldHead: heldHead
+            heldHead: heldHead,
+            failure: {
+                if case .failed(let reason) = outcome { return reason }
+                return nil
+            }()
         )
     }
 

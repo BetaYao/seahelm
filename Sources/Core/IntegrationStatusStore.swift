@@ -24,6 +24,25 @@ struct IntegrationPanelState: Codable, Equatable {
     /// Set instead of `heldPaths` when the hold was a commit made in the
     /// checkout rather than an uncommitted edit.
     var heldHead: String?
+    /// Why the round did not produce a result at all — git refused, the base is
+    /// unreachable, the checkout could not be made. Optional so state written
+    /// before this existed still decodes.
+    ///
+    /// Recorded rather than only reported, because a round that threw used to
+    /// write nothing: the last good round's line stayed on screen and First
+    /// Mate went on claiming an integration that no longer existed.
+    var failure: String?
+
+    /// The last round did not land cleanly: work was dropped or left carrying
+    /// markers, the result was built but held back, or the round failed
+    /// outright.
+    ///
+    /// This is what First Mate marks. A clean round is meant to be invisible —
+    /// the integration worktree is simply current — so the marker means "this
+    /// one wants a person", not "integration happened".
+    var needsAttention: Bool {
+        failure != nil || isHeld || !excluded.isEmpty || !conflictedPaths.isEmpty
+    }
 
     struct Excluded: Codable, Equatable {
         var label: String
@@ -31,7 +50,8 @@ struct IntegrationPanelState: Codable, Equatable {
     }
 
     init(line: String, included: [String], excluded: [Excluded], conflictedPaths: [String],
-         isHeld: Bool, heldPaths: [String]? = nil, heldHead: String? = nil) {
+         isHeld: Bool, heldPaths: [String]? = nil, heldHead: String? = nil,
+         failure: String? = nil) {
         self.line = line
         self.included = included
         self.excluded = excluded
@@ -39,6 +59,14 @@ struct IntegrationPanelState: Codable, Equatable {
         self.isHeld = isHeld
         self.heldPaths = heldPaths
         self.heldHead = heldHead
+        self.failure = failure
+    }
+
+    /// What a round that never ran leaves behind, so the banner stops showing
+    /// the last good round.
+    static func failed(_ reason: String) -> IntegrationPanelState {
+        IntegrationPanelState(line: "integration · failed · \(reason)", included: [], excluded: [],
+                              conflictedPaths: [], isHeld: false, failure: reason)
     }
 }
 

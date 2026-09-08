@@ -239,10 +239,10 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                            "grouped by project the checkout is a pinned row, not a banner")
 
             view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
 
             view.selectGroupingModeForTesting(.activityTime)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
 
             view.selectGroupingModeForTesting(.pane)
             XCTAssertEqual(view.integrationBannerLinesForTesting, [])
@@ -256,7 +256,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             let view = makeViewWithIntegration(defaults: defaults, status: nil)
             view.update(fleetWithIntegration())
             view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · not built yet"])
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · not built yet"])
         }
     }
 
@@ -272,11 +272,68 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
-    private func makeViewWithIntegration(defaults: UserDefaults, status: String?) -> DashboardOverviewView {
+    private func makeViewWithIntegration(defaults: UserDefaults, status: String?,
+                                        state: IntegrationPanelState? = nil) -> DashboardOverviewView {
         DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                               defaults: defaults, now: { self.now },
                               isIntegrationWorktree: { $0 == "/alpha-worktrees/integration" },
-                              integrationStatus: { _ in status })
+                              integrationStatus: { _ in status },
+                              integrationState: { _ in state })
+    }
+
+    /// A round that dropped work, or never ran, is marked — glyph and colour —
+    /// rather than reading like any other line in a dim list.
+    func testBannerMarksARoundThatNeedsSomeone() {
+        withDefaults { defaults in
+            let held = IntegrationPanelState(line: "integration · 2 worktrees · held · local edits",
+                                             included: ["a", "b"], excluded: [], conflictedPaths: [],
+                                             isHeld: true)
+            let view = makeViewWithIntegration(defaults: defaults, status: held.line, state: held)
+            view.update(fleetWithIntegration())
+            view.selectGroupingModeForTesting(.status)
+
+            XCTAssertEqual(view.integrationBannerLinesForTesting,
+                           ["!  alpha · integration · 2 worktrees · held · local edits"])
+            XCTAssertEqual(view.integrationBannerAttentionForTesting, [true])
+        }
+    }
+
+    /// The checkout's own row carries the state, so the modes that give it a row
+    /// need no banner — and the dot there is the integration's, not a shell's.
+    func testTheCheckoutRowShowsTheIntegrationState() {
+        withDefaults { defaults in
+            let failed = IntegrationPanelState.failed("no base ref")
+            let view = makeViewWithIntegration(defaults: defaults, status: failed.line, state: failed)
+            view.update(fleetWithIntegration())
+
+            for mode in [WorktreeGroupingMode.repository, .pane] {
+                view.selectGroupingModeForTesting(mode)
+                XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], "✕",
+                               "grouping \(mode) left the checkout reading as an agent")
+                // An ordinary worktree's dot still means what it always did.
+                XCTAssertEqual(view.rowGlyphsForTesting["/alpha"], AgentStatus.idle.glyph)
+                XCTAssertEqual(view.integrationBannerLinesForTesting, [],
+                               "grouping \(mode) said it twice")
+            }
+        }
+    }
+
+    /// Every state the checkout can be in reads differently at a glance.
+    func testEachIntegrationStateGetsItsOwnDot() {
+        let excluded = IntegrationPanelState(
+            line: "l", included: ["a"],
+            excluded: [.init(label: "b", paths: ["f.swift"])],
+            conflictedPaths: [], isHeld: false)
+        let clean = IntegrationPanelState(line: "l", included: ["a"], excluded: [],
+                                          conflictedPaths: [], isHeld: false)
+        for (state, glyph) in [(nil as IntegrationPanelState?, "◌"), (clean, "\u{2443}"),
+                               (excluded, "!"), (IntegrationPanelState.failed("x"), "✕")] {
+            withDefaults { defaults in
+                let view = makeViewWithIntegration(defaults: defaults, status: "l", state: state)
+                view.update(fleetWithIntegration())
+                XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], glyph)
+            }
+        }
     }
 
     private func fleetWithIntegration() -> [WorktreeRowInfo] {
@@ -322,7 +379,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
 
             view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  integration · 2 worktrees"])
+            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
         }
     }
 

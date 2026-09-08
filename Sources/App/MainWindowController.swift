@@ -1167,6 +1167,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                         )
                     }
                 case .failure(let error):
+                    // Recorded as well as reported. A round that threw wrote
+                    // nothing here, so First Mate went on showing the last good
+                    // round and read as an integration that was still current.
+                    IntegrationStatusStore.shared.set(
+                        .failed(error.localizedDescription), forWorktree: integrationPath)
                     self?.enqueueIntegrationReport(
                         "Integration failed: \(error.localizedDescription)",
                         repoPath: repoPath,
@@ -2993,6 +2998,8 @@ extension MainWindowController: CommandHost {
                     }
                     completion(report.summary, report.isHeld)
                 case .failure(let error):
+                    IntegrationStatusStore.shared.set(
+                        .failed(error.localizedDescription), forWorktree: integrationPath)
                     completion("Integration failed: \(error.localizedDescription)", false)
                 }
             }
