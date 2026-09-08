@@ -16,7 +16,7 @@
 <meta property="og:url" content="https://www.seahelm.dev/zh/">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
-<meta property="og:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
+<meta property="og:title" content="Seahelm &mdash; 多个 agent 在跑，你自己掌舵">
 <meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <meta property="og:image" content="https://www.seahelm.dev/og.zh.png">
 <meta property="og:image:width" content="1200">
@@ -24,7 +24,7 @@
 <meta property="og:image:alt" content="Seahelm — 为 coding agent 准备的原生 macOS 工作台">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Seahelm &mdash; 一个窗口，管住所有在跑的 agent">
+<meta name="twitter:title" content="Seahelm &mdash; 多个 agent 在跑，你自己掌舵">
 <meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.zh.png">
 
@@ -82,7 +82,7 @@
 
     <div class="hero">
       <p class="eyebrow"><span class="mark">&#9679;</span> 为 coding agent 准备的原生 macOS 工作台</p>
-      <h1>一个窗口，管住所有在跑的 agent。</h1>
+      <h1>多个 agent 在跑，有大副协助你，你自己掌舵。</h1>
       <p class="lede">
         你的舰队排在一张名册上：每个 worktree 一行，按仓库、状态或最近动向编队，每个 split pane
         里坐着一个 agent。Seahelm 用 Ghostty 引擎把它们逐个画出来，盯着谁在干活、谁在等你，
@@ -357,7 +357,7 @@
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">甲板二 &middot; 甲板之下</p></div>
-      <h2>底下是什么在跑</h2>
+      <h2>底下的技术是如何构建的？</h2>
       <p class="lede prose">
         247 个 Swift 文件，分四层，跑在 Ghostty 终端引擎之上。没有 Combine，也没有 SwiftUI ——
         用的是 AppKit 加 delegate，因为屏幕上那个东西本质是一块 Metal surface，后面接着一个 PTY。
@@ -651,7 +651,7 @@
   <div class="wrap">
     <div class="deck-head">
       <div class="rule-row"><p class="eyebrow">甲板三 &middot; 汇合点</p></div>
-      <h2>它们还能拼到一起吗？</h2>
+      <h2>多个 worktree 如何持续集成？</h2>
       <p class="lede prose">
         六个 agent，六个 worktree，六个分支，单看每一个都是绿的。但它们放<em>一起</em>还能不能跑，
         这个问题通常要拖到合并那天才有人回答。Seahelm 每一轮结束就回答一次 ——
