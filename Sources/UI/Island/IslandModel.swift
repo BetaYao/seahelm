@@ -77,10 +77,30 @@ final class IslandModel {
     /// a healthy one looks like, which is why this has to be said out loud.
     var controlChannelWarning: String?
 
+    /// The cards the island draws, newest first.
+    ///
+    /// `suggestNextOrder` covers an agent's next-step chips and its questions
+    /// alike — they share the kind and differ by payload. `integrationReport`
+    /// is here because the island is the only place its one irreversible
+    /// option is offered: the card was raised on every held round and drawn
+    /// nowhere, so the decision existed and could not be reached.
     static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
         Array(orders.lazy
-            .filter { $0.action.kind == .suggestNextOrder }
+            .filter { $0.action.kind == .suggestNextOrder || $0.action.kind == .integrationReport }
             .reversed())
+    }
+
+    /// Whether newly-arrived cards are worth opening the island for.
+    ///
+    /// A card with nothing to decide is a notice and waits to be found. That
+    /// separates the two integration rounds worth telling apart: one that
+    /// dropped a conflicting worktree says so and stays put — it happens on
+    /// every round while two worktrees touch the same file — while one held
+    /// back, whose only way forward destroys what is in the checkout, pops.
+    /// Agent suggestions and questions always carry options, so this changes
+    /// nothing for them.
+    static func shouldOpen(for fresh: [PendingOrder]) -> Bool {
+        fresh.contains { !($0.action.options ?? []).isEmpty }
     }
 
     /// Screen geometry, set by the panel controller.

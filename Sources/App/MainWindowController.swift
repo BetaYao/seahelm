@@ -2332,7 +2332,7 @@ extension MainWindowController {
         publishCardsToChat(tabCoordinator.pendingOrders.all())
 
         let fresh = islandSeenSuggestions.absorb(orders)
-        if !fresh.isEmpty, !model.isOpened {
+        if IslandModel.shouldOpen(for: fresh), !model.isOpened {
             let targetVisible = fresh.allSatisfy {
                 tabCoordinator.isWorktreeVisible($0.action.worktreePath)
             }
