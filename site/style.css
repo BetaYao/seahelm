@@ -93,11 +93,10 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 /* The descent, top to bottom. Each gradient ends on the colour the next one
    starts with, so the only hard edges are the two that mean something. */
 .sky      { background: linear-gradient(180deg, #f6fafc 0%, #eaf3f7 100%); }
-/* The horizon. The seam between .sky and .surface is where the fleet sits;
-   a one-pixel darker line gives the edge the eye expects there. */
-.surface  { background: linear-gradient(180deg, #cfe5ea 0%, #b5d9e1 100%); }
+/* The horizon: where the page enters the water, and the tour sits just under
+   it. A one-pixel darker line gives the edge the eye expects there. */
+.surface  { background: linear-gradient(180deg, #cfe5ea 0%, #a2cfda 100%); }
 .sky + .surface { border-top: 1px solid #a3ccd6; }
-.surface + .surface { background: linear-gradient(180deg, #b5d9e1 0%, #a2cfda 100%); }
 .shallows { background: linear-gradient(180deg, #a2cfda 0%, #74b2c1 100%); }
 /* The drop-off: the hold is the one section that starts dark against light,
    and the waterline across its top is the helm colour fading out either way. */
@@ -146,12 +145,8 @@ p  { margin: 0; }
    width by default, and the install command is one unbreakable line. On a
    phone that line is wider than the screen, the track grew to fit it, and
    everything in the hero — the lede, the fleet strip — went with it. */
-.hero { padding: 2.1rem 0 2.2rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
+.hero { padding: 2.1rem 0 3.2rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero h1 { max-width: 17ch; }
-/* The fleet strip, the caption and the install line, sitting on the water.
-   Same minmax as .hero and for the same reason: the install command is one
-   unbreakable line and must not widen the track on a phone. */
-.berth { padding: 1.8rem 0 2.4rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero .lede { max-width: 56ch; }
 .hero-cta { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .35rem; }
 .cmd {
