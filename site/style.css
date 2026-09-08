@@ -53,6 +53,15 @@
   --accent: #076c83;
   --accent-soft: rgba(7,108,131,.12);
   --shadow: 0 1px 0 rgba(6,40,52,.14);
+  /* The status colours were tuned against near-white and were left behind
+     here, where the water is two thirds of the way down: the green ✓ came out
+     at 1.5:1 against it and the `—` at 1.3:1. These are the same five hues,
+     dropped to where they clear 4.5:1 on this section's panel — the deep
+     sections have done exactly this since they were written. */
+  --run:    #15784b;
+  --wait:   #7f5200;
+  --err:    #b3211a;
+  --idle:   #5f6a78;
 }
 
 /* Deep water: the hold, the rendezvous, the seabed. */
@@ -233,13 +242,22 @@ figcaption code { font: 400 .82em/1 var(--f-mono); font-style: normal; color: va
 .svg-dash { stroke: var(--ink-2); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
 
 /* ── layer table ──────────────────────────────────────────────── */
-.tbl-scroll { overflow-x: auto; margin-top: 2rem; }
+/* On a panel rather than straight on the water. Small mono text cannot reach
+   4.5:1 against the bottom of a gradient without going so dark the hue is
+   gone; on `--sea-1` it is a known background at every scroll position, and
+   it is what the legend and the code blocks in the same sections already do. */
+.tbl-scroll {
+  overflow-x: auto; margin-top: 2rem;
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--sea-1); padding: 1rem 1.1rem;
+}
 table { border-collapse: collapse; width: 100%; min-width: 560px; color: var(--ink); }
 th, td { text-align: left; padding: .72rem .9rem; border-bottom: 1px solid var(--rule-2); vertical-align: baseline; }
 thead th {
   font: 500 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .14em;
   color: var(--ink-2); border-bottom: 1px solid var(--rule); padding-bottom: .55rem;
 }
+tbody tr:last-child td { border-bottom: 0; }
 tbody td:first-child { font: 600 .95rem/1.3 var(--f-cond); color: var(--ink); white-space: nowrap; }
 td.path { font: 400 .8rem/1.4 var(--f-mono); color: var(--accent); white-space: nowrap; }
 td.num  { font: 400 .82rem/1.4 var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-2); }
