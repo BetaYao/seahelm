@@ -82,6 +82,17 @@ final class PendingOrdersQueueTests: XCTestCase {
                        [.integrationReport, .suggestNextOrder])
     }
 
+    /// A conflict report is useful in the integration status surface, but it
+    /// has no decision for the user and must not occupy the attention island.
+    func testIslandLeavesNonActionableIntegrationReportsOut() {
+        let q = PendingOrdersQueue()
+        q.upsert(FirstMateAction(kind: .integrationReport, zone: .red,
+                                 worktreePath: "/wt/integration", branch: "", project: "p",
+                                 terminalID: "", message: "integrated a · excluded b"))
+
+        XCTAssertTrue(IslandModel.newestSuggestions(from: q.all()).isEmpty)
+    }
+
     /// The kinds with no card behind them stay out of the list.
     func testIslandLeavesNonCardKindsOut() {
         let q = PendingOrdersQueue()

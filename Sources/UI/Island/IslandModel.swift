@@ -80,13 +80,22 @@ final class IslandModel {
     /// The cards the island draws, newest first.
     ///
     /// `suggestNextOrder` covers an agent's next-step chips and its questions
-    /// alike — they share the kind and differ by payload. `integrationReport`
-    /// is here because the island is the only place its one irreversible
-    /// option is offered: the card was raised on every held round and drawn
-    /// nowhere, so the decision existed and could not be reached.
+    /// alike — they share the kind and differ by payload. An integration report
+    /// only belongs here when it has an option to act on; routine reports such
+    /// as excluded conflicts stay available in the checkout's status surface
+    /// without interrupting the user.
     static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
         Array(orders.lazy
-            .filter { $0.action.kind == .suggestNextOrder || $0.action.kind == .integrationReport }
+            .filter {
+                switch $0.action.kind {
+                case .suggestNextOrder:
+                    return true
+                case .integrationReport:
+                    return !($0.action.options ?? []).isEmpty
+                default:
+                    return false
+                }
+            }
             .reversed())
     }
 
