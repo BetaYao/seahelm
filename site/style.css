@@ -53,6 +53,15 @@
   --accent: #076c83;
   --accent-soft: rgba(7,108,131,.12);
   --shadow: 0 1px 0 rgba(6,40,52,.14);
+  /* The status colours were tuned against near-white and were left behind
+     here, where the water is two thirds of the way down: the green ✓ came out
+     at 1.5:1 against it and the `—` at 1.3:1. These are the same five hues,
+     dropped to where they clear 4.5:1 on this section's panel — the deep
+     sections have done exactly this since they were written. */
+  --run:    #15784b;
+  --wait:   #7f5200;
+  --err:    #b3211a;
+  --idle:   #5f6a78;
 }
 
 /* Deep water: the hold, the rendezvous, the seabed. */
@@ -93,11 +102,10 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 /* The descent, top to bottom. Each gradient ends on the colour the next one
    starts with, so the only hard edges are the two that mean something. */
 .sky      { background: linear-gradient(180deg, #f6fafc 0%, #eaf3f7 100%); }
-/* The horizon. The seam between .sky and .surface is where the fleet sits;
-   a one-pixel darker line gives the edge the eye expects there. */
-.surface  { background: linear-gradient(180deg, #cfe5ea 0%, #b5d9e1 100%); }
+/* The horizon: where the page enters the water, and the tour sits just under
+   it. A one-pixel darker line gives the edge the eye expects there. */
+.surface  { background: linear-gradient(180deg, #cfe5ea 0%, #a2cfda 100%); }
 .sky + .surface { border-top: 1px solid #a3ccd6; }
-.surface + .surface { background: linear-gradient(180deg, #b5d9e1 0%, #a2cfda 100%); }
 .shallows { background: linear-gradient(180deg, #a2cfda 0%, #74b2c1 100%); }
 /* The drop-off: the hold is the one section that starts dark against light,
    and the waterline across its top is the helm colour fading out either way. */
@@ -146,12 +154,8 @@ p  { margin: 0; }
    width by default, and the install command is one unbreakable line. On a
    phone that line is wider than the screen, the track grew to fit it, and
    everything in the hero — the lede, the fleet strip — went with it. */
-.hero { padding: 2.1rem 0 2.2rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
+.hero { padding: 2.1rem 0 3.2rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero h1 { max-width: 17ch; }
-/* The fleet strip, the caption and the install line, sitting on the water.
-   Same minmax as .hero and for the same reason: the install command is one
-   unbreakable line and must not widen the track on a phone. */
-.berth { padding: 1.8rem 0 2.4rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.35rem; }
 .hero .lede { max-width: 56ch; }
 .hero-cta { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .35rem; }
 .cmd {
@@ -238,13 +242,22 @@ figcaption code { font: 400 .82em/1 var(--f-mono); font-style: normal; color: va
 .svg-dash { stroke: var(--ink-2); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
 
 /* ── layer table ──────────────────────────────────────────────── */
-.tbl-scroll { overflow-x: auto; margin-top: 2rem; }
+/* On a panel rather than straight on the water. Small mono text cannot reach
+   4.5:1 against the bottom of a gradient without going so dark the hue is
+   gone; on `--sea-1` it is a known background at every scroll position, and
+   it is what the legend and the code blocks in the same sections already do. */
+.tbl-scroll {
+  overflow-x: auto; margin-top: 2rem;
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--sea-1); padding: 1rem 1.1rem;
+}
 table { border-collapse: collapse; width: 100%; min-width: 560px; color: var(--ink); }
 th, td { text-align: left; padding: .72rem .9rem; border-bottom: 1px solid var(--rule-2); vertical-align: baseline; }
 thead th {
   font: 500 .68rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: .14em;
   color: var(--ink-2); border-bottom: 1px solid var(--rule); padding-bottom: .55rem;
 }
+tbody tr:last-child td { border-bottom: 0; }
 tbody td:first-child { font: 600 .95rem/1.3 var(--f-cond); color: var(--ink); white-space: nowrap; }
 td.path { font: 400 .8rem/1.4 var(--f-mono); color: var(--accent); white-space: nowrap; }
 td.num  { font: 400 .82rem/1.4 var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-2); }
@@ -262,11 +275,14 @@ td.tick { font: 400 .85rem/1.4 var(--f-mono); }
 .row dd { margin: 0; font-size: .95rem; line-height: 1.55; color: var(--ink-2); }
 .row dd code, .desc code, .lede code { font: 400 .85em/1 var(--f-mono); color: var(--ink); }
 
-/* two lifted callouts — these get the border, the rows do not */
+/* Notes lifted out of the prose, in the same panel the legend and the code
+   blocks use: a hairline border, the pale sea fill, no accent stripe down the
+   side. The panel is what marks them as lifted; a coloured bar on top of it is
+   decoration that says "look here" without saying anything more. */
 .lift { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .lift > div {
-  border-left: 3px solid var(--accent);
-  border-radius: 0 6px 6px 0; padding: 1.1rem 1.2rem; background: var(--sea-1);
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--sea-1); padding: 1.1rem 1.2rem;
   display: grid; gap: .5rem; align-content: start;
 }
 .lift h3 { font-size: 1.1rem; }
