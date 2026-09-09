@@ -191,6 +191,45 @@ final class TelegramBridgeTests: XCTestCase {
         XCTAssertEqual(cmd?.body, "yes, do that")
     }
 
+    // MARK: - Telling the operator why nothing happened
+
+    /// The bug this exists for: an order typed into a group, unaddressed, was
+    /// dropped without a word — which reads exactly like a broken bot.
+    func testAnOperatorsBareGroupLineEarnsAHint() {
+        XCTAssertTrue(TelegramChannel.isUnaddressedOrder(
+            in: message("你看看这个 issue 的 bug 还在不在", chat: group),
+            config: ownerConfig, botUsername: "seahelm_bot"))
+    }
+
+    /// Everything that already works must stay silent: there is nothing to
+    /// explain to someone whose line was taken.
+    func testNothingThatWorksEarnsAHint() {
+        for taken in [message("fix the flaky test"),                                    // private prose
+                      message("/status", chat: group),                                  // group command
+                      message("@seahelm_bot ship it", chat: group),                     // group mention
+                      message("yes, do that", chat: group, replyingTo: "seahelm_bot")] { // group reply
+            XCTAssertFalse(TelegramChannel.isUnaddressedOrder(
+                in: taken, config: ownerConfig, botUsername: "seahelm_bot"), taken.body ?? "")
+        }
+    }
+
+    /// A colleague's chatter is not an order and not the operator's problem.
+    /// Hinting at it would make the bot the noisiest member of the room.
+    func testAStrangersGroupLineEarnsNoHint() {
+        let stranger = TelegramUser(id: 7, isBot: false, firstName: "X", username: nil)
+        XCTAssertFalse(TelegramChannel.isUnaddressedOrder(
+            in: message("lunch?", from: stranger, chat: group),
+            config: ownerConfig, botUsername: "seahelm_bot"))
+    }
+
+    func testTheHintNamesBothWaysIn() {
+        let hint = TelegramChannel.addressingHint(botUsername: "seahelm_bot")
+        XCTAssertTrue(hint.contains("@seahelm_bot"), hint)
+        XCTAssertTrue(hint.lowercased().contains("reply"), hint)
+        // A bot whose username we never learned still has a reply to offer.
+        XCTAssertFalse(TelegramChannel.addressingHint(botUsername: nil).contains("@"))
+    }
+
     /// The gate the group rule was always protecting: prose aimed at somebody
     /// else — another bot, a colleague's message — must not reach an agent.
     func testGroupProseAimedElsewhereIsStillNotAnOrder() {

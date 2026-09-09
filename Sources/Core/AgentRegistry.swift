@@ -406,6 +406,7 @@ class AgentRegistry {
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
             hookWaitingSince[event.terminalID] = nil
+            if next.lastUserPrompt != text { next.lastUserPromptAt = now }
             next.lastUserPrompt = text
         case .toolUse(let ev):
             next.hookStatus = .running
@@ -702,6 +703,7 @@ class AgentRegistry {
             ?? worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.value.first
         guard let tid, var info = agents[tid] else { lock.unlock(); return nil }
         info.lastMessage = trimmed
+        if info.lastAssistantMessage != trimmed { info.lastAssistantMessageAt = Date() }
         info.lastAssistantMessage = trimmed  // preserved for suggestion-card summary
         agents[tid] = info
         lock.unlock()
@@ -922,7 +924,10 @@ class AgentRegistry {
             let text = StopHookResponder.stripSentinel(from: raw)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                lock.lock(); agents[tid]?.lastAssistantMessage = text; lock.unlock()
+                lock.lock()
+                if agents[tid]?.lastAssistantMessage != text { agents[tid]?.lastAssistantMessageAt = Date() }
+                agents[tid]?.lastAssistantMessage = text
+                lock.unlock()
             }
         }
         ingest(event2)
@@ -1237,6 +1242,26 @@ class AgentRegistry {
         lock.unlock()
 
         channel?.setButtons(chatId: chatId, messageId: messageId, buttons: buttons)
+    }
+
+    /// Rewrite a message a channel already sent, or take it back. Both are for
+    /// the progress line — see `ChatProgressReporter` — and both are best
+    /// effort: a channel that cannot edit its own messages does nothing.
+    func editInChannel(_ channelId: String, chatId: String, messageId: String,
+                       content: String, format: MessageFormat = .markdown) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        channel?.editMessage(chatId: chatId, messageId: messageId, content: content, format: format)
+    }
+
+    func deleteInChannel(_ channelId: String, chatId: String, messageId: String) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        channel?.deleteMessage(chatId: chatId, messageId: messageId)
     }
 
     /// Broadcast a message to all registered external channels

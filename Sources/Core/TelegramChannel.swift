@@ -47,6 +47,9 @@ final class TelegramChannel: ExternalChannel {
     /// The chat the most recent order came from: the broadcast fallback when
     /// the config names no chat and no allowed user is numeric.
     private var lastCommandChatId: String?
+    /// When each group was last told how to address the bot — see
+    /// `shouldHintAddressing`.
+    private var lastAddressingHint: [String: Date] = [:]
 
     /// Where unbound fleet notifications go: configured default, else the chat
     /// that last issued an order.
@@ -231,6 +234,49 @@ final class TelegramChannel: ExternalChannel {
         }
     }
 
+    /// Rewrite a message already sent — the progress line, on every update.
+    ///
+    /// Deliberately unretried, and deliberately quiet about the two failures
+    /// that are not faults: an edit to identical text and an edit that came too
+    /// fast are both answered with an error Telegram means as "no", and the
+    /// next update replaces this one anyway. Logging either would fill the log
+    /// with the bridge working correctly.
+    func editMessage(chatId: String, messageId: String, content: String, format: MessageFormat) {
+        guard let id = Int(messageId) else { return }
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        guard let api else { return }
+        let parseMode: String? = format == .text ? nil : "HTML"
+        let rendered = parseMode == nil ? content : TelegramFormatter.html(from: content)
+        sendQueue.async {
+            do {
+                try api.editMessageText(chatId: chatId, messageId: id, text: rendered, parseMode: parseMode)
+            } catch let error as TelegramAPIError where error.isBadRequest && parseMode != nil {
+                // Same reasoning as `sendChunk`: rather than lose the update to
+                // a stray tag, put the same words up flat.
+                try? api.editMessageText(chatId: chatId, messageId: id,
+                                         text: TelegramFormatter.stripHTML(rendered), parseMode: nil)
+            } catch {
+                // Nothing to do and nothing worth saying — see above.
+            }
+        }
+    }
+
+    /// Take a message back. Used to clear the progress line once its turn is
+    /// over: what the agent actually said arrives as its own message a moment
+    /// later, and a stale "running Bash" left above it reads as still running.
+    func deleteMessage(chatId: String, messageId: String) {
+        guard let id = Int(messageId) else { return }
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        guard let api else { return }
+        sendQueue.async {
+            try? api.deleteMessage(chatId: chatId, messageId: id)
+        }
+    }
+
     // MARK: - Config
 
     /// Swap the allowlist and rules without reconnecting — both are consulted
@@ -374,8 +420,58 @@ final class TelegramChannel: ExternalChannel {
             return
         }
 
+        // An operator's own line in a group that was not aimed at the bot. It is
+        // deliberately not an order — see `command(in:)` — but dropping it
+        // without a word is exactly what teaches someone the bot is broken in
+        // groups: they typed a sentence to it and nothing happened. Say how to
+        // reach it, once in a while, and only to someone who could have given
+        // an order in the first place.
+        if Self.isUnaddressedOrder(in: message, config: cfg, botUsername: botUsername),
+           shouldHintAddressing(chatId: chatId) {
+            reply(chatId, Self.addressingHint(botUsername: botUsername))
+            return
+        }
+
         deliverSignal(message, text: text, config: cfg)
     }
+
+    /// A line from someone on the allowlist, in a group, that would have been
+    /// an order anywhere the bot is the only listener. In other words: the one
+    /// case where `command(in:)` said no over *where* it was said rather than
+    /// *who* said it.
+    static func isUnaddressedOrder(in message: TelegramMessage, config cfg: TelegramConfig,
+                                   botUsername: String?) -> Bool {
+        guard let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+              let from = message.from, cfg.allows(user: from),
+              !message.chat.isPrivate else { return false }
+        let body = stripBotMention(text, botUsername: botUsername)
+        guard !body.hasPrefix("/") else { return false }
+        return addressedProse(body, message: message, botUsername: botUsername) == nil
+    }
+
+    /// Both ways in, and why there is a door at all. The hint is itself one of
+    /// the bot's messages, so "reply to this" is something the reader can do
+    /// without leaving the line they are already looking at.
+    static func addressingHint(botUsername: String?) -> String {
+        let mention = (botUsername.map { "@\($0)" } ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ways = mention.isEmpty ? "Reply to this message" : "Reply to this message, or start the line with \(mention)"
+        return "\(ways) and I'll send it on. A bare line in a group I leave alone — somebody else's sentence must not steer an agent."
+    }
+
+    /// One hint per group per window. Two operators talking to each other in a
+    /// room the bot sits in must not collect a hint under every line.
+    private func shouldHintAddressing(chatId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date()
+        if let last = lastAddressingHint[chatId], now.timeIntervalSince(last) < Self.addressingHintWindow {
+            return false
+        }
+        lastAddressingHint[chatId] = now
+        return true
+    }
+
+    static let addressingHintWindow: TimeInterval = 600
 
     /// Answer `/start`.
     ///

@@ -117,6 +117,15 @@ protocol ExternalChannel: AnyObject {
     /// message repeating it.
     func setButtons(chatId: String, messageId: String, buttons: [MessageButton])
 
+    /// Rewrite the text of a message this channel already sent, and take one
+    /// back. Both exist for the same thing: a line reporting what an agent is
+    /// doing *while* it does it is one message edited over and over and then
+    /// removed, not a stream of new ones. Both are best effort — a channel that
+    /// can do neither does nothing, and the reader loses only the liveness. The
+    /// answer itself never travels this way.
+    func editMessage(chatId: String, messageId: String, content: String, format: MessageFormat)
+    func deleteMessage(chatId: String, messageId: String)
+
     /// Connection management
     func connect()
     func disconnect()
@@ -129,6 +138,9 @@ extension ExternalChannel {
     }
 
     func setButtons(chatId: String, messageId: String, buttons: [MessageButton]) {}
+
+    func editMessage(chatId: String, messageId: String, content: String, format: MessageFormat) {}
+    func deleteMessage(chatId: String, messageId: String) {}
 
     /// The common direction, named for what it means.
     func retireButtons(chatId: String, messageId: String) {
