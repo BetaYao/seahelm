@@ -44,6 +44,20 @@ final class StackedWorktreeBaseTests: XCTestCase {
         )
     }
 
+    /// A worktree cut from trunk records the local branch name, but the root
+    /// checkout can be behind its remote after another worktree's PR merges.
+    /// Prefer the remote-tracking tip so already-merged files do not linger in
+    /// Changes as branch-relative work.
+    func testRecordedTrunkPrefersRemoteTrackingTip() throws {
+        let repo = try makeStackedRepo()
+        runGit(["update-ref", "refs/remotes/origin/main", "main"], in: repo.root)
+
+        XCTAssertEqual(
+            GitDiff.resolveBaseRef(worktreePath: repo.uiWorktree, recordedBase: "main"),
+            "origin/main"
+        )
+    }
+
     /// A base merged upstream and pruned must not leave the panel baseless.
     func testDeletedBaseFallsBackToTrunk() throws {
         let repo = try makeStackedRepo()
