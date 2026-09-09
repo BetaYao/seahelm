@@ -58,6 +58,24 @@ final class StackedWorktreeBaseTests: XCTestCase {
         )
     }
 
+    /// Squash merging A's work puts the same file tree on main but leaves A's
+    /// commit outside main's ancestry. B must not list A's already-merged file
+    /// just because its merge base predates that squash commit.
+    func testSquashMergedBaseContentDoesNotLingerInChanges() throws {
+        let repo = try makeStackedRepo()
+        try "def endpoint(): pass\n".write(
+            toFile: repo.root + "/api.py",
+            atomically: true,
+            encoding: .utf8
+        )
+        commitAll(in: repo.root, message: "main: squash A's endpoint")
+
+        let changes = GitDiff.branchChangedFiles(worktreePath: repo.uiWorktree, recordedBase: "main")
+
+        XCTAssertEqual(changes.baseRef, "main")
+        XCTAssertEqual(Set(changes.files.map(\.path)), ["ui.html"])
+    }
+
     /// A base merged upstream and pruned must not leave the panel baseless.
     func testDeletedBaseFallsBackToTrunk() throws {
         let repo = try makeStackedRepo()

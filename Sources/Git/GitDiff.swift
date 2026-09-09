@@ -227,6 +227,9 @@ enum GitDiff {
     }
 
     /// Branch-relative change list: `git diff <merge-base(base)>` plus untracked.
+    /// Files whose content already matches the current base are omitted. This
+    /// keeps a squash-merged PR from lingering merely because its commits are
+    /// not ancestors of the new base tip.
     /// Falls back to porcelain `git status` when no base ref exists.
     /// When over `limit`, keeps the most recently modified files.
     static func branchChangedFiles(
@@ -256,6 +259,23 @@ enum GitDiff {
                 in: worktreePath
             ) ?? ""
             var entries = parseNameStatus(nameStatus, stage: .unstaged)
+
+            // A squash merge reproduces a branch's tree changes on the base
+            // with a new commit, so the merge-base range still names them.
+            // Intersect that range with the current base diff: this preserves
+            // branch-only changes while dropping paths already on the base.
+            let currentBaseStatus = runGit(
+                args: ["diff", "--name-status", "-z", "-M", resolved],
+                in: worktreePath
+            ) ?? ""
+            let currentBaseEntries = parseNameStatus(currentBaseStatus, stage: .unstaged)
+            let currentBasePaths = Set(currentBaseEntries.flatMap { entry in
+                [entry.path, entry.oldPath].compactMap { $0 }
+            })
+            entries = entries.filter { entry in
+                currentBasePaths.contains(entry.path)
+                    || entry.oldPath.map(currentBasePaths.contains) == true
+            }
 
             let porcelain = runGit(
                 args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
