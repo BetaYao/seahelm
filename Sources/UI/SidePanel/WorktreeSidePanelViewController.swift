@@ -116,6 +116,14 @@ final class WorktreeSidePanelViewController: NSViewController {
     private var showHiddenFiles = false
     /// Folder expansion state remembered per worktree, restored on return.
     private var expandedByWorktree: [String: Set<String>] = [:]
+    /// Root directory enumeration is filesystem work, so keep it off the main
+    /// thread. The generation guard below drops results for a worktree/tab that
+    /// is no longer selected.
+    private static let filesBuildQueue = DispatchQueue(
+        label: "seahelm.sidepanel.files-build",
+        qos: .userInitiated
+    )
+    private var filesBuildGeneration = 0
 
     // Changes tab
     private var changesTableView: NSTableView?
@@ -300,6 +308,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     /// Tear down every mounted tab. Only a worktree change warrants this; a tab
     /// switch must not, or the state this mounting exists to preserve is lost.
     private func discardAllTabs() {
+        filesBuildGeneration &+= 1
         for container in tabContainers.values { container.removeFromSuperview() }
         tabContainers.removeAll()
         builtTabs.removeAll()
@@ -339,6 +348,11 @@ final class WorktreeSidePanelViewController: NSViewController {
     func selectTab(_ tab: SidePanelTab) {
         guard tab != selectedTab else { return }
         captureExpansion()
+        if tab != .files {
+            // A pending Files build may finish after the user has moved to
+            // Changes. It can be restarted if Files is selected again.
+            filesBuildGeneration &+= 1
+        }
         selectedTab = tab
         if isViewLoaded {
             updateTabBarHighlight()
@@ -352,6 +366,12 @@ final class WorktreeSidePanelViewController: NSViewController {
         if !builtTabs.contains(selectedTab) {
             builtTabs.insert(selectedTab)
             buildSelectedTab()
+        } else if selectedTab == .files, fileTreeController == nil, let path = worktreePath {
+            // The first build may have been invalidated by a quick tab switch.
+            // Keep the lightweight loading state and restart it when Files is
+            // selected again.
+            showFilesLoadingState()
+            scheduleFilesTabBuild(path)
         } else if selectedTab == .changes, let path = worktreePath {
             // Files self-refreshes through its FSEvents watcher, but branch diff
             // has no such signal — re-scan on entry, restoring scroll so the
@@ -375,7 +395,8 @@ final class WorktreeSidePanelViewController: NSViewController {
                 showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder", below: header)
                 return
             }
-            showFilesTab(path)
+            showFilesLoadingState()
+            scheduleFilesTabBuild(path)
         case .changes:
             guard let path = worktreePath else {
                 let header = makePaneHeader(title: "Changes")
@@ -392,10 +413,80 @@ final class WorktreeSidePanelViewController: NSViewController {
         }
     }
 
+    /// Show a cheap interim view while the filesystem is being enumerated. The
+    /// worktree switch can therefore return to the event loop immediately
+    /// instead of constructing the entire Files tab in the click handler.
+    private func showFilesLoadingState() {
+        contentView.subviews.forEach { $0.removeFromSuperview() }
+        fileTreeController = nil
+        fileSearchField = nil
+        hiddenToggleButton = nil
 
-    private func showFilesTab(_ path: String) {
-        let controller = FileTreeOutlineController(rootPath: path)
-        controller.showHidden = showHiddenFiles
+        let header = makePaneHeader(title: "Files")
+        contentView.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: contentView.topAnchor),
+            header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+        ])
+        showPlaceholder("Loading files…", identifier: "sidePanel.filesLoading", below: header)
+    }
+
+    private func scheduleFilesTabBuild(_ path: String) {
+        filesBuildGeneration &+= 1
+        let generation = filesBuildGeneration
+        let showHidden = showHiddenFiles
+        let expanded = expandedByWorktree[path] ?? []
+
+        Self.filesBuildQueue.async {
+            let rootNodes = FileTreeOutlineController.childNodes(
+                of: URL(fileURLWithPath: path),
+                showHidden: showHidden
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.filesBuildGeneration == generation,
+                      self.selectedTab == .files,
+                      self.worktreePath == path else { return }
+                self.presentFilesTab(
+                    path,
+                    rootNodes: rootNodes,
+                    expandedPaths: expanded
+                )
+            }
+        }
+    }
+
+    private func presentFilesTab(
+        _ path: String,
+        rootNodes: [FileTreeNode],
+        expandedPaths: Set<String>
+    ) {
+        contentView.subviews.forEach { $0.removeFromSuperview() }
+        fileTreeController = nil
+        fileSearchField = nil
+        hiddenToggleButton = nil
+        showFilesTab(path, initialRootNodes: rootNodes)
+
+        // Expansion can cause lazy child directory reads and outline layout.
+        // Let the newly-mounted tab paint before restoring it.
+        guard let controller = fileTreeController else { return }
+        DispatchQueue.main.async { [weak self, weak controller] in
+            guard let self, let controller,
+                  self.fileTreeController === controller,
+                  self.selectedTab == .files,
+                  self.worktreePath == path else { return }
+            controller.restoreExpansion(expandedPaths)
+        }
+    }
+
+
+    private func showFilesTab(_ path: String, initialRootNodes: [FileTreeNode]) {
+        let controller = FileTreeOutlineController(
+            rootPath: path,
+            showHidden: showHiddenFiles,
+            initialRootNodes: initialRootNodes
+        )
         controller.onSelectFile = { [weak self] filePath in
             self?.handleFileSelection(filePath)
         }
@@ -495,8 +586,6 @@ final class WorktreeSidePanelViewController: NSViewController {
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
-        // Restore the folder expansion remembered for this worktree.
-        controller.restoreExpansion(expandedByWorktree[path] ?? [])
     }
 
     @objc private func toggleHiddenFiles(_ sender: NSButton) {
