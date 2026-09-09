@@ -136,7 +136,8 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         !filterText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    init(rootPath: String) {
+    init(rootPath: String, showHidden: Bool = false, initialRootNodes: [FileTreeNode]? = nil) {
+        self.showHidden = showHidden
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("FileColumn"))
         column.title = "Name"
         let ov = FileOutlineView()
@@ -161,7 +162,14 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         menu.delegate = self
         ov.menu = menu
 
-        setRoot(rootPath)
+        if let initialRootNodes {
+            self.rootPath = rootPath
+            self.rootNodes = initialRootNodes
+            rebuildPathIndex()
+            startWatching(rootPath)
+        } else {
+            setRoot(rootPath)
+        }
     }
 
     func setRoot(_ path: String?) {
