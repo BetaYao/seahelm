@@ -32,6 +32,30 @@ class TabCoordinator {
     let commandSessions = CommandSessionStore()
     private lazy var mailPaneObserver = MailPaneObserver(sessions: commandSessions)
 
+    /// The live "what it's doing right now" line in each bound Telegram chat.
+    /// Wired to the bridge here rather than in MainWindowController because
+    /// this is where the outcome stream already lands.
+    private(set) lazy var chatProgress: ChatProgressReporter = {
+        let reporter = ChatProgressReporter(sessions: commandSessions)
+        reporter.send = { chatId, text, done in
+            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
+            ) { messageId in
+                // The bridge reports the id from its own send queue; the
+                // reporter's state belongs to main, where every outcome lands.
+                DispatchQueue.main.async { done(messageId) }
+            }
+        }
+        reporter.edit = { chatId, messageId, text in
+            AgentRegistry.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
+                                               content: text)
+        }
+        reporter.remove = { chatId, messageId in
+            AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
+        }
+        return reporter
+    }()
+
     var activeTabIndex: Int = 0
     /// Every worktree across all repos. `tree` is optional because the tree is
     /// owned by `StationManager`, not by this list, and a worktree can be between
@@ -198,6 +222,7 @@ class TabCoordinator {
             self.firstMate?.handle(outcome)
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
+            self.chatProgress.ingest(outcome)
             // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
@@ -1718,8 +1743,41 @@ class TabCoordinator {
                                 lastMessage: lastMessage, repoPath: repoPath)
     }
 
+    /// Whether a completion is worth holding because the agent has not said it
+    /// is finished.
+    ///
+    /// A completion notice is mostly the agent's own answer, and the answer can
+    /// arrive *after* the edge that announces it. Measured on a real turn: the
+    /// notice went out at 09:06:32 and the model wrote its answer at 09:06:40.99
+    /// — nine seconds later. The screen had gone quiet while it was composing,
+    /// the scan read quiet as finished, and the notice quoted the only other
+    /// thing on the pane, a shell command. Worse, when the real Stop landed the
+    /// status was no longer `running`, so `shouldNotify` refused it and the
+    /// answer never reached the phone at all — leaving the wrong message with
+    /// the right buttons stapled underneath it.
+    ///
+    /// The signal is the *disagreement*, not the empty text. `pane explain` on
+    /// the pane above said it all: `hook_status: running`, `decided_by: screen`.
+    /// The agent's own hooks still had the turn open; only the screen thought it
+    /// was over. So hold while the two disagree, and let the agent settle it —
+    /// its Stop is what carries the answer.
+    ///
+    /// `hookStatus == .running` is also what keeps this off panes that report no
+    /// hooks at all: theirs is `.unknown`, the screen is the only witness they
+    /// have, and holding their completions would delay every one for nothing.
+    static func shouldWaitForCompletion(newStatus: AgentStatus, hookStatus: AgentStatus) -> Bool {
+        newStatus == .idle && hookStatus == .running
+    }
+
+    /// How long to hold such a completion, and how often to look again. Each
+    /// pass re-reads the pane, so the wait ends the moment the agent's own Stop
+    /// lands — the full window is only spent when it never does.
+    static let proseRetryInterval: TimeInterval = 1.5
+    static let proseAttempts = 10
+
     private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus,
-                                         newStatus: AgentStatus, lastMessage: String, repoPath: String) {
+                                         newStatus: AgentStatus, lastMessage: String, repoPath: String,
+                                         attemptsLeft: Int = TabCoordinator.proseAttempts) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
@@ -1738,6 +1796,29 @@ class TabCoordinator {
         // sent inside the cooldown window — see `NotificationManager.shouldNotify`.
         let source: NotificationManager.NotificationSource =
             pane?.hookStatus == newStatus ? .agent : .scan
+
+        // One line per delivery decision. This bug was diagnosed by reconstructing
+        // it from Claude's transcript timestamps against the notification history
+        // — two files that only happen to line up. The inputs are cheap to say.
+        NSLog("[notify] pane=\(terminalID.suffix(8)) \(oldStatus.rawValue)→\(newStatus.rawValue) " +
+              "hook=\(pane?.hookStatus.rawValue ?? "no-pane") prose=\(lastAssistantMessage.count) " +
+              "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft)")
+
+        if attemptsLeft > 0,
+           Self.shouldWaitForCompletion(newStatus: newStatus,
+                                        hookStatus: pane?.hookStatus ?? .unknown) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.proseRetryInterval) { [weak self] in
+                guard let self else { return }
+                // Back to work in the meantime: this completion was never one.
+                // Whatever the agent is doing now will announce itself.
+                guard AgentRegistry.shared.pane(for: terminalID)?.status != .running else { return }
+                self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                             oldStatus: oldStatus, newStatus: newStatus,
+                                             lastMessage: lastMessage, repoPath: repoPath,
+                                             attemptsLeft: attemptsLeft - 1)
+            }
+            return
+        }
 
         // A pending order card (AskUserQuestion / suggestion) for this pane
         // already surfaces the "needs input" state in the island and cockpit —
@@ -1760,6 +1841,8 @@ class TabCoordinator {
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
             lastAssistantMessage: lastAssistantMessage,
+            lastAssistantMessageAt: pane?.lastAssistantMessageAt,
+            lastUserPromptAt: pane?.lastUserPromptAt,
             isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID),
             source: source
         )

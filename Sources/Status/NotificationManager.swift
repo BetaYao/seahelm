@@ -205,6 +205,30 @@ class NotificationManager: NSObject {
         return "\(status.rawValue)|\(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))|\(trimmed)"
     }
 
+    /// Whether the agent's prose can be read as the answer to the prompt the
+    /// pane is holding.
+    ///
+    /// A completion notice says "finished" and then quotes the agent. When an
+    /// order lands and the agent has not spoken since, that quote is the answer
+    /// to the *previous* order — and announcing it puts a reply to "hi" under a
+    /// heading that names the order after it, out of order and, on a phone,
+    /// indistinguishable from the agent having answered. Worse, the turn
+    /// fingerprint carries the prompt, so the new prompt made a *new*
+    /// fingerprint out of the *old* words and walked straight through the
+    /// once-per-turn gate: the same answer, sent twice.
+    ///
+    /// Only the agent's own prose is held to this. A pane with none — anything
+    /// read off the screen rather than reported — has nothing to be out of
+    /// order with, and blocking it would silence every agent that reports no
+    /// hooks at all. The real completion arrives moments later with a fresh
+    /// timestamp and announces itself then.
+    static func answersCurrentPrompt(lastAssistantMessage: String,
+                                     assistantAt: Date?, promptAt: Date?) -> Bool {
+        guard !lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let promptAt, let assistantAt else { return true }
+        return assistantAt >= promptAt
+    }
+
     /// Whether a pending (delayed) notification for `targetStatus` should still
     /// fire, given the latest observed status for its key. Pure — extracted so the
     /// stability-gate decision is unit-testable without a live Timer.
@@ -546,6 +570,8 @@ class NotificationManager: NSObject {
         lastMessage: String,
         lastUserPrompt: String = "",
         lastAssistantMessage: String = "",
+        lastAssistantMessageAt: Date? = nil,
+        lastUserPromptAt: Date? = nil,
         isTargetVisible: Bool = false,
         source: NotificationSource = .scan
     ) {
@@ -555,6 +581,10 @@ class NotificationManager: NSObject {
         // pending stability timer can detect the agent moved on (e.g. an idle
         // flicker that flips back to running mid-turn).
         latestStatus[key] = newStatus
+
+        guard Self.answersCurrentPrompt(lastAssistantMessage: lastAssistantMessage,
+                                        assistantAt: lastAssistantMessageAt,
+                                        promptAt: lastUserPromptAt) else { return }
 
         let turn = Self.turnFingerprint(status: newStatus, lastAssistantMessage: lastAssistantMessage,
                                         lastMessage: lastMessage, lastUserPrompt: lastUserPrompt)

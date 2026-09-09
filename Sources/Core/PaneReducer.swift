@@ -9,7 +9,8 @@ enum PaneReducer {
                       lastMessage: String,
                       roundDuration: TimeInterval,
                       tasks: [TaskItem],
-                      lastUserPrompt: String) -> (info: PaneInfo, changed: Bool, previousStatus: AgentStatus) {
+                      lastUserPrompt: String,
+                      now: Date = Date()) -> (info: PaneInfo, changed: Bool, previousStatus: AgentStatus) {
         var next = info
         let previousStatus = info.status
         let changed = info.status != status
@@ -17,8 +18,12 @@ enum PaneReducer {
             || info.tasks.count != tasks.count
         next.status = status
         next.lastMessage = lastMessage
-        if !lastUserPrompt.isEmpty {
+        // Only on a *change*: this runs on every poll with the prompt re-passed
+        // unchanged, and stamping it each time would leave the prompt forever
+        // newer than the answer to it.
+        if !lastUserPrompt.isEmpty, lastUserPrompt != next.lastUserPrompt {
             next.lastUserPrompt = lastUserPrompt
+            next.lastUserPromptAt = now
         }
         next.roundDuration = roundDuration
         next.tasks = tasks
