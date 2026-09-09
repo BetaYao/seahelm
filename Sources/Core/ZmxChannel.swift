@@ -64,47 +64,12 @@ class ZmxChannel: AgentChannel {
                               arguments: args, timeout: Self.commandTimeout).succeeded
     }
 
-    /// The session's own scrollback, stripped of the escape sequences a TUI
-    /// paints itself with. Reads the persistent session rather than the surface,
-    /// so it works for a pane whose tab was never opened.
+    /// The session's own scrollback, stripped of the escape sequences and the
+    /// furniture a TUI paints itself with. Reads the persistent session rather
+    /// than the surface, so it works for a pane whose tab was never opened.
     func recentTranscript(lines: Int) -> String? {
         guard let raw = readOutput(lines: lines) else { return nil }
-        return Self.stripTerminalControl(raw)
-    }
-
-    /// Enough of an ANSI/OSC scrub to make a transcript readable in a mail.
-    static func stripTerminalControl(_ text: String) -> String {
-        var out = text
-        // `\#u{…}` rather than `\u{…}`: a raw string leaves escapes uninterpreted,
-        // so the plain form would look for a literal backslash-u.
-        for pattern in [#"\#u{1B}\][^\#u{07}\#u{1B}]*(?:\#u{07}|\#u{1B}\\)"#,   // OSC …BEL/ST
-                        #"\#u{1B}\[[0-9;?]*[ -/]*[@-~]"#,                        // CSI
-                        #"\#u{1B}[@-Z\\-_]"#,                                    // lone escapes
-                        #"[\#u{00}-\#u{08}\#u{0B}\#u{0C}\#u{0E}-\#u{1F}]"#] {    // stray control bytes
-            out = out.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-        }
-        return out.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.replacingOccurrences(of: "\r", with: "").trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !isChrome($0) }
-            .joined(separator: "\n")
-    }
-
-    /// Furniture an agent TUI repaints around the conversation — rules, meters,
-    /// the prompt caret, permission banners. Reading a transcript in a mail is
-    /// about what was said, and left in, the chrome outweighs it.
-    private static func isChrome(_ line: String) -> Bool {
-        // Box-drawing rules are pure decoration once the colours are gone.
-        if let first = line.first, "─━═│┃╭╮╰╯├┤┌┐└┘".contains(first) { return true }
-        // Meters and progress bars.
-        if line.contains("█") || line.contains("░") || line.contains("▓") { return true }
-        if line == "❯" || line == ">" || line == "⏺" { return true }
-        for marker in ["⏵⏵", "✻ Churned", "⚠ Transcript saving",
-                       // Seahelm's own control line, which is an instruction to
-                       // the agent rather than anything it said.
-                       "::seahelm-suggest::"] where line.contains(marker) {
-            return true
-        }
-        return false
+        return TerminalTranscript.clean(raw)
     }
 
     /// Deadline for one zmx call. zmx talks to a local socket, so anything past

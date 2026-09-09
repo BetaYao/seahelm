@@ -128,7 +128,10 @@ enum CommandFormatter {
     /// almost nothing about what an agent has been doing, and for a pane
     /// that reports no structured events they are empty.
     static func paneDetail(_ pane: PaneRef, activity: [String], transcript: String?, footer: String?) -> String {
-        var out = ["**\(target(pane))** · \(pane.type) — \(truncated(pane.title, limit: 90))",
+        // A pane that has said nothing yet takes its title from the agent's own
+        // OSC title, which is the agent's name — "Claude Code — Claude Code".
+        let title = pane.title.caseInsensitiveCompare(pane.type) == .orderedSame ? "" : pane.title
+        var out = ["**\(target(pane))** · \(pane.type)" + (title.isEmpty ? "" : " — \(truncated(title, limit: 90))"),
                    "\(pane.status.icon) \(pane.status.groupLabel)",
                    ""]
         if let transcript = transcript.map({ MailContentRedactor.summary($0, limit: 6_000) }),
@@ -138,7 +141,7 @@ enum CommandFormatter {
             out.append("")
         }
         let message = MailContentRedactor.summary(pane.lastMessage, limit: 1_500)
-        if !message.isEmpty {
+        if !message.isEmpty, !lifecycleLabels.contains(message) {
             out.append("**Latest**")
             out.append(message)
             out.append("")
@@ -151,6 +154,14 @@ enum CommandFormatter {
         if let footer, !footer.isEmpty { out.append(footer) }
         return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
     }
+
+    /// `lastMessage` falls back to the label of the last lifecycle event when
+    /// the agent has said nothing yet (see `HookDecoder.summary`). As a status
+    /// that reads fine; under **Latest**, next to the pane's status line, it is
+    /// the same fact twice — and "Session started" is not the latest anything.
+    static let lifecycleLabels: Set<String> = [
+        "Session started", "Creating worktree", "Subagent started", "Processing prompt",
+    ]
 
     // MARK: - Errors
 
