@@ -318,12 +318,23 @@ enum GitDiff {
     /// What seahelm recorded when it created the worktree beats guessing at a
     /// trunk name: a worktree stacked on another agent's branch has a base no
     /// entry in `preferredBaseRefs` can name, and comparing it against trunk
-    /// reports the branch below it as its own work. A recorded base that no
-    /// longer resolves — merged and pruned, or renamed — falls through to the
-    /// trunk guess rather than leaving the panel with no base at all.
+    /// reports the branch below it as its own work. The exception is a recorded
+    /// local trunk: use its remote-tracking ref when present, otherwise a root
+    /// checkout that has not pulled makes already-merged files look outstanding.
+    /// A recorded base that no longer resolves — merged and pruned, or renamed
+    /// — falls through to the trunk guess rather than leaving the panel baseless.
     static func resolveBaseRef(worktreePath: String, recordedBase: String?) -> String? {
-        if let recordedBase, refExists(recordedBase, worktreePath: worktreePath) {
-            return recordedBase
+        if let recordedBase {
+            let trimmed = recordedBase.trimmingCharacters(in: .whitespacesAndNewlines)
+            if (trimmed == "main" || trimmed == "master") {
+                let remoteTracking = "origin/\(trimmed)"
+                if refExists(remoteTracking, worktreePath: worktreePath) {
+                    return remoteTracking
+                }
+            }
+            if refExists(trimmed, worktreePath: worktreePath) {
+                return trimmed
+            }
         }
         for ref in preferredBaseRefs where refExists(ref, worktreePath: worktreePath) {
             return ref
