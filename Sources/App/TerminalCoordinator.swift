@@ -353,7 +353,20 @@ class TerminalCoordinator {
     func closeFocusedPane() {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
+        closePane(leafId: tree.focusedId, in: container)
+    }
 
+    /// Close a specific pane in a specific container — the path a pane's own
+    /// context menu takes. Acting on the clicked container and leaf matters:
+    /// the "active" container and its focused leaf can be a different worktree
+    /// (or nothing at all) than the pane the user right-clicked, and a close
+    /// routed there either hits the wrong pane or vanishes silently.
+    func closePane(leafId: String, in container: SplitContainerView) {
+        guard let tree = container.tree,
+              tree.root.findLeaf(id: leafId) != nil else { return }
+        // The close paths below key off the focused leaf; point it at the
+        // pane that was actually clicked first.
+        tree.focusedId = leafId
         switch Self.closePlan(leafCount: tree.leafCount) {
         case .closeLeaf:
             closeFocusedLeaf(container: container, tree: tree)
