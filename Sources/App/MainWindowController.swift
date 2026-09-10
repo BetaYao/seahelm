@@ -2734,6 +2734,10 @@ extension MainWindowController: TerminalCoordinatorDelegate {
             }
         }
     }
+
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didCloseLastPaneInWorktree path: String) {
+        tabCoordinator.worktreeSessionDidEnd(path)
+    }
 }
 
 // MARK: - Bridge Actions

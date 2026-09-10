@@ -127,4 +127,16 @@ final class TerminalCoordinatorTests: XCTestCase {
             idleAfter: 600, now: t0.addingTimeInterval(10))
         XCTAssertNil(plan.offscreenSince["gone"], "ids that no longer exist must not accumulate")
     }
+
+    // MARK: - Close policy
+
+    func testClosePlanEndsTheSessionWhenOneLeafRemains() {
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 1), .closeLastLeaf,
+                       "the last pane carries the worktree's whole session with it")
+    }
+
+    func testClosePlanDropsOneLeafWhenOthersRemain() {
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 2), .closeLeaf)
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 5), .closeLeaf)
+    }
 }

@@ -1417,6 +1417,17 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
+    /// The worktree's last pane was closed — its session ended, but the
+    /// worktree stays on disk and in `allWorktrees`. Drop the dead split
+    /// container and repaint the row as session-less. The light counterpart of
+    /// `worktreeDidDelete`, which also removes the row.
+    func worktreeSessionDidEnd(_ path: String) {
+        dashboardVC?.invalidateSplitContainer(forPath: path)
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
     // MARK: - Close Repo
 
     func performCloseRepo(projectName: String) {
