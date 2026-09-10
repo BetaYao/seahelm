@@ -223,6 +223,10 @@ class TabCoordinator {
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
             self.chatProgress.ingest(outcome)
+            if outcome.isCompletionSignal {
+                self.completionSignals[outcome.info.id, default: 0] += 1
+                self.deliverAgentCompletion(outcome)
+            }
             // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
@@ -1743,6 +1747,36 @@ class TabCoordinator {
                                 lastMessage: lastMessage, repoPath: repoPath)
     }
 
+    /// How many times each pane's agent has reported finishing a turn. Only
+    /// the count matters: a held screen-edge compares it against what it saw
+    /// on the way in, and any change means the agent got there first.
+    private var completionSignals: [String: Int] = [:]
+
+    /// The agent's own “I have finished” — the only event that carries what
+    /// it actually said.
+    ///
+    /// The status edge is not enough on its own, and one real turn shows why.
+    /// Replayed from the event log for pane #64: seq 52714 is a
+    /// `Running → Idle` status change; the agent's completion, the one carrying
+    /// `final_message`, is seq 52763 — forty-nine events later. The status never
+    /// left `Idle` in between, so no second edge existed to announce it and the
+    /// answer never reached the phone at all. What went instead was the screen's
+    /// idea of the pane at 52714, which was a shell command.
+    ///
+    /// So a completion announces itself. `NotificationManager` still decides
+    /// whether it is worth saying — the turn fingerprint is what keeps this from
+    /// repeating an edge that already went out with the same words.
+    private func deliverAgentCompletion(_ outcome: IngestOutcome) {
+        let path = outcome.info.worktreePath
+        let paneIndex = statusAggregator?.status(for: path)?
+            .panes.first { $0.terminalID == outcome.info.id }?.paneIndex ?? 1
+        deliverPaneStatusChange(worktreePath: path, paneIndex: paneIndex,
+                                // The agent has just said the turn is over, which
+                                // is the transition — whatever the rollup thinks.
+                                oldStatus: .running, newStatus: .idle,
+                                lastMessage: outcome.info.lastMessage,
+                                repoPath: worktreeRepoCache[path] ?? path)
+    }
     /// Whether a completion is worth holding because the agent has not said it
     /// is finished.
     ///
@@ -1807,11 +1841,15 @@ class TabCoordinator {
         if attemptsLeft > 0,
            Self.shouldWaitForCompletion(newStatus: newStatus,
                                         hookStatus: pane?.hookStatus ?? .unknown) {
+            let signalsSeen = completionSignals[terminalID] ?? 0
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.proseRetryInterval) { [weak self] in
                 guard let self else { return }
                 // Back to work in the meantime: this completion was never one.
                 // Whatever the agent is doing now will announce itself.
                 guard AgentRegistry.shared.pane(for: terminalID)?.status != .running else { return }
+                // The agent finished while we held this and said so itself, with
+                // the words this edge never had. That one has already gone out.
+                guard (self.completionSignals[terminalID] ?? 0) == signalsSeen else { return }
                 self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
                                              oldStatus: oldStatus, newStatus: newStatus,
                                              lastMessage: lastMessage, repoPath: repoPath,
