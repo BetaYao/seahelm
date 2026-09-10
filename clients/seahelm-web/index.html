@@ -161,7 +161,7 @@
     padding:3px 7px;background:var(--panel);border-bottom:1px solid var(--line-12);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vt-leaf.on .vt-leaf-title{color:var(--accent)}
-  .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden}
+  .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;touch-action:none}
   /* Single-pane fallback: the strip stands in for the panes we stopped drawing,
      so the layout is still legible even though only one of them is on screen. */
   .vt-single{flex:1 1 auto;min-height:0;min-width:0;display:flex}
@@ -387,7 +387,10 @@
 <link rel="stylesheet" href="./xterm.css" />
 <script src="./xterm.js"></script>
 <script src="./input-coalescer.js"></script>
+<script src="./touch-scroll.js"></script>
 <script src="./reconnect.js"></script>
+<script src="./vt-apply.js"></script>
+<script src="./term-focus.js"></script>
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
@@ -713,36 +716,19 @@ async function inflateRaw(bytes){
 // Inflation is async, and a terminal that applies two chunks out of order is
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
 // through one promise chain, so decode can overlap but application cannot.
-const vtWriteChains = new Map();
 // Under decode backlog, drop intermediate vt.data rather than growing forever.
 // Snapshots always enqueue (they reset the terminal).
 const VT_APPLY_MAX = 8;
-const vtApplyDepth = new Map();
-
-function enqueueVTApply(key, type, work){
-  const depth = vtApplyDepth.get(key) || 0;
-  if (type === 'vt.data' && depth >= VT_APPLY_MAX) {
-    log('sys', '(vt drop)', key);
-    return;
-  }
-  vtApplyDepth.set(key, depth + 1);
-  const prior = vtWriteChains.get(key) || Promise.resolve();
-  const next = prior.then(async () => {
-    try {
-      await work();
-    } catch (e) {
-      log('sys', '(vt)', `frame dropped: ${e && e.message}`);
-    } finally {
-      vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
-    }
-  });
-  vtWriteChains.set(key, next);
-}
-
+const vtApply = SeahelmVTApply.createApplyQueue({
+  maxData: VT_APPLY_MAX,
+  onDrop: (key) => log('sys', '(vt drop)', key),
+  onError: (_key, e) => log('sys', '(vt)', `frame dropped: ${e && e.message}`),
+});
+function enqueueVTApply(key, type, work){ return vtApply.enqueue(key, type, work); }
 /// A pane that goes away takes its chain with it — the map is keyed by pane and
 /// nothing else ever removed an entry, so worktree churn grew it for the life of
 /// the page.
-function releaseVTChain(key){ vtWriteChains.delete(key); }
+function releaseVTChain(key){ vtApply.release(key); }
 
 function onGatewayBinaryFrame(buf){
   const f = parseVTFrame(buf);
@@ -751,7 +737,7 @@ function onGatewayBinaryFrame(buf){
 
   enqueueVTApply(f.key, f.type, async () => {
     const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
-    handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
+    await handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
   });
 }
 
@@ -790,7 +776,7 @@ function onGatewayNotify(method, params){
     const key = params.pane_session_key || params.pane_id;
     const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
     enqueueVTApply(key, type, async () => {
-      handleVT(key, {
+      await handleVT(key, {
         type, b64: params.b64, cols: params.cols, rows: params.rows,
       });
     });
@@ -1577,6 +1563,7 @@ function mountSinglePane(key){
   for (const [k, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: k });
     if (entry.keys) entry.keys.cancel();
+    if (entry.touch) entry.touch();
     releaseVTChain(k);
     try { entry.term.dispose(); } catch (e) {}
   }
@@ -1617,6 +1604,7 @@ function unmountPanes(){
   for (const [key, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: key });
     if (entry.keys) entry.keys.cancel();
+    if (entry.touch) entry.touch();
     releaseVTChain(key);
     try { entry.term.dispose(); } catch (e) {}
   }
@@ -1681,7 +1669,14 @@ function buildLayoutLeaf(node){
   // pane can own its own outbound path — no routing table, no focus bookkeeping.
   t.onData((data) => entry.keys.push(data));
   t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
+  // xterm/ghostty-web scroll on wheel. The canvas swallows touch, so a
+  // swipe has to be translated — vertical only; a tap or a horizontal
+  // drag is left alone (focus, selection, TUI).
+  entry.touch = SeahelmTouchScroll.attach(host, {
+    target: () => host.querySelector('.xterm-viewport') || t.element || host,
+  });
   el.addEventListener('mousedown', () => focusPane(key));
+  el.addEventListener('touchstart', () => focusPane(key), { passive: true });
 
   // xterm paints its selection onto the canvas, so the browser has no DOM range
   // covering it. A native copy therefore falls back to whatever the browser does
@@ -1737,16 +1732,23 @@ function attachWebglRenderer(term){
       try { addon.dispose(); } catch (e) {}
     });
     term.loadAddon(addon);
+    // Renderer swap rebuilds the screen and commonly blurs the helper
+    // textarea; the pane highlight does not move, so give the keyboard back.
+    restoreTermFocus();
   }).catch((e) => {
     log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
   });
 }
 
+function restoreTermFocus(){
+  const entry = S.vt.focus && S.vt.panes.get(S.vt.focus);
+  if (entry) { try { entry.term.focus(); } catch (e) {} }
+}
+
 function focusPane(key){
   S.vt.focus = key;
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
-  const entry = key && S.vt.panes.get(key);
-  if (entry) { try { entry.term.focus(); } catch (e) {} }
+  restoreTermFocus();
   updateToBottom();
   renderTermKeys();
 }
@@ -1831,7 +1833,7 @@ function sendKeysPayload(paneKey, utf8Bytes){
 }
 
 /** Shared VT path for MQTT topic payloads and Gateway notify frames. */
-function handleVT(paneKey, v){
+async function handleVT(paneKey, v){
   if (!v) return;
   const entry = S.vt.panes.get(paneKey);
   if (!entry) return;                       // a pane we are not mirroring right now
@@ -1857,12 +1859,12 @@ function handleVT(paneKey, v){
       }
     }
     t.reset();
-    if (bytes.length) t.write(bytes, () => fitPaneFont(entry));
-    else fitPaneFont(entry);
+    await SeahelmVTApply.writeTerminal(t, bytes);
+    fitPaneFont(entry);
     if (S.vt.focus === paneKey) updateToBottom();
     return;
   }
-  t.write(bytes);
+  await SeahelmVTApply.writeTerminal(t, bytes);
 }
 
 /** The "back to live" affordance tracks whichever pane has focus. */
@@ -1970,6 +1972,9 @@ applyLogVisibility();
 $('logVtBtn').onclick = () => setShowVTFrames(!showVTFrames);
 setShowVTFrames(showVTFrames);
 $('clearLog').onclick=()=>$('log').innerHTML='';
+// Buttons steal the caret in a browser; the pane highlight does not move.
+// Keep xterm's helper textarea focused unless the user is in a real field.
+SeahelmTermFocus.install(document, restoreTermFocus);
 </script>
 </body>
 </html>
