@@ -15,6 +15,24 @@ final class TerminalCoordinatorTests: XCTestCase {
         XCTAssertNotNil(coordinator.config.splitLayouts["/tmp/test"])
     }
 
+    func testMigratesAnExtraPaneThatCollidesWithAnotherWorktreeBase() {
+        let first = "/workspace/task/https-github-com-dif"
+        let second = "/workspace/task/https-github-com-dif-2"
+        let firstBase = SessionManager.persistentSessionName(for: first)
+        let secondBase = SessionManager.persistentSessionName(for: second)
+        var config = Config()
+        config.splitLayouts = [
+            first: .split(axis: "horizontal", ratio: 0.5,
+                          first: .leaf(paneSessionKey: firstBase, title: nil),
+                          second: .leaf(paneSessionKey: secondBase, title: nil)),
+            second: .leaf(paneSessionKey: secondBase, title: nil),
+        ]
+
+        XCTAssertTrue(config.migrateCollidingPaneSessions())
+        XCTAssertEqual(config.splitLayouts[second]?.paneSessionKeys, [secondBase])
+        XCTAssertEqual(config.splitLayouts[first]?.paneSessionKeys, [firstBase, "\(firstBase)--pane-1"])
+    }
+
     func testSplitFocusedPaneWithNilRepoVCIsNoop() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         // Should not crash when no repoVC

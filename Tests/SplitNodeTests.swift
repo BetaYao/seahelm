@@ -134,9 +134,9 @@ final class SplitTreeTests: XCTestCase {
 
     func testNextSessionName() {
         let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", stationId: "s1", paneSessionKey: "seahelm-repo-main")
-        XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main-1")
-        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: "seahelm-repo-main-1")
-        XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main-2")
+        XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main--pane-1")
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: "seahelm-repo-main--pane-1")
+        XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main--pane-2")
     }
 
     func testAllSurfaceIds() {

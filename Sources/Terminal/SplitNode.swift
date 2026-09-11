@@ -53,8 +53,9 @@ indirect enum SplitNode {
             if name == baseName {
                 continue
             }
-            if name.hasPrefix(baseName + "-"),
-               let suffix = Int(name.dropFirst(baseName.count + 1)) {
+            let panePrefix = baseName + "--pane-"
+            if name.hasPrefix(panePrefix),
+               let suffix = Int(name.dropFirst(panePrefix.count)) {
                 maxIndex = max(maxIndex, suffix)
             }
         }
@@ -205,6 +206,24 @@ indirect enum CodableSplitNode: Codable {
 }
 
 extension CodableSplitNode {
+    var paneSessionKeys: [String] {
+        switch self {
+        case .leaf(let key, _): return [key]
+        case .split(_, _, let first, let second): return first.paneSessionKeys + second.paneSessionKeys
+        }
+    }
+
+    func replacingPaneSessionKeys(_ replacements: [String: String]) -> CodableSplitNode {
+        switch self {
+        case .leaf(let key, let title):
+            return .leaf(paneSessionKey: replacements[key] ?? key, title: title)
+        case .split(let axis, let ratio, let first, let second):
+            return .split(axis: axis, ratio: ratio,
+                          first: first.replacingPaneSessionKeys(replacements),
+                          second: second.replacingPaneSessionKeys(replacements))
+        }
+    }
+
     /// Wire shape for remote clients mirroring this window's layout.
     ///
     /// Leaves carry `pane_session_key` — the same key `pane.vt_open` takes — so a

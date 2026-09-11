@@ -247,7 +247,9 @@ struct Config: Codable {
         }
         do {
             let data = try Data(contentsOf: configPath)
-            return try JSONDecoder().decode(Config.self, from: data)
+            var config = try JSONDecoder().decode(Config.self, from: data)
+            if config.migrateCollidingPaneSessions() { config.save() }
+            return config
         } catch {
             NSLog("Failed to load config: \(error)")
             // A corrupt/undecodable config is NOT a fresh install — falling back
@@ -256,6 +258,41 @@ struct Config: Codable {
             fallback.onboardingCompleted = true
             return fallback
         }
+    }
+
+    /// Older split panes used `<base>-N`. That can equal another worktree's
+    /// base name when its directory ends in `-N`, making both cards attach the
+    /// same zmx session. Keep the true base owner on its existing session and
+    /// move only the colliding extra pane to the collision-proof `--pane-N`
+    /// namespace. Non-colliding legacy panes are deliberately left untouched.
+    @discardableResult
+    mutating func migrateCollidingPaneSessions() -> Bool {
+        var pathsByKey: [String: Set<String>] = [:]
+        for (path, layout) in splitLayouts {
+            for key in layout.paneSessionKeys where !key.isEmpty {
+                pathsByKey[key, default: []].insert(path)
+            }
+        }
+        var claimed = Set(pathsByKey.keys)
+        var changed = false
+        for (key, paths) in pathsByKey where paths.count > 1 {
+            guard let owner = paths.first(where: { SessionManager.persistentSessionName(for: $0) == key }) else {
+                continue
+            }
+            for path in paths where path != owner {
+                let base = SessionManager.persistentSessionName(for: path)
+                var index = 1
+                var replacement = SessionManager.indexedSessionName(base: base, index: index)
+                while claimed.contains(replacement) {
+                    index += 1
+                    replacement = SessionManager.indexedSessionName(base: base, index: index)
+                }
+                splitLayouts[path] = splitLayouts[path]?.replacingPaneSessionKeys([key: replacement])
+                claimed.insert(replacement)
+                changed = true
+            }
+        }
+        return changed
     }
 
     private static let saveQueue = DispatchQueue(label: "com.seahelm.config-save", qos: .utility)
