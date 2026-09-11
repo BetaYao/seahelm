@@ -44,6 +44,38 @@ final class StackedWorktreeBaseTests: XCTestCase {
         )
     }
 
+    /// A worktree cut from trunk records the local branch name, but the root
+    /// checkout can be behind its remote after another worktree's PR merges.
+    /// Prefer the remote-tracking tip so already-merged files do not linger in
+    /// Changes as branch-relative work.
+    func testRecordedTrunkPrefersRemoteTrackingTip() throws {
+        let repo = try makeStackedRepo()
+        runGit(["update-ref", "refs/remotes/origin/main", "main"], in: repo.root)
+
+        XCTAssertEqual(
+            GitDiff.resolveBaseRef(worktreePath: repo.uiWorktree, recordedBase: "main"),
+            "origin/main"
+        )
+    }
+
+    /// Squash merging A's work puts the same file tree on main but leaves A's
+    /// commit outside main's ancestry. B must not list A's already-merged file
+    /// just because its merge base predates that squash commit.
+    func testSquashMergedBaseContentDoesNotLingerInChanges() throws {
+        let repo = try makeStackedRepo()
+        try "def endpoint(): pass\n".write(
+            toFile: repo.root + "/api.py",
+            atomically: true,
+            encoding: .utf8
+        )
+        commitAll(in: repo.root, message: "main: squash A's endpoint")
+
+        let changes = GitDiff.branchChangedFiles(worktreePath: repo.uiWorktree, recordedBase: "main")
+
+        XCTAssertEqual(changes.baseRef, "main")
+        XCTAssertEqual(Set(changes.files.map(\.path)), ["ui.html"])
+    }
+
     /// A base merged upstream and pruned must not leave the panel baseless.
     func testDeletedBaseFallsBackToTrunk() throws {
         let repo = try makeStackedRepo()

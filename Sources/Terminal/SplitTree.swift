@@ -25,7 +25,7 @@ class SplitTree {
 
     func nextSessionName() -> String {
         let index = root.nextPaneIndex(baseName: baseSessionName)
-        return "\(baseSessionName)-\(index)"
+        return SessionManager.indexedSessionName(base: baseSessionName, index: index)
     }
 
     /// Split the focused leaf. Returns the new leaf id and the id of the split

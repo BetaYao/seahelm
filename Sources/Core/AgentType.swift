@@ -83,9 +83,8 @@ enum AgentType: String, Codable, CaseIterable {
     /// non-AI / shell types (those are not auto-launched). The task is
     /// shell-escaped because the result is interpreted by a POSIX shell.
     /// Instruction injected into the agent's system prompt so it emits next-step
-    /// suggestions itself as the last action of a turn — no blocking Stop hook /
-    /// extra round-trip. The Stop-hook path stays as a fallback for turns where
-    /// the agent doesn't comply or wasn't launched with this flag.
+    /// suggestions itself as the last action of a turn, without an extra
+    /// round-trip through a blocking Stop hook.
     static let suggestInstruction =
         "End every response with one final PLAIN-TEXT line formatted exactly as " +
         "`\(StopHookResponder.sentinel) first option | second option`, giving 2-5 short " +
@@ -93,8 +92,9 @@ enum AgentType: String, Codable, CaseIterable {
         "that line into clickable buttons for the user. Make it the LAST line of your " +
         "message; do NOT run any tool or shell command to produce it."
 
-    /// Agent-specific flag that appends to the system prompt at launch. nil =
-    /// this agent gets suggestions only via the Stop-hook fallback.
+    /// Agent-specific flag that appends the inline suggestion guidance at launch.
+    /// Agents without this flag receive the same guidance through the worktree
+    /// instructions written by `SuggestGuidanceWriter`.
     private var appendSystemPromptFlag: String? {
         switch self {
         case .claudeCode: return "--append-system-prompt"

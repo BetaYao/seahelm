@@ -32,6 +32,30 @@ class TabCoordinator {
     let commandSessions = CommandSessionStore()
     private lazy var mailPaneObserver = MailPaneObserver(sessions: commandSessions)
 
+    /// The live "what it's doing right now" line in each bound Telegram chat.
+    /// Wired to the bridge here rather than in MainWindowController because
+    /// this is where the outcome stream already lands.
+    private(set) lazy var chatProgress: ChatProgressReporter = {
+        let reporter = ChatProgressReporter(sessions: commandSessions)
+        reporter.send = { chatId, text, done in
+            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
+            ) { messageId in
+                // The bridge reports the id from its own send queue; the
+                // reporter's state belongs to main, where every outcome lands.
+                DispatchQueue.main.async { done(messageId) }
+            }
+        }
+        reporter.edit = { chatId, messageId, text in
+            AgentRegistry.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
+                                               content: text)
+        }
+        reporter.remove = { chatId, messageId in
+            AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
+        }
+        return reporter
+    }()
+
     var activeTabIndex: Int = 0
     /// Every worktree across all repos. `tree` is optional because the tree is
     /// owned by `StationManager`, not by this list, and a worktree can be between
@@ -198,6 +222,11 @@ class TabCoordinator {
             self.firstMate?.handle(outcome)
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
+            self.chatProgress.ingest(outcome)
+            if outcome.isCompletionSignal {
+                self.completionSignals[outcome.info.id, default: 0] += 1
+                self.deliverAgentCompletion(outcome)
+            }
             // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
@@ -592,6 +621,10 @@ class TabCoordinator {
                     self.saveConfig()
                 }
                 self.pruneStaleWorktreeConfigEntries()
+                // Keep the volume monitor's watched set in sync with the live
+                // workspace list (repos + every discovered worktree path).
+                let watchPaths = resolvedPaths + discoveredWorktrees.flatMap { $0.worktrees.map(\.path) }
+                VolumePresenceMonitor.shared.start(workspacePaths: watchPaths)
 
                 var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree?)] = []
 
@@ -686,57 +719,22 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
                     }
-                    // Per-session timestamps: when we last blocked a session for suggestions,
-                    // and when a user prompt last arrived for that session. If the user sent a
-                    // message AFTER our last block, Claude's next stop is a response to explicit
-                    // user direction — suppress the suggestion block so Claude can respond cleanly
-                    // without mixing suggestion overhead into the user-directed response.
-                    var sessionBlockedAt: [String: Date] = [:]
-                    var sessionUserPromptedAt: [String: Date] = [:]
-                    // When the agent voluntarily called seahelm-suggest this turn (it was
-                    // instructed to as its last action). If so, we needn't force a
-                    // suggestion via a blocking Stop — that saves the block→continue
-                    // round-trip. Reset each turn (on the next user prompt).
-                    var sessionSuggestedAt: [String: Date] = [:]
-
                     // Shared inbound-event sink, serialized so the webhook and the
-                    // control socket can both feed it without racing the per-session
-                    // dictionaries below.
+                    // control socket can both feed it without racing event handling.
                     let eventQueue = DispatchQueue(label: "seahelm.event-sink")
-                    let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
+                    let handleEvent: (WebhookEvent) -> Void = { [weak self] event in
                       eventQueue.sync {
-                        guard let self else { return nil }
-                        // Correlate the suggest→Stop suppression by pane, not session:
-                        // the agent-invoked `seahelm-suggest` carries only a pane id, while
-                        // the native Stop hook carries Claude's real session UUID. Keying off
-                        // sessionId made the two never match, so the block fired every turn.
-                        // paneId is stable across both; fall back to sessionId outside a pane.
-                        let turnKey = event.paneId ?? event.sessionId
-                        // Set when this Stop is answered with a `decision: block` body.
-                        // Held rather than returned early so the event still reaches
-                        // ingest — see the blocking branch below.
-                        var block: String?
-                        // Track when the user sent a message to this session; a new
-                        // user prompt starts a fresh turn, so the agent must suggest again.
-                        if event.event == .userPrompt {
-                            sessionUserPromptedAt[turnKey] = Date()
-                            sessionSuggestedAt.removeValue(forKey: turnKey)
-                        }
+                        guard let self else { return }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         AgentRegistry.shared.updateBackgroundBusy(from: event)
                         // Drop a (voluntary) suggestion while background work is still running —
                         // the agent will auto-resume, so it isn't a real end-of-turn yet.
                         if event.event == .suggest, AgentRegistry.shared.isBackgroundBusy(cwd: event.cwd) {
                             NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                            return nil
+                            return
                         }
                         if event.event == .suggest {
                             NSLog("[suggest] pass gate1 (not background-busy) — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                        }
-                        // The agent gave its own suggestions this turn (per the injected
-                        // instruction) — record it so the Stop below won't force another.
-                        if event.event == .suggest {
-                            sessionSuggestedAt[turnKey] = Date()
                         }
                         // Cursor has no last_assistant_message on stop. Always stash
                         // afterAgentResponse `text` as the card summary — even when the
@@ -758,25 +756,14 @@ class TabCoordinator {
                                     data: ["options": options], paneId: event.paneId)
                                 self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
                                 AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                                sessionSuggestedAt[turnKey] = Date()
                             }
                         }
-                        // Suppress the suggestion block when the user sent a message after our
-                        // last block — Claude is responding to explicit user direction and doesn't
-                        // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop, sessionSuggestedAt[turnKey] != nil {
-                            // The agent already emitted buttons as its last action this
-                            // turn — no forced block needed (no extra round-trip).
-                            sessionSuggestedAt.removeValue(forKey: turnKey)
-                        } else if event.event == .agentStop,
-                                  let msg = event.data?["last_assistant_message"] as? String,
-                                  let options = StopHookResponder.parseSuggestions(from: msg) {
-                            // Direction 3: the agent declared its next-step options as a
-                            // final plain-text line (per the injected instruction). They
-                            // ride this Stop hook's own round-trip — no seahelm-suggest tool
-                            // call — so the answer prose is never left before a trailing
-                            // tool_use for the TUI to swallow. Surface the buttons here, then
-                            // let the Stop fall through to normal completion below.
+                        // Claude and Codex carry the final response on Stop.
+                        // Harvest inline options from that passive event without
+                        // asking the agent for a second turn.
+                        if event.event == .agentStop,
+                           let msg = event.data?["last_assistant_message"] as? String,
+                           let options = StopHookResponder.parseSuggestions(from: msg) {
                             AgentRegistry.shared.noteAssistantMessage(
                                 cwd: event.cwd, paneId: event.paneId,
                                 message: StopHookResponder.stripSentinel(from: msg))
@@ -786,37 +773,11 @@ class TabCoordinator {
                                 data: ["options": options], paneId: event.paneId)
                             self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
                             AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                            sessionSuggestedAt[turnKey] = Date()
-                        } else if event.event == .agentStop,
-                           let blockedAt = sessionBlockedAt[turnKey],
-                           let promptedAt = sessionUserPromptedAt[turnKey],
-                           promptedAt > blockedAt {
-                            sessionBlockedAt.removeValue(forKey: turnKey)
-                            sessionUserPromptedAt.removeValue(forKey: turnKey)
-                        } else if let body = StopHookResponder.blockBody(
-                            for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
-                            // Blocking Stop: the agent will continue and declare its
-                            // options. Stash its final message so the suggestion card
-                            // can show it, and remember that we blocked.
-                            sessionBlockedAt[turnKey] = Date()
-                            if let msg = event.data?["last_assistant_message"] as? String {
-                                AgentRegistry.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
-                            }
-                            // Fall through to ingest: the turn is over as far as the user
-                            // is concerned — the agent has written its answer — and the
-                            // extra round-trip this block buys is seahelm's own suggestion
-                            // overhead. Withholding the stop here used to delay every
-                            // completion (status, banner, chat mirror) by a whole model
-                            // round-trip: 2.6s to 20s, median ~9s, measured across real
-                            // sessions. The agent's follow-up turn re-reports running and
-                            // stops again; the notification cooldown collapses that pair.
-                            block = body
                         }
                         self.statusPublisher.webhookProvider.handleEvent(event)
                         AgentRegistry.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // AgentRegistry.shared.updateTodoFromWebhook(event)
-                        return block
                       }
                     }
                     // Local control socket is the sole inbound transport: reads
@@ -1392,6 +1353,17 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
+    /// The worktree's last pane was closed — its session ended, but the
+    /// worktree stays on disk and in `allWorktrees`. Drop the dead split
+    /// container and repaint the row as session-less. The light counterpart of
+    /// `worktreeDidDelete`, which also removes the row.
+    func worktreeSessionDidEnd(_ path: String) {
+        dashboardVC?.invalidateSplitContainer(forPath: path)
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
+        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
     // MARK: - Close Repo
 
     func performCloseRepo(projectName: String) {
@@ -1514,6 +1486,10 @@ class TabCoordinator {
         let refreshAll = branchRefreshTick % 6 == 0
         for (tabIndex, tab) in tabs.enumerated() {
             guard refreshAll || tabIndex == activeTabIndex else { continue }
+            // A fenced volume means every git invocation against it will sit out
+            // its timeout and park ProcessRunner drain threads — that starvation
+            // is how a single dead mount freezes the rest of the app.
+            if VolumeFence.isFenced(tab.repoPath) { continue }
             WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
                 guard let self else { return }
                 _ = self.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: tab.worktrees, freshWorktrees: freshWorktrees)
@@ -1718,8 +1694,71 @@ class TabCoordinator {
                                 lastMessage: lastMessage, repoPath: repoPath)
     }
 
+    /// How many times each pane's agent has reported finishing a turn. Only
+    /// the count matters: a held screen-edge compares it against what it saw
+    /// on the way in, and any change means the agent got there first.
+    private var completionSignals: [String: Int] = [:]
+
+    /// The agent's own “I have finished” — the only event that carries what
+    /// it actually said.
+    ///
+    /// The status edge is not enough on its own, and one real turn shows why.
+    /// Replayed from the event log for pane #64: seq 52714 is a
+    /// `Running → Idle` status change; the agent's completion, the one carrying
+    /// `final_message`, is seq 52763 — forty-nine events later. The status never
+    /// left `Idle` in between, so no second edge existed to announce it and the
+    /// answer never reached the phone at all. What went instead was the screen's
+    /// idea of the pane at 52714, which was a shell command.
+    ///
+    /// So a completion announces itself. `NotificationManager` still decides
+    /// whether it is worth saying — the turn fingerprint is what keeps this from
+    /// repeating an edge that already went out with the same words.
+    private func deliverAgentCompletion(_ outcome: IngestOutcome) {
+        let path = outcome.info.worktreePath
+        let paneIndex = statusAggregator?.status(for: path)?
+            .panes.first { $0.terminalID == outcome.info.id }?.paneIndex ?? 1
+        deliverPaneStatusChange(worktreePath: path, paneIndex: paneIndex,
+                                // The agent has just said the turn is over, which
+                                // is the transition — whatever the rollup thinks.
+                                oldStatus: .running, newStatus: .idle,
+                                lastMessage: outcome.info.lastMessage,
+                                repoPath: worktreeRepoCache[path] ?? path)
+    }
+    /// Whether a completion is worth holding because the agent has not said it
+    /// is finished.
+    ///
+    /// A completion notice is mostly the agent's own answer, and the answer can
+    /// arrive *after* the edge that announces it. Measured on a real turn: the
+    /// notice went out at 09:06:32 and the model wrote its answer at 09:06:40.99
+    /// — nine seconds later. The screen had gone quiet while it was composing,
+    /// the scan read quiet as finished, and the notice quoted the only other
+    /// thing on the pane, a shell command. Worse, when the real Stop landed the
+    /// status was no longer `running`, so `shouldNotify` refused it and the
+    /// answer never reached the phone at all — leaving the wrong message with
+    /// the right buttons stapled underneath it.
+    ///
+    /// The signal is the *disagreement*, not the empty text. `pane explain` on
+    /// the pane above said it all: `hook_status: running`, `decided_by: screen`.
+    /// The agent's own hooks still had the turn open; only the screen thought it
+    /// was over. So hold while the two disagree, and let the agent settle it —
+    /// its Stop is what carries the answer.
+    ///
+    /// `hookStatus == .running` is also what keeps this off panes that report no
+    /// hooks at all: theirs is `.unknown`, the screen is the only witness they
+    /// have, and holding their completions would delay every one for nothing.
+    static func shouldWaitForCompletion(newStatus: AgentStatus, hookStatus: AgentStatus) -> Bool {
+        newStatus == .idle && hookStatus == .running
+    }
+
+    /// How long to hold such a completion, and how often to look again. Each
+    /// pass re-reads the pane, so the wait ends the moment the agent's own Stop
+    /// lands — the full window is only spent when it never does.
+    static let proseRetryInterval: TimeInterval = 1.5
+    static let proseAttempts = 10
+
     private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus,
-                                         newStatus: AgentStatus, lastMessage: String, repoPath: String) {
+                                         newStatus: AgentStatus, lastMessage: String, repoPath: String,
+                                         attemptsLeft: Int = TabCoordinator.proseAttempts) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
@@ -1738,6 +1777,33 @@ class TabCoordinator {
         // sent inside the cooldown window — see `NotificationManager.shouldNotify`.
         let source: NotificationManager.NotificationSource =
             pane?.hookStatus == newStatus ? .agent : .scan
+
+        // One line per delivery decision. This bug was diagnosed by reconstructing
+        // it from Claude's transcript timestamps against the notification history
+        // — two files that only happen to line up. The inputs are cheap to say.
+        NSLog("[notify] pane=\(terminalID.suffix(8)) \(oldStatus.rawValue)→\(newStatus.rawValue) " +
+              "hook=\(pane?.hookStatus.rawValue ?? "no-pane") prose=\(lastAssistantMessage.count) " +
+              "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft)")
+
+        if attemptsLeft > 0,
+           Self.shouldWaitForCompletion(newStatus: newStatus,
+                                        hookStatus: pane?.hookStatus ?? .unknown) {
+            let signalsSeen = completionSignals[terminalID] ?? 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.proseRetryInterval) { [weak self] in
+                guard let self else { return }
+                // Back to work in the meantime: this completion was never one.
+                // Whatever the agent is doing now will announce itself.
+                guard AgentRegistry.shared.pane(for: terminalID)?.status != .running else { return }
+                // The agent finished while we held this and said so itself, with
+                // the words this edge never had. That one has already gone out.
+                guard (self.completionSignals[terminalID] ?? 0) == signalsSeen else { return }
+                self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
+                                             oldStatus: oldStatus, newStatus: newStatus,
+                                             lastMessage: lastMessage, repoPath: repoPath,
+                                             attemptsLeft: attemptsLeft - 1)
+            }
+            return
+        }
 
         // A pending order card (AskUserQuestion / suggestion) for this pane
         // already surfaces the "needs input" state in the island and cockpit —
@@ -1760,6 +1826,8 @@ class TabCoordinator {
             lastMessage: lastMessage,
             lastUserPrompt: lastUserPrompt,
             lastAssistantMessage: lastAssistantMessage,
+            lastAssistantMessageAt: pane?.lastAssistantMessageAt,
+            lastUserPromptAt: pane?.lastUserPromptAt,
             isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID),
             source: source
         )

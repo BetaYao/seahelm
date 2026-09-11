@@ -340,4 +340,41 @@ final class NotificationManagerTests: XCTestCase {
         XCTAssertEqual(NotificationManager.turnFingerprint(
             status: .idle, lastAssistantMessage: "  ", lastMessage: "", lastUserPrompt: "x"), "")
     }
+
+    // MARK: - Answering the prompt the pane is actually holding
+
+    private func answers(prose: String = "Hi! Ready when you are.",
+                         assistant: TimeInterval?, prompt: TimeInterval?) -> Bool {
+        let base = Date()
+        return NotificationManager.answersCurrentPrompt(
+            lastAssistantMessage: prose,
+            assistantAt: assistant.map { base.addingTimeInterval($0) },
+            promptAt: prompt.map { base.addingTimeInterval($0) })
+    }
+
+    func testProseWrittenAfterThePromptIsTheAnswerToIt() {
+        XCTAssertTrue(answers(assistant: 3, prompt: 0))
+    }
+
+    /// The bug this exists for: an order lands, the agent has not spoken since,
+    /// and a completion edge quotes the *previous* turn's answer under the new
+    /// order's name. It also slipped the once-per-turn gate, because the new
+    /// prompt made a new fingerprint out of the old words.
+    func testProseOlderThanThePromptIsNotAnnounced() {
+        XCTAssertFalse(answers(assistant: 3, prompt: 30))
+    }
+
+    /// A pane that reports no prose has nothing to be out of order with —
+    /// holding it to this would silence every agent without hooks.
+    func testAPaneWithNoProseIsNeverHeld() {
+        XCTAssertTrue(answers(prose: "", assistant: nil, prompt: 30))
+        XCTAssertTrue(answers(prose: "   ", assistant: 3, prompt: 30))
+    }
+
+    /// Nothing to compare against: a restored snapshot, or a pane that has been
+    /// given no prompt this run.
+    func testMissingTimestampsDoNotBlock() {
+        XCTAssertTrue(answers(assistant: nil, prompt: 30))
+        XCTAssertTrue(answers(assistant: 3, prompt: nil))
+    }
 }

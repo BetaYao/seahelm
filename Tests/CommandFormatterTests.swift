@@ -130,25 +130,17 @@ final class CommandFormatterTests: XCTestCase {
         XCTAssertFalse(text.contains("**Session**"), text)
     }
 
-    /// An agent TUI repaints meters, rules and a permission banner around the
-    /// conversation; in a mail that furniture outweighs what was actually said.
-    func testStripsAgentTUIChrome() {
-        let raw = [
-            "real answer here",
-            "❯",
-            "✻ Churned for 44s",
-            "Context █░░░░░░░░░ 7% │ Usage ██░░░░░░░░ 19% (resets in 2h)",
-            "⏵⏵ bypass permissions on (shift+tab to cycle)",
-            "⚠ Transcript saving is off — inherited marker",
-            "::seahelm-suggest:: a | b",
-            "second real line",
-        ].joined(separator: "\n")
-        XCTAssertEqual(ZmxChannel.stripTerminalControl(raw), "real answer here\nsecond real line")
-    }
-
-    func testStripsTerminalControlSequences() {
-        let raw = "\u{1B}[1;32mready\u{1B}[0m\n\u{1B}]0;title\u{07}\n────────\n$ ls"
-        XCTAssertEqual(ZmxChannel.stripTerminalControl(raw), "ready\n$ ls")
+    /// A pane that has said nothing takes its title from the agent's own OSC
+    /// title, and printing both reads as "Claude Code — Claude Code".
+    func testPaneDetailDropsATitleThatIsJustTheAgentName() {
+        let pane = PaneRef(handle: 26, handleKey: "k26", id: "d", sessionKey: "k26",
+                           project: "saas-mono", branch: "task/betly-app", worktreePath: "/repo/betly",
+                           type: "Claude Code", title: "claude code", status: .idle,
+                           lastMessage: "Session started")
+        let text = CommandFormatter.paneDetail(pane, activity: [], transcript: nil, footer: nil)
+        XCTAssertTrue(text.contains("· Claude Code"), text)
+        XCTAssertFalse(text.contains("—"), "the title repeats the agent name")
+        XCTAssertFalse(text.contains("Latest"), "a lifecycle label is not the latest anything")
     }
 
     // MARK: - Errors

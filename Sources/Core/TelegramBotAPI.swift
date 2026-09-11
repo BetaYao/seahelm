@@ -304,6 +304,28 @@ final class TelegramBotAPI {
                                           deadline: Self.stallSeconds)
     }
 
+    /// Rewrite the text of a message this bot already sent.
+    ///
+    /// Telegram has no streaming primitive; a line that changes while an agent
+    /// works is this method called again on the same message id. Two of its
+    /// failures are ordinary rather than exceptional and the caller is expected
+    /// to swallow them: editing to *identical* text is a 400 ("message is not
+    /// modified"), and editing too often is a 429. Neither is worth a retry —
+    /// the next update supersedes this one anyway.
+    func editMessageText(chatId: String, messageId: Int, text: String, parseMode: String?) throws {
+        var params: [String: Any] = ["chat_id": chatId, "message_id": messageId, "text": text]
+        if let parseMode { params["parse_mode"] = parseMode }
+        // As with the keyboard edit, the answer is the edited message.
+        let _: TelegramMessage = try call("editMessageText", params: params, deadline: Self.stallSeconds)
+    }
+
+    /// Take back a message this bot sent. Telegram allows this for 48 hours,
+    /// which is far longer than a transient status line lives.
+    func deleteMessage(chatId: String, messageId: Int) throws {
+        let _: Bool = try call("deleteMessage", params: ["chat_id": chatId, "message_id": messageId],
+                               deadline: Self.stallSeconds)
+    }
+
     /// Publish the verb table to Telegram, so typing `/` in the chat lists the
     /// commands instead of requiring the user to have read `/help` once.
     ///

@@ -13,6 +13,13 @@ struct PaneInfo {
     /// cards can show the real explanation rather than the `seahelm-suggest …` line.
     var lastAssistantMessage: String = ""
     var lastUserPrompt: String = ""    // most recent user prompt text
+    /// When each of the two above last *changed*. A completion is announced as
+    /// the answer to the prompt the pane is holding, so the two have to be in
+    /// the right order: prose recorded before the prompt landed cannot be an
+    /// answer to it. Re-recording the same text does not move these — they mark
+    /// when the words first appeared, not when they were last seen.
+    var lastAssistantMessageAt: Date?
+    var lastUserPromptAt: Date?
     var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
@@ -70,6 +77,8 @@ extension PaneInfo {
         )
         copy.lastAssistantMessage = lastAssistantMessage
         copy.lastUserPrompt = lastUserPrompt
+        copy.lastAssistantMessageAt = lastAssistantMessageAt
+        copy.lastUserPromptAt = lastUserPromptAt
         copy.tasks = tasks
         copy.activityEvents = activityEvents
         copy.scanStatus = scanStatus

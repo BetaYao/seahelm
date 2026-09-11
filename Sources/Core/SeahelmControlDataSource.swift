@@ -4,9 +4,8 @@ import Foundation
 /// and StationRegistry for terminal reads.
 final class SeahelmControlDataSource: ControlDataSource {
 
-    /// The shared inbound-event sink (same closure the HTTP webhook uses).
-    /// Returns an optional block-body string for blocking Stop hooks.
-    private let hookSink: (WebhookEvent) -> String?
+    /// The shared inbound-event sink (same closure the HTTP webhook used).
+    private let hookSink: (WebhookEvent) -> Void
 
     /// Set by the owner (TabCoordinator) to perform a split on the main thread.
     /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
@@ -34,14 +33,14 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Decline a pane's pending suggestion (main thread — it is UI state).
     var dismissDecisionHandler: ((String) -> Bool)?
 
-    init(hookSink: @escaping (WebhookEvent) -> String? = { _ in nil }) {
+    init(hookSink: @escaping (WebhookEvent) -> Void = { _ in }) {
         self.hookSink = hookSink
     }
 
-    func ingestHook(json: [String: Any]) -> String? {
+    func ingestHook(json: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: json),
-              let event = try? WebhookEvent.parse(from: data) else { return nil }
-        return hookSink(event)
+              let event = try? WebhookEvent.parse(from: data) else { return }
+        hookSink(event)
     }
 
     func snapshotPanes() -> [PaneSnapshot] {

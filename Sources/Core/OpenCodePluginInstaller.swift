@@ -5,9 +5,8 @@ import Foundation
 ///
 /// Why a tool and not a hook: opencode's plugin API has no Claude-shaped Stop
 /// hook. Its `session.idle` event does fire at turn end, but the `event` hook's
-/// return value is not consumed, so `StopHookResponder.blockBody`'s reverse
-/// trigger — a `{"decision":"block"}` on stdout that pushes the agent to call
-/// seahelm-suggest — has no counterpart here. The only interceptive hook is
+/// return value is not consumed, so a blocking Stop-hook reverse trigger has no
+/// counterpart here. The only interceptive hook is
 /// `tool.execute.before` (throw to veto one tool call), which is the wrong
 /// shape. So the model calls a tool directly; `SuggestGuidanceWriter`'s
 /// AGENTS.md block is what tells it to.

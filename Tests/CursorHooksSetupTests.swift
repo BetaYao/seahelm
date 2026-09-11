@@ -20,7 +20,7 @@ final class CursorHooksSetupTests: XCTestCase {
             XCTAssertEqual(command, "\(SeahelmHookInstaller.scriptPath()) cursor")
         }
         let stop = try XCTUnwrap(hooks["stop"] as? [[String: Any]])
-        XCTAssertEqual(stop.first?["loop_limit"] as? Int, 5)
+        XCTAssertNil(stop.first?["loop_limit"])
     }
 
     func testPreservesUserOwnedHooksAndAppendsSeahelm() throws {

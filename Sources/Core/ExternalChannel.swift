@@ -47,6 +47,10 @@ struct OutboundMessage {
     let replyToMessageId: String?
     let streaming: Bool
     let streamId: String?
+    /// An optional logical packet id. Channels may coalesce duplicate sends of
+    /// the same packet without suppressing ordinary messages that happen to
+    /// have identical text.
+    let packetKey: String?
     /// Drawn under the message by channels that can. Always a shortcut for
     /// something the text says how to type, so dropping them costs nothing.
     let buttons: [MessageButton]
@@ -55,6 +59,15 @@ struct OutboundMessage {
          content: String, format: MessageFormat = .text,
          replyToMessageId: String? = nil, streaming: Bool = false, streamId: String? = nil,
          buttons: [MessageButton] = []) {
+        self.init(channelId: channelId, targetChatId: targetChatId, targetUserId: targetUserId,
+                  content: content, format: format, replyToMessageId: replyToMessageId,
+                  streaming: streaming, streamId: streamId, buttons: buttons, packetKey: nil)
+    }
+
+    init(channelId: String, targetChatId: String? = nil, targetUserId: String? = nil,
+         content: String, format: MessageFormat = .text,
+         replyToMessageId: String? = nil, streaming: Bool = false, streamId: String? = nil,
+         buttons: [MessageButton] = [], packetKey: String?) {
         self.channelId = channelId
         self.targetChatId = targetChatId
         self.targetUserId = targetUserId
@@ -64,6 +77,7 @@ struct OutboundMessage {
         self.streaming = streaming
         self.streamId = streamId
         self.buttons = buttons
+        self.packetKey = packetKey
     }
 }
 
@@ -117,6 +131,15 @@ protocol ExternalChannel: AnyObject {
     /// message repeating it.
     func setButtons(chatId: String, messageId: String, buttons: [MessageButton])
 
+    /// Rewrite the text of a message this channel already sent, and take one
+    /// back. Both exist for the same thing: a line reporting what an agent is
+    /// doing *while* it does it is one message edited over and over and then
+    /// removed, not a stream of new ones. Both are best effort — a channel that
+    /// can do neither does nothing, and the reader loses only the liveness. The
+    /// answer itself never travels this way.
+    func editMessage(chatId: String, messageId: String, content: String, format: MessageFormat)
+    func deleteMessage(chatId: String, messageId: String)
+
     /// Connection management
     func connect()
     func disconnect()
@@ -129,6 +152,9 @@ extension ExternalChannel {
     }
 
     func setButtons(chatId: String, messageId: String, buttons: [MessageButton]) {}
+
+    func editMessage(chatId: String, messageId: String, content: String, format: MessageFormat) {}
+    func deleteMessage(chatId: String, messageId: String) {}
 
     /// The common direction, named for what it means.
     func retireButtons(chatId: String, messageId: String) {

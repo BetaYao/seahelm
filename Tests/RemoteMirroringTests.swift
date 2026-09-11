@@ -12,7 +12,7 @@ private final class MirrorDataSource: ControlDataSource {
     func snapshotPanes() -> [PaneSnapshot] { [] }
     func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] { [] }
     func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-    func ingestHook(json: [String: Any]) -> String? { nil }
+    func ingestHook(json: [String: Any]) {}
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
 
     func liveLayouts() -> [String: [String: Any]]? { layouts }

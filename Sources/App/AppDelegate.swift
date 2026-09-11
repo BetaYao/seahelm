@@ -37,6 +37,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ThemeMode.applyAppearance(mode)
         NSAppearance.current = NSApp.effectiveAppearance
 
+        // Watch workspace volumes so an abrupt external-disk disconnect fences
+        // path I/O before the main thread beachballs on a stale mount.
+        VolumePresenceMonitor.shared.start(workspacePaths: config.workspacePaths)
+        VolumePresenceMonitor.shared.onVolumeRecovered = { [weak self] _ in
+            self?.mainWindowController?.tabCoordinator.startBranchRefreshTimer()
+        }
+
         // `--render-onboarding <dir>` renders the wizard steps to PNGs and
         // exits — headless design iteration.
         if let idx = CommandLine.arguments.firstIndex(of: "--render-onboarding"),
@@ -129,9 +136,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if !cleaned.isEmpty {
                 NSLog("[App] Cleaned %d orphan zmx session(s)", cleaned.count)
             }
+            // Volume-drop corpses: unreachable daemons whose start_dir is gone
+            // or wedged, plus attach clients still spinning under a live parent.
+            let wedged = SessionManager.cleanupWedgedVolumeSessions()
+            if !wedged.isEmpty {
+                NSLog("[App] Cleaned %d volume-wedged zmx session(s)", wedged.count)
+            }
             // Separate from the session sweep above: these are client processes,
             // not sessions. They survive the app that spawned them and spin at
             // 20-70% CPU indefinitely, so each restart adds a few more.
+            // `cleanupWedgedVolumeSessions` already reaps wedged attaches; this
+            // pass catches ppid==1 orphans from prior app instances.
             let clients = SessionManager.cleanupOrphanZmxClients()
             if !clients.isEmpty {
                 NSLog("[App] Killed %d orphan zmx client process(es)", clients.count)

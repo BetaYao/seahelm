@@ -447,6 +447,6 @@ final class VTPipelineBenchmarks: XCTestCase {
 private final class BenchDataSource: ControlDataSource {
     func snapshotPanes() -> [PaneSnapshot] { [] }
     func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-    func ingestHook(json: [String: Any]) -> String? { nil }
+    func ingestHook(json: [String: Any]) {}
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
 }
