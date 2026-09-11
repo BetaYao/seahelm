@@ -3188,7 +3188,8 @@ extension MainWindowController {
         for chatId in chats {
             AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text,
-                format: .markdown, buttons: buttons)
+                format: .markdown, buttons: buttons,
+                packetKey: Self.questionCardPacketKey(order))
             ) { [weak self] messageId in
                 guard let messageId else { return }
                 DispatchQueue.main.async {
@@ -3197,6 +3198,15 @@ extension MainWindowController {
                 }
             }
         }
+    }
+
+    /// Stable across a queue flicker. It deliberately names the card contents,
+    /// not a transient event sequence, so rediscovering the same approval is
+    /// the same Telegram packet.
+    static func questionCardPacketKey(_ order: PendingOrder) -> String {
+        let action = order.action
+        return [order.id, action.message, (action.options ?? []).joined(separator: "\u{1E}")]
+            .joined(separator: "\u{1F}")
     }
 
 

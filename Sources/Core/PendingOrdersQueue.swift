@@ -26,13 +26,35 @@ struct SuggestionSeenSet {
     }
 
     private var seen: [String: Fingerprint] = [:]
+    /// A viewport can miss an approval dialog for a frame while it is still
+    /// blocking the agent. Do not turn that brief absence into a brand-new
+    /// card on the next frame: the island would re-open and Telegram would
+    /// send another full question card. Real new cards still win immediately
+    /// when their contents differ.
+    private var recentlyAbsent: [String: (fingerprint: Fingerprint, at: Date)] = [:]
+    static let reappearanceGrace: TimeInterval = 60 * 60
 
     /// Record `orders` as the full set now on offer and return the ones this
     /// surface has not shown yet. Cards that left the queue are forgotten, so a
     /// re-raised card counts as new again.
-    mutating func absorb(_ orders: [PendingOrder]) -> [PendingOrder] {
-        let fresh = orders.filter { Self.isFresh($0, seen: seen[$0.id]) }
+    mutating func absorb(_ orders: [PendingOrder], now: Date = Date()) -> [PendingOrder] {
+        let incomingIDs = Set(orders.map(\.id))
+        for (id, fingerprint) in seen where !incomingIDs.contains(id) {
+            recentlyAbsent[id] = (fingerprint, now)
+        }
+        recentlyAbsent = recentlyAbsent.filter { _, absent in
+            now.timeIntervalSince(absent.at) < Self.reappearanceGrace
+        }
+
+        let fresh = orders.filter { order in
+            if let current = seen[order.id] {
+                return Self.isFresh(order, seen: current)
+            }
+            guard let absent = recentlyAbsent[order.id] else { return true }
+            return Self.isFresh(order, seen: absent.fingerprint)
+        }
         seen = Dictionary(orders.map { ($0.id, Fingerprint($0)) }, uniquingKeysWith: { _, last in last })
+        for id in incomingIDs { recentlyAbsent[id] = nil }
         return fresh
     }
 
