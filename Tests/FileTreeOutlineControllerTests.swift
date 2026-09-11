@@ -38,6 +38,16 @@ final class FileTreeOutlineControllerTests: XCTestCase {
         XCTAssertEqual(names, ["Sources", ".config", ".env"])
     }
 
+    func testInitialRootNodesAreVisibleWithoutAnotherRefresh() {
+        let nodes = FileTreeOutlineController.childNodes(of: root)
+        let controller = FileTreeOutlineController(rootPath: root.path, initialRootNodes: nodes)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 280, height: 400))
+        scroll.documentView = controller.outlineView
+        controller.outlineView.frame = scroll.bounds
+
+        XCTAssertGreaterThan(controller.outlineView.numberOfRows, 0)
+    }
+
     /// Toggling showHidden rebuilds the tree — previously this dropped expansion
     /// because `didSet` called bare `reload()`. Drive the outline through a
     /// scroll view and assert folders stay open across the toggle.
