@@ -29,6 +29,7 @@ final class TelegramChannel: ExternalChannel {
     private var generation = 0
     private let lock = NSLock()
     private let sendQueue = DispatchQueue(label: "com.seahelm.telegram.send", qos: .utility)
+    private let packets = TelegramPacketBook()
     /// Lets `disconnect` cut a retry backoff short instead of waiting it out.
     private let wake = DispatchSemaphore(value: 0)
 
@@ -149,6 +150,19 @@ final class TelegramChannel: ExternalChannel {
             return
         }
 
+        let packetKey = message.packetKey.map { "\(target)\u{1F}\($0)" }
+        if let packetKey {
+            switch packets.begin(key: packetKey, completion: completion) {
+            case .send:
+                break
+            case .joined:
+                return
+            case .delivered(let id):
+                completion?(id)
+                return
+            }
+        }
+
         let parseMode: String? = message.format == .text ? nil : "HTML"
         let rendered = parseMode == nil ? message.content : TelegramFormatter.html(from: message.content)
 
@@ -171,12 +185,15 @@ final class TelegramChannel: ExternalChannel {
                     // with nothing to mark the cut reads as the agent having
                     // said only that much.
                     NSLog("[Telegram] Gave up with \(chunks.count - index) of \(chunks.count) chunk(s) unsent")
-                    completion?(nil)
+                    if let packetKey { self.packets.finish(key: packetKey, messageID: nil) }
+                    else { completion?(nil) }
                     return
                 }
                 lastId = id
             }
-            completion?(lastId.map(String.init))
+            let id = lastId.map(String.init)
+            if let packetKey { self.packets.finish(key: packetKey, messageID: id) }
+            else { completion?(id) }
         }
     }
 
