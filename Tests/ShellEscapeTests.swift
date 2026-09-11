@@ -18,4 +18,28 @@ final class ShellEscapeTests: XCTestCase {
     func testEmptyString() {
         XCTAssertEqual(ShellEscape.singleQuote(""), "''")
     }
+
+    // MARK: - backslash (dropped file paths)
+
+    func testBackslashEscapesSpacesAndParentheses() {
+        XCTAssertEqual(ShellEscape.backslash("/tmp/My File (1).png"), "/tmp/My\\ File\\ \\(1\\).png")
+    }
+
+    func testBackslashEscapesQuotesAndDollar() {
+        // it's "$HOME" => it\'s\ \"\$HOME\"
+        XCTAssertEqual(ShellEscape.backslash("it's \"$HOME\""), "it\\'s\\ \\\"\\$HOME\\\"")
+    }
+
+    func testBackslashDoesNotDoubleItsOwnEscapes() {
+        // a\b c => a\\b\ c
+        XCTAssertEqual(ShellEscape.backslash("a\\b c"), "a\\\\b\\ c")
+    }
+
+    func testBackslashLeavesPlainPathAndUnicodeAlone() {
+        XCTAssertEqual(ShellEscape.backslash("/Users/me/résumé-v2.pdf"), "/Users/me/résumé-v2.pdf")
+    }
+
+    func testBackslashSingleQuotesValueWithNewline() {
+        XCTAssertEqual(ShellEscape.backslash("a\nb"), "'a\nb'")
+    }
 }

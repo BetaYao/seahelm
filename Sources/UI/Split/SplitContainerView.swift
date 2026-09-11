@@ -36,6 +36,8 @@ class SplitContainerView: NSView, DividerDelegate {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = true
         setAccessibilityIdentifier("splitPane.container")
+        // The container, not each pane, takes file drops — see "File drop" below.
+        registerForDraggedTypes(TerminalDrop.acceptedTypes)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -378,6 +380,138 @@ class SplitContainerView: NSView, DividerDelegate {
            window?.firstResponder !== view {
             window?.makeFirstResponder(view)
         }
+    }
+
+    // MARK: - File drop
+
+    /// Station id of the pane wearing the drop highlight, while a drag is over one.
+    private(set) var highlightedDropStationId: String?
+
+    /// The pane a drop at `point` (container coordinates) lands in, among
+    /// `paneFrames` keyed by station id. A point in no frame — the 1pt seam —
+    /// goes to the nearest pane within half a divider's hit strip, so crossing a
+    /// divider never loses the target.
+    static func dropTargetStationId(at point: CGPoint, paneFrames: [String: CGRect]) -> String? {
+        if let hit = paneFrames.first(where: { $0.value.contains(point) }) {
+            return hit.key
+        }
+        let reach = DividerView.hitThickness / 2
+        return paneFrames
+            .map { (id: $0.key, distance: distance(from: point, to: $0.value)) }
+            .filter { $0.distance <= reach }
+            .min { ($0.distance, $0.id) < ($1.distance, $1.id) }?
+            .id
+    }
+
+    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return hypot(dx, dy)
+    }
+
+    /// Frames of the panes on screen, keyed by station id: embedded here and not
+    /// hidden (zoomed out or asleep).
+    func visiblePaneFrames() -> [String: CGRect] {
+        guard let tree else { return [:] }
+        var frames: [String: CGRect] = [:]
+        for leaf in tree.allLeaves {
+            guard let frame = leafFrames[leaf.id],
+                  let view = surfaceViews[leaf.stationId],
+                  view.superview === self, !view.isHidden else { continue }
+            frames[leaf.stationId] = frame
+        }
+        return frames
+    }
+
+    /// Move the drop highlight to `stationId`'s pane, or clear it with nil. Runs
+    /// on every drag update; re-applying to the same pane is a no-op, and puts the
+    /// highlight back if a re-embed stripped it.
+    func setDropTarget(_ stationId: String?) {
+        if let old = highlightedDropStationId, old != stationId {
+            (surfaceViews[old] as? GhosttyNSView)?.setDropHighlight(false)
+        }
+        highlightedDropStationId = stationId
+        if let stationId {
+            (surfaceViews[stationId] as? GhosttyNSView)?.setDropHighlight(true)
+        }
+    }
+
+    /// The pane a drag is over, if it can take the drop: on screen, with a live
+    /// surface, and not covered by something outside the split.
+    private func dropTarget(for sender: NSDraggingInfo) -> (stationId: String, view: GhosttyNSView, station: Station)? {
+        guard TerminalDrop.canAccept(sender.draggingPasteboard),
+              !isCovered(atWindowPoint: sender.draggingLocation) else { return nil }
+        let frames = visiblePaneFrames().filter {
+            StationRegistry.shared.station(forId: $0.key)?.canDeliverInput == true
+        }
+        let point = convert(sender.draggingLocation, from: nil)
+        guard let stationId = Self.dropTargetStationId(at: point, paneFrames: frames),
+              let view = surfaceViews[stationId] as? GhosttyNSView,
+              let station = StationRegistry.shared.station(forId: stationId) else { return nil }
+        return (stationId, view, station)
+    }
+
+    /// Whether a view outside the split — the file/PR preview overlay — sits over
+    /// this window point. Divider strips overlap pane edges and don't count.
+    private func isCovered(atWindowPoint windowPoint: NSPoint) -> Bool {
+        guard let contentView = window?.contentView else { return true }
+        let point = contentView.superview?.convert(windowPoint, from: nil) ?? windowPoint
+        guard let hit = contentView.hitTest(point) else { return true }
+        return !(hit.isDescendant(of: self) || hit is DividerView || hit is ChromeDividerView)
+    }
+
+    private func updateDropTarget(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // `.copy` for the plus badge, as native Ghostty; a source that won't copy
+        // still gets an operation it allows.
+        let allowed = sender.draggingSourceOperationMask
+        guard let target = dropTarget(for: sender),
+              let operation = [NSDragOperation.copy, .generic, .link, .move].first(where: { allowed.contains($0) }) else {
+            setDropTarget(nil)
+            return []
+        }
+        setDropTarget(target.stationId)
+        return operation
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateDropTarget(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateDropTarget(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        setDropTarget(nil)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        setDropTarget(nil)
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        setDropTarget(nil)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropTarget(for: sender) != nil
+    }
+
+    /// Type the drop into the pane under the cursor — not the focused one — then
+    /// focus that pane and bring the app forward, so the user can keep typing.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        setDropTarget(nil)
+        guard let target = dropTarget(for: sender) else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        // Same call as a click (GhosttyNSView.mouseDown): onFocusAcquired syncs
+        // tree.focusedId and the inactive wash.
+        window?.makeFirstResponder(target.view)
+        TerminalDrop.resolve(from: sender.draggingPasteboard) { [weak station = target.station] content in
+            guard let content, let station else { return }
+            TerminalDrop.deliver(content, to: station)
+        }
+        return true
     }
 
     // MARK: - Focus navigation
