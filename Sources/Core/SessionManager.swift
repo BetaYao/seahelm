@@ -60,7 +60,7 @@ enum SessionManager {
 
     /// Generate an indexed session name for an additional pane.
     static func indexedSessionName(base: String, index: Int) -> String {
-        "\(base)-\(index)"
+        "\(base)--pane-\(index)"
     }
 
     static func parseZmxSessionNames(listOutput: String) -> [String] {

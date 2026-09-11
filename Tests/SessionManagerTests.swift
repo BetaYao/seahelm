@@ -42,6 +42,13 @@ class SessionManagerTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    func testIndexedPaneNameCannotEqualAnotherWorktreeBaseName() {
+        let base = SessionManager.persistentSessionName(for: "/workspace/task/https-github-com-dif")
+        let otherBase = SessionManager.persistentSessionName(for: "/workspace/task/https-github-com-dif-2")
+        XCTAssertEqual(SessionManager.indexedSessionName(base: base, index: 1), "\(base)--pane-1")
+        XCTAssertNotEqual(SessionManager.indexedSessionName(base: base, index: 1), otherBase)
+    }
+
     func testParseZmxSessionNamesReadsNameEqualsFormat() {
         let output = """
         name=seahelm-repo-main pid=123 cwd=/tmp/repo
