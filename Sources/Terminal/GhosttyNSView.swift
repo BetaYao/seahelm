@@ -22,6 +22,12 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Tuple: (owner, repo, prNumber).
     var onRequestPRPreview: ((String, String, Int) -> Void)?
 
+    /// The link libghostty reports under the pointer, or nil when there is none.
+    /// Only sent while the link modifier is held, so this is set exactly when the
+    /// pane is offering to open what the pointer is on. The pane menu prefers it
+    /// over guessing a URL out of the text under the click.
+    var hoverURL: String?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -581,6 +587,69 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     // MARK: - Mouse
 
+    /// Latest cursor shape libghostty asked for. AppKit owns the real cursor
+    /// through cursor rects (see `resetCursorRects`), so a change has to
+    /// invalidate them — that is what makes the pointer appear the instant the
+    /// link modifier goes down, with no mouse movement needed.
+    private var cursorShape: ghostty_action_mouse_shape_e = GHOSTTY_MOUSE_SHAPE_DEFAULT
+
+    /// Called on the main thread when libghostty changes the mouse shape.
+    func setCursorShape(_ shape: ghostty_action_mouse_shape_e) {
+        guard shape.rawValue != cursorShape.rawValue else { return }
+        cursorShape = shape
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // One rect covering the grid: Ghostty decides the shape cell by cell and
+        // reports it as an action, not as a region.
+        addCursorRect(bounds, cursor: Self.cursor(for: cursorShape))
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        Self.cursor(for: cursorShape).set()
+    }
+
+    /// Map Ghostty's pointer vocabulary onto the AppKit cursors that exist on
+    /// macOS 14. The zoom shapes have no NSCursor equivalent, so they stay an
+    /// arrow rather than inventing one.
+    private static func cursor(for shape: ghostty_action_mouse_shape_e) -> NSCursor {
+        switch shape.rawValue {
+        case GHOSTTY_MOUSE_SHAPE_TEXT.rawValue, GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT.rawValue:
+            return .iBeam
+        case GHOSTTY_MOUSE_SHAPE_POINTER.rawValue, GHOSTTY_MOUSE_SHAPE_ALIAS.rawValue:
+            return .pointingHand
+        case GHOSTTY_MOUSE_SHAPE_CONTEXT_MENU.rawValue:
+            return .contextualMenu
+        case GHOSTTY_MOUSE_SHAPE_HELP.rawValue:
+            return .arrow
+        case GHOSTTY_MOUSE_SHAPE_CROSSHAIR.rawValue, GHOSTTY_MOUSE_SHAPE_CELL.rawValue:
+            return .crosshair
+        case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED.rawValue, GHOSTTY_MOUSE_SHAPE_NO_DROP.rawValue:
+            return .operationNotAllowed
+        case GHOSTTY_MOUSE_SHAPE_GRAB.rawValue, GHOSTTY_MOUSE_SHAPE_ALL_SCROLL.rawValue,
+             GHOSTTY_MOUSE_SHAPE_MOVE.rawValue:
+            return .openHand
+        case GHOSTTY_MOUSE_SHAPE_GRABBING.rawValue:
+            return .closedHand
+        case GHOSTTY_MOUSE_SHAPE_N_RESIZE.rawValue, GHOSTTY_MOUSE_SHAPE_ROW_RESIZE.rawValue:
+            return .resizeUp
+        case GHOSTTY_MOUSE_SHAPE_S_RESIZE.rawValue:
+            return .resizeDown
+        case GHOSTTY_MOUSE_SHAPE_E_RESIZE.rawValue, GHOSTTY_MOUSE_SHAPE_COL_RESIZE.rawValue:
+            return .resizeRight
+        case GHOSTTY_MOUSE_SHAPE_W_RESIZE.rawValue:
+            return .resizeLeft
+        case GHOSTTY_MOUSE_SHAPE_EW_RESIZE.rawValue:
+            return .resizeLeftRight
+        case GHOSTTY_MOUSE_SHAPE_NS_RESIZE.rawValue:
+            return .resizeUpDown
+        default:
+            return .arrow
+        }
+    }
+
     /// Text of the most recent terminal selection, captured on `mouseUp`. The
     /// live selection is often cleared by the time our `rightMouseDown` runs (the
     /// right-button event delivery clears it before we can read it), so we snapshot
@@ -665,6 +734,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// GitHub PR URL captured from the same row, checked after `pendingPreviewURL`
     /// (a PR link is not a file so path resolution won't return it).
     private var pendingPRPreview: (owner: String, repo: String, number: Int)?
+    /// Web link the click resolved to, offered as "Open Link in Browser". A PR
+    /// link gets this *and* the preview item: reading it here and reading it on
+    /// GitHub are separate things to want.
+    private var pendingWebLink: URL?
     /// Several files the click could have meant, offered as a submenu because
     /// nothing in the click says which. Two ways to get here: one line naming
     /// several files that all exist, or a bare name matching several files in
@@ -708,6 +781,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
         } else {
             self.pendingPRPreview = nil
         }
+
+        // A link is its own kind of target: it may sit on a line that also names
+        // files, and opening it is not the same act as previewing one.
+        self.pendingWebLink = webLinkAtClick(selection: selection, tokens: tokens)
         // Focus the right-clicked pane so menu actions target it, then show
         // our pane context menu (split/close/copy/paste).
         if window?.firstResponder !== self {
@@ -715,6 +792,45 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
         NSMenu.popUpContextMenu(makePaneContextMenu(), with: event, for: self)
     }
+
+    /// Web link under the click, for the menu's link items. An explicit
+    /// selection outranks everything (the user already said what they meant),
+    /// then the link libghostty reported under the pointer, then the nearest
+    /// URL-shaped token.
+    private func webLinkAtClick(selection: String?, tokens: [String]) -> URL? {
+        if let selection, let url = Self.firstWebLink(in: [selection]) { return url }
+        if let hoverURL, let url = URL(string: hoverURL), url.scheme != nil { return url }
+        return Self.firstWebLink(in: tokens)
+    }
+
+    /// The first web link among `candidates`, in the order given — which for a
+    /// click is nearest-first.
+    ///
+    /// Matched with a regex instead of parsing the whole token: terminal output
+    /// frames a URL with whatever the surrounding prose used — `<https://…>`,
+    /// `[#1394](https://…)`, `见 https://…).` — so the token boundary is not the
+    /// URL's boundary. Only http(s) counts: this backs an "open in browser"
+    /// item, and a bare host or a path is not that.
+    static func firstWebLink(in candidates: [String]) -> URL? {
+        for candidate in candidates {
+            let range = NSRange(candidate.startIndex..., in: candidate)
+            guard let match = webLinkRegex?.firstMatch(in: candidate, range: range),
+                  let matchRange = Range(match.range, in: candidate) else { continue }
+            let found = candidate[matchRange]
+                .trimmingCharacters(in: .punctuationCharacters)
+            guard let url = URL(string: found), url.host?.isEmpty == false else { continue }
+            return url
+        }
+        return nil
+    }
+
+    /// Stops at whitespace, at the bracket and quote characters terminal output
+    /// uses to frame a link, and at `)` so a markdown link's tail does not end up
+    /// inside the URL.
+    private static let webLinkRegex = try? NSRegularExpression(
+        pattern: #"https?://[^\s<>"'`\[\]()]+"#,
+        options: .caseInsensitive
+    )
 
     override func rightMouseUp(with event: NSEvent) {
         // Consumed by the context menu in rightMouseDown; nothing to forward.
@@ -752,6 +868,21 @@ class GhosttyNSView: NSView, NSTextInputClient {
             menu.addItem(.separator())
         } else if !pendingPreviewChoices.isEmpty {
             menu.addItem(makeChoicePreviewItem(matches: pendingPreviewChoices))
+            menu.addItem(.separator())
+        }
+
+        if let link = pendingWebLink {
+            let openItem = NSMenuItem(title: "Open Link in Browser", action: #selector(contextOpenLink), keyEquivalent: "")
+            openItem.target = self
+            openItem.representedObject = link
+            openItem.toolTip = link.absoluteString
+            menu.addItem(openItem)
+
+            let copyLinkItem = NSMenuItem(title: "Copy Link", action: #selector(contextCopyLink), keyEquivalent: "")
+            copyLinkItem.target = self
+            copyLinkItem.representedObject = link
+            menu.addItem(copyLinkItem)
+
             menu.addItem(.separator())
         }
 
@@ -1155,6 +1286,18 @@ class GhosttyNSView: NSView, NSTextInputClient {
     @objc private func contextPRPreview(_ sender: NSMenuItem) {
         guard let pr = pendingPRPreview else { return }
         onRequestPRPreview?(pr.owner, pr.repo, pr.number)
+    }
+
+    @objc private func contextOpenLink(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        TerminalLinkOpener.open(url)
+    }
+
+    @objc private func contextCopyLink(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.absoluteString, forType: .string)
     }
 
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }
