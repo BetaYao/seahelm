@@ -6,6 +6,11 @@ protocol TerminalCoordinatorDelegate: AnyObject {
     /// A pane and its session are gone. Anything keyed by its terminal id — most
     /// visibly a pending suggestion card — has to go with it.
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String)
+    /// The worktree's last pane was closed: its session is dead and the tree is
+    /// gone, but the worktree itself stays on disk and in the fleet. The
+    /// dashboard must detach the dead split container and repaint the row as
+    /// session-less.
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didCloseLastPaneInWorktree path: String)
 }
 
 class TerminalCoordinator {
@@ -331,10 +336,94 @@ class TerminalCoordinator {
         }
     }
 
+    /// What a close request means for the tree as it stands: drop one leaf, or —
+    /// when the focused leaf is the tree's only leaf — end the worktree's whole
+    /// session. Pure so the policy is testable without stations or a window; the
+    /// last-leaf case kills a live zmx session, which is why it also gets the
+    /// confirmation in `closeFocusedPane`.
+    enum ClosePlan {
+        case closeLeaf
+        case closeLastLeaf
+    }
+
+    static func closePlan(leafCount: Int) -> ClosePlan {
+        leafCount > 1 ? .closeLeaf : .closeLastLeaf
+    }
+
     func closeFocusedPane() {
         guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
+        closePane(leafId: tree.focusedId, in: container)
+    }
 
+    /// Close a specific pane in a specific container — the path a pane's own
+    /// context menu takes. Acting on the clicked container and leaf matters:
+    /// the "active" container and its focused leaf can be a different worktree
+    /// (or nothing at all) than the pane the user right-clicked, and a close
+    /// routed there either hits the wrong pane or vanishes silently.
+    func closePane(leafId: String, in container: SplitContainerView) {
+        guard let tree = container.tree,
+              tree.root.findLeaf(id: leafId) != nil else { return }
+        // The close paths below key off the focused leaf; point it at the
+        // pane that was actually clicked first.
+        tree.focusedId = leafId
+        switch Self.closePlan(leafCount: tree.leafCount) {
+        case .closeLeaf:
+            closeFocusedLeaf(container: container, tree: tree)
+        case .closeLastLeaf:
+            confirmCloseLastPane(container: container, tree: tree)
+        }
+    }
+
+    /// Closing the tree's only pane ends the worktree's terminal session — the
+    /// zmx session is killed, and with it whatever the shell is still running —
+    /// so it asks first. The worktree on disk is untouched.
+    private func confirmCloseLastPane(container: SplitContainerView, tree: SplitTree) {
+        let name = URL(fileURLWithPath: tree.worktreePath).lastPathComponent
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Close the session in \u{201C}\(name)\u{201D}?"
+        alert.informativeText = "This is the worktree's last pane. Its terminal session will be ended and anything still running in that shell will be terminated. The worktree itself stays on disk."
+        alert.addButton(withTitle: "Close Session")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].hasDestructiveAction = true
+
+        let handle: (NSApplication.ModalResponse) -> Void = { [weak self, weak container] response in
+            guard response == .alertFirstButtonReturn, let container else { return }
+            self?.closeLastPane(container: container, tree: tree)
+        }
+        if let window = container.window {
+            alert.beginSheetModal(for: window, completionHandler: handle)
+        } else {
+            handle(alert.runModal())
+        }
+    }
+
+    /// Tear down a worktree's session once its last pane is closed: kill the zmx
+    /// session, drop the tree, and forget the saved layout so a later click on
+    /// the fleet row starts a fresh session instead of restoring a dead pane.
+    /// The mirror of `finalizeDeletedWorktree`, minus the git deletion.
+    private func closeLastPane(container: SplitContainerView, tree: SplitTree) {
+        guard let leaf = tree.allLeaves.first else { return }
+        let worktreePath = tree.worktreePath
+
+        SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
+        config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
+        AgentRegistry.shared.unregister(terminalID: leaf.stationId)
+        delegate?.terminalCoordinator(self, didClosePane: leaf.stationId)
+
+        config.splitLayouts.removeValue(forKey: worktreePath)
+        config.focusedPaneIds.removeValue(forKey: worktreePath)
+        config.save()
+
+        // removeTree destroys the station and unregisters it; the delegate then
+        // detaches the (now empty) container from the dashboard.
+        stationManager.removeTree(forPath: worktreePath)
+        delegate?.terminalCoordinatorDidUpdateSurfaces(self)
+        delegate?.terminalCoordinator(self, didCloseLastPaneInWorktree: worktreePath)
+    }
+
+    private func closeFocusedLeaf(container: SplitContainerView, tree: SplitTree) {
         guard let closed = tree.closeFocusedLeaf() else { return }
 
         // Kill zmx session
@@ -554,18 +643,30 @@ class TerminalCoordinator {
     /// that can take seconds) or the delete itself is in flight — without it
     /// the click reads as a no-op until a sheet finally appears.
     func confirmAndDeleteWorktree(_ info: WorktreeInfo, window: NSWindow?,
+                                  forcePastRunningGuard: Bool = false,
                                   onPendingChange: ((Bool) -> Void)? = nil) {
         guard !info.isMainWorktree else { return }
         guard let window else { return }
         // Same rule as `/return`: a worktree with an agent at work is not
         // pulled out from under it. Close the pane first if that is meant.
-        if AgentRegistry.shared.hasRunningPane(inWorktree: info.path) {
+        // The status pipeline can hold a stale `.running` for a pane whose
+        // agent already exited (its last TUI frame still matches a running
+        // rule), so the warning offers a way through: Delete Anyway skips only
+        // this guard — the dirty-worktree assessment still applies.
+        if !forcePastRunningGuard, AgentRegistry.shared.hasRunningPane(inWorktree: info.path) {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "\u{201C}\(info.displayName)\u{201D} has an agent running"
-            alert.informativeText = "Wait for it to finish, or close its pane, then delete the worktree."
+            alert.informativeText = "Wait for it to finish, or close its pane, then delete the worktree. If the agent has already exited, its status may be stale — Delete Anyway removes the worktree regardless. Uncommitted changes and unpublished commits still get a confirmation next."
             alert.addButton(withTitle: "OK")
-            alert.beginSheetModal(for: window)
+            alert.addButton(withTitle: "Delete Anyway")
+            alert.buttons[1].hasDestructiveAction = true
+            alert.beginSheetModal(for: window) { [weak self] response in
+                guard let self, response == .alertSecondButtonReturn else { return }
+                self.confirmAndDeleteWorktree(info, window: window,
+                                              forcePastRunningGuard: true,
+                                              onPendingChange: onPendingChange)
+            }
             return
         }
 
@@ -644,8 +745,14 @@ class TerminalCoordinator {
             // force-remove so git doesn't refuse on a dirty worktree.
             let shouldForce = force || WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
             DispatchQueue.main.async {
-                self?.performDeleteWorktree(info, repoPath: repoPath,
-                                            deleteBranch: deleteBranch, force: shouldForce) {
+                // Clear the pending flag even if the coordinator is gone —
+                // a stuck one disables the fleet row's Delete item for good.
+                guard let self else {
+                    onPendingChange?(false)
+                    return
+                }
+                self.performDeleteWorktree(info, repoPath: repoPath,
+                                           deleteBranch: deleteBranch, force: shouldForce) {
                     onPendingChange?(false)
                 }
             }

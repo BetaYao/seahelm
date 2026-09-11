@@ -2077,7 +2077,10 @@ extension MainWindowController: SplitContainerDelegate {
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String) {
-        closeFocusedPane()
+        // Close the pane that was actually clicked, in its own container —
+        // routing through the active container's focused leaf can hit a
+        // different worktree's pane or nothing at all.
+        terminalCoordinator.closePane(leafId: leafId, in: view)
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSleepPane leafId: String) {
@@ -2733,6 +2736,10 @@ extension MainWindowController: TerminalCoordinatorDelegate {
                 EmailAttachmentStore().remove(threadID: session.id, account: account)
             }
         }
+    }
+
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didCloseLastPaneInWorktree path: String) {
+        tabCoordinator.worktreeSessionDidEnd(path)
     }
 }
 
