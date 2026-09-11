@@ -501,16 +501,14 @@ private extension Array where Element == String {
     }
 }
 
-/// Hook/event integration settings. (Formerly carried an HTTP `port`; the HTTP
-/// webhook was retired for the fs-scoped control socket, so only the behavioral
-/// flags remain. A legacy `port` key in old configs is ignored.)
+/// Hook/event integration settings. The control socket receives passive agent
+/// events; Stop hooks are never used to block an agent turn. Legacy port and
+/// suggest_on_stop keys in old configs are ignored.
 struct WebhookConfig: Codable {
     var enabled: Bool = true
-    var suggestOnStop: Bool = true
 
     enum CodingKeys: String, CodingKey {
         case enabled
-        case suggestOnStop = "suggest_on_stop"
     }
 
     init() {}
@@ -518,7 +516,6 @@ struct WebhookConfig: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        suggestOnStop = try c.decodeIfPresent(Bool.self, forKey: .suggestOnStop) ?? true
     }
 }
 

@@ -309,6 +309,124 @@ enum SessionManager {
         return orphans
     }
 
+    /// `zmx attach` clients whose target session is missing or unreachable.
+    ///
+    /// Distinct from `orphanZmxClientPids`: those only reap `ppid == 1` clients
+    /// left behind after Seahelm itself died. After a volume drop the attach
+    /// client hangs rather than exiting, so it still has a live Seahelm parent
+    /// and the orphan sweep leaves it spinning at ~100% CPU forever. The
+    /// one-shot Station health check has already run by then, so nothing else
+    /// looks at these corpses unless we do.
+    ///
+    /// Only `attach` is targeted. `zmx run` hosts the session and must go
+    /// through `forceKillSession`.
+    static func wedgedAttachClientPids(processes: [ZmxProcess], listOutput: String) -> [Int32] {
+        var reachabilityByName: [String: SessionReachability] = [:]
+        for line in listOutput.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let name = zmxListField(trimmed, "name=")
+                ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
+            guard !name.isEmpty else { continue }
+            if zmxListField(trimmed, "err=") != nil {
+                reachabilityByName[name] = .unreachable
+            } else if let status = zmxListField(trimmed, "status="), status != "reachable" {
+                reachabilityByName[name] = .unreachable
+            } else {
+                reachabilityByName[name] = .reachable
+            }
+        }
+        return processes.compactMap { proc in
+            guard proc.isZmxBinary else { return nil }
+            guard let session = attachSessionName(fromCommand: proc.command) else { return nil }
+            let status = reachabilityByName[session] ?? .missing
+            switch status {
+            case .missing, .unreachable:
+                return proc.pid
+            case .reachable:
+                return nil
+            }
+        }
+    }
+
+    /// Session name targeted by a `zmx attach <name>` command line, if any.
+    static func attachSessionName(fromCommand command: String) -> String? {
+        guard let range = command.range(of: "/bin/zmx attach ") else { return nil }
+        let rest = command[range.upperBound...]
+        guard let token = rest.split(whereSeparator: \.isWhitespace).first else { return nil }
+        let name = String(token)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Managed sessions whose control socket is unreachable *and* whose
+    /// `start_dir` is not known to be reachable. That is the volume-drop
+    /// corpse: the row survives, the daemon answers nothing, and the checkout
+    /// path is gone or wedged. A busy daemon that merely missed one probe keeps
+    /// a reachable `start_dir` and is left alone.
+    static func unreachableSessionNames(
+        listOutput: String,
+        startDirReachable: (String) -> Bool
+    ) -> [String] {
+        parseZmxSessions(listOutput: listOutput).compactMap { session in
+            guard isManagedSessionPrefix(session.name) else { return nil }
+            guard reachability(of: session.name, listOutput: listOutput) == .unreachable else {
+                return nil
+            }
+            guard let startDir = session.startDir, !startDir.isEmpty else {
+                // No start_dir to probe — treat as wedged so a nameless corpse
+                // cannot sit forever after a volume drop.
+                return session.name
+            }
+            return startDirReachable(startDir) ? nil : session.name
+        }
+    }
+
+    /// Force-kill managed sessions wedged by a dead/unreachable start_dir, then
+    /// reap any attach clients left spinning against them (or against sessions
+    /// that have already disappeared). Returns session names that were cleaned.
+    ///
+    /// Deliberately does **not** reap attaches for an unreachable session whose
+    /// `start_dir` is still reachable — that shape is also what a busy daemon
+    /// looks like for one probe, and killing the live pane's attach would blank
+    /// a working agent.
+    @discardableResult
+    static func cleanupWedgedVolumeSessions(
+        listOutput: String? = nil,
+        psOutput: String? = nil,
+        startDirReachable: ((String) -> Bool)? = nil
+    ) -> [String] {
+        let list = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        let reachable = startDirReachable ?? { path in
+            // nil (probe timed out) and false (gone) both mean "not usable".
+            FileSystemProbe.existsIfKnown(path, timeout: 0.5) == true
+        }
+        let names = unreachableSessionNames(listOutput: list, startDirReachable: reachable)
+        for name in names {
+            NSLog("[SessionManager] Force-killing volume-wedged zmx session '%@'", name)
+            ZmxSessionRecovery.forceKillSession(name)
+        }
+        let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
+        let processes = parseZmxProcesses(psOutput: ps)
+        // After force-kill the rows are often already gone; classify against the
+        // pre-kill list so we still catch attaches whose session name we just
+        // tore down, plus any attach whose session is simply missing.
+        let wedged = wedgedAttachClientPids(processes: processes, listOutput: list)
+        let confirmed = Set(names)
+        let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        for pid in wedged {
+            guard let command = byPid[pid]?.command,
+                  let session = attachSessionName(fromCommand: command) else { continue }
+            let status = reachability(of: session, listOutput: list)
+            // Missing attaches are always safe to reap. Unreachable attaches are
+            // only reaped when we already confirmed the start_dir is dead.
+            let shouldKill = status == .missing || confirmed.contains(session)
+            guard shouldKill else { continue }
+            NSLog("[SessionManager] Reaping volume-wedged zmx attach %d: %@", pid, command)
+            kill(pid, SIGKILL)
+        }
+        return names
+    }
+
     /// Extract a `key=value` field (value runs up to the next whitespace) from a
     /// `zmx list` line, or nil if absent.
     private static func zmxListField(_ line: String, _ key: String) -> String? {

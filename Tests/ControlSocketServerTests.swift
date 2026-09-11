@@ -13,7 +13,7 @@ final class ControlSocketServerTests: XCTestCase {
                           project: "proj", agentType: "Claude Code", status: "Running", lastMessage: "hi")]
         }
         func readPane(paneId: String, source: String, lines: Int) -> String? { "line" }
-        func ingestHook(json: [String: Any]) -> String? { nil }
+        func ingestHook(json: [String: Any]) {}
     }
 
     private var server: ControlSocketServer!

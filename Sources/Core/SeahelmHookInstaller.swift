@@ -1,19 +1,18 @@
 import Foundation
 
 /// Installs `~/.local/bin/seahelm-hook`, the command-hook bridge that reports
-/// agent hook events to seahelm's control socket and relays any Stop-hook block
-/// decision back to the agent via stdout. Prefers the Unix socket; falls back to
-/// the HTTP webhook so a socket hiccup never breaks the Stop-hook UX.
+/// agent hook events to seahelm's control socket. Stop is observation-only:
+/// the bridge never relays a block decision back to the agent.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v5"
+    static let versionMarker = "# seahelm-hook v6"
 
     static func scriptContents() -> String {
         return """
         #!/bin/sh
         \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
         # Command hook for Claude/Codex: reads the hook JSON on stdin, reports it to
-        # seahelm, and prints any Stop-hook block decision ({"decision":"block",...})
-        # to stdout so the agent continues and calls seahelm-suggest.
+        # seahelm. Stop is reported like every other event and never blocks the
+        # agent into a second turn.
         #
         # Usage: seahelm-hook [<source>]   e.g. `seahelm-hook claude-code`
         set -u
@@ -33,8 +32,8 @@ enum SeahelmHookInstaller {
         # Session names are [A-Za-z0-9_-], so no JSON escaping is needed.
         # ZMX_SESSION holds the same value SessionManager exports as SEAHELM_PANE_ID,
         # and panes predating that export still have it — keep this fallback
-        # identical to seahelm-suggest's, or the two sides key the turn differently
-        # and every Stop blocks for a suggestion that already arrived.
+        # identical to seahelm-suggest's, so events from both paths land on the
+        # same pane.
         pid="${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
         prefix=""
         [ -n "$pid" ] && prefix="$prefix"'"seahelm_pane_id":"'"$pid"'",'
@@ -44,13 +43,11 @@ enum SeahelmHookInstaller {
         esac
 
         # Unix control socket. Plain `nc -U` (Apple nc supports neither -N nor -w):
-        # it closes its write half on stdin EOF, the server replies with the
-        # base64-encoded block body (block_b64) and closes, nc exits.
+        # it closes its write half on stdin EOF, the server acknowledges and
+        # closes. Discard the response; hook delivery is fire-and-forget.
         [ -S "$sock" ] && command -v nc >/dev/null 2>&1 || exit 0
         req='{"id":"h","method":"hook","params":'"$payload"'}'
-        resp="$(printf '%s\\n' "$req" | nc -U "$sock" 2>/dev/null)"
-        b64="$(printf '%s' "$resp" | sed -n 's/.*"block_b64":"\\([A-Za-z0-9+/=]*\\)".*/\\1/p')"
-        [ -n "$b64" ] && printf '%s' "$b64" | base64 -d 2>/dev/null
+        printf '%s\\n' "$req" | nc -U "$sock" >/dev/null 2>&1 || true
         exit 0
         """
     }

@@ -23,11 +23,10 @@ notifications, and you can answer one from your phone over iMessage. Claude and
 Codex token and quota usage are summarised in-app, so you also see when an agent is
 about to run out of budget rather than out of ideas.
 
-**Built around the decision, not the display.** Seahelm intercepts the Stop hook and
-makes the agent hand back its next-step options before it is allowed to stop. Those
-arrive as clickable cards. First Mate watches status transitions and either handles
-them or queues them for your approval. Showing "awaiting input" is the easy half; the
-question is what to do about it.
+**Built around the decision, not the display.** Seahelm reads the agent's final response
+from the Stop hook and turns an inline next-step marker into clickable cards. First Mate
+watches status transitions and either handles them or queues them for your approval.
+Showing "awaiting input" is the easy half; the question is what to do about it.
 
 **The pane follows its agent.** When an agent creates a worktree and starts working
 there, that pane moves to the new worktree's card instead of an empty pane appearing

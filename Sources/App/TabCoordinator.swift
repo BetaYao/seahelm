@@ -621,6 +621,10 @@ class TabCoordinator {
                     self.saveConfig()
                 }
                 self.pruneStaleWorktreeConfigEntries()
+                // Keep the volume monitor's watched set in sync with the live
+                // workspace list (repos + every discovered worktree path).
+                let watchPaths = resolvedPaths + discoveredWorktrees.flatMap { $0.worktrees.map(\.path) }
+                VolumePresenceMonitor.shared.start(workspacePaths: watchPaths)
 
                 var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree?)] = []
 
@@ -715,57 +719,22 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
                     }
-                    // Per-session timestamps: when we last blocked a session for suggestions,
-                    // and when a user prompt last arrived for that session. If the user sent a
-                    // message AFTER our last block, Claude's next stop is a response to explicit
-                    // user direction — suppress the suggestion block so Claude can respond cleanly
-                    // without mixing suggestion overhead into the user-directed response.
-                    var sessionBlockedAt: [String: Date] = [:]
-                    var sessionUserPromptedAt: [String: Date] = [:]
-                    // When the agent voluntarily called seahelm-suggest this turn (it was
-                    // instructed to as its last action). If so, we needn't force a
-                    // suggestion via a blocking Stop — that saves the block→continue
-                    // round-trip. Reset each turn (on the next user prompt).
-                    var sessionSuggestedAt: [String: Date] = [:]
-
                     // Shared inbound-event sink, serialized so the webhook and the
-                    // control socket can both feed it without racing the per-session
-                    // dictionaries below.
+                    // control socket can both feed it without racing event handling.
                     let eventQueue = DispatchQueue(label: "seahelm.event-sink")
-                    let handleEvent: (WebhookEvent) -> String? = { [weak self] event in
+                    let handleEvent: (WebhookEvent) -> Void = { [weak self] event in
                       eventQueue.sync {
-                        guard let self else { return nil }
-                        // Correlate the suggest→Stop suppression by pane, not session:
-                        // the agent-invoked `seahelm-suggest` carries only a pane id, while
-                        // the native Stop hook carries Claude's real session UUID. Keying off
-                        // sessionId made the two never match, so the block fired every turn.
-                        // paneId is stable across both; fall back to sessionId outside a pane.
-                        let turnKey = event.paneId ?? event.sessionId
-                        // Set when this Stop is answered with a `decision: block` body.
-                        // Held rather than returned early so the event still reaches
-                        // ingest — see the blocking branch below.
-                        var block: String?
-                        // Track when the user sent a message to this session; a new
-                        // user prompt starts a fresh turn, so the agent must suggest again.
-                        if event.event == .userPrompt {
-                            sessionUserPromptedAt[turnKey] = Date()
-                            sessionSuggestedAt.removeValue(forKey: turnKey)
-                        }
+                        guard let self else { return }
                         // Track per-worktree background-task state (subagent/shell/cron).
                         AgentRegistry.shared.updateBackgroundBusy(from: event)
                         // Drop a (voluntary) suggestion while background work is still running —
                         // the agent will auto-resume, so it isn't a real end-of-turn yet.
                         if event.event == .suggest, AgentRegistry.shared.isBackgroundBusy(cwd: event.cwd) {
                             NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                            return nil
+                            return
                         }
                         if event.event == .suggest {
                             NSLog("[suggest] pass gate1 (not background-busy) — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                        }
-                        // The agent gave its own suggestions this turn (per the injected
-                        // instruction) — record it so the Stop below won't force another.
-                        if event.event == .suggest {
-                            sessionSuggestedAt[turnKey] = Date()
                         }
                         // Cursor has no last_assistant_message on stop. Always stash
                         // afterAgentResponse `text` as the card summary — even when the
@@ -787,25 +756,14 @@ class TabCoordinator {
                                     data: ["options": options], paneId: event.paneId)
                                 self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
                                 AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                                sessionSuggestedAt[turnKey] = Date()
                             }
                         }
-                        // Suppress the suggestion block when the user sent a message after our
-                        // last block — Claude is responding to explicit user direction and doesn't
-                        // need suggestion overhead layered on top of the user-directed response.
-                        if event.event == .agentStop, sessionSuggestedAt[turnKey] != nil {
-                            // The agent already emitted buttons as its last action this
-                            // turn — no forced block needed (no extra round-trip).
-                            sessionSuggestedAt.removeValue(forKey: turnKey)
-                        } else if event.event == .agentStop,
-                                  let msg = event.data?["last_assistant_message"] as? String,
-                                  let options = StopHookResponder.parseSuggestions(from: msg) {
-                            // Direction 3: the agent declared its next-step options as a
-                            // final plain-text line (per the injected instruction). They
-                            // ride this Stop hook's own round-trip — no seahelm-suggest tool
-                            // call — so the answer prose is never left before a trailing
-                            // tool_use for the TUI to swallow. Surface the buttons here, then
-                            // let the Stop fall through to normal completion below.
+                        // Claude and Codex carry the final response on Stop.
+                        // Harvest inline options from that passive event without
+                        // asking the agent for a second turn.
+                        if event.event == .agentStop,
+                           let msg = event.data?["last_assistant_message"] as? String,
+                           let options = StopHookResponder.parseSuggestions(from: msg) {
                             AgentRegistry.shared.noteAssistantMessage(
                                 cwd: event.cwd, paneId: event.paneId,
                                 message: StopHookResponder.stripSentinel(from: msg))
@@ -815,37 +773,11 @@ class TabCoordinator {
                                 data: ["options": options], paneId: event.paneId)
                             self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
                             AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                            sessionSuggestedAt[turnKey] = Date()
-                        } else if event.event == .agentStop,
-                           let blockedAt = sessionBlockedAt[turnKey],
-                           let promptedAt = sessionUserPromptedAt[turnKey],
-                           promptedAt > blockedAt {
-                            sessionBlockedAt.removeValue(forKey: turnKey)
-                            sessionUserPromptedAt.removeValue(forKey: turnKey)
-                        } else if let body = StopHookResponder.blockBody(
-                            for: event, suggestOnStop: self.config.webhook.suggestOnStop) {
-                            // Blocking Stop: the agent will continue and declare its
-                            // options. Stash its final message so the suggestion card
-                            // can show it, and remember that we blocked.
-                            sessionBlockedAt[turnKey] = Date()
-                            if let msg = event.data?["last_assistant_message"] as? String {
-                                AgentRegistry.shared.noteAssistantMessage(cwd: event.cwd, paneId: event.paneId, message: msg)
-                            }
-                            // Fall through to ingest: the turn is over as far as the user
-                            // is concerned — the agent has written its answer — and the
-                            // extra round-trip this block buys is seahelm's own suggestion
-                            // overhead. Withholding the stop here used to delay every
-                            // completion (status, banner, chat mirror) by a whole model
-                            // round-trip: 2.6s to 20s, median ~9s, measured across real
-                            // sessions. The agent's follow-up turn re-reports running and
-                            // stops again; the notification cooldown collapses that pair.
-                            block = body
                         }
                         self.statusPublisher.webhookProvider.handleEvent(event)
                         AgentRegistry.shared.handleWebhookEvent(event)
                         // TODO: Enable when webhook→TODO matching logic is implemented
                         // AgentRegistry.shared.updateTodoFromWebhook(event)
-                        return block
                       }
                     }
                     // Local control socket is the sole inbound transport: reads
@@ -1543,6 +1475,10 @@ class TabCoordinator {
         let refreshAll = branchRefreshTick % 6 == 0
         for (tabIndex, tab) in tabs.enumerated() {
             guard refreshAll || tabIndex == activeTabIndex else { continue }
+            // A fenced volume means every git invocation against it will sit out
+            // its timeout and park ProcessRunner drain threads — that starvation
+            // is how a single dead mount freezes the rest of the app.
+            if VolumeFence.isFenced(tab.repoPath) { continue }
             WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
                 guard let self else { return }
                 _ = self.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: tab.worktrees, freshWorktrees: freshWorktrees)
