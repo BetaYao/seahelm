@@ -134,7 +134,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // Shadow is computed from an explicit path so Core Animation never has to
         // derive it from the live Metal contents (which forces offscreen passes).
         layer?.shadowPath = CGPath(rect: bounds, transform: nil)
-        syncWashLayerFrame()
+        syncOverlayLayerFrames()
         syncSurfaceSize()
     }
 
@@ -170,17 +170,21 @@ class GhosttyNSView: NSView, NSTextInputClient {
         CATransaction.commit()
     }
 
-    private func syncWashLayerFrame() {
-        guard let wash = washLayer else { return }
+    private func syncOverlayLayerFrames() {
+        guard washLayer != nil || dropHighlightLayer != nil else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        wash.frame = bounds
+        washLayer?.frame = bounds
+        dropHighlightLayer?.frame = bounds
         CATransaction.commit()
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         washLayer?.backgroundColor = Self.washColor(for: effectiveAppearance)
+        if let highlight = dropHighlightLayer {
+            applyDropHighlightColors(highlight)
+        }
     }
 
     /// Dark themes are already near-black, so a black wash lands on black and two
@@ -194,11 +198,52 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return (color.usingColorSpace(.sRGB) ?? color).cgColor
     }
 
+    // MARK: - Drop target highlight
+
+    /// Accent border and faint fill while a file drag hovers this pane, so a
+    /// split shows which pane the drop lands in. A sublayer for the same reason
+    /// as the wash, and above it: an unfocused, washed pane can be the target.
+    private var dropHighlightLayer: CALayer?
+
+    /// Whether the pane currently wears the drop highlight.
+    private(set) var showsDropHighlight = false
+
+    func setDropHighlight(_ on: Bool, animated: Bool = true) {
+        guard let layer, on != showsDropHighlight else { return }
+        showsDropHighlight = on
+        if on, dropHighlightLayer == nil {
+            let highlight = CALayer()
+            highlight.frame = bounds
+            highlight.zPosition = 101
+            highlight.borderWidth = 2
+            highlight.opacity = 0
+            layer.addSublayer(highlight)
+            dropHighlightLayer = highlight
+        }
+        guard let highlight = dropHighlightLayer else { return }
+        applyDropHighlightColors(highlight)
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        CATransaction.setAnimationDuration(0.08)
+        highlight.opacity = on ? 1 : 0
+        CATransaction.commit()
+    }
+
+    private func applyDropHighlightColors(_ highlight: CALayer) {
+        let accent = resolvedCGColor(SemanticColors.accent)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        highlight.borderColor = accent
+        highlight.backgroundColor = accent.copy(alpha: 0.12)
+        CATransaction.commit()
+    }
+
     override func removeFromSuperview() {
         super.removeFromSuperview()
         // Reparenting (dashboard focus panel, another tab) starts from a clean
         // pane; whoever embeds it next re-applies the wash if it belongs there.
         setInactiveWash(false, animated: false)
+        setDropHighlight(false, animated: false)
         // Reset debounce for the next embed — but keep a structural-split freeze
         // so a reparent mid-absorb cannot immediately SIGWINCH.
         if !freezePtyGridResize {
