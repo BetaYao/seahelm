@@ -49,18 +49,21 @@ enum SessionManager {
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: ":", with: "_")
 
-        if raw.count <= maxSessionNameLength {
-            return raw
-        }
-
-        let hash = shortHash(raw)
-        let truncated = String(raw.prefix(maxSessionNameLength - hash.count - 1))
-        return "\(truncated)-\(hash)"
+        return boundedSessionName(raw)
     }
 
     /// Generate an indexed session name for an additional pane.
     static func indexedSessionName(base: String, index: Int) -> String {
-        "\(base)-\(index)"
+        boundedSessionName("\(base)-\(index)")
+    }
+
+    private static func boundedSessionName(_ raw: String) -> String {
+        guard raw.utf8.count > maxSessionNameLength else { return raw }
+
+        let hash = shortHash(raw)
+        let prefixLength = maxSessionNameLength - hash.utf8.count - 1
+        let prefix = String(decoding: raw.utf8.prefix(prefixLength), as: UTF8.self)
+        return "\(prefix)-\(hash)"
     }
 
     static func parseZmxSessionNames(listOutput: String) -> [String] {

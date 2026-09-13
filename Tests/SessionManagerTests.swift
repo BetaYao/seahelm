@@ -42,6 +42,15 @@ class SessionManagerTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    func testIndexedSessionNameStaysWithinBackendLimit() {
+        let base = "seahelm-workspace-accounting-huge-8499b4-"
+
+        let name = SessionManager.indexedSessionName(base: base, index: 1)
+
+        XCTAssertLessThanOrEqual(name.utf8.count, 40)
+        XCTAssertNotEqual(name, SessionManager.indexedSessionName(base: base, index: 2))
+    }
+
     func testParseZmxSessionNamesReadsNameEqualsFormat() {
         let output = """
         name=seahelm-repo-main pid=123 cwd=/tmp/repo
