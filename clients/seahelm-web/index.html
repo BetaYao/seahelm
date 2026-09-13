@@ -140,7 +140,7 @@
     .wordmark{font-size:13px}
     .detail-head{margin:0 0 8px}
     .col{padding:8px}
-    .suggest-dock{padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+    .suggest-dock{padding:calc(8px + env(safe-area-inset-top)) 8px 8px}
   }
   .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
   #midcol{display:flex;flex-direction:column;overflow:hidden}
@@ -282,16 +282,21 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-pane.sel .ptitle,.fm-pane:hover .ptitle{opacity:1}
   /* ── suggestion dock ─────────────────────────────────────────
-     Floats over the whole page, pinned to the very bottom, so a suggestion is
-     equally reachable whichever column has focus. Sits above the terminal
-     rather than inside a column, which is why it is fixed, not sticky. */
-  .suggest-dock{position:fixed;left:0;right:0;bottom:0;z-index:60;
+     Floats over the whole page at the upper centre — same place the Mac
+     island opens its suggestion card — so a suggestion is reachable from any
+     column without covering the terminal's latest output at the bottom. */
+  .suggest-dock{position:fixed;left:0;right:0;top:0;z-index:60;
     display:flex;flex-direction:column;gap:8px;align-items:center;
-    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
-    background:linear-gradient(to top, rgba(6,26,32,.97) 65%, rgba(6,26,32,0));
+    padding:calc(12px + env(safe-area-inset-top)) 12px 20px;
+    background:linear-gradient(to bottom, rgba(6,26,32,.97) 55%, rgba(6,26,32,0));
     max-height:52vh;overflow-y:auto;pointer-events:none}
   .suggest-dock:empty{display:none}
-  .suggest-dock>*{pointer-events:auto;width:100%;max-width:760px}
+  .suggest-dock>*{pointer-events:auto;width:100%;max-width:540px;
+    animation:suggest-in .18s ease-out}
+  @keyframes suggest-in{
+    from{opacity:0;transform:translateY(-10px)}
+    to{opacity:1;transform:translateY(0)}
+  }
   /* ── event / suggestion cards ───────────────────────────── */
   .ev{background:var(--panel);border:1px solid var(--attention);
     border-radius:var(--r);padding:10px;margin-bottom:8px}
@@ -381,7 +386,7 @@
   </main>
   <div id="scrim"></div>
   <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
-  <!-- Suggestions float over the page, pinned to its very bottom. -->
+  <!-- Suggestions float over the page at the upper centre (island-style). -->
   <div class="suggest-dock" id="suggestDock"></div>
 
 <link rel="stylesheet" href="./xterm.css" />
@@ -952,8 +957,8 @@ function renderSuggestCard(pid, e){
   return box;
 }
 function renderSuggestions(){
-  // Docked to the bottom of the page, not to a column: a suggestion is the one
-  // thing that must be reachable no matter which pane you are looking at.
+  // Docked at the upper centre of the page (like the Mac island), not to a
+  // column: a suggestion must be reachable no matter which pane you are looking at.
   const host = $('suggestDock'); host.innerHTML='';
   for (const [pid,e] of S.events){
     if (!e) continue;

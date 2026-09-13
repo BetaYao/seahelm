@@ -39,9 +39,9 @@ final class AgentSessionRefTests: XCTestCase {
                        "'opencode' '--session' '\(uuid)'")
         XCTAssertEqual(AgentSessionRef(agent: "kimi", sessionId: uuid)?.resumeCommandLine(),
                        "'kimi' '--session' '\(uuid)'")
-        // cursor's binary is `cursor-agent`, not `cursor`.
+        // Cursor Agent's CLI entrypoint is `agent` (not the IDE's `cursor` shim).
         XCTAssertEqual(AgentSessionRef(agent: "cursor", sessionId: uuid)?.resumeCommandLine(),
-                       "'cursor-agent' '--resume' '\(uuid)'")
+                       "'agent' '--resume' '\(uuid)'")
     }
 
     // MARK: - Path kind
