@@ -42,6 +42,22 @@ final class AgentTypeTests: XCTestCase {
         )
     }
 
+    // MARK: - Cursor Agent
+
+    func testCursorLaunchesAgentCLINotIDEShim() {
+        // `cursor` is an IDE wrapper that refuses to start without Cursor.app's
+        // CLI on PATH; new worktrees must call the agent entrypoint instead.
+        XCTAssertEqual(AgentType.cursor.launchCommand, "agent")
+        XCTAssertEqual(
+            AgentType.cursor.launchCommand(withTask: "fix the bug", agentYolo: false),
+            "agent 'fix the bug'"
+        )
+        XCTAssertEqual(
+            AgentType.cursor.launchCommand(withTask: "fix the bug", agentYolo: true),
+            "agent --yolo 'fix the bug'"
+        )
+    }
+
     // MARK: - Pi agent
 
     func testPiIsAFirstClassAgent() {
