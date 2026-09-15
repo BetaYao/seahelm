@@ -98,58 +98,11 @@ final class TabCoordinatorTests: XCTestCase {
         XCTAssertFalse(TabCoordinator.isToolStateRepoPath("/Users/me/src/project.v2"))
     }
 
-    // MARK: - Auto-follow policy
+    // MARK: - Auto-follow policy (removed)
 
-    private let repoA = "/Volumes/openbeta/workspace/teamclaw"
-    private let repoB = "/Users/me/.amuxd/teams/t/apps/a"
-
-    /// The move the feature exists for: an agent's cwd lands in another worktree
-    /// of the repo the pane is already working on.
-    func testFollowsWithinTheSameRepo() {
-        XCTAssertTrue(TabCoordinator.shouldAutoFollow(
-            currentRepo: repoA, destinationRepo: repoA,
-            lastRehomedAt: nil, now: Date(), cooldown: 600))
-    }
-
-    /// The pane that was hauled out of `teamclaw-worktrees/integration` into an
-    /// amuxd app directory: the events carried the pane's own id, because the
-    /// agent emitting them was spawned *by* that pane and inherited its
-    /// `SEAHELM_PANE_ID`. Only the cwd's repo tells the two apart.
-    func testDoesNotFollowIntoAnotherRepo() {
-        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
-            currentRepo: repoA, destinationRepo: repoB,
-            lastRehomedAt: nil, now: Date(), cooldown: 600))
-    }
-
-    /// An unknown repo on either side is not a move we can vouch for.
-    func testDoesNotFollowWhenEitherRepoIsUnknown() {
-        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
-            currentRepo: nil, destinationRepo: repoA,
-            lastRehomedAt: nil, now: Date(), cooldown: 600))
-        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
-            currentRepo: repoA, destinationRepo: nil,
-            lastRehomedAt: nil, now: Date(), cooldown: 600))
-    }
-
-    /// Claude runs `cd <worktree> && …` for one tool call and is back at the repo
-    /// root for the next. Following both bounced the pane in and out and left a
-    /// replacement pane behind on every departure, so the agent ended up back on
-    /// the card it started from with two stray panes to show for it.
-    func testDoesNotFollowAgainDuringTheCooldown() {
-        let movedAt = Date()
-        XCTAssertFalse(TabCoordinator.shouldAutoFollow(
-            currentRepo: repoA, destinationRepo: repoA,
-            lastRehomedAt: movedAt, now: movedAt.addingTimeInterval(15), cooldown: 600))
-    }
-
-    /// The cooldown delays the pane, it does not pin it: once the agent has
-    /// settled somewhere else the next event moves it.
-    func testFollowsAgainOnceTheCooldownExpires() {
-        let movedAt = Date()
-        XCTAssertTrue(TabCoordinator.shouldAutoFollow(
-            currentRepo: repoA, destinationRepo: repoA,
-            lastRehomedAt: movedAt, now: movedAt.addingTimeInterval(601), cooldown: 600))
-    }
+    // Auto-rehome when an agent's cwd left its filed worktree is gone: the pane
+    // stays put and the chrome title shows an away suffix instead. Manual
+    // `pane move` still uses `rehomePane`.
 
     // MARK: - Placeholder replacement
 

@@ -44,6 +44,16 @@ class Station {
     func setOscTitle(_ t: String) { oscLock.lock(); _oscTitle = t; oscLock.unlock() }
     func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
     func setPwd(_ p: String) { oscLock.lock(); _pwd = p; oscLock.unlock() }
+
+    /// Last hook-reported location for this pane. Drives the chrome "away"
+    /// title when the agent is not in the pane's filed worktree. Nil until a
+    /// hook names this pane (`SEAHELM_PANE_ID`).
+    struct HookLocation {
+        /// Matched known worktree for the cwd, or nil when nothing matched.
+        let worktreePath: String?
+        let cwd: String
+    }
+    var hookLocation: HookLocation?
     /// Directory the pane's surface was created in (worktree root, typically).
     /// Used as a fallback base for resolving relative paths when the live OSC 7
     /// `pwd` hasn't been reported — which is the common case inside zmx sessions.

@@ -1,12 +1,8 @@
-// tests/AgentMovedWorktreeTests.swift
-//
 // The signal end of "an agent moved into a worktree of its own": a hook event's
 // cwd is the only thing that reports it, and every hook payload carries one.
 //
-// This layer is where the shipped bug lived, and why it survived: the tracker had
-// tests, the transfer had tests, and nothing tested whether a real event could
-// ever reach them. These drive WebhookStatusProvider with events shaped like the
-// ones Claude Code actually sends.
+// Discovery still surfaces new worktrees from that signal; the pane no longer
+// follows automatically — chrome shows an away title instead.
 import XCTest
 @testable import seahelm
 
@@ -209,7 +205,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
         let resolved = expectation(description: "pane worktree reported")
         var reportedPane: String?
         var reportedPath: String?
-        provider.onPaneWorktreeResolved = { paneId, path in
+        provider.onPaneWorktreeResolved = { paneId, path, _ in
             reportedPane = paneId
             reportedPath = path
             resolved.fulfill()
@@ -233,7 +229,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
 
         let notReported = expectation(description: "no move reported")
         notReported.isInverted = true
-        provider.onPaneWorktreeResolved = { _, _ in notReported.fulfill() }
+        provider.onPaneWorktreeResolved = { _, _, _ in notReported.fulfill() }
 
         provider.handleEvent(WebhookEvent(
             source: "claude-code", sessionId: "s1", event: .toolUseEnd,
@@ -255,15 +251,15 @@ final class AgentMovedWorktreeTests: XCTestCase {
 
         let notReported = expectation(description: "no move reported")
         notReported.isInverted = true
-        provider.onPaneWorktreeResolved = { _, _ in notReported.fulfill() }
+        provider.onPaneWorktreeResolved = { _, _, _ in notReported.fulfill() }
 
         provider.handleEvent(event(cwd: repo.path, paneId: nil))
 
         wait(for: [notReported], timeout: 0.6)
     }
 
-    /// Not edge-cached: a move that the owner could not complete on the first
-    /// event has to be retried on the next one, so the signal must repeat.
+    /// Not edge-cached: a location signal that the owner could not apply on the
+    /// first event has to be retried on the next one, so the signal must repeat.
     func testTheSignalRepeatsRatherThanFiringOnce() throws {
         let repo = root.appendingPathComponent("repo")
         try makeDirectory(repo)
@@ -274,7 +270,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
         var calls = 0
         let twice = expectation(description: "reported for both events")
         twice.expectedFulfillmentCount = 2
-        provider.onPaneWorktreeResolved = { _, _ in
+        provider.onPaneWorktreeResolved = { _, _, _ in
             calls += 1
             twice.fulfill()
         }
@@ -284,6 +280,32 @@ final class AgentMovedWorktreeTests: XCTestCase {
 
         wait(for: [twice], timeout: 2)
         XCTAssertEqual(calls, 2)
+    }
+
+    /// A cwd that matches no known worktree still reports location (with a nil
+    /// worktree) so the chrome can show the pane as away.
+    func testUnmatchedCwdStillReportsPaneLocation() throws {
+        let elsewhere = root.appendingPathComponent("elsewhere")
+        try makeDirectory(elsewhere)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([])
+
+        let resolved = expectation(description: "unmatched location reported")
+        var reportedPath: String?
+        var reportedCwd: String?
+        provider.onPaneWorktreeResolved = { _, path, cwd in
+            reportedPath = path
+            reportedCwd = cwd
+            resolved.fulfill()
+        }
+
+        provider.handleEvent(event(cwd: elsewhere.path))
+
+        wait(for: [resolved], timeout: 2)
+        XCTAssertNil(reportedPath)
+        XCTAssertEqual(reportedCwd.map { ($0 as NSString).resolvingSymlinksInPath },
+                       canon(elsewhere))
     }
 
 }
