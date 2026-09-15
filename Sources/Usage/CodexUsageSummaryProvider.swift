@@ -136,6 +136,14 @@ struct CodexAppServerRateLimitClient {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr
+        let pipeHandles = [
+            stdin.fileHandleForReading, stdin.fileHandleForWriting,
+            stdout.fileHandleForReading, stdout.fileHandleForWriting,
+            stderr.fileHandleForReading, stderr.fileHandleForWriting,
+        ]
+        defer {
+            for handle in pipeHandles { try? handle.close() }
+        }
 
         let outputGroup = DispatchGroup()
         let stdoutQueue = DispatchQueue(label: "codex-rate-limit.stdout")

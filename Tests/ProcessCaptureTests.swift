@@ -360,3 +360,77 @@ final class ProcessCaptureTests: XCTestCase {
         XCTAssertEqual(output ?? nil, "", "a clean tree is success-with-no-output, not failure")
     }
 }
+
+/// The Telegram long-poll thread is a bare `Thread` with no autorelease pool, and
+/// `TelegramBotAPI.call` used to leave stdout/stderr `FileHandle`s open after
+/// `readDataToEndOfFile`. On that combination every `getUpdates` permanently
+/// leaked two descriptors — ~2800 pipes after a workday. Closing every pipe end
+/// (the same rule as `ProcessRunner.drain`) keeps the count flat even without a
+/// pool; the poll loop also gained an `autoreleasepool` as belt-and-braces.
+final class TelegramStylePipeTests: XCTestCase {
+    private func openDescriptorCount() -> Int {
+        (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd"))?.count ?? -1
+    }
+
+    /// Mirrors `TelegramBotAPI.call`'s Process/Pipe shape against `/bin/echo`.
+    private func runEcho(closeHandles: Bool) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/echo")
+        process.arguments = ["hi"]
+        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+        let handles = [
+            stdin.fileHandleForReading, stdin.fileHandleForWriting,
+            stdout.fileHandleForReading, stdout.fileHandleForWriting,
+            stderr.fileHandleForReading, stderr.fileHandleForWriting,
+        ]
+        try! process.run()
+        try? stdin.fileHandleForWriting.close()
+        _ = stdout.fileHandleForReading.readDataToEndOfFile()
+        _ = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        if closeHandles {
+            for handle in handles { try? handle.close() }
+        }
+    }
+
+    func testClosingEveryPipeEndPreventsLeakOnBareThread() {
+        let iterations = 40
+        let done = expectation(description: "thread finished")
+        var before = 0
+        var after = 0
+        let thread = Thread {
+            // No autoreleasepool — the production poll thread used to have none.
+            before = self.openDescriptorCount()
+            for _ in 0..<iterations { self.runEcho(closeHandles: true) }
+            after = self.openDescriptorCount()
+            done.fulfill()
+        }
+        thread.start()
+        wait(for: [done], timeout: 30)
+        XCTAssertEqual(after, before,
+                       "leaked \(after - before) descriptors over \(iterations) telegram-shaped calls")
+    }
+
+    func testUnclosedHandlesLeakOnBareThread() {
+        // Guard the premise: without closes, the same loop must grow. If this
+        // ever stops failing, Foundation started reclaiming and the production
+        // close is still correct but this canary is obsolete.
+        let iterations = 40
+        let done = expectation(description: "thread finished")
+        var before = 0
+        var after = 0
+        let thread = Thread {
+            before = self.openDescriptorCount()
+            for _ in 0..<iterations { self.runEcho(closeHandles: false) }
+            after = self.openDescriptorCount()
+            done.fulfill()
+        }
+        thread.start()
+        wait(for: [done], timeout: 30)
+        XCTAssertGreaterThan(after, before,
+                             "expected the un-fixed path to leak; got \(before) -> \(after)")
+    }
+}
