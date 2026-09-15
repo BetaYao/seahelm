@@ -71,7 +71,10 @@ enum AgentType: String, Codable, CaseIterable {
         case .goose:      return "goose"
         case .amp:        return "amp"
         case .aider:      return "aider"
-        case .cursor:     return "cursor"
+        // Cursor Agent CLI — not the `cursor` IDE shim. Bare `cursor` errors with
+        // "No Cursor IDE installation found" unless the desktop app's CLI is on
+        // PATH; the agent entrypoint is `agent` (also linked as `cursor-agent`).
+        case .cursor:     return "agent"
         case .kiro:       return "kiro"
         case .pi:         return "pi"
         default:          return nil
