@@ -598,22 +598,24 @@ function openGatewaySocket(){
     if (S.pendingCode) params.code = S.pendingCode;
     else { params.mac_id = S.mac; params.token = S.authPass; }
     gwSend('auth', params, (r, err) => {
+      // Capture before clearing: token vs code decides whether we drop the
+      // remembered pair and put the gate back on the code form.
+      const usedCode = !!S.pendingCode;
       if (err && err.code === -32029) {
         S.pendingCode = null;
         reconnector.stop();        // retrying would only burn the rate limit
-        setStatus(false, '尝试过多,稍后再试');
-        log('sys', '(auth-rate)', JSON.stringify(err));
+        rejectAuth({ usedCode, rateLimited: true, detail: err });
         ws.close();
         return;
       }
       if (err || !r || r.ok === false) {
         S.pendingCode = null;
         reconnector.stop();        // a rejected credential stays rejected
-        setStatus(false, '认证失败');
-        log('sys', '(auth-fail)', err ? JSON.stringify(err) : JSON.stringify(r));
+        rejectAuth({ usedCode, rateLimited: false, detail: err || r });
         ws.close();
         return;
       }
+      gateErrorMsg = null;
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
@@ -652,7 +654,8 @@ function openGatewaySocket(){
     // the reconnect can put it back rather than landing on an empty page.
     if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
     unmountPanes();
-    if (reconnector.isStopped) setStatus(false, '离线');
+    // Do not overwrite a gate-visible auth error with a generic "offline".
+    if (reconnector.isStopped && !gateErrorMsg) setStatus(false, '离线');
     reconnector.closed();
   };
   ws.onerror = () => { if (reconnector.isStopped) setStatus(false, '错误'); };
@@ -829,6 +832,9 @@ function applySessionSnapshot(result){
 const CREDS_KEY = 'seahelm_creds';
 try { localStorage.removeItem('seahelm_pair'); } catch (e) {}   // drop the old plaintext
 
+// Sticky message for the gate card. The header status sits under the fullscreen
+// gate, so auth failures have to live here or the user sees "Connect" do nothing.
+let gateErrorMsg = null;
 
 /** Restore without the root secret: enough to authenticate, not to re-derive. */
 function restoreCreds(){
@@ -841,11 +847,36 @@ function restoreCreds(){
 }
 function clearPair(){
   S.authPass = null; S.pendingCode = null;
+  gateErrorMsg = null;
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem('seahelm_pair');   // pre-migration installs
   log('sys', '(unpaired)', '回到明文/手填模式');
   renderGate();
 }
+
+/** Auth rejected: drop a dead token and put the code form back on screen. */
+function rejectAuth({ usedCode, rateLimited, detail }){
+  if (rateLimited) {
+    gateErrorMsg = '尝试过多，稍后再试';
+    setStatus(false, '尝试过多,稍后再试');
+    log('sys', '(auth-rate)', JSON.stringify(detail));
+  } else if (usedCode) {
+    gateErrorMsg = '配对码错误或已过期';
+    setStatus(false, '认证失败');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  } else {
+    // Remembered token no longer works (revoke-all, new root secret, …).
+    // Keeping it would leave the Connect button looping on the same failure
+    // with no visible error — the gate covers the header status.
+    S.authPass = null;
+    try { localStorage.removeItem(CREDS_KEY); } catch (e) {}
+    gateErrorMsg = '配对已失效，请重新输入配对码';
+    setStatus(false, '认证失败');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  }
+  renderGate();
+}
+
 // Reflect pairing state in the header: chip when paired, 配对 button when not.
 /**
  * Connection gate. Three states: enter code, press connect, or get out of the way.
@@ -867,8 +898,10 @@ function renderGate(){
         <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
         <button class="gate-primary" id="gateConnect">连接</button>
         <button class="gate-link" id="gateUnpair">解除配对</button>
+        <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
       </div>`;
-    $('gateConnect').onclick = () => { connect(); renderGate(); };
+    if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
+    $('gateConnect').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     $('gateUnpair').onclick = () => { clearPair(); };
     return;
   }
@@ -880,14 +913,16 @@ function renderGate(){
       <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="one-time-code"
              maxlength="9" placeholder="1234 5678" />
       <button class="gate-primary" id="gatePair">配对并连接</button>
-      <div class="gate-error" id="gateError" hidden></div>
+      <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
     </div>`;
   const input = $('gateCode'), err = $('gateError');
-  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  if (gateErrorMsg) { err.textContent = gateErrorMsg; err.hidden = false; }
+  const fail = (m) => { gateErrorMsg = m; err.textContent = m; err.hidden = false; };
 
   const go = () => {
     const digits = String(input.value || '').replace(/\D/g, '');
     if (digits.length !== 8) return fail('请输入 8 位配对码');
+    gateErrorMsg = null;
     err.hidden = true;
     S.pendingCode = digits;
     connect();
