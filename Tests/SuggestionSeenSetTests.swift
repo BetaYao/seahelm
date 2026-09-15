@@ -49,12 +49,22 @@ final class SuggestionSeenSetTests: XCTestCase {
         XCTAssertTrue(seen.absorb([upgraded]).isEmpty)
     }
 
-    func testResolvedCardIsFreshWhenRaisedAgain() {
+    func testBrieflyVanishedCardDoesNotReopen() {
         var seen = SuggestionSeenSet()
         let card = order(message: "shipped", options: ["test", "commit"])
-        _ = seen.absorb([card])
-        _ = seen.absorb([])
-        XCTAssertEqual(seen.absorb([card]).count, 1)
+        let now = Date()
+        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([], now: now.addingTimeInterval(1))
+        XCTAssertTrue(seen.absorb([card], now: now.addingTimeInterval(2)).isEmpty)
+    }
+
+    func testLongGoneCardCanBeRaisedAgain() {
+        var seen = SuggestionSeenSet()
+        let card = order(message: "shipped", options: ["test", "commit"])
+        let now = Date()
+        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([], now: now.addingTimeInterval(1))
+        XCTAssertEqual(seen.absorb([card], now: now.addingTimeInterval(SuggestionSeenSet.reappearanceGrace + 2)).count, 1)
     }
 
     func testFreshEntriesAreReturnedNotJustCounted() {

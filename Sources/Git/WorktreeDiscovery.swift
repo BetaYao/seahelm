@@ -165,8 +165,27 @@ enum WorktreeDiscovery {
     /// and `.`/`..` components so paths from different sources compare equal.
     /// `git worktree list` emits symlink-resolved paths, while paths we construct
     /// from a repo root may not be — normalize both through here before comparing.
+    ///
+    /// Symlink resolution is bounded: against a stale removable mount,
+    /// `resolvingSymlinksInPath` blocks forever in the kernel and was the
+    /// beachball that froze the whole UI after an external disk dropped. A
+    /// fenced volume (see `VolumeFence`) skips the filesystem entirely.
     static func canonicalPath(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        if VolumeFence.isFenced(standardized) {
+            return standardized
+        }
+        if let resolver = canonicalPathResolverForTesting {
+            return resolver(standardized) ?? standardized
+        }
+        return FileSystemProbe.resolvedPath(standardized) ?? standardized
+    }
+
+    /// Test seam for the bounded resolver. Production uses `FileSystemProbe.resolvedPath`.
+    static var canonicalPathResolverForTesting: ((String) -> String?)?
+
+    static func resetCanonicalPathResolverForTesting() {
+        canonicalPathResolverForTesting = nil
     }
 
     static func parsePorcelain(_ output: String) -> [WorktreeInfo] {

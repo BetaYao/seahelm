@@ -5,10 +5,10 @@ final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
         let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v5"))
+        XCTAssertTrue(s.contains("seahelm-hook v6"))
         XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
-        XCTAssertTrue(s.contains("block_b64"))           // block extraction
-        XCTAssertTrue(s.contains("base64 -d"))
+        XCTAssertFalse(s.contains("block_b64"))          // Stop is observation-only
+        XCTAssertFalse(s.contains("base64 -d"))
         XCTAssertFalse(s.contains("/webhook"))           // HTTP fallback removed
         XCTAssertFalse(s.contains("curl"))
         XCTAssertTrue(s.contains("\"method\":\"hook\""))
@@ -26,7 +26,7 @@ final class SeahelmHookInstallerTests: XCTestCase {
             var captured: [[String: Any]] = []
             func snapshotPanes() -> [PaneSnapshot] { [] }
             func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-            func ingestHook(json: [String: Any]) -> String? { captured.append(json); return nil }
+            func ingestHook(json: [String: Any]) { captured.append(json) }
         }
 
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())

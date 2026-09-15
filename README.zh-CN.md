@@ -20,9 +20,9 @@ libghostty、每个 agent 一个 git worktree、用 hook 上报状态。真正�
 用 iMessage 从手机上回复它。Claude 和 Codex 的 token 与额度消耗也在 App 里汇总，所以你
 能提前看到某个 agent 快把预算跑光，而不是等它停下来才知道。
 
-**围绕决策设计，而不是围绕展示。** Seahelm 会拦截 Stop hook，逼 agent 在停下之前交出
-下一步的选项，这些选项以可点击的卡片送到你面前。First Mate 监听状态变化，要么自动处理，
-要么排进待批准队列。显示「正在等你」是容易的那一半，难的是接下来该做什么。
+**围绕决策设计，而不是围绕展示。** Seahelm 从 Stop hook 上报的最终回复里读取 agent 给出的
+下一步选项，把行内标记变成可点击的卡片。First Mate 监听状态变化，要么自动处理，要么排进
+待批准队列。显示「正在等你」是容易的那一半，难的是接下来该做什么。
 
 **pane 跟着它的 agent 走。** 当一个 agent 创建了新的 worktree 并开始在里面工作，这个
 pane 会迁移到新 worktree 的卡片上，而不是在旁边多出一个空终端。依据是每个 hook 负载都

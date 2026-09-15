@@ -51,7 +51,7 @@ class StationManager {
     /// does: the pane that moved away kept that exact name — zmx has no rename —
     /// so the replacement would attach to the live session the departed agent is
     /// still running in, and both panes would drive the same terminal. Claims the
-    /// first free `<base>`, `<base>-2`, `<base>-3` … instead.
+    /// first free `<base>`, `<base>--pane-1`, `<base>--pane-2` … instead.
     func replacementTree(for info: WorktreeInfo, backend: String) -> SplitTree {
         if let existing = trees[info.path] { return existing }
 
@@ -60,9 +60,9 @@ class StationManager {
             let base = SessionManager.persistentSessionName(for: info.path)
             let taken = claimedSessionNames
             paneSessionKey = base
-            var index = 2
+            var index = 1
             while taken.contains(paneSessionKey) {
-                paneSessionKey = "\(base)-\(index)"
+                paneSessionKey = SessionManager.indexedSessionName(base: base, index: index)
                 index += 1
             }
         }

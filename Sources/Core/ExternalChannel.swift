@@ -47,6 +47,10 @@ struct OutboundMessage {
     let replyToMessageId: String?
     let streaming: Bool
     let streamId: String?
+    /// An optional logical packet id. Channels may coalesce duplicate sends of
+    /// the same packet without suppressing ordinary messages that happen to
+    /// have identical text.
+    let packetKey: String?
     /// Drawn under the message by channels that can. Always a shortcut for
     /// something the text says how to type, so dropping them costs nothing.
     let buttons: [MessageButton]
@@ -55,6 +59,15 @@ struct OutboundMessage {
          content: String, format: MessageFormat = .text,
          replyToMessageId: String? = nil, streaming: Bool = false, streamId: String? = nil,
          buttons: [MessageButton] = []) {
+        self.init(channelId: channelId, targetChatId: targetChatId, targetUserId: targetUserId,
+                  content: content, format: format, replyToMessageId: replyToMessageId,
+                  streaming: streaming, streamId: streamId, buttons: buttons, packetKey: nil)
+    }
+
+    init(channelId: String, targetChatId: String? = nil, targetUserId: String? = nil,
+         content: String, format: MessageFormat = .text,
+         replyToMessageId: String? = nil, streaming: Bool = false, streamId: String? = nil,
+         buttons: [MessageButton] = [], packetKey: String?) {
         self.channelId = channelId
         self.targetChatId = targetChatId
         self.targetUserId = targetUserId
@@ -64,6 +77,7 @@ struct OutboundMessage {
         self.streaming = streaming
         self.streamId = streamId
         self.buttons = buttons
+        self.packetKey = packetKey
     }
 }
 

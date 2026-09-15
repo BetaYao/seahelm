@@ -19,20 +19,11 @@ enum CursorHooksSetup {
         "stop",
     ]
 
-    /// Bound on stop-hook re-invocation rounds — Cursor's counterpart to
-    /// Claude's `stop_hook_active` guard, so a blocking stop hook can't spin
-    /// the agent forever.
-    private static let stopLoopLimit = 5
-
-    private static func requiredEntry(event: String) -> [String: Any] {
+    private static func requiredEntry() -> [String: Any] {
         // Declare the caller — Cursor's payload carries no key that identifies it
         // (see WebhookEvent.inferNativeHookSource), and without a source the
         // event can't be attributed to a Cursor pane or resume ref.
-        var entry: [String: Any] = ["command": "\(SeahelmHookInstaller.scriptPath()) cursor"]
-        if event == "stop" {
-            entry["loop_limit"] = stopLoopLimit
-        }
-        return entry
+        ["command": "\(SeahelmHookInstaller.scriptPath()) cursor"]
     }
 
     /// A hook entry seahelm previously installed — safe to upgrade in place.
@@ -75,7 +66,7 @@ enum CursorHooksSetup {
         }
 
         for event in requiredEvents {
-            let required = requiredEntry(event: event)
+            let required = requiredEntry()
             var list = hooks[event] as? [[String: Any]] ?? []
             if let idx = list.firstIndex(where: isSeahelmManaged) {
                 if !NSDictionary(dictionary: list[idx]).isEqual(to: required) {

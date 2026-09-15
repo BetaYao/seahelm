@@ -15,6 +15,24 @@ final class TerminalCoordinatorTests: XCTestCase {
         XCTAssertNotNil(coordinator.config.splitLayouts["/tmp/test"])
     }
 
+    func testMigratesAnExtraPaneThatCollidesWithAnotherWorktreeBase() {
+        let first = "/workspace/task/https-github-com-dif"
+        let second = "/workspace/task/https-github-com-dif-2"
+        let firstBase = SessionManager.persistentSessionName(for: first)
+        let secondBase = SessionManager.persistentSessionName(for: second)
+        var config = Config()
+        config.splitLayouts = [
+            first: .split(axis: "horizontal", ratio: 0.5,
+                          first: .leaf(paneSessionKey: firstBase, title: nil),
+                          second: .leaf(paneSessionKey: secondBase, title: nil)),
+            second: .leaf(paneSessionKey: secondBase, title: nil),
+        ]
+
+        XCTAssertTrue(config.migrateCollidingPaneSessions())
+        XCTAssertEqual(config.splitLayouts[second]?.paneSessionKeys, [secondBase])
+        XCTAssertEqual(config.splitLayouts[first]?.paneSessionKeys, [firstBase, "\(firstBase)--pane-1"])
+    }
+
     func testSplitFocusedPaneWithNilRepoVCIsNoop() {
         let coordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         // Should not crash when no repoVC
@@ -126,5 +144,17 @@ final class TerminalCoordinatorTests: XCTestCase {
             visible: ["a"], sleepable: ["a"], offscreenSince: ["a": t0, "gone": t0],
             idleAfter: 600, now: t0.addingTimeInterval(10))
         XCTAssertNil(plan.offscreenSince["gone"], "ids that no longer exist must not accumulate")
+    }
+
+    // MARK: - Close policy
+
+    func testClosePlanEndsTheSessionWhenOneLeafRemains() {
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 1), .closeLastLeaf,
+                       "the last pane carries the worktree's whole session with it")
+    }
+
+    func testClosePlanDropsOneLeafWhenOthersRemain() {
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 2), .closeLeaf)
+        XCTAssertEqual(TerminalCoordinator.closePlan(leafCount: 5), .closeLeaf)
     }
 }

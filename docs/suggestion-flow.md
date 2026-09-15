@@ -1,76 +1,36 @@
-# Suggestion Flow (seahelm-suggest)
+# Suggestion Flow
 
-How next-step suggestion buttons are produced and rendered on a pane's
-First Mate card. Design is **instruction-primary, Stop-hook fallback**: in the
-normal case the agent emits its own suggestions and the Stop hook does nothing.
+Seahelm's suggestion path is instruction-primary and non-blocking. An agent may
+report options through the installed `seahelm-suggest` command/plugin, or place
+an inline marker in its final response:
+
+    ::seahelm-suggest:: first option | second option
+
+The Stop hook is observation-only. It forwards the final response to Seahelm,
+where the marker is parsed into a `suggest` event and rendered as a clickable
+card. A response without the marker is still a normal completed turn; Seahelm
+does not return `decision:block` or inject a follow-up prompt.
 
 ## Cursor Agent
 
-Cursor's `stop` payload has no `last_assistant_message`, and a Claude-style
-`decision:block`+`reason` is shown as a **user-visible** `followup_message`
-(grey instruction box). So for `source == "cursor"`:
+Cursor's `afterAgentResponse` event carries the final response text, so Seahelm
+parses the same marker there. Cursor's Stop payload has no final response and is
+never used to force a follow-up.
 
-- Suggestions are harvested from `afterAgentResponse` (`text` field) when the
-  reply already contains `::seahelm-suggest::`.
-- Stop never forces a followup. If the agent forgets the sentinel line, no
-  buttons appear that turn (guidance in `AGENTS.md` still asks for it).
+## Correlation
 
-Claude Code / Codex keep the Stop-hook reverse-trigger below.
+The control socket carries the stable `pane_id` on both command/plugin events
+and native hook events. This lets Seahelm associate a suggestion with the pane
+that produced it without relying on the agent's session-id format.
 
-## Correlation key
+## Background work
 
-The suppression state that ties "agent already suggested this turn" to "the
-Stop that follows" is keyed by **`turnKey = paneId ?? sessionId`**, NOT by
-session id. A native Stop hook carries Claude's real session UUID, while the
-agent-invoked `seahelm-suggest` only knows its `pane_id`; keying by session id
-made them never match, so the fallback block fired every turn. See
-`TabCoordinator.handleEvent` and `ControlProtocol` `case "suggest"`.
+Suggestions emitted while a subagent, shell task, or cron task is still running
+are dropped. The main agent has not reached a real end-of-turn yet and will
+report again when the background work settles.
 
-## Primary path — agent self-suggests each turn
+## Viewport choices
 
-```mermaid
-flowchart TD
-  A["Agent, as its last action,\ncalls: seahelm-suggest 'opt1' 'opt2' ..."] --> B["seahelm-suggest CLI\n→ unix socket\nmethod:suggest {pane_id, cwd, options}"]
-  B --> C["ControlProtocol case \"suggest\"\nsynthesize .suggest WebhookEvent\n(carries seahelm_pane_id)"]
-  C --> D["TabCoordinator.handleEvent\nturnKey = paneId ?? sessionId"]
-  D --> E{"background busy?\n(subagent / shell / cron)"}
-  E -- yes --> F["DROP suggest\n(agent will auto-resume,\nnot really end-of-turn)"]
-  E -- no --> G["sessionSuggestedAt[turnKey] = now\n(mark: suggested this turn)"]
-  G --> H["ShipLog.handleWebhookEvent\nresolve terminal by cwd → worktree"]
-  H --> I["FirstMate rule engine\n→ red-zone suggestNextOrder card\n(options + last assistant msg summary)"]
-  I --> J["UI renders clickable buttons"]
-```
-
-## Fallback path — Stop hook
-
-Fires when the agent's turn ends. Decision order inside `handleEvent`:
-
-```mermaid
-flowchart TD
-  S["Stop hook fires\n(native payload, real session UUID + seahelm_pane_id)"] --> T{"sessionSuggestedAt[turnKey] != nil?"}
-  T -- yes --> U["clear flag, DO NOT block\n(agent already emitted buttons —\nno extra round-trip)"]
-  T -- no --> V{"user prompted after our last block?\n(promptedAt > blockedAt)"}
-  V -- yes --> W["suppress block\n(responding to explicit user direction)"]
-  V -- no --> X{"StopHookResponder.blockBody gate:\nsuggestOnStop ON · main-agent Stop ·\nnot stop_hook_active · no background tasks ·\nlast msg not a question · source != cursor"}
-  X -- passes --> Y["return {decision:block}\n→ agent continues, calls seahelm-suggest\n(the extra round-trip)"]
-  X -- fails --> Z["no block — normal completion"]
-```
-
-Before the pane-id fix, branch `T` never matched, so essentially every real
-end-of-turn Stop fell through to `Y` and forced a wasted round-trip.
-
-## Reset — what defines "a turn"
-
-`sessionSuggestedAt[turnKey]` is cleared on each new `.userPrompt`. A fresh user
-message starts a new turn, so the agent must suggest again.
-
-## Viewport choices — permission prompts and `pane.options`
-
-`SeahelmControlDataSource.paneOptions(paneId:)` reads the pane's **live viewport
-text** and parses on-screen choices via `ChoiceOptionParser` (Happy-style
-detection of permission prompts / AskUserQuestion). The status poller uses the
-same parser to emit a screen-native question event, which becomes a First Mate
-card on desktop. Picking a card option drives the original TUI with arrow keys
-and Return. Wrapped labels and confirmation footers after the option list are
-supported. This remains a separate channel from the `seahelm-suggest` hook
-events described above.
+Permission prompts and `AskUserQuestion` choices are a separate channel. The
+status poller reads those from the live viewport and renders a question card;
+selecting a card sends the corresponding keys back to the original pane.

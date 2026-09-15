@@ -87,6 +87,11 @@ class Station {
     /// from a wedged one in that instant; only the wedged one is still
     /// unreachable a beat later.
     private static let unreachableConfirmDelay: TimeInterval = 5.0
+    /// How often to re-probe a live pane after the initial post-attach check.
+    /// The initial check alone cannot see a volume that drops minutes later —
+    /// attach clients hang rather than exiting, so without a periodic pass the
+    /// pane stays blank and the spin loop keeps a core forever.
+    private static let healthRecheckInterval: TimeInterval = 60.0
     /// Recoveries attempted since this pane was last seen healthy. A backend
     /// broken for reasons recovery cannot touch — the volume holding the zmx
     /// binary is gone — would otherwise thrash forever, because every recovery
@@ -416,6 +421,24 @@ class Station {
         _ = ghostty_surface_key(surface, release)
     }
 
+    /// Press ctrl+v as a real key event. Agent TUIs bind it to paste-image
+    /// (Claude Code's `chat:imagePaste`, see `AgentImagePaste`); sent through
+    /// `sendText` it would sit inside a bracketed paste and never read as a key.
+    /// Built like a real ctrl+v keyDown — no text — so Ghostty encodes the chord
+    /// for whatever keyboard protocol the pane has enabled.
+    func sendImagePasteKey() {
+        guard let surface else { return }
+        var press = ghostty_input_key_s()
+        press.action = GHOSTTY_ACTION_PRESS
+        press.keycode = 9  // macOS kVK_ANSI_V
+        press.mods = GHOSTTY_MODS_CTRL
+        press.unshifted_codepoint = UInt32(("v" as Unicode.Scalar).value)
+        _ = ghostty_surface_key(surface, press)
+        var release = press
+        release.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, release)
+    }
+
     func readViewportText() -> String? {
         var contended = false
         return readViewportText(tryOnly: false, contended: &contended)
@@ -550,15 +573,32 @@ class Station {
     private func scheduleZmxHealthCheck(paneSessionKey: String, container: NSView, workingDirectory: String?) {
         recoveryTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.checkZmxHealth(paneSessionKey: paneSessionKey, container: container, workingDirectory: workingDirectory)
+            self?.checkZmxHealth(
+                paneSessionKey: paneSessionKey,
+                container: container,
+                workingDirectory: workingDirectory,
+                reschedule: true
+            )
         }
         recoveryTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.recoveryDelay, execute: work)
     }
 
-    private func checkZmxHealth(paneSessionKey: String, container: NSView, workingDirectory: String?) {
+    private func checkZmxHealth(
+        paneSessionKey: String,
+        container: NSView,
+        workingDirectory: String?,
+        reschedule: Bool
+    ) {
         // If the surface was already destroyed, nothing to do.
         guard surface != nil else { return }
+        if reschedule {
+            schedulePeriodicZmxHealthCheck(
+                paneSessionKey: paneSessionKey,
+                container: container,
+                workingDirectory: workingDirectory
+            )
+        }
         // Deliberately no "did the attach process exit?" gate here. A daemon
         // wedged by its volume disappearing leaves the client hanging rather than
         // exiting, so gating on exit meant the one failure that never recovers on
@@ -570,6 +610,24 @@ class Station {
             processExited: processStatus == .exited,
             confirmUnreachable: true
         )
+    }
+
+    private func schedulePeriodicZmxHealthCheck(
+        paneSessionKey: String,
+        container: NSView,
+        workingDirectory: String?
+    ) {
+        recoveryTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.checkZmxHealth(
+                paneSessionKey: paneSessionKey,
+                container: container,
+                workingDirectory: workingDirectory,
+                reschedule: true
+            )
+        }
+        recoveryTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.healthRecheckInterval, execute: work)
     }
 
     /// Probe the session's reachability off the main thread and act on the plan.

@@ -81,4 +81,38 @@ enum FileSystemProbe {
         defer { lock.unlock() }
         return missing
     }
+
+    /// Bounded symlink resolution. `resolvingSymlinksInPath` is a `realpath()`
+    /// under the hood and, like `stat()`, can block forever against a stale
+    /// mount. Returns nil when the resolve does not finish within `timeout` so
+    /// callers can fall back to string identity instead of beachballing.
+    static func resolvedPath(_ path: String, timeout: TimeInterval = 1) -> String? {
+        let semaphore = DispatchSemaphore(value: 0)
+        final class Box { var value: String? }
+        let box = Box()
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.value = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            return nil
+        }
+        return box.value
+    }
+
+    /// Bounded `attributesOfItem`. Same stale-mount hazard as `fileExists`;
+    /// returns nil when the `stat()` does not finish in time.
+    static func attributes(_ path: String, timeout: TimeInterval = 1) -> [FileAttributeKey: Any]? {
+        let semaphore = DispatchSemaphore(value: 0)
+        final class Box { var value: [FileAttributeKey: Any]? }
+        let box = Box()
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.value = try? FileManager.default.attributesOfItem(atPath: path)
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            return nil
+        }
+        return box.value
+    }
 }

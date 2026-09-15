@@ -140,7 +140,7 @@
     .wordmark{font-size:13px}
     .detail-head{margin:0 0 8px}
     .col{padding:8px}
-    .suggest-dock{padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+    .suggest-dock{padding:calc(8px + env(safe-area-inset-top)) 8px 8px}
   }
   .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
   #midcol{display:flex;flex-direction:column;overflow:hidden}
@@ -161,7 +161,7 @@
     padding:3px 7px;background:var(--panel);border-bottom:1px solid var(--line-12);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vt-leaf.on .vt-leaf-title{color:var(--accent)}
-  .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden}
+  .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;touch-action:none}
   /* Single-pane fallback: the strip stands in for the panes we stopped drawing,
      so the layout is still legible even though only one of them is on screen. */
   .vt-single{flex:1 1 auto;min-height:0;min-width:0;display:flex}
@@ -282,16 +282,21 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-pane.sel .ptitle,.fm-pane:hover .ptitle{opacity:1}
   /* ── suggestion dock ─────────────────────────────────────────
-     Floats over the whole page, pinned to the very bottom, so a suggestion is
-     equally reachable whichever column has focus. Sits above the terminal
-     rather than inside a column, which is why it is fixed, not sticky. */
-  .suggest-dock{position:fixed;left:0;right:0;bottom:0;z-index:60;
+     Floats over the whole page at the upper centre — same place the Mac
+     island opens its suggestion card — so a suggestion is reachable from any
+     column without covering the terminal's latest output at the bottom. */
+  .suggest-dock{position:fixed;left:0;right:0;top:0;z-index:60;
     display:flex;flex-direction:column;gap:8px;align-items:center;
-    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
-    background:linear-gradient(to top, rgba(6,26,32,.97) 65%, rgba(6,26,32,0));
+    padding:calc(12px + env(safe-area-inset-top)) 12px 20px;
+    background:linear-gradient(to bottom, rgba(6,26,32,.97) 55%, rgba(6,26,32,0));
     max-height:52vh;overflow-y:auto;pointer-events:none}
   .suggest-dock:empty{display:none}
-  .suggest-dock>*{pointer-events:auto;width:100%;max-width:760px}
+  .suggest-dock>*{pointer-events:auto;width:100%;max-width:540px;
+    animation:suggest-in .18s ease-out}
+  @keyframes suggest-in{
+    from{opacity:0;transform:translateY(-10px)}
+    to{opacity:1;transform:translateY(0)}
+  }
   /* ── event / suggestion cards ───────────────────────────── */
   .ev{background:var(--panel);border:1px solid var(--attention);
     border-radius:var(--r);padding:10px;margin-bottom:8px}
@@ -381,13 +386,16 @@
   </main>
   <div id="scrim"></div>
   <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
-  <!-- Suggestions float over the page, pinned to its very bottom. -->
+  <!-- Suggestions float over the page at the upper centre (island-style). -->
   <div class="suggest-dock" id="suggestDock"></div>
 
 <link rel="stylesheet" href="./xterm.css" />
 <script src="./xterm.js"></script>
 <script src="./input-coalescer.js"></script>
+<script src="./touch-scroll.js"></script>
 <script src="./reconnect.js"></script>
+<script src="./vt-apply.js"></script>
+<script src="./term-focus.js"></script>
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
@@ -595,22 +603,24 @@ function openGatewaySocket(){
     if (S.pendingCode) params.code = S.pendingCode;
     else { params.mac_id = S.mac; params.token = S.authPass; }
     gwSend('auth', params, (r, err) => {
+      // Capture before clearing: token vs code decides whether we drop the
+      // remembered pair and put the gate back on the code form.
+      const usedCode = !!S.pendingCode;
       if (err && err.code === -32029) {
         S.pendingCode = null;
         reconnector.stop();        // retrying would only burn the rate limit
-        setStatus(false, '尝试过多,稍后再试');
-        log('sys', '(auth-rate)', JSON.stringify(err));
+        rejectAuth({ usedCode, rateLimited: true, detail: err });
         ws.close();
         return;
       }
       if (err || !r || r.ok === false) {
         S.pendingCode = null;
         reconnector.stop();        // a rejected credential stays rejected
-        setStatus(false, '认证失败');
-        log('sys', '(auth-fail)', err ? JSON.stringify(err) : JSON.stringify(r));
+        rejectAuth({ usedCode, rateLimited: false, detail: err || r });
         ws.close();
         return;
       }
+      gateErrorMsg = null;
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
@@ -649,7 +659,8 @@ function openGatewaySocket(){
     // the reconnect can put it back rather than landing on an empty page.
     if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
     unmountPanes();
-    if (reconnector.isStopped) setStatus(false, '离线');
+    // Do not overwrite a gate-visible auth error with a generic "offline".
+    if (reconnector.isStopped && !gateErrorMsg) setStatus(false, '离线');
     reconnector.closed();
   };
   ws.onerror = () => { if (reconnector.isStopped) setStatus(false, '错误'); };
@@ -713,36 +724,19 @@ async function inflateRaw(bytes){
 // Inflation is async, and a terminal that applies two chunks out of order is
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
 // through one promise chain, so decode can overlap but application cannot.
-const vtWriteChains = new Map();
 // Under decode backlog, drop intermediate vt.data rather than growing forever.
 // Snapshots always enqueue (they reset the terminal).
 const VT_APPLY_MAX = 8;
-const vtApplyDepth = new Map();
-
-function enqueueVTApply(key, type, work){
-  const depth = vtApplyDepth.get(key) || 0;
-  if (type === 'vt.data' && depth >= VT_APPLY_MAX) {
-    log('sys', '(vt drop)', key);
-    return;
-  }
-  vtApplyDepth.set(key, depth + 1);
-  const prior = vtWriteChains.get(key) || Promise.resolve();
-  const next = prior.then(async () => {
-    try {
-      await work();
-    } catch (e) {
-      log('sys', '(vt)', `frame dropped: ${e && e.message}`);
-    } finally {
-      vtApplyDepth.set(key, Math.max(0, (vtApplyDepth.get(key) || 1) - 1));
-    }
-  });
-  vtWriteChains.set(key, next);
-}
-
+const vtApply = SeahelmVTApply.createApplyQueue({
+  maxData: VT_APPLY_MAX,
+  onDrop: (key) => log('sys', '(vt drop)', key),
+  onError: (_key, e) => log('sys', '(vt)', `frame dropped: ${e && e.message}`),
+});
+function enqueueVTApply(key, type, work){ return vtApply.enqueue(key, type, work); }
 /// A pane that goes away takes its chain with it — the map is keyed by pane and
 /// nothing else ever removed an entry, so worktree churn grew it for the life of
 /// the page.
-function releaseVTChain(key){ vtWriteChains.delete(key); }
+function releaseVTChain(key){ vtApply.release(key); }
 
 function onGatewayBinaryFrame(buf){
   const f = parseVTFrame(buf);
@@ -751,7 +745,7 @@ function onGatewayBinaryFrame(buf){
 
   enqueueVTApply(f.key, f.type, async () => {
     const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
-    handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
+    await handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
   });
 }
 
@@ -790,7 +784,7 @@ function onGatewayNotify(method, params){
     const key = params.pane_session_key || params.pane_id;
     const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
     enqueueVTApply(key, type, async () => {
-      handleVT(key, {
+      await handleVT(key, {
         type, b64: params.b64, cols: params.cols, rows: params.rows,
       });
     });
@@ -843,6 +837,9 @@ function applySessionSnapshot(result){
 const CREDS_KEY = 'seahelm_creds';
 try { localStorage.removeItem('seahelm_pair'); } catch (e) {}   // drop the old plaintext
 
+// Sticky message for the gate card. The header status sits under the fullscreen
+// gate, so auth failures have to live here or the user sees "Connect" do nothing.
+let gateErrorMsg = null;
 
 /** Restore without the root secret: enough to authenticate, not to re-derive. */
 function restoreCreds(){
@@ -855,11 +852,36 @@ function restoreCreds(){
 }
 function clearPair(){
   S.authPass = null; S.pendingCode = null;
+  gateErrorMsg = null;
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem('seahelm_pair');   // pre-migration installs
   log('sys', '(unpaired)', '回到明文/手填模式');
   renderGate();
 }
+
+/** Auth rejected: drop a dead token and put the code form back on screen. */
+function rejectAuth({ usedCode, rateLimited, detail }){
+  if (rateLimited) {
+    gateErrorMsg = '尝试过多，稍后再试';
+    setStatus(false, '尝试过多,稍后再试');
+    log('sys', '(auth-rate)', JSON.stringify(detail));
+  } else if (usedCode) {
+    gateErrorMsg = '配对码错误或已过期';
+    setStatus(false, '认证失败');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  } else {
+    // Remembered token no longer works (revoke-all, new root secret, …).
+    // Keeping it would leave the Connect button looping on the same failure
+    // with no visible error — the gate covers the header status.
+    S.authPass = null;
+    try { localStorage.removeItem(CREDS_KEY); } catch (e) {}
+    gateErrorMsg = '配对已失效，请重新输入配对码';
+    setStatus(false, '认证失败');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  }
+  renderGate();
+}
+
 // Reflect pairing state in the header: chip when paired, 配对 button when not.
 /**
  * Connection gate. Three states: enter code, press connect, or get out of the way.
@@ -881,8 +903,10 @@ function renderGate(){
         <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
         <button class="gate-primary" id="gateConnect">连接</button>
         <button class="gate-link" id="gateUnpair">解除配对</button>
+        <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
       </div>`;
-    $('gateConnect').onclick = () => { connect(); renderGate(); };
+    if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
+    $('gateConnect').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     $('gateUnpair').onclick = () => { clearPair(); };
     return;
   }
@@ -894,14 +918,16 @@ function renderGate(){
       <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="one-time-code"
              maxlength="9" placeholder="1234 5678" />
       <button class="gate-primary" id="gatePair">配对并连接</button>
-      <div class="gate-error" id="gateError" hidden></div>
+      <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
     </div>`;
   const input = $('gateCode'), err = $('gateError');
-  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  if (gateErrorMsg) { err.textContent = gateErrorMsg; err.hidden = false; }
+  const fail = (m) => { gateErrorMsg = m; err.textContent = m; err.hidden = false; };
 
   const go = () => {
     const digits = String(input.value || '').replace(/\D/g, '');
     if (digits.length !== 8) return fail('请输入 8 位配对码');
+    gateErrorMsg = null;
     err.hidden = true;
     S.pendingCode = digits;
     connect();
@@ -966,8 +992,8 @@ function renderSuggestCard(pid, e){
   return box;
 }
 function renderSuggestions(){
-  // Docked to the bottom of the page, not to a column: a suggestion is the one
-  // thing that must be reachable no matter which pane you are looking at.
+  // Docked at the upper centre of the page (like the Mac island), not to a
+  // column: a suggestion must be reachable no matter which pane you are looking at.
   const host = $('suggestDock'); host.innerHTML='';
   for (const [pid,e] of S.events){
     if (!e) continue;
@@ -1577,6 +1603,7 @@ function mountSinglePane(key){
   for (const [k, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: k });
     if (entry.keys) entry.keys.cancel();
+    if (entry.touch) entry.touch();
     releaseVTChain(k);
     try { entry.term.dispose(); } catch (e) {}
   }
@@ -1617,6 +1644,7 @@ function unmountPanes(){
   for (const [key, entry] of S.vt.panes){
     if (isLinked()) sendCommand('pane.vt_close', { pane_session_key: key });
     if (entry.keys) entry.keys.cancel();
+    if (entry.touch) entry.touch();
     releaseVTChain(key);
     try { entry.term.dispose(); } catch (e) {}
   }
@@ -1681,7 +1709,14 @@ function buildLayoutLeaf(node){
   // pane can own its own outbound path — no routing table, no focus bookkeeping.
   t.onData((data) => entry.keys.push(data));
   t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
+  // xterm/ghostty-web scroll on wheel. The canvas swallows touch, so a
+  // swipe has to be translated — vertical only; a tap or a horizontal
+  // drag is left alone (focus, selection, TUI).
+  entry.touch = SeahelmTouchScroll.attach(host, {
+    target: () => host.querySelector('.xterm-viewport') || t.element || host,
+  });
   el.addEventListener('mousedown', () => focusPane(key));
+  el.addEventListener('touchstart', () => focusPane(key), { passive: true });
 
   // xterm paints its selection onto the canvas, so the browser has no DOM range
   // covering it. A native copy therefore falls back to whatever the browser does
@@ -1737,16 +1772,23 @@ function attachWebglRenderer(term){
       try { addon.dispose(); } catch (e) {}
     });
     term.loadAddon(addon);
+    // Renderer swap rebuilds the screen and commonly blurs the helper
+    // textarea; the pane highlight does not move, so give the keyboard back.
+    restoreTermFocus();
   }).catch((e) => {
     log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
   });
 }
 
+function restoreTermFocus(){
+  const entry = S.vt.focus && S.vt.panes.get(S.vt.focus);
+  if (entry) { try { entry.term.focus(); } catch (e) {} }
+}
+
 function focusPane(key){
   S.vt.focus = key;
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
-  const entry = key && S.vt.panes.get(key);
-  if (entry) { try { entry.term.focus(); } catch (e) {} }
+  restoreTermFocus();
   updateToBottom();
   renderTermKeys();
 }
@@ -1831,7 +1873,7 @@ function sendKeysPayload(paneKey, utf8Bytes){
 }
 
 /** Shared VT path for MQTT topic payloads and Gateway notify frames. */
-function handleVT(paneKey, v){
+async function handleVT(paneKey, v){
   if (!v) return;
   const entry = S.vt.panes.get(paneKey);
   if (!entry) return;                       // a pane we are not mirroring right now
@@ -1857,12 +1899,12 @@ function handleVT(paneKey, v){
       }
     }
     t.reset();
-    if (bytes.length) t.write(bytes, () => fitPaneFont(entry));
-    else fitPaneFont(entry);
+    await SeahelmVTApply.writeTerminal(t, bytes);
+    fitPaneFont(entry);
     if (S.vt.focus === paneKey) updateToBottom();
     return;
   }
-  t.write(bytes);
+  await SeahelmVTApply.writeTerminal(t, bytes);
 }
 
 /** The "back to live" affordance tracks whichever pane has focus. */
@@ -1970,6 +2012,9 @@ applyLogVisibility();
 $('logVtBtn').onclick = () => setShowVTFrames(!showVTFrames);
 setShowVTFrames(showVTFrames);
 $('clearLog').onclick=()=>$('log').innerHTML='';
+// Buttons steal the caret in a browser; the pane highlight does not move.
+// Keep xterm's helper textarea focused unless the user is in a real field.
+SeahelmTermFocus.install(document, restoreTermFocus);
 </script>
 </body>
 </html>

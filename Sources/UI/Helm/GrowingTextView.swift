@@ -62,19 +62,9 @@ final class GrowingTextView: NSTextView {
             return url
         }
 
-        guard let image = NSImage(pasteboard: pb) else { return nil }
-        guard let rep = image.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) }),
-              let pngData = rep.representation(using: .png, properties: [:]) else { return nil }
-
-        let tmpDir = FileManager.default.temporaryDirectory
+        guard let image = NSImage(pasteboard: pb), let tiff = image.tiffRepresentation else { return nil }
         let fileName = "seahelm-paste-\(Int(Date().timeIntervalSince1970)).png"
-        let fileURL = tmpDir.appendingPathComponent(fileName)
-        do {
-            try pngData.write(to: fileURL)
-            return fileURL
-        } catch {
-            return nil
-        }
+        return TerminalDrop.writePNG(imageData: tiff, to: FileManager.default.temporaryDirectory, name: fileName)
     }
 
     override func becomeFirstResponder() -> Bool {

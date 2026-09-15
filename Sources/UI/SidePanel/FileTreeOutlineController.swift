@@ -165,6 +165,11 @@ final class FileTreeOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         if let initialRootNodes {
             self.rootPath = rootPath
             self.rootNodes = initialRootNodes
+            // `NSOutlineView` can cache its initial empty row model before it is
+            // attached to the scroll view. Unlike `setRoot`, this async handoff
+            // used to skip the reload, leaving Files blank until another action
+            // (such as toggling hidden files) happened to refresh it.
+            ov.reloadData()
             rebuildPathIndex()
             startWatching(rootPath)
         } else {

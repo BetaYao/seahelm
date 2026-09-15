@@ -14,14 +14,10 @@ final class CodexHooksSetupTests: XCTestCase {
         XCTAssertTrue(contents.contains("codex_hooks = true"))
     }
 
-    /// Regression: the Codex wrapper ran the bridge as `>/dev/null 2>&1`, throwing
-    /// away its stdout — which is exactly where a Stop-hook block decision lives.
-    /// Codex's wire takes the same `{"decision":"block","reason":…}` Claude does,
-    /// so suggestions were one redirect away from working all along.
-    ///
-    /// stderr must stay discarded AND must not be folded into stdout: `2>&1` would
-    /// splice diagnostics into the JSON Codex parses.
-    func testStopHookCommandKeepsStdoutSoBlockDecisionsReachCodex() throws {
+    /// Stop is a passive reporting hook now. The wrapper must discard both the
+    /// bridge's stdout and stderr so no control-socket response can be mistaken
+    /// for a Codex hook decision.
+    func testHookCommandDiscardsBridgeOutput() throws {
         let dir = try makeTempDir()
         let url = dir.appendingPathComponent("hooks.json")
         XCTAssertTrue(CodexHooksSetup.ensureHooksJSONForTests(at: url))
@@ -33,17 +29,15 @@ final class CodexHooksSetupTests: XCTestCase {
         let command = (stop?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
         let cmd = try XCTUnwrap(command)
 
-        // Match the fd-1 redirect specifically: bare `>` and `1>`. A plain
-        // `contains(">/dev/null")` also matches the `2>/dev/null` we *want*.
-        XCTAssertFalse(cmd.contains(" >/dev/null") || cmd.contains("1>/dev/null"),
-                       "stdout is discarded, so no block decision can reach Codex: \(cmd)")
-        XCTAssertFalse(cmd.contains("2>&1"), "stderr merged into stdout would corrupt the JSON Codex parses: \(cmd)")
-        XCTAssertTrue(cmd.contains("2>/dev/null"), "stderr should still be discarded: \(cmd)")
+        // Both file descriptors are discarded because the bridge has no hook
+        // decision to return.
+        XCTAssertTrue(cmd.contains(">/dev/null 2>&1"),
+                      "bridge output must not reach Codex: \(cmd)")
         XCTAssertTrue(cmd.contains(SeahelmHookInstaller.scriptPath()), "must invoke the bridge by absolute path: \(cmd)")
     }
 
-    /// A stale seahelm-owned command must be rewritten, or every existing install
-    /// keeps the stdout-discarding wrapper forever and never sees the fix.
+    /// A stale seahelm-owned command must be rewritten so existing installs also
+    /// become passive reporting hooks.
     func testStaleSeahelmOwnedCommandIsUpgraded() throws {
         let dir = try makeTempDir()
         let url = dir.appendingPathComponent("hooks.json")
@@ -59,7 +53,7 @@ final class CodexHooksSetupTests: XCTestCase {
         let stop = hooks?["Stop"] as? [[String: Any]]
         let command = (stop?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
         XCTAssertNotEqual(command, stale, "stale seahelm hook was left in place")
-        XCTAssertFalse(try XCTUnwrap(command).contains(">/dev/null 2>&1"))
+        XCTAssertTrue(try XCTUnwrap(command).contains(">/dev/null 2>&1"))
     }
 
     func testEnsureCodexHooksFeatureEnabledReplacesFalse() throws {

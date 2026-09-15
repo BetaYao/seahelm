@@ -45,6 +45,9 @@ Wire 格式:
 | `mqtt.min.js` | vendored MQTT.js — **仅 devbroker / 遗留 MQTT 调试** |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
+| `touch-scroll.js` | 触控竖滑 → 终端 wheel，手机上回看历史 |
+| `vt-apply.js` | VT 帧串行写入；等 `term.write` 完成再应用下一帧 |
+| `term-focus.js` | chrome 点击不抢终端 caret；真实输入框除外 |
 | `devbroker/` | 本地 MQTT 调试台(**非生产路径**) |
 
 ## 本地 MQTT 调试(dev-only)
@@ -86,7 +89,7 @@ MAC=live npm run mock:zmx # 终端 B: ZMX_PANES=1,真实 zmx session → MQTT pa
 | ≤ 1100px | 日志栏自动隐藏 |
 | ≤ 760px | 单栏,First Mate 抽屉(☰) |
 
-终端按宽度贴合;字号下限 9px;右下角「↓ 最新」在回看时出现。
+终端按宽度贴合;字号下限 9px;手机单指上下滑回看历史（横滑不拦截）;右下角「↓ 最新」在回看时出现。
 
 ### VT 订阅模式
 
@@ -131,6 +134,8 @@ cd clients/seahelm-web/devbroker
 npm run broker && npm run mock
 node protocol-test.js   # 22 项 §15
 node vt-test.js         # VT 端到端
+node vt-apply-test.js   # write 串行 / 背压丢帧
+node term-focus-test.js # chrome 不抢终端 caret
 ```
 
 ## 相关文档

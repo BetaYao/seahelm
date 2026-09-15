@@ -70,9 +70,9 @@ protocol ControlDataSource: AnyObject {
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
-    /// into the shared event sink. Returns an optional block-body string (used by
-    /// blocking Stop hooks); nil for fire-and-forget events like suggest.
-    func ingestHook(json: [String: Any]) -> String?
+    /// into the shared event sink. Hook delivery is fire-and-forget; Stop hooks
+    /// are observation-only and never return a continuation/block decision.
+    func ingestHook(json: [String: Any])
 
     // MARK: Phase 2 — write channel + wait (default no-ops so read-only
     // conformers/fakes keep compiling).
@@ -232,13 +232,9 @@ final class ControlRouter {
 
         case "hook":
             // Raw webhook-shaped payload (parity with the HTTP webhook body).
-            // The optional block body (a Stop-hook `{"decision":"block",...}` JSON)
-            // is returned base64-encoded so the shell hook script can extract it
-            // with a trivial, quote-safe regex and `base64 -d` it to stdout.
-            let block = dataSource?.ingestHook(json: params)
-            if let block, let b64 = block.data(using: .utf8)?.base64EncodedString() {
-                return .ok(["block_b64": b64])
-            }
+            // Hook delivery is deliberately fire-and-forget: a Stop hook reports
+            // the final response but cannot block the agent into another turn.
+            dataSource?.ingestHook(json: params)
             return .ok([:])
 
         case "pane.send_text", "pane.run":

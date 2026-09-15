@@ -782,9 +782,21 @@ final class DashboardOverviewView: NSView {
     /// Also used to build grouping items for remote clients (TabCoordinator).
     static func creationDate(_ path: String) -> Date {
         if let cached = creationDateCache[path] { return cached }
-        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        // A stale removable mount makes `attributesOfItem` block forever; the
+        // dashboard rebuilds on the main thread, so an unbounded `stat()` here
+        // beachballs the whole app after an external disk drops. Skip the
+        // filesystem entirely for a fenced volume, and otherwise bound the wait.
+        if VolumeFence.isFenced(path) {
+            creationDateCache[path] = .distantPast
+            return .distantPast
+        }
+        let attrs = FileSystemProbe.attributes(path, timeout: 0.5)
         let date = attrs?[.creationDate] as? Date ?? .distantPast
-        creationDateCache[path] = date
+        // Only cache a definitive answer. A timeout leaves the entry out so a
+        // remounted volume can still learn its real creation date later.
+        if attrs != nil {
+            creationDateCache[path] = date
+        }
         return date
     }
 

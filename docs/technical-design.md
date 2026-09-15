@@ -149,7 +149,7 @@
 - `WorktreeStatusAggregator`（主线程）：把多个 pane 的 `PaneStatus` 聚合成一个 `WorktreeStatus`，维护 terminal↔worktree 映射与 `lastActivityAt`，变更回调 `WorktreeStatusDelegate`。
 
 ### 6.3 Webhook / Hooks 接收链
-`WebhookServer`（`Network.framework`，只监听 loopback，`POST /webhook`）→ `WebhookEvent.parse`（区分通用 payload 与原生 hook payload；15 种事件类型）→ `WebhookStatusProvider`（按 `sessionId` 维护会话态，把 cwd 映射到已知 worktree，解析 TaskCreate/Update 成任务列表，触发新 worktree 发现）。`StopHookResponder` 为 Claude Stop hook 返回 `{"decision":"block"}` 反向触发 agent 调用 `seahelm-suggest` 生成候选下一步。
+`seahelm-hook`（Unix control socket，接收 command-hook JSON）→ `WebhookEvent.parse`（区分通用 payload 与原生 hook payload；15 种事件类型）→ `WebhookStatusProvider`（按 `sessionId` 维护会话态，把 cwd 映射到已知 worktree，解析 TaskCreate/Update 成任务列表，触发新 worktree 发现）。Stop 事件只上报 agent 的最终回复；`StopHookResponder` 从其中解析行内 `::seahelm-suggest::` 标记，生成候选下一步，不再返回 block 决策。
 
 ### 6.4 状态合成中枢：ShipLog.ingest
 所有来源最终汇入 `ShipLog.ingest(NormalizedEvent)`（`ShipLog.swift:167`，唯一写入口）：`.screenObserved` 写 `scanStatus`，hook 事件写 `hookStatus`，最终 `status = 取高优先级([scanStatus, hookStatus])`。产出 `IngestOutcome` 到主线程分发。`SailorReducer` 是被调用的纯函数（旧快照 + 输入 → 新快照 + 是否变更，无 IO 可单测）。

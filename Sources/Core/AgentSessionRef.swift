@@ -166,7 +166,7 @@ struct AgentSessionRef: Codable, Equatable {
         case ("opencode", .id): return ["opencode", "--session", value]
         case ("qodercli", .id): return ["qodercli", "--resume", value]
         case ("kilo", .id): return ["kilo", "--session", value]
-        case ("cursor", .id): return ["cursor-agent", "--resume", value]
+        case ("cursor", .id): return ["agent", "--resume", value]
         default: return nil
         }
     }

@@ -41,7 +41,7 @@ class AgentRegistry {
     /// How long a hook-asserted `.idle` outranks a scan `.running`. Deliberately
     /// short: past it the screen takes authority back, so a stale hook `.idle`
     /// can never pin a visibly-working pane at idle — and an agent that resumes
-    /// (e.g. to answer a blocking Stop) is shown as running again within seconds.
+    /// (e.g. to answer a Stop) is shown as running again within seconds.
     /// `var` so tests can drive the window deterministically.
     static var hookIdleGrace: TimeInterval = 3.0
 

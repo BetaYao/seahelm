@@ -9,7 +9,7 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
 
         func snapshotPanes() -> [PaneSnapshot] { panes }
         func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-        func ingestHook(json: [String: Any]) -> String? { nil }
+        func ingestHook(json: [String: Any]) {}
         func sendKeys(paneId: String, keys: [String]) -> Bool {
             guard knownPanes.contains(paneId) else { return false }
             sentKeys.append((paneId, keys))

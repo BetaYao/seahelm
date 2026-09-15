@@ -45,18 +45,19 @@ indirect enum SplitNode {
     }
 
     /// Derive next pane index from existing session names.
+    ///
+    /// Indexed names end in `--pane-N`. When the base was truncated to fit the
+    /// backend limit the full `baseName + "--pane-"` prefix no longer matches, so
+    /// scan for the marker from the end instead of requiring an exact head.
     func nextPaneIndex(baseName: String) -> Int {
-        let leaves = allLeaves
+        let marker = "--pane-"
         var maxIndex = 0
-        for leaf in leaves {
+        for leaf in allLeaves {
             let name = leaf.paneSessionKey
-            if name == baseName {
-                continue
-            }
-            if name.hasPrefix(baseName + "-"),
-               let suffix = Int(name.dropFirst(baseName.count + 1)) {
-                maxIndex = max(maxIndex, suffix)
-            }
+            if name == baseName { continue }
+            guard let range = name.range(of: marker, options: .backwards),
+                  let suffix = Int(name[range.upperBound...]) else { continue }
+            maxIndex = max(maxIndex, suffix)
         }
         return maxIndex + 1
     }
@@ -205,6 +206,24 @@ indirect enum CodableSplitNode: Codable {
 }
 
 extension CodableSplitNode {
+    var paneSessionKeys: [String] {
+        switch self {
+        case .leaf(let key, _): return [key]
+        case .split(_, _, let first, let second): return first.paneSessionKeys + second.paneSessionKeys
+        }
+    }
+
+    func replacingPaneSessionKeys(_ replacements: [String: String]) -> CodableSplitNode {
+        switch self {
+        case .leaf(let key, let title):
+            return .leaf(paneSessionKey: replacements[key] ?? key, title: title)
+        case .split(let axis, let ratio, let first, let second):
+            return .split(axis: axis, ratio: ratio,
+                          first: first.replacingPaneSessionKeys(replacements),
+                          second: second.replacingPaneSessionKeys(replacements))
+        }
+    }
+
     /// Wire shape for remote clients mirroring this window's layout.
     ///
     /// Leaves carry `pane_session_key` — the same key `pane.vt_open` takes — so a
