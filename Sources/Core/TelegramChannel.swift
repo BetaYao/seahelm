@@ -95,8 +95,13 @@ final class TelegramChannel: ExternalChannel {
         self.api = api
         lock.unlock()
 
+        // A bare Thread has no autorelease pool. Foundation's Process/Pipe
+        // path autoreleases heavily; without a pool around each poll the
+        // handles pile up for the life of the thread (see TelegramBotAPI.call).
         let thread = Thread { [weak self] in
-            self?.run(api: api, config: cfg, generation: gen)
+            autoreleasepool {
+                self?.run(api: api, config: cfg, generation: gen)
+            }
         }
         thread.name = "com.seahelm.telegram.poll"
         thread.qualityOfService = .utility
@@ -337,21 +342,27 @@ final class TelegramChannel: ExternalChannel {
         updateState(.connected)
 
         while true {
-            guard let updates = retrying(generation: gen, "poll", {
-                try api.getUpdates(offset: offset, timeout: TelegramBotAPI.longPollSeconds)
-            }), isCurrent(gen) else { return }
+            // One pool per long-poll so a day of getUpdates cannot retain a
+            // day's worth of autoreleased Pipe/FileHandle/JSON debris.
+            let keepGoing: Bool = autoreleasepool {
+                guard let updates = retrying(generation: gen, "poll", {
+                    try api.getUpdates(offset: offset, timeout: TelegramBotAPI.longPollSeconds)
+                }), isCurrent(gen) else { return false }
 
-            lock.lock()
-            let live = config
-            lock.unlock()
-            for update in updates {
-                offset = max(offset ?? 0, update.updateId + 1)
-                if let message = update.payload {
-                    handle(message, config: live)
-                } else if let callback = update.callbackQuery {
-                    handle(callback: callback, config: live)
+                lock.lock()
+                let live = config
+                lock.unlock()
+                for update in updates {
+                    offset = max(offset ?? 0, update.updateId + 1)
+                    if let message = update.payload {
+                        handle(message, config: live)
+                    } else if let callback = update.callbackQuery {
+                        handle(callback: callback, config: live)
+                    }
                 }
+                return true
             }
+            if !keepGoing { return }
         }
     }
 

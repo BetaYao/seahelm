@@ -44,13 +44,16 @@ struct VTProcessSpawnRequest: Equatable {
 final class LiveVTAttachedProcess: VTAttachedProcess {
     private let process: Process
     let stdin: FileHandle?
+    /// Held so `terminate` can clear the handler — leaving it set keeps the
+    /// FileHandle registered with the run loop after the process is gone.
+    private let stdoutRead: FileHandle
     private var stdoutHandler: ((Data) -> Void)?
 
     init(process: Process, stdout: Pipe, stdinPipe: Pipe) {
         self.process = process
         self.stdin = stdinPipe.fileHandleForWriting
-        let readHandle = stdout.fileHandleForReading
-        readHandle.readabilityHandler = { [weak self] handle in
+        self.stdoutRead = stdout.fileHandleForReading
+        stdoutRead.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.stdoutHandler?(data)
@@ -62,13 +65,23 @@ final class LiveVTAttachedProcess: VTAttachedProcess {
     }
 
     func setTerminationHandler(_ handler: @escaping () -> Void) {
-        process.terminationHandler = { _ in handler() }
+        process.terminationHandler = { [weak self] _ in
+            self?.teardownPipes()
+            handler()
+        }
     }
 
     func terminate() {
+        teardownPipes()
         if process.isRunning {
             process.terminate()
         }
+    }
+
+    private func teardownPipes() {
+        stdoutRead.readabilityHandler = nil
+        try? stdoutRead.close()
+        try? stdin?.close()
     }
 }
 

@@ -376,6 +376,20 @@ final class TelegramBotAPI {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        // Every end, not just the ones we read. `readDataToEndOfFile` does not
+        // close, and the poll thread that owns these calls has no autorelease
+        // pool of its own — leaving a handle open leaked two descriptors per
+        // call (~2800 pipes after a workday of long-polls). Same rule as
+        // `ProcessRunner.drain`.
+        let allHandles = [
+            stdin.fileHandleForReading, stdin.fileHandleForWriting,
+            stdout.fileHandleForReading, stdout.fileHandleForWriting,
+            stderr.fileHandleForReading, stderr.fileHandleForWriting,
+        ]
+        func closePipes() {
+            for handle in allHandles { try? handle.close() }
+        }
+
         let id = ObjectIdentifier(process)
         lock.lock()
         processes[id] = process
@@ -384,6 +398,7 @@ final class TelegramBotAPI {
             lock.lock()
             processes.removeValue(forKey: id)
             lock.unlock()
+            closePipes()
         }
 
         do {
