@@ -89,17 +89,6 @@ class TabCoordinator {
     var statusPublisher: StatusPublisher!
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
-    let pendingTransfers = PendingTransferTracker()
-    /// When each pane last changed worktree, keyed by station id. A pane that just
-    /// moved is settling in, and an agent's cwd bounces while it works: Claude runs
-    /// `cd <worktree> && …` for one tool call and is back at the repo root for the
-    /// next, so following every bounce walked the pane in and out — and each
-    /// departure left a replacement pane behind on the source. Auto-follow holds off
-    /// for `autoRehomeCooldown` after any move, `pane move` included, so a manual
-    /// correction sticks instead of being undone by the agent's next event.
-    private var lastRehomedAt: [String: Date] = [:]
-    private let autoRehomeCooldown: TimeInterval = 600
-
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
     let watchFeed = WatchFeed()
@@ -703,18 +692,13 @@ class TabCoordinator {
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
-                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath, paneId in
-                        guard let self else { return }
-                        // The pane whose agent is already working there follows it in
-                        // once discovery integrates the worktree, instead of the
-                        // worktree standing up an empty pane of its own beside it.
-                        if let paneId {
-                            self.pendingTransfers.record(worktreePath: worktreePath, paneId: paneId)
-                        }
-                        self.handleNewWorktreeFromHook(worktreePath)
+                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath, _ in
+                        // Discover the card; do not move the pane — the chrome
+                        // title shows when its agent is away from the filed worktree.
+                        self?.handleNewWorktreeFromHook(worktreePath)
                     }
-                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath in
-                        self?.followAgentToWorktree(paneId: paneId, worktreePath: worktreePath)
+                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath, cwd in
+                        self?.noteAgentLocation(paneId: paneId, worktreePath: worktreePath, cwd: cwd)
                     }
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
@@ -968,20 +952,13 @@ class TabCoordinator {
             let proj = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
                 ?? URL(fileURLWithPath: repoRoot).lastPathComponent
 
-            // A pane whose agent is already working in this worktree follows it in
-            // rather than letting the worktree stand up an empty pane beside it.
-            let claimed = pendingTransfers.consume(newWorktreePath: info.path).map {
-                performPaneRehome(transfer: $0, newInfo: info, repoRoot: repoRoot, project: proj)
-            } ?? false
+            // New worktrees always get their own tree. Panes no longer follow
+            // their agent here — see `noteAgentLocation` / chrome away title.
+            let tree = terminalCoordinator.resolveTree(for: info)
+            allWorktrees.append((info: info, tree: tree))
+            worktreeRepoCache[info.path] = repoRoot
 
-            if !claimed {
-                // Nobody moved here — create a fresh tree
-                let tree = terminalCoordinator.resolveTree(for: info)
-                allWorktrees.append((info: info, tree: tree))
-                worktreeRepoCache[info.path] = repoRoot
-
-                registerPanes(of: info, project: proj, startedAt: Date())
-            }
+            registerPanes(of: info, project: proj, startedAt: Date())
         }
 
         // Record startedAt for new worktrees
@@ -1092,32 +1069,21 @@ class TabCoordinator {
             .contains { $0.hasPrefix(".") }
     }
 
-    /// Move the pane whose agent created `newInfo` into it, keeping the agent
-    /// running. Returns false when the pane can no longer be resolved, so the
-    /// caller falls back to standing up a fresh tree.
-    @discardableResult
-    private func performPaneRehome(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo,
-                                   repoRoot: String, project: String) -> Bool {
-        guard let station = StationRegistry.shared.station(forSessionName: transfer.paneId) else {
-            NSLog("[TabCoordinator] Rehome skipped — no live station for pane \(transfer.paneId)")
-            return false
+    /// Record where a pane's agent last reported itself. Does not move the pane;
+    /// refresh the chrome title so a mismatch can show as an "away" suffix.
+    private func noteAgentLocation(paneId: String, worktreePath: String?, cwd: String) {
+        guard let station = StationRegistry.shared.station(forSessionName: paneId) else { return }
+        let next = Station.HookLocation(worktreePath: worktreePath, cwd: cwd)
+        let prev = station.hookLocation
+        let changed = prev?.worktreePath != next.worktreePath || prev?.cwd != next.cwd
+        station.hookLocation = next
+        if changed {
+            delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         }
-        // Same-repo gate, as in `shouldAutoFollow` — the destination is not in
-        // `worktreeRepoCache` yet, so compare against the repo root the caller
-        // already resolved. Fails open when the pane's own repo is unknown: this
-        // path has an explicit creation signal behind it, not just a cwd.
-        if let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
-           let currentRepo = trackedRepoRoot(forWorktree: current),
-           currentRepo != WorktreeDiscovery.canonicalPath(repoRoot) {
-            NSLog("[TabCoordinator] Rehome skipped — pane \(transfer.paneId) lives in \(currentRepo), not \(repoRoot)")
-            return false
-        }
-        return rehomePane(stationId: station.id, into: newInfo, repoRoot: repoRoot, project: project)
     }
 
-    /// Move a live pane into an existing worktree, by station id. The manual
-    /// counterpart of the automatic rehome, behind `pane.move`: for agents whose
-    /// worktree creation we cannot observe, and for correcting a misattribution.
+    /// Move a live pane into an existing worktree, by station id. Behind
+    /// `pane.move`: for correcting attribution when an agent works elsewhere.
     /// False when the pane or the worktree is unknown.
     @discardableResult
     func movePane(stationId: String, toWorktreePath: String) -> Bool {
@@ -1132,65 +1098,6 @@ class TabCoordinator {
         let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
             ?? URL(fileURLWithPath: repoRoot).lastPathComponent
         return rehomePane(stationId: stationId, into: entry.info, repoRoot: repoRoot, project: project)
-    }
-
-    /// Move a pane to the worktree its agent is actually working in, whenever it
-    /// is not already filed there.
-    ///
-    /// The "worktree we do not track yet" trigger cannot carry this on its own: it
-    /// holds only until discovery catches up, and discovery sweeps every 5s. An
-    /// agent whose directory change is not itself a tool call — Codex's `/cd`
-    /// fires no hook — reports its new cwd well after that window shut, and would
-    /// go on working out of the pane it left. Comparing against the pane's live
-    /// attribution on every event has no window to miss, and it also brings a pane
-    /// back when its agent leaves a worktree for good — `shouldAutoFollow` is what
-    /// separates leaving for good from the `cd` an agent does mid-turn.
-    private func followAgentToWorktree(paneId: String, worktreePath: String) {
-        guard let station = StationRegistry.shared.station(forSessionName: paneId),
-              let current = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
-              WorktreeDiscovery.canonicalPath(current) != WorktreeDiscovery.canonicalPath(worktreePath)
-        else { return }
-        guard Self.shouldAutoFollow(currentRepo: trackedRepoRoot(forWorktree: current),
-                                    destinationRepo: trackedRepoRoot(forWorktree: worktreePath),
-                                    lastRehomedAt: lastRehomedAt[station.id],
-                                    now: Date(), cooldown: autoRehomeCooldown) else { return }
-        movePane(stationId: station.id, toWorktreePath: worktreePath)
-    }
-
-    /// Whether a pane may auto-follow its agent right now. Pure, because both rules
-    /// are policy rather than mechanism and each was learned from one failure.
-    ///
-    /// **Same repo.** A pane follows its agent between worktrees of the repo it is
-    /// working on; a cwd in an unrelated repo is a visit, not a move. It is also the
-    /// only thing separating the pane's own agent from an agent it merely spawned:
-    /// `SEAHELM_PANE_ID` (and the `ZMX_SESSION` the hook falls back to) is inherited
-    /// by every descendant process, so a test harness that stands up its own agent
-    /// in a generated app directory reports hook events under the pane's id with a
-    /// cwd of its own — which is how a pane working in one repo's worktree was
-    /// hauled into `~/.amuxd/teams/<id>/apps/<id>`. An unknown repo on either side
-    /// fails closed: without both we cannot tell a move from a visit.
-    ///
-    /// **Cooldown.** See `lastRehomedAt`.
-    static func shouldAutoFollow(currentRepo: String?, destinationRepo: String?,
-                                 lastRehomedAt: Date?, now: Date,
-                                 cooldown: TimeInterval) -> Bool {
-        guard let currentRepo, let destinationRepo, currentRepo == destinationRepo else { return false }
-        guard let lastRehomedAt else { return true }
-        return now.timeIntervalSince(lastRehomedAt) >= cooldown
-    }
-
-    /// Canonical repo root behind a tracked worktree path, or nil when the path is
-    /// not one we track. The cache is keyed by the spelling discovery produced, so
-    /// a miss falls back to comparing canonical forms rather than concluding the
-    /// worktree is unknown.
-    private func trackedRepoRoot(forWorktree path: String) -> String? {
-        if let hit = worktreeRepoCache[path] { return WorktreeDiscovery.canonicalPath(hit) }
-        let canon = WorktreeDiscovery.canonicalPath(path)
-        for (worktree, repo) in worktreeRepoCache
-        where WorktreeDiscovery.canonicalPath(worktree) == canon {
-            return WorktreeDiscovery.canonicalPath(repo)
-        }
-        return nil
     }
 
     /// Lift one pane out of its current worktree and into `destination`, keeping
@@ -1218,10 +1125,6 @@ class TabCoordinator {
             return false
         }
         let sourcePath = move.sourcePath
-        // Self-healing: entries past the cooldown can never gate anything again,
-        // so drop them rather than keep a row per pane for the life of the process.
-        lastRehomedAt = lastRehomedAt.filter { Date().timeIntervalSince($0.value) < autoRehomeCooldown }
-        lastRehomedAt[stationId] = Date()
         NSLog("[TabCoordinator] Rehomed pane \(stationId) from \(sourcePath) to \(destination.path)")
 
         // Re-attribute rather than unregister+register: the agent in this pane is

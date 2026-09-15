@@ -1586,7 +1586,15 @@ dashboard.stationManager = terminalCoordinator.stationManager
                                                       pwd: station.pwd)
             ?? (persisted?.isEmpty == false ? persisted : nil)
         guard let title else { return }
-        windowChrome?.updateTerminalTitle(repo: "", pane: title)
+        let loc = station.hookLocation
+        let away = PaneAwayIndicator.titleSuffix(
+            filedWorktree: path,
+            hookWorktree: loc?.worktreePath,
+            hookCwd: loc?.cwd,
+            hasHookLocation: loc != nil,
+            pwd: station.pwd
+        ) ?? ""
+        windowChrome?.updateTerminalTitle(repo: "", pane: title + away)
     }
 
     /// Drive the terminal chrome header: `Repo · pane title`.
@@ -1601,26 +1609,40 @@ dashboard.stationManager = terminalCoordinator.stationManager
             ?? tabCoordinator.repoName(forWorktree: path)
 
         let paneTitle: String
+        let focusedPane: PaneInfo?
         let worktreePanes = AgentRegistry.shared.panes(forWorktree: path)
         if let info, !worktreePanes.isEmpty {
             // Current (focused) pane, or the most-recently-active pane otherwise.
             let tree = terminalCoordinator.stationManager.tree(forPath: path)
-            let focusedPane = PaneTitleResolver.representativePane(
+            let representative = PaneTitleResolver.representativePane(
                 focusedStationId: PaneTitleResolver.focusedStationId(in: tree),
                 among: worktreePanes,
                 fallback: info
             )
-            paneTitle = PaneTitleResolver.title(for: focusedPane)
+            focusedPane = representative
+            paneTitle = PaneTitleResolver.title(for: representative)
         } else if let info {
+            focusedPane = info
             paneTitle = PaneTitleResolver.title(for: info)
         } else {
+            focusedPane = nil
             paneTitle = WorktreeTitleResolver.resolve(
                 worktreePath: path,
                 lastUserPrompt: "",
                 branch: ""
             )
         }
-        windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle)
+        let away = focusedPane.flatMap { pane -> String? in
+            let loc = pane.station?.hookLocation
+            return PaneAwayIndicator.titleSuffix(
+                filedWorktree: pane.worktreePath,
+                hookWorktree: loc?.worktreePath,
+                hookCwd: loc?.cwd,
+                hasHookLocation: loc != nil,
+                pwd: pane.station?.pwd ?? ""
+            )
+        } ?? ""
+        windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle + away)
         windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, pane: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }

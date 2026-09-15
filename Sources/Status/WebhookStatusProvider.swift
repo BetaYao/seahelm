@@ -10,20 +10,16 @@ class WebhookStatusProvider {
     }
 
     /// Called (on main) when an agent's cwd names a worktree we do not track yet.
-    /// `paneId` is the emitting pane's session name (SEAHELM_PANE_ID), so the owner
-    /// can move that exact pane into the worktree once it is integrated instead of
-    /// standing up an empty one beside it — nil when the hook carried none.
+    /// `paneId` is the emitting pane's session name (SEAHELM_PANE_ID). Discovery
+    /// still runs; the pane is no longer moved automatically — the chrome title
+    /// shows when the agent is away from its filed worktree.
     var onNewWorktreeDetected: ((_ worktreePath: String, _ paneId: String?) -> Void)?
 
-    /// Called (on main) with the worktree a pane's agent is *currently* working
-    /// in, on every hook event that names a pane.
-    ///
-    /// Not edge-triggered here on purpose. The owner compares against the pane's
-    /// live attribution, which is the authoritative copy, so a move that could not
-    /// be completed yet — the destination not integrated, the station not
-    /// resolvable — is simply retried on the agent's next event instead of being
-    /// swallowed by a cache that already recorded the edge.
-    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String) -> Void)?
+    /// Called (on main) with where a pane's agent is *currently* working, on
+    /// every hook event that names a pane. `worktreePath` is the matched known
+    /// worktree, or nil when the cwd matched nothing. `cwd` is the raw path
+    /// from the hook. Used for the chrome "away" title — not for auto-rehome.
+    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String?, _ cwd: String) -> Void)?
 
     /// Called (on main) when an agent hook event resolves a persistable resume
     /// ref for a known worktree. `paneId` is the emitting pane's session name
@@ -75,13 +71,24 @@ class WebhookStatusProvider {
             // invisible — it sits *inside* a known worktree while being a worktree
             // root itself, which is exactly where Claude Code's own EnterWorktree
             // puts one (`<repo>/.claude/worktrees/<name>`). Ask the owner to
-            // discover it; the pane follows once it is integrated.
+            // discover it so the new card appears; the pane stays where it is.
             let preMatch = matchWorktree(canonCwd)
             if preMatch == nil || (preMatch != canonCwd && isWorktreeRoot(canonCwd)) {
                 requestDiscovery(of: canonCwd, rawCwd: event.cwd, paneId: event.paneId)
             }
 
-            guard let worktreePath = matchWorktree(canonCwd) else {
+            let matchedWorktree = matchWorktree(canonCwd)
+
+            // Where this pane's agent is now — including "nowhere we track".
+            // Subagents are excluded: their `agent_id` marks a nested context.
+            if let paneId = event.paneId, event.data?["agent_id"] == nil {
+                let cwd = event.cwd
+                DispatchQueue.main.async { [weak self] in
+                    self?.onPaneWorktreeResolved?(paneId, matchedWorktree, cwd)
+                }
+            }
+
+            guard let worktreePath = matchedWorktree else {
                 NSLog("[WebhookStatusProvider] No worktree match for cwd: \(event.cwd)")
                 return
             }
@@ -119,22 +126,6 @@ class WebhookStatusProvider {
                 let paneId = event.paneId
                 DispatchQueue.main.async { [weak self] in
                     self?.onAgentSessionResolved?(worktreePath, paneId, ref)
-                }
-            }
-
-            // Where this pane's agent is now. Every hook payload carries `cwd`, so
-            // this lands on the agent's next action after it moves — which is what
-            // the "worktree we do not track yet" check above cannot cover on its
-            // own: discovery sweeps every 5s, and an agent whose directory change
-            // is not itself a tool call (Codex's `/cd` fires no hook) reports its
-            // new cwd long after the worktree stopped being new.
-            //
-            // Subagents are excluded for the same reason they are above: their
-            // `agent_id` marks a nested context, and one running elsewhere must not
-            // drag the pane its parent is sitting in.
-            if let paneId = event.paneId, event.data?["agent_id"] == nil {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onPaneWorktreeResolved?(paneId, worktreePath)
                 }
             }
 
