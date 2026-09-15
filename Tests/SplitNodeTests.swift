@@ -74,7 +74,7 @@ final class SplitNodeTests: XCTestCase {
 
     func testNextPaneIndex_WithExistingPanes() {
         let left = SplitNode.leaf(id: "a", stationId: "s1", paneSessionKey: "seahelm-repo-main")
-        let right = SplitNode.leaf(id: "b", stationId: "s2", paneSessionKey: "seahelm-repo-main-1")
+        let right = SplitNode.leaf(id: "b", stationId: "s2", paneSessionKey: "seahelm-repo-main--pane-1")
         let split = SplitNode.split(id: "s", axis: .horizontal, ratio: 0.5, first: left, second: right)
         XCTAssertEqual(split.nextPaneIndex(baseName: "seahelm-repo-main"), 2)
     }
@@ -137,6 +137,22 @@ final class SplitTreeTests: XCTestCase {
         XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main--pane-1")
         _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: "seahelm-repo-main--pane-1")
         XCTAssertEqual(tree.nextSessionName(), "seahelm-repo-main--pane-2")
+    }
+
+    /// A long base forces the indexed head to truncate; `--pane-N` still has to
+    /// advance so the next split does not reuse the same session name.
+    func testNextSessionNameAdvancesWhenIndexedNamesAreTruncated() {
+        let base = SessionManager.persistentSessionName(
+            for: "/workspace/very-long-repo-name-here/very-long-branch-name-alpha")
+        XCTAssertEqual(base.utf8.count, 40)
+        let tree = SplitTree(worktreePath: "/repo/alpha", rootLeafId: "a", stationId: "s1", paneSessionKey: base)
+        let first = tree.nextSessionName()
+        XCTAssertLessThanOrEqual(first.utf8.count, 40)
+        XCTAssertTrue(first.hasSuffix("--pane-1"), first)
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newStationId: "s2", newSessionName: first)
+        let second = tree.nextSessionName()
+        XCTAssertEqual(second, SessionManager.indexedSessionName(base: base, index: 2))
+        XCTAssertNotEqual(first, second)
     }
 
     func testAllSurfaceIds() {

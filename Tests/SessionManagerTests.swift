@@ -42,11 +42,26 @@ class SessionManagerTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    func testIndexedSessionNameStaysWithinBackendLimit() {
+        let base = "seahelm-workspace-accounting-huge-8499b4-"
+
+        let name = SessionManager.indexedSessionName(base: base, index: 1)
+
+        XCTAssertLessThanOrEqual(name.utf8.count, 40)
+        XCTAssertTrue(name.hasSuffix("--pane-1"), name)
+        XCTAssertNotEqual(name, SessionManager.indexedSessionName(base: base, index: 2))
+    }
+
     func testIndexedPaneNameCannotEqualAnotherWorktreeBaseName() {
         let base = SessionManager.persistentSessionName(for: "/workspace/task/https-github-com-dif")
         let otherBase = SessionManager.persistentSessionName(for: "/workspace/task/https-github-com-dif-2")
-        XCTAssertEqual(SessionManager.indexedSessionName(base: base, index: 1), "\(base)--pane-1")
-        XCTAssertNotEqual(SessionManager.indexedSessionName(base: base, index: 1), otherBase)
+        let indexed = SessionManager.indexedSessionName(base: base, index: 1)
+        // Old `base-2` equalled another worktree's persistent name; `--pane-N`
+        // (kept as a suffix even when the head is truncated) must not.
+        XCTAssertTrue(indexed.hasSuffix("--pane-1"), indexed)
+        XCTAssertLessThanOrEqual(indexed.utf8.count, 40)
+        XCTAssertNotEqual(indexed, otherBase)
+        XCTAssertNotEqual(SessionManager.indexedSessionName(base: base, index: 2), otherBase)
     }
 
     func testParseZmxSessionNamesReadsNameEqualsFormat() {

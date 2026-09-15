@@ -49,18 +49,32 @@ enum SessionManager {
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: ":", with: "_")
 
-        if raw.count <= maxSessionNameLength {
-            return raw
-        }
-
-        let hash = shortHash(raw)
-        let truncated = String(raw.prefix(maxSessionNameLength - hash.count - 1))
-        return "\(truncated)-\(hash)"
+        return boundedSessionName(raw)
     }
 
     /// Generate an indexed session name for an additional pane.
+    ///
+    /// Uses `--pane-N` so `base-2` cannot collide with another worktree whose
+    /// directory is literally `…-2`. The `--pane-N` suffix is kept intact when
+    /// truncating — `nextPaneIndex` parses it — and only the base head is
+    /// shortened (with a hash) to stay within the backend name limit.
     static func indexedSessionName(base: String, index: Int) -> String {
-        "\(base)--pane-\(index)"
+        let suffix = "--pane-\(index)"
+        let budget = max(0, maxSessionNameLength - suffix.utf8.count)
+        return boundedSessionName(base, maxLength: budget) + suffix
+    }
+
+    private static func boundedSessionName(_ raw: String) -> String {
+        boundedSessionName(raw, maxLength: maxSessionNameLength)
+    }
+
+    private static func boundedSessionName(_ raw: String, maxLength: Int) -> String {
+        guard raw.utf8.count > maxLength else { return raw }
+
+        let hash = shortHash(raw)
+        let prefixLength = max(0, maxLength - hash.utf8.count - 1)
+        let prefix = String(decoding: raw.utf8.prefix(prefixLength), as: UTF8.self)
+        return "\(prefix)-\(hash)"
     }
 
     static func parseZmxSessionNames(listOutput: String) -> [String] {

@@ -45,19 +45,19 @@ indirect enum SplitNode {
     }
 
     /// Derive next pane index from existing session names.
+    ///
+    /// Indexed names end in `--pane-N`. When the base was truncated to fit the
+    /// backend limit the full `baseName + "--pane-"` prefix no longer matches, so
+    /// scan for the marker from the end instead of requiring an exact head.
     func nextPaneIndex(baseName: String) -> Int {
-        let leaves = allLeaves
+        let marker = "--pane-"
         var maxIndex = 0
-        for leaf in leaves {
+        for leaf in allLeaves {
             let name = leaf.paneSessionKey
-            if name == baseName {
-                continue
-            }
-            let panePrefix = baseName + "--pane-"
-            if name.hasPrefix(panePrefix),
-               let suffix = Int(name.dropFirst(panePrefix.count)) {
-                maxIndex = max(maxIndex, suffix)
-            }
+            if name == baseName { continue }
+            guard let range = name.range(of: marker, options: .backwards),
+                  let suffix = Int(name[range.upperBound...]) else { continue }
+            maxIndex = max(maxIndex, suffix)
         }
         return maxIndex + 1
     }
