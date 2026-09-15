@@ -423,6 +423,32 @@ class GhosttyBridge {
             // libghostty flips conditional state then asks the embedder to reload.
             GhosttyBridge.shared.reloadConfig(target: target, soft: action.action.reload_config.soft)
             return true
+        case GHOSTTY_ACTION_OPEN_URL:
+            // Cmd+click on a link. OSC 8 targets are producer-controlled and get
+            // the strict policy; a URL matched in the grid is what the user
+            // pointed at, so it opens directly.
+            let open = action.action.open_url
+            guard let raw = decode(open.url, count: Int(open.len)) else { return true }
+            let origin: TerminalLinkOrigin = open.kind == GHOSTTY_ACTION_OPEN_URL_KIND_OSC8
+                ? .hyperlink
+                : .visibleText
+            return TerminalLinkOpener.handle(origin: origin, raw: raw)
+        case GHOSTTY_ACTION_MOUSE_SHAPE:
+            // Drives the cursor: a pointer over a link, a resize arrow in a
+            // mouse-tracking TUI. Without this the pane always shows an arrow,
+            // so a linkable URL looks like plain text.
+            guard let view = station(for: target)?.view else { return true }
+            let shape = action.action.mouse_shape
+            DispatchQueue.main.async { view.setCursorShape(shape) }
+            return true
+        case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+            // Only sent while the link modifier is held, i.e. exactly when the
+            // pane should offer to open what is under the pointer.
+            guard let view = station(for: target)?.view else { return true }
+            let hover = action.action.mouse_over_link
+            let url = decode(hover.url, count: Int(hover.len))
+            DispatchQueue.main.async { view.hoverURL = url }
+            return true
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             return true
         case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS,
@@ -436,6 +462,15 @@ class GhosttyBridge {
         default:
             return false
         }
+    }
+
+    /// Copy a C string that libghostty passes as pointer + byte length. The
+    /// buffers are not NUL-terminated, so the length is the only safe bound.
+    private static func decode(_ pointer: UnsafePointer<CChar>?, count: Int) -> String? {
+        guard let pointer, count > 0 else { return nil }
+        let bytes = UnsafeRawPointer(pointer).assumingMemoryBound(to: UInt8.self)
+        let text = String(decoding: UnsafeBufferPointer(start: bytes, count: count), as: UTF8.self)
+        return text.isEmpty ? nil : text
     }
 
     private static func readClipboard(userData: UnsafeMutableRawPointer?, clipboard: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) -> Bool {
