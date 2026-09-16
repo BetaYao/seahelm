@@ -181,6 +181,7 @@
 		5F7CEFC99E339F7621D6509A /* ZmxLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063BC4CAFB28A7B7DEA60474 /* ZmxLocatorTests.swift */; };
 		5FC3252BFA86D110BFDCF34E /* WorktreeReturnRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA8AD6F8AC7CDE47F86245A /* WorktreeReturnRunnerTests.swift */; };
 		5FC647D840678AE10E2FF5BC /* ShortcutHintBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E664A1C5B1466EF19108D6B8 /* ShortcutHintBar.swift */; };
+		5FF231B7FD897BF5252E8648 /* TelegramInboundMediaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728C2C38D2A4B5627B149F88 /* TelegramInboundMediaTests.swift */; };
 		608A71AD329F3222B8668A1E /* ZmxLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3737CB607E821B5D3EFDBDAF /* ZmxLocator.swift */; };
 		608DDB1CC5C107E0E543EE93 /* UsageReadoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C559AE5CD4ECA7DCD1E11D4C /* UsageReadoutView.swift */; };
 		6152CD919925AF8CBC204000 /* DebugFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAFF4D1021558298332264D5 /* DebugFlags.swift */; };
@@ -508,6 +509,7 @@
 		FD31D39DD1C179392C0993F6 /* DiffSyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510FA8122ABEBFF0AAB1C539 /* DiffSyntaxHighlighter.swift */; };
 		FD97CEE3018382B7182D5EB7 /* DialogPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC6CD361867294E47A209E3 /* DialogPresenter.swift */; };
 		FE0A82E1F0D8DBE2D036CB71 /* AIPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */; };
+		FE109CCA64A2444D664C7FCC /* TelegramInboundMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09CD18DFB68633987C0BD28 /* TelegramInboundMedia.swift */; };
 		FE58A1CB16B3FF9EEAFA132F /* IntegrationRowStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 456723EB5522C611A1982269 /* IntegrationRowStatus.swift */; };
 		FED31A3C39D21CA95E4FE06D /* FirstMate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF9EEEBC6FB86CD29B2B3D45 /* FirstMate.swift */; };
 /* End PBXBuildFile section */
@@ -736,6 +738,7 @@
 		72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstallerTests.swift; sourceTree = "<group>"; };
 		724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPRDecodingTests.swift; sourceTree = "<group>"; };
 		7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventExtractor.swift; sourceTree = "<group>"; };
+		728C2C38D2A4B5627B149F88 /* TelegramInboundMediaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramInboundMediaTests.swift; sourceTree = "<group>"; };
 		72D7AE18D546D48E83055667 /* github-pr-detail.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-pr-detail.json"; sourceTree = "<group>"; };
 		730849EDAF323B0D541E397C /* PaneWorkingDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneWorkingDirectoryTests.swift; sourceTree = "<group>"; };
 		73FDA109B06DD6B1F279D87A /* PaneReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneReducerTests.swift; sourceTree = "<group>"; };
@@ -832,6 +835,7 @@
 		9F66DA28CC57BFA18891872D /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
 		9FEA86B38AB3BEE8AA18906A /* HeadlessCommandHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadlessCommandHost.swift; sourceTree = "<group>"; };
 		A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHistoryBuffer.swift; sourceTree = "<group>"; };
+		A09CD18DFB68633987C0BD28 /* TelegramInboundMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramInboundMedia.swift; sourceTree = "<group>"; };
 		A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayFrame.swift; sourceTree = "<group>"; };
 		A17E46AFD48BFAA312D7D627 /* WorktreeGitStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGitStatsTests.swift; sourceTree = "<group>"; };
 		A1876E1900448D0350043DB3 /* IntegrationBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationBuilderTests.swift; sourceTree = "<group>"; };
@@ -1175,6 +1179,7 @@
 				371F0BC6C00D849566000118 /* TelegramChannel.swift */,
 				A78FEF7EF31BF2E3DD44AD5F /* TelegramConfig.swift */,
 				367C0A6616137695AEDA9D74 /* TelegramFormatter.swift */,
+				A09CD18DFB68633987C0BD28 /* TelegramInboundMedia.swift */,
 				9D293FA0847660A497A11838 /* TelegramPacketBook.swift */,
 				40B24B841AC2BEE7F645B456 /* TelegramPairing.swift */,
 				AFC635E261560E69EFA29FEE /* TelegramRule.swift */,
@@ -1626,6 +1631,7 @@
 				DC183C3A20588D380EF62682 /* TabSelectionTests.swift */,
 				249CA31487C12997605E1512 /* TaskProgressParserTests.swift */,
 				59CF8253BD7CAF318D05885C /* TelegramBridgeTests.swift */,
+				728C2C38D2A4B5627B149F88 /* TelegramInboundMediaTests.swift */,
 				803B8F8E6947C76080BAE3C2 /* TelegramPacketBookTests.swift */,
 				89AF451E1FC9B6E21F9B67A6 /* TelegramPairingTests.swift */,
 				D2A3B9CBE08762DDD19AA2C5 /* TelegramRuleCoalescerTests.swift */,
@@ -2201,6 +2207,7 @@
 				65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */,
 				B658CA193508F17D6F6BA66D /* TaskProgressParserTests.swift in Sources */,
 				0202D5F27E405DFF0764DBA3 /* TelegramBridgeTests.swift in Sources */,
+				5FF231B7FD897BF5252E8648 /* TelegramInboundMediaTests.swift in Sources */,
 				F72F97A5DE0B316E3B90BDB5 /* TelegramPacketBookTests.swift in Sources */,
 				9095B660E7047E1815E67212 /* TelegramPairingTests.swift in Sources */,
 				A30993302260CC1F5B1F7179 /* TelegramRuleCoalescerTests.swift in Sources */,
@@ -2493,6 +2500,7 @@
 				FC2829917F91412C222E569F /* TelegramChannel.swift in Sources */,
 				0ACBFB116D839F9A3BC9DD7C /* TelegramConfig.swift in Sources */,
 				B27CC6F1E02F01BDF914C664 /* TelegramFormatter.swift in Sources */,
+				FE109CCA64A2444D664C7FCC /* TelegramInboundMedia.swift in Sources */,
 				0624E489B118EC8FAD59FEB1 /* TelegramPacketBook.swift in Sources */,
 				75D489DADDF9A46F3AA3F96D /* TelegramPairing.swift in Sources */,
 				BBC84EA31C8C52BCB30F54B1 /* TelegramRule.swift in Sources */,

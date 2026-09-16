@@ -412,21 +412,29 @@ final class TelegramChannel: ExternalChannel {
     // MARK: - Inbound
 
     private func handle(_ message: TelegramMessage, config cfg: TelegramConfig) {
-        guard let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty else { return }
+        // Photos (and image documents) download on this poll thread, then join
+        // any caption as the order body. A photo with no caption used to be
+        // dropped entirely because `body` was empty.
+        let mediaPaths = materializeAttachments(message)
+        let text = TelegramInboundMedia.composeOrderText(
+            paths: mediaPaths,
+            caption: message.body)
+        guard !text.isEmpty else { return }
         let chatId = String(message.chat.id)
 
         // `/start` is Telegram's own front door: the Start button sends it, and
         // a `t.me/<bot>?start=<code>` deep link sends it with the pairing code
         // attached. It is answered here and never reaches the verb table, which
         // has no such verb and would only reply "unknown command".
+        // Pairing only cares about the caption/text, not attached media paths.
+        let pairingSource = message.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if let payload = TelegramPairingCode.startPayload(
-            in: Self.stripBotMention(text, botUsername: botUsername)) {
+            in: Self.stripBotMention(pairingSource, botUsername: botUsername)) {
             handleStart(payload: payload, message: message, config: cfg)
             return
         }
 
-        if let command = Self.command(in: message, config: cfg, botUsername: botUsername) {
+        if let command = Self.command(in: message, body: text, config: cfg, botUsername: botUsername) {
             lock.lock()
             chatIdBySender[command.senderId] = chatId
             lastCommandChatId = chatId
@@ -460,7 +468,53 @@ final class TelegramChannel: ExternalChannel {
             return
         }
 
-        deliverSignal(message, text: text, config: cfg)
+        // Rules match the human-readable caption/text, not downloaded paths.
+        if let signalText = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !signalText.isEmpty {
+            deliverSignal(message, text: signalText, config: cfg)
+        }
+    }
+
+    /// Download the largest photo (or an image document) onto disk. Failures
+    /// are logged and skipped so a caption-only order still gets through.
+    private func materializeAttachments(_ message: TelegramMessage) -> [URL] {
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        guard let api else { return [] }
+
+        let candidates: [(fileId: String, name: String?)]
+        if let photo = TelegramInboundMedia.preferredPhoto(message.photo ?? []) {
+            candidates = [(photo.fileId, nil)]
+        } else if let document = message.document, TelegramInboundMedia.isImageDocument(document) {
+            candidates = [(document.fileId, document.fileName)]
+        } else {
+            return []
+        }
+
+        var urls: [URL] = []
+        for candidate in candidates {
+            do {
+                let file = try api.getFile(fileId: candidate.fileId)
+                guard let path = file.filePath, !path.isEmpty else {
+                    NSLog("[Telegram] getFile returned no path for \(candidate.fileId.prefix(12))…")
+                    continue
+                }
+                if let size = file.fileSize, size > TelegramInboundMedia.maxBytes {
+                    NSLog("[Telegram] Skipping oversized media (\(size) bytes)")
+                    continue
+                }
+                let data = try api.downloadFile(path: path)
+                let name = TelegramInboundMedia.fileName(
+                    telegramPath: path, documentName: candidate.name)
+                let url = try TelegramMediaStore().save(
+                    data: data, fileName: name, messageId: message.messageId)
+                urls.append(url)
+            } catch {
+                NSLog("[Telegram] Failed to download media: \(error.localizedDescription)")
+            }
+        }
+        return urls
     }
 
     /// A line from someone on the allowlist, in a group, that would have been
@@ -473,7 +527,7 @@ final class TelegramChannel: ExternalChannel {
               let from = message.from, cfg.allows(user: from),
               !message.chat.isPrivate else { return false }
         let body = stripBotMention(text, botUsername: botUsername)
-        guard !body.hasPrefix("/") else { return false }
+        guard !isSlashCommand(body) else { return false }
         return addressedProse(body, message: message, botUsername: botUsername) == nil
     }
 
@@ -663,28 +717,42 @@ final class TelegramChannel: ExternalChannel {
     /// updates — that was the whole trouble with a transport that shared the
     /// owner's identity.
     static func command(in message: TelegramMessage,
+                        body override: String? = nil,
                         config: TelegramConfig,
                         botUsername: String?) -> Command? {
-        guard let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // `override` carries downloaded media paths joined with any caption —
+        // what the pane should see. Classification still uses the same gates.
+        let source = override ?? message.body
+        guard let text = source?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty else { return nil }
         guard let from = message.from else { return nil }
         guard config.allows(user: from) else {
             // Logged only when it looked like an order; group chatter from
             // colleagues would otherwise fill the log.
-            if text.hasPrefix("/") {
+            if isSlashCommand(text) {
                 NSLog("[Telegram] Ignoring command from unlisted user \(from.displayName) (\(from.id))")
             }
             return nil
         }
 
         let body = stripBotMention(text, botUsername: botUsername)
-        if message.chat.isPrivate || body.hasPrefix("/") {
+        if message.chat.isPrivate || isSlashCommand(body) {
             return Command(body: body, senderId: String(from.id), senderName: from.displayName)
         }
         guard let addressed = addressedProse(body, message: message, botUsername: botUsername) else {
             return nil
         }
         return Command(body: addressed, senderId: String(from.id), senderName: from.displayName)
+    }
+
+    /// Telegram bot commands are `/name` (letters, digits, underscore), optionally
+    /// `@bot` and args. A downloaded path like `/tmp/shot.png` must not count.
+    static func isSlashCommand(_ body: String) -> Bool {
+        guard body.hasPrefix("/") else { return false }
+        let token = body.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? body
+        let name = token.split(separator: "@", maxSplits: 1).first.map(String.init) ?? token
+        let rest = name.dropFirst()
+        return !rest.isEmpty && rest.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
     /// Group prose aimed at the bot, with the address taken off; nil when the
