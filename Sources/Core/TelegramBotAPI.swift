@@ -37,6 +37,31 @@ struct TelegramReplyTarget: Decodable, Equatable {
     let from: TelegramUser?
 }
 
+/// One size of a photo Telegram attaches to a message. The API sends several;
+/// the bridge keeps the largest.
+struct TelegramPhotoSize: Decodable, Equatable {
+    let fileId: String
+    let width: Int
+    let height: Int
+    let fileSize: Int?
+}
+
+/// A file sent as a document (including "Send as file" images).
+struct TelegramDocument: Decodable, Equatable {
+    let fileId: String
+    let fileName: String?
+    let mimeType: String?
+    let fileSize: Int?
+}
+
+/// `getFile` result — `filePath` is the relative path under Telegram's file host.
+struct TelegramFile: Decodable, Equatable {
+    let fileId: String
+    let fileUniqueId: String?
+    let fileSize: Int?
+    let filePath: String?
+}
+
 struct TelegramMessage: Decodable, Equatable {
     let messageId: Int
     /// Unix seconds.
@@ -49,11 +74,16 @@ struct TelegramMessage: Decodable, Equatable {
     let text: String?
     /// A photo or document sent with a note carries the note here, not in `text`.
     let caption: String?
+    /// Compressed photo sizes, smallest first. Absent when there is no photo.
+    let photo: [TelegramPhotoSize]?
+    /// Present when the user sent a file (including an image "as file").
+    let document: TelegramDocument?
     /// The message this one replies to, when it replies to anything.
     let replyToMessage: TelegramReplyTarget?
 
     init(messageId: Int, date: TimeInterval, chat: TelegramChat, from: TelegramUser?,
          senderChat: TelegramChat?, text: String?, caption: String?,
+         photo: [TelegramPhotoSize]? = nil, document: TelegramDocument? = nil,
          replyToMessage: TelegramReplyTarget? = nil) {
         self.messageId = messageId
         self.date = date
@@ -62,6 +92,8 @@ struct TelegramMessage: Decodable, Equatable {
         self.senderChat = senderChat
         self.text = text
         self.caption = caption
+        self.photo = photo
+        self.document = document
         self.replyToMessage = replyToMessage
     }
 
@@ -349,28 +381,72 @@ final class TelegramBotAPI {
                                deadline: Self.stallSeconds)
     }
 
-    // MARK: - Transport
+    /// Resolve a `file_id` to a downloadable path on Telegram's file host.
+    func getFile(fileId: String) throws -> TelegramFile {
+        try call("getFile", params: ["file_id": fileId], deadline: Self.stallSeconds)
+    }
 
-    private func call<T: Decodable>(_ method: String, params: [String: Any], deadline: Int) throws -> T {
+    /// Download the bytes at `filePath` from a prior `getFile`. Caps at
+    /// `maxBytes` so a hostile or huge upload cannot fill the disk.
+    func downloadFile(path filePath: String, maxBytes: Int = TelegramInboundMedia.maxBytes) throws -> Data {
         lock.lock()
         let dead = invalidated
         lock.unlock()
         if dead { throw TelegramAPIError.cancelled }
 
-        let body = try JSONSerialization.data(withJSONObject: params)
-        let configURL = try writeConfig(method: method)
+        let configURL = try writeFileConfig(filePath: filePath)
         defer { try? FileManager.default.removeItem(at: configURL) }
+
+        let output = try runCurl(configURL: configURL, deadline: Self.stallSeconds, body: nil)
+        guard output.count <= maxBytes else {
+            throw TelegramAPIError.network("file exceeds \(maxBytes) bytes")
+        }
+        guard !output.isEmpty else {
+            throw TelegramAPIError.badResponse
+        }
+        return output
+    }
+
+    // MARK: - Transport
+
+    private func call<T: Decodable>(_ method: String, params: [String: Any], deadline: Int) throws -> T {
+        let body = try JSONSerialization.data(withJSONObject: params)
+        let configURL = try writeConfig(url: "\(Self.host)/bot\(token)/\(method)")
+        defer { try? FileManager.default.removeItem(at: configURL) }
+        let output = try runCurl(configURL: configURL, deadline: deadline, body: body)
+        return try unwrap(output)
+    }
+
+    /// GET a file URL — raw bytes, no `{ok, result}` envelope.
+    private func writeFileConfig(filePath: String) throws -> URL {
+        // Paths from Telegram are relative (`photos/file_0.jpg`); reject anything
+        // that could escape the file host prefix.
+        guard !filePath.hasPrefix("/"), !filePath.contains(".."),
+              !filePath.contains("://") else {
+            throw TelegramAPIError.badResponse
+        }
+        return try writeConfig(url: "\(Self.host)/file/bot\(token)/\(filePath)")
+    }
+
+    private func runCurl(configURL: URL, deadline: Int, body: Data?) throws -> Data {
+        lock.lock()
+        let dead = invalidated
+        lock.unlock()
+        if dead { throw TelegramAPIError.cancelled }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.curlPath)
-        process.arguments = [
+        var args = [
             "--silent", "--show-error",
             "--config", configURL.path,
             "--max-time", "\(deadline)",
-            "--request", "POST",
-            "--header", "Content-Type: application/json",
-            "--data-binary", "@-",
         ]
+        if body != nil {
+            args += ["--request", "POST",
+                     "--header", "Content-Type: application/json",
+                     "--data-binary", "@-"]
+        }
+        process.arguments = args
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         process.standardInput = stdin
         process.standardOutput = stdout
@@ -406,7 +482,9 @@ final class TelegramBotAPI {
         } catch {
             throw TelegramAPIError.network("could not start curl: \(error.localizedDescription)")
         }
-        stdin.fileHandleForWriting.write(body)
+        if let body {
+            stdin.fileHandleForWriting.write(body)
+        }
         try? stdin.fileHandleForWriting.close()
         // Drain both pipes before waiting, or a large reply fills the pipe and
         // curl blocks on write while we block on exit.
@@ -421,7 +499,7 @@ final class TelegramBotAPI {
 
         switch process.terminationStatus {
         case 0:
-            return try unwrap(output)
+            return output
         case 28:
             throw TelegramAPIError.network("no response within \(deadline)s")
         default:
@@ -433,15 +511,15 @@ final class TelegramBotAPI {
     /// The URL — and so the token — goes to curl through a private file
     /// rather than an argument, where every other user on the machine could
     /// read it with `ps`.
-    private func writeConfig(method: String) throws -> URL {
+    private func writeConfig(url: String) throws -> URL {
         let dir = FileManager.default.temporaryDirectory
-        let url = dir.appendingPathComponent("seahelm-telegram-\(UUID().uuidString).curlrc")
-        let contents = "url = \"\(Self.host)/bot\(token)/\(method)\"\n"
-        guard FileManager.default.createFile(atPath: url.path, contents: Data(contents.utf8),
+        let configURL = dir.appendingPathComponent("seahelm-telegram-\(UUID().uuidString).curlrc")
+        let contents = "url = \"\(url)\"\n"
+        guard FileManager.default.createFile(atPath: configURL.path, contents: Data(contents.utf8),
                                              attributes: [.posixPermissions: 0o600]) else {
             throw TelegramAPIError.network("could not write curl config")
         }
-        return url
+        return configURL
     }
 
     /// Every method answers `{ok, result}` or `{ok: false, error_code,
