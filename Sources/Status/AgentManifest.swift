@@ -36,9 +36,11 @@ struct AgentManifest: Codable {
     // seahelm extensions (not present in herdr manifests)
     var process: ProcessMatch? = nil
     var authority: String = "session_only"   // session_only | full_lifecycle | screen_only
+    /// Optional MessageStream display / fallback policy (see MessageConfig).
+    var message: MessageConfig? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, version, aliases, rules, process, authority
+        case id, version, aliases, rules, process, authority, message
         case minEngineVersion = "min_engine_version"
         case defaultStatus = "default_status"
         case messageSkipPatterns = "message_skip_patterns"
@@ -55,6 +57,7 @@ struct AgentManifest: Codable {
         rules = try c.decodeIfPresent([ManifestRule].self, forKey: .rules) ?? []
         process = try c.decodeIfPresent(ProcessMatch.self, forKey: .process)
         authority = try c.decodeIfPresent(String.self, forKey: .authority) ?? "session_only"
+        message = try c.decodeIfPresent(MessageConfig.self, forKey: .message)
     }
 }
 
