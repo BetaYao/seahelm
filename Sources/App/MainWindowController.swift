@@ -397,6 +397,8 @@ class MainWindowController: NSWindowController {
 
         setupMenuShortcuts()
         installFnDoubleTapMonitor()
+        // Before the layout: the Changes panel asks GitHub what has merged.
+        MergedPRLookup.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
         setupLayout()
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()

@@ -17,12 +17,18 @@ final class GitHubPRService {
 
     /// token 可能是空字符串（未登录场景），此时只读接口会返回 401。
     /// 调用方负责检查 token 非空后再调用需要写权限的接口。
-    init(token: String, owner: String, repo: String) {
+    /// `requestTimeout` nil keeps URLSession's default (60s); callers that
+    /// block a queue on the answer pass something shorter.
+    init(token: String, owner: String, repo: String, requestTimeout: TimeInterval? = nil) {
         self.token = token
         self.owner = owner
         self.repo = repo
 
         let config = URLSessionConfiguration.default
+        if let requestTimeout {
+            config.timeoutIntervalForRequest = requestTimeout
+            config.timeoutIntervalForResource = requestTimeout
+        }
         config.httpShouldSetCookies = false
         config.httpCookieAcceptPolicy = .never
         // GitHub API 需要合理的 UA，否则返回 403

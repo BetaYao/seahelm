@@ -167,6 +167,107 @@ final class GitDiffTests: XCTestCase {
         XCTAssertEqual(Set(branch.files.map(\.path)), Set(["f3.txt", "f4.txt"]))
     }
 
+    // MARK: - what is still outstanding
+
+    /// The case that kept files listed forever: the branch was squash-merged,
+    /// then main edited the same files elsewhere. Nothing is left to PR.
+    func testSquashMergedBranchIsCleanAfterTheBaseEditsThoseFilesAgain() throws {
+        let repo = try makeSquashMergedRepo()
+        try "ONE\ntwo\nTHREE on main\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "main: edit another line")
+        runGit(["checkout", "-q", "feat"], in: repo)
+
+        let branch = GitDiff.branchChangedFiles(worktreePath: repo, recordedBase: nil)
+
+        XCTAssertEqual(branch.basis, .mergeResult(baseRef: "main"))
+        XCTAssertEqual(branch.files.map(\.path), [])
+        XCTAssertEqual(branch.conflictedPaths, [])
+    }
+
+    /// Without the PR to go on, main editing the very lines the squash brought
+    /// in makes the merge conflict. The file stays listed, but flagged.
+    func testSameLinesEditedAfterASquashAreFlaggedAsConflicts() throws {
+        let repo = try makeSquashMergedRepo()
+        try "ONE again on main\ntwo\nthree\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "main: rewrite the squashed line")
+        runGit(["checkout", "-q", "feat"], in: repo)
+
+        let branch = GitDiff.branchChangedFiles(worktreePath: repo, recordedBase: nil)
+
+        XCTAssertEqual(branch.files.map(\.path), ["lines.txt"])
+        XCTAssertEqual(branch.files.first?.stage, .committed)
+        XCTAssertEqual(branch.conflictedPaths, ["lines.txt"])
+    }
+
+    /// With the merged PR's head, only later commits count — even where the
+    /// merge result alone would report a conflict.
+    func testMergedPRCountsOnlyTheWorkAfterItsHead() throws {
+        let repo = try makeSquashMergedRepo()
+        try "ONE again on main\ntwo\nthree\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "main: rewrite the squashed line")
+        runGit(["checkout", "-q", "feat"], in: repo)
+        let prHead = runGit(["rev-parse", "HEAD"], in: repo).trimmingCharacters(in: .whitespacesAndNewlines)
+        try "later\n".write(toFile: repo + "/after.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "feat: after the PR merged")
+
+        var asked: (branch: String, base: String)?
+        let branch = GitDiff.branchChangedFiles(worktreePath: repo, recordedBase: nil) { _, name, base in
+            asked = (name, base)
+            return [MergedPRHead(number: 42, headSHA: prHead)]
+        }
+
+        XCTAssertEqual(asked?.branch, "feat")
+        XCTAssertEqual(asked?.base, "main")
+        XCTAssertEqual(branch.basis, .sinceMergedPR(MergedPRHead(number: 42, headSHA: prHead), baseRef: "main"))
+        XCTAssertEqual(branch.files.map(\.path), ["after.txt"])
+        XCTAssertEqual(branch.files.first?.stage, .committed)
+        XCTAssertEqual(branch.diffAnchor, prHead)
+        XCTAssertEqual(branch.conflictedPaths, [])
+    }
+
+    /// A PR head the branch does not contain says nothing about this branch.
+    func testMergedPRWhoseHeadTheBranchLacksIsIgnored() throws {
+        let repo = try makeSquashMergedRepo()
+        let mainTip = runGit(["rev-parse", "main"], in: repo).trimmingCharacters(in: .whitespacesAndNewlines)
+        runGit(["checkout", "-q", "feat"], in: repo)
+
+        let branch = GitDiff.branchChangedFiles(worktreePath: repo, recordedBase: nil) { _, _, _ in
+            [MergedPRHead(number: 7, headSHA: mainTip)]
+        }
+
+        XCTAssertEqual(branch.basis, .mergeResult(baseRef: "main"))
+    }
+
+    /// A committed file edited again is listed once, as uncommitted — it has to
+    /// be committed before it can go anywhere.
+    func testUncommittedEditToACommittedFileIsListedOnceAsUncommitted() throws {
+        let repo = try makeRepoWithFeatureBranch()
+        try "feature\n".write(toFile: repo + "/tracked.txt", atomically: true, encoding: .utf8)
+        try "other\n".write(toFile: repo + "/other.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "feat: two files")
+        try "feature, edited again\n".write(toFile: repo + "/tracked.txt", atomically: true, encoding: .utf8)
+
+        let branch = GitDiff.branchChangedFiles(worktreePath: repo, recordedBase: nil)
+
+        XCTAssertEqual(branch.uncommittedFiles.map(\.path), ["tracked.txt"])
+        XCTAssertEqual(branch.committedFiles.map(\.path), ["other.txt"])
+        XCTAssertEqual(branch.totalCount, 2)
+    }
+
+    func testParseMergeTreeReadsTreeAndConflicts() {
+        let clean = GitDiff.parseMergeTree("0123abcd\0", exitCode: 0)
+        XCTAssertEqual(clean?.tree, "0123abcd")
+        XCTAssertEqual(clean?.conflictedPaths, [])
+
+        let conflicted = GitDiff.parseMergeTree("0123abcd\0a.txt\0dir/b.txt\0", exitCode: 1)
+        XCTAssertEqual(conflicted?.tree, "0123abcd")
+        XCTAssertEqual(conflicted?.conflictedPaths, ["a.txt", "dir/b.txt"])
+
+        // 128/129: an error, such as a git too old for --write-tree.
+        XCTAssertNil(GitDiff.parseMergeTree("usage: git merge-tree", exitCode: 129))
+        XCTAssertNil(GitDiff.parseMergeTree("", exitCode: 0))
+    }
+
     // MARK: - helpers
 
     private func makeRepoWithFeatureBranch() throws -> String {
@@ -182,6 +283,35 @@ final class GitDiffTests: XCTestCase {
                     "commit", "-m", "init"], in: repo)
         _ = runGit(["checkout", "-b", "feat"], in: repo)
         return repo
+    }
+
+    /// main has `lines.txt`; `feat` changes its first line and adds `new.txt`;
+    /// main then gets the same change as one squash commit. Leaves main checked
+    /// out so a test can add what main did next.
+    private func makeSquashMergedRepo() throws -> String {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seahelm-gitdiff-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let repo = tempDir.appendingPathComponent("repo").path
+        runGit(["init", "-b", "main", repo], in: tempDir.path)
+        try "one\ntwo\nthree\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "init")
+
+        runGit(["checkout", "-q", "-b", "feat"], in: repo)
+        try "ONE\ntwo\nthree\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        try "new\n".write(toFile: repo + "/new.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "feat: the PR")
+
+        runGit(["checkout", "-q", "main"], in: repo)
+        try "ONE\ntwo\nthree\n".write(toFile: repo + "/lines.txt", atomically: true, encoding: .utf8)
+        try "new\n".write(toFile: repo + "/new.txt", atomically: true, encoding: .utf8)
+        commitAll(in: repo, message: "the PR, squashed")
+        return repo
+    }
+
+    private func commitAll(in repo: String, message: String) {
+        runGit(["add", "-A"], in: repo)
+        runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", message], in: repo)
     }
 
     @discardableResult
