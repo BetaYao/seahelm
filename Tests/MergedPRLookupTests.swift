@@ -53,22 +53,6 @@ final class MergedPRLookupTests: XCTestCase {
         XCTAssertEqual(tokenRequests, 1)
     }
 
-    // TMP-LIVE-BEGIN
-    func testTmpLive() {
-        let lookup = MergedPRLookup()
-        lookup.resolveToken = { MainWindowController.resolveGitHubToken(repoPath: $0) }
-        for path in ["/Volumes/openbeta/workspace/teamclaw-worktrees/task/pai-hang-bang",
-                     "/Volumes/openbeta/workspace/seahelm"] {
-            let start = Date()
-            let branch = GitDiff.branchChangedFiles(worktreePath: path, recordedBase: nil, mergedPRs: lookup.mergedPRs)
-            let first = Date().timeIntervalSince(start)
-            let again = Date()
-            _ = GitDiff.branchChangedFiles(worktreePath: path, recordedBase: nil, mergedPRs: lookup.mergedPRs)
-            print("LIVE \((path as NSString).lastPathComponent) first=\(String(format: "%.2f", first))s cached=\(String(format: "%.2f", Date().timeIntervalSince(again)))s basis=\(branch.basis) subtitle=\(ChangesSummary.subtitle(for: branch)) sections=\(ChangesSummary.sections(for: branch).map(\.title))")
-        }
-    }
-    // TMP-LIVE-END
-
     // MARK: - helpers
 
     private func decodePRs(_ specs: [(number: Int, sha: String, mergedAt: String?)]) throws -> [GitHubPR] {

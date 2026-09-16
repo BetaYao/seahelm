@@ -898,6 +898,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         tableView.target = self
         tableView.action = #selector(changeRowClicked)
         tableView.setAccessibilityIdentifier("sidePanel.changesTable")
+        tableView.floatsGroupRows = false
         tableView.backgroundColor = .clear
         tableView.selectionHighlightStyle = .regular
 
@@ -928,6 +929,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         outlineView.target = self
         outlineView.action = #selector(changeTreeRowClicked)
         outlineView.setAccessibilityIdentifier("sidePanel.changesTree")
+        outlineView.floatsGroupRows = false
         outlineView.backgroundColor = .clear
         outlineView.selectionHighlightStyle = .regular
 
@@ -1091,12 +1093,14 @@ private extension WorktreeSidePanelViewController {
         } else {
             cellView = NSTableCellView()
             cellView.identifier = id
+            // Not the cell's `textField`: AppKit restyles that on a group row
+            // in the system font, and this panel is mono throughout.
             let label = NSTextField(labelWithString: "")
             label.font = AppFont.mono(size: 10.5, weight: .semibold)
             label.textColor = Self.inkDim
             label.lineBreakMode = .byTruncatingTail
             label.translatesAutoresizingMaskIntoConstraints = false
-            cellView.textField = label
+            label.tag = 200
             cellView.addSubview(label)
             NSLayoutConstraint.activate([
                 label.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 8),
@@ -1104,7 +1108,7 @@ private extension WorktreeSidePanelViewController {
                 label.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
             ])
         }
-        cellView.textField?.stringValue = title
+        (cellView.viewWithTag(200) as? NSTextField)?.stringValue = title
         return cellView
     }
 
