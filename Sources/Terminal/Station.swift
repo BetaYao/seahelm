@@ -432,10 +432,10 @@ class Station {
     }
 
     /// Press ctrl+v as a real key event. Agent TUIs bind it to paste-image
-    /// (Claude Code's `chat:imagePaste`, see `AgentImagePaste`); sent through
-    /// `sendText` it would sit inside a bracketed paste and never read as a key.
-    /// Built like a real ctrl+v keyDown — no text — so Ghostty encodes the chord
-    /// for whatever keyboard protocol the pane has enabled.
+    /// (Claude Code, Codex, Cursor Agent, OpenCode — see `AgentImagePaste`);
+    /// sent through `sendText` it would sit inside a bracketed paste and never
+    /// read as a key. Built like a real ctrl+v keyDown — no text — so Ghostty
+    /// encodes the chord for whatever keyboard protocol the pane has enabled.
     func sendImagePasteKey() {
         guard let surface else { return }
         var press = ghostty_input_key_s()

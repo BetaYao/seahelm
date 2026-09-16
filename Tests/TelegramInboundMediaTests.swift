@@ -125,4 +125,25 @@ final class TelegramInboundMediaTests: XCTestCase {
         XCTAssertTrue(TelegramChannel.isSlashCommand("/go #3"))
         XCTAssertTrue(TelegramChannel.isSlashCommand("/status@seahelm_bot"))
     }
+
+    func testPeelCachedMediaSeparatesCaptionFromImagePaths() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seahelm-tg-peel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let image = root.appendingPathComponent("shot.jpg")
+        try Data([0xFF, 0xD8, 0xFF]).write(to: image) // minimal jpeg magic
+
+        let composed = TelegramInboundMedia.composeOrderText(
+            paths: [image], caption: "what is this?")
+        let peeled = TelegramInboundMedia.peelCachedMedia(
+            from: composed, root: root)
+        XCTAssertEqual(peeled.urls.map(\.path), [image.standardizedFileURL.path])
+        XCTAssertEqual(peeled.prose, "what is this?")
+
+        let pathOnly = TelegramInboundMedia.peelCachedMedia(
+            from: image.path, root: root)
+        XCTAssertEqual(pathOnly.urls.map(\.path), [image.standardizedFileURL.path])
+        XCTAssertEqual(pathOnly.prose, "")
+    }
 }

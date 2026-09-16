@@ -54,6 +54,49 @@ enum TelegramInboundMedia {
         }
         return fallback
     }
+
+    /// Split an order into cached Telegram image paths and the remaining prose
+    /// (caption). Lines whose every whitespace token is an image under `root`
+    /// are peeled; everything else stays as text for the agent.
+    static func peelCachedMedia(
+        from text: String,
+        root: URL = TelegramMediaStore.defaultRoot,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> (urls: [URL], prose: String) {
+        let rootLower = root.standardizedFileURL.path.lowercased()
+        var urls: [URL] = []
+        var proseLines: [String] = []
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let tokens = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            guard !tokens.isEmpty else {
+                proseLines.append(line)
+                continue
+            }
+            var lineURLs: [URL] = []
+            var allMedia = true
+            for token in tokens {
+                let path = URL(fileURLWithPath: token).standardizedFileURL.path
+                let ext = (path as NSString).pathExtension.lowercased()
+                if path.lowercased().hasPrefix(rootLower),
+                   imageExtensions.contains(ext),
+                   fileExists(token) || fileExists(path) {
+                    lineURLs.append(URL(fileURLWithPath: path))
+                } else {
+                    allMedia = false
+                    break
+                }
+            }
+            if allMedia {
+                urls.append(contentsOf: lineURLs)
+            } else {
+                proseLines.append(line)
+            }
+        }
+        let prose = proseLines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (urls, prose)
+    }
 }
 
 /// Writes downloaded Telegram media under the caches directory.

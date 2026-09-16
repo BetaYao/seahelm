@@ -761,18 +761,37 @@ class AgentRegistry {
         // is what silently swallowed every message sent to a backgrounded pane
         // from Telegram, mail, and the control socket alike.
         if let station, station.canDeliverInput {
-            // Send the text first, then the Enter as a separate write. Agent TUIs
-            // (Claude Code, codex) treat a `\r` arriving in the same burst as the
-            // pasted text as a literal newline (multiline input) instead of a
-            // submit, so the order text lands but never sends. A short gap lets the
-            // TUI finish ingesting the paste before the Return submits it.
-            DispatchQueue.main.async {
-                station.sendText(command)
-                // Submit via a real Return key event (not "\r" text), after a beat
-                // so the TUI finishes ingesting the pasted text first.
-                DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
-                    station.sendEnterKey()
+            let agent = pane(for: terminalID)?.agentType
+            let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
+            // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
+            // Images land in the composer only — no Enter — so the operator can
+            // add more context before submitting. Plain text still auto-sends.
+            if !images.isEmpty, AgentImagePaste.supports(agent) {
+                DispatchQueue.main.async {
+                    AgentImagePaste.attach(images, to: station) { notAttached in
+                        var rest = prose
+                        if !notAttached.isEmpty {
+                            let paths = notAttached.map { ShellEscape.backslash($0.path) }
+                                .joined(separator: " ")
+                            rest = [prose, paths].filter { !$0.isEmpty }.joined(separator: "\n")
+                        }
+                        if !rest.isEmpty {
+                            station.sendText(rest)
+                        }
+                    }
                 }
+                return
+            }
+            // Cached media typed as paths (agents without image-paste) also stay
+            // unsubmitted; only pure prose hits Enter.
+            if !images.isEmpty {
+                DispatchQueue.main.async {
+                    station.sendText(command)
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                Self.submitTypedInput(command, on: station)
             }
             return
         }
@@ -789,6 +808,16 @@ class AgentRegistry {
             // the command line verbatim.
             if !sessionKey.isEmpty, ZmxChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
             channel?.sendCommand(command)
+        }
+    }
+
+    /// Type `text` then Return after `enterSubmitDelay`. Used for prose-only
+    /// orders; image/attachment delivery never calls this.
+    private static func submitTypedInput(_ text: String, on station: Station) {
+        guard !text.isEmpty else { return }
+        station.sendText(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
+            station.sendEnterKey()
         }
     }
 
