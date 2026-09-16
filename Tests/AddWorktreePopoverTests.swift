@@ -60,7 +60,11 @@ final class AddWorktreePopoverTests: XCTestCase {
         XCTAssertEqual(controller.thumbnailCountForTesting, 1)
 
         controller.submitForTesting()
-        XCTAssertEqual(submitted, "fix this layout /tmp/shot-b.png")
+        XCTAssertEqual(
+            submitted,
+            TelegramInboundMedia.composeOrderText(
+                paths: [URL(fileURLWithPath: "/tmp/shot-b.png")],
+                caption: "fix this layout"))
     }
 
     func testPopoverGrowsOnlyWhenAttachmentsArePresent() {
@@ -85,7 +89,11 @@ final class AddWorktreePopoverTests: XCTestCase {
 
         controller.submitForTesting()
 
-        XCTAssertEqual(submitted, "/tmp/shot-a.png")
+        XCTAssertEqual(
+            submitted,
+            TelegramInboundMedia.composeOrderText(
+                paths: [URL(fileURLWithPath: "/tmp/shot-a.png")],
+                caption: nil))
         XCTAssertNil(controller.errorTextForTesting)
     }
 
@@ -93,6 +101,28 @@ final class AddWorktreePopoverTests: XCTestCase {
         let controller = makeLoadedController()
         XCTAssertEqual(controller.agentChoiceTitlesForTesting,
                        AddWorktreePopoverController.agentChoices.map(\.displayName))
+    }
+
+    /// A screenshot puts only PNG/TIFF on the clipboard. Stock NSTextView disables
+    /// Paste for that, so ⌘V never reached the task field's image handling.
+    func testPasteIsEnabledWhenTheClipboardHoldsOnlyAnImage() {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("seahelm-tests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        let image = NSImage(size: NSSize(width: 4, height: 4), flipped: false) { rect in
+            NSColor.systemTeal.setFill()
+            rect.fill()
+            return true
+        }
+        let png = NSBitmapImageRep(data: image.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+        pasteboard.setData(png, forType: .png)
+
+        let taskField = GrowingTextView()
+        taskField.pasteboard = pasteboard
+        taskField.onPasteImage = { _ in }
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+
+        XCTAssertTrue(taskField.validateUserInterfaceItem(pasteItem))
     }
 
     private func makeLoadedController() -> AddWorktreePopoverController {

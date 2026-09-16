@@ -754,7 +754,12 @@ class AgentRegistry {
     /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,
     /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
     /// only when the surface isn't available (e.g. pane not currently rendered).
-    func sendCommand(to terminalID: String, command: String) {
+    /// Send a command to a specific agent.
+    /// - Parameter submitWithAttachments: When the command peels to images,
+    ///   default behaviour leaves them in the composer (Telegram / mail — let
+    ///   the operator add a note). Pass `true` for automated first-brief
+    ///   delivery after a new worktree launch so the agent actually starts.
+    func sendCommand(to terminalID: String, command: String, submitWithAttachments: Bool = false) {
         let station = StationRegistry.shared.station(forId: terminalID)
         // `canDeliverInput`, not merely "a Station exists" — the two come apart
         // for any pane whose tab has not been opened in this run, and that gap
@@ -764,8 +769,8 @@ class AgentRegistry {
             let agent = pane(for: terminalID)?.agentType
             let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
             // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
-            // Images land in the composer only — no Enter — so the operator can
-            // add more context before submitting. Plain text still auto-sends.
+            // Images land in the composer; Enter only when the caller opts in
+            // (fresh worktree brief). Plain text still auto-sends.
             if !images.isEmpty, AgentImagePaste.supports(agent) {
                 DispatchQueue.main.async {
                     AgentImagePaste.attach(images, to: station) { notAttached in
@@ -778,15 +783,24 @@ class AgentRegistry {
                         if !rest.isEmpty {
                             station.sendText(rest)
                         }
+                        if submitWithAttachments {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
+                                station.sendEnterKey()
+                            }
+                        }
                     }
                 }
                 return
             }
-            // Cached media typed as paths (agents without image-paste) also stay
-            // unsubmitted; only pure prose hits Enter.
+            // Agents without image-paste: paths stay as text. Submit only when
+            // asked (same policy as the paste path above).
             if !images.isEmpty {
                 DispatchQueue.main.async {
-                    station.sendText(command)
+                    if submitWithAttachments {
+                        Self.submitTypedInput(command, on: station)
+                    } else {
+                        station.sendText(command)
+                    }
                 }
                 return
             }

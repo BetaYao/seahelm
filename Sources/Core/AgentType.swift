@@ -111,17 +111,28 @@ enum AgentType: String, Codable, CaseIterable {
 
     /// Testable overload — avoids Config.load() in unit tests.
     func launchCommand(withTask task: String, agentYolo: Bool) -> String? {
-        guard let base = launchCommand else { return nil }
-        var cmd = base
-        if agentYolo, let yolo = yoloFlag {
-            cmd += " \(yolo)"
-        }
+        guard var cmd = bareLaunchCommand(agentYolo: agentYolo) else { return nil }
         if let flag = appendSystemPromptFlag {
             cmd += " \(flag) \(ShellEscape.singleQuote(Self.suggestInstruction))"
         }
         let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             cmd += " \(ShellEscape.singleQuote(trimmed))"
+        }
+        return cmd
+    }
+
+    /// Binary + optional yolo flag only. Used when the command is *typed* into
+    /// a PTY (`zmx run`): long quoted argv (task text, `--append-system-prompt`)
+    /// gets truncated mid-line and leaves the shell waiting on an unclosed
+    /// quote. The initial task is injected afterward via
+    /// `InitialAgentTaskDelivery`; suggest guidance is already written into the
+    /// worktree's `CLAUDE.md` / `AGENTS.md` by `SuggestGuidanceWriter`.
+    func bareLaunchCommand(agentYolo: Bool = Config.load().agentYolo) -> String? {
+        guard let base = launchCommand else { return nil }
+        var cmd = base
+        if agentYolo, let yolo = yoloFlag {
+            cmd += " \(yolo)"
         }
         return cmd
     }
