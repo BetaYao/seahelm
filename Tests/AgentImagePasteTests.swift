@@ -42,7 +42,11 @@ final class AgentImagePasteTests: XCTestCase {
 
     func testOnlyClaudeCodeAttachesImages() {
         XCTAssertTrue(AgentImagePaste.supports(.claudeCode))
-        XCTAssertFalse(AgentImagePaste.supports(.codex))
+        XCTAssertTrue(AgentImagePaste.supports(.codex))
+        XCTAssertTrue(AgentImagePaste.supports(.cursor))
+        XCTAssertTrue(AgentImagePaste.supports(.openCode))
+        XCTAssertFalse(AgentImagePaste.supports(.gemini))
+        XCTAssertFalse(AgentImagePaste.supports(.shellCommand))
         XCTAssertFalse(AgentImagePaste.supports(nil))
     }
 

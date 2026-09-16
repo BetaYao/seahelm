@@ -6,10 +6,9 @@ import UniformTypeIdentifiers
 /// itself — image on the clipboard, then its paste-image key — so a drop lands
 /// as an attachment (Claude Code's `[Image #1]`) instead of a path.
 ///
-/// Only agents whose image paste is known qualify. Claude Code binds
-/// `chat:imagePaste` to ctrl+v on macOS and reads the clipboard with
-/// `osascript -e 'the clipboard as «class PNGf»'`, so each image goes up as PNG.
-/// Shells, other agents and non-image files keep getting paths.
+/// Claude Code, Codex, Cursor Agent, and OpenCode all bind image paste to
+/// ctrl+v on macOS (not cmd+v) and read a PNG from the clipboard. Shells and
+/// other agents keep getting paths.
 enum AgentImagePaste {
     /// How long the agent gets to read the clipboard before the next image
     /// replaces it. Claude Code shells out to osascript for every paste.
@@ -17,8 +16,12 @@ enum AgentImagePaste {
     /// Extra time after the last image before the user's clipboard comes back.
     static let restoreDelay: TimeInterval = 1.5
 
+    /// Agents known to attach a clipboard PNG on ctrl+v.
     static func supports(_ agent: AgentType?) -> Bool {
-        agent == .claudeCode
+        switch agent {
+        case .claudeCode, .codex, .cursor, .openCode: return true
+        default: return false
+        }
     }
 
     /// Whether `url` names an image by its type (png, jpeg, heic, gif, webp…).
