@@ -62,7 +62,7 @@ final class IntegrationBuilderTests: XCTestCase {
         ))
         XCTAssertEqual(result.included, ["agentB"])
         XCTAssertEqual(result.excluded, [
-            IntegrationExclusion(label: "agentC", conflictingPaths: ["shared.txt"]),
+            IntegrationExclusion(label: "agentC", conflictingPaths: ["shared.txt"], against: "agentB"),
         ])
         XCTAssertTrue(result.conflictedPaths.isEmpty)
         // agentB won the file, and agentC's own work went with the exclusion.
@@ -148,6 +148,68 @@ final class IntegrationBuilderTests: XCTestCase {
             sources: [bogus, source("agentA", repo: repo)]))
         XCTAssertEqual(result.included, ["agentA"])
         XCTAssertEqual(result.excluded.map(\.label), ["ghost"])
+    }
+
+    /// Tip already reachable from the accumulator (same commit or ancestor)
+    /// must count as included without another merge — re-folding it is what
+    /// manufactures fake conflicts against work that is already in.
+    func testTipAlreadyInAccumulatorIsIncludedWithoutRemerge() throws {
+        let repo = try makeFleet()
+        let a = source("agentA", repo: repo)
+        let result = try XCTUnwrap(IntegrationBuilder.build(
+            repoPath: repo, base: "main",
+            sources: [a, IntegrationSource(label: "agentA-again", commit: a.commit)]
+        ))
+        XCTAssertEqual(result.included, ["agentA", "agentA-again"])
+        XCTAssertTrue(result.excluded.isEmpty)
+        XCTAssertEqual(filesIn(commit: result.commit, repo: repo),
+                       ["a.txt", "base.txt", "shared.txt"])
+        // First-parent chain is one integrate commit; the duplicate tip must
+        // not mint another. (Plain `base..commit` also counts the side tip.)
+        let integrateSteps = gitOutput(
+            ["rev-list", "--count", "--first-parent", "\(result.base)..\(result.commit)"], in: repo)
+        XCTAssertEqual(integrateSteps, "1", "re-including an already-present tip must not mint another integrate commit")
+    }
+
+    /// Rebased / cherry-equivalent tips are already in for the same reason:
+    /// nothing unique remains on the right after `--cherry-pick`.
+    func testCherryEquivalentTipIsTreatedAsAlreadyIncluded() throws {
+        let repo = try makeFleet()
+        // agentA's patch, replayed as a fresh commit on main — same tree delta,
+        // different SHA, so ancestry alone would miss it.
+        runGit(["checkout", "main"], in: repo)
+        runGit(["checkout", "-b", "agentA-replay", "main"], in: repo)
+        try "A\n".write(toFile: repo + "/a.txt", atomically: true, encoding: .utf8)
+        commitAll(repo, "agentA replay")
+        let replay = source("agentA-replay", repo: repo)
+        runGit(["checkout", "main"], in: repo)
+
+        let result = try XCTUnwrap(IntegrationBuilder.build(
+            repoPath: repo, base: "main",
+            sources: [source("agentA", repo: repo), replay]
+        ))
+        XCTAssertEqual(result.included, ["agentA", "agentA-replay"])
+        XCTAssertTrue(result.excluded.isEmpty)
+        let integrateSteps = gitOutput(
+            ["rev-list", "--count", "--first-parent", "\(result.base)..\(result.commit)"], in: repo)
+        XCTAssertEqual(integrateSteps, "1")
+    }
+
+    /// Exclusion must name the side already in the accumulator, not only the
+    /// paths — otherwise operators guess which worktree won the file.
+    func testExclusionNamesWhoItCollidedWith() throws {
+        let repo = try makeFleet()
+        let result = try XCTUnwrap(IntegrationBuilder.build(
+            repoPath: repo,
+            base: "main",
+            sources: [source("agentB", repo: repo), source("agentC", repo: repo)]
+        ))
+        XCTAssertEqual(result.excluded, [
+            IntegrationExclusion(
+                label: "agentC",
+                conflictingPaths: ["shared.txt"],
+                against: "agentB"),
+        ])
     }
 
     /// The safety property the whole design rests on.

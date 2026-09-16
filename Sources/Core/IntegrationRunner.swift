@@ -29,7 +29,12 @@ struct IntegrationRunReport: Equatable {
             ? "integration · empty"
             : "integration · \(result.included.count) worktree\(result.included.count == 1 ? "" : "s")"
         if !result.excluded.isEmpty {
-            line += " · excluded \(result.excluded.map(\.label).joined(separator: ", "))"
+            line += " · excluded " + result.excluded.map { exclusion in
+                if let against = exclusion.against, !against.isEmpty {
+                    return "\(exclusion.label) vs \(against)"
+                }
+                return exclusion.label
+            }.joined(separator: ", ")
         }
         if !committedOnly.isEmpty {
             // Ambient, not a card: an agent still working is the normal case,
@@ -62,7 +67,8 @@ struct IntegrationRunReport: Equatable {
             line: cardLine,
             included: result.included,
             excluded: result.excluded.map {
-                IntegrationPanelState.Excluded(label: $0.label, paths: $0.conflictingPaths)
+                IntegrationPanelState.Excluded(
+                    label: $0.label, paths: $0.conflictingPaths, against: $0.against)
             },
             conflictedPaths: result.conflictedPaths,
             isHeld: held,
@@ -108,9 +114,13 @@ struct IntegrationRunReport: Equatable {
         }
         if !result.excluded.isEmpty {
             let details = result.excluded.map { exclusion -> String in
-                exclusion.conflictingPaths.isEmpty
-                    ? exclusion.label
-                    : "\(exclusion.label) (\(exclusion.conflictingPaths.joined(separator: ", ")))"
+                var head = exclusion.label
+                if let against = exclusion.against, !against.isEmpty {
+                    head += " vs \(against)"
+                }
+                return exclusion.conflictingPaths.isEmpty
+                    ? head
+                    : "\(head) (\(exclusion.conflictingPaths.joined(separator: ", ")))"
             }
             parts.append("excluded \(details.joined(separator: "; "))")
         }

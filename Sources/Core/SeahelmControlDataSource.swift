@@ -284,7 +284,11 @@ final class SeahelmControlDataSource: ControlDataSource {
             if let state = IntegrationStatusStore.shared.state(forWorktree: checkout) {
                 entry["line"] = state.line
                 entry["included"] = state.included
-                entry["excluded"] = state.excluded.map { ["label": $0.label, "paths": $0.paths] }
+                entry["excluded"] = state.excluded.map { item -> [String: Any] in
+                    var row: [String: Any] = ["label": item.label, "paths": item.paths]
+                    if let against = item.against { row["against"] = against }
+                    return row
+                }
                 entry["conflicted_paths"] = state.conflictedPaths
                 entry["held"] = state.isHeld
                 if let paths = state.heldPaths { entry["held_paths"] = paths }
