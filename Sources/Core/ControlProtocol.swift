@@ -123,6 +123,8 @@ protocol ControlDataSource: AnyObject {
     /// any path inside a repo (an agent's cwd, usually) and narrows the answer
     /// to that repo; nil returns every checkout.
     func integrationStatus(path: String?) -> [String: Any]?
+    /// Recent MessageStream events for one pane, or all panes when `paneId` is nil.
+    func messageSnapshot(paneId: String?) -> [[String: Any]]
 }
 
 extension ControlDataSource {
@@ -145,6 +147,7 @@ extension ControlDataSource {
     func wakePane(paneId: String?) -> [String]? { nil }
     func memoryStats() -> [String: Any]? { nil }
     func integrationStatus(path: String?) -> [String: Any]? { nil }
+    func messageSnapshot(paneId: String?) -> [[String: Any]] { [] }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -399,6 +402,11 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "no integration state")
             }
             return .ok(detail)
+
+        case "message.snapshot":
+            let paneId = params["pane_id"] as? String
+            let messages = dataSource?.messageSnapshot(paneId: paneId) ?? []
+            return .ok(["messages": messages])
 
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)

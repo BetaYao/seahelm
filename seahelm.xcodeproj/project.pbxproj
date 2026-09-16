@@ -98,6 +98,7 @@
 		34295E2A78AAF5B432E08698 /* PiExtensionInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */; };
 		346BF50E3F02C947F8D62DB5 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 887D8D47490B9D11BC6072DA /* JetBrainsMono-Regular.ttf */; };
 		3498F0F3D7028F811DF7DF34 /* HeadlessCommandHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEA86B38AB3BEE8AA18906A /* HeadlessCommandHost.swift */; };
+		34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */; };
 		350E1C39CF2682EBE1BC9E3D /* TerminalTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F029A5E271BDEEF49A54B1E /* TerminalTranscript.swift */; };
 		35A6DB4DA447049F72CAA83D /* VolumePresenceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927530C926CA58BD88B3AB91 /* VolumePresenceMonitor.swift */; };
 		35B413CAB65CDFC7F5994E84 /* ActivityEventExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7282FEF43CB2989F9CE4859B /* ActivityEventExtractor.swift */; };
@@ -1009,6 +1010,7 @@
 		E1FA2EB699654E9A701124D1 /* WorktreeShellActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeShellActions.swift; sourceTree = "<group>"; };
 		E2BAEF3139798D53AE355496 /* GitProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitProcess.swift; sourceTree = "<group>"; };
 		E32DE93C37CE90D70B03D84D /* GmailOAuthCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthCredentialStore.swift; sourceTree = "<group>"; };
+		E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlMessageSnapshotTests.swift; sourceTree = "<group>"; };
 		E4347F9E7EF04217AB29D93E /* ChromeIconButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeIconButton.swift; sourceTree = "<group>"; };
 		E48EF7634B86F69D2FCA6759 /* WorktreeReturnPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeReturnPlannerTests.swift; sourceTree = "<group>"; };
 		E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */ = {isa = PBXFileReference; path = ghostty.conf; sourceTree = "<group>"; };
@@ -1547,6 +1549,7 @@
 				C30353E5B3401026090F247F /* CommandParserTests.swift */,
 				B93F28C39550D1DFF047CEC1 /* CommandSessionStoreTests.swift */,
 				B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */,
+				E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */,
 				4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */,
 				536A8D31229E4F3D3D5D4DE8 /* ControlSocketServerTests.swift */,
 				5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */,
@@ -2128,6 +2131,7 @@
 				57C58092E1257638F545FA4E /* CommandParserTests.swift in Sources */,
 				C8EC73DE95B9FA8B8B73013D /* CommandSessionStoreTests.swift in Sources */,
 				E3B3F5D302481F3DF776ED95 /* ConfigTests.swift in Sources */,
+				34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */,
 				C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */,
 				1F17BE40E11A063D21FD2B1C /* ControlSocketServerTests.swift in Sources */,
 				B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */,
