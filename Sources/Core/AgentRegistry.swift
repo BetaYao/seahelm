@@ -764,8 +764,8 @@ class AgentRegistry {
             let agent = pane(for: terminalID)?.agentType
             let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
             // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
-            // Typing a path alone never becomes `[Image #n]` — paste first, then
-            // any caption, then Enter.
+            // Images land in the composer only — no Enter — so the operator can
+            // add more context before submitting. Plain text still auto-sends.
             if !images.isEmpty, AgentImagePaste.supports(agent) {
                 DispatchQueue.main.async {
                     AgentImagePaste.attach(images, to: station) { notAttached in
@@ -775,8 +775,18 @@ class AgentRegistry {
                                 .joined(separator: " ")
                             rest = [prose, paths].filter { !$0.isEmpty }.joined(separator: "\n")
                         }
-                        Self.submitTypedInput(rest, on: station)
+                        if !rest.isEmpty {
+                            station.sendText(rest)
+                        }
                     }
+                }
+                return
+            }
+            // Cached media typed as paths (agents without image-paste) also stay
+            // unsubmitted; only pure prose hits Enter.
+            if !images.isEmpty {
+                DispatchQueue.main.async {
+                    station.sendText(command)
                 }
                 return
             }
@@ -801,13 +811,11 @@ class AgentRegistry {
         }
     }
 
-    /// Type `text` (if any) then Return after `enterSubmitDelay`. Image-only
-    /// Telegram orders call this with an empty string so Enter alone submits
-    /// the already-pasted attachments.
+    /// Type `text` then Return after `enterSubmitDelay`. Used for prose-only
+    /// orders; image/attachment delivery never calls this.
     private static func submitTypedInput(_ text: String, on station: Station) {
-        if !text.isEmpty {
-            station.sendText(text)
-        }
+        guard !text.isEmpty else { return }
+        station.sendText(text)
         DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
             station.sendEnterKey()
         }
