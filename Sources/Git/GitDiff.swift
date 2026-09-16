@@ -4,6 +4,8 @@ enum GitChangeStage: Equatable {
     case staged
     case unstaged
     case untracked
+    /// Committed on the branch, but not yet in its base.
+    case committed
 }
 
 struct GitChangedFile {
@@ -82,26 +84,85 @@ struct DiffLine {
     }
 }
 
-/// Files changed on this worktree relative to a base branch (typically main),
-/// including commits and the dirty working tree.
+/// A PR merged into the base, named by its last commit. Everything up to that
+/// commit is in the base, whatever the base has done to those files since.
+struct MergedPRHead: Equatable {
+    let number: Int
+    let headSHA: String
+}
+
+/// Merged PRs for a branch into a base branch, newest merge first.
+typealias MergedPRProvider = (_ worktreePath: String, _ branch: String, _ baseBranch: String) -> [MergedPRHead]
+
+/// What "still outstanding" was measured against.
+enum GitChangesBasis: Equatable {
+    /// Only work after a merged PR's head commit.
+    case sinceMergedPR(MergedPRHead, baseRef: String)
+    /// What merging HEAD into the base would change.
+    case mergeResult(baseRef: String)
+    /// No base ref: the working tree's own status only.
+    case workingTree
+}
+
+/// What this worktree still has to get into its base (typically main): its
+/// uncommitted work, plus committed work the base does not have yet.
 struct GitBranchChanges {
-    /// Resolved compare base (`origin/main`, `main`, …). `nil` when falling
-    /// back to working-tree `git status` only.
-    let baseRef: String?
+    let basis: GitChangesBasis
     /// Newest-first slice, capped at `GitDiff.maxListedChangedFiles`.
     let files: [GitChangedFile]
     /// Full change count before capping.
     let totalCount: Int
+    /// Committed files that would conflict when merged into the base.
+    let conflictedPaths: Set<String>
+    /// The commit the diff view compares the working tree against; nil when
+    /// there is only the index and working tree to go on.
+    let diffAnchor: String?
+    /// Last fetch of the base's remote. Nil for a local base.
+    let fetchedAt: Date?
+
+    init(
+        basis: GitChangesBasis,
+        files: [GitChangedFile],
+        totalCount: Int,
+        conflictedPaths: Set<String> = [],
+        diffAnchor: String? = nil,
+        fetchedAt: Date? = nil
+    ) {
+        self.basis = basis
+        self.files = files
+        self.totalCount = totalCount
+        self.conflictedPaths = conflictedPaths
+        self.diffAnchor = diffAnchor
+        self.fetchedAt = fetchedAt
+    }
+
+    /// Resolved compare base (`origin/main`, `main`, …). `nil` when falling
+    /// back to working-tree `git status` only.
+    var baseRef: String? {
+        switch basis {
+        case .sinceMergedPR(_, let baseRef), .mergeResult(let baseRef): return baseRef
+        case .workingTree: return nil
+        }
+    }
+
+    var mergedPR: MergedPRHead? {
+        if case .sinceMergedPR(let pr, _) = basis { return pr }
+        return nil
+    }
 
     var isTruncated: Bool { files.count < totalCount }
 
+    var uncommittedFiles: [GitChangedFile] { files.filter { $0.stage != .committed } }
+    var committedFiles: [GitChangedFile] { files.filter { $0.stage == .committed } }
+
     /// Short label for UI (“main” rather than “origin/main”).
     var baseDisplayName: String? {
-        guard let baseRef else { return nil }
-        if baseRef.hasPrefix("origin/") {
-            return String(baseRef.dropFirst("origin/".count))
-        }
-        return baseRef
+        baseRef.map(Self.branchName(of:))
+    }
+
+    /// The branch a base ref names: `main` for `origin/main`.
+    static func branchName(of baseRef: String) -> String {
+        baseRef.hasPrefix("origin/") ? String(baseRef.dropFirst("origin/".count)) : baseRef
     }
 }
 
@@ -128,10 +189,10 @@ enum GitDiff {
         return files
     }
 
-    /// Snapshot of this worktree vs its base branch (merge-base with main/master).
-    /// Includes committed-on-branch changes, staged/unstaged edits, and untracked
-    /// files — so Changes stays populated after commit/push until merged to base.
-    /// Diff content is limited to the same recent-file cap as the Changes list.
+    /// Diffs for the files `branchChangedFiles` lists, each against that list's
+    /// `diffAnchor`: the merge base, or a merged PR's head so already-merged work
+    /// is not shown again. Diff content is limited to the same recent-file cap as
+    /// the Changes list.
     static func snapshot(
         worktreePath: String,
         maxSyntheticFileBytes: Int = 128 * 1024,
@@ -148,13 +209,13 @@ enum GitDiff {
         let paths = changed.map(\.path)
 
         let files: [DiffFile]
-        if let mergeBase = mergeBase(with: branch.baseRef, worktreePath: worktreePath) {
+        if let anchor = branch.diffAnchor {
             let output: String
             if paths.isEmpty {
                 output = ""
             } else {
                 output = runGit(
-                    args: ["diff", "--no-color", "-M", mergeBase, "--"] + paths,
+                    args: ["diff", "--no-color", "-M", anchor, "--"] + paths,
                     in: worktreePath
                 ) ?? ""
             }
@@ -226,11 +287,20 @@ enum GitDiff {
         branchChangedFiles(worktreePath: worktreePath).files
     }
 
-    /// Branch-relative change list: `git diff <merge-base(base)>` plus untracked.
-    /// Files whose content already matches the current base are omitted. This
-    /// keeps a squash-merged PR from lingering merely because its commits are
-    /// not ancestors of the new base tip.
-    /// Falls back to porcelain `git status` when no base ref exists.
+    /// What this worktree still has to get into its base: uncommitted work
+    /// (tracked edits against HEAD, then untracked files), then committed work
+    /// the base does not have.
+    ///
+    /// A squash merge puts a branch's changes on the base without any of its
+    /// commits, so committed work is measured one of two ways:
+    ///  - If the branch has a merged PR whose head it still contains, only what
+    ///    came after that head. The PR's head is the one exact record of what
+    ///    went in, so the base editing the same files later does not matter.
+    ///  - Otherwise, what merging HEAD into the base would change
+    ///    (`git merge-tree`); changes already in the base merge to nothing. The
+    ///    gap: if the base has since edited the same lines, the merge conflicts
+    ///    and the file is listed, flagged in `conflictedPaths`.
+    /// Falls back to working-tree status when no base ref exists.
     /// When over `limit`, keeps the most recently modified files.
     static func branchChangedFiles(
         worktreePath: String,
@@ -239,64 +309,154 @@ enum GitDiff {
         branchChangedFiles(
             worktreePath: worktreePath,
             limit: limit,
-            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath)
+            recordedBase: WorktreeBaseBranchStore.shared.baseBranch(forWorktree: worktreePath),
+            mergedPRs: MergedPRLookup.shared.mergedPRs
         )
     }
 
-    /// Seam for tests — see `resolveBaseRef(worktreePath:recordedBase:)`.
+    /// Seam for tests — see `resolveBaseRef(worktreePath:recordedBase:)`. No
+    /// merged-PR lookup happens unless a provider is passed.
     static func branchChangedFiles(
         worktreePath: String,
         limit: Int = maxListedChangedFiles,
-        recordedBase: String?
+        recordedBase: String?,
+        mergedPRs: MergedPRProvider = { _, _, _ in [] }
     ) -> GitBranchChanges {
-        let uncapped: [GitChangedFile]
-        let baseRef: String?
-        if let resolved = resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase),
-           let mergeBase = mergeBase(with: resolved, worktreePath: worktreePath) {
-            baseRef = resolved
-            let nameStatus = runGit(
-                args: ["diff", "--name-status", "-z", "-M", mergeBase],
-                in: worktreePath
-            ) ?? ""
-            var entries = parseNameStatus(nameStatus, stage: .unstaged)
+        let uncommitted = uncommittedChanges(worktreePath: worktreePath)
 
-            // A squash merge reproduces a branch's tree changes on the base
-            // with a new commit, so the merge-base range still names them.
-            // Intersect that range with the current base diff: this preserves
-            // branch-only changes while dropping paths already on the base.
-            let currentBaseStatus = runGit(
-                args: ["diff", "--name-status", "-z", "-M", resolved],
-                in: worktreePath
-            ) ?? ""
-            let currentBaseEntries = parseNameStatus(currentBaseStatus, stage: .unstaged)
-            let currentBasePaths = Set(currentBaseEntries.flatMap { entry in
-                [entry.path, entry.oldPath].compactMap { $0 }
-            })
-            entries = entries.filter { entry in
-                currentBasePaths.contains(entry.path)
-                    || entry.oldPath.map(currentBasePaths.contains) == true
+        var basis = GitChangesBasis.workingTree
+        var committed: [GitChangedFile] = []
+        var conflicted: Set<String> = []
+        var anchor: String?
+        var fetchedAt: Date?
+
+        if let baseRef = resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase),
+           let mergeBase = mergeBase(with: baseRef, worktreePath: worktreePath) {
+            fetchedAt = lastFetchDate(for: baseRef, worktreePath: worktreePath)
+            if let pr = mergedPRHead(worktreePath: worktreePath, baseRef: baseRef, mergedPRs: mergedPRs) {
+                basis = .sinceMergedPR(pr, baseRef: baseRef)
+                anchor = pr.headSHA
+                committed = nameStatus(["diff", "--name-status", "-z", "-M", pr.headSHA, "HEAD"],
+                                       stage: .committed, in: worktreePath)
+            } else {
+                basis = .mergeResult(baseRef: baseRef)
+                anchor = mergeBase
+                if let merge = mergeTree(base: baseRef, worktreePath: worktreePath) {
+                    committed = nameStatus(["diff", "--name-status", "-z", "-M", baseRef, merge.tree],
+                                           stage: .committed, in: worktreePath)
+                    conflicted = merge.conflictedPaths
+                } else {
+                    committed = committedChangesByContent(
+                        mergeBase: mergeBase, baseRef: baseRef, worktreePath: worktreePath)
+                }
             }
-
-            let porcelain = runGit(
-                args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-                in: worktreePath
-            ) ?? ""
-            let known = Set(entries.map(\.path))
-            let untracked = parsePorcelainStatus(porcelain)
-                .filter { $0.stage == .untracked && !known.contains($0.path) }
-            entries.append(contentsOf: untracked)
-            uncapped = entries
-        } else {
-            baseRef = nil
-            let output = runGit(
-                args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-                in: worktreePath
-            ) ?? ""
-            uncapped = parsePorcelainStatus(output)
         }
 
+        // A file with uncommitted edits is listed once, as uncommitted: it has
+        // to be committed before it can go anywhere.
+        let uncommittedPaths = Set(uncommitted.flatMap { [$0.path, $0.oldPath].compactMap { $0 } })
+        let outstanding = committed.filter { !uncommittedPaths.contains($0.path) }
+        let uncapped = uncommitted + outstanding
         let capped = capToRecentFiles(uncapped, worktreePath: worktreePath, limit: limit)
-        return GitBranchChanges(baseRef: baseRef, files: capped, totalCount: uncapped.count)
+        return GitBranchChanges(
+            basis: basis,
+            files: capped,
+            totalCount: uncapped.count,
+            conflictedPaths: conflicted,
+            diffAnchor: anchor,
+            fetchedAt: fetchedAt
+        )
+    }
+
+    /// Tracked edits against HEAD, one entry per path however they are staged,
+    /// then untracked files. A repo with no commits has no HEAD to diff against,
+    /// so it gets plain status.
+    static func uncommittedChanges(worktreePath: String) -> [GitChangedFile] {
+        let status = parsePorcelainStatus(runGit(
+            args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            in: worktreePath
+        ) ?? "")
+        guard refExists("HEAD", worktreePath: worktreePath) else { return status }
+        var entries = nameStatus(["diff", "--name-status", "-z", "-M", "HEAD"], stage: .unstaged, in: worktreePath)
+        let known = Set(entries.map(\.path))
+        entries.append(contentsOf: status.filter { $0.stage == .untracked && !known.contains($0.path) })
+        return entries
+    }
+
+    /// The newest merged PR whose head this branch still contains. A head the
+    /// branch does not contain — history rewritten since, or never fetched —
+    /// says nothing about what is outstanding here.
+    private static func mergedPRHead(
+        worktreePath: String,
+        baseRef: String,
+        mergedPRs: MergedPRProvider
+    ) -> MergedPRHead? {
+        guard let branch = runGit(args: ["branch", "--show-current"], in: worktreePath)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty else { return nil }
+        let baseBranch = GitBranchChanges.branchName(of: baseRef)
+        guard branch != baseBranch else { return nil }
+        return mergedPRs(worktreePath, branch, baseBranch).first {
+            GitProcess.capture(["merge-base", "--is-ancestor", $0.headSHA, "HEAD"],
+                               in: worktreePath, timeout: gitTimeout).exitCode == 0
+        }
+    }
+
+    /// `git merge-tree --write-tree`: the tree that merging HEAD into `base`
+    /// would produce, and the paths it would conflict on. Nil when git cannot
+    /// say — older than 2.38, or any other failure.
+    static func mergeTree(base: String, worktreePath: String) -> (tree: String, conflictedPaths: Set<String>)? {
+        let result = GitProcess.capture(
+            ["merge-tree", "--write-tree", "-z", "--name-only", "--no-messages", base, "HEAD"],
+            in: worktreePath,
+            timeout: gitTimeout
+        )
+        guard let exitCode = result.exitCode else { return nil }
+        return parseMergeTree(result.stdout, exitCode: exitCode)
+    }
+
+    /// Exit 0 is a clean merge and 1 a conflicted one; anything else is an
+    /// error. The output is the tree id, then each conflicted path, all
+    /// NUL-terminated.
+    static func parseMergeTree(_ output: String, exitCode: Int32) -> (tree: String, conflictedPaths: Set<String>)? {
+        guard exitCode == 0 || exitCode == 1 else { return nil }
+        let fields = output.components(separatedBy: "\0")
+        guard let tree = fields.first?.trimmingCharacters(in: .whitespacesAndNewlines), !tree.isEmpty else {
+            return nil
+        }
+        let conflicted = exitCode == 1 ? Set(fields.dropFirst().filter { !$0.isEmpty }) : []
+        return (tree, conflicted)
+    }
+
+    /// For git without `merge-tree --write-tree`: the branch's own commits, less
+    /// paths whose content already matches the base. Unlike the merge result it
+    /// keeps a file the base has edited again since.
+    private static func committedChangesByContent(
+        mergeBase: String,
+        baseRef: String,
+        worktreePath: String
+    ) -> [GitChangedFile] {
+        let range = nameStatus(["diff", "--name-status", "-z", "-M", mergeBase, "HEAD"],
+                               stage: .committed, in: worktreePath)
+        let differing = Set(nameStatus(["diff", "--name-status", "-z", "-M", baseRef, "HEAD"],
+                                       stage: .committed, in: worktreePath)
+            .flatMap { [$0.path, $0.oldPath].compactMap { $0 } })
+        return range.filter { differing.contains($0.path) || $0.oldPath.map(differing.contains) == true }
+    }
+
+    /// When `baseRef`'s remote was last fetched (FETCH_HEAD's mtime). Nil for a
+    /// local branch, which no fetch updates.
+    static func lastFetchDate(for baseRef: String, worktreePath: String) -> Date? {
+        guard let fullName = runGit(args: ["rev-parse", "--symbolic-full-name", baseRef], in: worktreePath)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), fullName.hasPrefix("refs/remotes/"),
+              let commonDir = runGit(args: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                     in: worktreePath)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !commonDir.isEmpty else { return nil }
+        let fetchHead = URL(fileURLWithPath: commonDir).appendingPathComponent("FETCH_HEAD")
+        return (try? fetchHead.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    private static func nameStatus(_ args: [String], stage: GitChangeStage, in worktreePath: String) -> [GitChangedFile] {
+        parseNameStatus(runGit(args: args, in: worktreePath) ?? "", stage: stage)
     }
 
     /// Keep up to `limit` entries, preferring newest mtime. Deleted/missing paths

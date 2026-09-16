@@ -15,17 +15,126 @@ final class ChangeTreeNode {
     let path: String
     var entry: GitChangedFile?
     var children: [ChangeTreeNode] = []
+    /// A section heading ("Uncommitted", "Not in main"), not a directory.
+    let isGroup: Bool
 
     var isLeaf: Bool { entry != nil }
 
-    init(name: String, path: String, entry: GitChangedFile? = nil) {
+    init(name: String, path: String, entry: GitChangedFile? = nil, isGroup: Bool = false) {
         self.name = name
         self.path = path
         self.entry = entry
+        self.isGroup = isGroup
     }
 }
 
+/// One titled group of the Changes list.
+struct ChangeSection {
+    let title: String
+    let files: [GitChangedFile]
+}
+
+/// The Changes tab answers "what here still has to go in a PR?". These turn a
+/// `GitBranchChanges` into that answer's words, kept apart from the view so they
+/// can be tested.
+enum ChangesSummary {
+    /// Uncommitted work first — it has to be committed before anything else —
+    /// then committed work the base does not have. Empty groups are left out.
+    static func sections(for branch: GitBranchChanges) -> [ChangeSection] {
+        var sections: [ChangeSection] = []
+        let uncommitted = branch.uncommittedFiles
+        if !uncommitted.isEmpty {
+            sections.append(ChangeSection(title: "Uncommitted · \(uncommitted.count)", files: uncommitted))
+        }
+        let committed = branch.committedFiles
+        if !committed.isEmpty {
+            let label: String
+            switch branch.basis {
+            case .sinceMergedPR(let pr, _): label = "After #\(pr.number)"
+            case .mergeResult: label = "Not in \(branch.baseDisplayName ?? "base")"
+            case .workingTree: label = "Committed"
+            }
+            sections.append(ChangeSection(title: "\(label) · \(committed.count)", files: committed))
+        }
+        return sections
+    }
+
+    /// Header subtitle: how many files, and against what. A remote base fetched
+    /// over an hour ago says so, since the answer is only as fresh as the fetch.
+    static func subtitle(for branch: GitBranchChanges, now: Date = Date()) -> String {
+        var parts: [String] = []
+        if branch.files.isEmpty {
+            switch branch.basis {
+            case .sinceMergedPR(let pr, _): parts.append("merged in #\(pr.number)")
+            case .mergeResult: parts.append("clean · vs \(branch.baseDisplayName ?? "base")")
+            case .workingTree: parts.append("clean")
+            }
+        } else {
+            parts.append(branch.isTruncated
+                ? "\(branch.files.count) of \(branch.totalCount)"
+                : branch.files.count == 1 ? "1 file" : "\(branch.files.count) files")
+            switch branch.basis {
+            case .sinceMergedPR(let pr, _): parts.append("since #\(pr.number)")
+            case .mergeResult: parts.append("vs \(branch.baseDisplayName ?? "base")")
+            case .workingTree: break
+            }
+        }
+        if let fetchedAt = branch.fetchedAt, now.timeIntervalSince(fetchedAt) >= 3600 {
+            parts.append("fetched \(age(since: fetchedAt, now: now)) ago")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Tooltip on the subtitle: what the list was measured against.
+    static func explanation(for branch: GitBranchChanges) -> String {
+        switch branch.basis {
+        case .sinceMergedPR(let pr, let baseRef):
+            return "Not yet in a PR: uncommitted work, plus commits after #\(pr.number) "
+                + "(merged into \(baseRef) at \(pr.headSHA.prefix(9)))."
+        case .mergeResult(let baseRef):
+            var text = "Not yet in \(baseRef): uncommitted work, plus what merging this branch would change."
+            if !branch.conflictedPaths.isEmpty {
+                text += " ! marks a file that merge would conflict on — possibly work "
+                    + "already merged that \(baseRef) has since edited."
+            }
+            return text
+        case .workingTree:
+            return "No base branch found: uncommitted work only."
+        }
+    }
+
+    static func emptyMessage(for branch: GitBranchChanges) -> String {
+        if let pr = branch.mergedPR {
+            return "Nothing left to PR — everything here went in with #\(pr.number)"
+        }
+        return "No changes"
+    }
+
+    /// "45m", "3h", "2d".
+    static func age(since date: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
+        if minutes < 60 { return "\(minutes)m" }
+        if minutes < 60 * 24 { return "\(minutes / 60)h" }
+        return "\(minutes / (60 * 24))d"
+    }
+}
+
+/// A row of the flat Changes list: a section heading or a file.
+enum ChangeRow {
+    case group(String)
+    case file(GitChangedFile)
+}
+
 enum ChangeTreeBuilder {
+    /// One heading node per section, each holding that section's directory tree.
+    static func build(sections: [ChangeSection]) -> [ChangeTreeNode] {
+        sections.map { section in
+            let group = ChangeTreeNode(name: section.title, path: "", isGroup: true)
+            group.children = build(from: section.files)
+            return group
+        }
+    }
+
     static func build(from files: [GitChangedFile]) -> [ChangeTreeNode] {
         let root = ChangeTreeNode(name: "", path: "")
         var directoriesByPath: [String: ChangeTreeNode] = ["": root]
@@ -130,6 +239,8 @@ final class WorktreeSidePanelViewController: NSViewController {
     private var changesOutlineView: NSOutlineView?
     private var changesScrollView: NSScrollView?
     private var changedFiles: [GitChangedFile] = []
+    /// The flat list's rows: section headings with their files.
+    private var changeRows: [ChangeRow] = []
     private var changeTreeRoots: [ChangeTreeNode] = []
     private var changesListMode: ChangesListMode = .flat
     private var currentBranchChanges: GitBranchChanges?
@@ -228,7 +339,8 @@ final class WorktreeSidePanelViewController: NSViewController {
     }
 
     /// `◍ Title` + optional subtitle + hairline — same rhythm as First Mate.
-    private func makePaneHeader(title: String, subtitle: String = "", trailingView: NSView? = nil) -> NSView {
+    private func makePaneHeader(title: String, subtitle: String = "", subtitleToolTip: String? = nil,
+                                trailingView: NSView? = nil) -> NSView {
         let icon = NSTextField(labelWithString: "◍")
         icon.font = AppFont.mono(size: 13)
         icon.textColor = Self.sea
@@ -241,6 +353,10 @@ final class WorktreeSidePanelViewController: NSViewController {
         subLabel.font = AppFont.mono(size: 11)
         subLabel.textColor = Self.inkFaint
         subLabel.isHidden = subtitle.isEmpty
+        subLabel.toolTip = subtitleToolTip
+        // The subtitle gives way first in a narrow panel, not the title.
+        subLabel.lineBreakMode = .byTruncatingTail
+        subLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView(views: [icon, titleLabel, subLabel])
         row.orientation = .horizontal
@@ -614,7 +730,9 @@ final class WorktreeSidePanelViewController: NSViewController {
     private func presentChanges(_ branch: GitBranchChanges) {
         currentBranchChanges = branch
         changedFiles = branch.files
-        changeTreeRoots = ChangeTreeBuilder.build(from: branch.files)
+        let sections = ChangesSummary.sections(for: branch)
+        changeRows = sections.flatMap { [ChangeRow.group($0.title)] + $0.files.map(ChangeRow.file) }
+        changeTreeRoots = ChangeTreeBuilder.build(sections: sections)
         rebuildChangesView(branch)
     }
 
@@ -627,22 +745,6 @@ final class WorktreeSidePanelViewController: NSViewController {
         changesOutlineView = nil
         changesScrollView = nil
 
-        let subtitle: String
-        if changedFiles.isEmpty {
-            subtitle = branch.baseDisplayName.map { "clean · vs \($0)" } ?? "clean"
-        } else {
-            let countLabel: String
-            if branch.isTruncated {
-                countLabel = "\(changedFiles.count) of \(branch.totalCount)"
-            } else {
-                countLabel = "\(changedFiles.count) files"
-            }
-            if let base = branch.baseDisplayName {
-                subtitle = "\(countLabel) · vs \(base)"
-            } else {
-                subtitle = countLabel
-            }
-        }
         let modeButton = NSButton()
         modeButton.bezelStyle = .recessed
         modeButton.isBordered = false
@@ -659,7 +761,8 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         let header = makePaneHeader(
             title: "Changes",
-            subtitle: subtitle,
+            subtitle: ChangesSummary.subtitle(for: branch),
+            subtitleToolTip: ChangesSummary.explanation(for: branch),
             trailingView: changedFiles.isEmpty ? nil : modeButton
         )
         contentView.addSubview(header)
@@ -685,7 +788,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         let listTop = composition ?? header
 
         if changedFiles.isEmpty {
-            showPlaceholder("No changes", identifier: "sidePanel.changesEmpty", below: listTop)
+            showPlaceholder(ChangesSummary.emptyMessage(for: branch), identifier: "sidePanel.changesEmpty", below: listTop)
             return
         }
 
@@ -860,8 +963,8 @@ final class WorktreeSidePanelViewController: NSViewController {
     @objc private func changeRowClicked() {
         guard let tableView = changesTableView else { return }
         let row = tableView.clickedRow
-        guard row >= 0, row < changedFiles.count else { return }
-        handleChangeSelection(changedFiles[row].path)
+        guard row >= 0, row < changeRows.count, case .file(let entry) = changeRows[row] else { return }
+        handleChangeSelection(entry.path)
     }
 
     @objc private func changeTreeRowClicked() {
@@ -921,12 +1024,26 @@ extension WorktreeSidePanelViewController: NSTextFieldDelegate {
 
 extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        changedFiles.count
+        changeRows.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let entry = changedFiles[row]
-        return makeChangeCell(in: tableView, text: entry.path, entry: entry, identifier: "ChangeCell")
+        switch changeRows[row] {
+        case .group(let title):
+            return makeChangeGroupCell(in: tableView, title: title)
+        case .file(let entry):
+            return makeChangeCell(in: tableView, text: entry.path, entry: entry, identifier: "ChangeCell")
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        if case .group = changeRows[row] { return true }
+        return false
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if case .file = changeRows[row] { return true }
+        return false
     }
 }
 
@@ -943,6 +1060,14 @@ extension WorktreeSidePanelViewController: NSOutlineViewDataSource, NSOutlineVie
         return changeTreeRoots[index]
     }
 
+    func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
+        (item as? ChangeTreeNode)?.isGroup == true
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
+        (item as? ChangeTreeNode)?.isGroup != true
+    }
+
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         guard let node = item as? ChangeTreeNode else { return false }
         return !node.children.isEmpty
@@ -957,7 +1082,34 @@ extension WorktreeSidePanelViewController: NSOutlineViewDataSource, NSOutlineVie
 // MARK: - Changes cell helpers
 
 private extension WorktreeSidePanelViewController {
+    /// Section heading: "Uncommitted · 2", "Not in main · 5".
+    func makeChangeGroupCell(in view: NSTableView, title: String) -> NSTableCellView {
+        let id = NSUserInterfaceItemIdentifier("ChangeGroupCell")
+        let cellView: NSTableCellView
+        if let reused = view.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
+            cellView = reused
+        } else {
+            cellView = NSTableCellView()
+            cellView.identifier = id
+            let label = NSTextField(labelWithString: "")
+            label.font = AppFont.mono(size: 10.5, weight: .semibold)
+            label.textColor = Self.inkDim
+            label.lineBreakMode = .byTruncatingTail
+            label.translatesAutoresizingMaskIntoConstraints = false
+            cellView.textField = label
+            cellView.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 8),
+                label.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -8),
+                label.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+            ])
+        }
+        cellView.textField?.stringValue = title
+        return cellView
+    }
+
     func makeChangeTreeCell(in outlineView: NSOutlineView, node: ChangeTreeNode) -> NSTableCellView {
+        if node.isGroup { return makeChangeGroupCell(in: outlineView, title: node.name) }
         let id = NSUserInterfaceItemIdentifier("ChangeTreeCell")
         let cellView: NSTableCellView
         if let reused = outlineView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
@@ -1005,12 +1157,14 @@ private extension WorktreeSidePanelViewController {
 
         if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
             if let entry = node.entry {
-                let badge = statusBadge(for: entry.status)
+                let badge = statusBadge(for: entry)
                 badgeLabel.stringValue = badge.text
                 badgeLabel.textColor = badge.color
+                badgeLabel.toolTip = badge.toolTip
             } else {
                 badgeLabel.stringValue = ""
                 badgeLabel.textColor = Self.inkDim
+                badgeLabel.toolTip = nil
             }
         }
         let icon = changeTreeIcon(for: node)
@@ -1060,12 +1214,14 @@ private extension WorktreeSidePanelViewController {
 
         if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
             if let entry {
-                let badge = statusBadge(for: entry.status)
+                let badge = statusBadge(for: entry)
                 badgeLabel.stringValue = badge.text
                 badgeLabel.textColor = badge.color
+                badgeLabel.toolTip = badge.toolTip
             } else {
                 badgeLabel.stringValue = ""
                 badgeLabel.textColor = Self.inkDim
+                badgeLabel.toolTip = nil
             }
         }
         cellView.textField?.stringValue = text
@@ -1079,6 +1235,17 @@ private extension WorktreeSidePanelViewController {
         let fileNode = FileTreeNode(url: URL(fileURLWithPath: node.path), isDirectory: false)
         let icon = FileTreeOutlineController.icon(for: fileNode)
         return (icon.0, icon.1)
+    }
+
+    /// A file the merge into the base would conflict on shows `!` rather than
+    /// its status letter.
+    func statusBadge(for entry: GitChangedFile) -> (text: String, color: NSColor, toolTip: String?) {
+        if entry.stage == .committed, currentBranchChanges?.conflictedPaths.contains(entry.path) == true {
+            let base = currentBranchChanges?.baseDisplayName ?? "the base"
+            return ("!", .systemOrange, "Merging into \(base) conflicts here")
+        }
+        let badge = statusBadge(for: entry.status)
+        return (badge.text, badge.color, nil)
     }
 
     func statusBadge(for status: DiffFile.FileStatus) -> (text: String, color: NSColor) {
