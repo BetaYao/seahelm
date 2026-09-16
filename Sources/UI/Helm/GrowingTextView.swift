@@ -43,19 +43,37 @@ final class GrowingTextView: NSTextView {
         return str
     }
 
+    /// Where image pastes are read from. Only tests swap it.
+    var pasteboard: NSPasteboard = .general
+
     override func paste(_ sender: Any?) {
-        if let url = Self.extractImageFromPasteboard() {
+        if let url = extractImageFromPasteboard() {
             onPasteImage?(url)
             return
         }
         super.pasteAsPlainText(sender)
     }
 
-    private static func extractImageFromPasteboard() -> URL? {
-        let pb = NSPasteboard.general
-        guard pb.types?.contains(where: {
+    /// Stock NSTextView enables Paste only when the clipboard has a type it can
+    /// read as text (strings, RTF, file names). A screenshot is bare PNG/TIFF, so
+    /// the Paste item stayed disabled and ⌘V never reached `paste(_:)` — image
+    /// paste only ever worked for files copied in Finder.
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), onPasteImage != nil, isEditable, pasteboardMayHoldImage {
+            return true
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    private var pasteboardMayHoldImage: Bool {
+        pasteboard.types?.contains(where: {
             $0 == .png || $0 == .tiff || $0 == NSPasteboard.PasteboardType("public.file-url")
-        }) == true else { return nil }
+        }) == true
+    }
+
+    private func extractImageFromPasteboard() -> URL? {
+        let pb = pasteboard
+        guard pasteboardMayHoldImage else { return nil }
 
         // File-url pastes (Finder): copy into the peelable paste cache so
         // worktree create → agent attach can find them.
