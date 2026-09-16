@@ -10,8 +10,19 @@
 1. Mac 上启用 Host Gateway(Seahelm Settings → Host Gateway / Browser access)。
 2. 浏览器打开 Gateway 页面(如 `http://<Mac Tailscale IP>:2783/` 或 localhost)——**http / https 均可**。
 3. 在网页输入 Settings 里显示的 **8 位配对码** → 配对并连接。
-4. 连接后自动 `session.snapshot` → First Mate 渲染 pane 列表 → 点一行开 VT 终端。
+4. 连接后自动 `session.snapshot` → First Mate 渲染 pane 列表 → 点一行打开现场。
 5. 浏览器会记住 token;下次打开同一页面自动重连。刷新配对码不会踢掉已配对浏览器;「撤销所有远程」才会。
+
+### Text mode（手机默认）
+
+窄屏（≤760px）默认 **时间线**（MessageStream），不调用 `pane.vt_open`：
+
+- 服务端推送 `pane.message`（user / tool / assistant / status / decision / notice）
+- 标题栏 **时间线 / 终端** 徽章切换；选「终端」才走原 VT 路径
+- 底部输入框 → `pane.send_text`；Esc → `pane.send_keys`
+- 偏好写入 `localStorage seahelm_surface_mode`
+
+宽屏默认仍是 VT；可手动切到时间线。设计见 `docs/superpowers/specs/2026-09-17-message-stream-design.md`。
 
 传输选择(自动,无需手调):
 
