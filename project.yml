@@ -281,3 +281,33 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.seahelm.uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: seahelm
+
+schemes:
+  seahelm:
+    build:
+      targets:
+        seahelm: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - seahelmTests
+  seahelmTests:
+    build:
+      targets:
+        seahelm: [test]
+        seahelmTests: [test]
+    test:
+      config: Debug
+      targets:
+        - seahelmTests
+  seahelmUITests:
+    build:
+      targets:
+        seahelm: [test]
+        seahelmUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - seahelmUITests
