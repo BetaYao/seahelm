@@ -745,14 +745,9 @@ final class TelegramChannel: ExternalChannel {
         return Command(body: addressed, senderId: String(from.id), senderName: from.displayName)
     }
 
-    /// Telegram bot commands are `/name` (letters, digits, underscore), optionally
-    /// `@bot` and args. A downloaded path like `/tmp/shot.png` must not count.
+    /// Telegram bot commands are `/name` — same rule as `CommandParser`.
     static func isSlashCommand(_ body: String) -> Bool {
-        guard body.hasPrefix("/") else { return false }
-        let token = body.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? body
-        let name = token.split(separator: "@", maxSplits: 1).first.map(String.init) ?? token
-        let rest = name.dropFirst()
-        return !rest.isEmpty && rest.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        CommandParser.isSlashCommand(body)
     }
 
     /// Group prose aimed at the bot, with the address taken off; nil when the

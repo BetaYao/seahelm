@@ -9,7 +9,10 @@ enum CommandParser {
     static func parse(_ text: String, index: FleetIndex) -> Result<ParsedLine, CommandError> {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failure(.empty) }
-        guard trimmed.hasPrefix("/") else { return .success(ParsedLine(.say(trimmed))) }
+        // Absolute paths (`/Users/.../shot.jpg`) also start with `/`. Only a
+        // Telegram/bot-style `/verb` is a command; everything else is prose
+        // for the bound pane — including a photo-only Telegram order.
+        guard isSlashCommand(trimmed) else { return .success(ParsedLine(.say(trimmed))) }
 
         let body = trimmed.dropFirst()
         let parts = body.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
@@ -23,6 +26,19 @@ enum CommandParser {
         }
 
         return parseVerb(verb, rest: rest, index: index).map { ParsedLine($0, force: force) }
+    }
+
+    /// Bot commands are `/name` (letters, digits, underscore), optionally
+    /// `@bot` and args. A filesystem path like `/Users/me/img.jpg` is not one.
+    /// A lone `/` still counts so the parser can answer "unknown command".
+    static func isSlashCommand(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return false }
+        let token = trimmed.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? trimmed
+        let name = token.split(separator: "@", maxSplits: 1).first.map(String.init) ?? token
+        let rest = name.dropFirst()
+        if rest.isEmpty { return name == "/" }
+        return rest.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
     // MARK: - Verbs

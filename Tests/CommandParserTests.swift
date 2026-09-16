@@ -48,6 +48,16 @@ final class CommandParserTests: XCTestCase {
         XCTAssertEqual(command("fix the flaky test"), .say("fix the flaky test"))
     }
 
+    /// Telegram photo-only orders are a bare absolute path. That must reach the
+    /// pane as prose, not become `Unknown command /Users/...`.
+    func testAbsoluteImagePathIsProseNotACommand() {
+        let path = "/Users/matt.chow/Library/Caches/seahelm/telegram-media/4510/file_1.jpg"
+        XCTAssertEqual(command(path), .say(path))
+        XCTAssertFalse(CommandParser.isSlashCommand(path))
+        XCTAssertTrue(CommandParser.isSlashCommand("/status"))
+        XCTAssertTrue(CommandParser.isSlashCommand("/go #3"))
+    }
+
     func testEmptyIsAnError() {
         XCTAssertEqual(error("   "), .empty)
     }
