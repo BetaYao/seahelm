@@ -43,6 +43,9 @@ final class DashboardOverviewView: NSView {
     /// Worktree paths whose Delete/Return is in flight. Survives a full list
     /// rebuild so a status poll mid-fetch does not extinguish the spinner.
     private var pendingWorktreePaths: Set<String> = []
+    /// Project titles whose `/integrate` round is in flight. Survives a full
+    /// list rebuild the same way `pendingWorktreePaths` does.
+    private var pendingIntegrateProjects: Set<String> = []
     /// Move a repo's integration checkout back onto origin/main. Only offered
     /// on rows that are one.
     var onResetIntegration: ((String) -> Void)?
@@ -651,6 +654,8 @@ final class DashboardOverviewView: NSView {
         }
         // Drop pending marks for rows that left the fleet (deleted mid-fetch).
         pendingWorktreePaths = pendingWorktreePaths.intersection(Set(panesByPath.keys))
+        let liveProjects = Set(panesByPath.values.map(\.project))
+        pendingIntegrateProjects = pendingIntegrateProjects.intersection(liveProjects)
         #if DEBUG
         recordTelemetry(kind: "full",
                         elapsedMs: elapsedMilliseconds(since: start),
@@ -748,6 +753,21 @@ final class DashboardOverviewView: NSView {
         }
     }
 
+    /// Show (or clear) the in-flight spinner on a project-header integrate
+    /// control. A round shells out several times; without this the click looks
+    /// dead until the report lands.
+    func setIntegratePending(_ project: String, pending: Bool) {
+        if pending {
+            pendingIntegrateProjects.insert(project)
+        } else {
+            pendingIntegrateProjects.remove(project)
+        }
+        for button in headerButtons(matching: Self.integrateButtonIdentifier) {
+            guard integrateProjects[safeIndex: button.tag] == project else { continue }
+            applyIntegratePendingAppearance(button, pending: pending)
+        }
+    }
+
     /// Move the highlight to `id` in place, cross-fading between the two rows and
     /// scrolling the new one into view.
     ///
@@ -833,6 +853,13 @@ final class DashboardOverviewView: NSView {
     var integrateProjectsForTesting: [String] {
         headerButtons(matching: Self.integrateButtonIdentifier)
             .compactMap { integrateProjects[safeIndex: $0.tag] }
+    }
+    func integrateButtonIsPendingForTesting(_ project: String) -> Bool {
+        pendingIntegrateProjects.contains(project)
+            && headerButtons(matching: Self.integrateButtonIdentifier).contains {
+                integrateProjects[safeIndex: $0.tag] == project
+                    && $0.subviews.contains { !$0.isHidden && $0 is SpinnerDotView }
+            }
     }
     /// Project titles whose group headers offer "Close Project…".
     var closeableProjectsForTesting: [String] {
@@ -921,10 +948,12 @@ final class DashboardOverviewView: NSView {
             let spacer = NSView()
             spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
             views.append(spacer)
-            // Only worth offering once there is more than one worktree to fold
-            // together — on a single-worktree project it would integrate a repo
-            // with itself.
-            if integrationEnabled, group.items.count > 1 {
+            // Offer once there are at least three worktrees (main included) to
+            // fold, and the project does not already have an integration
+            // checkout — then the icon means "create", not "re-run".
+            if integrationEnabled,
+               group.items.count >= 3,
+               !group.items.contains(where: \.isIntegration) {
                 views.append(makeIntegrateButton(project: group.title))
             }
             trailingButtons.append(makeAddWorktreeButton(project: group.title))
@@ -1003,21 +1032,7 @@ final class DashboardOverviewView: NSView {
         button.isBordered = false
         button.bezelStyle = .inline
         button.refusesFirstResponder = true
-        if let image = NSImage(systemSymbolName: "arrow.trianglehead.merge", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
-            ?? NSImage(systemSymbolName: "arrow.triangle.merge", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) {
-            button.image = image
-            button.title = ""
-            button.imagePosition = .imageOnly
-        } else {
-            button.title = "⑃"
-            button.font = AppFont.mono(size: 12)
-        }
         button.contentTintColor = Self.inkFaint
-        let description = "Integrate \(project)"
-        button.toolTip = description
-        button.setAccessibilityLabel(description)
         button.identifier = Self.integrateButtonIdentifier
         button.target = self
         button.action = #selector(integrateClicked(_:))
@@ -1025,11 +1040,61 @@ final class DashboardOverviewView: NSView {
         integrateProjects.append(project)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Keep a fixed footprint so swapping the merge glyph for a spinner does
+        // not reflow the trailing "+" / close controls mid-round.
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 14),
+            button.heightAnchor.constraint(equalToConstant: 14),
+        ])
+        let spinner = SpinnerDotView(color: Self.inkFaint)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isHidden = true
+        button.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+        ])
+        applyIntegratePendingAppearance(button, pending: pendingIntegrateProjects.contains(project))
         return button
+    }
+
+    private static func integrateGlyphImage() -> NSImage? {
+        NSImage(systemSymbolName: "arrow.trianglehead.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+        ?? NSImage(systemSymbolName: "arrow.triangle.merge", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+    }
+
+    private func applyIntegratePendingAppearance(_ button: NSButton, pending: Bool) {
+        let spinner = button.subviews.compactMap { $0 as? SpinnerDotView }.first
+        button.isEnabled = !pending
+        if pending {
+            button.image = nil
+            button.title = ""
+            button.imagePosition = .imageOnly
+            spinner?.isHidden = false
+            button.toolTip = "Integrating…"
+        } else if let image = Self.integrateGlyphImage() {
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+            spinner?.isHidden = true
+            let project = integrateProjects[safeIndex: button.tag] ?? ""
+            button.toolTip = "Integrate \(project)"
+        } else {
+            button.image = nil
+            button.title = "\u{2443}"
+            button.font = AppFont.mono(size: 12)
+            spinner?.isHidden = true
+            let project = integrateProjects[safeIndex: button.tag] ?? ""
+            button.toolTip = "Integrate \(project)"
+        }
+        button.setAccessibilityLabel(button.toolTip)
     }
 
     @objc private func integrateClicked(_ sender: NSButton) {
         guard let project = integrateProjects[safeIndex: sender.tag] else { return }
+        guard !pendingIntegrateProjects.contains(project) else { return }
         onIntegrate?(project)
     }
 

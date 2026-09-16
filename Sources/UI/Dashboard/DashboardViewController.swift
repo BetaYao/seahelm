@@ -414,6 +414,11 @@ class DashboardViewController: NSViewController {
         overviewView.setWorktreePending(path, pending: pending)
     }
 
+    /// Spin the project-header integrate control while a round is in flight.
+    func setIntegratePending(project: String, pending: Bool) {
+        overviewView.setIntegratePending(project, pending: pending)
+    }
+
     /// `changedWorktreePath` narrows the in-place refresh to one card when the
     /// caller knows only that worktree's status changed; nil refreshes all cards.
     func updatePanes(_ newPanes: [WorktreeRowInfo], changedWorktreePath: String? = nil) {

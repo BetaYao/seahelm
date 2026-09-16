@@ -1115,6 +1115,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private func runIntegration(repoPath: String, mode: IntegrationConflictMode, force: Bool) {
         let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
             ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
+        let project = tabCoordinator.repoName(forWorktree: repoPath)
         guard config.integrationEnabled else {
             enqueueIntegrationReport(
                 "Integration is turned off in Settings ▸ General ▸ Integration",
@@ -1128,6 +1129,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
         let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
 
+        dashboardVC?.setIntegratePending(project: project, pending: true)
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome: Result<IntegrationRunReport, Error>
             do {
@@ -1144,6 +1146,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 outcome = .failure(error)
             }
             DispatchQueue.main.async { [weak self] in
+                self?.dashboardVC?.setIntegratePending(project: project, pending: false)
                 switch outcome {
                 case .success(let report):
                     // Record only once the round got far enough to have a
@@ -2987,12 +2990,14 @@ extension MainWindowController: CommandHost {
             completion("No repo selected.", false)
             return
         }
+        let project = tabCoordinator.repoName(forWorktree: repoPath)
         let worktrees = tabCoordinator.allWorktrees
             .map(\.info)
             .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
         let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
             ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
         let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
+        dashboardVC?.setIntegratePending(project: project, pending: true)
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome: Result<IntegrationRunReport, Error>
             do {
@@ -3011,6 +3016,7 @@ extension MainWindowController: CommandHost {
                 outcome = .failure(error)
             }
             DispatchQueue.main.async { [weak self] in
+                self?.dashboardVC?.setIntegratePending(project: project, pending: false)
                 switch outcome {
                 case .success(let report):
                     IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
