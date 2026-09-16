@@ -30,13 +30,15 @@ enum CommandParser {
 
     /// Bot commands are `/name` (letters, digits, underscore), optionally
     /// `@bot` and args. A filesystem path like `/Users/me/img.jpg` is not one.
+    /// A lone `/` still counts so the parser can answer "unknown command".
     static func isSlashCommand(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return false }
         let token = trimmed.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? trimmed
         let name = token.split(separator: "@", maxSplits: 1).first.map(String.init) ?? token
         let rest = name.dropFirst()
-        return !rest.isEmpty && rest.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        if rest.isEmpty { return name == "/" }
+        return rest.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
     // MARK: - Verbs
