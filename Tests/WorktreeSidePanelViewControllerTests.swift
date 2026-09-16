@@ -178,7 +178,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         let vc = makeIntegrationVC(IntegrationPanelState(
             line: "integration · 2 worktrees",
             included: ["agentA", "agentB"],
-            excluded: [.init(label: "agentC", paths: ["shared.txt"])],
+            excluded: [.init(label: "agentC", paths: ["shared.txt"], against: "agentB")],
             conflictedPaths: [],
             isHeld: false
         ))
@@ -187,7 +187,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
 
         XCTAssertEqual(compositionLines(vc), [
             "in: agentA, agentB",
-            "excluded: agentC · shared.txt",
+            "excluded: agentC vs agentB · shared.txt",
         ])
     }
 

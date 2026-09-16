@@ -832,8 +832,12 @@ final class WorktreeSidePanelViewController: NSViewController {
             Theme.textSecondary
         ))
         for excluded in state.excluded {
+            var head = excluded.label
+            if let against = excluded.against, !against.isEmpty {
+                head += " vs \(against)"
+            }
             let where_ = excluded.paths.isEmpty ? "" : " · " + excluded.paths.joined(separator: ", ")
-            lines.append(("excluded: \(excluded.label)\(where_)", .systemOrange))
+            lines.append(("excluded: \(head)\(where_)", .systemOrange))
         }
         if !state.conflictedPaths.isEmpty {
             lines.append(("conflict markers: " + state.conflictedPaths.joined(separator: ", "), .systemOrange))

@@ -14,6 +14,16 @@ struct IntegrationExclusion: Equatable {
     /// Paths git could not merge. Empty only if git reported a conflict without
     /// naming one, which would be a git bug rather than a state to act on.
     let conflictingPaths: [String]
+    /// Label already in the accumulator that this source lost to — the "other
+    /// side" of a sequential fold. Nil when nothing has been included yet
+    /// (conflict against bare trunk) or the merge could not run at all.
+    let against: String?
+
+    init(label: String, conflictingPaths: [String], against: String? = nil) {
+        self.label = label
+        self.conflictingPaths = conflictingPaths
+        self.against = against
+    }
 }
 
 struct IntegrationResult: Equatable {
@@ -87,17 +97,28 @@ enum IntegrationBuilder {
         var conflicted: [String] = []
 
         for source in sources {
+            // Already reachable from the accumulator (ancestor or cherry-pick
+            // equivalent): counting it as included without re-merging avoids
+            // fake conflicts when the same tip — or a rebased copy — shows up
+            // again. Accumulator stays put; no extra integrate commit.
+            if isAlreadyIncluded(source.commit, in: accumulator, repoPath: repoPath) {
+                included.append(source.label)
+                continue
+            }
+
             guard let merge = mergeTree(accumulator, source.commit, repoPath: repoPath) else {
                 // git could not run the merge at all — a missing commit, say.
                 // Treat it like a conflict with nothing to name rather than
                 // abandoning the whole round.
-                excluded.append(IntegrationExclusion(label: source.label, conflictingPaths: []))
+                excluded.append(IntegrationExclusion(
+                    label: source.label, conflictingPaths: [], against: included.last))
                 continue
             }
 
             if merge.conflictingPaths.isEmpty {
                 guard let next = commit(tree: merge.tree, onto: accumulator, merging: source, repoPath: repoPath) else {
-                    excluded.append(IntegrationExclusion(label: source.label, conflictingPaths: []))
+                    excluded.append(IntegrationExclusion(
+                        label: source.label, conflictingPaths: [], against: included.last))
                     continue
                 }
                 accumulator = next
@@ -108,12 +129,18 @@ enum IntegrationBuilder {
             switch mode {
             case .excludeConflicting:
                 excluded.append(
-                    IntegrationExclusion(label: source.label, conflictingPaths: merge.conflictingPaths)
+                    IntegrationExclusion(
+                        label: source.label,
+                        conflictingPaths: merge.conflictingPaths,
+                        against: included.last)
                 )
             case .includeWithMarkers:
                 guard let next = commit(tree: merge.tree, onto: accumulator, merging: source, repoPath: repoPath) else {
                     excluded.append(
-                        IntegrationExclusion(label: source.label, conflictingPaths: merge.conflictingPaths)
+                        IntegrationExclusion(
+                            label: source.label,
+                            conflictingPaths: merge.conflictingPaths,
+                            against: included.last)
                     )
                     continue
                 }
@@ -194,5 +221,27 @@ enum IntegrationBuilder {
             message: "seahelm: integrate \(source.label)",
             repoPath: repoPath
         )
+    }
+
+    /// Whether `commit`'s unique work is already present in `accumulator`:
+    /// direct ancestry, or every right-only commit is cherry-pick equivalent.
+    static func isAlreadyIncluded(_ commit: String, in accumulator: String, repoPath: String) -> Bool {
+        if GitProcess.capture(
+            ["merge-base", "--is-ancestor", commit, accumulator],
+            in: repoPath,
+            timeout: timeout
+        ).succeeded {
+            return true
+        }
+        guard let raw = GitProcess.run(
+            ["rev-list", "--count", "--cherry-pick", "--right-only", "--no-merges",
+             "\(accumulator)...\(commit)"],
+            in: repoPath,
+            timeout: timeout
+        )?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let count = Int(raw) else {
+            return false
+        }
+        return count == 0
     }
 }

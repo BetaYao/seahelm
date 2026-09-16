@@ -47,6 +47,15 @@ struct IntegrationPanelState: Codable, Equatable {
     struct Excluded: Codable, Equatable {
         var label: String
         var paths: [String]
+        /// Who already in the fold this label lost to. Optional for older
+        /// persisted state that only stored label + paths.
+        var against: String?
+
+        init(label: String, paths: [String], against: String? = nil) {
+            self.label = label
+            self.paths = paths
+            self.against = against
+        }
     }
 
     init(line: String, included: [String], excluded: [Excluded], conflictedPaths: [String],
