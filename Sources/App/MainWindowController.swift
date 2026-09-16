@@ -1037,7 +1037,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
-                if let agentCommandLine = agentType.launchCommand(withTask: task) {
+                // Bare launch only — never put the task (or Claude's long
+                // --append-system-prompt) on the zmx-typed command line. That
+                // truncates mid-quote and leaves bash stuck; Claude never starts.
+                // Suggest guidance is already in CLAUDE.md via WorktreeCreator.
+                if let agentCommandLine = agentType.bareLaunchCommand() {
                     let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
                     let backend = self.runtimeBackend
                     // `zmx run` blocks until the (long-lived) agent exits, so spawn the
@@ -1053,9 +1057,14 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     _ = SessionManager.waitUntilSessionExists(
                         name: paneSessionKey, backend: backend, timeoutSeconds: 5.0)
                 }
+                let path = info.path
+                let brief = task
+                let launchedAgent = agentType
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
-                    onComplete?(info.path)
+                    InitialAgentTaskDelivery.schedule(
+                        task: brief, worktreePath: path, expectedAgent: launchedAgent)
+                    onComplete?(path)
                 }
             } catch {
                 DispatchQueue.main.async {

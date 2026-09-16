@@ -282,13 +282,14 @@ final class AddWorktreePopoverController: NSViewController {
         return type
     }
 
-    /// The brief handed to the agent: the typed text plus one absolute path per
-    /// pasted image, which is how these CLIs take attachments.
+    /// The brief handed to the agent: caption, then peelable image paths on
+    /// their own line — same shape Telegram inbound media uses so
+    /// `sendCommand` can paste attachments for Claude/Codex/Cursor/OpenCode.
     private var composedTask: String {
         let typed = taskView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !pendingImageURLs.isEmpty else { return typed }
-        let paths = pendingImageURLs.map(\.path).joined(separator: " ")
-        return typed.isEmpty ? paths : "\(typed) \(paths)"
+        return TelegramInboundMedia.composeOrderText(
+            paths: pendingImageURLs,
+            caption: typed.isEmpty ? nil : typed)
     }
 
     @objc private func submit() {

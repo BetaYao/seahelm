@@ -60,7 +60,11 @@ final class AddWorktreePopoverTests: XCTestCase {
         XCTAssertEqual(controller.thumbnailCountForTesting, 1)
 
         controller.submitForTesting()
-        XCTAssertEqual(submitted, "fix this layout /tmp/shot-b.png")
+        XCTAssertEqual(
+            submitted,
+            TelegramInboundMedia.composeOrderText(
+                paths: [URL(fileURLWithPath: "/tmp/shot-b.png")],
+                caption: "fix this layout"))
     }
 
     func testPopoverGrowsOnlyWhenAttachmentsArePresent() {
@@ -85,7 +89,11 @@ final class AddWorktreePopoverTests: XCTestCase {
 
         controller.submitForTesting()
 
-        XCTAssertEqual(submitted, "/tmp/shot-a.png")
+        XCTAssertEqual(
+            submitted,
+            TelegramInboundMedia.composeOrderText(
+                paths: [URL(fileURLWithPath: "/tmp/shot-a.png")],
+                caption: nil))
         XCTAssertNil(controller.errorTextForTesting)
     }
 

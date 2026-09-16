@@ -57,14 +57,18 @@ final class GrowingTextView: NSTextView {
             $0 == .png || $0 == .tiff || $0 == NSPasteboard.PasteboardType("public.file-url")
         }) == true else { return nil }
 
+        // File-url pastes (Finder): copy into the peelable paste cache so
+        // worktree create → agent attach can find them.
         if let url = pb.readObjects(forClasses: [NSURL.self], options: nil)?.first as? URL,
            NSImage(contentsOf: url) != nil {
-            return url
+            return try? PasteMediaStore().importFile(at: url)
         }
 
-        guard let image = NSImage(pasteboard: pb), let tiff = image.tiffRepresentation else { return nil }
+        guard let image = NSImage(pasteboard: pb), let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return nil }
         let fileName = "seahelm-paste-\(Int(Date().timeIntervalSince1970)).png"
-        return TerminalDrop.writePNG(imageData: tiff, to: FileManager.default.temporaryDirectory, name: fileName)
+        return try? PasteMediaStore().save(data: png, fileName: fileName)
     }
 
     override func becomeFirstResponder() -> Bool {

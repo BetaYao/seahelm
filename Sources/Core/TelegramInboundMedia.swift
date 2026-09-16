@@ -55,15 +55,21 @@ enum TelegramInboundMedia {
         return fallback
     }
 
-    /// Split an order into cached Telegram image paths and the remaining prose
-    /// (caption). Lines whose every whitespace token is an image under `root`
-    /// are peeled; everything else stays as text for the agent.
+    /// Cache roots whose image paths may be peeled out of an order and pasted
+    /// into an agent composer (Telegram downloads + New-worktree dialog pastes).
+    static var defaultPeelRoots: [URL] {
+        [TelegramMediaStore.defaultRoot, PasteMediaStore.defaultRoot]
+    }
+
+    /// Split an order into cached inbound image paths and the remaining prose
+    /// (caption). Lines whose every whitespace token is an image under one of
+    /// `roots` are peeled; everything else stays as text for the agent.
     static func peelCachedMedia(
         from text: String,
-        root: URL = TelegramMediaStore.defaultRoot,
+        roots: [URL] = defaultPeelRoots,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> (urls: [URL], prose: String) {
-        let rootLower = root.standardizedFileURL.path.lowercased()
+        let rootLowers = roots.map { $0.standardizedFileURL.path.lowercased() }
         var urls: [URL] = []
         var proseLines: [String] = []
 
@@ -77,8 +83,10 @@ enum TelegramInboundMedia {
             var allMedia = true
             for token in tokens {
                 let path = URL(fileURLWithPath: token).standardizedFileURL.path
+                let pathLower = path.lowercased()
                 let ext = (path as NSString).pathExtension.lowercased()
-                if path.lowercased().hasPrefix(rootLower),
+                let underCache = rootLowers.contains { pathLower.hasPrefix($0) }
+                if underCache,
                    imageExtensions.contains(ext),
                    fileExists(token) || fileExists(path) {
                     lineURLs.append(URL(fileURLWithPath: path))
@@ -96,6 +104,15 @@ enum TelegramInboundMedia {
         let prose = proseLines.joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (urls, prose)
+    }
+
+    /// Convenience for tests that only exercise one cache root.
+    static func peelCachedMedia(
+        from text: String,
+        root: URL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> (urls: [URL], prose: String) {
+        peelCachedMedia(from: text, roots: [root], fileExists: fileExists)
     }
 }
 
@@ -133,6 +150,42 @@ final class TelegramMediaStore {
             .replacingOccurrences(of: ":", with: "_")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return base.isEmpty ? "image.jpg" : base
+    }
+}
+
+/// Clipboard / dialog image pastes that must survive until the agent attaches
+/// them — same peelable layout as Telegram downloads, separate subdirectory.
+final class PasteMediaStore {
+    let root: URL
+
+    static var defaultRoot: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("seahelm/paste-media", isDirectory: true)
+    }
+
+    init(root: URL = PasteMediaStore.defaultRoot) {
+        self.root = root
+    }
+
+    /// Persist raw image bytes under a unique directory.
+    func save(data: Data, fileName: String) throws -> URL {
+        guard data.count <= TelegramInboundMedia.maxBytes else {
+            throw TelegramMediaStoreError.tooLarge
+        }
+        let safe = TelegramMediaStore.sanitizedFileName(fileName)
+        let dir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(safe)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// Copy an existing image into the paste cache so peel + agent paste see a
+    /// stable path under `defaultRoot` (Finder file-url pastes land here).
+    func importFile(at source: URL) throws -> URL {
+        let data = try Data(contentsOf: source)
+        let name = source.lastPathComponent.isEmpty ? "image.png" : source.lastPathComponent
+        return try save(data: data, fileName: name)
     }
 }
 
