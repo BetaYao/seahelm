@@ -9,7 +9,7 @@
 
 1. Mac 上启用 Host Gateway(Seahelm Settings → Host Gateway / Browser access)。
 2. 浏览器打开 Gateway 页面(如 `http://<Mac Tailscale IP>:2783/` 或 localhost)——**http / https 均可**。
-3. 在网页输入 Settings 里显示的 **8 位配对码** → 配对并连接。
+3. 在网页输入 Settings 里显示的**配对码** → 配对并连接。配对码长期有效，默认随机 8 位，也可以在 Settings 里点 **Set code…** 自己设成 8–16 位数字。
 4. 连接后自动 `session.snapshot` → First Mate 渲染 pane 列表 → 点一行打开现场。
 5. 浏览器会记住 token;下次打开同一页面自动重连。刷新配对码不会踢掉已配对浏览器;「撤销所有远程」才会。
 
@@ -56,7 +56,6 @@ Wire 格式:
 | 文件 | 作用 |
 |---|---|
 | `index.html` | 网页客户端:Gateway + MQTT 双模;左栏 First Mate、中间 VT 终端、右栏报文日志 |
-| `e2ee.js` | 配对 URI 解析 + HKDF auth/E2EE(与 Mac `MqttCrypto` 一致) |
 | `mqtt.min.js` | vendored MQTT.js — **仅 devbroker / 遗留 MQTT 调试** |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
