@@ -34,6 +34,15 @@ final class LivePairingCode: PairingCodeVerifying {
         return code
     }
 
+    /// Set a code you chose. Nil, and nothing changes, when it is not a valid code.
+    func set(_ raw: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let code = store.set(raw) else { return nil }
+        onChange?(store)
+        return code
+    }
+
     func verify(_ raw: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }

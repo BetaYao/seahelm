@@ -143,6 +143,46 @@ final class CommandFormatterTests: XCTestCase {
         XCTAssertFalse(text.contains("Latest"), "a lifecycle label is not the latest anything")
     }
 
+    private func row(_ seq: UInt64, _ kind: MessageKind, _ text: String? = nil, tool: String? = nil) -> MessageEvent {
+        MessageEvent(seq: seq, paneId: "b", paneSessionKey: "k7", kind: kind,
+                     ts: Date(timeIntervalSince1970: 1_800_000_000 + Double(seq)), text: text, tool: tool, detail: "x")
+    }
+
+    /// `/show` on a pane with a stream: the latest turn in a few lines, then
+    /// its reply whole — not a terminal scrape that repeats the reply and
+    /// pushed it past a message, which cut it off mid-word.
+    func testPaneDetailReadsTheLatestTurnFromTheStream() {
+        let reply = (1...40).map { "Line \($0) of a long answer that says what changed and why." }.joined(separator: "\n")
+        let stream = [
+            row(1, .user, "the previous ask"), row(2, .assistant, "The previous answer."),
+            row(3, .user, "fix the early idle"),
+            row(4, .thinking, "Reading the arbitration."),
+            row(5, .tool, tool: "Bash"), row(6, .tool, tool: "Bash"), row(7, .tool, tool: "Read"),
+            row(8, .assistant, "Found it: the reclaim fires before the spinner lands."),
+            row(9, .tool, tool: "Edit"),
+            row(10, .status), row(11, .assistant, reply), row(12, .decision, "ship it · wait"),
+        ]
+        let text = CommandFormatter.paneDetail(
+            CommandFixture.paneB, activity: ["Bash — swift test"], transcript: "⏺ scraped screen", stream: stream, footer: nil)
+        XCTAssertTrue(text.contains("**Session**\n❯ fix the early idle\nReading the arbitration.\n› Bash ×2 · Read\nFound it: the reclaim fires before the spinner lands.\n› Edit\n\n**Latest**\n"), text)
+        XCTAssertTrue(text.hasSuffix(reply), "the reply is whole: \(text.suffix(80))")
+        XCTAssertEqual(text.components(separatedBy: "Line 40 of").count, 2, "the reply appears once")
+        XCTAssertFalse(text.contains("previous"), "only the latest turn")
+        XCTAssertFalse(text.contains("scraped screen"), "the stream replaces the screen scrape")
+        XCTAssertFalse(text.contains("Recent activity"), "its calls are in the session already")
+        XCTAssertLessThan(text.count, TelegramFormatter.maxMessageLength)
+    }
+
+    func testStreamSessionKeepsThePromptAndTheNewestLines() {
+        let turn = [row(1, .user, "do the long thing")]
+            + (2...40).map { row(UInt64($0), .assistant, "Step \($0): " + String(repeating: "x", count: 60)) }
+        let lines = CommandFormatter.sessionLines(turn)
+        XCTAssertEqual(lines.first, "❯ do the long thing")
+        XCTAssertEqual(lines[1], "…")
+        XCTAssertTrue(lines.last?.hasPrefix("Step 40:") == true, "\(lines)")
+        XCTAssertLessThanOrEqual(lines.joined(separator: "\n").count, CommandFormatter.sessionBudget + 2)
+    }
+
     // MARK: - Errors
 
     func testErrorsSayHowToFindTheThing() {

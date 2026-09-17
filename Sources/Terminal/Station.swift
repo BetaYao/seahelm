@@ -449,6 +449,24 @@ class Station {
         _ = ghostty_surface_key(surface, release)
     }
 
+    /// Press a named key (`ControlKeys.keyPress`) as a real key event, the way
+    /// `sendImagePasteKey` presses ctrl+v, so Ghostty encodes it for the pane's
+    /// keyboard protocol. False when there is no surface or the name is not a
+    /// key press, so the caller can type it instead.
+    func sendKeyPress(_ name: String) -> Bool {
+        guard let surface, let key = ControlKeys.keyPress(for: name) else { return false }
+        var press = ghostty_input_key_s()
+        press.action = GHOSTTY_ACTION_PRESS
+        press.keycode = key.keycode
+        press.mods = key.ctrl ? GHOSTTY_MODS_CTRL : GHOSTTY_MODS_NONE
+        press.unshifted_codepoint = key.codepoint
+        _ = ghostty_surface_key(surface, press)
+        var release = press
+        release.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, release)
+        return true
+    }
+
     func readViewportText() -> String? {
         var contended = false
         return readViewportText(tryOnly: false, contended: &contended)

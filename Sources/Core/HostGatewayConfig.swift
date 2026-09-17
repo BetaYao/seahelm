@@ -8,7 +8,8 @@ struct HostGatewayConfig: Codable, Equatable {
     /// Directory served at `/`. Empty → the bundled `seahelm-web`; set it to a
     /// working copy to iterate on the web client without rebuilding the app.
     var webRoot: String?
-    /// Eight-digit code required to pair a remote client with this host.
+    /// The code a remote client enters to pair with this host (see `PairingCodeStore`).
+    /// Written only through `Config.persistPairCode`.
     var pairCode: String?
 
     init(enabled: Bool? = nil,

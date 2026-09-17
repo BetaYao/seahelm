@@ -18,6 +18,7 @@ final class HeadlessCommandHost: CommandHost {
     func selectWorktree(path: String) {}
     func sendText(paneId: String, text: String) -> Bool { false }
     func transcript(paneSessionKey: String) -> String? { nil }
+    func messages(paneSessionKey: String) -> [MessageEvent] { [] }
     func activity(paneId: String) -> [String] { [] }
     func assessReturn(worktreePath: String, completion: @escaping (WorktreeReturnFacts) -> Void) {
         completion(WorktreeReturnFacts(branch: ""))

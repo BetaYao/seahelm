@@ -512,7 +512,7 @@ class MainWindowController: NSWindowController {
         wc.show()
     }
 
-    /// Browser pairing window (8-digit code). Held strongly so it survives
+    /// Browser pairing window (pairing code). Held strongly so it survives
     /// past this call. See `PairingWindowController`.
     @objc func showPairing() {
         _ = mintPairingContext()
@@ -522,6 +522,7 @@ class MainWindowController: NSWindowController {
             accessURL: accessURL,
             code: code,
             onRefresh: { [weak self] in self?.refreshPairingCode() ?? "" },
+            onSet: { [weak self] raw in self?.setPairingCode(raw) },
             onRevokeAll: { [weak self] in self?.revokeAllRemotes() })
         wc.showWindow(nil)
         wc.window?.center()
@@ -2522,6 +2523,10 @@ extension MainWindowController: SettingsDelegate {
         refreshPairingCode()
     }
 
+    func settings(_ settings: SettingsViewController, setPairingCode code: String) -> String? {
+        setPairingCode(code)
+    }
+
     func settingsRevokeAllRemotes(_ settings: SettingsViewController) {
         revokeAllRemotes()
     }
@@ -2530,7 +2535,7 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.hostGatewayIsListening
     }
 
-    /// Ensure an 8-digit code exists on the live config (and LivePairingCode if Gateway is up).
+    /// Ensure a pairing code exists on the live config (and LivePairingCode if Gateway is up).
     @discardableResult
     private func currentPairingCode() -> String {
         if let live = tabCoordinator.pairingCodeLive {
@@ -2538,9 +2543,7 @@ extension MainWindowController: SettingsDelegate {
         }
         var store = PairingCodeStore(code: config.hostGateway?.pairCode)
         let code = store.ensureCode()
-        if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
-        config.hostGateway?.pairCode = code
-        config.saveNow()
+        storePairingCode(code)
         return code
     }
 
@@ -2551,10 +2554,25 @@ extension MainWindowController: SettingsDelegate {
         }
         var store = PairingCodeStore(code: config.hostGateway?.pairCode)
         let code = store.refresh()
+        storePairingCode(code)
+        return code
+    }
+
+    /// A code you chose. Nil when it is not 8–16 digits; the current code stays.
+    private func setPairingCode(_ raw: String) -> String? {
+        if let live = tabCoordinator.pairingCodeLive {
+            return live.set(raw)
+        }
+        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
+        guard let code = store.set(raw) else { return nil }
+        storePairingCode(code)
+        return code
+    }
+
+    private func storePairingCode(_ code: String) {
         if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
         config.hostGateway?.pairCode = code
-        config.saveNow()
-        return code
+        Config.persistPairCode(code)
     }
 
     /// Rotate root secret and pairing code so every remembered browser must re-pair.
@@ -2914,6 +2932,10 @@ extension MainWindowController: CommandHost {
 
     func transcript(paneSessionKey: String) -> String? {
         ZmxChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
+    }
+
+    func messages(paneSessionKey: String) -> [MessageEvent] {
+        MessageStreamHub.shared.snapshot(paneId: paneSessionKey)
     }
 
     /// Recent tool activity for one pane, as plain lines.

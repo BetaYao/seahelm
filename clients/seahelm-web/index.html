@@ -66,8 +66,6 @@
     font-size:12px;color:var(--text)}
   .chip .lock{font-size:11px;opacity:.85}
   .chip b{font-family:var(--mono);font-weight:600;letter-spacing:.02em}
-  .chip .e2ee{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--running);
-    border:1px solid rgba(27,176,98,.4);border-radius:3px;padding:1px 4px}
   .chip .chip-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
     line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
   .chip .chip-x:hover{color:var(--danger);background:var(--danger-14)}
@@ -526,7 +524,6 @@
 <script src="./term-focus.js"></script>
 <script src="./message-timeline.js"></script>
 <script src="./markdown.js"></script>
-<script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1379,9 +1376,9 @@ function renderGate(){
   gate.innerHTML = `
     <div class="gate-card">
       <div class="gate-title">配对这台 Mac</div>
-      <div class="gate-hint">在 Seahelm 设置里查看 8 位配对码，输入后连接</div>
-      <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="one-time-code"
-             maxlength="9" placeholder="1234 5678" />
+      <div class="gate-hint">输入 Seahelm 设置里的配对码后连接</div>
+      <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="off"
+             maxlength="24" placeholder="1234 5678" />
       <button class="gate-primary" id="gatePair">配对并连接</button>
       <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
     </div>`;
@@ -1391,7 +1388,8 @@ function renderGate(){
 
   const go = () => {
     const digits = String(input.value || '').replace(/\D/g, '');
-    if (digits.length !== 8) return fail('请输入 8 位配对码');
+    // Generated codes are 8 digits; one set on the Mac may be up to 16.
+    if (digits.length < 8 || digits.length > 16) return fail('配对码是 8–16 位数字');
     gateErrorMsg = null;
     err.hidden = true;
     S.pendingCode = digits;
