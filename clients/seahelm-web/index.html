@@ -362,6 +362,18 @@
   .reply-bar{flex:none;border-top:1px solid var(--line-12);max-height:40vh;overflow-y:auto;
     padding:10px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans)}
   .reply-bar[hidden]{display:none}
+  /* What the pane on screen is doing now. The timeline above only shows what
+     already happened, so without this a quiet agent and a busy one look alike. */
+  .run-line{flex:none;display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-12);
+    padding:8px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
+  .run-line[hidden]{display:none}
+  .run-line i{width:6px;height:6px;border-radius:50%;flex:none}
+  .run-line .rl-running{color:var(--running)}
+  .run-line .rl-waiting{color:var(--attention)}
+  .run-line .rl-failed{color:var(--danger)}
+  .run-line .rl-time{font-family:var(--mono);font-size:11px;color:var(--idle)}
+  .run-line:not([hidden]) ~ .reply-bar,
+  .run-line:not([hidden]) ~ .msg-composer{border-top:0}
   /* Choices and the input are one place to answer from, not two panels. */
   .reply-bar:not([hidden]) ~ .msg-composer{border-top:0}
   .rb-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;font-size:12px;color:var(--attention)}
@@ -483,6 +495,7 @@
       <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="回到最新输出">↓ 最新</button>
+      <div class="run-line" id="runLine" hidden></div>
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer">
         <input id="msgInput" placeholder="发给当前 pane…" autocomplete="off"/>
@@ -1449,6 +1462,7 @@ function renderSuggestions(){
   const text = loadSurfaceMode() === 'text';
   renderReplyBar(text);
   renderAttentionLine(text);
+  renderRunLine();
   // The timeline has its own places for these; the floating dock would cover
   // the head and the history it pages in, and repeat what the timeline says.
   if (text) return;
@@ -1500,6 +1514,20 @@ function renderReplyBar(text){
     opts.appendChild(b);
   });
   bar.appendChild(opts);
+}
+
+const RUN_LINE_LABEL = { running: '运行中', waiting: '等你回应', failed: '出错了' };
+/** The selected pane's live status above the composer; hidden while it rests. */
+function renderRunLine(){
+  const line = $('runLine');
+  const pane = loadSurfaceMode() === 'text' && S.selPane ? S.panes.get(S.selPane) : null;
+  const st = pane ? normStatus(pane.status) : '';
+  line.hidden = !RUN_LINE_LABEL[st];
+  if (line.hidden) { line.innerHTML = ''; return; }
+  const since = st === 'running' ? (S.rowTimes.get(pane.worktree_path) || {}).running_since : 0;
+  line.innerHTML = (st === 'running' ? '<span class="fm-spin"></span>' : `<i style="background:${STC[st]}"></i>`)
+    + `<span class="rl-${st}">${RUN_LINE_LABEL[st]}</span>`
+    + (since ? `<span class="rl-time" data-running-since="${since}">${esc(compactDuration(since))}</span>` : '');
 }
 
 /** Other panes waiting on a decision: one line under the head, a tap away. */
@@ -1749,6 +1777,9 @@ function rowTimeText(runningSince, lastActivityAt){
 function tickTimes(){
   for (const el of document.querySelectorAll('.fm-time')){
     el.textContent = rowTimeText(Number(el.dataset.runningSince) || 0, Number(el.dataset.lastActivity) || 0);
+  }
+  for (const el of document.querySelectorAll('.rl-time')){
+    el.textContent = compactDuration(Number(el.dataset.runningSince) || 0);
   }
 }
 setInterval(tickTimes, 1000);
