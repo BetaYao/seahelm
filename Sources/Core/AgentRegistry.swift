@@ -56,6 +56,11 @@ class AgentRegistry {
     /// `var` so tests can drive the reclaim deterministically.
     static var hookWaitingGrace: TimeInterval = 3.0
 
+    /// When the prompt that started the pane's current turn was submitted;
+    /// cleared by its Stop. Unlike `hookRunningSince` it survives an approval
+    /// mid-turn, so it can say where the turn's running time counts from.
+    private var turnStartedAt: [String: Date] = [:]
+
     private var agents: [String: PaneInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
     private let transcriptTail = AgentTranscriptTail()
@@ -163,6 +168,7 @@ class AgentRegistry {
         hookRunningSince.removeValue(forKey: terminalID)
         hookIdleSince.removeValue(forKey: terminalID)
         hookWaitingSince.removeValue(forKey: terminalID)
+        turnStartedAt.removeValue(forKey: terminalID)
         eventLog.removeValue(forKey: terminalID)
         globalSeq += 1
         let seq = globalSeq
@@ -311,6 +317,14 @@ class AgentRegistry {
 
     /// Same question from outside the lock — for `pane.explain`, so the diagnostic
     /// reports the arbitration the pipeline would actually make right now.
+    /// When the prompt that began the pane's current turn was submitted, until
+    /// the turn's Stop. Nil for a pane between turns or without hooks.
+    func turnStarted(terminalID: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return turnStartedAt[terminalID]
+    }
+
     func hookIdleIsFresh(terminalID: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -412,6 +426,7 @@ class AgentRegistry {
             hookWaitingSince[event.terminalID] = nil
             if next.lastUserPrompt != text { next.lastUserPromptAt = now }
             next.lastUserPrompt = text
+            turnStartedAt[event.terminalID] = now
         case .toolUse(let ev):
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
@@ -437,6 +452,7 @@ class AgentRegistry {
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
             hookRunningSince[event.terminalID] = nil
+            turnStartedAt[event.terminalID] = nil
             hookWaitingSince[event.terminalID] = nil
             // Fresh trailing edge — overwritten by each Stop, since every one of
             // them is the agent stating anew that it finished.

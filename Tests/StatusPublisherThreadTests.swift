@@ -71,6 +71,51 @@ class StatusPublisherThreadTests: XCTestCase {
             forceRecheck: true))
     }
 
+    /// Stop reported, scan still holding Running: an unchanged frame must be
+    /// looked at again or the hold outlives the turn until the next forced recheck.
+    func testUnchangedFrameIsRecheckedWhileAStoppedTurnIsHeldRunning() {
+        XCTAssertFalse(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42, contentHash: 42, committedScanStatus: .running,
+            publishedScanStatus: .running, forceRecheck: false, hookStatus: .idle))
+        XCTAssertTrue(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42, contentHash: 42, committedScanStatus: .idle,
+            publishedScanStatus: .idle, forceRecheck: false, hookStatus: .idle))
+        XCTAssertTrue(StatusPublisher.shouldSkipUnchangedFrame(
+            lastHash: 42, contentHash: 42, committedScanStatus: .running,
+            publishedScanStatus: .running, forceRecheck: false, hookStatus: .running),
+            "mid-turn frames still skip as before")
+    }
+
+    func testDefaultedIdleIsHeldMidTurnButCommitsOnceTheHookStopped() {
+        let blank = Detection(state: .idle, isDefaulted: true)
+        let midTurn = DebouncedStatusTracker()
+        midTurn.update(status: .running)
+        for _ in 0..<5 {
+            let idle = StatusPublisher.idleObservation(blank, hookStatus: .running)
+            XCTAssertFalse(midTurn.update(status: .idle, visibleIdle: idle.visibleIdle, defaulted: idle.defaulted))
+        }
+        XCTAssertEqual(midTurn.currentStatus, .running, "a thinking gap is not the end of a turn")
+
+        let stopped = DebouncedStatusTracker()
+        stopped.update(status: .running)
+        let idle = StatusPublisher.idleObservation(blank, hookStatus: .idle)
+        XCTAssertTrue(stopped.update(status: .idle, visibleIdle: idle.visibleIdle, defaulted: idle.defaulted))
+        XCTAssertEqual(stopped.currentStatus, .idle)
+    }
+
+    func testRoundCountsFromTheLaterOfScanStartAndPrompt() {
+        let scan = Date(timeIntervalSince1970: 1000)
+        XCTAssertNil(StatusPublisher.roundStart(scanRunningSince: nil, turnStarted: scan),
+                     "not running on screen, no round")
+        XCTAssertEqual(StatusPublisher.roundStart(scanRunningSince: scan, turnStarted: nil), scan)
+        XCTAssertEqual(StatusPublisher.roundStart(scanRunningSince: scan,
+                                                  turnStarted: Date(timeIntervalSince1970: 1074)),
+                       Date(timeIntervalSince1970: 1074),
+                       "a prompt after the scan's start is a new round")
+        XCTAssertEqual(StatusPublisher.roundStart(scanRunningSince: scan,
+                                                  turnStarted: Date(timeIntervalSince1970: 990)), scan)
+    }
+
     func testAgentDefSelectionUsesExistingCodexType() {
         let content = "Would you like to run the following command?"
         let candidates = AgentDetectConfig.default.agents.map { ($0.name.lowercased(), $0) }

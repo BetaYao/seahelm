@@ -281,7 +281,9 @@ class StatusPublisher {
             let committedScanStatus = trackers[terminalID]?.currentStatus
             lock.unlock()
 
-            let publishedScanStatus = AgentRegistry.shared.pane(for: terminalID)?.scanStatus
+            let registryPane = AgentRegistry.shared.pane(for: terminalID)
+            let publishedScanStatus = registryPane?.scanStatus
+            let hookStatus = registryPane?.hookStatus ?? .unknown
             let forceRecheck = Self.shouldBackendCapture(
                 pollCycle: pollCycle,
                 offset: Int(truncatingIfNeeded: terminalID.stableHash),
@@ -291,7 +293,8 @@ class StatusPublisher {
                 contentHash: contentHash,
                 committedScanStatus: committedScanStatus,
                 publishedScanStatus: publishedScanStatus,
-                forceRecheck: forceRecheck) {
+                forceRecheck: forceRecheck,
+                hookStatus: hookStatus) {
                 continue
             }
 
@@ -343,16 +346,21 @@ class StatusPublisher {
                 manifest: manifest, osc: osc, lowercasedContent: lowerContent)
             let textStatus = detection.state
 
+            let idle = Self.idleObservation(detection, hookStatus: hookStatus)
+            let turnStarted = AgentRegistry.shared.turnStarted(terminalID: terminalID)
+
             lock.lock()
             let oldStatus = tracker.currentStatus
-            let statusChanged = tracker.update(status: textStatus, visibleIdle: detection.visibleIdle,
-                                               defaulted: detection.isDefaulted)
+            let statusChanged = tracker.update(status: textStatus, visibleIdle: idle.visibleIdle,
+                                               defaulted: idle.defaulted)
             // The debounced/committed status drives both pipelines, so a held
             // running→idle flip does not leak into AgentRegistry either.
             let committedStatus = tracker.currentStatus
             let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             lastMessages[terminalID] = lastMessage
-            let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
+            let roundDur = Self.roundStart(scanRunningSince: runningStartTimes[terminalID],
+                                           turnStarted: turnStarted)
+                .map { Date().timeIntervalSince($0) } ?? 0
             if statusChanged {
                 if committedStatus == .running && oldStatus != .running {
                     runningStartTimes[terminalID] = Date()
@@ -515,14 +523,40 @@ class StatusPublisher {
         showsApproval ? .waiting : committed
     }
 
+    /// How a frame's idle is weighed. The long hold on a defaulted idle is for
+    /// agents only the screen can judge — one pausing to think looks exactly like
+    /// one that finished. A pane whose hooks last reported Stop has said it
+    /// finished, so its idle commits at once. Held instead, it outlasted the
+    /// hook's own idle window and bounced the pane back to Running for ~10s after
+    /// every turn.
+    static func idleObservation(_ detection: Detection, hookStatus: AgentStatus)
+        -> (visibleIdle: Bool, defaulted: Bool) {
+        hookStatus == .idle ? (true, false) : (detection.visibleIdle, detection.isDefaulted)
+    }
+
+    /// Where a running pane's round counts from: when the scan saw it start, or
+    /// when a prompt started the turn if that is later. A prompt sent seconds
+    /// after the last turn is a new round even if no scan landed in between to
+    /// see the pane idle.
+    static func roundStart(scanRunningSince: Date?, turnStarted: Date?) -> Date? {
+        guard let scanRunningSince else { return nil }
+        guard let turnStarted else { return scanRunningSince }
+        return max(scanRunningSince, turnStarted)
+    }
+
     static func shouldSkipUnchangedFrame(
         lastHash: UInt64?,
         contentHash: UInt64,
         committedScanStatus: AgentStatus?,
         publishedScanStatus: AgentStatus?,
-        forceRecheck: Bool
+        forceRecheck: Bool,
+        hookStatus: AgentStatus = .unknown
     ) -> Bool {
         guard lastHash == contentHash, !forceRecheck else { return false }
+        // The hooks say the turn ended but the scan still holds it running: the
+        // frame has to be looked at again, or an unchanged screen keeps that hold
+        // alive until the next forced recheck.
+        if hookStatus == .idle, committedScanStatus == .running { return false }
         return committedScanStatus != nil && committedScanStatus == publishedScanStatus
     }
 
