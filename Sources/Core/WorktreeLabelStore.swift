@@ -19,13 +19,16 @@ final class WorktreeLabelStore {
         store[path].flatMap(SessionLabel.init(rawValue:))
     }
 
-    /// Record the label, or clear it with nil. Persisted immediately.
+    /// Record the label, or clear it with nil. Persisted immediately, and
+    /// announced with `.worktreeLabelDidChange` so surfaces that are not the
+    /// fleet list (the island) repaint without waiting for their next refresh.
     func set(_ label: SessionLabel?, forWorktree path: String) {
         if let label {
             store.set(label.rawValue, forKey: path)
         } else {
             forget(worktreePath: path)
         }
+        NotificationCenter.default.post(name: .worktreeLabelDidChange, object: nil)
     }
 
     /// Forget a deleted worktree, so a later worktree at the same path does not
@@ -33,4 +36,10 @@ final class WorktreeLabelStore {
     func forget(worktreePath path: String) {
         store.remove(forKey: path)
     }
+}
+
+extension Notification.Name {
+    /// Posted on the caller's thread by `WorktreeLabelStore.set` — the row menu,
+    /// so main.
+    static let worktreeLabelDidChange = Notification.Name("seahelm.worktreeLabelDidChange")
 }

@@ -27,8 +27,15 @@ enum SessionLabel: String, CaseIterable {
     var color: NSColor {
         NSColor(name: nil) { [self] appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return Self.color(hex: isDark ? darkHex : lightHex)
+            return isDark ? darkSurfaceColor : Self.color(hex: lightHex)
         }
+    }
+
+    /// The dark-theme variant whatever the appearance, for a surface that is
+    /// dark in both: the island stays near-black in light mode, where `color`
+    /// would hand it the dense variant meant for a white list.
+    var darkSurfaceColor: NSColor {
+        Self.color(hex: darkHex)
     }
 
     private var darkHex: UInt32 {

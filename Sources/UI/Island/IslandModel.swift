@@ -19,6 +19,9 @@ struct IslandAgentRow: Identifiable, Equatable {
     let message: String
     /// Task description entered at worktree-creation time.
     let title: String
+    /// The worktree's colour from the fleet row menu, drawn as the row's left
+    /// bar. Status is shown on the right, so the bar is free to carry it.
+    var label: SessionLabel? = nil
 
     /// Running / waiting / error get a chip + activity line; idle stays quiet.
     var needsAttention: Bool {

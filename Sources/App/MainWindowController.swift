@@ -416,6 +416,10 @@ class MainWindowController: NSWindowController {
             self, selector: #selector(handlePaneDidAcquireFocus(_:)),
             name: .paneDidAcquireFocus, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleWorktreeLabelDidChange(_:)),
+            name: .worktreeLabelDidChange, object: nil
+        )
         handleNotificationHistoryDidChange(nil)
         setupIsland()
         setupSuggestionReveal()
@@ -2301,6 +2305,12 @@ extension MainWindowController {
         }
     }
 
+    /// The island's left bar is the worktree's label; a pick should not wait
+    /// for the 10s fallback timer to show there.
+    @objc private func handleWorktreeLabelDidChange(_ note: Notification?) {
+        refreshIsland()
+    }
+
     fileprivate func refreshIsland() {
         guard config.islandEnabled else { return }
         let model = islandController.model
@@ -2331,7 +2341,8 @@ extension MainWindowController {
                 message: pane.lastAssistantMessage.isEmpty ? pane.lastMessage : pane.lastAssistantMessage,
                 // The island row already renders the branch separately — drop a
                 // title that is just the branch fallback.
-                title: (cachedTitle == pane.branch ? "" : cachedTitle) ?? pane.lastUserPrompt
+                title: (cachedTitle == pane.branch ? "" : cachedTitle) ?? pane.lastUserPrompt,
+                label: WorktreeLabelStore.shared.label(forWorktree: pane.worktreePath)
             )
             if let existing = byWorktree[pane.worktreePath] {
                 if Self.notificationPriorityScoreForIsland(row.status) > Self.notificationPriorityScoreForIsland(existing.status) {
