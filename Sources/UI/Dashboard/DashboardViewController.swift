@@ -74,6 +74,8 @@ struct WorktreeRowInfo {
     var panes: [PaneDisplayInfo] = []
     /// The row's ribbon colour, from `WorktreeLabelStore`. Nil = unlabelled.
     var label: SessionLabel?
+    /// Quiet for a day with nothing left to PR — see `WorktreeCleanupPolicy`.
+    var isCleanupCandidate = false
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
     /// the pane that changed status most recently — and carried here rather than
