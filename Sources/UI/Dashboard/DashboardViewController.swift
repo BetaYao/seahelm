@@ -74,6 +74,8 @@ struct WorktreeRowInfo {
     var panes: [PaneDisplayInfo] = []
     /// The row's ribbon colour, from `WorktreeLabelStore`. Nil = unlabelled.
     var label: SessionLabel?
+    /// Quiet for a day with nothing left to PR — see `WorktreeCleanupPolicy`.
+    var isCleanupCandidate = false
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
     /// the pane that changed status most recently — and carried here rather than
@@ -125,6 +127,9 @@ class DashboardViewController: NSViewController {
     /// Hold/resume the fleet row rebuild while an anchored form is open.
     func setFleetRenderPaused(_ paused: Bool) {
         overviewView.isRenderPaused = paused
+        // Resuming renders the rows that were held; point the ↑↓ ring at the
+        // selection among them.
+        if !paused, firstMateSideOpen { syncOverviewFocusCounts() }
     }
 
     /// Set by TabCoordinator during setup
@@ -536,6 +541,7 @@ class DashboardViewController: NSViewController {
         if !overviewView.isHidden {
             overviewView.selectedId = overviewSelectedId
             overviewView.update(agents)
+            syncOverviewFocusCounts()
         }
     }
 
@@ -1320,6 +1326,8 @@ class DashboardViewController: NSViewController {
     /// What the fleet list — and the First Mate panel that renders it — is
     /// currently highlighting, which is not always the selected pane.
     var overviewSelectedIdForTesting: String { overviewView.selectedId }
+    /// The row actually painted as selected, nil when the selection has no row.
+    var renderedOverviewSelectionForTesting: String? { overviewView.renderedSelectedRowIDForTesting }
     var hasCenterOverlayForTesting: Bool { centerOverlay != nil }
 
     /// Pane row click in "Group by Pane": drill into the worktree, then focus
@@ -1429,6 +1437,11 @@ class DashboardViewController: NSViewController {
             worktreeCount: overviewView.orderedRows.count,
             worktreeAnchor: anchor
         )
+        // No row is not the same as gone. While the "+" form holds the render,
+        // `orderedRows` predates the worktree the form just created and
+        // selected; clamping then put the highlight back on whichever old row
+        // sat at that index while the terminal showed the new one.
+        if anchor == nil, agents.contains(where: { $0.id == overviewSelectedId }) { return }
         // Refresh highlights only — a data refresh must not re-trigger terminal
         // embeds or focus moves.
         switch effect {

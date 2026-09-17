@@ -402,6 +402,52 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    // MARK: - ready to clean up
+
+    /// The mark takes the dot's place, and goes when the flag does — rows are
+    /// reused across incremental updates.
+    func testACleanupCandidateShowsTheMarkInPlaceOfItsDot() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults, now: { self.now },
+                                             isIntegrationWorktree: { _ in false })
+            var stale = makePane(name: "stale", project: "alpha", worktreePath: "/a/stale",
+                                 paneStatuses: [.idle], isMainWorktree: false,
+                                 lastActivityAt: now.addingTimeInterval(-3 * 86_400))
+            stale.isCleanupCandidate = true
+            let fresh = makePane(name: "fresh", project: "alpha", worktreePath: "/a/fresh",
+                                 paneStatuses: [.idle], isMainWorktree: false,
+                                 lastActivityAt: now.addingTimeInterval(-60))
+            view.update([stale, fresh])
+
+            XCTAssertEqual(view.rowGlyphsForTesting["/a/stale"], DashboardOverviewView.cleanupSymbolName)
+            XCTAssertEqual(view.rowGlyphsForTesting["/a/fresh"], AgentStatus.idle.glyph)
+
+            stale.isCleanupCandidate = false
+            view.update([stale, fresh])
+            XCTAssertEqual(view.rowGlyphsForTesting["/a/stale"], AgentStatus.idle.glyph)
+        }
+    }
+
+    /// The checkout's dot reports the integration, and a running pane spins,
+    /// whatever a stale flag says.
+    func testTheMarkNeverHidesAnIntegrationOrRunningDot() {
+        withDefaults { defaults in
+            let view = makeViewWithIntegration(defaults: defaults, status: "l",
+                                               state: .failed("x"))
+            var fleet = fleetWithIntegration()
+            fleet[1].isCleanupCandidate = true
+            var running = makePane(name: "busy", project: "alpha", worktreePath: "/alpha-worktrees/busy",
+                                   paneStatuses: [.running], isMainWorktree: false,
+                                   lastActivityAt: now.addingTimeInterval(-3 * 86_400))
+            running.isCleanupCandidate = true
+            view.update(fleet + [running])
+
+            XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], "✕")
+            XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/busy"], "◐")
+        }
+    }
+
     private func fleetWithIntegration() -> [WorktreeRowInfo] {
         [
             makePane(name: "main", project: "alpha", worktreePath: "/alpha",

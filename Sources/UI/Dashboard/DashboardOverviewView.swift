@@ -81,6 +81,9 @@ final class DashboardOverviewView: NSView {
     fileprivate static let inkFaint: NSColor = SemanticColors.subtle
     fileprivate static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
     fileprivate static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
+    /// A worktree that is ready to clean up has nothing left to ship, so what
+    /// remains is Delete — the mark says so.
+    static let cleanupSymbolName = "trash"
 
     private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
@@ -1226,6 +1229,9 @@ final class DashboardOverviewView: NSView {
         /// Shown while Delete/Return is assessing or tearing the worktree down —
         /// a muted spinner so it is not mistaken for an agent that is running.
         private let busySpinner: SpinnerDotView
+        /// Stands in for the dot on a worktree that is ready to clean up — quiet
+        /// for a day, nothing left to PR (`WorktreeRowInfo.isCleanupCandidate`).
+        private let cleanupIcon: NSImageView
         private let titleLabel: NSTextField
         private let timeLabel: NSTextField
         private let branchLabel: NSTextField
@@ -1237,12 +1243,14 @@ final class DashboardOverviewView: NSView {
         private var hovered = false
         private var pending = false
         private var lastStatus: AgentStatus = .unknown
+        private var isCleanupCandidate = false
 
         private static let cornerRadius: CGFloat = 8
         /// Thin enough to live in the gutter before the status dot (leading + 10),
         /// inset vertically so the row's rounded corners don't clip it.
         private static let ribbonWidth: CGFloat = 3
         private static let ribbonInset: CGFloat = 6
+        private static let cleanupDescription = "Ready to clean up: no activity for 24h and nothing left to PR"
         private static let pendingPulseKey = "seahelm.pendingPulse"
         /// One beat, matched to the fleet list's other selection feedback.
         static let selectionFadeDuration: CFTimeInterval = 0.18
@@ -1291,6 +1299,7 @@ final class DashboardOverviewView: NSView {
             // whatever status happened to be current at construction time.
             self.runningDot = SpinnerDotView(color: AgentStatus.running.color)
             self.busySpinner = SpinnerDotView(color: DashboardOverviewView.inkDim)
+            self.cleanupIcon = NSImageView()
             self.titleLabel = Self.label(pane.currentPaneTitle, DashboardOverviewView.ink, 12)
             self.timeLabel = Self.label(pane.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
             let branch = pane.thread.isEmpty ? pane.name : pane.thread
@@ -1324,6 +1333,13 @@ final class DashboardOverviewView: NSView {
             busySpinner.setContentHuggingPriority(.required, for: .horizontal)
             busySpinner.setContentCompressionResistancePriority(.required, for: .horizontal)
             busySpinner.isHidden = true
+            cleanupIcon.image = NSImage(systemSymbolName: DashboardOverviewView.cleanupSymbolName,
+                                        accessibilityDescription: Self.cleanupDescription)?
+                .withSymbolConfiguration(.init(pointSize: 9, weight: .medium))
+            cleanupIcon.contentTintColor = DashboardOverviewView.inkDim
+            cleanupIcon.toolTip = Self.cleanupDescription
+            cleanupIcon.translatesAutoresizingMaskIntoConstraints = false
+            cleanupIcon.isHidden = true
             titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             timeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -1374,6 +1390,7 @@ final class DashboardOverviewView: NSView {
             addSubview(staticDot)
             addSubview(runningDot)
             addSubview(busySpinner)
+            addSubview(cleanupIcon)
             addSubview(textCol)
             NSLayoutConstraint.activate([
                 ribbon.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1392,6 +1409,11 @@ final class DashboardOverviewView: NSView {
                 runningDot.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
                 busySpinner.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
                 busySpinner.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
+                // Centred on the dot rather than sharing its leading edge: the
+                // symbol is wider than the glyph, and the text column is pinned
+                // to the glyph, so it must not shift when the icon swaps in.
+                cleanupIcon.centerXAnchor.constraint(equalTo: staticDot.centerXAnchor),
+                cleanupIcon.centerYAnchor.constraint(equalTo: line1.centerYAnchor),
 
                 line1.widthAnchor.constraint(equalTo: textCol.widthAnchor),
                 line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
@@ -1445,7 +1467,10 @@ final class DashboardOverviewView: NSView {
             applyLabel(pane.label)
         }
 
-        var dotGlyphForTesting: String { staticDot.isHidden ? "◐" : staticDot.stringValue }
+        var dotGlyphForTesting: String {
+            if !cleanupIcon.isHidden { return DashboardOverviewView.cleanupSymbolName }
+            return staticDot.isHidden ? "◐" : staticDot.stringValue
+        }
         var runtimeTextForTesting: String { timeLabel.stringValue }
         var titleTextForTesting: String { titleLabel.stringValue }
         var titleFrameForTesting: NSRect { titleLabel.frame }
@@ -1508,14 +1533,17 @@ final class DashboardOverviewView: NSView {
             Self.setText(staticDot, glyph)
             if staticDot.textColor != color { staticDot.textColor = color }
             lastStatus = status
+            isCleanupCandidate = pane.isCleanupCandidate
             applyDotVisibility()
         }
 
-        /// Status vs busy: only one of the three leading marks is visible.
+        /// Status vs busy vs ready to clean up: only one of the four leading
+        /// marks is visible.
         private func applyDotVisibility() {
             if pending {
                 if !staticDot.isHidden { staticDot.isHidden = true }
                 if !runningDot.isHidden { runningDot.isHidden = true }
+                if !cleanupIcon.isHidden { cleanupIcon.isHidden = true }
                 if busySpinner.isHidden { busySpinner.isHidden = false }
             } else {
                 if !busySpinner.isHidden { busySpinner.isHidden = true }
@@ -1523,8 +1551,12 @@ final class DashboardOverviewView: NSView {
                 // that dot is reporting the integration now, and a spinner
                 // would read as a round in flight.
                 let running = integration == nil && lastStatus == .running
-                if staticDot.isHidden != running { staticDot.isHidden = running }
+                // The policy already rules out the checkout and a running
+                // pane; checked again so a stale flag can never hide either.
+                let cleanup = integration == nil && !running && isCleanupCandidate
+                if staticDot.isHidden != (running || cleanup) { staticDot.isHidden = running || cleanup }
                 if runningDot.isHidden != !running { runningDot.isHidden = !running }
+                if cleanupIcon.isHidden != !cleanup { cleanupIcon.isHidden = !cleanup }
             }
         }
 

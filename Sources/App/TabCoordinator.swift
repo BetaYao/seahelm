@@ -242,9 +242,24 @@ class TabCoordinator {
             }
             self.saveConfig()
         }
+        WorktreeCleanupStore.shared.onChange = { [weak self] _ in self?.scheduleCleanupRepaint() }
     }
 
     deinit { AgentRegistry.shared.onOutcome = nil }
+
+    private var cleanupRepaintScheduled = false
+
+    /// Probes resolve one after another off a serial queue; fold a burst of
+    /// them into one fleet repaint.
+    private func scheduleCleanupRepaint() {
+        guard !cleanupRepaintScheduled else { return }
+        cleanupRepaintScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            self.cleanupRepaintScheduled = false
+            self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
+        }
+    }
 
     // MARK: - Tab Switching
 
@@ -464,6 +479,22 @@ class TabCoordinator {
             let lastActivity = statusAggregator.lastActivity(for: agent.worktreePath) ?? agent.startedAt
             let lastActivityAge = WorktreeRowHelpers.relativeAge(since: lastActivity)
 
+            // Ready to clean up? Only a worktree the fleet has already seen sit
+            // quiet for a day costs a git probe; the store serves the answer
+            // from cache and repaints the fleet when a probe changes it.
+            let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(agent.worktreePath)
+            let cleanupStatuses = paneStatuses + [rolledUpStatus]
+            let now = Date()
+            if WorktreeCleanupPolicy.isQuiet(isMain: isMain, isIntegration: isIntegration,
+                                             statuses: cleanupStatuses, lastActivity: lastActivity, now: now) {
+                WorktreeCleanupStore.shared.refresh(worktreePath: agent.worktreePath, now: now)
+            }
+            let isCleanupCandidate = WorktreeCleanupPolicy.isCandidate(
+                isMain: isMain, isIntegration: isIntegration, statuses: cleanupStatuses,
+                lastActivity: lastActivity,
+                probe: WorktreeCleanupStore.shared.probe(worktreePath: agent.worktreePath),
+                now: now)
+
             // Git summary (diff size + ahead/behind). Served from an 8s cache;
             // kick an off-main refresh so the next build has fresh numbers.
             if changedWorktreePath == nil || changedWorktreePath == agent.worktreePath {
@@ -548,7 +579,8 @@ class TabCoordinator {
                 currentPaneTitle: currentPaneTitle,
                 currentPaneRunTime: currentPaneRunTime,
                 panes: panes,
-                label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath)
+                label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath),
+                isCleanupCandidate: isCleanupCandidate
             ))
         }
 
@@ -1250,6 +1282,7 @@ class TabCoordinator {
         }
         WorktreeTitleCache.shared.evict(worktreePath: info.path)
         WorktreeGitStatsCache.shared.evict(worktreePath: info.path)
+        WorktreeCleanupStore.shared.evict(worktreePath: info.path)
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
@@ -1288,6 +1321,7 @@ class TabCoordinator {
             }
             WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
             WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)
+            WorktreeCleanupStore.shared.evict(worktreePath: worktree.path)
             if runtimeBackend != "local" {
                 let paneSessionKey = SessionManager.persistentSessionName(for: worktree.path)
                 SessionManager.killSession(paneSessionKey, backend: runtimeBackend)
@@ -1356,6 +1390,16 @@ class TabCoordinator {
         return tick % elapsedRefreshEveryTicks == 0
     }
 
+    /// Every 12th tick, i.e. once a minute, whether or not anything runs: a
+    /// worktree becomes ready to clean up by time passing alone, and nothing
+    /// else rebuilds the rows of a fleet that has gone quiet.
+    private static let cleanupRefreshEveryTicks = 12
+
+    static func shouldRefreshCleanupMarks(tick: Int) -> Bool {
+        guard tick > 0 else { return false }
+        return tick % cleanupRefreshEveryTicks == 0
+    }
+
     func startBranchRefreshTimer() {
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -1367,8 +1411,9 @@ class TabCoordinator {
             // AgentRegistry no longer fans out on roundDuration ticks (see
             // displayedStateUnchanged), so elapsed-time and activity-age labels
             // are advanced here at a gentle cadence while anything is running.
-            if Self.shouldRefreshDashboardElapsedTime(tick: self.branchRefreshTick),
-               AgentRegistry.shared.allPanes().contains(where: { $0.status == .running }) {
+            let refreshElapsed = Self.shouldRefreshDashboardElapsedTime(tick: self.branchRefreshTick)
+                && AgentRegistry.shared.allPanes().contains(where: { $0.status == .running })
+            if refreshElapsed || Self.shouldRefreshCleanupMarks(tick: self.branchRefreshTick) {
                 self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
             }
             // Rides this timer rather than starting its own: the policy only
