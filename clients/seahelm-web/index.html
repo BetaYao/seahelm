@@ -317,6 +317,31 @@
   .ev .opt:hover{border-color:var(--accent)}
   .ev .opt:first-of-type{background:var(--accent-12);border-color:var(--accent-20)}
   .ev .opt b{font-family:var(--mono);color:var(--muted);margin-right:8px;font-weight:500}
+  /* ── MessageStream text mode ─────────────────────────────── */
+  #messageTimeline{display:none;flex:1;overflow:auto;padding:12px;flex-direction:column;gap:8px}
+  #messageTimeline.on{display:flex}
+  #termWrap.text-hidden{display:none}
+  #toBottom.text-hidden{display:none}
+  .msg-row-status{align-self:center;font-size:11px;color:var(--muted);
+    background:rgba(255,255,255,.04);border:1px solid var(--line-20);
+    padding:3px 10px;border-radius:999px}
+  .msg-row-tool{align-self:stretch;background:rgba(27,176,98,.08);
+    border-left:3px solid #1bb062;padding:8px 10px;border-radius:8px;
+    font-family:var(--mono);font-size:12px;color:#c6efd0}
+  .msg-row-tool .k{color:#69db7c;font-weight:600;margin-right:6px}
+  .msg-row-asst{background:var(--panel);border:1px solid var(--line-20);
+    padding:10px 12px;border-radius:12px 12px 12px 4px;white-space:pre-wrap;font-size:13px}
+  .msg-row-user{align-self:flex-end;background:rgba(61,156,253,.12);
+    border:1px solid rgba(61,156,253,.25);padding:10px 12px;
+    border-radius:12px 12px 4px 12px;white-space:pre-wrap;font-size:13px;max-width:92%}
+  .msg-row-meta{font-size:11px;color:var(--muted);padding:6px 10px;
+    border-radius:8px;font-family:var(--mono);background:rgba(255,255,255,.03)}
+  .msg-composer{display:none;border-top:1px solid var(--line-20);padding:10px;gap:8px}
+  .msg-composer.on{display:flex}
+  .msg-composer input{flex:1;border-radius:10px;border:1px solid var(--line-20);
+    background:var(--bg);color:var(--text);padding:10px 12px;font-size:13px}
+  .msg-composer button{border:0;border-radius:10px;background:var(--accent);
+    color:#041018;font-weight:600;padding:0 14px;cursor:pointer}
   /* ── log ────────────────────────────────────────────────── */
   #log{font-family:var(--mono);font-size:11px;line-height:1.45}
   .logline{padding:3px 0;border-bottom:1px solid var(--line-12)}
@@ -368,12 +393,18 @@
     <div class="col" id="midcol">
       <div class="detail-head">
         <h2 id="detailHead">终端</h2>
+        <button class="renderer-badge" id="surfaceBadge" title="现场模式">时间线</button>
         <button class="renderer-badge" id="vtModeBadge" title="VT 订阅模式">单屏</button>
         <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
       </div>
+      <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="回到最新输出">↓ 最新</button>
+      <div class="msg-composer" id="msgComposer">
+        <input id="msgInput" placeholder="发给当前 pane…" autocomplete="off"/>
+        <button id="msgSend" type="button">发送</button>
+      </div>
     </div>
     <div class="col" id="rightcol" style="border-right:0">
       <h2>报文日志</h2>
@@ -442,6 +473,10 @@ const S = {
   // keystrokes reach, `worktree` is the layout currently mounted.
   vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror',
        scrollback:VT_SCROLLBACK_DEEP },
+  // MessageStream timeline (text mode). Keyed by pane_session_key.
+  messages:{},
+  // 'text' | 'vt' — phone/narrow defaults to text so VT is opt-in.
+  surfaceMode: null,
   // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
   // the next mount can decide its layout without attaching first. Persisted
   // because that decision happens *before* anything attaches: on a cold visit
@@ -780,6 +815,10 @@ function onGatewayNotify(method, params){
     renderSuggestions();
     return;
   }
+  if (method === 'pane.message') {
+    onPaneMessage(params);
+    return;
+  }
   if (method === 'vt.snapshot' || method === 'vt.data') {
     const key = params.pane_session_key || params.pane_id;
     const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
@@ -790,6 +829,136 @@ function onGatewayNotify(method, params){
     });
   }
 }
+
+function onPaneMessage(params){
+  const key = params.pane_session_key || params.pane_id;
+  if (!key) return;
+  const list = (S.messages[key] = S.messages[key] || []);
+  list.push(params);
+  while (list.length > 100) list.shift();
+  if (loadSurfaceMode() === 'text' && (S.selPane === key || S.vt.focus === key)) {
+    renderMessageTimeline(key);
+  }
+}
+
+function renderMessageRow(m){
+  switch (m.kind) {
+    case 'tool': {
+      const tool = esc(m.tool || '');
+      const detail = esc(m.detail || '');
+      return `<div class="msg-row-tool"><span class="k">${tool}</span>${detail}</div>`;
+    }
+    case 'user':
+      return `<div class="msg-row-user">${esc(m.text || '')}</div>`;
+    case 'assistant':
+      return `<div class="msg-row-asst">${esc(m.text || '')}</div>`;
+    case 'status': {
+      const label = (m.old_status ? m.old_status + ' → ' : '') + (m.status || '');
+      return `<div class="msg-row-status">${esc(label)}</div>`;
+    }
+    case 'decision':
+    case 'notice':
+      return `<div class="msg-row-meta">${esc(m.text || '')}</div>`;
+    default:
+      return '';
+  }
+}
+
+function renderMessageTimeline(key){
+  const host = $('messageTimeline');
+  if (!host) return;
+  const rows = S.messages[key] || [];
+  if (!rows.length) {
+    host.innerHTML = '<div class="muted" style="padding:24px;text-align:center">暂无消息流 — agent 有 hook 时会出现 tool / 助手正文</div>';
+  } else {
+    host.innerHTML = rows.map(renderMessageRow).join('');
+    host.scrollTop = host.scrollHeight;
+  }
+}
+
+const SURFACE_KEY = 'seahelm_surface_mode';
+function defaultSurfaceMode(){
+  return (window.innerWidth || 900) <= 760 ? 'text' : 'vt';
+}
+function loadSurfaceMode(){
+  if (S.surfaceMode === 'text' || S.surfaceMode === 'vt') return S.surfaceMode;
+  const v = localStorage.getItem(SURFACE_KEY);
+  if (v === 'text' || v === 'vt') { S.surfaceMode = v; return v; }
+  S.surfaceMode = defaultSurfaceMode();
+  return S.surfaceMode;
+}
+function applySurfaceMode(){
+  const text = loadSurfaceMode() === 'text';
+  const tl = $('messageTimeline');
+  const wrap = $('termWrap');
+  const toBottom = $('toBottom');
+  const composer = $('msgComposer');
+  const vtBadge = $('vtModeBadge');
+  const rendererBadge = $('rendererBadge');
+  if (tl) tl.classList.toggle('on', text);
+  if (wrap) wrap.classList.toggle('text-hidden', text);
+  if (toBottom) toBottom.classList.toggle('text-hidden', text);
+  if (composer) composer.classList.toggle('on', text);
+  if (vtBadge) vtBadge.hidden = text;
+  if (rendererBadge) rendererBadge.hidden = text;
+  const head = $('detailHead');
+  if (head) head.textContent = text ? '时间线' : '终端';
+}
+
+function setSurfaceMode(mode){
+  const next = mode === 'vt' ? 'vt' : 'text';
+  const prev = loadSurfaceMode();
+  S.surfaceMode = next;
+  localStorage.setItem(SURFACE_KEY, S.surfaceMode);
+  renderSurfaceBadge();
+  applySurfaceMode();
+  if (next === prev) return;
+  if (next === 'text') {
+    if (S.vt.panes.size) unmountPanes();
+    const key = S.selPane || S.vt.focus;
+    if (key) renderMessageTimeline(key);
+  } else if (S.sel) {
+    requestLayout(S.sel);
+  }
+}
+function renderSurfaceBadge(){
+  const el = $('surfaceBadge');
+  if (!el) return;
+  const mode = loadSurfaceMode();
+  el.textContent = mode === 'text' ? '时间线' : '终端';
+  el.title = mode === 'text'
+    ? '时间线（MessageStream）— 点击打开真终端'
+    : '真终端（VT）— 点击回到时间线';
+  el.onclick = () => setSurfaceMode(mode === 'text' ? 'vt' : 'text');
+}
+renderSurfaceBadge();
+applySurfaceMode();
+
+function sendComposerText(){
+  const input = $('msgInput');
+  const text = (input && input.value || '').trim();
+  const key = S.selPane || S.vt.focus;
+  if (!text || !key || !isLinked()) return;
+  const pane = S.panes.get(key) || {};
+  const paneId = pane.pane_id || key;
+  sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, () => {});
+  input.value = '';
+}
+(function wireComposer(){
+  const send = $('msgSend');
+  const input = $('msgInput');
+  if (send) send.onclick = sendComposerText;
+  if (input) input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendComposerText(); }
+    if (ev.key === 'Escape') {
+      const key = S.selPane || S.vt.focus;
+      const pane = S.panes.get(key) || {};
+      const paneId = pane.pane_id || key;
+      if (key && isLinked()) sendCommand('pane.send_keys', { pane_id: paneId, keys: ['esc'] });
+    }
+  });
+})();
+
 
 /** Ask the Mac to group the fleet the way its dashboard would. */
 function refreshGroups(){
@@ -1556,6 +1725,20 @@ function mountPanes(tree, focusKey, path){
   }
   S.vt.worktree = path;
   S.vt.tree = tree;
+
+  // Text mode: paint MessageStream, do not attach VT.
+  if (loadSurfaceMode() === 'text') {
+    const leaves = treeLeaves(tree);
+    const wanted = leaves.find(l => l.pane_session_key === (focusKey || S.selPane)) || leaves[0];
+    const key = wanted && wanted.pane_session_key;
+    S.selPane = key || S.selPane;
+    S.vt.focus = key;
+    applySurfaceMode();
+    if (key) renderMessageTimeline(key);
+    return;
+  }
+
+  applySurfaceMode();
   const preferMirror = loadVtMode() === 'mirror';
   S.vt.mode = (preferMirror && layoutFitsMirror(tree, wrap.clientWidth)) ? 'mirror' : 'single';
 

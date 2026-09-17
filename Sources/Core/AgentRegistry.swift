@@ -167,6 +167,8 @@ class AgentRegistry {
         let seq = globalSeq
         lock.unlock()
 
+        MessageStreamHub.shared.clear(paneId: terminalID)
+
         // Announce the close so remote mirrors can drop the pane's
         // retained slot topic instead of leaving a ghost. Off the lock, on main.
         guard let info = closed else { return }
@@ -569,6 +571,9 @@ class AgentRegistry {
             self.delegate?.agentDidUpdate(outcome.info)
             self.onOutcome?(outcome)
             EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
+            let config = ManifestStore.shared.manifest(for: outcome.info.agentType.rawValue)?
+                .manifest.message ?? .default
+            MessageStreamHub.shared.ingest(outcome: outcome, config: config)
         }
     }
 

@@ -299,6 +299,10 @@ final class SeahelmControlDataSource: ControlDataSource {
         return ["checkouts": checkouts]
     }
 
+    func messageSnapshot(paneId: String?) -> [[String: Any]] {
+        MessageStreamHub.shared.snapshot(paneId: paneId).map(\.dict)
+    }
+
     func explainPane(paneId: String) -> [String: Any]? {
         guard let station = station(for: paneId) else { return nil }
         let pane = AgentRegistry.shared.pane(for: station.id)

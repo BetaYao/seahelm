@@ -287,6 +287,16 @@ final class HostGatewaySession {
         }
     }
 
+    /// Server → session: a MessageStream timeline item.
+    func pushMessage(_ event: MessageEvent) {
+        lock.lock()
+        let ready = authenticated
+        lock.unlock()
+        guard ready else { return }
+        enqueue(.text(HostGatewayFrame.encode(
+            .notify(method: "pane.message", params: event.dict))))
+    }
+
     /// Answering locally clears it for everyone; other clients must be told.
     private func queueDecisionCleared(_ key: String) {
         enqueue(.text(HostGatewayFrame.encode(
@@ -420,6 +430,12 @@ final class HostGatewaySession {
             for d in decisions.pending() {
                 out.append(HostGatewayFrame.encode(
                     .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d))))
+            }
+            // Replay MessageStream rings so text-mode clients paint without an
+            // extra round trip (and without needing VT).
+            for ev in MessageStreamHub.shared.snapshot(paneId: nil) {
+                out.append(HostGatewayFrame.encode(
+                    .notify(method: "pane.message", params: ev.dict)))
             }
         }
         return out

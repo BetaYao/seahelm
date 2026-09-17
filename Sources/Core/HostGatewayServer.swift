@@ -30,6 +30,7 @@ final class HostGatewayServer {
     /// resolves it for all of them, and a client arriving late needs the backlog.
     private let decisions = HostGatewayDecisions()
     private var eventToken: Int?
+    private var messageToken: Int?
     private var connections: [ObjectIdentifier: ConnectionState] = [:]
     private var proxied: [ObjectIdentifier: NWConnection] = [:]
     private var readyHandlers: [() -> Void] = []
@@ -101,6 +102,7 @@ final class HostGatewayServer {
             }
             self.frontBindAttemptsLeft = Self.frontBindAttempts
             self.subscribeToAgentEvents()
+            self.subscribeToMessageStream()
             self.startWebSocketListener()
         }
     }
@@ -124,6 +126,19 @@ final class HostGatewayServer {
         }
     }
 
+    /// MessageStreamHub → every authenticated session as `pane.message` notifies.
+    private func subscribeToMessageStream() {
+        guard messageToken == nil else { return }
+        messageToken = MessageStreamHub.shared.subscribe { [weak self] event in
+            guard let self else { return }
+            self.queue.async {
+                for state in self.connections.values {
+                    state.session.pushMessage(event)
+                }
+            }
+        }
+    }
+
     func stop() {
         queue.sync {
             for state in connections.values {
@@ -133,6 +148,8 @@ final class HostGatewayServer {
             connections.removeAll()
             if let eventToken { EventHub.shared.unsubscribe(eventToken) }
             eventToken = nil
+            if let messageToken { MessageStreamHub.shared.unsubscribe(messageToken) }
+            messageToken = nil
             for connection in proxied.values {
                 connection.cancel()
             }
