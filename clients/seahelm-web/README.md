@@ -28,12 +28,7 @@
 
 宽屏默认仍是 VT；可手动切到时间线。设计见 `docs/superpowers/specs/2026-09-17-message-stream-design.md`。
 
-传输选择(自动,无需手调):
-
-| 条件 | 传输 |
-|---|---|
-| 页面同源 `/ws`(Host Gateway 托管),或 `?transport=gateway` | **WebSocket Host Gateway** |
-| `?mqtt=1`,或 broker 为 `localhost:28083` | **MQTT**(devbroker 调试) |
+传输:页面同源的 `/ws`,即 Host Gateway 托管的 WebSocket。
 
 Gateway 握手:
 
@@ -55,39 +50,13 @@ Wire 格式:
 
 | 文件 | 作用 |
 |---|---|
-| `index.html` | 网页客户端:Gateway + MQTT 双模;左栏 First Mate、中间 VT 终端、右栏报文日志 |
-| `mqtt.min.js` | vendored MQTT.js — **仅 devbroker / 遗留 MQTT 调试** |
+| `index.html` | 网页客户端:左栏 First Mate、中间时间线 / VT 终端、右栏报文日志 |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
 | `touch-scroll.js` | 触控竖滑 → 终端 wheel，手机上回看历史 |
 | `vt-apply.js` | VT 帧串行写入；等 `term.write` 完成再应用下一帧 |
 | `term-focus.js` | chrome 点击不抢终端 caret；真实输入框除外 |
-| `devbroker/` | 本地 MQTT 调试台(**非生产路径**) |
-
-## 本地 MQTT 调试(dev-only)
-
-`devbroker` + `mock:zmx` 用于协议/VT 开发,**不是**生产远程控制路径。
-
-```bash
-cd clients/seahelm-web/devbroker
-npm install
-npm run broker         # 终端 A: MQTT 2883 + WS 28083
-MAC=live npm run mock  # 终端 B: Seahelm 替身(快照 + 命令)
-```
-
-浏览器打开 `index.html`,broker 默认 `ws://localhost:28083/mqtt`(自动走 MQTT)。
-也可显式 `?mqtt=1`。
-
-> `MAC=live` 因为 UI 上 mac 只能通过配对设置;本地替身需发到页面默认 `live`。
-
-### 真实 zmx pane(dev-only)
-
-```bash
-npm run broker            # 终端 A
-MAC=live npm run mock:zmx # 终端 B: ZMX_PANES=1,真实 zmx session → MQTT pane
-```
-
-**`mock:zmx` 仅供本地开发** — 生产浏览器应连 Mac Host Gateway,不经 MQTT。
+| `devbroker/` | 上面各模块的 node 单元测试(无依赖),以及 `bench.html` 的结果收集器 |
 
 ## 界面构成
 
@@ -130,9 +99,9 @@ MAC=live npm run mock:zmx # 终端 B: ZMX_PANES=1,真实 zmx session → MQTT pa
 ## VT 终端
 
 Mac 侧经 **`zmx attach`** 保真 PTY 流;浏览器 xterm.js 渲染。
-Gateway notify / MQTT topic 均携带 `{b64, cols?, rows?}`;客户端共用 `handleVT()` 解码路径。
+Gateway notify 携带 `{b64, cols?, rows?}`,由 `handleVT()` 解码。
 
-命令(Gateway JSON-RPC / MQTT command 共用 method 名):
+命令(Gateway JSON-RPC):
 
 | method | 说明 |
 |---|---|
@@ -141,15 +110,12 @@ Gateway notify / MQTT topic 均携带 `{b64, cols?, rows?}`;客户端共用 `han
 | `pane.vt_close` | 断开 attach 客户端 |
 | `pane.send_keys` | `{b64}` UTF-8 键序列；协商 `keys_binary` 后可走二进制帧 |
 
-## 协议一致性测试(MQTT devbroker)
+## 测试
+
+不需要 `npm install`,在 `clients/seahelm-web` 下直接跑:
 
 ```bash
-cd clients/seahelm-web/devbroker
-npm run broker && npm run mock
-node protocol-test.js   # 22 项 §15
-node vt-test.js         # VT 端到端
-node vt-apply-test.js   # write 串行 / 背压丢帧
-node term-focus-test.js # chrome 不抢终端 caret
+for t in devbroker/*-test.js; do node "$t" || break; done
 ```
 
 ## 相关文档
