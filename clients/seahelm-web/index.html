@@ -333,11 +333,12 @@
     font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--idle)}
   .tl-status::before,.tl-status::after{content:'';flex:1;height:1px;background:var(--line-12)}
   .tl-status i{width:5px;height:5px;border-radius:50%;flex:none}
-  .tl-user{display:flex;gap:8px;margin:14px 0 8px;font-family:var(--sans);
-    font-size:14px;line-height:1.6;font-weight:500;color:#e6f2f2}
-  .tl-user::before{content:'›';flex:none;width:10px;font-family:var(--mono);
-    font-weight:600;color:var(--accent)}
-  .tl-user div{white-space:pre-wrap;word-break:break-word;min-width:0}
+  /* What you sent is the one thing on the right, and the one thing with a fill —
+     so a long run of agent output never hides where a turn began. */
+  .tl-user{display:flex;justify-content:flex-end;margin:18px 0 12px;padding-left:15%}
+  .tl-user div{min-width:0;padding:9px 14px;border-radius:16px 16px 4px 16px;
+    background:rgba(31,200,218,.26);color:#f4fdfe;font-family:var(--sans);
+    font-size:14px;line-height:1.55;font-weight:500;white-space:pre-wrap;word-break:break-word}
   .tl-tool{display:flex;gap:8px;padding-left:18px;min-width:0;white-space:nowrap;
     font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
   .tl-tool b{flex:none;font-weight:500;color:#a8c3c5}
