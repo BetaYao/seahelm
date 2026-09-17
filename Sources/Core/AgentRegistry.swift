@@ -759,14 +759,18 @@ class AgentRegistry {
     ///   default behaviour leaves them in the composer (Telegram / mail — let
     ///   the operator add a note). Pass `true` for automated first-brief
     ///   delivery after a new worktree launch so the agent actually starts.
-    func sendCommand(to terminalID: String, command: String, submitWithAttachments: Bool = false) {
+    /// - Parameter agentType: The agent the caller knows is in the pane, for when
+    ///   the registry has not caught up — it learns the type from a screen scan,
+    ///   and an agent it does not know yet gets images typed as paths.
+    func sendCommand(to terminalID: String, command: String, submitWithAttachments: Bool = false,
+                     agentType: AgentType? = nil) {
         let station = StationRegistry.shared.station(forId: terminalID)
         // `canDeliverInput`, not merely "a Station exists" — the two come apart
         // for any pane whose tab has not been opened in this run, and that gap
         // is what silently swallowed every message sent to a backgrounded pane
         // from Telegram, mail, and the control socket alike.
         if let station, station.canDeliverInput {
-            let agent = pane(for: terminalID)?.agentType
+            let agent = agentType ?? pane(for: terminalID)?.agentType
             let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
             // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
             // Images land in the composer; Enter only when the caller opts in

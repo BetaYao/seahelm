@@ -2,68 +2,112 @@ import XCTest
 @testable import seahelm
 
 final class InitialAgentTaskDeliveryTests: XCTestCase {
+    private typealias Snapshot = InitialAgentTaskDelivery.PaneSnapshot
 
-    func testSendsOncePaneCanDeliverAndAgentIsReady() {
-        var sent: [(String, String)] = []
+    private static let claudePrompt = """
+     ▐▛███▜▌   Claude Code v2.1.274
+    ────────────────────────────────────────
+    ❯ 
+    ────────────────────────────────────────
+      ⏵⏵ bypass permissions on (shift+tab to cycle)
+    """
+
+    private static let trustDialog = """
+     Do you trust the files in this folder?
+
+     /Volumes/work/app-worktrees/task/fix-login
+
+     ❯ 1. Yes, proceed
+       2. No, exit
+
+     Enter to confirm · Esc to cancel
+    """
+
+    /// Runs `attempt` synchronously against a scripted sequence of snapshots
+    /// (the last one repeats), returning what was sent and how many looks it took.
+    private func deliver(
+        _ task: String = "brief",
+        remaining: Int = 10,
+        snapshots: [Snapshot?]
+    ) -> (sent: [(pane: String, text: String, agent: AgentType)], lookups: Int) {
+        var sent: [(pane: String, text: String, agent: AgentType)] = []
         var lookups = 0
         InitialAgentTaskDelivery.attempt(
-            task: "long brief about workspace picker",
+            task: task,
             worktreePath: "/wt",
-            remaining: 5,
-            maxAttempts: 5,
+            remaining: remaining,
             retryInterval: 0,
             lookup: { _ in
-                lookups += 1
-                return ("pane-1", true, true)
+                defer { lookups += 1 }
+                return snapshots[min(lookups, snapshots.count - 1)]
             },
-            send: { sent.append(($0, $1)) },
+            send: { sent.append(($0, $1, $2)) },
             asyncAfter: { _, work in work() }
         )
-        XCTAssertEqual(sent.map(\.0), ["pane-1"])
-        XCTAssertEqual(sent.map(\.1), ["long brief about workspace picker"])
-        XCTAssertEqual(lookups, 1)
+        return (sent, lookups)
+    }
+
+    func testSendsOnceAgentHasDrawnItsPrompt() {
+        let ready = Snapshot(paneId: "pane-1", runningAgent: .claudeCode, screen: Self.claudePrompt)
+        let result = deliver("long brief about workspace picker", snapshots: [ready])
+        XCTAssertEqual(result.sent.map(\.pane), ["pane-1"])
+        XCTAssertEqual(result.sent.map(\.text), ["long brief about workspace picker"])
+        XCTAssertEqual(result.sent.map(\.agent), [.claudeCode])
+        XCTAssertEqual(result.lookups, InitialAgentTaskDelivery.readyConfirmations)
     }
 
     func testRetriesUntilPaneAppears() {
-        var sent: [(String, String)] = []
-        var lookups = 0
-        InitialAgentTaskDelivery.attempt(
-            task: "do the thing",
-            worktreePath: "/wt",
-            remaining: 3,
-            maxAttempts: 3,
-            retryInterval: 0,
-            lookup: { _ in
-                lookups += 1
-                if lookups < 3 { return nil }
-                return ("pane-9", true, true)
-            },
-            send: { sent.append(($0, $1)) },
-            asyncAfter: { _, work in work() }
-        )
-        XCTAssertEqual(sent.map(\.0), ["pane-9"])
-        XCTAssertEqual(lookups, 3)
+        let ready = Snapshot(paneId: "pane-9", runningAgent: .codex, screen: "› Ask Codex to do anything")
+        let result = deliver(snapshots: [nil, nil, ready])
+        XCTAssertEqual(result.sent.map(\.pane), ["pane-9"])
+        XCTAssertEqual(result.sent.map(\.agent), [.codex])
     }
 
-    func testSendsAfterGraceEvenWithoutAgentDetection() {
-        var sent: [(String, String)] = []
-        var lookups = 0
-        InitialAgentTaskDelivery.attempt(
-            task: "brief",
-            worktreePath: "/wt",
-            remaining: InitialAgentTaskDelivery.maxAttempts - InitialAgentTaskDelivery.agentDetectGraceAttempts,
-            maxAttempts: InitialAgentTaskDelivery.maxAttempts,
-            retryInterval: 0,
-            lookup: { _ in
-                lookups += 1
-                // can deliver, but agent not detected yet
-                return ("pane-2", true, false)
-            },
-            send: { sent.append(($0, $1)) },
-            asyncAfter: { _, work in work() }
-        )
-        XCTAssertEqual(sent.map(\.0), ["pane-2"])
-        XCTAssertEqual(lookups, 1)
+    /// The launch line echoed into the shell names the agent seconds before it
+    /// runs. Typing then lost the text and the Return, leaving a bare path.
+    func testWaitsWhileAgentIsNotRunningHoweverLong() {
+        let booting = Snapshot(paneId: "pane-2", runningAgent: nil,
+                               screen: "~ % zsh -lic 'cd /wt && claude --dangerously-skip-permissions'")
+        let result = deliver(remaining: 40, snapshots: [booting])
+        XCTAssertTrue(result.sent.isEmpty)
+        XCTAssertEqual(result.lookups, 41)
+    }
+
+    /// Between exec and the agent's first frame the screen is blank — the input
+    /// loop is not up yet.
+    func testWaitsWhileRunningAgentHasDrawnNothing() {
+        let blank = Snapshot(paneId: "pane-3", runningAgent: .claudeCode, screen: "\n   \n\n")
+        let unreadable = Snapshot(paneId: "pane-3", runningAgent: .claudeCode, screen: nil)
+        let ready = Snapshot(paneId: "pane-3", runningAgent: .claudeCode, screen: Self.claudePrompt)
+        let result = deliver(snapshots: [blank, unreadable, blank, ready])
+        XCTAssertEqual(result.sent.map(\.pane), ["pane-3"])
+        XCTAssertEqual(result.lookups, 3 + InitialAgentTaskDelivery.readyConfirmations)
+    }
+
+    /// One ready look is not enough: the process tree can show the agent while
+    /// the screen still shows the shell that launched it.
+    func testReadinessMustHoldOnConsecutiveLooks() {
+        let ready = Snapshot(paneId: "pane-4", runningAgent: .claudeCode, screen: Self.claudePrompt)
+        let blank = Snapshot(paneId: "pane-4", runningAgent: .claudeCode, screen: "")
+        let result = deliver(snapshots: [ready, blank, ready, ready])
+        XCTAssertEqual(result.sent.map(\.pane), ["pane-4"])
+        XCTAssertEqual(result.lookups, 4)
+    }
+
+    /// The brief's Return would pick "Yes, proceed" and trust the folder for the user.
+    func testHoldsWhileADialogIsUpThenSendsOnceItIsAnswered() {
+        let dialog = Snapshot(paneId: "pane-5", runningAgent: .claudeCode, screen: Self.trustDialog)
+        let ready = Snapshot(paneId: "pane-5", runningAgent: .claudeCode, screen: Self.claudePrompt)
+        let result = deliver(snapshots: [dialog, dialog, dialog, ready])
+        XCTAssertEqual(result.sent.map(\.pane), ["pane-5"])
+        XCTAssertEqual(result.lookups, 3 + InitialAgentTaskDelivery.readyConfirmations)
+    }
+
+    func testGivesUpWithoutSendingWhenAttemptsRunOut() {
+        let dialog = Snapshot(paneId: "pane-6", runningAgent: .claudeCode, screen: Self.trustDialog)
+        let result = deliver(remaining: 5, snapshots: [dialog])
+        XCTAssertTrue(result.sent.isEmpty)
+        XCTAssertEqual(result.lookups, 6)
     }
 
     func testEmptyTaskIsIgnoredBySchedule() {
@@ -73,8 +117,8 @@ final class InitialAgentTaskDeliveryTests: XCTestCase {
             worktreePath: "/wt",
             expectedAgent: .claudeCode,
             initialDelay: 0,
-            lookup: { _ in ("p", true, true) },
-            send: { _, _ in sent += 1 },
+            lookup: { _ in Snapshot(paneId: "p", runningAgent: .claudeCode, screen: Self.claudePrompt) },
+            send: { _, _, _ in sent += 1 },
             asyncAfter: { _, work in work() }
         )
         XCTAssertEqual(sent, 0)
