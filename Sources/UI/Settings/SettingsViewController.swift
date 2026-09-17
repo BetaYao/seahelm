@@ -7,11 +7,15 @@ protocol SettingsDelegate: AnyObject {
     /// Still required so Host Gateway can issue long-lived tokens after a code auth.
     func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: PairingIdentity)?
 
-    /// Current 8-digit pairing code (ensures one exists).
+    /// Current pairing code (ensures one exists).
     func settingsPairingCode(_ settings: SettingsViewController) -> String
 
     /// Generate a new code; previous code stops working. Does not revoke tokens.
     func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String
+
+    /// Set a code the user chose. Nil, and the current code stays, when it is
+    /// not 8–16 digits. Does not revoke tokens.
+    func settings(_ settings: SettingsViewController, setPairingCode code: String) -> String?
 
     /// Rotate root secret + refresh code; all stored browser tokens die.
     func settingsRevokeAllRemotes(_ settings: SettingsViewController)
@@ -57,6 +61,10 @@ extension SettingsDelegate {
     func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String {
         var store = PairingCodeStore(code: nil)
         return store.refresh()
+    }
+    func settings(_ settings: SettingsViewController, setPairingCode code: String) -> String? {
+        var store = PairingCodeStore(code: nil)
+        return store.set(code)
     }
     func settingsRevokeAllRemotes(_ settings: SettingsViewController) {}
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
@@ -565,6 +573,15 @@ class SettingsViewController: NSViewController {
             self.config.hostGateway?.pairCode = next
             return next
         }
+        pane.onSet = { [weak self] raw in
+            guard let self else { return nil }
+            let saved = self.settingsDelegate?.settings(self, setPairingCode: raw) ?? {
+                var store = PairingCodeStore(code: self.config.hostGateway?.pairCode)
+                return store.set(raw)
+            }()
+            if let saved { self.config.hostGateway?.pairCode = saved }
+            return saved
+        }
         pane.onRevokeAll = { [weak self] in
             guard let self else { return }
             self.settingsDelegate?.settingsRevokeAllRemotes(self)
@@ -582,7 +599,7 @@ class SettingsViewController: NSViewController {
             gatewayGroup,
             SettingsGroupView(title: "Browser access", rows: [
                 SettingsRow.stacked(nil,
-                                    subtitle: "Open the access URL below in a browser and enter the 8-digit code.",
+                                    subtitle: "Open the access URL below in a browser and enter the pairing code.",
                                     content: pane),
             ]),
         ]

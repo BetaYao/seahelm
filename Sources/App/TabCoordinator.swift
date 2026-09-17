@@ -910,13 +910,13 @@ class TabCoordinator {
         if hgConfig.pairCode != ensured {
             hgConfig.pairCode = ensured
             config.hostGateway = hgConfig
-            saveConfig()
+            Config.persistPairCode(ensured)
         }
         let live = LivePairingCode(store: store)
         live.onChange = { [weak self] updated in
-            guard let self else { return }
-            self.config.hostGateway?.pairCode = updated.code
-            self.saveConfig()
+            guard let self, let code = updated.code else { return }
+            self.config.hostGateway?.pairCode = code
+            Config.persistPairCode(code)
         }
         pairingCodeLive = live
         let limiter = PairRateLimiter()

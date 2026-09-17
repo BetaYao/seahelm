@@ -316,7 +316,35 @@ struct Config: Codable {
         if out.gmailMail == nil { out.gmailMail = other.gmailMail }
         if out.pairing == nil { out.pairing = other.pairing }
         if out.hostGateway == nil { out.hostGateway = other.hostGateway }
+        // The pairing code has one writer, `persistPairCode`, which puts it on
+        // disk at once. Every other copy of the config — the window's, the
+        // coordinator's, Settings' — may hold an older code, and writing it back
+        // silently undid a refreshed or chosen code at the next launch.
+        if out.hostGateway != nil, let code = other.hostGateway?.pairCode {
+            out.hostGateway?.pairCode = code
+        }
         return out
+    }
+
+    /// Put the pairing code on disk now, and only it. Ordinary saves then keep
+    /// whatever this wrote (see `preservingSettingsOwnedSecrets`), including a
+    /// debounced save already queued with an older copy.
+    static func persistPairCode(_ code: String) {
+        guard !DebugFlags.forceEmptyState else { return }
+        saveQueue.sync {
+            // No readable file: nothing on disk to override, so the owner's
+            // next ordinary save carries the code.
+            guard var disk = diskSnapshot() else { return }
+            if disk.hostGateway == nil { disk.hostGateway = HostGatewayConfig() }
+            disk.hostGateway?.pairCode = code
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                try encoder.encode(disk).write(to: configPath, options: .atomic)
+            } catch {
+                NSLog("Failed to save pairing code: \(error)")
+            }
+        }
     }
 
     /// Disk snapshot for merge-on-write. Nil when the file is missing or undecodable —

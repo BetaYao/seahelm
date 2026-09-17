@@ -1,6 +1,6 @@
 import AppKit
 
-/// Browser pairing UI: 8-digit code + access URL (no QR / long link).
+/// Browser pairing UI: the pairing code + access URL (no QR / long link).
 ///
 /// The page URL the browser already opened is the entry; the code only
 /// authorizes. Settings and the menu pairing window share this pane.
@@ -10,6 +10,8 @@ final class PairingPaneView: NSView {
     }
 
     var onRefresh: (() -> String)?
+    /// A code the user typed; returns what was stored, or nil when it was refused.
+    var onSet: ((String) -> String?)?
     var onRevokeAll: (() -> Void)?
 
     private let codeLabel = NSTextField(labelWithString: "")
@@ -27,14 +29,8 @@ final class PairingPaneView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func setCode(_ code: String) {
-        let n = PairingCodeStore.normalize(code)
-        currentCode = n
-        guard n.count == 8 else {
-            codeLabel.stringValue = n
-            return
-        }
-        let i = n.index(n.startIndex, offsetBy: 4)
-        codeLabel.stringValue = "\(n[..<i]) \(n[i...])"
+        currentCode = PairingCodeStore.normalize(code)
+        codeLabel.stringValue = PairingCodeStore.grouped(code)
     }
 
     // MARK: - UI
@@ -43,7 +39,7 @@ final class PairingPaneView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         let hint = NSTextField(labelWithString:
-            "Open the access URL in a browser, then enter this code.")
+            "Open the access URL in a browser, then enter this code. It stays until you change it.")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.maximumNumberOfLines = 2
@@ -63,17 +59,23 @@ final class PairingPaneView: NSView {
 
         let copyCode = NSButton(title: "Copy code", target: self, action: #selector(copyCodeClicked))
         let refresh = NSButton(title: "Refresh code", target: self, action: #selector(refreshClicked))
+        let setOwn = NSButton(title: "Set code…", target: self, action: #selector(setClicked))
         let copyURL = NSButton(title: "Copy URL", target: self, action: #selector(copyURLClicked))
         let revoke = NSButton(title: "Revoke all remotes", target: self, action: #selector(revokeClicked))
         revoke.hasDestructiveAction = true
 
-        let buttons = NSStackView(views: [copyCode, refresh, copyURL, revoke])
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        buttons.alignment = .centerY
+        // Two rows: the code's own actions, then the link's and the reset — five
+        // buttons in one row ran past the pairing window.
+        func row(_ views: [NSView]) -> NSStackView {
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.spacing = 8
+            row.alignment = .centerY
+            return row
+        }
 
         let stack = NSStackView(views: [
-            hint, codeLabel, urlCaption, urlField, buttons,
+            hint, codeLabel, row([copyCode, refresh, setOwn]), urlCaption, urlField, row([copyURL, revoke]),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -106,6 +108,29 @@ final class PairingPaneView: NSView {
         if let next = onRefresh?() { setCode(next) }
     }
 
+    @objc private func setClicked() {
+        let lengths = PairingCodeStore.lengths
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.font = .monospacedSystemFont(ofSize: 15, weight: .regular)
+        field.placeholderString = "1234 5678"
+        var message = "\(lengths.lowerBound)–\(lengths.upperBound) digits. Browsers already paired stay paired."
+        while true {
+            let alert = NSAlert()
+            alert.messageText = "Set pairing code"
+            alert.informativeText = message
+            alert.accessoryView = field
+            alert.addButton(withTitle: "Set")
+            alert.addButton(withTitle: "Cancel")
+            alert.window.initialFirstResponder = field
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            if let saved = onSet?(field.stringValue) {
+                setCode(saved)
+                return
+            }
+            message = "Use \(lengths.lowerBound)–\(lengths.upperBound) digits; spaces and dashes are fine."
+        }
+    }
+
     @objc private func revokeClicked() {
         onRevokeAll?()
     }
@@ -118,11 +143,13 @@ final class PairingWindowController: NSWindowController {
 
     init(accessURL: String, code: String,
          onRefresh: @escaping () -> String,
+         onSet: @escaping (String) -> String?,
          onRevokeAll: @escaping () -> Void) {
         pane = PairingPaneView(accessURL: accessURL, code: code)
         pane.onRefresh = onRefresh
+        pane.onSet = onSet
         pane.onRevokeAll = onRevokeAll
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 280),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 310),
                               styleMask: [.titled, .closable],
                               backing: .buffered, defer: false)
         window.title = "Pair browser client"

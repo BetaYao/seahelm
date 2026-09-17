@@ -572,6 +572,35 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(merged.telegram?.autoConnect, false)
     }
 
+    /// The window and the coordinator each hold a copy of the config. A copy
+    /// from before the code was refreshed or chosen must not write the old
+    /// code back — it came back at the next launch, and paired nothing.
+    func testAStaleCopyDoesNotWriteBackAnOldPairingCode() {
+        var writer = Config()
+        writer.workspacePaths = ["/tmp/a"]
+        writer.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "11111111")
+        var disk = Config()
+        disk.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "202609171430")
+
+        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
+        XCTAssertEqual(merged.hostGateway?.pairCode, "202609171430")
+        XCTAssertEqual(merged.workspacePaths, ["/tmp/a"])
+        XCTAssertEqual(merged.hostGateway?.port, 2783)
+    }
+
+    /// Settings still owns the rest of the gateway section.
+    func testTheGatewaySettingsAreStillTheWritersOwn() {
+        var writer = Config()
+        writer.hostGateway = HostGatewayConfig(enabled: false, port: 3001)
+        var disk = Config()
+        disk.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "48291736")
+
+        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
+        XCTAssertEqual(merged.hostGateway?.enabled, false)
+        XCTAssertEqual(merged.hostGateway?.port, 3001)
+        XCTAssertEqual(merged.hostGateway?.pairCode, "48291736")
+    }
+
     /// TelegramConfig only has a custom decoder; encoding must still emit
     /// `bot_token` or a save looks successful while the file never stores it.
     func testTelegramConfigRoundTripsThroughJSON() throws {
