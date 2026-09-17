@@ -54,6 +54,7 @@ Wire 格式:
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
 | `touch-scroll.js` | 触控竖滑 → 终端 wheel，手机上回看历史 |
+| `vt-frame.js` | 二进制 VT 帧编解码，`index.html` 与 `bench.html` 共用，格式对齐 `HostGatewayVTFrame.swift` |
 | `vt-apply.js` | VT 帧串行写入；等 `term.write` 完成再应用下一帧 |
 | `term-focus.js` | chrome 点击不抢终端 caret；真实输入框除外 |
 | `devbroker/` | 上面各模块的 node 单元测试(无依赖),以及 `bench.html` 的结果收集器 |

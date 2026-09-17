@@ -524,6 +524,7 @@
 <script src="./term-focus.js"></script>
 <script src="./message-timeline.js"></script>
 <script src="./markdown.js"></script>
+<script src="./vt-frame.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -738,7 +739,7 @@ function openGatewaySocket(){
     S.history = {};
     const params = {
       vt_binary: true,
-      vt_deflate: typeof DecompressionStream === 'function',
+      vt_deflate: VTFrame.deflateSupported(),
       keys_binary: true,
     };
     if (S.pendingCode) params.code = S.pendingCode;
@@ -828,39 +829,8 @@ function gwSend(method, params, onReply){
 }
 
 // ── binary VT frames ──────────────────────────────────────────────────────
-// Layout (see Sources/Core/HostGatewayVTFrame.swift):
-//   u8 version | u8 flags (bit0 = deflate-raw) | u8 kind (1 data, 2 snapshot)
-//   u8 keyLen  | key… | [snapshot only] u16 cols, u16 rows | payload
-const VT_FRAME_VERSION = 1;
-// Hoisted: parseVTFrame runs per keystroke and per screen update.
-const VT_KEY_DECODER = new TextDecoder();
-
-function parseVTFrame(buf){
-  if (buf.length < 4 || buf[0] !== VT_FRAME_VERSION) return null;
-  const flags = buf[1], kind = buf[2], keyLen = buf[3];
-  let off = 4;
-  if (buf.length < off + keyLen) return null;
-  const key = VT_KEY_DECODER.decode(buf.subarray(off, off + keyLen));
-  off += keyLen;
-  let cols, rows;
-  if (kind === 2){
-    if (buf.length < off + 4) return null;
-    cols = (buf[off] << 8) | buf[off+1];
-    rows = (buf[off+2] << 8) | buf[off+3];
-    off += 4;
-  }
-  return {
-    type: kind === 2 ? 'vt.snapshot' : 'vt.data',
-    key, cols, rows,
-    deflated: (flags & 1) !== 0,
-    body: buf.subarray(off),
-  };
-}
-
-async function inflateRaw(bytes){
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
+// The wire format itself lives in vt-frame.js, shared with bench.html so the
+// benchmark cannot drift onto a format the socket no longer speaks.
 
 // Inflation is async, and a terminal that applies two chunks out of order is
 // corrupted — not slow, corrupted. Every frame for a pane is therefore threaded
@@ -880,12 +850,23 @@ function enqueueVTApply(key, type, work){ return vtApply.enqueue(key, type, work
 function releaseVTChain(key){ vtApply.release(key); }
 
 function onGatewayBinaryFrame(buf){
-  const f = parseVTFrame(buf);
+  // The auth reply is what makes these frames expected at all. Checking it here
+  // turns a server that ignored the negotiation into one visible log line
+  // instead of a terminal that renders some frames and silently drops the rest.
+  if (!S.gw || !S.gw.binary) {
+    log('sys', '(vt)', `binary frame on a JSON-negotiated socket, dropped (${buf.length}B)`);
+    return;
+  }
+  const f = VTFrame.parse(buf);
   if (!f) { log('sys', '(vt)', `unparseable binary frame, ${buf.length}B`); return; }
+  if (f.deflated && !S.gw.deflate) {
+    log('sys', '(vt)', 'deflated frame we did not negotiate for, dropped');
+    return;
+  }
   log('rx', f.type, `${f.type} ${f.body.length}B${f.deflated ? ' deflated' : ''} (payload elided)`);
 
   enqueueVTApply(f.key, f.type, async () => {
-    const bytes = f.deflated ? await inflateRaw(f.body) : f.body;
+    const bytes = f.deflated ? await VTFrame.inflateRaw(f.body) : f.body;
     await handleVT(f.key, { type: f.type, bytes, cols: f.cols, rows: f.rows });
   });
 }
