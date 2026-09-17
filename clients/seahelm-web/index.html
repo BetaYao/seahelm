@@ -320,8 +320,9 @@
   .ev .opt b{font-family:var(--mono);color:var(--muted);margin-right:8px;font-weight:500}
   /* ── MessageStream text mode ─────────────────────────────── */
   /* Read like a transcript, not a stack of cards: no boxes, no side bars.
-     Kinds are told apart by type and indent — the prompt glyph marks what you
-     sent, tools are dim monospace, prose is set for reading. */
+     Kinds are told apart by type — what you sent is a bubble on the right,
+     tools are dim monospace, prose is set for reading. Everything else shares
+     the left edge of the status rules, with no indent of its own. */
   #messageTimeline{display:none;flex:1;overflow:auto;padding:4px 16px 28px;flex-direction:column}
   #messageTimeline.on{display:flex}
   #termWrap.text-hidden{display:none}
@@ -339,23 +340,23 @@
   .tl-user div{min-width:0;padding:9px 14px;border-radius:16px 16px 4px 16px;
     background:rgba(31,200,218,.26);color:#f4fdfe;font-family:var(--sans);
     font-size:14px;line-height:1.55;font-weight:500;white-space:pre-wrap;word-break:break-word}
-  .tl-tool{display:flex;gap:8px;padding-left:18px;min-width:0;white-space:nowrap;
+  .tl-tool{display:flex;gap:8px;min-width:0;white-space:nowrap;
     font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
   .tl-tool b{flex:none;font-weight:500;color:#a8c3c5}
   .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
   .tl-tool em{flex:none;font-style:normal;color:var(--idle)}
   .tl-tool.err b{color:var(--danger)}
-  .tl-asst{margin:10px 0 8px;padding-left:18px;font-family:var(--sans);
+  .tl-asst{margin:10px 0 8px;font-family:var(--sans);
     font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
-  .tl-notice{margin:4px 0;padding-left:18px;font-family:var(--sans);font-size:12px;color:var(--muted)}
+  .tl-notice{margin:4px 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
   /* Narration while the agent works: the same column as its replies, a step
      quieter, so what it said still reads first. */
-  .tl-thinking{margin:8px 0 6px;padding-left:18px;font-family:var(--sans);
+  .tl-thinking{margin:8px 0 6px;font-family:var(--sans);
     font-size:13px;line-height:1.65;color:var(--muted);word-break:break-word}
   .tl-thinking strong{color:inherit}
   /* A past decision point. The one still open is answered in the reply bar;
      amber is kept for that. */
-  .tl-decision{margin:6px 0;padding-left:18px;font-family:var(--sans);font-size:12px;
+  .tl-decision{margin:6px 0;font-family:var(--sans);font-size:12px;
     line-height:1.6;color:var(--muted)}
   /* Timeline mode answers where you type: the open decision of the pane on
      screen sits above the composer instead of floating over the page. */
