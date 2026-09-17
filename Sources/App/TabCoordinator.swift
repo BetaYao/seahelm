@@ -547,7 +547,8 @@ class TabCoordinator {
                 gitStats: gitStats,
                 currentPaneTitle: currentPaneTitle,
                 currentPaneRunTime: currentPaneRunTime,
-                panes: panes
+                panes: panes,
+                label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath)
             ))
         }
 

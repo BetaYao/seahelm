@@ -108,6 +108,7 @@ enum WorktreeDeleter {
         }
 
         WorktreeBaseBranchStore.shared.forget(worktreePath: worktreePath)
+        WorktreeLabelStore.shared.forget(worktreePath: worktreePath)
 
         // Optionally delete the branch
         var branchWarning: String?

@@ -38,6 +38,9 @@ final class DashboardOverviewView: NSView {
     /// the pane's worktree path and its Station id.
     var onSelectPane: ((String, String) -> Void)?
     var onDeleteWorktree: ((String) -> Void)?
+    /// Row context menu → Label. Args: the worktree path and the chosen colour,
+    /// nil for "None".
+    var onSetLabel: ((String, SessionLabel?) -> Void)?
     /// The row's Return — `/return @worktree` by another route.
     var onReturnWorktree: ((String) -> Void)?
     /// Worktree paths whose Delete/Return is in flight. Survives a full list
@@ -611,6 +614,7 @@ final class DashboardOverviewView: NSView {
                                   integration: integrationRowStatus(groupedItem))
                 row.onTap = { [weak self] path in self?.onSelectWorktree?(path) }
                 row.onDelete = { [weak self] path in self?.onDeleteWorktree?(path) }
+                row.onSetLabel = { [weak self] path, label in self?.onSetLabel?(path, label) }
                 row.onReturn = { [weak self] path in self?.onReturnWorktree?(path) }
                 row.onResetIntegration = { [weak self] path in self?.onResetIntegration?(path) }
                 row.onHoverChanged = { [weak self] row, entered in
@@ -885,6 +889,21 @@ final class DashboardOverviewView: NSView {
     /// The leading dot each rendered row is showing, keyed by worktree path.
     var rowGlyphsForTesting: [String: String] {
         rowViewsByID.mapValues(\.dotGlyphForTesting)
+    }
+    /// The label each rendered row is wearing, keyed by worktree path.
+    var rowLabelsForTesting: [String: SessionLabel?] {
+        rowViewsByID.mapValues(\.labelForTesting)
+    }
+
+    /// Repaint one row's ribbon now, without waiting for the next list rebuild.
+    /// The cached panes take the label too: a grouping switch, an unpause or
+    /// another row's status edge re-renders from them, and would otherwise
+    /// strip the ribbon until the coordinator next rebuilds the rows.
+    func setLabel(_ label: SessionLabel?, forWorktree path: String) {
+        for index in latestPanes.indices where latestPanes[index].worktreePath == path {
+            latestPanes[index].label = label
+        }
+        rowViewsByID[path]?.applyLabel(label)
     }
     var renderedSelectedRowIDForTesting: String? { rowViewsByID[selectedId] == nil ? nil : selectedId }
     /// Ids of every row currently painting the hover tint — more than one means
@@ -1183,6 +1202,8 @@ final class DashboardOverviewView: NSView {
         var onDelete: ((String) -> Void)?
         var onReturn: ((String) -> Void)?
         var onResetIntegration: ((String) -> Void)?
+        /// Args: this row's worktree path and the chosen colour (nil = None).
+        var onSetLabel: ((String, SessionLabel?) -> Void)?
         /// Refreshed by `update` rather than fixed at init: a row is keyed by its
         /// station id, and a worktree transfer (`handleNewBranch`) re-registers the
         /// same stations under a new path. A reused row that kept its original
@@ -1195,6 +1216,11 @@ final class DashboardOverviewView: NSView {
         private var isIntegration: Bool { integration != nil }
         private var selected: Bool
         private let showsRepository: Bool
+        /// Ribbon down the row's left edge carrying the worktree's label colour.
+        /// A subview, not a sibling: hover resolution walks up from the view under
+        /// the pointer to find the row.
+        private let ribbon = NSView()
+        private var label: SessionLabel?
         private let staticDot: NSTextField
         private let runningDot: SpinnerDotView
         /// Shown while Delete/Return is assessing or tearing the worktree down —
@@ -1213,6 +1239,10 @@ final class DashboardOverviewView: NSView {
         private var lastStatus: AgentStatus = .unknown
 
         private static let cornerRadius: CGFloat = 8
+        /// Thin enough to live in the gutter before the status dot (leading + 10),
+        /// inset vertically so the row's rounded corners don't clip it.
+        private static let ribbonWidth: CGFloat = 3
+        private static let ribbonInset: CGFloat = 6
         private static let pendingPulseKey = "seahelm.pendingPulse"
         /// One beat, matched to the fleet list's other selection feedback.
         static let selectionFadeDuration: CFTimeInterval = 0.18
@@ -1338,11 +1368,19 @@ final class DashboardOverviewView: NSView {
             textCol.alignment = .leading
             textCol.translatesAutoresizingMaskIntoConstraints = false
 
+            ribbon.wantsLayer = true
+            ribbon.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(ribbon)
             addSubview(staticDot)
             addSubview(runningDot)
             addSubview(busySpinner)
             addSubview(textCol)
             NSLayoutConstraint.activate([
+                ribbon.leadingAnchor.constraint(equalTo: leadingAnchor),
+                ribbon.topAnchor.constraint(equalTo: topAnchor, constant: Self.ribbonInset),
+                ribbon.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.ribbonInset),
+                ribbon.widthAnchor.constraint(equalToConstant: Self.ribbonWidth),
+
                 textCol.leadingAnchor.constraint(equalTo: staticDot.trailingAnchor, constant: 7),
                 textCol.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
                 textCol.topAnchor.constraint(equalTo: topAnchor, constant: 8),
@@ -1359,6 +1397,7 @@ final class DashboardOverviewView: NSView {
                 line2.widthAnchor.constraint(equalTo: textCol.widthAnchor),
             ])
             applyContent(pane: pane, status: status)
+            applyLabel(pane.label)
         }
         required init?(coder: NSCoder) { fatalError() }
 
@@ -1401,6 +1440,9 @@ final class DashboardOverviewView: NSView {
             setSelected(selected, animated: false)
             setAccessibilityLabel(pane.name)
             applyContent(pane: pane, status: status)
+            // Refreshed here rather than through `structureSignature`: a label
+            // change is content, so it takes the incremental path.
+            applyLabel(pane.label)
         }
 
         var dotGlyphForTesting: String { staticDot.isHidden ? "◐" : staticDot.stringValue }
@@ -1492,7 +1534,7 @@ final class DashboardOverviewView: NSView {
             pending = isPending
             applyDotVisibility()
             let alpha: CGFloat = isPending ? 0.55 : 1
-            for view in [titleLabel, timeLabel, branchLabel, gitLabel, paneCountLabel] as [NSView] {
+            for view in [titleLabel, timeLabel, branchLabel, gitLabel, paneCountLabel, ribbon] as [NSView] {
                 view.alphaValue = alpha
             }
             repositoryLabel?.alphaValue = alpha
@@ -1519,6 +1561,8 @@ final class DashboardOverviewView: NSView {
                 item.target = self
                 menu.addItem(item)
             }
+            menu.addItem(.separator())
+            menu.addItem(labelMenuItem())
             menu.addItem(.separator())
             if isIntegration {
                 let resetItem = NSMenuItem(title: "Reset to origin/main",
@@ -1656,8 +1700,62 @@ final class DashboardOverviewView: NSView {
             } else {
                 applyBackground(hovered: hovered)
             }
+            // A layer's CGColor does not follow a dynamic NSColor.
+            applyLabel(label)
         }
 
+        /// Paint the ribbon, or hide it when the row is unlabelled.
+        func applyLabel(_ newLabel: SessionLabel?) {
+            label = newLabel
+            ribbon.isHidden = newLabel == nil
+            guard let newLabel else { return }
+            ribbon.layer?.cornerRadius = Self.ribbonWidth / 2
+            ribbon.layer?.backgroundColor = resolvedCGColor(newLabel.color)
+        }
+
+        /// Label ▸ None plus the eight swatches, with the current one ticked.
+        private func labelMenuItem() -> NSMenuItem {
+            let item = NSMenuItem(title: "Label", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            let none = NSMenuItem(title: "None", action: #selector(clearLabelAction), keyEquivalent: "")
+            none.target = self
+            none.state = label == nil ? .on : .off
+            submenu.addItem(none)
+            submenu.addItem(.separator())
+            for option in SessionLabel.allCases {
+                let swatch = NSMenuItem(title: option.title, action: #selector(setLabelAction(_:)),
+                                        keyEquivalent: "")
+                swatch.target = self
+                swatch.representedObject = option.rawValue
+                swatch.image = Self.swatchImage(option)
+                swatch.state = option == label ? .on : .off
+                submenu.addItem(swatch)
+            }
+            item.submenu = submenu
+            return item
+        }
+
+        private static func swatchImage(_ label: SessionLabel) -> NSImage {
+            NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+                label.color.setFill()
+                NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 2.5, yRadius: 2.5).fill()
+                return true
+            }
+        }
+
+        @objc private func setLabelAction(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? String,
+                  let picked = SessionLabel(rawValue: raw) else { return }
+            applyLabel(picked)
+            onSetLabel?(path, picked)
+        }
+
+        @objc private func clearLabelAction() {
+            applyLabel(nil)
+            onSetLabel?(path, nil)
+        }
+
+        var labelForTesting: SessionLabel? { label }
         var isHoveredForTesting: Bool { hovered }
     }
 
