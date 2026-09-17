@@ -659,6 +659,85 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
+    // MARK: - Session labels
+
+    /// The ribbon is the whole feature: a labelled row wears its colour, an
+    /// unlabelled one wears none, and picking a colour repaints that row alone.
+    func testRowRibbonFollowsTheWorktreeLabel() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
+                         paneStatuses: [.running], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-100), label: .teal),
+                makePane(name: "idle", project: "alpha", worktreePath: "/idle",
+                         paneStatuses: [.idle], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-200)),
+            ])
+
+            XCTAssertEqual(view.rowLabelsForTesting["/run"] ?? nil, .teal)
+            XCTAssertNil(view.rowLabelsForTesting["/idle"] ?? nil)
+
+            view.setLabel(.pink, forWorktree: "/idle")
+            XCTAssertEqual(view.rowLabelsForTesting["/idle"] ?? nil, .pink)
+            XCTAssertEqual(view.rowLabelsForTesting["/run"] ?? nil, .teal, "one row's pick must not touch another")
+
+            view.setLabel(nil, forWorktree: "/run")
+            XCTAssertNil(view.rowLabelsForTesting["/run"] ?? nil)
+        }
+    }
+
+    /// A label-only change is content, not structure, so the list reuses the
+    /// existing row views. The ribbon has to be refreshed on that path too, or
+    /// it goes stale until something else forces a full rebuild.
+    func testLabelChangeSurvivesTheIncrementalUpdatePath() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            let unlabelled = makePane(name: "run", project: "alpha", worktreePath: "/run",
+                                      paneStatuses: [.running], isMainWorktree: false,
+                                      lastActivityAt: now.addingTimeInterval(-100))
+            view.update([unlabelled])
+            let rendersAfterFirst = view.fullRenderCountForTesting
+            XCTAssertNil(view.rowLabelsForTesting["/run"] ?? nil)
+
+            view.update([
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
+                         paneStatuses: [.running], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-100), label: .green),
+            ])
+
+            XCTAssertEqual(view.fullRenderCountForTesting, rendersAfterFirst,
+                           "precondition: a label change should take the incremental path")
+            XCTAssertEqual(view.rowLabelsForTesting["/run"] ?? nil, .green)
+        }
+    }
+
+    /// A pick lands before the coordinator re-reads the store, so the overview
+    /// still holds the unlabelled rows it was last handed. Re-rendering from
+    /// those — here, the create popover closing — must not strip the ribbon.
+    func testPickedLabelSurvivesARerenderFromCachedRows() {
+        withDefaults { defaults in
+            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                             defaults: defaults,
+                                             now: { self.now })
+            view.update([
+                makePane(name: "run", project: "alpha", worktreePath: "/run",
+                         paneStatuses: [.running], isMainWorktree: false,
+                         lastActivityAt: now.addingTimeInterval(-100)),
+            ])
+
+            view.setLabel(.purple, forWorktree: "/run")
+            view.isRenderPaused = true
+            view.isRenderPaused = false
+
+            XCTAssertEqual(view.rowLabelsForTesting["/run"] ?? nil, .purple)
+        }
+    }
+
     private func withDefaults(_ body: (UserDefaults) -> Void) {
         let suite = "DashboardOverviewGroupingTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -676,7 +755,8 @@ private func makePane(
     isMainWorktree: Bool,
     lastActivityAt: Date?,
     currentPaneTitle: String? = nil,
-    currentPaneRunTime: String = "30s"
+    currentPaneRunTime: String = "30s",
+    label: SessionLabel? = nil
 ) -> WorktreeRowInfo {
     let surface = Station()
     return WorktreeRowInfo(
@@ -701,6 +781,7 @@ private func makePane(
         lastActivityAt: lastActivityAt,
         gitStats: nil,
         currentPaneTitle: currentPaneTitle ?? name,
-        currentPaneRunTime: currentPaneRunTime
+        currentPaneRunTime: currentPaneRunTime,
+        label: label
     )
 }
