@@ -2916,6 +2916,10 @@ extension MainWindowController: CommandHost {
         ZmxChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
     }
 
+    func messages(paneSessionKey: String) -> [MessageEvent] {
+        MessageStreamHub.shared.snapshot(paneId: paneSessionKey)
+    }
+
     /// Recent tool activity for one pane, as plain lines.
     func activity(paneId: String) -> [String] {
         guard let pane = AgentRegistry.shared.pane(for: paneId) else { return [] }

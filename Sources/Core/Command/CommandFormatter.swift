@@ -124,16 +124,42 @@ enum CommandFormatter {
 
     // MARK: - Detail
 
-    /// One pane in full. The transcript leads: the status fields alone say
+    /// One pane in full. The session leads: the status fields alone say
     /// almost nothing about what an agent has been doing, and for a pane
     /// that reports no structured events they are empty.
-    static func paneDetail(_ pane: PaneRef, activity: [String], transcript: String?, footer: String?) -> String {
+    ///
+    /// A pane with a MessageStream is read from it: the latest turn, short,
+    /// then its reply whole. The terminal transcript is kept for panes the
+    /// stream has nothing for — it is a screen scrape, so it repeats the reply
+    /// the way the agent drew it, and the two together ran past a message and
+    /// cut the reply off.
+    static func paneDetail(_ pane: PaneRef, activity: [String], transcript: String?,
+                           stream: [MessageEvent] = [], footer: String?) -> String {
         // A pane that has said nothing yet takes its title from the agent's own
         // OSC title, which is the agent's name — "Claude Code — Claude Code".
         let title = pane.title.caseInsensitiveCompare(pane.type) == .orderedSame ? "" : pane.title
         var out = ["**\(target(pane))** · \(pane.type)" + (title.isEmpty ? "" : " — \(truncated(title, limit: 90))"),
                    "\(pane.status.icon) \(pane.status.groupLabel)",
                    ""]
+        let turn = latestTurn(stream)
+        if !turn.isEmpty {
+            let reply = turn.last { $0.kind == .assistant }
+            let session = MailContentRedactor.summary(
+                sessionLines(turn.filter { $0.seq != reply?.seq }).joined(separator: "\n"), limit: 2_000)
+            if !session.isEmpty {
+                out.append("**Session**")
+                out.append(session)
+                out.append("")
+            }
+            let latest = MailContentRedactor.summary(reply?.text ?? pane.lastMessage, limit: 3_500)
+            if !latest.isEmpty, !lifecycleLabels.contains(latest) {
+                out.append("**Latest**")
+                out.append(latest)
+                out.append("")
+            }
+            if let footer, !footer.isEmpty { out.append(footer) }
+            return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
+        }
         if let transcript = transcript.map({ MailContentRedactor.summary($0, limit: 6_000) }),
            !transcript.isEmpty {
             out.append("**Session**")
@@ -153,6 +179,59 @@ enum CommandFormatter {
         }
         if let footer, !footer.isEmpty { out.append(footer) }
         return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
+    }
+
+    /// The stream from the latest prompt on — the whole ring when that prompt
+    /// has already scrolled out of it.
+    static func latestTurn(_ stream: [MessageEvent]) -> [MessageEvent] {
+        guard let start = stream.lastIndex(where: { $0.kind == .user }) else { return stream }
+        return Array(stream[start...])
+    }
+
+    /// Characters the session may take, so the reply under it still fits the
+    /// same message.
+    static let sessionBudget = 800
+
+    /// The turn as a few lines: what was asked, what the agent said, and its
+    /// tool calls folded into one line per run. Past the budget the oldest
+    /// lines go, but never the prompt — it is what the rest answers.
+    static func sessionLines(_ turn: [MessageEvent]) -> [String] {
+        var prompt: String?
+        var lines: [String] = []
+        var run: [(tool: String, count: Int)] = []
+        func closeRun() {
+            guard !run.isEmpty else { return }
+            lines.append("› " + run.map { $0.count > 1 ? "\($0.tool) ×\($0.count)" : $0.tool }.joined(separator: " · "))
+            run = []
+        }
+        for event in turn {
+            let text = (event.text ?? "").split(whereSeparator: \.isNewline).joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+            switch event.kind {
+            case .user where !text.isEmpty:
+                prompt = "❯ " + truncated(text, limit: 120)
+            case .assistant where !text.isEmpty, .thinking where !text.isEmpty:
+                closeRun()
+                lines.append(truncated(text, limit: 160))
+            case .tool:
+                guard let tool = event.tool, !tool.isEmpty else { continue }
+                if run.last?.tool == tool { run[run.count - 1].count += 1 } else { run.append((tool, 1)) }
+            default:
+                continue
+            }
+        }
+        closeRun()
+        var kept: [String] = []
+        var used = prompt.map { $0.count + 1 } ?? 0
+        for line in lines.reversed() {
+            guard used + line.count + 1 <= sessionBudget else {
+                kept.insert("…", at: 0)
+                break
+            }
+            used += line.count + 1
+            kept.insert(line, at: 0)
+        }
+        return (prompt.map { [$0] } ?? []) + kept
     }
 
     /// `lastMessage` falls back to the label of the last lifecycle event when

@@ -87,6 +87,8 @@ protocol CommandHost: AnyObject {
     func selectWorktree(path: String)
     func sendText(paneId: String, text: String) -> Bool
     func transcript(paneSessionKey: String) -> String?
+    /// The pane's MessageStream as the gateway has it, oldest first.
+    func messages(paneSessionKey: String) -> [MessageEvent]
     func activity(paneId: String) -> [String]
     /// Everything `/return` decides from, gathered off the main thread. The
     /// planner is pure, so this is the only place the verb touches git.
@@ -211,6 +213,7 @@ final class CommandExecutor {
                 pane,
                 activity: host.activity(paneId: pane.id),
                 transcript: pane.sessionKey.isEmpty ? nil : host.transcript(paneSessionKey: pane.sessionKey),
+                stream: pane.sessionKey.isEmpty ? [] : host.messages(paneSessionKey: pane.sessionKey),
                 footer: nil)))
 
         case .order(let pane, let text):

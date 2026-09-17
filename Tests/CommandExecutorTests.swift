@@ -44,6 +44,7 @@ final class FakeCommandHost: CommandHost {
         return true
     }
     func transcript(paneSessionKey: String) -> String? { "$ swift build\nBuild complete" }
+    func messages(paneSessionKey: String) -> [MessageEvent] { [] }
     func activity(paneId: String) -> [String] { ["Bash — swift build"] }
     func assessReturn(worktreePath: String, completion: @escaping (WorktreeReturnFacts) -> Void) {
         assessed.append(worktreePath)
