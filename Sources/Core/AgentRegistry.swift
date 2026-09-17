@@ -29,6 +29,16 @@ class AgentRegistry {
     /// Long enough for the agent to start rendering its spinner after a prompt.
     /// `var` so tests can drive the trailing-edge reclaim deterministically.
     static var hookRunningGrace: TimeInterval = 3.0
+    /// The same reclaim, for a run the screen never showed. A scan idle proves
+    /// the agent stopped only once the screen has shown it working: before its
+    /// spinner lands the frame still holds the last turn's prompt, and a slow
+    /// scan took several seconds to see a new turn — so a 3s window reclaimed
+    /// every such start, blinking the pane to Idle while it worked. Long, but
+    /// finite, so a turn that died before drawing anything still comes back.
+    static var hookRunningUnseenGrace: TimeInterval = 15.0
+    /// When each terminal's screen last showed it running — what tells an idle
+    /// frame that ends a run from one taken before the run reached the screen.
+    private var scanRunningAt: [String: Date] = [:]
 
     /// When each terminal's hook last asserted `.idle` (a Stop). The trailing-edge
     /// counterpart to `hookRunningSince`: for a grace window after the agent says
@@ -166,6 +176,7 @@ class AgentRegistry {
         orderedIDs.removeAll { $0 == terminalID }
         statusEnteredAt.removeValue(forKey: terminalID)
         hookRunningSince.removeValue(forKey: terminalID)
+        scanRunningAt.removeValue(forKey: terminalID)
         hookIdleSince.removeValue(forKey: terminalID)
         hookWaitingSince.removeValue(forKey: terminalID)
         turnStartedAt.removeValue(forKey: terminalID)
@@ -393,15 +404,19 @@ class AgentRegistry {
             if let cl = commandLine { next.commandLine = cl }
             if agentType != .unknown { next.agentType = agentType }
             if !activity.isEmpty { next.activityEvents = activity }
+            if status == .running { scanRunningAt[event.terminalID] = now }
             // Trailing-edge reclaim: once scan sees a sustained idle (past the grace
             // window since the hook's running edge), drop a stale hook `.running` so
             // an Esc/interrupt that fires no Stop hook doesn't stick on "running".
             if status == .idle, next.hookStatus == .running,
                let since = hookRunningSince[event.terminalID],
-               now.timeIntervalSince(since) >= Self.hookRunningGrace,
                Self.isSessionOnly(next.agentType) {
-                next.hookStatus = .unknown
-                hookRunningSince[event.terminalID] = nil
+                let screenShowedRun = (scanRunningAt[event.terminalID] ?? .distantPast) >= since
+                let grace = screenShowedRun ? Self.hookRunningGrace : Self.hookRunningUnseenGrace
+                if now.timeIntervalSince(since) >= grace {
+                    next.hookStatus = .unknown
+                    hookRunningSince[event.terminalID] = nil
+                }
             }
             // Same reclaim for a stale hook `.waiting`: the question has been
             // answered and the agent is visibly working again. Only a hook could

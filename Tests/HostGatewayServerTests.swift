@@ -308,6 +308,54 @@ final class HostGatewayServerTests: XCTestCase {
         task.cancel(with: .goingAway, reason: nil)
     }
 
+    /// Two browsers on one Mac. Dismissing a suggestion in one clears the store
+    /// both share, so the prompt that follows has nothing left to expire — the
+    /// other browser has to be told directly, or it keeps the card.
+    func testDecisionClearedInOneBrowserClearsItInTheOthers() {
+        let b64 = PairingCrypto.base64url(root)
+        let token = PairingCrypto(rootSecret: root).authPassword
+        let server = HostGatewayServer(
+            config: HostGatewayConfig(enabled: true, port: testPort),
+            router: ControlRouter(dataSource: ServerFakeDataSource()),
+            expectedMacId: macId,
+            rootSecretBase64url: b64,
+            vt: ServerFakeVT())
+        defer { server.stop() }
+        waitUntilListening(server)
+
+        func connect(_ id: String) -> URLSessionWebSocketTask {
+            let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(testPort)/ws")!)
+            task.resume()
+            sendText(#"{"id":"\#(id)","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token)"}}"#, on: task)
+            _ = receiveText(from: task)
+            return task
+        }
+        func nextDecision(on task: URLSessionWebSocketTask) -> [String: Any]? {
+            for _ in 0..<50 {
+                guard let obj = try? JSONSerialization.jsonObject(with: Data(receiveText(from: task).utf8))
+                        as? [String: Any] else { return nil }
+                if obj["method"] as? String == "pane.event" { return obj["params"] as? [String: Any] }
+            }
+            return nil
+        }
+        let picker = connect("authA")
+        let watcher = connect("authB")
+
+        EventHub.shared.publish(seq: 1, event: [
+            "type": "pane.updated", "seq": 1, "pane_id": "t1", "pane_session_key": "two-browsers",
+            "suggest": ["options": ["ship it", "wait"]],
+        ])
+        XCTAssertEqual(nextDecision(on: watcher)?["options"] as? [String], ["ship it", "wait"])
+
+        sendText(#"{"id":"no","method":"decision.dismiss","params":{"pane_session_key":"two-browsers"}}"#, on: picker)
+        let cleared = nextDecision(on: watcher)
+        XCTAssertEqual(cleared?["pane_session_key"] as? String, "two-browsers")
+        XCTAssertEqual(cleared?["cleared"] as? Bool, true)
+
+        picker.cancel(with: .goingAway, reason: nil)
+        watcher.cancel(with: .goingAway, reason: nil)
+    }
+
     /// The page has to come off the same port as `/ws`, or the browser client is
     /// left on a foreign origin where `crypto.subtle` does not exist.
     func testStaticPageServedFromSamePort() throws {

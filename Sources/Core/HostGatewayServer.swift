@@ -508,6 +508,13 @@ final class HostGatewayServer {
                 self.sendPendingNotifications(for: connection, session: session)
             }
         }
+        // Runs inside `session.handle`, which is already on `queue`.
+        session.setDecisionClearedHandler { [weak self] origin, key in
+            guard let self else { return }
+            for state in self.connections.values where state.session !== origin {
+                state.session.pushDecision(.cleared(paneSessionKey: key))
+            }
+        }
 
         connection.stateUpdateHandler = { [weak self] connState in
             guard let self else { return }

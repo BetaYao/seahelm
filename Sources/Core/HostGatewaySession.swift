@@ -72,6 +72,7 @@ final class HostGatewaySession {
     private var vtDeflate = false
     private var keysBinary = false
     private var pendingOutbound: ((HostGatewaySession) -> Void)?
+    private var decisionCleared: ((HostGatewaySession, String) -> Void)?
 
     init(router: ControlRouter,
          expectedMacId: String,
@@ -128,6 +129,16 @@ final class HostGatewaySession {
     func setPendingOutboundHandler(_ handler: @escaping (HostGatewaySession) -> Void) {
         lock.lock()
         pendingOutbound = handler
+        lock.unlock()
+    }
+
+    /// Called when this client answers, picks or dismisses a decision, so the
+    /// server can tell every other client. The decision store is shared: once
+    /// one browser cleared it, the prompt that follows finds nothing to expire,
+    /// and a second browser — or the phone — kept the card until it reconnected.
+    func setDecisionClearedHandler(_ handler: @escaping (HostGatewaySession, String) -> Void) {
+        lock.lock()
+        decisionCleared = handler
         lock.unlock()
     }
 
@@ -333,6 +344,10 @@ final class HostGatewaySession {
         enqueue(.text(HostGatewayFrame.encode(
             .notify(method: "pane.event",
                     params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))))
+        lock.lock()
+        let tellOthers = decisionCleared
+        lock.unlock()
+        tellOthers?(self, key)
     }
 
     func drainNotifications() -> [HostGatewayWireFrame] {

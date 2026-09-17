@@ -39,23 +39,19 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
     /// sustained idle past the grace window, a stale hook `.running` is dropped.
     func testCursorScanIdleReclaimsStaleHookRunningAfterGrace() {
         AgentRegistry.hookRunningGrace = 0
-        var callCount = 0
-        var captured: IngestOutcome?
-        let exp = expectation(description: "outcome")
-        exp.assertForOverFulfill = false
-        AgentRegistry.shared.onOutcome = { o in
-            callCount += 1
-            if callCount == 2 { captured = o; exp.fulfill() }
-        }
+        defer { AgentRegistry.hookRunningGrace = 3.0 }
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("cursor"),
                                               kind: .userPrompt("do the thing")))
+        scan(.running, agentType: .cursor)
+        scan(.idle, agentType: .cursor)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    private func scan(_ status: AgentStatus, agentType: AgentType = .claudeCode) {
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
-            kind: .screenObserved(status: .idle, message: "", activity: [],
-                                  commandLine: nil, agentType: .cursor,
+            kind: .screenObserved(status: status, message: "", activity: [],
+                                  commandLine: nil, agentType: agentType,
                                   roundDuration: 0, tasks: [])))
-        wait(for: [exp], timeout: 2)
-        XCTAssertEqual(captured?.newStatus, .idle)
-        AgentRegistry.hookRunningGrace = 3.0
     }
 
     func testSessionOnlyHookRunningPromotesOverStaleScanIdle() {
@@ -89,22 +85,38 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
         // deterministically without a wall-clock wait.
         AgentRegistry.hookRunningGrace = 0
         defer { AgentRegistry.hookRunningGrace = 3.0 }
-        var callCount = 0
-        var captured: IngestOutcome?
-        let exp = expectation(description: "outcome")
-        exp.assertForOverFulfill = false
-        AgentRegistry.shared.onOutcome = { o in
-            callCount += 1
-            if callCount == 2 { captured = o; exp.fulfill() }
-        }
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .userPrompt("do the thing")))
-        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
-            kind: .screenObserved(status: .idle, message: "", activity: [],
-                                  commandLine: nil, agentType: .claudeCode,
-                                  roundDuration: 0, tasks: [])))
-        wait(for: [exp], timeout: 2)
-        XCTAssertEqual(captured?.newStatus, .idle)
+        scan(.running)
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    /// A new turn, polled before its spinner reached the screen: the frame still
+    /// shows the last turn's prompt, past the 3s window. That is not the run
+    /// ending — the pane blinked to Idle for a few seconds at the start of turns.
+    func testScanIdleBeforeTheRunReachesTheScreenDoesNotEndIt() {
+        AgentRegistry.hookRunningGrace = 0
+        defer { AgentRegistry.hookRunningGrace = 3.0 }
+        scan(.running)                    // the previous turn
+        scan(.idle)
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .userPrompt("next")))
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .running)
+        scan(.running)
+        scan(.idle)                       // now it has shown the run, and stopped
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    /// A turn that died before drawing anything still comes back, just later.
+    func testRunTheScreenNeverShowedIsReclaimedAfterTheLongerWindow() {
+        AgentRegistry.hookRunningUnseenGrace = 0
+        defer { AgentRegistry.hookRunningUnseenGrace = 15.0 }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .userPrompt("do the thing")))
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
     }
 
     func testUrgentHookSurfacesEvenWhenScreenAuthoritative() {
