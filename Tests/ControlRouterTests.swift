@@ -415,6 +415,30 @@ final class ControlRouterTests: XCTestCase {
         XCTAssertEqual(d["matched"] as? Bool, true)
     }
 
+    /// Named keys reach a live surface as key presses: typed, the terminal's
+    /// paste path turned ESC and ^C into spaces, and the web 打断 did nothing.
+    func testNamedKeysArePressedNotTyped() {
+        XCTAssertEqual(ControlKeys.keyPress(for: "esc")?.keycode, 53)
+        XCTAssertEqual(ControlKeys.keyPress(for: "Escape")?.codepoint, 0x1b)
+        let ctrlC = ControlKeys.keyPress(for: "ctrl+c")
+        XCTAssertEqual(ctrlC?.keycode, 8)
+        XCTAssertEqual(ctrlC?.ctrl, true)
+        XCTAssertEqual(ctrlC?.codepoint, UInt32(("c" as Unicode.Scalar).value))
+        XCTAssertEqual(ControlKeys.keyPress(for: "ctrl+v")?.keycode, 9, "the keycode sendImagePasteKey uses")
+        XCTAssertEqual(ControlKeys.keyPress(for: "down")?.keycode, 125)
+        XCTAssertEqual(ControlKeys.keyPress(for: "backspace")?.keycode, 51)
+        for typed in ["enter", "space", "y", "1", "ctrl+1", "ctrl+cc"] {
+            XCTAssertNil(ControlKeys.keyPress(for: typed), typed)
+        }
+    }
+
+    /// Every ctrl+letter the byte mapping knows is also a key press.
+    func testEveryCtrlLetterHasAKeycode() {
+        for letter in "abcdefghijklmnopqrstuvwxyz" {
+            XCTAssertNotNil(ControlKeys.keyPress(for: "ctrl+\(letter)"), String(letter))
+        }
+    }
+
     func testControlKeysMapping() {
         XCTAssertEqual(ControlKeys.bytes(for: "esc"), "\u{1b}")
         XCTAssertEqual(ControlKeys.bytes(for: "ctrl+c"), "\u{03}")

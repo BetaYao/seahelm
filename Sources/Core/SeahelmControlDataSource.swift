@@ -167,7 +167,7 @@ final class SeahelmControlDataSource: ControlDataSource {
                 let send = {
                     if isEnter {
                         station.sendEnterKey()
-                    } else if let bytes = ControlKeys.bytes(for: key) {
+                    } else if !station.sendKeyPress(key), let bytes = ControlKeys.bytes(for: key) {
                         station.sendText(bytes)
                     }
                 }

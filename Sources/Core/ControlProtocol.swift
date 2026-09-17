@@ -187,6 +187,38 @@ enum ControlKeys {
         }
     }
 
+    /// A named key as a real key press: macOS virtual keycode, whether ctrl is
+    /// held, and the character the key makes with no modifiers. Nil for a key
+    /// that is typed as text — enter, space and single literal characters.
+    ///
+    /// A pane with a live surface must get these as key events. Typed, they go
+    /// through the terminal's paste path, which replaces ESC, ^C and DEL with a
+    /// space — so "esc" arrived as a space and an arrow as " [B".
+    static func keyPress(for name: String) -> (keycode: UInt32, ctrl: Bool, codepoint: UInt32)? {
+        switch name.lowercased() {
+        case "esc", "escape":     return (53, false, 0x1b)
+        case "tab":               return (48, false, 0x09)
+        case "backspace", "bs":   return (51, false, 0x7f)
+        // The private-use characters AppKit reports for the arrow keys.
+        case "up":                return (126, false, 0xF700)
+        case "down":              return (125, false, 0xF701)
+        case "left":              return (123, false, 0xF702)
+        case "right":             return (124, false, 0xF703)
+        default:
+            let k = name.lowercased()
+            guard k.hasPrefix("ctrl+"), k.count == 6, let c = k.last,
+                  let keycode = ansiLetterKeycodes[c] else { return nil }
+            return (keycode, true, UInt32(c.unicodeScalars.first!.value))
+        }
+    }
+
+    /// kVK_ANSI_A … kVK_ANSI_Z.
+    private static let ansiLetterKeycodes: [Character: UInt32] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+        "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
+        "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+    ]
+
     /// Normalize a `keys` param that may arrive as a string or an array.
     static func parseKeys(_ raw: Any?) -> [String] {
         if let arr = raw as? [String] { return arr }
