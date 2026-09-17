@@ -30,7 +30,10 @@ final class TerminalCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(config.migrateCollidingPaneSessions())
         XCTAssertEqual(config.splitLayouts[second]?.paneSessionKeys, [secondBase])
-        XCTAssertEqual(config.splitLayouts[first]?.paneSessionKeys, [firstBase, "\(firstBase)--pane-1"])
+        // Named from its own worktree's base. This base is long enough that the
+        // name is shortened to stay within the backend limit (SessionManagerTests).
+        XCTAssertEqual(config.splitLayouts[first]?.paneSessionKeys,
+                       [firstBase, SessionManager.indexedSessionName(base: firstBase, index: 1)])
     }
 
     func testSplitFocusedPaneWithNilRepoVCIsNoop() {
