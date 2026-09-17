@@ -204,3 +204,33 @@ final class HostGatewaySessionBackpressureTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 1, "two overflows within 1s must share one snapshot")
     }
 }
+
+extension HostGatewaySessionBackpressureTests {
+    /// The browser's fleet list got statuses once, on authentication, and never
+    /// again: nothing pushed a status change or a closed pane after that.
+    func testStatusChangesAndClosedPanesReachTheFleetList() {
+        let (s, _, _) = session()
+        openAuthenticated(s)
+        _ = s.drainNotifications()
+
+        s.pushPaneEvent(["type": "pane.status_changed", "seq": 7, "pane_id": "p1", "pane_session_key": "k1",
+                         "status": "Running", "old_status": "Idle", "agent_type": "claudeCode",
+                         "worktree_path": "/wt", "last_message": "Bash", "user_prompt": "ship it"])
+        s.pushPaneEvent(["type": "pane.updated", "pane_session_key": "k1", "status": "Running"])
+        s.pushPaneEvent(["type": "pane.closed", "pane_id": "p1", "pane_session_key": "k1", "worktree_path": "/wt"])
+
+        let notes = s.drainNotifications()
+        XCTAssertEqual(methods(of: notes), ["pane.status", "pane.closed"],
+                       "per-hook pane.updated changes nothing the list draws")
+        let status = decodeResponse(notes[0])["params"] as? [String: Any]
+        XCTAssertEqual(status?["pane_session_key"] as? String, "k1")
+        XCTAssertEqual(status?["status"] as? String, "Running")
+        XCTAssertNil(status?["user_prompt"], "the list is sent what it draws, not the whole event")
+    }
+
+    func testPaneEventsWaitForAuthentication() {
+        let (s, _, _) = session()
+        s.pushPaneEvent(["type": "pane.status_changed", "pane_session_key": "k1", "status": "Running"])
+        XCTAssertTrue(methods(of: s.drainNotifications()).isEmpty)
+    }
+}

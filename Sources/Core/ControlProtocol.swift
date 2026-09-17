@@ -125,6 +125,9 @@ protocol ControlDataSource: AnyObject {
     func integrationStatus(path: String?) -> [String: Any]?
     /// Recent MessageStream events for one pane, or all panes when `paneId` is nil.
     func messageSnapshot(paneId: String?) -> [[String: Any]]
+    /// A page of one pane's MessageStream older than `beforeSeq`, oldest first:
+    /// `{messages, has_more}`.
+    func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any]
 }
 
 extension ControlDataSource {
@@ -148,6 +151,9 @@ extension ControlDataSource {
     func memoryStats() -> [String: Any]? { nil }
     func integrationStatus(path: String?) -> [String: Any]? { nil }
     func messageSnapshot(paneId: String?) -> [[String: Any]] { [] }
+    func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any] {
+        ["messages": [], "has_more": false]
+    }
 }
 
 /// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
@@ -407,6 +413,18 @@ final class ControlRouter {
             let paneId = params["pane_id"] as? String
             let messages = dataSource?.messageSnapshot(paneId: paneId) ?? []
             return .ok(["messages": messages])
+
+        case "message.history":
+            guard let paneId = (params["pane_session_key"] as? String) ?? (params["pane_id"] as? String),
+                  !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_session_key or pane_id required")
+            }
+            guard let beforeSeq = (params["before_seq"] as? NSNumber)?.uint64Value else {
+                return .error(code: ControlError.invalidParams, message: "before_seq required")
+            }
+            let limit = min(max((params["limit"] as? Int) ?? 50, 1), 200)
+            return .ok(dataSource?.messageHistory(paneId: paneId, beforeSeq: beforeSeq, limit: limit)
+                ?? ["messages": [], "has_more": false])
 
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)

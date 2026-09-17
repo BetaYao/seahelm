@@ -118,9 +118,9 @@ final class HostGatewayServer {
             guard let self else { return }
             self.queue.async {
                 let change = self.decisions.apply(event: event)
-                if case .none = change { return }
                 for state in self.connections.values {
-                    state.session.pushDecision(change)
+                    if change != .none { state.session.pushDecision(change) }
+                    state.session.pushPaneEvent(event)
                 }
             }
         }
@@ -506,6 +506,13 @@ final class HostGatewayServer {
             guard let self, let connection else { return }
             self.queue.async {
                 self.sendPendingNotifications(for: connection, session: session)
+            }
+        }
+        // Runs inside `session.handle`, which is already on `queue`.
+        session.setDecisionClearedHandler { [weak self] origin, key in
+            guard let self else { return }
+            for state in self.connections.values where state.session !== origin {
+                state.session.pushDecision(.cleared(paneSessionKey: key))
             }
         }
 

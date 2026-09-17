@@ -30,6 +30,7 @@
     --danger-14:rgba(232,70,53,.14);
     --attention-12:rgba(224,164,88,.12);
     --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Segoe UI','Microsoft YaHei',sans-serif;
     --r:4px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -318,30 +319,122 @@
   .ev .opt:first-of-type{background:var(--accent-12);border-color:var(--accent-20)}
   .ev .opt b{font-family:var(--mono);color:var(--muted);margin-right:8px;font-weight:500}
   /* ── MessageStream text mode ─────────────────────────────── */
-  #messageTimeline{display:none;flex:1;overflow:auto;padding:12px;flex-direction:column;gap:8px}
+  /* Read like a transcript, not a stack of cards: no boxes, no side bars.
+     Kinds are told apart by type — what you sent is a bubble on the right,
+     tools are dim monospace, prose is set for reading. Everything else shares
+     the left edge of the status rules, with no indent of its own. */
+  #messageTimeline{display:none;flex:1;overflow:auto;padding:4px 16px 28px;flex-direction:column}
   #messageTimeline.on{display:flex}
   #termWrap.text-hidden{display:none}
   #toBottom.text-hidden{display:none}
-  .msg-row-status{align-self:center;font-size:11px;color:var(--muted);
-    background:rgba(255,255,255,.04);border:1px solid var(--line-20);
-    padding:3px 10px;border-radius:999px}
-  .msg-row-tool{align-self:stretch;background:rgba(27,176,98,.08);
-    border-left:3px solid #1bb062;padding:8px 10px;border-radius:8px;
-    font-family:var(--mono);font-size:12px;color:#c6efd0}
-  .msg-row-tool .k{color:#69db7c;font-weight:600;margin-right:6px}
-  .msg-row-asst{background:var(--panel);border:1px solid var(--line-20);
-    padding:10px 12px;border-radius:12px 12px 12px 4px;white-space:pre-wrap;font-size:13px}
-  .msg-row-user{align-self:flex-end;background:rgba(61,156,253,.12);
-    border:1px solid rgba(61,156,253,.25);padding:10px 12px;
-    border-radius:12px 12px 4px 12px;white-space:pre-wrap;font-size:13px;max-width:92%}
-  .msg-row-meta{font-size:11px;color:var(--muted);padding:6px 10px;
-    border-radius:8px;font-family:var(--mono);background:rgba(255,255,255,.03)}
-  .msg-composer{display:none;border-top:1px solid var(--line-20);padding:10px;gap:8px}
+  .tl{width:100%;max-width:760px;margin:0 auto}
+  .tl-empty{padding:48px 0;text-align:center;color:var(--muted);font-size:12px}
+  .tl-more{padding:10px 0 2px;text-align:center;font-size:11px;color:var(--idle)}
+  .tl-status{display:flex;align-items:center;gap:8px;margin:20px 0 10px;
+    font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--idle)}
+  .tl-status::before,.tl-status::after{content:'';flex:1;height:1px;background:var(--line-12)}
+  .tl-status i{width:5px;height:5px;border-radius:50%;flex:none}
+  /* What you sent is the one thing on the right, and the one thing with a fill —
+     so a long run of agent output never hides where a turn began. */
+  .tl-user{display:flex;justify-content:flex-end;margin:18px 0 12px;padding-left:15%}
+  .tl-user div{min-width:0;padding:9px 14px;border-radius:16px 16px 4px 16px;
+    background:rgba(31,200,218,.26);color:#f4fdfe;font-family:var(--sans);
+    font-size:14px;line-height:1.55;font-weight:500;white-space:pre-wrap;word-break:break-word}
+  .tl-tool{display:flex;gap:8px;min-width:0;white-space:nowrap;
+    font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
+  .tl-tool b{flex:none;font-weight:500;color:#a8c3c5}
+  .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
+  .tl-tool em{flex:none;font-style:normal;color:var(--idle)}
+  .tl-tool.err b{color:var(--danger)}
+  .tl-asst{margin:10px 0 8px;font-family:var(--sans);
+    font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
+  .tl-notice{margin:4px 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
+  /* Narration while the agent works: the same column as its replies, a step
+     quieter, so what it said still reads first. */
+  .tl-thinking{margin:8px 0 6px;font-family:var(--sans);
+    font-size:13px;line-height:1.65;color:var(--muted);word-break:break-word}
+  .tl-thinking strong{color:inherit}
+  /* A past decision point. The one still open is answered in the reply bar;
+     amber is kept for that. */
+  .tl-decision{margin:6px 0;font-family:var(--sans);font-size:12px;
+    line-height:1.6;color:var(--muted)}
+  /* Timeline mode answers where you type: the open decision of the pane on
+     screen sits above the composer instead of floating over the page. */
+  .reply-bar{flex:none;border-top:1px solid var(--line-12);max-height:40vh;overflow-y:auto;
+    padding:10px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans)}
+  .reply-bar[hidden]{display:none}
+  /* What the pane on screen is doing now. The timeline above only shows what
+     already happened, so without this a quiet agent and a busy one look alike. */
+  .run-line{flex:none;display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-12);
+    padding:8px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
+  .run-line[hidden]{display:none}
+  .run-line i{width:6px;height:6px;border-radius:50%;flex:none}
+  .run-line .rl-running{color:var(--running)}
+  .run-line .rl-waiting{color:var(--attention)}
+  .run-line .rl-failed{color:var(--danger)}
+  .run-line .rl-time{font-family:var(--mono);font-size:11px;color:var(--idle)}
+  .run-line:not([hidden]) ~ .reply-bar,
+  .run-line:not([hidden]) ~ .msg-composer{border-top:0}
+  /* Choices and the input are one place to answer from, not two panels. */
+  .reply-bar:not([hidden]) ~ .msg-composer{border-top:0}
+  .rb-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;font-size:12px;color:var(--attention)}
+  .rb-head span{flex:1;min-width:0}
+  .rb-head.danger{color:var(--danger)}
+  .rb-skip{flex:none;background:none;border:0;padding:0;cursor:pointer;
+    font-family:var(--sans);font-size:12px;color:var(--muted)}
+  .rb-skip:hover{color:var(--text)}
+  .rb-opts{display:flex;flex-wrap:wrap;gap:6px}
+  .rb-opts button{max-width:100%;background:none;border:1px solid var(--line-20);border-radius:16px;
+    padding:6px 12px;cursor:pointer;text-align:left;font-family:var(--sans);font-size:13px;
+    line-height:1.4;color:var(--text)}
+  .rb-opts button:first-child{border-color:var(--accent-20);color:var(--accent)}
+  .rb-opts button:hover{border-color:var(--accent)}
+  /* Other panes waiting on you: one quiet line under the head, never a card. */
+  .attention-line{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;
+    margin:-4px 0 6px;padding:0 max(16px, calc((100% - 760px) / 2));font-family:var(--sans);font-size:12px}
+  .attention-line[hidden]{display:none}
+  .attention-line button{background:none;border:0;padding:2px 0;cursor:pointer;
+    font-family:var(--sans);font-size:12px;color:var(--attention)}
+  .attention-line button b{font-weight:500;color:var(--text)}
+  .attention-line em{font-style:normal;color:var(--muted)}
+  .md p{margin:0 0 .65em}
+  .md>:last-child{margin-bottom:0}
+  .md strong{font-weight:600;color:#e6f2f2}
+  .md a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-20);word-break:break-all}
+  .md code{font-family:var(--mono);font-size:.86em;padding:.1em .35em;border-radius:3px;
+    background:rgba(150,215,225,.08)}
+  .md pre{margin:.3em 0 .8em;padding:10px 12px;border-radius:6px;overflow:auto;
+    background:rgba(0,0,0,.2);font-family:var(--mono);font-size:12px;line-height:1.55}
+  .md pre code{padding:0;background:none;font-size:inherit}
+  .md ul,.md ol{margin:.2em 0 .65em;padding-left:1.25em}
+  .md li{margin:.15em 0}
+  .md li::marker{color:var(--idle)}
+  .md li>ul,.md li>ol{margin:.15em 0 .2em}
+  .md h3,.md h4{margin:.9em 0 .35em;font-size:14px;font-weight:600;color:#e6f2f2}
+  .md blockquote{margin:0 0 .65em;padding-left:1em;color:var(--muted)}
+  .md hr{margin:1em 0;border:0;height:1px;background:var(--line-12)}
+  .md-table{overflow-x:auto;margin:.3em 0 .8em}
+  .md table{border-collapse:collapse;font-size:13px}
+  .md th,.md td{padding:5px 14px 5px 0;border-bottom:1px solid var(--line-12);text-align:left;vertical-align:top}
+  .md th{font-weight:500;color:var(--muted)}
+  /* Lines up with the transcript column on a wide window. */
+  .msg-composer{display:none;gap:8px;border-top:1px solid var(--line-12);
+    padding:10px max(16px, calc((100% - 760px) / 2))}
   .msg-composer.on{display:flex}
-  .msg-composer input{flex:1;border-radius:10px;border:1px solid var(--line-20);
-    background:var(--bg);color:var(--text);padding:10px 12px;font-size:13px}
-  .msg-composer button{border:0;border-radius:10px;background:var(--accent);
-    color:#041018;font-weight:600;padding:0 14px;cursor:pointer}
+  .msg-composer input{flex:1;min-width:0;border-radius:8px;border:1px solid var(--line-12);
+    background:rgba(150,215,225,.04);color:var(--text);padding:10px 12px;
+    font-family:var(--sans);font-size:14px;outline:none}
+  .msg-composer input:focus{border-color:var(--accent-20)}
+  .msg-composer button{flex:none;border:0;border-radius:8px;background:var(--accent);
+    color:#041018;font-family:var(--sans);font-size:13px;font-weight:600;padding:0 16px;cursor:pointer}
+  .seg{display:inline-flex;flex:none;gap:2px;padding:2px;border:1px solid var(--line-12);border-radius:6px}
+  .seg button{background:none;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;
+    font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .seg button.on{background:var(--accent-12);color:var(--accent)}
+  .interrupt-btn{flex:none;background:none;border:1px solid rgba(232,70,53,.35);border-radius:6px;
+    padding:4px 12px;font-family:var(--sans);font-size:12px;color:var(--danger);cursor:pointer}
+  .interrupt-btn:hover:not(:disabled){background:var(--danger-14)}
+  .interrupt-btn:disabled{opacity:.35;cursor:default}
   /* ── log ────────────────────────────────────────────────── */
   #log{font-family:var(--mono);font-size:11px;line-height:1.45}
   .logline{padding:3px 0;border-bottom:1px solid var(--line-12)}
@@ -393,14 +486,18 @@
     <div class="col" id="midcol">
       <div class="detail-head">
         <h2 id="detailHead">终端</h2>
-        <button class="renderer-badge" id="surfaceBadge" title="现场模式">时间线</button>
+        <span class="seg" id="surfaceBadge"></span>
         <button class="renderer-badge" id="vtModeBadge" title="VT 订阅模式">单屏</button>
         <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
+        <button class="interrupt-btn" id="interruptBtn" type="button" hidden>打断</button>
       </div>
+      <div class="attention-line" id="attentionLine" hidden></div>
       <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="回到最新输出">↓ 最新</button>
+      <div class="run-line" id="runLine" hidden></div>
+      <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer">
         <input id="msgInput" placeholder="发给当前 pane…" autocomplete="off"/>
         <button id="msgSend" type="button">发送</button>
@@ -427,6 +524,8 @@
 <script src="./reconnect.js"></script>
 <script src="./vt-apply.js"></script>
 <script src="./term-focus.js"></script>
+<script src="./message-timeline.js"></script>
+<script src="./markdown.js"></script>
 <script src="./e2ee.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
@@ -475,6 +574,8 @@ const S = {
        scrollback:VT_SCROLLBACK_DEEP },
   // MessageStream timeline (text mode). Keyed by pane_session_key.
   messages:{},
+  // Paging older timeline pages in, per pane: {loading, done}.
+  history:{},
   // 'text' | 'vt' — phone/narrow defaults to text so VT is opt-in.
   surfaceMode: null,
   // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
@@ -486,6 +587,9 @@ const S = {
   // Groups are computed Mac-side (fleet.groups) so the browser cannot drift
   // from the dashboard; `groups` is null until the first reply lands.
   grouping:{ mode: localStorage.getItem('seahelm_grouping') || 'repository', groups:null },
+  // worktree path → {running_since, last_activity_at}, from `fleet.groups`: what
+  // the time on the right of each fleet row counts from.
+  rowTimes:new Map(),
 };
 // Opening size only. zmx reports no geometry and has no resize verb, so the
 // bridge reads the session's real grid from outside (pid → tty → `stty size`)
@@ -594,6 +698,7 @@ function setStatus(on, txt){
   // The gate is a function of connection state, so it re-renders wherever that
   // state is set — including the paths that drop the socket without asking.
   renderGate();
+  renderInterruptButton();
 }
 
 // ── connect ───────────────────────────────────────────────────────────────
@@ -630,6 +735,10 @@ function openGatewaySocket(){
   ws.binaryType = 'arraybuffer';
   S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false, keysBinary: false };
   ws.onopen = () => {
+    // The gateway replays every ring after auth. Start empty so that replay is
+    // the whole history — and because a restarted Mac numbers `seq` from 1.
+    S.messages = {};
+    S.history = {};
     const params = {
       vt_binary: true,
       vt_deflate: typeof DecompressionStream === 'function',
@@ -819,6 +928,14 @@ function onGatewayNotify(method, params){
     onPaneMessage(params);
     return;
   }
+  if (method === 'pane.status') {
+    onPaneStatus(params);
+    return;
+  }
+  if (method === 'pane.closed') {
+    onPaneClosed(params);
+    return;
+  }
   if (method === 'vt.snapshot' || method === 'vt.data') {
     const key = params.pane_session_key || params.pane_id;
     const type = method === 'vt.snapshot' ? 'vt.snapshot' : 'vt.data';
@@ -830,35 +947,109 @@ function onGatewayNotify(method, params){
   }
 }
 
+// ── fleet updates ──────────────────────────────────────────────────────────
+// The pane list arrives once, with authentication. These keep it current: the
+// Mac pushes status changes and closed panes, and anything about a pane this
+// page has never seen means the fleet itself changed, so it is asked for again.
+
+/** A pane changed status on the Mac: patch the row the list already has. */
+function onPaneStatus(p){
+  const key = p.pane_session_key || p.pane_id;
+  if (!key) return;
+  const pane = S.panes.get(key);
+  if (!pane) { refreshFleetSoon(true); return; }
+  if (p.status) pane.status = p.status;
+  if (p.agent_type) pane.agent_type = p.agent_type;
+  if (typeof p.last_message === 'string') pane.last_message = p.last_message;
+  refreshFleetSoon(false);
+}
+
+function onPaneClosed(p){
+  const key = p.pane_session_key || p.pane_id;
+  if (!key || !S.panes.has(key)) return;
+  S.panes.delete(key);
+  S.events.delete(key);
+  delete S.messages[key];
+  delete S.history[key];
+  if (S.selPane === key) {
+    // Stay on the worktree if it still has panes; otherwise there is nothing to show.
+    S.selPane = null;
+    if (!buildFleet().some(r => r.path === S.sel)) S.sel = null;
+    S.vt.worktree = null;              // remount rather than keep a dead pane on screen
+    renderDetail();
+  }
+  refreshFleetSoon(false);
+}
+
+let treeFrame = 0;
+let fleetTimer = null;
+let fleetNeedsSnapshot = false;
+/** Repaint the list on the next frame; re-ask the Mac for its grouping — and the
+ *  pane list, when one appeared — at most once a second while changes keep coming. */
+function refreshFleetSoon(needSnapshot){
+  if (!treeFrame) treeFrame = requestAnimationFrame(() => { treeFrame = 0; renderTree(); });
+  fleetNeedsSnapshot = fleetNeedsSnapshot || needSnapshot;
+  if (fleetTimer) return;
+  fleetTimer = setTimeout(() => {
+    fleetTimer = null;
+    if (!isLinked()) return;
+    const withPanes = fleetNeedsSnapshot;
+    fleetNeedsSnapshot = false;
+    if (withPanes) {
+      gwSend('session.snapshot', {}, (snap) => { if (snap && snap.panes) applySessionSnapshot(snap); });
+    } else {
+      refreshGroups();
+    }
+  }, 1000);
+}
+
 function onPaneMessage(params){
   const key = params.pane_session_key || params.pane_id;
   if (!key) return;
   const list = (S.messages[key] = S.messages[key] || []);
-  list.push(params);
-  while (list.length > 100) list.shift();
-  if (loadSurfaceMode() === 'text' && (S.selPane === key || S.vt.focus === key)) {
+  if (!SeahelmMessageTimeline.appendMessage(list, params, MESSAGE_CAP)) return;
+  // Only the selected pane: the composer sends to `S.selPane`, so the timeline
+  // on screen must be that pane's and nobody else's.
+  if (loadSurfaceMode() === 'text' && S.selPane === key) {
     renderMessageTimeline(key);
   }
 }
 
+// As many as the Mac keeps on disk per pane, so paging back never evicts what
+// it just loaded.
+const MESSAGE_CAP = 2000;
+
+/** Events never change once sent, so each row is built — and its markdown
+ *  parsed — once, not on every repaint of a long history. */
 function renderMessageRow(m){
+  return m._html || (m._html = messageRowHTML(m));
+}
+
+function messageRowHTML(m){
   switch (m.kind) {
     case 'tool': {
-      const tool = esc(m.tool || '');
-      const detail = esc(m.detail || '');
-      return `<div class="msg-row-tool"><span class="k">${tool}</span>${detail}</div>`;
+      const count = m.count > 1 ? `<em>×${m.count}</em>` : '';
+      // Tools without arguments (AskUserQuestion) report their own name as detail.
+      const detail = m.detail && m.detail !== m.tool ? m.detail : '';
+      return `<div class="tl-tool${m.is_error ? ' err' : ''}"><b>${esc(m.tool || '')}</b>`
+        + `<span>${esc(detail)}</span>${count}</div>`;
     }
     case 'user':
-      return `<div class="msg-row-user">${esc(m.text || '')}</div>`;
+      return `<div class="tl-user"><div>${esc(m.text || '')}</div></div>`;
     case 'assistant':
-      return `<div class="msg-row-asst">${esc(m.text || '')}</div>`;
+      return `<div class="tl-asst md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     case 'status': {
-      const label = (m.old_status ? m.old_status + ' → ' : '') + (m.status || '');
-      return `<div class="msg-row-status">${esc(label)}</div>`;
+      // A static dot: the spinner the fleet list uses would claim a past
+      // "running" is still going.
+      const st = normStatus(m.status);
+      return `<div class="tl-status"><i style="background:${STC[st] || STC.unknown}"></i>${esc(m.status || '')}</div>`;
     }
     case 'decision':
+      return `<div class="tl-decision">${esc(m.text || '')}</div>`;
     case 'notice':
-      return `<div class="msg-row-meta">${esc(m.text || '')}</div>`;
+      return `<div class="tl-notice">${esc(m.text || '')}</div>`;
+    case 'thinking':
+      return `<div class="tl-thinking md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     default:
       return '';
   }
@@ -867,14 +1058,99 @@ function renderMessageRow(m){
 function renderMessageTimeline(key){
   const host = $('messageTimeline');
   if (!host) return;
-  const rows = S.messages[key] || [];
-  if (!rows.length) {
-    host.innerHTML = '<div class="muted" style="padding:24px;text-align:center">暂无消息流 — agent 有 hook 时会出现 tool / 助手正文</div>';
-  } else {
-    host.innerHTML = rows.map(renderMessageRow).join('');
-    host.scrollTop = host.scrollHeight;
+  renderInterruptButton();
+  // Text mode hides #termWrap, and with it the "选择一个 worktree" hint the
+  // terminal path shows — so without this a phone opens on an empty page.
+  if (!key) {
+    const hint = getComputedStyle($('drawerBtn')).display === 'none'
+      ? '在左侧列表选择一个 pane' : '点左上角 ☰ 选择一个 pane';
+    host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
+    host.dataset.key = '';
+    return;
   }
+  const rows = S.messages[key] || [];
+  // Follow new output only when already at the bottom; someone scrolled up to
+  // read must not be yanked down by the next tool call. A different pane
+  // always opens at its latest.
+  const follow = host.dataset.key !== key
+    || host.scrollHeight - host.scrollTop - host.clientHeight < 48;
+  const h = S.history[key] || {};
+  const top = h.loading ? '<div class="tl-more">加载更早的记录…</div>'
+    : h.done ? '<div class="tl-more">已经到最早</div>' : '';
+  host.innerHTML = rows.length
+    ? `<div class="tl">${top}${rows.map(renderMessageRow).join('')}</div>`
+    : '<div class="tl"><div class="tl-empty">还没有记录 — agent 开始工作后会出现在这里</div></div>';
+  host.dataset.key = key;
+  if (follow) host.scrollTop = host.scrollHeight;
+  // Near the top, or too little to scroll at all: fetch the page before. Checked
+  // a frame later, once a caller holding the reading position has put it back.
+  requestAnimationFrame(() => { if (host.scrollTop < 200) loadOlderMessages(key); });
 }
+
+/** Repaint without moving what is on screen: history lands above it. */
+function renderKeepingPosition(key){
+  const host = $('messageTimeline');
+  const fromBottom = host.scrollHeight - host.scrollTop;
+  renderMessageTimeline(key);
+  host.scrollTop = host.scrollHeight - fromBottom;
+}
+
+function loadOlderMessages(key){
+  const list = S.messages[key];
+  if (!key || key !== S.selPane || !list || !list.length) return;
+  if (loadSurfaceMode() !== 'text' || !isLinked()) return;
+  const h = (S.history[key] = S.history[key] || { loading: false, done: false });
+  if (h.loading || h.done) return;
+  h.loading = true;
+  renderKeepingPosition(key);
+  sendCommand('message.history', { pane_session_key: key, before_seq: SeahelmMessageTimeline.oldestSeq(list), limit: 50 }, (r) => {
+    h.loading = false;
+    if (S.messages[key] !== list) return;          // the socket dropped meanwhile
+    if (!r || r.ok === false) {
+      // A Mac without history, or a failed read: stop asking rather than retry on every scroll.
+      h.done = true;
+    } else {
+      const older = r.result.messages || [];
+      for (const m of older) SeahelmMessageTimeline.appendMessage(list, m, MESSAGE_CAP);
+      if (!r.result.has_more || !older.length) h.done = true;
+    }
+    if (S.selPane === key && loadSurfaceMode() === 'text') renderKeepingPosition(key);
+  });
+}
+$('messageTimeline').addEventListener('scroll', (ev) => {
+  if (ev.target.scrollTop < 200) loadOlderMessages(ev.target.dataset.key);
+}, { passive: true });
+
+// Every agent seahelm knows says "esc to interrupt" in its status line, and ^C
+// at an idle Claude or Codex prompt is the first half of quitting it. A shell
+// task is the other way round: Esc does nothing, ^C stops it.
+const CTRL_C_INTERRUPTS = new Set(['brew', 'btop', 'top', 'htop', 'docker', 'npm', 'yarn',
+  'make', 'cargo', 'go', 'python', 'pip', 'shellCommand']);
+
+function renderInterruptButton(){
+  const btn = $('interruptBtn');
+  if (!btn) return;
+  btn.hidden = loadSurfaceMode() !== 'text';
+  btn.disabled = !(S.selPane && isLinked());
+  const pane = S.panes.get(S.selPane) || {};
+  btn.title = CTRL_C_INTERRUPTS.has(pane.agent_type)
+    ? '打断 — 发送 Ctrl+C' : '打断 — 发送 Esc，停下 agent 当前这一轮';
+}
+
+function interruptPane(){
+  const key = S.selPane;
+  if (!key || !isLinked()) return;
+  const pane = S.panes.get(key) || {};
+  const keys = CTRL_C_INTERRUPTS.has(pane.agent_type) ? ['ctrl+c'] : ['esc'];
+  sendCommand('pane.send_keys', { pane_id: pane.pane_id || key, keys }, (r) => {
+    if (r && r.ok === false) {
+      showActionToast((r.error && r.error.message) || '打断失败', true);
+      return;
+    }
+    showActionToast('已打断');
+  });
+}
+$('interruptBtn').onclick = interruptPane;
 
 const SURFACE_KEY = 'seahelm_surface_mode';
 function defaultSurfaceMode(){
@@ -901,8 +1177,16 @@ function applySurfaceMode(){
   if (composer) composer.classList.toggle('on', text);
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
+  // Terminal keys and split/close only make sense against a live terminal; the
+  // timeline keeps one of them, as 打断.
+  const keys = $('termKeys');
+  if (keys) keys.style.display = text ? 'none' : '';
+  renderInterruptButton();
+  // With a worktree open the head names it (renderDetail); only fall back to
+  // the mode when there is nothing to name.
   const head = $('detailHead');
-  if (head) head.textContent = text ? '时间线' : '终端';
+  if (head && !S.sel) head.textContent = text ? '时间线' : '终端';
+  if (text && !S.selPane) renderMessageTimeline(null);
 }
 
 function setSurfaceMode(mode){
@@ -912,11 +1196,11 @@ function setSurfaceMode(mode){
   localStorage.setItem(SURFACE_KEY, S.surfaceMode);
   renderSurfaceBadge();
   applySurfaceMode();
+  renderSuggestions();      // dock for the terminal, reply bar for the timeline
   if (next === prev) return;
   if (next === 'text') {
     if (S.vt.panes.size) unmountPanes();
-    const key = S.selPane || S.vt.focus;
-    if (key) renderMessageTimeline(key);
+    if (S.selPane) renderMessageTimeline(S.selPane);
   } else if (S.sel) {
     requestLayout(S.sel);
   }
@@ -925,11 +1209,19 @@ function renderSurfaceBadge(){
   const el = $('surfaceBadge');
   if (!el) return;
   const mode = loadSurfaceMode();
-  el.textContent = mode === 'text' ? '时间线' : '终端';
-  el.title = mode === 'text'
-    ? '时间线（MessageStream）— 点击打开真终端'
-    : '真终端（VT）— 点击回到时间线';
-  el.onclick = () => setSurfaceMode(mode === 'text' ? 'vt' : 'text');
+  el.innerHTML = '';
+  for (const [value, label, title] of [
+    ['text', '时间线', 'agent 的对话与工具调用'],
+    ['vt', '终端', '打开真实终端画面'],
+  ]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = title;
+    b.className = value === mode ? 'on' : '';
+    b.onclick = () => setSurfaceMode(value);
+    el.appendChild(b);
+  }
 }
 renderSurfaceBadge();
 applySurfaceMode();
@@ -937,7 +1229,7 @@ applySurfaceMode();
 function sendComposerText(){
   const input = $('msgInput');
   const text = (input && input.value || '').trim();
-  const key = S.selPane || S.vt.focus;
+  const key = S.selPane;
   if (!text || !key || !isLinked()) return;
   const pane = S.panes.get(key) || {};
   const paneId = pane.pane_id || key;
@@ -951,7 +1243,7 @@ function sendComposerText(){
   if (input) input.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendComposerText(); }
     if (ev.key === 'Escape') {
-      const key = S.selPane || S.vt.focus;
+      const key = S.selPane;
       const pane = S.panes.get(key) || {};
       const paneId = pane.pane_id || key;
       if (key && isLinked()) sendCommand('pane.send_keys', { pane_id: paneId, keys: ['esc'] });
@@ -967,6 +1259,10 @@ function refreshGroups(){
   sendCommand('fleet.groups', { mode }, (r) => {
     if (S.grouping.mode !== mode) return;            // mode changed while in flight
     S.grouping.groups = (r && r.ok !== false && r.result && r.result.groups) || null;
+    S.rowTimes = new Map();
+    for (const g of S.grouping.groups || []) {
+      for (const i of g.items || []) S.rowTimes.set(i.worktree_path, i);
+    }
     renderTree();
   });
 }
@@ -1164,9 +1460,96 @@ function renderSuggestions(){
   // Docked at the upper centre of the page (like the Mac island), not to a
   // column: a suggestion must be reachable no matter which pane you are looking at.
   const host = $('suggestDock'); host.innerHTML='';
+  const text = loadSurfaceMode() === 'text';
+  renderReplyBar(text);
+  renderAttentionLine(text);
+  renderRunLine();
+  // The timeline has its own places for these; the floating dock would cover
+  // the head and the history it pages in, and repeat what the timeline says.
+  if (text) return;
   for (const [pid,e] of S.events){
     if (!e) continue;
     host.appendChild(renderSuggestCard(pid, e));
+  }
+}
+
+/** The open decision of the pane on screen, answered above the composer. The
+ *  prose it is about is the reply just above, so only the choices are shown. */
+function renderReplyBar(text){
+  const bar = $('replyBar');
+  const pid = S.selPane;
+  const e = text && pid ? S.events.get(pid) : null;
+  bar.hidden = !e;
+  bar.innerHTML = '';
+  if (!e) return;
+  const question = e.type === 'question';
+  const head = document.createElement('div');
+  head.className = 'rb-head' + (e.danger ? ' danger' : '');
+  head.innerHTML = `<span>${esc(question ? (e.prompt || '需要你确认') : '接下来做什么？')}</span>`
+    + '<button class="rb-skip" type="button">忽略</button>';
+  head.querySelector('.rb-skip').onclick = () => {
+    S.events.delete(pid);
+    renderSuggestions();
+    sendCommand('decision.dismiss', { pane_session_key: pid });
+  };
+  bar.appendChild(head);
+  const opts = document.createElement('div');
+  opts.className = 'rb-opts';
+  (e.options || []).forEach((opt, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = opt;
+    b.onclick = () => {
+      // Optimistic, like dismissing: the Mac clears it for every client once
+      // the answer lands, and puts nothing back if it does not.
+      S.events.delete(pid);
+      renderSuggestions();
+      sendCommand(question ? 'question.answer' : 'suggest.pick', { pane_session_key: pid, index: i }, (r) => {
+        if (r && r.ok === false) {
+          S.events.set(pid, e);
+          renderSuggestions();
+          showActionToast((r.error && r.error.message) || '没有发出去', true);
+        }
+      });
+    };
+    opts.appendChild(b);
+  });
+  bar.appendChild(opts);
+}
+
+const RUN_LINE_LABEL = { running: '运行中', waiting: '等你回应', failed: '出错了' };
+/** The selected pane's live status above the composer; hidden while it rests. */
+function renderRunLine(){
+  const line = $('runLine');
+  const pane = loadSurfaceMode() === 'text' && S.selPane ? S.panes.get(S.selPane) : null;
+  const st = pane ? normStatus(pane.status) : '';
+  line.hidden = !RUN_LINE_LABEL[st];
+  if (line.hidden) { line.innerHTML = ''; return; }
+  const since = st === 'running' ? (S.rowTimes.get(pane.worktree_path) || {}).running_since : 0;
+  line.innerHTML = (st === 'running' ? '<span class="fm-spin"></span>' : `<i style="background:${STC[st]}"></i>`)
+    + `<span class="rl-${st}">${RUN_LINE_LABEL[st]}</span>`
+    + (since ? `<span class="rl-time" data-running-since="${since}">${esc(compactDuration(since))}</span>` : '');
+}
+
+/** Other panes waiting on a decision: one line under the head, a tap away. */
+function renderAttentionLine(text){
+  const line = $('attentionLine');
+  const waiting = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane) : [];
+  line.hidden = !waiting.length;
+  line.innerHTML = '';
+  for (const [pid, e] of waiting.slice(0, 3)) {
+    const p = S.panes.get(pid) || {};
+    const name = [p.project, p.branch].filter(Boolean).join(' · ') || (p.title || '').trim() || shortId(p.pane_id || pid);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = `<b>${esc(name)}</b> ${e.type === 'question' ? '等你批准' : '有建议'} ›`;
+    b.onclick = () => selectPaneByKey(pid);
+    line.appendChild(b);
+  }
+  if (waiting.length > 3) {
+    const more = document.createElement('em');
+    more.textContent = `还有 ${waiting.length - 3} 个`;
+    line.appendChild(more);
   }
 }
 
@@ -1244,7 +1627,8 @@ function buildFleet(){
       branch: w.branch || lead.branch || '',
       title: w.title || (entry.path.split('/').pop() || entry.path),
       status: w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
-      startedAt: w.started_at || null,
+      runningSince: (S.rowTimes.get(entry.path) || {}).running_since || null,
+      lastActivityAt: (S.rowTimes.get(entry.path) || {}).last_activity_at || w.started_at || null,
       git: w.git || null,
       paneCount: w.pane_count || entry.panes.length,
       panes: entry.panes,
@@ -1275,7 +1659,7 @@ function groupsToRender(rows){
     if (!local.has(r.project)) local.set(r.project, []);
     local.get(r.project).push(r);
   }
-  for (const list of local.values()) list.sort((a,b) => (b.startedAt||0) - (a.startedAt||0));
+  for (const list of local.values()) list.sort((a,b) => (b.lastActivityAt||0) - (a.lastActivityAt||0));
   return [...local.entries()].sort((a,b) => a[0].localeCompare(b[0]))
     .map(([title, list]) => ({ title, status:null, isRepo:true, rows:list }));
 }
@@ -1306,15 +1690,14 @@ function renderTree(){
       const sel = S.sel === r.path;
       const row = document.createElement('div');
       row.className = 'fm-row' + (sel ? ' sel' : '');
-      const timeText = normStatus(r.status) === 'running'
-        ? compactDuration(r.startedAt) : relativeAge(r.startedAt);
+      const timeText = rowTimeText(r.runningSince, r.lastActivityAt);
       const git = gitInfoHTML(r.git);
       row.innerHTML =
         statusDotHTML(r.status, 'fm-dot') +
         `<span class="fm-txt">
            <span class="fm-l1">
              <span class="fm-name">${esc(r.title)}</span>
-             <span class="fm-time" data-started="${r.startedAt||''}" data-status="${esc(r.status)}">${esc(timeText)}</span>
+             <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}">${esc(timeText)}</span>
            </span>
            <span class="fm-l2">
              <span class="fm-deck-tag" style="color:${deckColor(r.project)}">${esc(r.project)}</span>
@@ -1386,12 +1769,18 @@ function handleViewportResize(){
 }
 
 /** Retick the elapsed labels in place — no re-render, no scroll jump. */
+/** DashboardOverviewView's `currentPaneRunTime`: how long the focused pane's round
+ *  has run while it runs, otherwise how long since the worktree last did anything. */
+function rowTimeText(runningSince, lastActivityAt){
+  return runningSince ? compactDuration(runningSince) : relativeAge(lastActivityAt);
+}
+
 function tickTimes(){
-  for (const el of document.querySelectorAll('.fm-time[data-started]')){
-    const started = Number(el.dataset.started || 0);
-    if (!started) continue;
-    el.textContent = normStatus(el.dataset.status) === 'running'
-      ? compactDuration(started) : relativeAge(started);
+  for (const el of document.querySelectorAll('.fm-time')){
+    el.textContent = rowTimeText(Number(el.dataset.runningSince) || 0, Number(el.dataset.lastActivity) || 0);
+  }
+  for (const el of document.querySelectorAll('.rl-time')){
+    el.textContent = compactDuration(Number(el.dataset.runningSince) || 0);
   }
 }
 setInterval(tickTimes, 1000);
@@ -1634,6 +2023,13 @@ function renderDetail(){
   wrap.classList.remove('empty');
   // Already mirroring this worktree — a click inside it only moves focus.
   if (S.vt.worktree === S.sel){
+    // Text mode attaches nothing, so `S.vt.panes` is empty and focusPane has
+    // nothing to move: switching panes here means painting the new one.
+    if (loadSurfaceMode() === 'text'){
+      S.vt.focus = S.selPane;
+      if (S.selPane) renderMessageTimeline(S.selPane);
+      return;
+    }
     if (S.selPane && S.vt.panes.has(S.selPane)) focusPane(S.selPane);
     return;
   }
@@ -1731,7 +2127,9 @@ function mountPanes(tree, focusKey, path){
     const leaves = treeLeaves(tree);
     const wanted = leaves.find(l => l.pane_session_key === (focusKey || S.selPane)) || leaves[0];
     const key = wanted && wanted.pane_session_key;
-    S.selPane = key || S.selPane;
+    // The composer sends to `S.selPane`; when the Mac's focus moved it, the
+    // list highlight has to follow or it names a pane the text will not reach.
+    if (key && key !== S.selPane) { S.selPane = key; renderTree(); }
     S.vt.focus = key;
     applySurfaceMode();
     if (key) renderMessageTimeline(key);

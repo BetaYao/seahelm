@@ -8,6 +8,7 @@ final class ChatProgressReporterTests: XCTestCase {
     private var sent: [(chat: String, text: String)] = []
     private var edited: [(chat: String, id: String, text: String)] = []
     private var removed: [(chat: String, id: String)] = []
+    private var scheduled: [(delay: TimeInterval, work: (Date) -> Void)] = []
     /// What the next send reports back as the message id.
     private var nextMessageId: String? = "100"
 
@@ -17,7 +18,7 @@ final class ChatProgressReporterTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        sent = []; edited = []; removed = []; nextMessageId = "100"
+        sent = []; edited = []; removed = []; scheduled = []; nextMessageId = "100"
         store = CommandSessionStore(url: nil, legacyMailURL: nil)
         reporter = ChatProgressReporter(sessions: store)
         reporter.send = { [weak self] chat, text, done in
@@ -27,6 +28,7 @@ final class ChatProgressReporterTests: XCTestCase {
         reporter.edit = { [weak self] chat, id, text in self?.edited.append((chat, id, text)) }
         reporter.remove = { [weak self] chat, id in self?.removed.append((chat, id)) }
         reporter.identify = { [weak self] _ in self.map { ($0.paneKey, 26) } }
+        reporter.schedule = { [weak self] delay, work in self?.scheduled.append((delay, work)) }
     }
 
     // MARK: - Fixtures
@@ -67,6 +69,19 @@ final class ChatProgressReporterTests: XCTestCase {
     }
 
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func said(_ text: String, kind: MessageKind = .assistant) -> MessageEvent {
+        MessageEvent(seq: 0, paneId: paneId, paneSessionKey: sessionKey, kind: kind, ts: start, text: text)
+    }
+
+    private func called(_ tool: String, _ detail: String, failed: Bool = false) -> MessageEvent {
+        MessageEvent(seq: 0, paneId: paneId, paneSessionKey: sessionKey, kind: .tool, ts: start,
+                     tool: tool, detail: detail, isError: failed)
+    }
+
+    private func stream(_ message: MessageEvent, at offset: TimeInterval) {
+        reporter.ingest(message, now: start.addingTimeInterval(offset))
+    }
 
     // MARK: - When the line appears
 
@@ -167,6 +182,102 @@ final class ChatProgressReporterTests: XCTestCase {
         ingest(working("Edit"), at: 30)
         XCTAssertEqual(sent.count, 2, "with no id to edit, the next update posts afresh")
         XCTAssertTrue(edited.isEmpty)
+    }
+
+    // MARK: - The stream
+
+    /// The words between tool calls are what a phone could not see before:
+    /// the line carries them, and the calls, as the stream has them.
+    func testTheLineShowsWhatTheAgentSaidAndDidThisTurn() {
+        bindChat("555")
+        ingest(working(), at: 0)
+        stream(said("The server path looks right; checking the client."), at: 5)
+        stream(called("Bash", "grep -n pane.event index.html"), at: 6)
+        ingest(working(), at: 13)
+        XCTAssertEqual(sent.count, 1)
+        let text = sent[0].text
+        XCTAssertTrue(text.hasPrefix("⏳ **#26 alpha/feat-x** · 13s\n\n"), text)
+        XCTAssertTrue(text.hasSuffix("The server path looks right; checking the client.\n› Bash — grep -n pane.event index.html"), text)
+    }
+
+    /// A row alone keeps the line current: prose streamed from the transcript
+    /// arrives with no outcome of its own.
+    func testARowEditsTheLineWithoutWaitingForAnOutcome() {
+        bindChat("555")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        stream(said("Running the full suite now."), at: 20)
+        XCTAssertEqual(edited.count, 1)
+        XCTAssertTrue(edited[0].text.hasSuffix("Running the full suite now."), edited[0].text)
+    }
+
+    /// The reply that closed the last turn is streamed after its Stop. It must
+    /// not open the next turn's line.
+    func testRowsOutsideATurnAreNotShown() {
+        bindChat("555")
+        stream(said("Last turn's answer."), at: 0)
+        ingest(working(), at: 1)
+        stream(said("New work."), at: 2)
+        ingest(working(), at: 14)
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertFalse(sent[0].text.contains("Last turn's answer."), sent[0].text)
+        XCTAssertTrue(sent[0].text.contains("New work."), sent[0].text)
+
+        ingest(outcome(pane(), completion: true), at: 20)
+        stream(said("Final reply."), at: 20)
+        ingest(working(), at: 30)
+        ingest(working(), at: 43)
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertFalse(sent[1].text.contains("New work."), "each turn starts clean: \(sent[1].text)")
+        XCTAssertFalse(sent[1].text.contains("Final reply."), sent[1].text)
+    }
+
+    func testOnlyTheLatestRowsAreShown() {
+        bindChat("555")
+        ingest(working(), at: 0)
+        for n in 1...8 { stream(called("Read", "file\(n).swift"), at: 1) }
+        ingest(working(), at: 13)
+        let text = sent[0].text
+        XCTAssertFalse(text.contains("file2.swift"), text)
+        for n in 3...8 { XCTAssertTrue(text.contains("file\(n).swift"), text) }
+    }
+
+    /// A row that lands inside the throttle is not dropped: it goes up once the
+    /// interval is over, even if nothing else happens — a long build is quiet.
+    func testAHeldBackRowIsPutUpWhenTheIntervalIsOver() {
+        bindChat("555")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        stream(called("Bash", "xcodebuild test"), at: 14)
+        stream(called("Bash", "swift build"), at: 15)
+        XCTAssertTrue(edited.isEmpty)
+        XCTAssertEqual(scheduled.count, 1, "one flush per pane, however many rows it holds")
+        scheduled[0].work(start.addingTimeInterval(16))
+        XCTAssertEqual(edited.count, 1)
+        XCTAssertTrue(edited[0].text.hasSuffix("› Bash — xcodebuild test\n› Bash — swift build"), edited[0].text)
+    }
+
+    func testAFlushAfterTheTurnEndedPutsNothingUp() {
+        bindChat("555")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        stream(called("Bash", "make"), at: 14)
+        ingest(outcome(pane(status: .idle), statusChanged: true, newStatus: .idle), at: 15)
+        scheduled.forEach { $0.work(start.addingTimeInterval(16)) }
+        XCTAssertTrue(edited.isEmpty)
+        XCTAssertEqual(removed.count, 1)
+    }
+
+    func testRowsReadAsProseOrAMarkedCall() {
+        XCTAssertEqual(ChatProgressReporter.row(for: said("  Looking at it.\n")), "Looking at it.")
+        XCTAssertEqual(ChatProgressReporter.row(for: said("Weighing it.", kind: .thinking)), "Weighing it.")
+        XCTAssertEqual(ChatProgressReporter.row(for: called("Bash", "ls")), "› Bash — ls")
+        XCTAssertEqual(ChatProgressReporter.row(for: called("Bash", "false", failed: true)), "✗ Bash — false")
+        let long = ChatProgressReporter.row(for: said("a\nb " + String(repeating: "x", count: 300)))
+        XCTAssertEqual(long?.count, 200)
+        for kind: MessageKind in [.user, .status, .decision, .notice] {
+            XCTAssertNil(ChatProgressReporter.row(for: said("x", kind: kind)), kind.rawValue)
+        }
     }
 
     // MARK: - The line

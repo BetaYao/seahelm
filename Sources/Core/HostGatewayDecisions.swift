@@ -73,21 +73,25 @@ final class HostGatewayDecisions {
         // idle when the options arrive. Clearing on "not waiting" therefore killed
         // every suggestion one status poll after it appeared, which is why the
         // desktop island could hold a card the browser never saw. A suggestion
-        // ends when it is picked, replaced, or the pane starts working again.
-        if let status = event["status"] as? String {
-            lock.lock()
-            let existing = open[key]
-            let expired: Bool
-            switch existing?.kind {
-            case "question": expired = status != AgentStatus.waiting.rawValue
-            case "suggest":  expired = status == AgentStatus.running.rawValue
-            default:         expired = false
-            }
-            if expired { open.removeValue(forKey: key) }
-            lock.unlock()
-            return expired ? .cleared(paneSessionKey: key) : .none
+        // ends when it is picked, replaced, or the next prompt is submitted.
+        //
+        // Not when the pane reads "running" again: for a few seconds after the
+        // Stop hook the screen still shows the turn's spinner, and once the hook's
+        // idle window lapses the pane flips back to running until the scan catches
+        // up — which took every suggestion away about five seconds after it arrived.
+        lock.lock()
+        let expired: Bool
+        switch open[key]?.kind {
+        case "question":
+            expired = (event["status"] as? String).map { $0 != AgentStatus.waiting.rawValue } ?? false
+        case "suggest":
+            expired = event["user_prompt"] != nil
+        default:
+            expired = false
         }
-        return .none
+        if expired { open.removeValue(forKey: key) }
+        lock.unlock()
+        return expired ? .cleared(paneSessionKey: key) : .none
     }
 
     func options(forPaneSessionKey key: String) -> [String] {

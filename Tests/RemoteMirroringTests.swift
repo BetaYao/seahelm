@@ -136,5 +136,18 @@ final class RemoteMirroringTests: XCTestCase {
         XCTAssertEqual(items?.first?["status"] as? String, "Waiting")
         XCTAssertEqual(items?.first?["last_activity_at"] as? Double, 1000)
         XCTAssertEqual(items?.first?["is_main_worktree"] as? Bool, true)
+        XCTAssertNil(items?.first?["running_since"], "only a running row has a round to count")
+    }
+
+    /// The web list ticks the running timer itself, so it needs the instant the
+    /// round began rather than the `12s` string the desktop row renders.
+    func testRunningRowCarriesWhenItsRoundStarted() {
+        let item = WorktreeGroupingItem(
+            id: "w1", path: "/wt/a", repository: "seahelm", status: .running,
+            lastActivityAt: Date(timeIntervalSince1970: 1000), isMainWorktree: false,
+            creationDate: Date(timeIntervalSince1970: 0),
+            runningSince: Date(timeIntervalSince1970: 1500))
+        XCTAssertEqual(item.dict["running_since"] as? Double, 1500)
+        XCTAssertEqual(item.dict["last_activity_at"] as? Double, 1000)
     }
 }

@@ -39,23 +39,19 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
     /// sustained idle past the grace window, a stale hook `.running` is dropped.
     func testCursorScanIdleReclaimsStaleHookRunningAfterGrace() {
         AgentRegistry.hookRunningGrace = 0
-        var callCount = 0
-        var captured: IngestOutcome?
-        let exp = expectation(description: "outcome")
-        exp.assertForOverFulfill = false
-        AgentRegistry.shared.onOutcome = { o in
-            callCount += 1
-            if callCount == 2 { captured = o; exp.fulfill() }
-        }
+        defer { AgentRegistry.hookRunningGrace = 3.0 }
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("cursor"),
                                               kind: .userPrompt("do the thing")))
+        scan(.running, agentType: .cursor)
+        scan(.idle, agentType: .cursor)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    private func scan(_ status: AgentStatus, agentType: AgentType = .claudeCode) {
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
-            kind: .screenObserved(status: .idle, message: "", activity: [],
-                                  commandLine: nil, agentType: .cursor,
+            kind: .screenObserved(status: status, message: "", activity: [],
+                                  commandLine: nil, agentType: agentType,
                                   roundDuration: 0, tasks: [])))
-        wait(for: [exp], timeout: 2)
-        XCTAssertEqual(captured?.newStatus, .idle)
-        AgentRegistry.hookRunningGrace = 3.0
     }
 
     func testSessionOnlyHookRunningPromotesOverStaleScanIdle() {
@@ -89,22 +85,38 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
         // deterministically without a wall-clock wait.
         AgentRegistry.hookRunningGrace = 0
         defer { AgentRegistry.hookRunningGrace = 3.0 }
-        var callCount = 0
-        var captured: IngestOutcome?
-        let exp = expectation(description: "outcome")
-        exp.assertForOverFulfill = false
-        AgentRegistry.shared.onOutcome = { o in
-            callCount += 1
-            if callCount == 2 { captured = o; exp.fulfill() }
-        }
         AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
                                               kind: .userPrompt("do the thing")))
-        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
-            kind: .screenObserved(status: .idle, message: "", activity: [],
-                                  commandLine: nil, agentType: .claudeCode,
-                                  roundDuration: 0, tasks: [])))
-        wait(for: [exp], timeout: 2)
-        XCTAssertEqual(captured?.newStatus, .idle)
+        scan(.running)
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    /// A new turn, polled before its spinner reached the screen: the frame still
+    /// shows the last turn's prompt, past the 3s window. That is not the run
+    /// ending — the pane blinked to Idle for a few seconds at the start of turns.
+    func testScanIdleBeforeTheRunReachesTheScreenDoesNotEndIt() {
+        AgentRegistry.hookRunningGrace = 0
+        defer { AgentRegistry.hookRunningGrace = 3.0 }
+        scan(.running)                    // the previous turn
+        scan(.idle)
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .userPrompt("next")))
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .running)
+        scan(.running)
+        scan(.idle)                       // now it has shown the run, and stopped
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
+    }
+
+    /// A turn that died before drawing anything still comes back, just later.
+    func testRunTheScreenNeverShowedIsReclaimedAfterTheLongerWindow() {
+        AgentRegistry.hookRunningUnseenGrace = 0
+        defer { AgentRegistry.hookRunningUnseenGrace = 15.0 }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                              kind: .userPrompt("do the thing")))
+        scan(.idle)
+        XCTAssertEqual(AgentRegistry.shared.pane(for: "t1")?.status, .idle)
     }
 
     func testUrgentHookSurfacesEvenWhenScreenAuthoritative() {
@@ -298,5 +310,84 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
                                   roundDuration: 0, tasks: [])))
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .running)
+    }
+
+    /// One Claude approval dialog, polled the way StatusPublisher polls it: the
+    /// frame's `screenObserved`, then the dialog's `.question`. Reporting the text
+    /// heuristic's status in the first flipped the pane Waiting → Running/Idle →
+    /// Waiting on every poll; the dialog frame must report waiting throughout.
+    func testApprovalDialogPollsDoNotFlipStatus() {
+        var outcomes: [IngestOutcome] = []
+        AgentRegistry.shared.onOutcome = { outcomes.append($0) }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .userPrompt("migrate belayo")))
+        for heuristic in [AgentStatus.running, .running, .idle, .idle, .idle] {
+            AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+                kind: .screenObserved(status: StatusPublisher.observedStatus(committed: heuristic,
+                                                                             showsApproval: true),
+                                      message: "", activity: [], commandLine: nil,
+                                      agentType: .claudeCode, roundDuration: 0, tasks: [])))
+            AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+                kind: .question(prompt: "Claude Code requires approval",
+                                options: ["1. Yes", "2. No"], followups: [])))
+        }
+        let drained = expectation(description: "outcomes delivered")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 2)
+
+        let edges = outcomes.filter(\.statusChanged).map { "\($0.oldStatus.rawValue)→\($0.newStatus.rawValue)" }
+        XCTAssertEqual(edges.filter { $0.hasSuffix("→Waiting") }.count, 1, "\(edges)")
+        XCTAssertFalse(edges.contains { $0.hasPrefix("Waiting→") }, "\(edges)")
+    }
+
+    func testObservedStatusIsWaitingOnlyWhileAnApprovalShows() {
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .running, showsApproval: true), .waiting)
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .idle, showsApproval: true), .waiting)
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .running, showsApproval: false), .running)
+    }
+
+    /// A turn ending, polled the way StatusPublisher polls it. The scan holds a
+    /// defaulted idle for six frames, far longer than the hook's own idle window,
+    /// so once that window lapsed the held Running took the pane back for ~10s.
+    func testTurnEndDoesNotBounceBackToRunning() {
+        AgentRegistry.hookIdleGrace = 0          // the window, already lapsed
+        defer { AgentRegistry.hookIdleGrace = 3.0 }
+        let tracker = DebouncedStatusTracker()
+        func poll(_ detection: Detection) -> AgentStatus {
+            let hook = AgentRegistry.shared.pane(for: "t1")?.hookStatus ?? .unknown
+            let idle = StatusPublisher.idleObservation(detection, hookStatus: hook)
+            tracker.update(status: detection.state, visibleIdle: idle.visibleIdle, defaulted: idle.defaulted)
+            AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+                kind: .screenObserved(status: tracker.currentStatus, message: "", activity: [],
+                                      commandLine: nil, agentType: .claudeCode, roundDuration: 0, tasks: [])))
+            return AgentRegistry.shared.pane(for: "t1")?.status ?? .unknown
+        }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .userPrompt("ship it")))
+        XCTAssertEqual(poll(Detection(state: .running, visibleWorking: true)), .running)
+        // Mid-turn, a frame with nothing on it is still held: the agent may be thinking.
+        XCTAssertEqual(poll(Detection(state: .idle, isDefaulted: true)), .running)
+
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .agentStopped(success: true)))
+        let afterStop = (0..<8).map { _ in poll(Detection(state: .idle, isDefaulted: true)) }
+        XCTAssertEqual(afterStop, Array(repeating: .idle, count: 8))
+    }
+
+    func testTurnStartIsThePromptAndSurvivesAnApproval() {
+        XCTAssertNil(AgentRegistry.shared.turnStarted(terminalID: "t1"))
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .userPrompt("ship it")))
+        let started = AgentRegistry.shared.turnStarted(terminalID: "t1")
+        XCTAssertNotNil(started)
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+            kind: .question(prompt: "Run it?", options: ["Yes", "No"], followups: [])))
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+            kind: .toolUse(ActivityEvent(tool: "Bash", detail: "ls", isError: false, timestamp: Date()))))
+        XCTAssertEqual(AgentRegistry.shared.turnStarted(terminalID: "t1"), started,
+                       "an approval inside the turn does not start a new one")
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .agentStopped(success: true)))
+        XCTAssertNil(AgentRegistry.shared.turnStarted(terminalID: "t1"))
     }
 }

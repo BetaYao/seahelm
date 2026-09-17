@@ -36,6 +36,9 @@ struct WorktreeGroupingItem: Equatable {
     /// agent, so its status and activity describe a shell, not work — see
     /// `groups(_:mode:now:calendar:)` for what that changes.
     let isIntegration: Bool
+    /// When the row's focused pane started its current round, while it runs.
+    /// Not used for grouping — carried so a remote list can show the same timer.
+    let runningSince: Date?
 
     init(
         id: String,
@@ -45,7 +48,8 @@ struct WorktreeGroupingItem: Equatable {
         lastActivityAt: Date?,
         isMainWorktree: Bool,
         creationDate: Date,
-        isIntegration: Bool = false
+        isIntegration: Bool = false,
+        runningSince: Date? = nil
     ) {
         self.id = id
         self.path = path
@@ -55,6 +59,7 @@ struct WorktreeGroupingItem: Equatable {
         self.isMainWorktree = isMainWorktree
         self.creationDate = creationDate
         self.isIntegration = isIntegration
+        self.runningSince = runningSince
     }
 }
 
@@ -68,7 +73,8 @@ extension WorktreeRowInfo {
             lastActivityAt: lastActivityAt,
             isMainWorktree: isMainWorktree,
             creationDate: creationDate,
-            isIntegration: isIntegration
+            isIntegration: isIntegration,
+            runningSince: currentPaneRunningSince
         )
     }
 }
@@ -295,6 +301,9 @@ extension WorktreeGroupingItem {
         ]
         if let lastActivityAt {
             d["last_activity_at"] = lastActivityAt.timeIntervalSince1970
+        }
+        if let runningSince {
+            d["running_since"] = runningSince.timeIntervalSince1970
         }
         return d
     }

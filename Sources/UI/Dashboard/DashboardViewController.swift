@@ -70,6 +70,9 @@ struct WorktreeRowInfo {
     let currentPaneTitle: String
     /// Running / activity age for that focused pane (compact: `12s` / `3m`).
     let currentPaneRunTime: String
+    /// When that focused pane's current round started, while it is running — the
+    /// instant `currentPaneRunTime` counts from, for clients that tick it themselves.
+    var currentPaneRunningSince: Date? = nil
     /// Per-pane rows for the expanded "Group by Pane" mode (leaf order).
     var panes: [PaneDisplayInfo] = []
     /// The row's ribbon colour, from `WorktreeLabelStore`. Nil = unlabelled.

@@ -29,6 +29,16 @@ class AgentRegistry {
     /// Long enough for the agent to start rendering its spinner after a prompt.
     /// `var` so tests can drive the trailing-edge reclaim deterministically.
     static var hookRunningGrace: TimeInterval = 3.0
+    /// The same reclaim, for a run the screen never showed. A scan idle proves
+    /// the agent stopped only once the screen has shown it working: before its
+    /// spinner lands the frame still holds the last turn's prompt, and a slow
+    /// scan took several seconds to see a new turn — so a 3s window reclaimed
+    /// every such start, blinking the pane to Idle while it worked. Long, but
+    /// finite, so a turn that died before drawing anything still comes back.
+    static var hookRunningUnseenGrace: TimeInterval = 15.0
+    /// When each terminal's screen last showed it running — what tells an idle
+    /// frame that ends a run from one taken before the run reached the screen.
+    private var scanRunningAt: [String: Date] = [:]
 
     /// When each terminal's hook last asserted `.idle` (a Stop). The trailing-edge
     /// counterpart to `hookRunningSince`: for a grace window after the agent says
@@ -56,8 +66,14 @@ class AgentRegistry {
     /// `var` so tests can drive the reclaim deterministically.
     static var hookWaitingGrace: TimeInterval = 3.0
 
+    /// When the prompt that started the pane's current turn was submitted;
+    /// cleared by its Stop. Unlike `hookRunningSince` it survives an approval
+    /// mid-turn, so it can say where the turn's running time counts from.
+    private var turnStartedAt: [String: Date] = [:]
+
     private var agents: [String: PaneInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
+    private let transcriptTail = AgentTranscriptTail()
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
@@ -160,14 +176,17 @@ class AgentRegistry {
         orderedIDs.removeAll { $0 == terminalID }
         statusEnteredAt.removeValue(forKey: terminalID)
         hookRunningSince.removeValue(forKey: terminalID)
+        scanRunningAt.removeValue(forKey: terminalID)
         hookIdleSince.removeValue(forKey: terminalID)
         hookWaitingSince.removeValue(forKey: terminalID)
+        turnStartedAt.removeValue(forKey: terminalID)
         eventLog.removeValue(forKey: terminalID)
         globalSeq += 1
         let seq = globalSeq
         lock.unlock()
 
-        MessageStreamHub.shared.clear(paneId: terminalID)
+        MessageStreamHub.shared.clear(paneId: terminalID,
+                                      paneSessionKey: closed?.station?.paneSessionKey)
 
         // Announce the close so remote mirrors can drop the pane's
         // retained slot topic instead of leaving a ghost. Off the lock, on main.
@@ -309,6 +328,14 @@ class AgentRegistry {
 
     /// Same question from outside the lock — for `pane.explain`, so the diagnostic
     /// reports the arbitration the pipeline would actually make right now.
+    /// When the prompt that began the pane's current turn was submitted, until
+    /// the turn's Stop. Nil for a pane between turns or without hooks.
+    func turnStarted(terminalID: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return turnStartedAt[terminalID]
+    }
+
     func hookIdleIsFresh(terminalID: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -377,15 +404,19 @@ class AgentRegistry {
             if let cl = commandLine { next.commandLine = cl }
             if agentType != .unknown { next.agentType = agentType }
             if !activity.isEmpty { next.activityEvents = activity }
+            if status == .running { scanRunningAt[event.terminalID] = now }
             // Trailing-edge reclaim: once scan sees a sustained idle (past the grace
             // window since the hook's running edge), drop a stale hook `.running` so
             // an Esc/interrupt that fires no Stop hook doesn't stick on "running".
             if status == .idle, next.hookStatus == .running,
                let since = hookRunningSince[event.terminalID],
-               now.timeIntervalSince(since) >= Self.hookRunningGrace,
                Self.isSessionOnly(next.agentType) {
-                next.hookStatus = .unknown
-                hookRunningSince[event.terminalID] = nil
+                let screenShowedRun = (scanRunningAt[event.terminalID] ?? .distantPast) >= since
+                let grace = screenShowedRun ? Self.hookRunningGrace : Self.hookRunningUnseenGrace
+                if now.timeIntervalSince(since) >= grace {
+                    next.hookStatus = .unknown
+                    hookRunningSince[event.terminalID] = nil
+                }
             }
             // Same reclaim for a stale hook `.waiting`: the question has been
             // answered and the agent is visibly working again. Only a hook could
@@ -410,6 +441,7 @@ class AgentRegistry {
             hookWaitingSince[event.terminalID] = nil
             if next.lastUserPrompt != text { next.lastUserPromptAt = now }
             next.lastUserPrompt = text
+            turnStartedAt[event.terminalID] = now
         case .toolUse(let ev):
             next.hookStatus = .running
             if hookRunningSince[event.terminalID] == nil { hookRunningSince[event.terminalID] = now }
@@ -435,6 +467,7 @@ class AgentRegistry {
         case .agentStopped(let success):
             next.hookStatus = success ? .idle : .error
             hookRunningSince[event.terminalID] = nil
+            turnStartedAt[event.terminalID] = nil
             hookWaitingSince[event.terminalID] = nil
             // Fresh trailing edge — overwritten by each Stop, since every one of
             // them is the agent stating anew that it finished.
@@ -571,9 +604,13 @@ class AgentRegistry {
             self.delegate?.agentDidUpdate(outcome.info)
             self.onOutcome?(outcome)
             EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
-            let config = ManifestStore.shared.manifest(for: outcome.info.agentType.rawValue)?
-                .manifest.message ?? .default
-            MessageStreamHub.shared.ingest(outcome: outcome, config: config)
+            // An outcome queued just before its pane closed lands after `unregister`
+            // cleared the history; appending it would write a file for a pane that
+            // no longer exists, replayed to every client from then on.
+            if self.pane(for: outcome.event.terminalID) != nil {
+                MessageStreamHub.shared.ingest(
+                    outcome: outcome, config: MessageConfig.resolve(for: outcome.info.agentType))
+            }
         }
     }
 
@@ -982,9 +1019,36 @@ class AgentRegistry {
                 lock.unlock()
             }
         }
+        if let path = event.sessionPath {
+            forwardTranscriptProse(terminalID: tid, path: path)
+        }
         ingest(event2)
         if let hooks = channel(for: tid) as? HooksChannel {
             hooks.handleWebhookEvent(event)
+        }
+    }
+
+    /// The prose an agent wrote between tool calls never comes through a hook —
+    /// only its transcript has it. Read what is new there and queue it on main
+    /// *before* this hook's own outcome, so it lands above the tool call it
+    /// introduces, the way it reads in the terminal.
+    private func forwardTranscriptProse(terminalID tid: String, path: String) {
+        guard let pane = pane(for: tid) else { return }
+        let key = pane.station?.paneSessionKey ?? ""
+        let hub = MessageStreamHub.shared
+        // A transcript first seen after a relaunch is only read back to where
+        // this pane's timeline already reaches.
+        let since = hub.snapshot(paneId: key.isEmpty ? tid : key).last?.ts ?? Date(timeIntervalSinceNow: -300)
+        let entries = transcriptTail.newProse(path: path, since: since)
+        guard !entries.isEmpty else { return }
+        let events = entries.map {
+            MessageEvent(seq: 0, paneId: tid, paneSessionKey: key,
+                         kind: $0.kind == .thinking ? .thinking : .assistant,
+                         ts: $0.timestamp ?? Date(), text: $0.text)
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.pane(for: tid) != nil else { return }
+            hub.append(events)
         }
     }
 

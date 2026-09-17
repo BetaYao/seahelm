@@ -219,3 +219,42 @@ final class AgentRegistryWebhookPathTests: XCTestCase {
             "agentStop completion outcome oldStatus must reflect poll-set status, not .idle")
     }
 }
+
+extension AgentRegistryWebhookPathTests {
+    /// What the terminal shows between tool calls reaches the timeline from the
+    /// transcript, above the tool call it introduces, and the Stop hook's copy
+    /// of the final message does not add a second one.
+    func testTranscriptProseReachesTheTimelineOnce() throws {
+        let transcript = FileManager.default.temporaryDirectory
+            .appendingPathComponent("webhook-transcript-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: transcript) }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func line(_ text: String) -> String {
+            let obj: [String: Any] = ["type": "assistant", "timestamp": f.string(from: Date()),
+                                      "message": ["role": "assistant", "content": [["type": "text", "text": text]]]]
+            return String(data: try! JSONSerialization.data(withJSONObject: obj), encoding: .utf8)! + "\n"
+        }
+        func hook(_ type: WebhookEventType, _ data: [String: Any]) -> WebhookEvent {
+            WebhookEvent(source: "claude-code", sessionId: "sess-1", sessionPath: transcript.path,
+                         event: type, cwd: "/tmp/webhook-path-test-repo", timestamp: nil, data: data)
+        }
+
+        try Data(line("先看一下 hook 带了什么。").utf8).write(to: transcript)
+        AgentRegistry.shared.handleWebhookEvent(hook(.toolUseStart, ["tool_name": "Bash",
+                                                                     "tool_input": ["command": "ls"]]))
+        let handle = try FileHandle(forWritingTo: transcript)
+        handle.seekToEndOfFile()
+        handle.write(Data(line("修好了。").utf8))
+        handle.closeFile()
+        AgentRegistry.shared.handleWebhookEvent(hook(.agentStop, ["last_assistant_message": "修好了。"]))
+        let drained = expectation(description: "main queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 2)
+
+        let rows = MessageStreamHub.shared.snapshot(paneId: "webhook-path-test-tid")
+            .filter { $0.kind == .assistant || $0.kind == .tool }
+            .map { $0.kind == .tool ? "tool:\($0.tool ?? "")" : $0.text ?? "" }
+        XCTAssertEqual(rows, ["先看一下 hook 带了什么。", "tool:Bash", "修好了。"])
+    }
+}

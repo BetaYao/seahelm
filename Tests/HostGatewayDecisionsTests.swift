@@ -98,12 +98,27 @@ extension HostGatewayDecisionsTests {
                        "an idle pane is where a suggestion lives, not where it dies")
     }
 
-    func testSuggestEndsWhenThePaneGoesBackToWork() {
+    /// What a finished turn looks like to the gateway: Stop brings the options,
+    /// then the pane reads running again for a while as the screen catches up.
+    /// The suggestion used to die on that and was gone before it could be tapped.
+    func testSuggestSurvivesTheRunningBlipAfterATurn() {
         let d = HostGatewayDecisions()
         _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
                             "suggest": ["options": ["a"]]])
-        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue]),
+        for status in [AgentStatus.idle, .running, .idle] {
+            XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": status.rawValue]), .none)
+        }
+        XCTAssertEqual(d.options(forPaneSessionKey: "k1"), ["a"])
+    }
+
+    func testSuggestEndsWithTheNextPrompt() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+                            "suggest": ["options": ["a"]]])
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue,
+                                       "user_prompt": "do something else"]),
                        .cleared(paneSessionKey: "k1"))
+        XCTAssertTrue(d.pending().isEmpty)
     }
 
     func testQuestionStillDiesWithItsPrompt() {

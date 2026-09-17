@@ -53,6 +53,11 @@ class TabCoordinator {
         reporter.remove = { chatId, messageId in
             AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
         }
+        // Rows are appended on main, in order with the outcomes that start and
+        // end the turn they belong to.
+        _ = MessageStreamHub.shared.subscribe { [weak reporter] message in
+            reporter?.ingest(message)
+        }
         return reporter
     }()
 
@@ -524,6 +529,8 @@ class TabCoordinator {
                 }
                 return lastActivityAge
             }()
+            let currentPaneRunningSince: Date? = focusedPane.status == .running && focusedPane.roundDuration > 0
+                ? Date().addingTimeInterval(-focusedPane.roundDuration) : nil
 
             // Per-pane rows for the expanded "Group by Pane" mode. Aligned to
             // paneStations (leaf order); title/status come from each pane's own
@@ -578,6 +585,7 @@ class TabCoordinator {
                 gitStats: gitStats,
                 currentPaneTitle: currentPaneTitle,
                 currentPaneRunTime: currentPaneRunTime,
+                currentPaneRunningSince: currentPaneRunningSince,
                 panes: panes,
                 label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath),
                 isCleanupCandidate: isCleanupCandidate
