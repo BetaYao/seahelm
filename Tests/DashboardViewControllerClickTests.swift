@@ -199,6 +199,40 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertEqual(vc.overviewSelectedIdForTesting, "/repo/a")
     }
 
+    /// The "+" form holds the fleet render while it is open, and a worktree it
+    /// creates is selected before the form has finished closing. A status poll
+    /// in that gap looked for the new selection among rows rendered before the
+    /// worktree existed, found nothing, and clamped the highlight back onto
+    /// whichever old row sat at the previous index — the terminal moved to the
+    /// new worktree, the fleet list stayed behind.
+    func testAWorktreeCreatedFromTheAddFormKeepsTheFleetHighlight() {
+        let vc = DashboardViewController()
+        vc.dashboardDelegate = DashboardDelegateSpy()
+        vc.loadViewIfNeeded()
+        let a = makePane(name: "agent-a", worktreePath: "/repo/a")
+        let b = makePane(name: "agent-b", worktreePath: "/repo/b")
+        vc.updatePanes([a, b])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        vc.handleWorktreeRowClickForTesting(path: "/repo/b")
+
+        vc.setFleetRenderPaused(true)                      // form opens
+        let c = makePane(name: "agent-c", worktreePath: "/repo/c")
+        vc.updatePanes([a, b, c])                          // TabCoordinator.handleNewBranch
+        vc.selectPane(byWorktreePath: "/repo/c")
+        vc.commitWorktreeSelection(path: "/repo/c")        // the form's completion
+        vc.updatePanes([a, b, c])                          // a status poll while it closes
+        vc.setFleetRenderPaused(false)                     // popoverDidClose
+
+        XCTAssertEqual(vc.selectedWorktreeId, "/repo/c")
+        XCTAssertEqual(vc.overviewSelectedIdForTesting, "/repo/c",
+                       "the fleet highlight fell back onto a worktree the terminal left")
+        XCTAssertEqual(vc.renderedOverviewSelectionForTesting, "/repo/c")
+
+        // The next poll, with the row on screen, must not move it either.
+        vc.updatePanes([a, b, c])
+        XCTAssertEqual(vc.overviewSelectedIdForTesting, "/repo/c")
+    }
+
     func testCommitWorktreeSelectionRestoresOverviewHighlight() {
         let vc = DashboardViewController()
         vc.loadViewIfNeeded()
