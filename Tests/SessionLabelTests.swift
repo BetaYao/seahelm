@@ -51,6 +51,18 @@ final class SessionLabelTests: XCTestCase {
         }
     }
 
+    /// The island is near-black in light mode too, so it takes the dark
+    /// variant whichever appearance is current.
+    func testDarkSurfaceColorIgnoresAppearance() throws {
+        let dark = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let light = try XCTUnwrap(NSAppearance(named: .aqua))
+        for label in SessionLabel.allCases {
+            let themed = try XCTUnwrap(resolved(label.color, in: dark))
+            XCTAssertEqual(resolved(label.darkSurfaceColor, in: light), themed, label.rawValue)
+            XCTAssertEqual(resolved(label.darkSurfaceColor, in: dark), themed, label.rawValue)
+        }
+    }
+
     /// Every hue is its own: two rows wearing different labels must not look
     /// identical at a glance.
     func testLabelsAreVisuallyDistinctInDarkTheme() throws {

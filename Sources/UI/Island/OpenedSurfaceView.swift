@@ -324,8 +324,10 @@ struct OpenedSurfaceView: View {
     private func agentRow(_ row: IslandAgentRow) -> some View {
         let statusColor = Color(nsColor: row.status.color)
         return HStack(spacing: 10) {
+            // The worktree's label, not its status — status sits on the right.
+            // Unlabelled rows keep the slot so every row's text lines up.
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(statusColor.opacity(row.needsAttention ? 1 : 0.45))
+                .fill(row.label.map { Color(nsColor: $0.darkSurfaceColor) } ?? Color.clear)
                 .frame(width: 4)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -353,6 +355,13 @@ struct OpenedSurfaceView: View {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                                     .fill(statusColor.opacity(0.14))
                             )
+                    } else {
+                        // Quiet rows used to show status only through a dimmed
+                        // left bar; now that the bar is the label, a dim dot
+                        // keeps it.
+                        Circle()
+                            .fill(statusColor.opacity(0.45))
+                            .frame(width: 6, height: 6)
                     }
                 }
                 if row.needsAttention, !row.message.isEmpty {
