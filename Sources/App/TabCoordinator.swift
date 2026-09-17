@@ -524,6 +524,8 @@ class TabCoordinator {
                 }
                 return lastActivityAge
             }()
+            let currentPaneRunningSince: Date? = focusedPane.status == .running && focusedPane.roundDuration > 0
+                ? Date().addingTimeInterval(-focusedPane.roundDuration) : nil
 
             // Per-pane rows for the expanded "Group by Pane" mode. Aligned to
             // paneStations (leaf order); title/status come from each pane's own
@@ -578,6 +580,7 @@ class TabCoordinator {
                 gitStats: gitStats,
                 currentPaneTitle: currentPaneTitle,
                 currentPaneRunTime: currentPaneRunTime,
+                currentPaneRunningSince: currentPaneRunningSince,
                 panes: panes,
                 label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath),
                 isCleanupCandidate: isCleanupCandidate

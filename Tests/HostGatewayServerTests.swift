@@ -267,6 +267,47 @@ final class HostGatewayServerTests: XCTestCase {
         task.cancel(with: .goingAway, reason: nil)
     }
 
+    /// The fleet list is fed by pushes after the auth snapshot: a status change
+    /// published on EventHub has to arrive at a connected browser as `pane.status`.
+    func testStatusChangeIsPushedToAnAuthenticatedBrowser() {
+        let ds = ServerFakeDataSource()
+        let vt = ServerFakeVT()
+        let b64 = PairingCrypto.base64url(root)
+        let token = PairingCrypto(rootSecret: root).authPassword
+        let server = HostGatewayServer(
+            config: HostGatewayConfig(enabled: true, port: testPort),
+            router: ControlRouter(dataSource: ds),
+            expectedMacId: macId,
+            rootSecretBase64url: b64,
+            vt: vt)
+        defer { server.stop() }
+        waitUntilListening(server)
+
+        let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(testPort)/ws")!)
+        task.resume()
+        sendText(#"{"id":"auth3","method":"auth","params":{"mac_id":"\#(macId)","token":"\#(token)"}}"#, on: task)
+        _ = receiveText(from: task)
+
+        EventHub.shared.publish(seq: 1, event: [
+            "type": "pane.status_changed", "seq": 1, "pane_id": "t1", "pane_session_key": "fleet-k1",
+            "status": "Running", "old_status": "Idle", "agent_type": "claudeCode",
+            "worktree_path": "/wt", "last_message": "Bash",
+        ])
+
+        // Whatever the auth replay queued (timeline rings from other tests) comes first.
+        var status: [String: Any]?
+        for _ in 0..<50 {
+            let obj = try! JSONSerialization.jsonObject(with: Data(receiveText(from: task).utf8)) as! [String: Any]
+            if obj["method"] as? String == "pane.status" {
+                status = obj["params"] as? [String: Any]
+                break
+            }
+        }
+        XCTAssertEqual(status?["pane_session_key"] as? String, "fleet-k1")
+        XCTAssertEqual(status?["status"] as? String, "Running")
+        task.cancel(with: .goingAway, reason: nil)
+    }
+
     /// The page has to come off the same port as `/ws`, or the browser client is
     /// left on a foreign origin where `crypto.subtle` does not exist.
     func testStaticPageServedFromSamePort() throws {

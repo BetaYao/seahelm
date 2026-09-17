@@ -10,6 +10,16 @@ struct MessageConfig: Equatable {
 
     static let `default` = MessageConfig()
 
+    /// The agent manifest's `message` block, or defaults. Looked up by
+    /// `manifestId` ("claude"), not the enum's raw value ("claudeCode"), which no
+    /// manifest id or alias answers to.
+    static func resolve(
+        for agentType: AgentType,
+        manifest: (String) -> AgentManifest? = { ManifestStore.shared.manifest(for: $0)?.manifest }
+    ) -> MessageConfig {
+        manifest(agentType.manifestId)?.message ?? .default
+    }
+
     enum CodingKeys: String, CodingKey {
         case assistantFrom = "assistant_from"
         case userFields = "user_fields"

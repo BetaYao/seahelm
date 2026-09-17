@@ -362,19 +362,23 @@ class StatusPublisher {
             }
             lock.unlock()
 
+            // Agent permission dialogs are rendered by the TUI rather than sent
+            // through Codex/Claude hooks. Surface their numbered choices through
+            // the same First Mate question-card pipeline used by native tools.
+            let choices = ChoiceOptionParser.parse(content)
+            let hasApproval = agentType.isAIAgent && !choices.isEmpty
+
             let normalized = NormalizedEvent(
                 terminalID: terminalID, source: .scan,
-                kind: .screenObserved(status: committedStatus, message: "", activity: activityEvents,
+                kind: .screenObserved(status: Self.observedStatus(committed: committedStatus,
+                                                                  showsApproval: hasApproval),
+                                      message: "", activity: activityEvents,
                                       commandLine: commandLine, agentType: agentType,
                                       roundDuration: roundDur, tasks: webhookTasks,
                                       backgroundBusy: detection.backgroundBusy))
             AgentRegistry.shared.ingest(normalized)
 
-            // Agent permission dialogs are rendered by the TUI rather than sent
-            // through Codex/Claude hooks. Surface their numbered choices through
-            // the same First Mate question-card pipeline used by native tools.
-            let choices = ChoiceOptionParser.parse(content)
-            if agentType.isAIAgent, !choices.isEmpty {
+            if hasApproval {
                 let question = NormalizedEvent(
                     terminalID: terminalID, source: .scan,
                     kind: .question(
@@ -500,6 +504,15 @@ class StatusPublisher {
     static func shouldBackendCapture(pollCycle: Int, offset: Int, stride: Int) -> Bool {
         let s = max(1, stride)
         return ((pollCycle &+ offset) % s + s) % s == 0
+    }
+
+    /// The status a frame reports. A frame showing an approval dialog is waiting,
+    /// whatever the text heuristics made of it: the dialog is ingested as a
+    /// `.question` straight after, and reporting the heuristic status first made
+    /// the pane flip Running/Idle → Waiting on every poll for as long as the
+    /// dialog stayed up — each flip a status change for every observer.
+    static func observedStatus(committed: AgentStatus, showsApproval: Bool) -> AgentStatus {
+        showsApproval ? .waiting : committed
     }
 
     static func shouldSkipUnchangedFrame(

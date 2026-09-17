@@ -31,6 +31,23 @@ final class MessageConfigManifestTests: XCTestCase {
         XCTAssertNil(m.message)
     }
 
+    func testResolveLooksUpManifestIdNotRawValue() throws {
+        let json = #"{"id":"claude","message":{"coalesce_tools":false}}"#.data(using: .utf8)!
+        let claude = try JSONDecoder().decode(AgentManifest.self, from: json)
+        var asked: [String] = []
+        let config = MessageConfig.resolve(for: .claudeCode) { id in
+            asked.append(id)
+            return id == "claude" ? claude : nil
+        }
+        XCTAssertEqual(asked, ["claude"])
+        XCTAssertFalse(config.coalesceTools)
+    }
+
+    func testResolveFallsBackToDefaultWithoutMessageBlock() {
+        let config = MessageConfig.resolve(for: .codex) { _ in nil }
+        XCTAssertEqual(config, .default)
+    }
+
     func testMessageEventDictShape() {
         let ev = MessageEvent(
             seq: 7,

@@ -299,4 +299,38 @@ final class AgentRegistryIngestOutcomeTests: XCTestCase {
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(captured?.newStatus, .running)
     }
+
+    /// One Claude approval dialog, polled the way StatusPublisher polls it: the
+    /// frame's `screenObserved`, then the dialog's `.question`. Reporting the text
+    /// heuristic's status in the first flipped the pane Waiting → Running/Idle →
+    /// Waiting on every poll; the dialog frame must report waiting throughout.
+    func testApprovalDialogPollsDoNotFlipStatus() {
+        var outcomes: [IngestOutcome] = []
+        AgentRegistry.shared.onOutcome = { outcomes.append($0) }
+        AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .hook("claude-code"),
+                                                    kind: .userPrompt("migrate belayo")))
+        for heuristic in [AgentStatus.running, .running, .idle, .idle, .idle] {
+            AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+                kind: .screenObserved(status: StatusPublisher.observedStatus(committed: heuristic,
+                                                                             showsApproval: true),
+                                      message: "", activity: [], commandLine: nil,
+                                      agentType: .claudeCode, roundDuration: 0, tasks: [])))
+            AgentRegistry.shared.ingest(NormalizedEvent(terminalID: "t1", source: .scan,
+                kind: .question(prompt: "Claude Code requires approval",
+                                options: ["1. Yes", "2. No"], followups: [])))
+        }
+        let drained = expectation(description: "outcomes delivered")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 2)
+
+        let edges = outcomes.filter(\.statusChanged).map { "\($0.oldStatus.rawValue)→\($0.newStatus.rawValue)" }
+        XCTAssertEqual(edges.filter { $0.hasSuffix("→Waiting") }.count, 1, "\(edges)")
+        XCTAssertFalse(edges.contains { $0.hasPrefix("Waiting→") }, "\(edges)")
+    }
+
+    func testObservedStatusIsWaitingOnlyWhileAnApprovalShows() {
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .running, showsApproval: true), .waiting)
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .idle, showsApproval: true), .waiting)
+        XCTAssertEqual(StatusPublisher.observedStatus(committed: .running, showsApproval: false), .running)
+    }
 }

@@ -58,6 +58,7 @@ class AgentRegistry {
 
     private var agents: [String: PaneInfo] = [:]       // keyed by terminal ID
     private var eventLog: [String: [NormalizedEvent]] = [:]   // tid → recent N, ring buffer, never persisted
+    private let transcriptTail = AgentTranscriptTail()
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
@@ -167,7 +168,8 @@ class AgentRegistry {
         let seq = globalSeq
         lock.unlock()
 
-        MessageStreamHub.shared.clear(paneId: terminalID)
+        MessageStreamHub.shared.clear(paneId: terminalID,
+                                      paneSessionKey: closed?.station?.paneSessionKey)
 
         // Announce the close so remote mirrors can drop the pane's
         // retained slot topic instead of leaving a ghost. Off the lock, on main.
@@ -571,9 +573,13 @@ class AgentRegistry {
             self.delegate?.agentDidUpdate(outcome.info)
             self.onOutcome?(outcome)
             EventHub.shared.publish(seq: outcome.seq, event: Self.event(from: outcome))
-            let config = ManifestStore.shared.manifest(for: outcome.info.agentType.rawValue)?
-                .manifest.message ?? .default
-            MessageStreamHub.shared.ingest(outcome: outcome, config: config)
+            // An outcome queued just before its pane closed lands after `unregister`
+            // cleared the history; appending it would write a file for a pane that
+            // no longer exists, replayed to every client from then on.
+            if self.pane(for: outcome.event.terminalID) != nil {
+                MessageStreamHub.shared.ingest(
+                    outcome: outcome, config: MessageConfig.resolve(for: outcome.info.agentType))
+            }
         }
     }
 
@@ -982,9 +988,36 @@ class AgentRegistry {
                 lock.unlock()
             }
         }
+        if let path = event.sessionPath {
+            forwardTranscriptProse(terminalID: tid, path: path)
+        }
         ingest(event2)
         if let hooks = channel(for: tid) as? HooksChannel {
             hooks.handleWebhookEvent(event)
+        }
+    }
+
+    /// The prose an agent wrote between tool calls never comes through a hook —
+    /// only its transcript has it. Read what is new there and queue it on main
+    /// *before* this hook's own outcome, so it lands above the tool call it
+    /// introduces, the way it reads in the terminal.
+    private func forwardTranscriptProse(terminalID tid: String, path: String) {
+        guard let pane = pane(for: tid) else { return }
+        let key = pane.station?.paneSessionKey ?? ""
+        let hub = MessageStreamHub.shared
+        // A transcript first seen after a relaunch is only read back to where
+        // this pane's timeline already reaches.
+        let since = hub.snapshot(paneId: key.isEmpty ? tid : key).last?.ts ?? Date(timeIntervalSinceNow: -300)
+        let entries = transcriptTail.newProse(path: path, since: since)
+        guard !entries.isEmpty else { return }
+        let events = entries.map {
+            MessageEvent(seq: 0, paneId: tid, paneSessionKey: key,
+                         kind: $0.kind == .thinking ? .thinking : .assistant,
+                         ts: $0.timestamp ?? Date(), text: $0.text)
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.pane(for: tid) != nil else { return }
+            hub.append(events)
         }
     }
 

@@ -287,6 +287,37 @@ final class HostGatewaySession {
         }
     }
 
+    /// Server → session: a pane changed status or closed — what keeps the fleet
+    /// list in step after the snapshot it was sent on authentication.
+    func pushPaneEvent(_ event: [String: Any]) {
+        guard let note = Self.paneNotify(for: event) else { return }
+        lock.lock()
+        let ready = authenticated
+        lock.unlock()
+        guard ready else { return }
+        enqueue(.text(HostGatewayFrame.encode(.notify(method: note.method, params: note.params))))
+    }
+
+    /// The EventHub events the fleet list needs, in wire shape. `pane.updated`
+    /// is left out: it fires on every hook and changes nothing the list draws.
+    static func paneNotify(for event: [String: Any]) -> (method: String, params: [String: Any])? {
+        let method: String, keys: [String]
+        switch event["type"] as? String {
+        case "pane.status_changed":
+            method = "pane.status"
+            keys = ["pane_id", "pane_session_key", "status", "old_status", "agent_type",
+                    "worktree_path", "last_message"]
+        case "pane.closed":
+            method = "pane.closed"
+            keys = ["pane_id", "pane_session_key", "worktree_path"]
+        default:
+            return nil
+        }
+        var params: [String: Any] = [:]
+        for key in keys { params[key] = event[key] }
+        return (method, params)
+    }
+
     /// Server → session: a MessageStream timeline item.
     func pushMessage(_ event: MessageEvent) {
         lock.lock()

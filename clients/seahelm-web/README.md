@@ -17,9 +17,13 @@
 
 窄屏（≤760px）默认 **时间线**（MessageStream），不调用 `pane.vt_open`：
 
-- 服务端推送 `pane.message`（user / tool / assistant / status / decision / notice）
-- 标题栏 **时间线 / 终端** 徽章切换；选「终端」才走原 VT 路径
-- 底部输入框 → `pane.send_text`；Esc → `pane.send_keys`
+- 服务端推送 `pane.message`（user / tool / assistant / status / decision / notice），连接时先回放每个 pane 最近 80 条
+- 往上滚动自动加载更早的记录（`message.history`，按 `before_seq` 分页，每页 50 条）
+- 时间线落盘在 `~/.config/seahelm/message-stream/<pane_session_key>.jsonl`，每个 pane 保留最近约 2000 条；重启 App 不丢，关闭 pane 时删除
+- 助手回复按 markdown 渲染（`markdown.js`，先转义再排版，只放行 http/https 链接）
+- 标题栏 **时间线 / 终端** 切换；选「终端」才走原 VT 路径
+- 时间线模式下终端按键栏收起，只留 **打断**：agent 发 Esc，shell 任务发 Ctrl+C
+- 底部输入框 → `pane.send_text`
 - 偏好写入 `localStorage seahelm_surface_mode`
 
 宽屏默认仍是 VT；可手动切到时间线。设计见 `docs/superpowers/specs/2026-09-17-message-stream-design.md`。

@@ -118,9 +118,9 @@ final class HostGatewayServer {
             guard let self else { return }
             self.queue.async {
                 let change = self.decisions.apply(event: event)
-                if case .none = change { return }
                 for state in self.connections.values {
-                    state.session.pushDecision(change)
+                    if change != .none { state.session.pushDecision(change) }
+                    state.session.pushPaneEvent(event)
                 }
             }
         }

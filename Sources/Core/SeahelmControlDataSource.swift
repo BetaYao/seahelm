@@ -303,6 +303,11 @@ final class SeahelmControlDataSource: ControlDataSource {
         MessageStreamHub.shared.snapshot(paneId: paneId).map(\.dict)
     }
 
+    func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any] {
+        let page = MessageStreamHub.shared.history(paneId: paneId, beforeSeq: beforeSeq, limit: limit)
+        return ["messages": page.events.map(\.dict), "has_more": page.hasMore]
+    }
+
     func explainPane(paneId: String) -> [String: Any]? {
         guard let station = station(for: paneId) else { return nil }
         let pane = AgentRegistry.shared.pane(for: station.id)
