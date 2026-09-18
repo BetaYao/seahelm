@@ -310,6 +310,35 @@ enum CommandFormatter {
         }
     }
 
+    /// The footer on a listing a room narrowed.
+    ///
+    /// It says both halves — what this room is about, and that there is more
+    /// elsewhere — because a listing that quietly omits half the fleet is
+    /// indistinguishable from a fleet that lost half its panes. Nothing hidden,
+    /// nothing said.
+    static func narrowedNote(keys: Set<String>, hidden: Int) -> String {
+        guard !keys.isEmpty, hidden > 0 else { return "" }
+        let names = keys.sorted().map { $0.hasPrefix("/") ? URL(fileURLWithPath: $0).lastPathComponent : $0 }
+        return "\n\n_\(names.joined(separator: ", ")) only — \(hidden) more elsewhere; `/status all` for the fleet._"
+    }
+
+    /// What `/home` prints on its own: which group each repo's topics go to.
+    ///
+    /// Chat ids, not names — the bot cannot ask Telegram what a group is called
+    /// without a round trip per row, and the id is what the reader would put in
+    /// the config anyway. The group the reader is standing in is the one whose
+    /// id they just saw in their own address bar.
+    static func topicHomes(_ homes: [String: String]) -> String {
+        guard !homes.isEmpty else {
+            return "No group opens topics yet. Say `/home @repo` in a forum group "
+                 + "to give that repo's panes a topic each here."
+        }
+        let rows = homes.sorted { $0.key < $1.key }
+            .map { "• `\($0.key)` → `\($0.value)`" }
+            .joined(separator: "\n")
+        return "**Topics open in:**\n\(rows)\n\n`/home @repo off` removes one."
+    }
+
     private static func usageHint(_ verb: String) -> String {
         guard let spec = CommandSpecs.spec(for: verb) else { return "" }
         return " Usage: `\(spec.usage)`"

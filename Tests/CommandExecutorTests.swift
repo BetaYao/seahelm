@@ -94,6 +94,21 @@ final class FakeCommandHost: CommandHost {
     func addIdea(text: String, source: String) -> String { ideas.append("\(source): \(text)"); return text }
     func openIssue(title: String) { issues.append(title) }
     func addRepo() { addRepoCalls += 1 }
+
+    /// `/home` — the table it writes, and whether the group it was asked about
+    /// can hold topics.
+    var homes: [String: String] = [:]
+    var topicHostProblem: String?
+    func topicHomes() -> [String: String] { homes }
+    var archivesOnRehome = 0
+    @discardableResult
+    func setTopicHome(key: String, chatId: String?) -> Int {
+        if let chatId { homes[key] = chatId } else { homes.removeValue(forKey: key) }
+        return archivesOnRehome
+    }
+    func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void) {
+        completion(topicHostProblem)
+    }
     func confirm(_ summary: String, completion: @escaping (Bool) -> Void) {
         confirmations.append(summary)
         completion(confirmAnswer)
@@ -399,5 +414,140 @@ final class CommandExecutorTests: XCTestCase {
     func testErrorsAreReportedAsErrors() {
         XCTAssertTrue(last("/go #99").isError)
         XCTAssertTrue(last("/nope").text.contains("/help"))
+    }
+
+    // MARK: - /home
+
+    /// The group is where the line came from, so a surface that is not a chat
+    /// has nothing to offer — and must not write a mapping to nowhere.
+    func testHomeNeedsATelegramGroup() {
+        let reply = last("/home @alpha", on: .desktop)
+        XCTAssertTrue(reply.isError)
+        XCTAssertTrue(host.homes.isEmpty)
+    }
+
+    func testHomeRecordsTheChatTheLineCameFrom() {
+        let reply = last("/home @alpha", on: CommandSurface(sessionKey: "telegram:-100#46"))
+        XCTAssertFalse(reply.isError)
+        // The topic is dropped: a topic is opened *in* a chat.
+        XCTAssertEqual(host.homes["alpha"], "-100")
+        XCTAssertTrue(reply.text.contains("alpha (repo)"))
+    }
+
+    /// A group that cannot hold topics is refused with the fix, and nothing is
+    /// written — a mapping that fails at the first notice is worse than none.
+    func testHomeRefusesAGroupThatCannotHoldTopics() {
+        host.topicHostProblem = "Make me an admin with Manage Topics."
+        let reply = last("/home @alpha", on: CommandSurface(sessionKey: "telegram:-100"))
+        XCTAssertTrue(reply.isError)
+        XCTAssertTrue(reply.text.contains("Manage Topics"))
+        XCTAssertTrue(host.homes.isEmpty)
+    }
+
+    func testHomeOffRemovesTheMapping() {
+        host.homes["alpha"] = "-100"
+        let reply = last("/home @alpha off", on: CommandSurface(sessionKey: "telegram:-100"))
+        XCTAssertFalse(reply.isError)
+        XCTAssertTrue(host.homes.isEmpty)
+    }
+
+    /// Removing works from anywhere: it names what to drop and needs no group.
+    func testHomeOffDoesNotNeedAGroup() {
+        host.homes["alpha"] = "-100"
+        XCTAssertFalse(last("/home @alpha off", on: .desktop).isError)
+        XCTAssertTrue(host.homes.isEmpty)
+    }
+
+    func testBareHomeListsTheMapping() {
+        host.homes = ["alpha": "-1001", "beta": "-1002"]
+        let reply = last("/home")
+        XCTAssertFalse(reply.isError)
+        XCTAssertTrue(reply.text.contains("alpha"))
+        XCTAssertTrue(reply.text.contains("-1002"))
+    }
+
+    /// Moving a repo's home archives what it had in the old group, and says so
+    /// — the history did not vanish, it was left where it was said.
+    func testHomeSaysHowManyTopicsItStranded() {
+        host.archivesOnRehome = 2
+        let reply = last("/home @alpha", on: CommandSurface(sessionKey: "telegram:-200"))
+        XCTAssertFalse(reply.isError)
+        XCTAssertTrue(reply.text.contains("2 existing topics archived"), reply.text)
+    }
+
+    func testHomeSaysNothingWhenNothingWasStranded() {
+        let reply = last("/home @alpha", on: CommandSurface(sessionKey: "telegram:-200"))
+        XCTAssertFalse(reply.text.contains("archived"), reply.text)
+    }
+
+    /// One reads as one, not "1 topics".
+    func testStrandedNoteIsSingularForOne() {
+        XCTAssertTrue(CommandExecutor.archivedNote(1).contains("1 existing topic archived"))
+        XCTAssertTrue(CommandExecutor.archivedNote(1).contains("it was"))
+        XCTAssertEqual(CommandExecutor.archivedNote(0), "")
+    }
+
+    // MARK: - /status in a room that belongs to a repo
+
+    private var alphaRoom: CommandSurface { CommandSurface(sessionKey: "telegram:-100") }
+
+    func testStatusInARepoRoomListsOnlyThatRepo() {
+        host.homes = ["alpha": "-100"]
+        let text = last("/status", on: alphaRoom).text
+        XCTAssertTrue(text.contains("#3"), text)   // alpha
+        XCTAssertTrue(text.contains("#7"), text)   // alpha
+        XCTAssertFalse(text.contains("#12"), text) // beta — another room's work
+    }
+
+    /// Nothing hidden, nothing said; something hidden, say how much.
+    func testNarrowedListingSaysThereIsMoreElsewhere() {
+        host.homes = ["alpha": "-100"]
+        let text = last("/status", on: alphaRoom).text
+        XCTAssertTrue(text.contains("alpha only"), text)
+        XCTAssertTrue(text.contains("/status all"), text)
+    }
+
+    func testStatusAllWidensItBack() {
+        host.homes = ["alpha": "-100"]
+        let text = last("/status all", on: alphaRoom).text
+        XCTAssertTrue(text.contains("#12"), text)
+        XCTAssertFalse(text.contains("only —"), text)
+    }
+
+    /// A topic inside the room is still the room.
+    func testNarrowingAppliesInsideATopicOfThatGroup() {
+        host.homes = ["alpha": "-100"]
+        let text = last("/status", on: CommandSurface(sessionKey: "telegram:-100#7")).text
+        XCTAssertFalse(text.contains("#12"), text)
+    }
+
+    /// A room nobody gave to anything is about the whole fleet.
+    func testUnhomedChatStillSeesEverything() {
+        let text = last("/status", on: CommandSurface(sessionKey: "telegram:-999")).text
+        XCTAssertTrue(text.contains("#12"), text)
+        XCTAssertFalse(text.contains("only —"), text)
+    }
+
+    func testDesktopIsNeverNarrowed() {
+        host.homes = ["alpha": "-100"]
+        XCTAssertTrue(last("/status", on: .desktop).text.contains("#12"))
+    }
+
+    /// Two repos homed to one group make the room about both.
+    func testTwoReposInOneRoom() {
+        host.homes = ["alpha": "-100", "beta": "-100"]
+        let text = last("/status", on: alphaRoom).text
+        XCTAssertTrue(text.contains("#12"), text)
+        XCTAssertFalse(text.contains("only —"), text)
+    }
+
+    func testWorktreeScopeNarrowsToo() {
+        host.homes = ["alpha": "-100"]
+        let text = last("/status worktrees", on: alphaRoom).text
+        XCTAssertFalse(text.contains("fix-y"), text)
+    }
+
+    func testStatusRejectsAStrayWord() {
+        XCTAssertTrue(last("/status sideways").isError)
     }
 }

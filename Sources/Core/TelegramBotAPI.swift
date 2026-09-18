@@ -23,8 +23,20 @@ struct TelegramChat: Decodable, Equatable {
     let type: String
     let title: String?
     let username: String?
+    /// True when the supergroup has topics turned on. Not consulted for
+    /// routing — a message says which topic it is in — but it is what tells a
+    /// log line why one group threads its replies and another does not.
+    let isForum: Bool?
 
     var isPrivate: Bool { type == "private" }
+
+    init(id: Int64, type: String, title: String?, username: String?, isForum: Bool? = nil) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.username = username
+        self.isForum = isForum
+    }
 }
 
 /// The slice of a message the bridge needs when it is the *target* of a reply.
@@ -80,11 +92,22 @@ struct TelegramMessage: Decodable, Equatable {
     let document: TelegramDocument?
     /// The message this one replies to, when it replies to anything.
     let replyToMessage: TelegramReplyTarget?
+    /// The forum topic this message sits in — but also, in a plain group, the
+    /// reply chain it belongs to, and since Bot API 10.0 a private chat's own
+    /// topic. Only `TelegramChatAddress` decides which of those can be replied
+    /// into; nothing else should read this field.
+    let messageThreadId: Int?
+    /// True when the message was posted to a topic rather than to the chat at
+    /// large. Absent for General, which is the chat at large.
+    let isTopicMessage: Bool?
 
     init(messageId: Int, date: TimeInterval, chat: TelegramChat, from: TelegramUser?,
          senderChat: TelegramChat?, text: String?, caption: String?,
          photo: [TelegramPhotoSize]? = nil, document: TelegramDocument? = nil,
-         replyToMessage: TelegramReplyTarget? = nil) {
+         replyToMessage: TelegramReplyTarget? = nil,
+         messageThreadId: Int? = nil, isTopicMessage: Bool? = nil) {
+        self.messageThreadId = messageThreadId
+        self.isTopicMessage = isTopicMessage
         self.messageId = messageId
         self.date = date
         self.chat = chat
@@ -120,6 +143,26 @@ struct TelegramUpdate: Decodable, Equatable {
     /// rest are deliberately not requested (`allowedUpdates`), so they never
     /// arrive.
     var payload: TelegramMessage? { message ?? channelPost }
+}
+
+/// The slice of `getChatMember` the bridge reads: what this bot may do in a
+/// chat. `canManageTopics` is absent for anyone who is not an administrator,
+/// which reads the same as not having it.
+struct TelegramChatMember: Decodable, Equatable {
+    let status: String
+    let canManageTopics: Bool?
+
+    var isAdministrator: Bool { status == "administrator" || status == "creator" }
+    /// The group's creator may always manage topics; Telegram leaves the flag
+    /// off for them rather than setting it true.
+    var mayManageTopics: Bool { status == "creator" || canManageTopics == true }
+}
+
+/// What `createForumTopic` answers with: the thread id every later message
+/// into this topic carries.
+struct TelegramForumTopic: Decodable, Equatable {
+    let messageThreadId: Int
+    let name: String
 }
 
 struct TelegramBotInfo: Decodable, Equatable {
@@ -247,6 +290,17 @@ final class TelegramBotAPI {
         for process in live where process.isRunning { process.terminate() }
     }
 
+    /// What a chat is — asked for one thing only: whether it is a forum.
+    func getChat(chatId: String) throws -> TelegramChat {
+        try call("getChat", params: ["chat_id": chatId], deadline: Self.stallSeconds)
+    }
+
+    /// This bot's standing in a chat, for the rights it needs there.
+    func getChatMember(chatId: String, userId: Int64) throws -> TelegramChatMember {
+        try call("getChatMember", params: ["chat_id": chatId, "user_id": userId],
+                 deadline: Self.stallSeconds)
+    }
+
     func getMe() throws -> TelegramBotInfo {
         try call("getMe", params: [:], deadline: Self.stallSeconds)
     }
@@ -273,9 +327,13 @@ final class TelegramBotAPI {
     /// `buttons` become a one-per-row inline keyboard. Returns the sent
     /// message's id, which is what a later `editMessageReplyMarkup` needs to
     /// take those buttons off again.
+    ///
+    /// `messageThreadId` posts into a forum topic. It is left off for every
+    /// other kind of chat — including a forum's General topic, which Telegram
+    /// rejects a thread id for; see `TelegramChatAddress`.
     @discardableResult
     func sendMessage(chatId: String, text: String, parseMode: String?,
-                     buttons: [MessageButton] = []) throws -> Int {
+                     buttons: [MessageButton] = [], messageThreadId: Int? = nil) throws -> Int {
         var params: [String: Any] = [
             "chat_id": chatId,
             "text": text,
@@ -284,6 +342,7 @@ final class TelegramBotAPI {
             "link_preview_options": ["is_disabled": true],
         ]
         if let parseMode { params["parse_mode"] = parseMode }
+        if let messageThreadId { params["message_thread_id"] = messageThreadId }
         if !buttons.isEmpty {
             params["reply_markup"] = ["inline_keyboard": Self.keyboard(buttons)]
         }
@@ -368,6 +427,62 @@ final class TelegramBotAPI {
         let payload = commands.map { ["command": $0.command, "description": $0.description] }
         let _: Bool = try call("setMyCommands", params: ["commands": payload],
                                deadline: Self.stallSeconds)
+    }
+
+    // MARK: - Forum topics
+
+    /// Open a topic in a forum supergroup and return it.
+    ///
+    /// Needs the bot to be an administrator with `can_manage_topics`; without
+    /// it Telegram answers 400 and there is nothing to retry — someone has to
+    /// grant the right in the group.
+    func createForumTopic(chatId: String, name: String, iconColor: Int?) throws -> TelegramForumTopic {
+        var params: [String: Any] = ["chat_id": chatId, "name": Self.trimTopicName(name)]
+        if let iconColor { params["icon_color"] = iconColor }
+        return try call("createForumTopic", params: params, deadline: Self.stallSeconds)
+    }
+
+    /// Rename a topic. Agents rewrite their own session titles as the work
+    /// turns, and a thread still called by the first prompt three hours in is
+    /// worse than no name at all.
+    func editForumTopic(chatId: String, messageThreadId: Int, name: String) throws {
+        let _: Bool = try call("editForumTopic",
+                               params: ["chat_id": chatId,
+                                        "message_thread_id": messageThreadId,
+                                        "name": Self.trimTopicName(name)],
+                               deadline: Self.stallSeconds)
+    }
+
+    /// Close a topic: it folds into the group's closed list and stops taking
+    /// messages, but keeps everything said in it.
+    ///
+    /// Deliberately not `deleteForumTopic`. A pane ending is not a reason to
+    /// destroy the record of what it did, and deletion cannot be undone.
+    func closeForumTopic(chatId: String, messageThreadId: Int) throws {
+        let _: Bool = try call("closeForumTopic",
+                               params: ["chat_id": chatId, "message_thread_id": messageThreadId],
+                               deadline: Self.stallSeconds)
+    }
+
+    /// Telegram caps a topic name at 128 characters and rejects an empty one.
+    static func trimTopicName(_ name: String, limit: Int = 128) -> String {
+        let flat = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if flat.isEmpty { return "seahelm" }
+        guard flat.count > limit else { return flat }
+        return String(flat.prefix(limit - 1)) + "\u{2026}"
+    }
+
+    /// The six colours Telegram allows a topic icon to take. Anything else is a
+    /// 400, so a colour is chosen from this list rather than computed.
+    static let topicIconColors = [0x6FB9F0, 0xFFD67E, 0xCB86DB, 0x8EEE98, 0xFF93B2, 0xFB6F5F]
+
+    /// One colour per project, stable across launches, so a glance at the topic
+    /// list groups by repo. A sum of scalars rather than `hashValue`: Swift's
+    /// hashing is seeded per process and would repaint the list on every start.
+    static func topicIconColor(for key: String) -> Int {
+        guard !key.isEmpty else { return topicIconColors[0] }
+        let sum = key.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % 100_003 }
+        return topicIconColors[sum % topicIconColors.count]
     }
 
     /// Drop any webhook registered against this bot.

@@ -13,6 +13,34 @@ enum GoTarget: Equatable {
     case worktree(WorktreeRef)
 }
 
+/// What `/home` gives a group to: a whole repo, or one worktree.
+///
+/// The repo is the grain that pays — a handful of groups, made once — and the
+/// worktree is there for the one piece of work important enough to deserve a
+/// room of its own. A worktree named here wins over its repo.
+enum HomeTarget: Equatable {
+    case repo(RepoRef)
+    case worktree(WorktreeRef)
+
+    /// The `topic_chats` key this target is stored under: a repo by name, a
+    /// worktree by path — exactly what a pane reports about itself.
+    var configKey: String {
+        switch self {
+        case .repo(let repo):         return repo.name
+        case .worktree(let worktree): return worktree.path
+        }
+    }
+
+    /// What the reply calls it, saying which of the two it resolved to so a
+    /// wrong guess is visible at once.
+    var label: String {
+        switch self {
+        case .repo(let repo):         return "\(repo.name) (repo)"
+        case .worktree(let worktree): return "\(worktree.name) (worktree)"
+        }
+    }
+}
+
 /// The command language, spoken identically by the desktop Helm line, the
 /// chat bridge and mail. See `docs/command-redesign.md`.
 ///
@@ -37,8 +65,9 @@ enum Command: Equatable {
     case order(PaneRef, String)
     /// `/broadcast <text>` — to every pane. Confirms.
     case broadcast(String)
-    /// `/status [worktrees|repos]` — a listing with handles.
-    case status(StatusScope)
+    /// `/status [worktrees|repos] [all]` — a listing with handles. In a group
+    /// that `/home` gave to a repo, the listing is that repo's unless `all`.
+    case status(StatusScope, all: Bool)
     /// `/return` — review every finished worktree.
     case returnAll
     /// `/return @worktree` — delete one linked worktree. Confirms.
@@ -51,6 +80,9 @@ enum Command: Equatable {
     case idea(String)
     /// `/feedback <text>` — open a GitHub issue for seahelm.
     case feedback(String)
+    /// `/home [@repo|@worktree [off]]` — make the group this was said in the
+    /// place that thing's pane topics are opened. Bare: list the mapping.
+    case home(HomeTarget?, off: Bool)
     /// `/help [command]`
     case help(String?)
     /// `/yes` — confirm this conversation's pending action.

@@ -71,12 +71,19 @@ enum CommandParser {
                                 : .success(.broadcast(rest))
 
         case "status":
-            switch firstToken(rest)?.lowercased() {
-            case nil, "panes", "pane":          return .success(.status(.panes))
-            case "worktrees", "worktree":       return .success(.status(.worktrees))
-            case "repos", "repo", "projects":   return .success(.status(.repos))
-            case .some(let other):              return .failure(.badArgument(verb: "status", token: other))
+            var scope = StatusScope.panes
+            var all = false
+            for token in rest.split(whereSeparator: \.isWhitespace) {
+                switch token.lowercased() {
+                case "panes", "pane":            scope = .panes
+                case "worktrees", "worktree":    scope = .worktrees
+                case "repos", "repo", "projects": scope = .repos
+                // The whole fleet, from a room that otherwise shows only its own.
+                case "all", "fleet":             all = true
+                default: return .failure(.badArgument(verb: "status", token: String(token)))
+                }
             }
+            return .success(.status(scope, all: all))
 
         case "return", "remove":
             guard let token = firstToken(rest) else { return .success(.returnAll) }
@@ -108,6 +115,18 @@ enum CommandParser {
         case "feedback":
             return rest.isEmpty ? .failure(.missingArgument(verb: "feedback", what: "a description")) : .success(.feedback(rest))
 
+        case "home":
+            let tokens = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard let token = tokens.first else { return .success(.home(nil, off: false)) }
+            var off = false
+            if tokens.count > 1 {
+                guard tokens[1].lowercased() == "off" else {
+                    return .failure(.badArgument(verb: "home", token: tokens[1]))
+                }
+                off = true
+            }
+            return homeTarget(token, index: index).map { .home($0, off: off) }
+
         case "help":
             guard let token = firstToken(rest) else { return .success(.help(nil)) }
             let name = token.hasPrefix("/") ? String(token.dropFirst()) : token
@@ -123,14 +142,14 @@ enum CommandParser {
 
         case "worktree":
             // `#`/`@` selected; anything else was a description to start.
-            guard let token = firstToken(rest) else { return .success(.status(.worktrees)) }
+            guard let token = firstToken(rest) else { return .success(.status(.worktrees, all: false)) }
             if token.hasPrefix("#") || token.hasPrefix("@"), rest == token {
                 return goTarget(token, index: index).map(Command.go)
             }
             return parseNew(rest, index: index)
 
         case "pane", "panes":
-            guard let token = firstToken(rest) else { return .success(.status(.panes)) }
+            guard let token = firstToken(rest) else { return .success(.status(.panes, all: false)) }
             return goTarget(token, index: index).map(Command.go)
 
         default:
@@ -179,6 +198,22 @@ enum CommandParser {
         if let repo = index.repo(named: name) { return .success(repo) }
         if case .success = index.worktree(named: name) { return .failure(.worktreeNotRepo(name)) }
         return .failure(.unknownRepo(name))
+    }
+
+    /// `/home` is the one verb that takes a repo *or* a worktree, so it is also
+    /// the one that needs a tie-break. It is the least surprising one: a
+    /// `repo/branch` form is unambiguous and settles it, a name that is a repo
+    /// is that repo — the recommended grain — and anything else is tried as a
+    /// worktree. The reply names which it chose, so a wrong guess shows up
+    /// immediately rather than as threads appearing in the wrong room.
+    static func homeTarget(_ token: String, index: FleetIndex) -> Result<HomeTarget, CommandError> {
+        let name = token.hasPrefix("@") ? String(token.dropFirst()) : token
+        guard !name.isEmpty else { return .failure(.unknownRepo(token)) }
+        if name.contains("/") {
+            return worktreeRef(token, index: index).map(HomeTarget.worktree)
+        }
+        if let repo = index.repo(named: name) { return .success(.repo(repo)) }
+        return worktreeRef(token, index: index).map(HomeTarget.worktree)
     }
 
     /// `/go` takes either kind. The sigil decides; a bare number is a pane and
