@@ -81,6 +81,16 @@ class MainWindowController: NSWindowController {
     /// `telegramChannel` so ending pairing restores the configured bridge
     /// rather than leaving the wizard's token in place.
     private var telegramPairingChannel: TelegramChannel?
+    /// Panes whose topic is being opened right now, so a second notice arriving
+    /// in that round trip joins the first rather than opening a second thread.
+    var topicCreationInFlight: Set<String> = []
+    /// Notices held while a pane's topic is opened, flushed into it once it is
+    /// (or sent the ordinary way if it could not be).
+    var pendingTopicNotices: [String: [String]] = [:]
+    /// Set when Telegram refuses to open a topic — in practice, the bot is not
+    /// an admin with "Manage Topics". Cleared when the bridge restarts, so
+    /// granting the right and saving settings is enough to try again.
+    var autoTopicsBlocked = false
     /// Fleet row lit while a context-menu `/return` is assessing. Cleared when
     /// a sheet appears, the command fails, or the tear-down finishes.
     private var pendingReturnPath: String?
@@ -403,6 +413,11 @@ class MainWindowController: NSWindowController {
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()
         tabCoordinator.loadWorkspaces()
+        // The bridge AppDelegate opened knows nothing about the topics seahelm
+        // opened in earlier runs; the session store is what remembers them.
+        // Not from `statusPublisher`'s initializer: this reads `tabCoordinator`,
+        // whose own initializer reads `statusPublisher`.
+        syncDedicatedTopics()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleNavigateToWorktree(_:)),
@@ -2672,6 +2687,10 @@ extension MainWindowController: SettingsDelegate {
         AgentRegistry.shared.registerChannel(channel)
         channel.connect()
         telegramChannel = channel
+        // A fresh bridge is also a fresh chance at topics: whoever just saved
+        // settings may have been granting the bot the right to open them.
+        autoTopicsBlocked = false
+        syncDedicatedTopics()
         NSLog("[Settings] Telegram bridge reconnecting")
     }
 
@@ -2796,10 +2815,12 @@ extension MainWindowController: TerminalCoordinatorDelegate {
         tabCoordinator.pendingOrders.resolvePane(terminalID: terminalID)
         // Every conversation bound to the pane is told, and a mail thread's
         // attachments go with it.
-        for session in tabCoordinator.commandSessions.close(paneId: terminalID) where session.surface == "mail" {
-            if let account = config.gmailMail?.accountEmail {
+        for session in tabCoordinator.commandSessions.close(paneId: terminalID) {
+            if session.surface == "mail", let account = config.gmailMail?.accountEmail {
                 EmailAttachmentStore().remove(threadID: session.id, account: account)
             }
+            // A topic seahelm opened for this pane is closed with it.
+            retireAutoTopic(session)
         }
     }
 
@@ -3089,6 +3110,101 @@ extension MainWindowController: CommandHost {
         IdeaStore.shared.add(text: text, project: "external", source: source, tags: []).text
     }
 
+    // MARK: - Per-pane chat topics
+
+    func topicHomes() -> [String: String] {
+        config.telegram?.topicChats ?? [:]
+    }
+
+    /// The app is the only writer of config.json — a hand edit under a running
+    /// instance is lost at its next save — so `/home` goes through here.
+    ///
+    /// Setting a home also turns the feature on. Someone saying where topics
+    /// should go has already said they want them, and a switch they then have
+    /// to find in Settings is a second step that only exists to be forgotten.
+    @discardableResult
+    func setTopicHome(key: String, chatId: String?) -> Int {
+        var telegram = config.telegram ?? TelegramConfig()
+        var table = telegram.topicChats ?? [:]
+        if let chatId {
+            table[key] = chatId
+            telegram.autoTopics = true
+        } else {
+            table.removeValue(forKey: key)
+        }
+        telegram.topicChats = table.isEmpty ? nil : table
+        config.telegram = telegram
+        config.saveNow()
+        // A home that was just granted deserves a fresh attempt even if an
+        // earlier one failed for want of rights.
+        autoTopicsBlocked = false
+        NSLog("[Telegram] Topic home \(chatId == nil ? "cleared for" : "set for") \(key)")
+        return rehomeStaleTopics()
+    }
+
+    /// Archive every topic that the table no longer puts where it is.
+    ///
+    /// Asked of the *new* config rather than of what just changed, so one sweep
+    /// covers every way a pane's room can move: a repo re-homed, a worktree key
+    /// added that shadows its repo, a mapping removed, the fallback changed.
+    ///
+    /// The old thread is closed rather than deleted — what the agent said in it
+    /// stays readable — and the binding is dropped, so the pane opens a fresh
+    /// topic in its new group the next time it has something to say. A pane
+    /// whose live state cannot be resolved is left alone: archiving a thread is
+    /// not something to do on a guess.
+    @discardableResult
+    func rehomeStaleTopics() -> Int {
+        let store = tabCoordinator.commandSessions
+        var moved = 0
+        for session in store.autoTopicSessions() {
+            guard let paneId = session.boundPaneId,
+                  let pane = AgentRegistry.shared.pane(for: paneId) else { continue }
+            let wanted = config.telegram?.topicChatId(worktreePath: pane.worktreePath,
+                                                      project: pane.project)
+            let current = TelegramChatAddress.chatId(of: session.id)
+            guard wanted != current else { continue }
+            liveTelegramChannel?.closeTopic(address: session.id)
+            store.remove(session.key)
+            moved += 1
+            NSLog("[Telegram] Topic \(session.id) archived — \(pane.project) now belongs to "
+                + "\(wanted ?? "no group")")
+        }
+        if moved > 0 { syncDedicatedTopics() }
+        return moved
+    }
+
+    /// Ask Telegram whether this chat can actually hold topics, before saying
+    /// yes to it.
+    ///
+    /// Both failures are things only a person can fix, and both had to be
+    /// diagnosed by hand the first time they happened: a group without topics
+    /// turned on, and a bot that may not open them. Answering with the fix is
+    /// the difference between a feature that works and one that silently does
+    /// nothing hours later.
+    func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void) {
+        guard let channel = liveTelegramChannel else {
+            completion("The Telegram bridge isn't connected.")
+            return
+        }
+        channel.inspectTopicHost(chatId: chatId) { report in
+            DispatchQueue.main.async {
+                switch report {
+                case .ok:
+                    completion(nil)
+                case .notAForum:
+                    completion("This group doesn't have topics turned on. "
+                             + "Group settings ▸ Topics, then say `/home` again.")
+                case .missingRight:
+                    completion("I'm in this group but not allowed to open topics. "
+                             + "Make me an admin with **Manage Topics**, then say `/home` again.")
+                case .failed(let message):
+                    completion("Telegram wouldn't say whether this group can hold topics: \(message)")
+                }
+            }
+        }
+    }
+
     func openIssue(title: String) {
         openGitHubIssue(title: title)
     }
@@ -3121,13 +3237,31 @@ extension MainWindowController: CommandHost {
     /// `fleetSilenced` drops the fleet-wide listeners for this one event — the
     /// desktop already showed it. Chats bound to the pane are never dropped.
     private func notifyTelegramSessions(terminalID: String, text: String, fleetSilenced: Bool = false) {
+        let pane = terminalID.isEmpty ? nil : AgentRegistry.shared.pane(for: terminalID)
         let paneKey: String?
-        if !terminalID.isEmpty, let pane = AgentRegistry.shared.pane(for: terminalID) {
+        if let pane {
             paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
                                              paneId: pane.id)
         } else {
             paneKey = nil
         }
+
+        // A pane with a topic of its own reports there and only there. Holding
+        // this notice back while the topic is opened is the one case where a
+        // banner is delayed — by one round trip, once per pane, and the
+        // alternative is announcing the pane in General and then never again.
+        if let pane, let paneKey, config.telegram?.autoTopicsEnabled == true {
+            switch ensureAutoTopic(for: pane, paneKey: paneKey, pending: text) {
+            case .deferred:
+                return
+            case .ready:
+                deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: [])
+                return
+            case .unavailable:
+                break
+            }
+        }
+
         var fleet: [String] = []
         if !fleetSilenced {
             if let chat = config.telegram?.resolvedDefaultChatId { fleet.append(chat) }
@@ -3135,6 +3269,11 @@ extension MainWindowController: CommandHost {
                 fleet.append(chat)
             }
         }
+        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: fleet)
+    }
+
+    private func deliverTelegram(terminalID: String, text: String, paneKey: String?, fleet: [String]) {
+        // Already one address per chat — see `telegramChatsToNotify`.
         let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
             paneKey: paneKey, fleetListenerChatIds: fleet)
         for chatId in chats {
@@ -3149,6 +3288,122 @@ extension MainWindowController: CommandHost {
                 }
             }
         }
+    }
+}
+
+// MARK: - Per-pane Telegram topics
+
+extension MainWindowController {
+    enum AutoTopicState {
+        /// The pane has its topic; deliver there now.
+        case ready
+        /// A topic is being opened; this notice is buffered and will go out
+        /// when it is.
+        case deferred
+        /// No topic and none coming — fall back to the ordinary routing.
+        case unavailable
+    }
+
+    /// The live Telegram channel. Not `telegramChannel`, which is only set when
+    /// settings restart the bridge: the one `AppDelegate` opens at launch is
+    /// registered with `AgentRegistry` and nowhere else.
+    var liveTelegramChannel: TelegramChannel? {
+        telegramChannel ?? (AgentRegistry.shared.externalChannel("telegram") as? TelegramChannel)
+    }
+
+    /// Make sure this pane has a topic of its own, opening one if it does not.
+    ///
+    /// Opening is lazy on purpose. A fleet of twenty panes is twenty threads if
+    /// they are created up front — most of them for panes that never say
+    /// anything — and twenty `createForumTopic` calls in a burst is exactly the
+    /// shape Telegram rate-limits. The first thing a pane has to say is also
+    /// the first moment a thread for it is worth reading.
+    func ensureAutoTopic(for pane: PaneInfo, paneKey: String, pending text: String) -> AutoTopicState {
+        // Which group this pane belongs in — its worktree's, its repo's, or the
+        // fallback. A pane whose repo names no group and where there is no
+        // fallback simply has no topic, and reports the ordinary way.
+        guard !autoTopicsBlocked,
+              let chatId = config.telegram?.topicChatId(worktreePath: pane.worktreePath,
+                                                        project: pane.project) else {
+            return .unavailable
+        }
+        let name = Self.autoTopicName(for: pane)
+
+        if let session = tabCoordinator.commandSessions.autoTopic(forPaneKey: paneKey) {
+            // The agent renames itself as the work turns; follow it, but only
+            // when it actually moved.
+            if session.topicName != name {
+                liveTelegramChannel?.renameTopic(address: session.id, name: name)
+                tabCoordinator.commandSessions.noteTopicName(name, for: session.key)
+            }
+            return .ready
+        }
+
+        guard let channel = liveTelegramChannel else { return .unavailable }
+
+        pendingTopicNotices[paneKey, default: []].append(text)
+        guard !topicCreationInFlight.contains(paneKey) else { return .deferred }
+        topicCreationInFlight.insert(paneKey)
+
+        let paneId = pane.id
+        let worktreePath = pane.worktreePath
+        channel.createTopic(chatId: chatId, name: name, iconKey: pane.project) { [weak self] address in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.topicCreationInFlight.remove(paneKey)
+                let buffered = self.pendingTopicNotices.removeValue(forKey: paneKey) ?? []
+
+                guard let address else {
+                    // Almost always the missing admin right. Stop asking until
+                    // the bridge is restarted — one clear line in the log beats
+                    // one per pane — and let the buffered notices go out the
+                    // ordinary way rather than vanish.
+                    self.autoTopicsBlocked = true
+                    NSLog("[Telegram] Per-pane topics are off for this session — see the error above.")
+                    for text in buffered {
+                        self.notifyTelegramSessions(terminalID: paneId, text: text)
+                    }
+                    return
+                }
+
+                let key = CommandSession.key(surface: "telegram", id: address)
+                self.tabCoordinator.commandSessions.bindAutoTopic(
+                    key, toPaneKey: paneKey, paneId: paneId,
+                    worktreePath: worktreePath, topicName: name)
+                self.syncDedicatedTopics()
+                for text in buffered {
+                    self.deliverTelegram(terminalID: paneId, text: text, paneKey: paneKey, fleet: [])
+                }
+            }
+        }
+        return .deferred
+    }
+
+    /// Close the topic seahelm opened for a pane that has ended.
+    ///
+    /// The session is already marked closed by the caller, so this is only the
+    /// Telegram half: the thread folds into the group's closed list, keeping
+    /// everything the agent said in it.
+    func retireAutoTopic(_ session: CommandSession) {
+        guard session.autoTopic, session.surface == "telegram" else { return }
+        liveTelegramChannel?.closeTopic(address: session.id)
+        syncDedicatedTopics()
+    }
+
+    /// Tell the channel which threads are its own panes' command lines, so bare
+    /// prose in them counts as an order.
+    func syncDedicatedTopics() {
+        liveTelegramChannel?.setDedicatedTopics(tabCoordinator.commandSessions.autoTopicAddresses())
+    }
+
+    /// What the thread is called: the repo, then whatever the pane is calling
+    /// itself. The repo leads because a phone shows a truncated list of thread
+    /// names and "seahelm" first is what makes that list skimmable.
+    static func autoTopicName(for pane: PaneInfo) -> String {
+        let title = PaneTitleResolver.title(for: pane).trimmingCharacters(in: .whitespacesAndNewlines)
+        let project = pane.project.trimmingCharacters(in: .whitespacesAndNewlines)
+        let joined = [project, title].filter { !$0.isEmpty }.joined(separator: " · ")
+        return TelegramBotAPI.trimTopicName(joined.isEmpty ? "seahelm" : joined)
     }
 }
 
@@ -3257,14 +3512,19 @@ extension MainWindowController {
             paneKey: paneKey, fleetListenerChatIds: []))
         if let chat = config.telegram?.resolvedDefaultChatId { chats.insert(chat) }
         if let chat = telegramChannel?.fleetNotifyChatId { chats.insert(chat) }
-        guard !chats.isEmpty else { return }
+        // The fleet inserts above are bare chat ids, and one of them is often
+        // the group a bound topic already covers — so dedupe after them, not
+        // only inside the lookup.
+        let home = paneKey.flatMap { tabCoordinator.commandSessions.autoTopic(forPaneKey: $0)?.id }
+        let ordered = TelegramChatAddress.oneAddressPerChat(Array(chats), preferring: home)
+        guard !ordered.isEmpty else { return }
 
         let buttons = optionButtons(for: order, dismissable: true)
         let text = Self.questionCardText(
             handle: paneKey.map { PaneHandleRegistry.shared.handle(for: $0) },
             project: order.action.project, branch: order.action.branch,
             message: order.action.message, options: order.action.options ?? [])
-        for chatId in chats {
+        for chatId in ordered {
             AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text,
                 format: .markdown, buttons: buttons,

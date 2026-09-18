@@ -92,6 +92,30 @@ struct FleetIndex: Equatable {
         self.repos = repos
     }
 
+    /// The fleet as one room sees it: only the work that room is about.
+    ///
+    /// `keys` are `topic_chats` keys — a repo name or a worktree path — so a
+    /// group given to `saas-mono` lists that repo's panes and nothing else. A
+    /// room's `/status` answering with twenty panes from four projects is a
+    /// listing nobody reads; the room already says which work it is for.
+    ///
+    /// Filtering here rather than in the formatter keeps every listing, handle
+    /// and button consistent by construction: they are all built from an index,
+    /// and this is an index.
+    func narrowed(to keys: Set<String>) -> FleetIndex {
+        guard !keys.isEmpty else { return self }
+        func matches(project: String, worktreePath: String) -> Bool {
+            keys.contains { key in
+                key.hasPrefix("/") ? key == worktreePath
+                                   : key.caseInsensitiveCompare(project) == .orderedSame
+            }
+        }
+        return FleetIndex(
+            panes: panes.filter { matches(project: $0.project, worktreePath: $0.worktreePath) },
+            worktrees: worktrees.filter { matches(project: $0.repo, worktreePath: $0.path) },
+            repos: repos.filter { matches(project: $0.name, worktreePath: $0.path) })
+    }
+
     // MARK: - Panes
 
     func pane(handle: Int) -> PaneRef? {

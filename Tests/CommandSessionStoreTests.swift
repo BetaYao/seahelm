@@ -162,4 +162,43 @@ final class PaneHandleRegistryTests: XCTestCase {
         XCTAssertEqual(PaneHandleRegistry.key(sessionKey: "", paneId: "st9"), "local:st9")
         XCTAssertEqual(PaneHandleRegistry.key(sessionKey: "seahelm-x", paneId: "st9"), "seahelm-x")
     }
+
+    // MARK: - One address per room
+
+    /// The duplicate that shipped twice: three bindings on one pane, all in the
+    /// same group, and every notice arriving three times. Deduping lives in the
+    /// store because the first fix patched one call site and missed two.
+    func testNotifyGivesOneAddressPerChat() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind(CommandSession.key(surface: "telegram", id: "-100"),
+                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
+        store.bind(CommandSession.key(surface: "telegram", id: "-100#46"),
+                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
+        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#102"),
+                            toPaneKey: "p", paneId: "A", worktreePath: "/w", topicName: "n")
+
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: []),
+                       ["-100#102"])
+        XCTAssertEqual(store.telegramChats(boundToPaneKey: "p"), ["-100#102"])
+    }
+
+    /// A fleet listener naming the same group is the same room too.
+    func testFleetListenerDoesNotDoubleUpOnABoundGroup() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#7"),
+                            toPaneKey: "p", paneId: "A", worktreePath: "/w", topicName: "n")
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: ["-100"]),
+                       ["-100#7"])
+    }
+
+    /// Another chat is another conversation and still hears it.
+    func testADifferentChatIsStillNotified() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind(CommandSession.key(surface: "telegram", id: "-100#4"),
+                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
+        store.bind(CommandSession.key(surface: "telegram", id: "42"),
+                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: []).sorted(),
+                       ["-100#4", "42"])
+    }
 }

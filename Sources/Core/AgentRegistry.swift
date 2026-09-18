@@ -1216,6 +1216,15 @@ class AgentRegistry {
         }
     }
 
+    /// The registered channel, for the few operations that are a channel's own
+    /// rather than the generic protocol's — opening a Telegram forum topic has
+    /// no meaning in a mail thread, so it does not belong on `ExternalChannel`.
+    func externalChannel(_ channelId: String) -> ExternalChannel? {
+        lock.lock()
+        defer { lock.unlock() }
+        return externalChannels[channelId]
+    }
+
     /// Unregister and disconnect an external channel
     func unregisterChannel(_ channelId: String) {
         lock.lock()

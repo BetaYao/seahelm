@@ -149,9 +149,7 @@ final class ChatProgressReporter {
     /// Every chat whose conversation is bound to this pane. A fleet listener is
     /// deliberately not one of them.
     private func chatIds(forPane paneKey: String) -> [String] {
-        sessions.sessions(boundToPaneKey: paneKey)
-            .filter { $0.surface == "telegram" }
-            .map(\.id)
+        sessions.telegramChats(boundToPaneKey: paneKey)
     }
 
     /// Puts `text` up in `chatId`. False when the throttle held a changed line

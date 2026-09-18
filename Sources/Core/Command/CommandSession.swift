@@ -34,15 +34,47 @@ struct CommandSession: Codable, Equatable {
     /// The bound pane was closed. Kept rather than deleted so a mail thread
     /// can still be told its pane is gone.
     var closed: Bool
+    /// seahelm opened this Telegram topic for the pane itself, rather than
+    /// someone binding a topic that already existed.
+    ///
+    /// Two things turn on it. Inside such a topic prose is an order, because
+    /// the thread is that pane's command line and nothing else. And when the
+    /// pane ends, the topic is closed — which would be rude to do to a thread
+    /// somebody else opened.
+    var autoTopic: Bool
+    /// The name the topic currently carries, so a rename is only spent when the
+    /// pane's title has actually moved.
+    var topicName: String?
 
     init(key: String, boundPaneKey: String? = nil, boundPaneId: String? = nil,
-         boundWorktreePath: String? = nil, commander: String? = nil, closed: Bool = false) {
+         boundWorktreePath: String? = nil, commander: String? = nil, closed: Bool = false,
+         autoTopic: Bool = false, topicName: String? = nil) {
         self.key = key
         self.boundPaneKey = boundPaneKey
         self.boundPaneId = boundPaneId
         self.boundWorktreePath = boundWorktreePath
         self.commander = commander
         self.closed = closed
+        self.autoTopic = autoTopic
+        self.topicName = topicName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case key, boundPaneKey, boundPaneId, boundWorktreePath, commander, closed
+        case autoTopic, topicName
+    }
+
+    /// Hand-written so a store written before auto-topics still decodes.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        boundPaneKey = try c.decodeIfPresent(String.self, forKey: .boundPaneKey)
+        boundPaneId = try c.decodeIfPresent(String.self, forKey: .boundPaneId)
+        boundWorktreePath = try c.decodeIfPresent(String.self, forKey: .boundWorktreePath)
+        commander = try c.decodeIfPresent(String.self, forKey: .commander)
+        closed = try c.decodeIfPresent(Bool.self, forKey: .closed) ?? false
+        autoTopic = try c.decodeIfPresent(Bool.self, forKey: .autoTopic) ?? false
+        topicName = try c.decodeIfPresent(String.self, forKey: .topicName)
     }
 
     static func key(surface: String, id: String) -> String { "\(surface):\(id)" }
@@ -121,6 +153,72 @@ final class CommandSessionStore {
         }
     }
 
+    /// Bind a topic seahelm just opened to the pane it was opened for.
+    ///
+    /// Separate from `bind` because it also records the two things that make a
+    /// topic *ours* — see `CommandSession.autoTopic`.
+    func bindAutoTopic(_ key: String, toPaneKey paneKey: String, paneId: String,
+                       worktreePath: String, topicName: String) {
+        queue.sync {
+            var session = sessions[key] ?? CommandSession(key: key)
+            session.boundPaneKey = paneKey
+            session.boundPaneId = paneId
+            session.boundWorktreePath = worktreePath
+            session.closed = false
+            session.autoTopic = true
+            session.topicName = topicName
+            sessions[key] = session
+            persist()
+        }
+    }
+
+    /// The live topic seahelm opened for this pane, if it has one.
+    func autoTopic(forPaneKey paneKey: String) -> CommandSession? {
+        queue.sync {
+            sessions.values.first { $0.autoTopic && !$0.closed && $0.boundPaneKey == paneKey }
+        }
+    }
+
+    /// Every live topic seahelm opened, by address — what the channel needs to
+    /// know which threads take bare prose as orders.
+    func autoTopicAddresses() -> Set<String> {
+        queue.sync {
+            Set(sessions.values.filter { $0.autoTopic && !$0.closed && $0.surface == "telegram" }
+                .map(\.id))
+        }
+    }
+
+    /// Every live topic seahelm opened, as sessions — what a re-home sweep
+    /// walks to decide which are now in the wrong group.
+    func autoTopicSessions() -> [CommandSession] {
+        queue.sync {
+            sessions.values.filter { $0.autoTopic && !$0.closed && $0.surface == "telegram" }
+        }
+    }
+
+    /// Forget a session outright.
+    ///
+    /// Not `close`: a closed session is one whose pane ended and is kept so it
+    /// can still be told so. This is for a binding that should never have
+    /// existed at this address — a topic that moved groups — where the pane is
+    /// alive and must be free to open a fresh one.
+    func remove(_ key: String) {
+        queue.sync {
+            guard sessions.removeValue(forKey: key) != nil else { return }
+            persist()
+        }
+    }
+
+    /// Record the name a topic now carries, after a successful rename.
+    func noteTopicName(_ name: String, for key: String) {
+        queue.sync {
+            guard var session = sessions[key] else { return }
+            session.topicName = name
+            sessions[key] = session
+            persist()
+        }
+    }
+
     func unbind(_ key: String) {
         queue.sync {
             guard var session = sessions[key] else { return }
@@ -144,6 +242,11 @@ final class CommandSessionStore {
     /// configured default / last-order chat) hear the whole fleet only while
     /// unbound — after `/go #n` they are silenced for every other pane, which
     /// is what binding is for.
+    /// The result carries one address per chat: a pane collects bindings — a
+    /// `/go` in the group, another in a topic, its own auto topic — and they
+    /// are all the same room. Deduping here rather than at each call site is
+    /// deliberate; the first fix missed two of the three and the duplicates
+    /// came straight back. See `TelegramChatAddress.oneAddressPerChat`.
     func telegramChatsToNotify(paneKey: String?,
                                fleetListenerChatIds: [String]) -> [String] {
         queue.sync {
@@ -163,7 +266,22 @@ final class CommandSessionStore {
                     chats.insert(chatId)
                 }
             }
-            return Array(chats)
+            return TelegramChatAddress.oneAddressPerChat(
+                Array(chats), preferring: paneKey.flatMap { key in
+                    sessions.values.first { $0.autoTopic && !$0.closed && $0.boundPaneKey == key }?.id
+                })
+        }
+    }
+
+    /// Telegram addresses bound to this pane, one per chat — what a progress
+    /// line edits in place, and why it must not open three of them in one room.
+    func telegramChats(boundToPaneKey paneKey: String) -> [String] {
+        queue.sync {
+            let bound = sessions.values.filter {
+                $0.surface == "telegram" && !$0.closed && $0.boundPaneKey == paneKey
+            }
+            return TelegramChatAddress.oneAddressPerChat(
+                bound.map(\.id), preferring: bound.first(where: \.autoTopic)?.id)
         }
     }
 
