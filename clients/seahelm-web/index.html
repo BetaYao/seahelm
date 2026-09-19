@@ -525,6 +525,7 @@
 <script src="./message-timeline.js"></script>
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
+<script src="./composer-keys.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1219,8 +1220,11 @@ function sendComposerText(){
   const input = $('msgInput');
   if (send) send.onclick = sendComposerText;
   if (input) input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendComposerText(); }
-    if (ev.key === 'Escape') {
+    // Enter and Escape mean nothing here while an IME is composing — see
+    // composer-keys.js.
+    const action = SeahelmComposerKeys.composerKeyAction(ev);
+    if (action === 'send') { ev.preventDefault(); sendComposerText(); }
+    if (action === 'esc') {
       const key = S.selPane;
       const pane = S.panes.get(key) || {};
       const paneId = pane.pane_id || key;
