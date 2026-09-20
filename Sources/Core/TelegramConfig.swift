@@ -38,24 +38,106 @@ struct TelegramConfig: Codable, Equatable {
     /// seahelm never doubles as a trigger.
     var rules: [TelegramRule]?
 
+    /// Give each pane a forum topic of its own in `topicChatId`.
+    ///
+    /// Off by default, and not merely out of caution: it needs a forum group
+    /// the bot administers with "Manage Topics", which nothing else here
+    /// requires. Turned on, a pane's first notice opens a thread named after it
+    /// and everything that pane says goes there — which also means the pane
+    /// stops reporting to the fleet-wide chat, or every notice would arrive
+    /// twice.
+    var autoTopics: Bool?
+
+    /// The forum supergroup topics are opened in when nothing more specific
+    /// matches. Its own id, with no topic: what a topic is created *in*.
+    var topicChatId: String?
+
+    /// Which group a pane's topic is opened in, keyed by **worktree path** or
+    /// **project name**.
+    ///
+    /// One group holding every pane in the fleet does not scale — twenty panes
+    /// is twenty threads in one list — so the fleet is split across groups the
+    /// way the work already is. A bot cannot create a group (the Bot API opens
+    /// topics, not chats), so these are groups someone made by hand and added
+    /// the bot to; this table only says which is which.
+    ///
+    /// Project is the grain that pays: a repo is a handful of groups made once,
+    /// where a worktree would be a new group every time a branch is cut. A
+    /// worktree path is still allowed as a key, for the one worktree important
+    /// enough to deserve a room of its own, and it wins over the project.
+    var topicChats: [String: String]?
+
     init(botToken: String? = nil,
          allowedUsers: [String] = [],
          defaultChatId: String? = nil,
          autoConnect: Bool? = nil,
          backfillSeconds: Double? = nil,
-         rules: [TelegramRule]? = nil) {
+         rules: [TelegramRule]? = nil,
+         autoTopics: Bool? = nil,
+         topicChatId: String? = nil,
+         topicChats: [String: String]? = nil) {
         self.botToken = botToken
         self.allowedUsers = allowedUsers
         self.defaultChatId = defaultChatId
         self.autoConnect = autoConnect
         self.backfillSeconds = backfillSeconds
         self.rules = rules
+        self.autoTopics = autoTopics
+        self.topicChatId = topicChatId
+        self.topicChats = topicChats
     }
 
     var resolvedAutoConnect: Bool { autoConnect ?? true }
     var resolvedBackfillSeconds: Double { backfillSeconds ?? 60 }
     var resolvedRules: [TelegramRule] { rules ?? [] }
     var resolvedBotToken: String? { nonBlank(botToken) }
+
+    /// The feature is on and has somewhere to put at least one topic.
+    var autoTopicsEnabled: Bool {
+        autoTopics == true && (nonBlank(topicChatId) != nil || !(topicChats ?? [:]).isEmpty)
+    }
+
+    /// The fallback group: where a pane goes when the table names none for it.
+    var resolvedTopicChatId: String? {
+        guard autoTopics == true, let chat = nonBlank(topicChatId) else { return nil }
+        return TelegramChatAddress.chatId(of: chat)
+    }
+
+    /// Which group this pane's topic belongs in.
+    ///
+    /// Most specific first: the worktree it is working in, then the repo that
+    /// worktree belongs to, then the fallback. A value that carries a topic of
+    /// its own is taken down to the group — a topic is opened *in* a chat.
+    func topicChatId(worktreePath: String, project: String) -> String? {
+        guard autoTopics == true else { return nil }
+        let table = topicChats ?? [:]
+        if let hit = table.first(where: { Self.samePath($0.key, worktreePath) })?.value,
+           let chat = nonBlank(hit) {
+            return TelegramChatAddress.chatId(of: chat)
+        }
+        if let hit = table.first(where: { Self.sameName($0.key, project) })?.value,
+           let chat = nonBlank(hit) {
+            return TelegramChatAddress.chatId(of: chat)
+        }
+        return resolvedTopicChatId
+    }
+
+    /// Paths compare without a trailing slash; a table written by hand will
+    /// have one about half the time.
+    private static func samePath(_ a: String, _ b: String) -> Bool {
+        func trim(_ s: String) -> String {
+            var t = s.trimmingCharacters(in: .whitespaces)
+            while t.count > 1, t.hasSuffix("/") { t.removeLast() }
+            return t
+        }
+        guard b.hasPrefix("/") else { return false }
+        return trim(a) == trim(b)
+    }
+
+    private static func sameName(_ a: String, _ b: String) -> Bool {
+        a.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(
+            b.trimmingCharacters(in: .whitespaces)) == .orderedSame
+    }
 
     var resolvedDefaultChatId: String? {
         if let explicit = nonBlank(defaultChatId) { return explicit }
@@ -108,6 +190,9 @@ struct TelegramConfig: Codable, Equatable {
         case autoConnect = "auto_connect"
         case backfillSeconds = "backfill_seconds"
         case rules
+        case autoTopics = "auto_topics"
+        case topicChatId = "topic_chat_id"
+        case topicChats = "topic_chats"
     }
 
     init(from decoder: Decoder) throws {
@@ -118,5 +203,8 @@ struct TelegramConfig: Codable, Equatable {
         autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect)
         backfillSeconds = try c.decodeIfPresent(Double.self, forKey: .backfillSeconds)
         rules = try c.decodeIfPresent([TelegramRule].self, forKey: .rules)
+        autoTopics = try c.decodeIfPresent(Bool.self, forKey: .autoTopics)
+        topicChatId = try c.decodeIfPresent(String.self, forKey: .topicChatId)
+        topicChats = try c.decodeIfPresent([String: String].self, forKey: .topicChats)
     }
 }

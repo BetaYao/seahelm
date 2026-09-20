@@ -54,9 +54,9 @@ enum CommandSpecs {
             detail: "Lists the panes it would reach and asks first.",
             confirms: true),
         CommandSpec(
-            verb: "status", usage: "/status [worktrees|repos]",
+            verb: "status", usage: "/status [worktrees|repos] [all]",
             summary: "The fleet, with handles",
-            detail: "Bare `/status` lists every pane, grouped by repo and worktree, with its `#handle`, status and title, and marks the one you are talking to. `worktrees` and `repos` list the tiers above."),
+            detail: "Bare `/status` lists every pane, grouped by repo and worktree, with its `#handle`, status and title, and marks the one you are talking to. `worktrees` and `repos` list the tiers above. In a group `/home` gave to a repo, the listing is that repo's own — the room is about that work — and `all` widens it back to the fleet."),
         CommandSpec(
             verb: "return", usage: "/return [@worktree]",
             summary: "Finish a worktree: ship what it has, then delete it",
@@ -72,6 +72,10 @@ enum CommandSpecs {
             summary: "Run one integration round for the current repo",
             detail: "Folds every worktree in the repo onto trunk and checks the result out in the integration worktree. `full` keeps conflicting worktrees with markers instead of dropping them. If local edits in the checkout hold the round back, it asks before discarding them.",
             confirms: true),
+        CommandSpec(
+            verb: "home", usage: "/home [@repo|@worktree [off]]",
+            summary: "Open this group's topics for a repo — say it in the group",
+            detail: "Run in a Telegram forum group: from then on, every pane of that repo gets a topic of its own in *this* group, named after what it is working on. A worktree can be named instead of a repo, and wins over it. `off` removes the mapping; bare `/home` lists what goes where. Checks before agreeing that the group has topics turned on and that the bot may open them — the two things that otherwise fail quietly later."),
         CommandSpec(
             verb: "idea", usage: "/idea <text>",
             summary: "Capture an idea",

@@ -129,6 +129,25 @@ final class TelegramBridgeTests: XCTestCase {
         XCTAssertNil(update.payload?.from)
     }
 
+    /// The fields a forum topic arrives on, off the wire and through the
+    /// snake-case strategy the poll loop decodes with.
+    func testForumTopicMessageDecodes() throws {
+        let json = """
+        {"update_id":1,"message":{"message_id":8,"message_thread_id":42,"is_topic_message":true,
+         "from":{"id":42,"is_bot":false,"first_name":"Matt","username":"matt_c"},
+         "chat":{"id":-1001234567890,"type":"supergroup","title":"Team","is_forum":true},
+         "date":1757000000,"text":"/status"}}
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let update = try decoder.decode(TelegramUpdate.self, from: json)
+        let message = try XCTUnwrap(update.payload)
+        XCTAssertEqual(message.messageThreadId, 42)
+        XCTAssertEqual(message.isTopicMessage, true)
+        XCTAssertEqual(message.chat.isForum, true)
+        XCTAssertEqual(TelegramChatAddress.of(message), "-1001234567890#42")
+    }
+
     // MARK: - Command classification
 
     private func message(_ text: String?,

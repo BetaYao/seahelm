@@ -144,9 +144,11 @@ final class CommandParserTests: XCTestCase {
     // MARK: - /status
 
     func testStatusScopes() {
-        XCTAssertEqual(command("/status"), .status(.panes))
-        XCTAssertEqual(command("/status worktrees"), .status(.worktrees))
-        XCTAssertEqual(command("/status repos"), .status(.repos))
+        XCTAssertEqual(command("/status"), .status(.panes, all: false))
+        XCTAssertEqual(command("/status worktrees"), .status(.worktrees, all: false))
+        XCTAssertEqual(command("/status repos"), .status(.repos, all: false))
+        XCTAssertEqual(command("/status all"), .status(.panes, all: true))
+        XCTAssertEqual(command("/status worktrees all"), .status(.worktrees, all: true))
         XCTAssertEqual(error("/status nope"), .badArgument(verb: "status", token: "nope"))
     }
 
@@ -247,10 +249,10 @@ final class CommandParserTests: XCTestCase {
     // MARK: - Legacy spellings
 
     func testOldVerbsStillParseForNow() {
-        XCTAssertEqual(command("/worktree"), .status(.worktrees))
+        XCTAssertEqual(command("/worktree"), .status(.worktrees, all: false))
         XCTAssertEqual(command("/worktree fix it"), .new(task: "fix it", repo: nil))
         XCTAssertEqual(command("/worktree @feat-x"), .go(.worktree(CommandFixture.featX)))
-        XCTAssertEqual(command("/pane"), .status(.panes))
+        XCTAssertEqual(command("/pane"), .status(.panes, all: false))
         XCTAssertEqual(command("/panes #7"), .go(.pane(CommandFixture.paneB)))
         XCTAssertEqual(command("/remove @feat-x"), .returnWorktree(CommandFixture.featX))
     }
