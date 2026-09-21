@@ -39,8 +39,9 @@ struct CommandSession: Codable, Equatable {
     ///
     /// Two things turn on it. Inside such a topic prose is an order, because
     /// the thread is that pane's command line and nothing else. And when the
-    /// pane ends, the topic is closed — which would be rude to do to a thread
-    /// somebody else opened.
+    /// pane ends, the topic is deleted — which would be unthinkable to do to a
+    /// thread somebody else opened, where the binding is simply let go of and
+    /// the room told.
     var autoTopic: Bool
     /// The name the topic currently carries, so a rename is only spent when the
     /// pane's title has actually moved.
@@ -302,6 +303,24 @@ final class CommandSessionStore {
         }
     }
 
+    /// Mark one session closed, by key. Returns it when this call is what
+    /// closed it, so a caller cannot clean the same binding up twice.
+    @discardableResult
+    func close(key: String) -> CommandSession? {
+        queue.sync {
+            guard var session = sessions[key], !session.closed else { return nil }
+            session.closed = true
+            sessions[key] = session
+            persist()
+            return session
+        }
+    }
+
+    /// Every session, open or closed — what a reconciling sweep walks.
+    func allSessions() -> [CommandSession] {
+        queue.sync { Array(sessions.values) }
+    }
+
     // MARK: - Pending confirmations
 
     func setPending(_ action: PendingAction, for key: String) {
@@ -353,5 +372,33 @@ final class CommandSessionStore {
                 closed: conversation.closed)
         }
         return out
+    }
+}
+
+/// Which bindings have outlived the pane they were made for.
+///
+/// The app's own teardown paths let go of a binding as they close the pane, so
+/// this is for the drift they cannot see: a worktree removed with `git
+/// worktree remove` in some other terminal, or the app quitting between the
+/// deletion and the cleanup. It is the rule alone, with no store and no
+/// filesystem, because the interesting part is what it refuses to touch.
+///
+/// A binding is retired only on a *fact*: the worktree it names is no longer
+/// on disk. Never because the pane could not be found — a pane that has not
+/// finished restoring looks exactly the same, and the punishment for guessing
+/// is a deleted thread. And never while the bound pane is alive: a pane that
+/// followed its agent out of a worktree being deleted has moved, not ended,
+/// and its conversation moves with it.
+enum StaleChatBindings {
+    static func stale(in sessions: [CommandSession],
+                      worktreeExists: (String) -> Bool,
+                      paneIsLive: (String) -> Bool) -> [CommandSession] {
+        sessions.filter { session in
+            guard !session.closed else { return false }
+            guard let path = session.boundWorktreePath, !path.isEmpty else { return false }
+            guard !worktreeExists(path) else { return false }
+            if let paneId = session.boundPaneId, paneIsLive(paneId) { return false }
+            return true
+        }.sorted { $0.key < $1.key }
     }
 }

@@ -191,6 +191,70 @@ final class PaneHandleRegistryTests: XCTestCase {
                        ["-100#7"])
     }
 
+    // MARK: - Letting go of a binding
+
+    func testCloseByKeyClosesOnceAndReportsWhoDidIt() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:1", toPaneKey: "k7", paneId: "b", worktreePath: "/w")
+        XCTAssertEqual(store.close(key: "telegram:1")?.key, "telegram:1")
+        // The second caller is told it was not theirs to clean up — otherwise a
+        // topic could be deleted twice over.
+        XCTAssertNil(store.close(key: "telegram:1"))
+        XCTAssertNil(store.close(key: "telegram:absent"))
+    }
+
+    /// The sweep's whole job: a binding whose worktree is gone.
+    func testStaleBindingIsOneWhoseWorktreeIsGone() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:1", toPaneKey: "k7", paneId: "dead", worktreePath: "/gone")
+        store.bind("telegram:2", toPaneKey: "k8", paneId: "live", worktreePath: "/here")
+        let stale = StaleChatBindings.stale(in: store.allSessions(),
+                                            worktreeExists: { $0 == "/here" },
+                                            paneIsLive: { _ in false })
+        XCTAssertEqual(stale.map(\.key), ["telegram:1"])
+    }
+
+    /// A pane that followed its agent out of a worktree being deleted moved,
+    /// it did not end — and the conversation goes with the pane.
+    func testALiveBoundPaneKeepsItsBinding() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:1", toPaneKey: "k7", paneId: "moved", worktreePath: "/gone")
+        XCTAssertTrue(StaleChatBindings.stale(in: store.allSessions(),
+                                              worktreeExists: { _ in false },
+                                              paneIsLive: { $0 == "moved" }).isEmpty)
+    }
+
+    /// Never on a missing pane alone: that is also what a pane looks like
+    /// before the app has finished restoring it.
+    func testAMissingPaneAloneIsNotStale() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:1", toPaneKey: "k7", paneId: "unregistered", worktreePath: "/here")
+        XCTAssertTrue(StaleChatBindings.stale(in: store.allSessions(),
+                                              worktreeExists: { _ in true },
+                                              paneIsLive: { _ in false }).isEmpty)
+    }
+
+    /// An already-closed binding has been let go of once; sweeping it again
+    /// would send a second goodbye to the same room.
+    func testAClosedBindingIsNotSweptAgain() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind("telegram:1", toPaneKey: "k7", paneId: "dead", worktreePath: "/gone")
+        store.close(paneId: "dead")
+        XCTAssertTrue(StaleChatBindings.stale(in: store.allSessions(),
+                                              worktreeExists: { _ in false },
+                                              paneIsLive: { _ in false }).isEmpty)
+    }
+
+    /// A chat bound to no worktree — `/go` never given, or given to a pane
+    /// since gone — has nothing to check against and is left alone.
+    func testABindingWithNoWorktreeIsLeftAlone() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.save(CommandSession(key: "telegram:1"))
+        XCTAssertTrue(StaleChatBindings.stale(in: store.allSessions(),
+                                              worktreeExists: { _ in false },
+                                              paneIsLive: { _ in false }).isEmpty)
+    }
+
     /// Another chat is another conversation and still hears it.
     func testADifferentChatIsStillNotified() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)

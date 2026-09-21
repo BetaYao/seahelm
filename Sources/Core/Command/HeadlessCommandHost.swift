@@ -47,4 +47,8 @@ final class HeadlessCommandHost: CommandHost {
     func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void) {
         completion("Not running.")
     }
+    /// Nothing to reconcile without the app: the bindings and the topics both
+    /// belong to the running instance.
+    @discardableResult
+    func reconcileChatBindings() -> Int { 0 }
 }

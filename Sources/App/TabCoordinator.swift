@@ -6,6 +6,11 @@ protocol TabCoordinatorDelegate: AnyObject {
     func tabCoordinatorRequestUpdateTitleBar(_ coordinator: TabCoordinator)
     func tabCoordinatorRequestShowNewBranchDialog(_ coordinator: TabCoordinator)
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator)
+    /// A pane ended because the tier above it went away — its worktree was
+    /// deleted, its repo closed — rather than because someone closed it. The
+    /// window controller lets go of whatever was bound to it; `reason`
+    /// completes the sentence those conversations are told.
+    func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String)
 }
 
 class TabCoordinator {
@@ -1284,8 +1289,11 @@ class TabCoordinator {
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
         }
         // Unregister EVERY pane of the worktree (split worktrees have N agents;
-        // taking just the first leaked the rest for the app's lifetime).
+        // taking just the first leaked the rest for the app's lifetime), and
+        // let go of what each was bound to first — the pane is as gone as one
+        // somebody closed, and only this path knows why.
         for terminalID in AgentRegistry.shared.terminalIDs(forWorktree: info.path) {
+            delegate?.tabCoordinator(self, paneDidEnd: terminalID, reason: "the worktree was deleted")
             AgentRegistry.shared.unregister(terminalID: terminalID)
         }
         WorktreeTitleCache.shared.evict(worktreePath: info.path)
@@ -1323,9 +1331,13 @@ class TabCoordinator {
             // Unregister EVERY pane of the worktree, not just the first pane.
             let ids = AgentRegistry.shared.terminalIDs(forWorktree: worktree.path)
             if ids.isEmpty, let primaryStation {
+                delegate?.tabCoordinator(self, paneDidEnd: primaryStation.id, reason: "the repo was closed")
                 AgentRegistry.shared.unregister(terminalID: primaryStation.id)
             } else {
-                for id in ids { AgentRegistry.shared.unregister(terminalID: id) }
+                for id in ids {
+                    delegate?.tabCoordinator(self, paneDidEnd: id, reason: "the repo was closed")
+                    AgentRegistry.shared.unregister(terminalID: id)
+                }
             }
             WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
             WorktreeGitStatsCache.shared.evict(worktreePath: worktree.path)

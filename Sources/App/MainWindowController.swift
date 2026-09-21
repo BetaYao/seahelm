@@ -2795,6 +2795,9 @@ extension MainWindowController: TabCoordinatorDelegate {
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator) {
         // Keep the chrome shell mounted; switchToTab(0) re-slots dashboard hosts.
     }
+    func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String) {
+        endChatBindings(forPaneId: terminalID, reason: reason)
+    }
 }
 
 // MARK: - TerminalCoordinatorDelegate
@@ -2812,16 +2815,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String) {
-        tabCoordinator.pendingOrders.resolvePane(terminalID: terminalID)
-        // Every conversation bound to the pane is told, and a mail thread's
-        // attachments go with it.
-        for session in tabCoordinator.commandSessions.close(paneId: terminalID) {
-            if session.surface == "mail", let account = config.gmailMail?.accountEmail {
-                EmailAttachmentStore().remove(threadID: session.id, account: account)
-            }
-            // A topic seahelm opened for this pane is closed with it.
-            retireAutoTopic(session)
-        }
+        endChatBindings(forPaneId: terminalID, reason: "the pane was closed")
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didCloseLastPaneInWorktree path: String) {
@@ -3379,15 +3373,86 @@ extension MainWindowController {
         return .deferred
     }
 
-    /// Close the topic seahelm opened for a pane that has ended.
+    /// Let go of every conversation bound to a pane that has ended.
     ///
-    /// The session is already marked closed by the caller, so this is only the
-    /// Telegram half: the thread folds into the group's closed list, keeping
-    /// everything the agent said in it.
-    func retireAutoTopic(_ session: CommandSession) {
-        guard session.autoTopic, session.surface == "telegram" else { return }
-        liveTelegramChannel?.closeTopic(address: session.id)
+    /// The one path for it, because a pane ends more ways than a person
+    /// closing it: the worktree it lived in is deleted, or the repo is. Each of
+    /// those used to tear the pane down without telling the chat layer
+    /// anything, which left a topic reading as live and — worse — left its chat
+    /// counted as bound, so fleet notices stayed silenced in it for good.
+    ///
+    /// `reason` completes the sentence the far end is told, so it says what
+    /// actually happened rather than the same line for every ending.
+    func endChatBindings(forPaneId paneId: String, reason: String) {
+        tabCoordinator.pendingOrders.resolvePane(terminalID: paneId)
+        for session in tabCoordinator.commandSessions.close(paneId: paneId) {
+            retireChatBinding(session, reason: reason)
+        }
+    }
+
+    /// One conversation, let go of: whatever the binding owned is cleaned up,
+    /// and the far end stops being left to guess.
+    ///
+    /// The two halves are deliberately unequal. A topic seahelm opened for the
+    /// pane is *deleted* — it was that pane's command line and nothing else, so
+    /// with the pane gone it is an entry people scroll past. A topic or chat
+    /// somebody else opened is theirs: it is told, once, and left alone.
+    func retireChatBinding(_ session: CommandSession, reason: String) {
+        if session.surface == "mail", let account = config.gmailMail?.accountEmail {
+            EmailAttachmentStore().remove(threadID: session.id, account: account)
+        }
+        guard session.surface == "telegram" else { return }
+        guard session.autoTopic else {
+            noticeUnbound(session, reason: reason)
+            return
+        }
+        liveTelegramChannel?.deleteTopic(address: session.id)
+        // The thread is gone, so a session pointing at it has nothing to be
+        // kept for — unlike a mail thread, which is kept closed so it can still
+        // be answered.
+        tabCoordinator.commandSessions.remove(session.key)
         syncDedicatedTopics()
+    }
+
+    /// Say once, in the room itself, that this conversation is no longer
+    /// pointed at anything. Without it the next order typed there is the first
+    /// anyone hears of it, hours later.
+    private func noticeUnbound(_ session: CommandSession, reason: String) {
+        AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            channelId: "telegram", targetChatId: session.id,
+            content: "Unbound — \(reason). `/status` lists what is running, `/go #n` picks a pane.",
+            format: .markdown))
+    }
+
+    /// Retire the bindings the teardown paths never saw, and report how many.
+    ///
+    /// Run from `/status`, which is already the fleet inventory: the listing
+    /// and the reconciliation answer the same question, and a sweep nobody has
+    /// to remember to run is the only kind that stays true. Deliberately not on
+    /// a timer — the work is a store walk plus one `stat` per binding, but
+    /// deleting threads on a schedule while nobody is watching is not something
+    /// to do quietly.
+    ///
+    /// The rule for what counts as stale is `StaleChatBindings`, which is where
+    /// the reasoning about false positives lives.
+    @discardableResult
+    func reconcileChatBindings() -> Int {
+        let store = tabCoordinator.commandSessions
+        let stale = StaleChatBindings.stale(
+            in: store.allSessions(),
+            worktreeExists: { FileManager.default.fileExists(atPath: $0) },
+            paneIsLive: { AgentRegistry.shared.pane(for: $0) != nil })
+        var retired = 0
+        for session in stale {
+            // Counted on the close, not on the candidate: the count is what the
+            // reader is told, and a binding something else closed first is not
+            // work this sweep did.
+            guard let closed = store.close(key: session.key) else { continue }
+            NSLog("[Telegram] Binding \(closed.key) retired — \(closed.boundWorktreePath ?? "?") is gone")
+            retireChatBinding(closed, reason: "the worktree was deleted")
+            retired += 1
+        }
+        return retired
     }
 
     /// Tell the channel which threads are its own panes' command lines, so bare

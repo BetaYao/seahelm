@@ -322,6 +322,15 @@ enum CommandFormatter {
         return "\n\n_\(names.joined(separator: ", ")) only — \(hidden) more elsewhere; `/status all` for the fleet._"
     }
 
+    /// The tail `/status` adds when the listing it just built was preceded by
+    /// a cleanup. Said rather than done silently: a thread that vanished from
+    /// the group is the kind of thing a reader should be able to trace back to
+    /// something they typed.
+    static func reconciledNote(_ retired: Int) -> String {
+        guard retired > 0 else { return "" }
+        return "\n\n_Let go of \(retired) binding\(retired == 1 ? "" : "s") whose worktree is gone._"
+    }
+
     /// What `/home` prints on its own: which group each repo's topics go to.
     ///
     /// Chat ids, not names — the bot cannot ask Telegram what a group is called
