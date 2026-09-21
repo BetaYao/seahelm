@@ -98,7 +98,7 @@ console.log('gateway reconnect');
 {
   const { vt, attempts, r } = harness();
   r.closed();                     // one in flight
-  r.stop();                       // user hits 断开 while it is pending
+  r.stop();                       // user hits Disconnect while it is pending
   vt.advance(60000);
   check(attempts.length === 0, 'stop cancels a pending retry');
 }

@@ -3,7 +3,7 @@
 // An IME owns the keyboard while it is composing: Enter commits the candidate
 // a Pinyin/Kana user is still choosing, Escape abandons it. Acting on either
 // sends half-typed text to the agent and eats the keystroke that was picking
-// the word, which is what "中文输入法回车直接发送" looks like from the seat.
+// the word, which is what "the IME's Enter fires the message" looks like from the seat.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

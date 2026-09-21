@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Seahelm · cockpit</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e2d37'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%231fc8da' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%231fc8da'/%3E%3C/svg%3E" />
-<!-- 普通静态页:同源 Host Gateway 的 WS/WSS。无外部依赖,离线可用。 -->
+<!-- Plain static page: WS/WSS to the same-origin Host Gateway. No external deps, works offline. -->
 <style>
   /* Bare-TUI cockpit — matches Sources/UI/Shared/SemanticColors.swift (dark) */
   :root{
@@ -453,16 +453,16 @@
 </head>
 <body>
   <header>
-    <button id="drawerBtn" title="船员列表">☰</button>
+    <button id="drawerBtn" title="Fleet list">☰</button>
     <span class="wordmark"><span class="sea">sea</span>helm</span>
     <span class="spacer"></span>
     <!-- hidden manual fields: connect() reads these; pairing overrides them -->
     <span id="advRow" class="advrow" hidden>
       <input class="sm" id="mac" value="live" title="mac_id" />
     </span>
-    <span id="status" class="st-off">离线</span>
-    <button class="ghost" id="logBtn" title="隐藏报文日志">日志</button>
-    <button class="ghost" id="disconnectBtn" title="断开连接">断开</button>
+    <span id="status" class="st-off">Offline</span>
+    <button class="ghost" id="logBtn" title="Hide message log">Log</button>
+    <button class="ghost" id="disconnectBtn" title="Disconnect">Disconnect</button>
   </header>
   <div id="gate" class="gate" hidden></div>
   <main>
@@ -473,9 +473,9 @@
         <span class="fm-sub" id="fmSub">0 projects · 0 running</span>
       </div>
       <div class="fm-modes" id="fmModes">
-        <button data-mode="repository">项目</button>
-        <button data-mode="status">状态</button>
-        <button data-mode="activity">时间</button>
+        <button data-mode="repository">Project</button>
+        <button data-mode="status">Status</button>
+        <button data-mode="activity">Activity</button>
       </div>
       <div class="fm-scroll">
         <div id="tree"></div>
@@ -483,29 +483,29 @@
     </div>
     <div class="col" id="midcol">
       <div class="detail-head">
-        <h2 id="detailHead">终端</h2>
+        <h2 id="detailHead">Terminal</h2>
         <span class="seg" id="surfaceBadge"></span>
-        <button class="renderer-badge" id="vtModeBadge" title="VT 订阅模式">单屏</button>
-        <button class="renderer-badge" id="rendererBadge" title="终端渲染器">xterm.js</button>
+        <button class="renderer-badge" id="vtModeBadge" title="VT subscription mode">Single</button>
+        <button class="renderer-badge" id="rendererBadge" title="Terminal renderer">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
-        <button class="interrupt-btn" id="interruptBtn" type="button" hidden>打断</button>
+        <button class="interrupt-btn" id="interruptBtn" type="button" hidden>Interrupt</button>
       </div>
       <div class="attention-line" id="attentionLine" hidden></div>
       <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
-      <button id="toBottom" title="回到最新输出">↓ 最新</button>
+      <button id="toBottom" title="Jump to the latest output">↓ Latest</button>
       <div class="run-line" id="runLine" hidden></div>
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer">
-        <input id="msgInput" placeholder="发给当前 pane…" autocomplete="off"/>
-        <button id="msgSend" type="button">发送</button>
+        <input id="msgInput" placeholder="Send to this pane…" autocomplete="off"/>
+        <button id="msgSend" type="button">Send</button>
       </div>
     </div>
     <div class="col" id="rightcol" style="border-right:0">
-      <h2>报文日志</h2>
+      <h2>Message log</h2>
       <div class="toolbar">
-        <button id="clearLog">清空</button>
-        <button id="logVtBtn">VT 帧</button>
+        <button id="clearLog">Clear</button>
+        <button id="logVtBtn">VT frames</button>
       </div>
       <div id="log"></div>
     </div>
@@ -674,7 +674,7 @@ function setShowVTFrames(on){
   showVTFrames = on;
   localStorage.setItem('seahelm_log_vt', on ? '1' : '0');
   const btn = $('logVtBtn');
-  if (btn){ btn.classList.toggle('on', on); btn.title = on ? '隐藏 VT 帧' : '显示 VT 帧'; }
+  if (btn){ btn.classList.toggle('on', on); btn.title = on ? 'Hide VT frames' : 'Show VT frames'; }
 }
 
 function log(dir, topic, payload){
@@ -724,7 +724,7 @@ function openGatewaySocket(){
   const url = gatewayWsURL();
   if (!S.authPass && !S.pendingCode) {
     reconnector.stop();            // nothing to authenticate with
-    setStatus(false, '需要配对码');
+    setStatus(false, 'Pairing code needed');
     return;
   }
   const wsURL = url;
@@ -777,7 +777,7 @@ function openGatewaySocket(){
       if ($('mac')) $('mac').value = S.mac;
       log('sys', '(vt format)', S.gw.binary ? (S.gw.deflate ? 'binary+deflate' : 'binary') : 'json+base64');
       reconnector.succeeded();
-      setStatus(true, '已连接');
+      setStatus(true, 'Connected');
       // The Mac folds the snapshot into the auth reply, because a round trip
       // over the tunnel costs far more than the query does. Ask separately only
       // when talking to one that predates it.
@@ -803,10 +803,10 @@ function openGatewaySocket(){
     if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
     unmountPanes();
     // Do not overwrite a gate-visible auth error with a generic "offline".
-    if (reconnector.isStopped && !gateErrorMsg) setStatus(false, '离线');
+    if (reconnector.isStopped && !gateErrorMsg) setStatus(false, 'Offline');
     reconnector.closed();
   };
-  ws.onerror = () => { if (reconnector.isStopped) setStatus(false, '错误'); };
+  ws.onerror = () => { if (reconnector.isStopped) setStatus(false, 'Error'); };
 }
 
 /** Put back the worktree that was on screen before the drop. */
@@ -1038,11 +1038,11 @@ function renderMessageTimeline(key){
   const host = $('messageTimeline');
   if (!host) return;
   renderInterruptButton();
-  // Text mode hides #termWrap, and with it the "选择一个 worktree" hint the
+  // Text mode hides #termWrap, and with it the "Select a worktree" hint the
   // terminal path shows — so without this a phone opens on an empty page.
   if (!key) {
     const hint = getComputedStyle($('drawerBtn')).display === 'none'
-      ? '在左侧列表选择一个 pane' : '点左上角 ☰ 选择一个 pane';
+      ? 'Pick a pane from the list on the left' : 'Tap ☰ at the top left to pick a pane';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
     return;
@@ -1054,11 +1054,11 @@ function renderMessageTimeline(key){
   const follow = host.dataset.key !== key
     || host.scrollHeight - host.scrollTop - host.clientHeight < 48;
   const h = S.history[key] || {};
-  const top = h.loading ? '<div class="tl-more">加载更早的记录…</div>'
-    : h.done ? '<div class="tl-more">已经到最早</div>' : '';
+  const top = h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
+    : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
   host.innerHTML = rows.length
     ? `<div class="tl">${top}${rows.map(renderMessageRow).join('')}</div>`
-    : '<div class="tl"><div class="tl-empty">还没有记录 — agent 开始工作后会出现在这里</div></div>';
+    : '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
   host.dataset.key = key;
   if (follow) host.scrollTop = host.scrollHeight;
   // Near the top, or too little to scroll at all: fetch the page before. Checked
@@ -1113,7 +1113,7 @@ function renderInterruptButton(){
   btn.disabled = !(S.selPane && isLinked());
   const pane = S.panes.get(S.selPane) || {};
   btn.title = CTRL_C_INTERRUPTS.has(pane.agent_type)
-    ? '打断 — 发送 Ctrl+C' : '打断 — 发送 Esc，停下 agent 当前这一轮';
+    ? 'Interrupt — send Ctrl+C' : 'Interrupt — send Esc, stopping this agent turn';
 }
 
 function interruptPane(){
@@ -1123,10 +1123,10 @@ function interruptPane(){
   const keys = CTRL_C_INTERRUPTS.has(pane.agent_type) ? ['ctrl+c'] : ['esc'];
   sendCommand('pane.send_keys', { pane_id: pane.pane_id || key, keys }, (r) => {
     if (r && r.ok === false) {
-      showActionToast((r.error && r.error.message) || '打断失败', true);
+      showActionToast((r.error && r.error.message) || 'Interrupt failed', true);
       return;
     }
-    showActionToast('已打断');
+    showActionToast('Interrupted');
   });
 }
 $('interruptBtn').onclick = interruptPane;
@@ -1157,14 +1157,14 @@ function applySurfaceMode(){
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
   // Terminal keys and split/close only make sense against a live terminal; the
-  // timeline keeps one of them, as 打断.
+  // timeline keeps one of them, as Interrupt.
   const keys = $('termKeys');
   if (keys) keys.style.display = text ? 'none' : '';
   renderInterruptButton();
   // With a worktree open the head names it (renderDetail); only fall back to
   // the mode when there is nothing to name.
   const head = $('detailHead');
-  if (head && !S.sel) head.textContent = text ? '时间线' : '终端';
+  if (head && !S.sel) head.textContent = text ? 'Timeline' : 'Terminal';
   if (text && !S.selPane) renderMessageTimeline(null);
 }
 
@@ -1190,8 +1190,8 @@ function renderSurfaceBadge(){
   const mode = loadSurfaceMode();
   el.innerHTML = '';
   for (const [value, label, title] of [
-    ['text', '时间线', 'agent 的对话与工具调用'],
-    ['vt', '终端', '打开真实终端画面'],
+    ['text', 'Timeline', 'The agent\'s replies and tool calls'],
+    ['vt', 'Terminal', 'Open the live terminal screen'],
   ]) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -1302,19 +1302,19 @@ function clearPair(){
   gateErrorMsg = null;
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem('seahelm_pair');   // pre-migration installs
-  log('sys', '(unpaired)', '回到明文/手填模式');
+  log('sys', '(unpaired)', 'back to manual entry');
   renderGate();
 }
 
 /** Auth rejected: drop a dead token and put the code form back on screen. */
 function rejectAuth({ usedCode, rateLimited, detail }){
   if (rateLimited) {
-    gateErrorMsg = '尝试过多，稍后再试';
-    setStatus(false, '尝试过多,稍后再试');
+    gateErrorMsg = 'Too many attempts — try again later';
+    setStatus(false, 'Too many attempts');
     log('sys', '(auth-rate)', JSON.stringify(detail));
   } else if (usedCode) {
-    gateErrorMsg = '配对码错误或已过期';
-    setStatus(false, '认证失败');
+    gateErrorMsg = 'Wrong or expired pairing code';
+    setStatus(false, 'Auth failed');
     log('sys', '(auth-fail)', JSON.stringify(detail));
   } else {
     // Remembered token no longer works (revoke-all, new root secret, …).
@@ -1322,14 +1322,14 @@ function rejectAuth({ usedCode, rateLimited, detail }){
     // with no visible error — the gate covers the header status.
     S.authPass = null;
     try { localStorage.removeItem(CREDS_KEY); } catch (e) {}
-    gateErrorMsg = '配对已失效，请重新输入配对码';
-    setStatus(false, '认证失败');
+    gateErrorMsg = 'Pairing is no longer valid — enter the code again';
+    setStatus(false, 'Auth failed');
     log('sys', '(auth-fail)', JSON.stringify(detail));
   }
   renderGate();
 }
 
-// Reflect pairing state in the header: chip when paired, 配对 button when not.
+// Reflect pairing state in the header: chip when paired, Pair button when not.
 /**
  * Connection gate. Three states: enter code, press connect, or get out of the way.
  */
@@ -1348,8 +1348,8 @@ function renderGate(){
     gate.innerHTML = `
       <div class="gate-card">
         <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
-        <button class="gate-primary" id="gateConnect">连接</button>
-        <button class="gate-link" id="gateUnpair">解除配对</button>
+        <button class="gate-primary" id="gateConnect">Connect</button>
+        <button class="gate-link" id="gateUnpair">Unpair</button>
         <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
       </div>`;
     if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
@@ -1360,11 +1360,11 @@ function renderGate(){
 
   gate.innerHTML = `
     <div class="gate-card">
-      <div class="gate-title">配对这台 Mac</div>
-      <div class="gate-hint">输入 Seahelm 设置里的配对码后连接</div>
+      <div class="gate-title">Pair this Mac</div>
+      <div class="gate-hint">Enter the pairing code from Seahelm Settings, then connect</div>
       <input class="gate-input" id="gateCode" inputmode="numeric" autocomplete="off"
              maxlength="24" placeholder="1234 5678" />
-      <button class="gate-primary" id="gatePair">配对并连接</button>
+      <button class="gate-primary" id="gatePair">Pair and connect</button>
       <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
     </div>`;
   const input = $('gateCode'), err = $('gateError');
@@ -1374,7 +1374,7 @@ function renderGate(){
   const go = () => {
     const digits = String(input.value || '').replace(/\D/g, '');
     // Generated codes are 8 digits; one set on the Mac may be up to 16.
-    if (digits.length < 8 || digits.length > 16) return fail('配对码是 8–16 位数字');
+    if (digits.length < 8 || digits.length > 16) return fail('The pairing code is 8–16 digits');
     gateErrorMsg = null;
     err.hidden = true;
     S.pendingCode = digits;
@@ -1413,7 +1413,7 @@ function renderSuggestCard(pid, e){
   const meta = [p.project, p.branch].filter(Boolean).join(' · ');
   const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
   box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}`
-    + `<button class="ev-x" title="放弃这条建议">✕</button></div>`
+    + `<button class="ev-x" title="Dismiss this suggestion">✕</button></div>`
     + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
     + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
   // Tapping the card jumps to the pane that asked, so you can see the context
@@ -1468,8 +1468,8 @@ function renderReplyBar(text){
   const question = e.type === 'question';
   const head = document.createElement('div');
   head.className = 'rb-head' + (e.danger ? ' danger' : '');
-  head.innerHTML = `<span>${esc(question ? (e.prompt || '需要你确认') : '接下来做什么？')}</span>`
-    + '<button class="rb-skip" type="button">忽略</button>';
+  head.innerHTML = `<span>${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
+    + '<button class="rb-skip" type="button">Skip</button>';
   head.querySelector('.rb-skip').onclick = () => {
     S.events.delete(pid);
     renderSuggestions();
@@ -1491,7 +1491,7 @@ function renderReplyBar(text){
         if (r && r.ok === false) {
           S.events.set(pid, e);
           renderSuggestions();
-          showActionToast((r.error && r.error.message) || '没有发出去', true);
+          showActionToast((r.error && r.error.message) || 'Not sent', true);
         }
       });
     };
@@ -1500,7 +1500,7 @@ function renderReplyBar(text){
   bar.appendChild(opts);
 }
 
-const RUN_LINE_LABEL = { running: '运行中', waiting: '等你回应', failed: '出错了' };
+const RUN_LINE_LABEL = { running: 'Running', waiting: 'Waiting on you', failed: 'Failed' };
 /** The selected pane's live status above the composer; hidden while it rests. */
 function renderRunLine(){
   const line = $('runLine');
@@ -1525,13 +1525,13 @@ function renderAttentionLine(text){
     const name = [p.project, p.branch].filter(Boolean).join(' · ') || (p.title || '').trim() || shortId(p.pane_id || pid);
     const b = document.createElement('button');
     b.type = 'button';
-    b.innerHTML = `<b>${esc(name)}</b> ${e.type === 'question' ? '等你批准' : '有建议'} ›`;
+    b.innerHTML = `<b>${esc(name)}</b> ${e.type === 'question' ? 'needs approval' : 'has a suggestion'} ›`;
     b.onclick = () => selectPaneByKey(pid);
     line.appendChild(b);
   }
   if (waiting.length > 3) {
     const more = document.createElement('em');
-    more.textContent = `还有 ${waiting.length - 3} 个`;
+    more.textContent = `+${waiting.length - 3} more`;
     line.appendChild(more);
   }
 }
@@ -1651,20 +1651,20 @@ function renderTree(){
   const t = $('tree'); t.innerHTML='';
   const rows = buildFleet();
   updateFirstMateHeader(rows);
-  if (!rows.length){ t.innerHTML='<div class="muted">无 pane</div>'; renderSuggestions(); return; }
+  if (!rows.length){ t.innerHTML='<div class="muted">No panes</div>'; renderSuggestions(); return; }
 
   for (const group of groupsToRender(rows)){
     const g = document.createElement('div'); g.className='fm-group';
     const head = document.createElement('div'); head.className='fm-group-head';
     head.innerHTML = (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
       + `<span class="fm-deck">${esc(group.title)}</span>`
-      + (group.isRepo ? `<button class="fm-add" title="新建 worktree">+</button>` : '');
+      + (group.isRepo ? `<button class="fm-add" title="New worktree">+</button>` : '');
     // The Mac opens the helm prefilled with `/worktree @<project>`; the web has
     // no helm, so this is deliberately inert rather than pretending to work.
     const add = head.querySelector('.fm-add');
     if (add) add.onclick = (e) => {
       e.stopPropagation();
-      log('sys','(not wired)', `新建 worktree @${group.title} —— web 端暂未接`);
+      log('sys','(not wired)', `New worktree @${group.title} — not wired up on the web yet`);
     };
     g.appendChild(head);
 
@@ -1806,7 +1806,7 @@ function ensureRenderer(){
       // Falling back is the right failure mode for a spike: an experimental
       // renderer that will not load must not take the client down with it.
       TerminalCtor = window.Terminal;
-      log('sys', '(renderer failed)', `ghostty-web 加载失败,回退 xterm.js: ${e && e.message}`);
+      log('sys', '(renderer failed)', `ghostty-web failed to load, falling back to xterm.js: ${e && e.message}`);
       return 'xterm';
     });
   return rendererReady;
@@ -1817,8 +1817,8 @@ function renderRendererBadge(active){
   if (!el) return;
   el.textContent = active === 'ghostty' ? 'ghostty-web' : 'xterm.js';
   el.title = active === 'ghostty'
-    ? 'Ghostty VT parser (wasm) + Canvas 2D — 点击切回 xterm.js'
-    : 'xterm.js — 点击试用 ghostty-web';
+    ? 'Ghostty VT parser (wasm) + Canvas 2D — click to switch back to xterm.js'
+    : 'xterm.js — click to try ghostty-web';
   el.className = 'renderer-badge' + (active === 'ghostty' ? ' alt' : '');
   el.onclick = () => {
     const next = active === 'ghostty' ? 'xterm' : 'ghostty';
@@ -1853,10 +1853,10 @@ function renderVtModeBadge(){
   const el = $('vtModeBadge');
   if (!el) return;
   const mode = loadVtMode();
-  el.textContent = mode === 'mirror' ? '镜像' : '单屏';
+  el.textContent = mode === 'mirror' ? 'Mirror' : 'Single';
   el.title = mode === 'mirror'
-    ? '镜像：每个 pane 一路 VT — 点击切到单屏'
-    : '单屏：只订阅焦点 pane — 点击切到镜像';
+    ? 'Mirror: one VT stream per pane — click for single'
+    : 'Single: only the focused pane is subscribed — click for mirror';
   el.onclick = () => setVtMode(mode === 'mirror' ? 'single' : 'mirror');
 }
 renderVtModeBadge();
@@ -1874,12 +1874,12 @@ renderVtModeBadge();
 
 /** Raw bytes: what a real key press would have produced. */
 const TERM_KEYS = [
-  { label: 'Esc',  bytes: '\x1b',     title: 'Escape — 中断 Claude 的当前输出' },
-  { label: '^C',   bytes: '\x03',     title: 'Ctrl+C — 中断前台进程' },
+  { label: 'Esc',  bytes: '\x1b',     title: 'Escape — interrupt what Claude is printing' },
+  { label: '^C',   bytes: '\x03',     title: 'Ctrl+C — interrupt the foreground process' },
   { label: '^D',   bytes: '\x04',     title: 'Ctrl+D — EOF' },
-  { label: '⇥',    bytes: '\t',       title: 'Tab — 补全(浏览器会拿 Tab 切焦点)' },
-  { label: '⇧⇥',   bytes: '\x1b[Z',   title: 'Shift+Tab — Claude Code 切换权限模式' },
-  { label: '↑',    bytes: '\x1b[A',   title: '上箭头 — 历史命令' },
+  { label: '⇥',    bytes: '\t',       title: 'Tab — completion (the browser steals Tab for focus)' },
+  { label: '⇧⇥',   bytes: '\x1b[Z',   title: 'Shift+Tab — Claude Code permission mode' },
+  { label: '↑',    bytes: '\x1b[A',   title: 'Up arrow — command history' },
 ];
 
 function renderTermKeys(){
@@ -1900,7 +1900,7 @@ function renderTermKeys(){
 
   const copy = document.createElement('button');
   copy.textContent = '⧉';
-  copy.title = '复制选区(手机上没有 ⌘C)';
+  copy.title = 'Copy the selection (a phone has no ⌘C)';
   copy.disabled = !live;
   copy.onclick = () => copySelection();
   bar.appendChild(copy);
@@ -1911,7 +1911,7 @@ function renderTermKeys(){
 
   const split = document.createElement('button');
   split.textContent = '⌘D';
-  split.title = '分屏 — 在 Mac 上把这个 pane 一分为二';
+  split.title = 'Split — divide this pane in two on the Mac';
   split.disabled = !live;
   split.onclick = () => paneAction('pane.split', { direction: 'right', focus: false });
   bar.appendChild(split);
@@ -1919,13 +1919,13 @@ function renderTermKeys(){
   const close = document.createElement('button');
   close.textContent = '⌘W';
   close.className = 'danger';
-  close.title = '关闭这个 pane';
+  close.title = 'Close this pane';
   close.disabled = !live;
   close.onclick = () => {
     const name = (S.panes.get(S.vt.focus) || {}).title || S.vt.focus;
     // Closing takes a running agent with it, and the button is one click from
     // every other button on this bar.
-    if (!confirm(`关闭 pane「${name}」?其中正在运行的进程会被终止。`)) return;
+    if (!confirm(`Close pane “${name}”? Anything running in it is killed.`)) return;
     paneAction('pane.close', {});
   };
   bar.appendChild(close);
@@ -1936,10 +1936,10 @@ function copySelection(){
   const entry = S.vt.focus ? S.vt.panes.get(S.vt.focus) : null;
   if (!entry) return;
   const text = entry.term.getSelection();
-  if (!text){ log('sys', '(copy)', '没有选中内容'); return; }
+  if (!text){ log('sys', '(copy)', 'nothing selected'); return; }
   // Requires a secure context, which the page already needs for pairing anyway.
   navigator.clipboard.writeText(text)
-    .then(() => log('sys', '(copy)', `已复制 ${text.length} 字符`))
+    .then(() => log('sys', '(copy)', `copied ${text.length} chars`))
     .catch((e) => log('sys', '(copy failed)', String(e && e.message)));
   try { entry.term.focus(); } catch (e) {}
 }
@@ -1960,10 +1960,10 @@ function paneAction(method, extra){
   sendCommand(method, Object.assign({ pane_id: pane.pane_id || key }, extra), (r) => {
     if (r && r.ok === false){
       log('sys', '(pane action failed)', JSON.stringify(r.error || r));
-      showActionToast((r.error && r.error.message) || '操作失败', true);
+      showActionToast((r.error && r.error.message) || 'Action failed', true);
       return;
     }
-    showActionToast(method === 'pane.split' ? '已分屏' : '已关闭 pane');
+    showActionToast(method === 'pane.split' ? 'Pane split' : 'Pane closed');
     const path = S.sel;
     S.vt.worktree = null;        // force a remount of the changed layout
     if (path) requestLayout(path);
@@ -1995,9 +1995,9 @@ function renderDetail(){
   const head = $('detailHead'), wrap = $('termWrap');
   if (!S.sel){
     unmountPanes();
-    head.textContent = '终端';
+    head.textContent = 'Terminal';
     wrap.classList.add('empty');
-    wrap.innerHTML = '<div class="muted">选择一个 worktree</div>';
+    wrap.innerHTML = '<div class="muted">Select a worktree</div>';
     renderTermKeys();
     return;
   }
@@ -2099,7 +2099,7 @@ function mountPanes(tree, focusKey, path){
   wrap.innerHTML = '';
   if (!tree){
     wrap.classList.add('empty');
-    wrap.innerHTML = '<div class="muted">无 pane</div>';
+    wrap.innerHTML = '<div class="muted">No panes</div>';
     return;
   }
   S.vt.worktree = path;
@@ -2332,7 +2332,7 @@ function attachWebglRenderer(term){
     const Ctor = mod.WebglAddon || mod;
     const addon = new Ctor();
     addon.onContextLoss(() => {
-      log('sys', '(webgl)', 'context lost — 该面板回退到 DOM 渲染');
+      log('sys', '(webgl)', 'context lost — this pane falls back to DOM rendering');
       try { addon.dispose(); } catch (e) {}
     });
     term.loadAddon(addon);
@@ -2340,7 +2340,7 @@ function attachWebglRenderer(term){
     // textarea; the pane highlight does not move, so give the keyboard back.
     restoreTermFocus();
   }).catch((e) => {
-    log('sys', '(webgl)', `不可用,回退 DOM 渲染: ${e && e.message}`);
+    log('sys', '(webgl)', `unavailable, falling back to DOM rendering: ${e && e.message}`);
   });
 }
 
@@ -2514,7 +2514,7 @@ function sendCommand(method, params, onReply){
   // transient state a tap can land in — a modal the user has to dismiss, on
   // a phone, for something about to fix itself, is the wrong shape.
   if (!isLinked()) {
-    setStatus(false, reconnector.isPending ? '重连中…' : '未连接');
+    setStatus(false, reconnector.isPending ? 'Reconnecting…' : 'Not connected');
     log('sys', '(dropped)', method);
     return;
   }
@@ -2556,7 +2556,7 @@ function applyLogVisibility(){
   document.querySelector('main').classList.toggle('nolog', off);
   const btn = $('logBtn');
   btn.classList.toggle('on', !off);
-  btn.title = off ? '显示报文日志' : '隐藏报文日志';
+  btn.title = off ? 'Show message log' : 'Hide message log';
   setTimeout(fitAllPanes, 200);   // the panes just got wider
 }
 $('disconnectBtn').onclick = () => {
@@ -2566,7 +2566,7 @@ $('disconnectBtn').onclick = () => {
   lastMount = null;
   disconnectAll();
   unmountPanes();
-  setStatus(false, '离线');
+  setStatus(false, 'Offline');
 };
 $('logBtn').onclick = () => {
   localStorage.setItem(LOG_SHOWN_KEY, logShown() ? '0' : '1');

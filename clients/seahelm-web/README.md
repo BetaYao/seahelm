@@ -1,126 +1,126 @@
 # seahelm-web — Host Gateway browser client
 
-网页端 Seahelm 客户端(纯静态 + xterm.js),**生产路径经 Mac 内嵌 Host Gateway (WSS)**。
-配对后直连 `wss://…/ws`,走 JSON-RPC 请求/应答 + VT notify;不再经 MQTT 传终端字节流。
+The browser client for Seahelm (plain static page + xterm.js). **In production it talks to the Host Gateway embedded in the Mac app over WSS.**
+Once paired it connects straight to `wss://…/ws` and speaks JSON-RPC request/reply plus VT notifies; terminal bytes no longer travel over MQTT.
 
-> **不是 Artifact**:Claude Artifact 的 CSP 禁连外部 WS,故必须作普通静态页在浏览器打开。
+> **Not an Artifact**: a Claude Artifact's CSP forbids connecting to an external WS, so this has to be opened as an ordinary static page in a browser.
 
-## 生产用法(Gateway-first)
+## Production use (Gateway-first)
 
-1. Mac 上启用 Host Gateway(Seahelm Settings → Host Gateway / Browser access)。
-2. 浏览器打开 Gateway 页面(如 `http://<Mac Tailscale IP>:2783/` 或 localhost)——**http / https 均可**。
-3. 在网页输入 Settings 里显示的**配对码** → 配对并连接。配对码长期有效，默认随机 8 位，也可以在 Settings 里点 **Set code…** 自己设成 8–16 位数字。
-4. 连接后自动 `session.snapshot` → First Mate 渲染 pane 列表 → 点一行打开现场。
-5. 浏览器会记住 token;下次打开同一页面自动重连。刷新配对码不会踢掉已配对浏览器;「撤销所有远程」才会。
+1. Enable the Host Gateway on the Mac (Seahelm Settings → Host Gateway / Browser access).
+2. Open the Gateway page in a browser (e.g. `http://<Mac Tailscale IP>:2783/`, or localhost) — **http or https, either works**.
+3. Type the **pairing code** shown in Settings → Pair and connect. The code does not expire; it defaults to 8 random digits, and **Set code…** in Settings lets you choose your own 8–16 digit one.
+4. On connect the page runs `session.snapshot` → First Mate paints the pane list → tap a row to open it.
+5. The browser remembers the token and reconnects by itself next time. Refreshing the pairing code does not evict a browser that is already paired; **Revoke all remotes** does.
 
-### Text mode（手机默认）
+### Text mode (the phone default)
 
-窄屏（≤760px）默认 **时间线**（MessageStream），不调用 `pane.vt_open`：
+A narrow screen (≤760px) opens on the **Timeline** (MessageStream) and never calls `pane.vt_open`:
 
-- 服务端推送 `pane.message`（user / tool / assistant / status / decision / notice），连接时先回放每个 pane 最近 80 条
-- 往上滚动自动加载更早的记录（`message.history`，按 `before_seq` 分页，每页 50 条）
-- 时间线落盘在 `~/.config/seahelm/message-stream/<pane_session_key>.jsonl`，每个 pane 保留最近约 2000 条；重启 App 不丢，关闭 pane 时删除
-- 助手回复按 markdown 渲染（`markdown.js`，先转义再排版，只放行 http/https 链接）
-- 标题栏 **时间线 / 终端** 切换；选「终端」才走原 VT 路径
-- 时间线模式下终端按键栏收起，只留 **打断**：agent 发 Esc，shell 任务发 Ctrl+C
-- 底部输入框 → `pane.send_text`
-- 偏好写入 `localStorage seahelm_surface_mode`
+- the server pushes `pane.message` (user / tool / assistant / status / decision / notice), replaying each pane's last 80 on connect
+- scrolling up loads earlier messages (`message.history`, paged by `before_seq`, 50 at a time)
+- the timeline is stored at `~/.config/seahelm/message-stream/<pane_session_key>.jsonl`, about 2000 rows kept per pane; it survives an app restart and is deleted when the pane closes
+- assistant replies render as markdown (`markdown.js` — escape first, then format; only http/https links are allowed through)
+- the head bar toggles **Timeline / Terminal**; only Terminal takes the VT path
+- in timeline mode the terminal key bar folds away and only **Interrupt** is left: Esc for an agent, Ctrl+C for a shell task
+- the composer at the bottom sends `pane.send_text`
+- the preference lives in `localStorage seahelm_surface_mode`
 
-宽屏默认仍是 VT；可手动切到时间线。设计见 `docs/superpowers/specs/2026-09-17-message-stream-design.md`。
+A wide window still defaults to VT and can be switched to the timeline by hand. Design: `docs/superpowers/specs/2026-09-17-message-stream-design.md`.
 
-传输:页面同源的 `/ws`,即 Host Gateway 托管的 WebSocket。
+Transport: `/ws` on the page's own origin — the WebSocket the Host Gateway serves.
 
-Gateway 握手:
+Gateway handshake:
 
-1. 首次:`auth` → `{code}` → 返回 `{ok, mac_id, token, vt_binary, vt_deflate}`
-2. 回访:`auth` → `{mac_id, token}`(localStorage)
-3. `session.snapshot` → 填充 First Mate
-4. 选 pane → `pane.vt_open`; 服务端 push binary VT frames(或 JSON legacy)
-5. 键盘 → `pane.send_keys` `{pane_session_key, b64}`
+1. first visit: `auth` → `{code}` → returns `{ok, mac_id, token, vt_binary, vt_deflate}`
+2. return visit: `auth` → `{mac_id, token}` (from localStorage)
+3. `session.snapshot` → fills First Mate
+4. pick a pane → `pane.vt_open`; the server pushes binary VT frames (or legacy JSON)
+5. keystrokes → `pane.send_keys` `{pane_session_key, b64}`
 
-Wire 格式:
+Wire format:
 
 ```
-请求:  {"id","method","params"}
-应答:  {"id","result"} 或 {"id","error"}
-推送:  {"type":"notify","method","params"}
+request:  {"id","method","params"}
+reply:    {"id","result"} or {"id","error"}
+push:     {"type":"notify","method","params"}
 ```
 
-## 组成
+## Layout of the source
 
-| 文件 | 作用 |
+| File | What it does |
 |---|---|
-| `index.html` | 网页客户端:左栏 First Mate、中间时间线 / VT 终端、右栏报文日志 |
+| `index.html` | the client itself: First Mate on the left, timeline / VT terminal in the middle, message log on the right |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
-| `touch-scroll.js` | 触控竖滑 → 终端 wheel，手机上回看历史 |
-| `vt-frame.js` | 二进制 VT 帧编解码，`index.html` 与 `bench.html` 共用，格式对齐 `HostGatewayVTFrame.swift` |
-| `vt-apply.js` | VT 帧串行写入；等 `term.write` 完成再应用下一帧 |
-| `term-focus.js` | chrome 点击不抢终端 caret；真实输入框除外 |
-| `composer-keys.js` | 时间线输入框的回车 / Esc 判定；输入法选词期间交还给输入法 |
-| `devbroker/` | 上面各模块的 node 单元测试(无依赖),以及 `bench.html` 的结果收集器 |
+| `touch-scroll.js` | vertical touch drag → terminal wheel, so a phone can scroll back |
+| `vt-frame.js` | binary VT frame codec, shared by `index.html` and `bench.html`, format matching `HostGatewayVTFrame.swift` |
+| `vt-apply.js` | serializes VT frame writes; waits for `term.write` before applying the next frame |
+| `term-focus.js` | a click on the chrome does not steal the terminal caret — real input fields excepted |
+| `composer-keys.js` | what Enter / Esc mean in the timeline composer; hands both back to an IME while it is composing |
+| `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
 
-## 界面构成
+## The interface
 
-- **左栏 = First Mate**,按 Mac Dashboard "Group by Sailor" 模式移植。
-- **中间 = 终端**,选 pane 即开 VT。
-- **右栏 = 报文日志**,开发用,可隐藏。
+- **Left column = First Mate**, ported from the Mac dashboard's "Group by Sailor" mode.
+- **Middle = terminal**, picking a pane opens its VT.
+- **Right column = message log**, for development; can be hidden.
 
-### 响应式
+### Responsive
 
-| 宽度 | 布局 |
+| Width | Layout |
 |---|---|
-| > 1100px | 三栏,日志栏可手动开关 |
-| ≤ 1100px | 日志栏自动隐藏 |
-| ≤ 760px | 单栏,First Mate 抽屉(☰) |
+| > 1100px | three columns, log column toggled by hand |
+| ≤ 1100px | log column hidden automatically |
+| ≤ 760px | one column, First Mate in a drawer (☰) |
 
-终端按宽度贴合;字号下限 9px;手机单指上下滑回看历史（横滑不拦截）;右下角「↓ 最新」在回看时出现。
+The terminal fits itself to the width, down to a 9px floor; a one-finger vertical drag scrolls back on a phone (a horizontal drag is left alone); the **↓ Latest** button appears in the lower right while you are reading back.
 
-### VT 订阅模式
+### VT subscription mode
 
-终端标题栏 **单屏 / 镜像** 徽章切换 VT attach 策略(`localStorage seahelm_vt_mode`,默认 **`single`**):
+The **Single / Mirror** badge in the terminal head bar switches the VT attach policy (`localStorage seahelm_vt_mode`, default **`single`**):
 
-| 模式 | 行为 |
+| Mode | Behaviour |
 |---|---|
-| **单屏** (默认) | 只 attach 当前焦点 pane — 弱网/小屏友好,多 pane 时靠顶栏 chip 切换 |
-| **镜像** | 每个 pane 一路 VT,按 Mac 侧 split 布局同屏渲染 |
+| **Single** (default) | attach only the focused pane — kind to a weak link and a small screen; with several panes you switch with the chips in the head bar |
+| **Mirror** | one VT stream per pane, rendered together in the Mac's split layout |
 
-窄窗口仍强制单屏(`layoutFitsMirror` 不满足时忽略镜像偏好)。
+A narrow window is forced to single anyway (a mirror preference is ignored when `layoutFitsMirror` is not satisfied).
 
-## 弱网相关行为
+## Behaviour on a weak link
 
-| 能力 | 说明 |
+| Capability | What it does |
 |---|---|
-| **静态加速** | Gateway 对 js/css/html 等做 gzip；带 `?v=` 的资源可长期缓存；HTTP keep-alive 连拉多文件 |
-| **延后 WebGL** | `xterm-addon-webgl.js` 在首个终端打开后再加载 |
-| **默认单屏** | 见上「VT 订阅模式」— 默认只订阅焦点 pane，镜像需手动开 |
-| **背压** | Mac 侧 VT 发送队列有界；积压时丢旧 `vt.data` 并重 snapshot，画面可能短暂跳动 |
-| **浏览器丢帧** | 解压/写终端积压超过深度上限时丢中间 `vt.data` |
-| **binary keys** | `auth` 协商 `keys_binary` 后按键走二进制帧（无 JSON/base64）；旧 Mac 仍用 `pane.send_keys` |
+| **Static assets** | the Gateway gzips js/css/html; anything with `?v=` is cacheable long-term; HTTP keep-alive fetches several files over one connection |
+| **Deferred WebGL** | `xterm-addon-webgl.js` loads after the first terminal opens, not before |
+| **Single by default** | see "VT subscription mode" above — only the focused pane is subscribed; mirror is opt-in |
+| **Backpressure** | the Mac's VT send queue is bounded; under backlog it drops old `vt.data` and re-snapshots, so the screen may jump briefly |
+| **Browser frame drops** | when the decompress/write backlog passes its depth limit, intermediate `vt.data` is dropped |
+| **binary keys** | once `auth` negotiates `keys_binary`, keystrokes go as binary frames (no JSON/base64); an older Mac still gets `pane.send_keys` |
 
-## VT 终端
+## VT terminal
 
-Mac 侧经 **`zmx attach`** 保真 PTY 流;浏览器 xterm.js 渲染。
-Gateway notify 携带 `{b64, cols?, rows?}`,由 `handleVT()` 解码。
+The Mac serves a faithful PTY stream through **`zmx attach`**; the browser renders it with xterm.js.
+Gateway notifies carry `{b64, cols?, rows?}`, decoded by `handleVT()`.
 
-命令(Gateway JSON-RPC):
+Commands (Gateway JSON-RPC):
 
-| method | 说明 |
+| method | What it does |
 |---|---|
-| `pane.vt_open` | attach;首屏 `vt.snapshot`,其后 `vt.data` |
-| `pane.vt_keepalive` | 20s 心跳 |
-| `pane.vt_close` | 断开 attach 客户端 |
-| `pane.send_keys` | `{b64}` UTF-8 键序列；协商 `keys_binary` 后可走二进制帧 |
+| `pane.vt_open` | attach; `vt.snapshot` first, `vt.data` after |
+| `pane.vt_keepalive` | 20s heartbeat |
+| `pane.vt_close` | detach this client |
+| `pane.send_keys` | `{b64}` UTF-8 key sequence; can go as binary frames once `keys_binary` is negotiated |
 
-## 测试
+## Tests
 
-不需要 `npm install`,在 `clients/seahelm-web` 下直接跑:
+No `npm install` needed — run them straight from `clients/seahelm-web`:
 
 ```bash
 for t in devbroker/*-test.js; do node "$t" || break; done
 ```
 
-## 相关文档
+## Related documents
 
-- `docs/superpowers/specs/2026-08-10-web-host-gateway-design.md` — Gateway 设计
-- `docs/remote-clients-design.md` — MQTT 协议(Watch/ESP32;web 生产走 Gateway)
+- `docs/superpowers/specs/2026-08-10-web-host-gateway-design.md` — Gateway design
+- `docs/remote-clients-design.md` — the MQTT protocol (Watch/ESP32; the web client uses the Gateway in production)

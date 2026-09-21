@@ -2,7 +2,7 @@
 //
 // Run:  node devbroker/composer-keys-test.js
 //
-// Typing 中文 goes through a candidate list: Enter picks the word, it does not
+// Typing Chinese goes through a candidate list: Enter picks the word, it does not
 // end the sentence. Submitting on that Enter sent the raw pinyin to the agent
 // and swallowed the choice, so the composer was unusable in any IME.
 'use strict';
