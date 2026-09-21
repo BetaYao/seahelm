@@ -269,4 +269,42 @@ final class WebhookStatusProviderTests: XCTestCase {
             data: data
         )
     }
+
+    // MARK: - Claude Code's paste wrapper
+
+    /// The shape Claude Code actually writes: tags on their own lines, and a
+    /// closing tag that repeats the attribute.
+    func testPasteWrapperIsTakenOffAroundTypedText() {
+        let raw = "\n\n<pasted_content id=\"240b\">\nsample.mov\nsample.jpg\n</pasted_content id=\"240b\">\n\n\ndownload 目录，今天采集的样本"
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent(raw),
+                       "sample.mov\nsample.jpg\n\ndownload 目录，今天采集的样本")
+    }
+
+    /// A message that is nothing but a paste — every message seahelm-web sends,
+    /// once it is long enough — is just its own words.
+    func testWholeMessagePaste() {
+        let raw = "<pasted_content id=\"5192\">\n可以，daemon 落库的时候把 URL 带上\n</pasted_content id=\"5192\">"
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent(raw),
+                       "可以，daemon 落库的时候把 URL 带上")
+    }
+
+    /// The attribute is optional — plain `<pasted_content>` appears too.
+    func testWrapperWithoutAnId() {
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent("<pasted_content>\nhi\n</pasted_content>"), "hi")
+    }
+
+    func testSeveralPastesInOneTurn() {
+        let raw = "<pasted_content id=\"a\">\none\n</pasted_content id=\"a\">\nand\n<pasted_content id=\"b\">\ntwo\n</pasted_content id=\"b\">"
+        // The tags sat on their own lines, so what is left is separated the way
+        // the sender saw it: a blank line between each block and the prose.
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent(raw), "one\n\nand\n\ntwo")
+    }
+
+    /// Nothing to unwrap must come back untouched — including text that merely
+    /// mentions the tag, and text with its own blank lines.
+    func testOrdinaryPromptIsUntouched() {
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent("fix the flaky test"), "fix the flaky test")
+        let spaced = "first\n\nsecond"
+        XCTAssertEqual(WebhookStatusProvider.unwrapPastedContent(spaced), spaced)
+    }
 }
