@@ -3402,7 +3402,11 @@ extension MainWindowController {
     static func autoTopicName(for pane: PaneInfo) -> String {
         let title = PaneTitleResolver.title(for: pane).trimmingCharacters(in: .whitespacesAndNewlines)
         let project = pane.project.trimmingCharacters(in: .whitespacesAndNewlines)
-        let joined = [project, title].filter { !$0.isEmpty }.joined(separator: " · ")
+        // A pane with nothing better to call itself falls back to its repo, and
+        // prefixing that with the repo again reads as a bug: `teamclaw ·
+        // teamclaw`. Say it once.
+        let parts = title.caseInsensitiveCompare(project) == .orderedSame ? [project] : [project, title]
+        let joined = parts.filter { !$0.isEmpty }.joined(separator: " · ")
         return TelegramBotAPI.trimTopicName(joined.isEmpty ? "seahelm" : joined)
     }
 }

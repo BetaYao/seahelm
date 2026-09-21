@@ -304,4 +304,48 @@ final class TelegramAutoTopicTests: XCTestCase {
         XCTAssertFalse(TelegramChatMember(status: "administrator", canManageTopics: false).mayManageTopics)
         XCTAssertFalse(TelegramChatMember(status: "member", canManageTopics: nil).mayManageTopics)
     }
+
+    // MARK: - Polish
+
+    /// Telegram's "that edit would change nothing" is a 400, but it is the API
+    /// agreeing with us — not a failure worth a log line.
+    func testNotModifiedIsRecognisedAndNothingElseIs() {
+        let notModified = TelegramAPIError.api(
+            code: 400, description: "Bad Request: message is not modified: specified new message content and reply markup are exactly the same")
+        XCTAssertTrue(notModified.isNotModified)
+        XCTAssertTrue(notModified.isBadRequest)
+
+        XCTAssertFalse(TelegramAPIError.api(code: 400, description: "Bad Request: message to edit not found").isNotModified)
+        XCTAssertFalse(TelegramAPIError.api(code: 429, description: "Too Many Requests").isNotModified)
+        XCTAssertFalse(TelegramAPIError.network("timeout").isNotModified)
+    }
+
+    /// A pane with nothing better to call itself falls back to its repo, and
+    /// `teamclaw · teamclaw` reads as a bug.
+    func testTopicNameSaysTheRepoOnceWhenTheTitleIsTheRepo() {
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "teamclaw")),
+                       "teamclaw")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "TeamClaw")),
+                       "teamclaw")
+    }
+
+    func testTopicNameKeepsBothWhenTheyDiffer() {
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "run.sh 无法启动")),
+                       "seahelm · run.sh 无法启动")
+    }
+
+    /// A pane in a repo with no title at all still names its room.
+    func testTopicNameFallsBackToTheRepoAlone() {
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "")),
+                       "seahelm")
+    }
+
+    /// `PaneTitleResolver` answers from the pane's own fields; a bare pane with
+    /// no station falls through to its branch, then its repo.
+    private func pane(project: String, title: String) -> PaneInfo {
+        PaneInfo(id: "t", worktreePath: "/w/\(project)", agentType: .claudeCode,
+                 project: project, branch: title.isEmpty ? project : title,
+                 status: .idle, lastMessage: "", commandLine: nil, roundDuration: 0,
+                 startedAt: nil, station: nil, channel: nil, taskProgress: TaskProgress())
+    }
 }

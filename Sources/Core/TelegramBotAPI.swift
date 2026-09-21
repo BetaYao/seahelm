@@ -236,6 +236,20 @@ enum TelegramAPIError: LocalizedError, Equatable {
         if case .api(400, _) = self { return true }
         return false
     }
+
+    /// Telegram's way of saying "that edit would change nothing".
+    ///
+    /// It arrives as a 400, but it is the API agreeing with us: the message
+    /// already says and offers exactly this. Every caller that edits does so
+    /// repeatedly by design — a progress line rewritten each tick, a card whose
+    /// buttons are set again when the same suggestion lands twice — so treating
+    /// it as a failure fills the log with the bridge working correctly.
+    var isNotModified: Bool {
+        if case .api(400, let description) = self {
+            return description.contains("message is not modified")
+        }
+        return false
+    }
 }
 
 // MARK: - Client

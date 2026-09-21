@@ -264,6 +264,11 @@ final class TelegramChannel: ExternalChannel {
         sendQueue.async {
             do {
                 try api.setReplyMarkup(chatId: chat, messageId: id, buttons: buttons)
+            } catch let error as TelegramAPIError where error.isNotModified {
+                // The message already carries exactly this keyboard. Setting the
+                // same buttons twice is ordinary — a suggestion that lands again
+                // while its card is still up — and saying so is noise, the same
+                // reasoning `editMessage` has always applied.
             } catch {
                 NSLog("[Telegram] Could not set buttons on \(chatId)/\(id): \(error.localizedDescription)")
             }
