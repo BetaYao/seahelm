@@ -418,12 +418,16 @@
   /* Lines up with the transcript column on a wide window. */
   .msg-composer{display:none;gap:8px;border-top:1px solid var(--line-12);
     padding:10px max(16px, calc((100% - 760px) / 2))}
-  .msg-composer.on{display:flex}
-  .msg-composer input{flex:1;min-width:0;border-radius:8px;border:1px solid var(--line-12);
+  /* Bottom-aligned so the button stays put while the field grows upward. */
+  .msg-composer.on{display:flex;align-items:flex-end}
+  /* One row is 42px: 20px of line, 20px of padding, 2px of border. The cap is
+     eight rows, past which the field scrolls instead of eating the pane. */
+  .msg-composer textarea{flex:1;min-width:0;border-radius:8px;border:1px solid var(--line-12);
     background:rgba(150,215,225,.04);color:var(--text);padding:10px 12px;
-    font-family:var(--sans);font-size:14px;outline:none}
-  .msg-composer input:focus{border-color:var(--accent-20)}
-  .msg-composer button{flex:none;border:0;border-radius:8px;background:var(--accent);
+    font-family:var(--sans);font-size:14px;line-height:20px;outline:none;
+    height:42px;max-height:182px;resize:none;overflow-y:auto}
+  .msg-composer textarea:focus{border-color:var(--accent-20)}
+  .msg-composer button{flex:none;height:42px;border:0;border-radius:8px;background:var(--accent);
     color:#041018;font-family:var(--sans);font-size:13px;font-weight:600;padding:0 16px;cursor:pointer}
   .seg{display:inline-flex;flex:none;gap:2px;padding:2px;border:1px solid var(--line-12);border-radius:6px}
   .seg button{background:none;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;
@@ -497,7 +501,7 @@
       <div class="run-line" id="runLine" hidden></div>
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer">
-        <input id="msgInput" placeholder="Send to this pane…" autocomplete="off"/>
+        <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off"></textarea>
         <button id="msgSend" type="button">Send</button>
       </div>
     </div>
@@ -1205,6 +1209,21 @@ function renderSurfaceBadge(){
 renderSurfaceBadge();
 applySurfaceMode();
 
+/** Grow the composer to fit what is in it, up to the CSS cap. */
+function autoGrowComposer(){
+  const input = $('msgInput');
+  if (!input) return;
+  // Measure from nothing, or a field that just lost a line keeps the taller
+  // scrollHeight it had and never shrinks back.
+  input.style.height = 'auto';
+  // `scrollHeight` is content + padding, but `box-sizing:border-box` counts the
+  // border in `height` too. Without the difference the field lands two pixels
+  // short of its own content and grows a scrollbar at one line.
+  const border = input.offsetHeight - input.clientHeight;
+  // No ceiling here: `max-height` in the CSS clamps it, and the field scrolls.
+  input.style.height = (input.scrollHeight + border) + 'px';
+}
+
 function sendComposerText(){
   const input = $('msgInput');
   const text = (input && input.value || '').trim();
@@ -1214,11 +1233,13 @@ function sendComposerText(){
   const paneId = pane.pane_id || key;
   sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, () => {});
   input.value = '';
+  autoGrowComposer();
 }
 (function wireComposer(){
   const send = $('msgSend');
   const input = $('msgInput');
   if (send) send.onclick = sendComposerText;
+  if (input) input.addEventListener('input', autoGrowComposer);
   if (input) input.addEventListener('keydown', (ev) => {
     // Enter and Escape mean nothing here while an IME is composing — see
     // composer-keys.js.
