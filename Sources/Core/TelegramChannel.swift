@@ -223,6 +223,19 @@ final class TelegramChannel: ExternalChannel {
                                              buttons: buttons, messageThreadId: threadId)
                 NSLog("[Telegram] → \(target): \(chunk.count) chars")
                 return id
+            } catch let error as TelegramAPIError where error.isMissingThread && threadId != nil {
+                // The thread went while this was in flight — a pane's own topic
+                // deleted with the pane, or one somebody removed by hand. The
+                // group is still the right room, so the message lands there
+                // rather than nowhere.
+                NSLog("[Telegram] Topic \(target) is gone — sending to the group instead")
+                do {
+                    return try api.sendMessage(chatId: chatId, text: chunk, parseMode: parseMode,
+                                               buttons: buttons, messageThreadId: nil)
+                } catch {
+                    NSLog("[Telegram] Send failed (no topic): \(error.localizedDescription)")
+                    return nil
+                }
             } catch let error as TelegramAPIError where error.isBadRequest && parseMode != nil {
                 // Telegram is strict about its HTML. Rather than lose the
                 // message over a stray tag, resend the same words flat.
@@ -381,6 +394,30 @@ final class TelegramChannel: ExternalChannel {
                 NSLog("[Telegram] Closed topic \(address)")
             } catch {
                 NSLog("[Telegram] Could not close topic \(address): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Take a topic away entirely — for a pane's own thread once the pane is
+    /// gone. Callers must have established that the thread is one seahelm
+    /// opened; this end only knows how to address it.
+    ///
+    /// An address with no thread is a whole chat, and no failure here is worth
+    /// telling the reader about: they are about to notice either a thread that
+    /// went or one that stayed.
+    func deleteTopic(address: String) {
+        let (chatId, threadId) = TelegramChatAddress.split(address)
+        guard let threadId else { return }
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        guard let api else { return }
+        sendQueue.async {
+            do {
+                try api.deleteForumTopic(chatId: chatId, messageThreadId: threadId)
+                NSLog("[Telegram] Deleted topic \(address)")
+            } catch {
+                NSLog("[Telegram] Could not delete topic \(address): \(error.localizedDescription)")
             }
         }
     }

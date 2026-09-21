@@ -109,6 +109,13 @@ final class FakeCommandHost: CommandHost {
     func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void) {
         completion(topicHostProblem)
     }
+    var retiredOnReconcile = 0
+    private(set) var reconcileCalls = 0
+    @discardableResult
+    func reconcileChatBindings() -> Int {
+        reconcileCalls += 1
+        return retiredOnReconcile
+    }
     func confirm(_ summary: String, completion: @escaping (Bool) -> Void) {
         confirmations.append(summary)
         completion(confirmAnswer)
@@ -232,6 +239,20 @@ final class CommandExecutorTests: XCTestCase {
         let chat = last("/status")
         XCTAssertFalse(chat.showsOverview)
         XCTAssertTrue(chat.text.contains("#7"), chat.text)
+    }
+
+    /// `/status` is the one command that is already an inventory, so it is
+    /// where the bindings are reconciled against it.
+    func testStatusReconcilesBindingsAndSaysSo() {
+        host.retiredOnReconcile = 2
+        let chat = last("/status")
+        XCTAssertEqual(host.reconcileCalls, 1)
+        XCTAssertTrue(chat.text.contains("Let go of 2 bindings"), chat.text)
+    }
+
+    /// Nothing swept, nothing said — the usual case must not grow a line.
+    func testStatusSaysNothingWhenThereWasNothingToLetGoOf() {
+        XCTAssertFalse(last("/status").text.contains("Let go of"))
     }
 
     // MARK: - Confirmation

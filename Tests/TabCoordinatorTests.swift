@@ -27,6 +27,10 @@ private class MockTabCoordinatorDelegate: TabCoordinatorDelegate {
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator) {
         clearContentCalled = true
     }
+    var endedPanes: [(id: String, reason: String)] = []
+    func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String) {
+        endedPanes.append((terminalID, reason))
+    }
 }
 
 final class TabCoordinatorTests: XCTestCase {

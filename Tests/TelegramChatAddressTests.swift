@@ -146,4 +146,17 @@ final class TelegramChatAddressTests: XCTestCase {
         XCTAssertEqual(TelegramChatAddress.oneAddressPerChat(["-100#4"], preferring: "-100#99"),
                        ["-100#4"])
     }
+
+    // MARK: - A thread that is gone
+
+    /// Telegram's wording for a thread that no longer exists, which is what a
+    /// message aimed at a deleted topic comes back as.
+    func testMissingThreadIsRecognised() {
+        XCTAssertTrue(TelegramAPIError.api(code: 400, description: "Bad Request: message thread not found")
+            .isMissingThread)
+        XCTAssertFalse(TelegramAPIError.api(code: 400, description: "Bad Request: chat not found")
+            .isMissingThread)
+        XCTAssertFalse(TelegramAPIError.api(code: 403, description: "message thread not found")
+            .isMissingThread)
+    }
 }

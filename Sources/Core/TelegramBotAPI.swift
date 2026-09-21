@@ -237,6 +237,19 @@ enum TelegramAPIError: LocalizedError, Equatable {
         return false
     }
 
+    /// The topic this message was addressed to no longer exists.
+    ///
+    /// It happens both ways now: seahelm deletes a pane's own thread when the
+    /// pane ends, and a person can delete any thread at any time. Either way
+    /// the words still have somewhere to go — the group itself — and a notice
+    /// that silently evaporates is the one outcome worth ruling out.
+    var isMissingThread: Bool {
+        if case .api(400, let description) = self {
+            return description.lowercased().contains("message thread not found")
+        }
+        return false
+    }
+
     /// Telegram's way of saying "that edit would change nothing".
     ///
     /// It arrives as a 400, but it is the API agreeing with us: the message
@@ -470,10 +483,30 @@ final class TelegramBotAPI {
     /// Close a topic: it folds into the group's closed list and stops taking
     /// messages, but keeps everything said in it.
     ///
-    /// Deliberately not `deleteForumTopic`. A pane ending is not a reason to
-    /// destroy the record of what it did, and deletion cannot be undone.
+    /// For a thread that is being *moved* rather than ended — a repo re-homed
+    /// to another group — where what the agent said is still worth reading in
+    /// the room it was said in. A thread whose pane is gone is deleted
+    /// instead; see `deleteForumTopic`.
     func closeForumTopic(chatId: String, messageThreadId: Int) throws {
         let _: Bool = try call("closeForumTopic",
+                               params: ["chat_id": chatId, "message_thread_id": messageThreadId],
+                               deadline: Self.stallSeconds)
+    }
+
+    /// Delete a topic, taking every message in it.
+    ///
+    /// What a pane's own thread gets when the pane ends: the thread exists to
+    /// be that pane's command line and nothing else, so once there is no pane
+    /// it is a dead entry in a list people have to scroll past. Closing would
+    /// leave it exactly that, only greyed out.
+    ///
+    /// Only ever aimed at a thread seahelm opened itself (`CommandSession
+    /// .autoTopic`) — deletion cannot be undone, and a thread somebody else
+    /// opened is not ours to destroy. Needs the same `can_manage_topics` as
+    /// opening one. General cannot be deleted, and never reaches here: it has
+    /// no thread id to address (see `TelegramChatAddress`).
+    func deleteForumTopic(chatId: String, messageThreadId: Int) throws {
+        let _: Bool = try call("deleteForumTopic",
                                params: ["chat_id": chatId, "message_thread_id": messageThreadId],
                                deadline: Self.stallSeconds)
     }

@@ -124,6 +124,13 @@ protocol CommandHost: AnyObject {
     /// Whether this chat can actually hold topics: nil when it can, otherwise
     /// what is missing, in words the reader can act on.
     func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void)
+    /// Let go of the bindings whose worktree is no longer on disk — deleting
+    /// the topics seahelm opened for them — and return how many.
+    ///
+    /// Asked by `/status`, which is already the inventory this reconciles
+    /// against, so the listing that follows describes a fleet that exists.
+    @discardableResult
+    func reconcileChatBindings() -> Int
     /// Desktop only: a native sheet. Chat surfaces never reach this.
     func confirm(_ summary: String, completion: @escaping (Bool) -> Void)
 }
@@ -253,6 +260,10 @@ final class CommandExecutor {
             }
 
         case .status(let scope, let all):
+            // Reconcile before listing, not after: a binding whose worktree was
+            // deleted behind the app's back would otherwise be marked "talking
+            // to this one" against a pane the listing cannot show.
+            let retired = host.reconcileChatBindings()
             // A room given to a repo answers about that repo. `bound` is
             // resolved against the whole fleet, so a pane this conversation is
             // talking to is still marked even when it is not in the listing.
@@ -272,6 +283,7 @@ final class CommandExecutor {
                 text = CommandFormatter.repos(shown)
             }
             let note = CommandFormatter.narrowedNote(keys: keys, hidden: index.panes.count - shown.panes.count)
+                + CommandFormatter.reconciledNote(retired)
             reply(CommandReply(text + note, showsOverview: surface.isDesktop, buttons: buttons))
 
         case .returnAll:
