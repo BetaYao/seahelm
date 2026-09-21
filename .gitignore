@@ -30,11 +30,15 @@ dist/
 # Git worktrees
 .worktrees/
 
+# Installed dependencies, anywhere. Not merely untidy: a worktree card
+# counts untracked files as the agent's new work (see WorktreeGitStats),
+# so one stray `npm install` reported +92376 lines on a clean tree.
+node_modules/
+
 # secrets
 .env
 clients/seahelm-stack/.env
 clients/seahelm-stack/cloudflared.yml
-clients/seahelm-stack/gateway/node_modules/
 
 # Local Watch gateway API key
 apple-watch/Secrets.xcconfig
