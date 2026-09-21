@@ -9,7 +9,7 @@
 // Two things it must not do:
 //   • retry a credential the gateway rejected — a wrong or expired code will be
 //     wrong forever, and hammering it burns the pairing rate limit
-//   • retry after the user pressed 断开
+//   • retry after the user pressed Disconnect
 //
 // Pure, with its clock and timers injected, so the schedule can be asserted.
 (function (root, factory) {
