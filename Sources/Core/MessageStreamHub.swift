@@ -232,7 +232,18 @@ final class MessageStreamStore {
     private static func decode(_ line: Substring) -> MessageEvent? {
         guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
               let dict = obj as? [String: Any] else { return nil }
-        return MessageEvent(dict: dict)
+        guard var event = MessageEvent(dict: dict) else { return nil }
+        // Rows written before `UserPromptText` existed: a background task
+        // finishing, recorded as though the user had typed it, and prompts
+        // still wearing Claude Code's paste wrapper. Applying the same rule on
+        // the way back out heals a history someone already has instead of
+        // making them wait for the ring to roll over. Both readers — the replay
+        // on launch and the scroll-back page — come through here.
+        if event.kind == .user {
+            guard let shown = UserPromptText.humanText(event.text ?? "") else { return nil }
+            event.text = shown
+        }
+        return event
     }
 
     private func appendLine(_ event: MessageEvent, key: String) {
@@ -255,3 +266,19 @@ final class MessageStreamStore {
         linesOnDisk[key] = kept.count
     }
 }
+
+#if DEBUG
+extension MessageStreamHub {
+    /// The stored-row rule, reachable without a file: what a persisted line
+    /// turns back into (nil when it is dropped on the way out).
+    static func decodeForTests(_ dict: [String: Any]) -> MessageEvent? {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let line = String(data: data, encoding: .utf8) else { return nil }
+        return MessageStreamStore.decodeForTests(Substring(line))
+    }
+}
+
+extension MessageStreamStore {
+    static func decodeForTests(_ line: Substring) -> MessageEvent? { decode(line) }
+}
+#endif

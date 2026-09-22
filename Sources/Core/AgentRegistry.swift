@@ -566,8 +566,7 @@ class AgentRegistry {
         // A user_prompt event carries what the user typed — surfaced so remote
         // history can show both sides of the conversation (user + assistant).
         if case .userPrompt(let text) = o.event.kind {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { dict["user_prompt"] = trimmed }
+            if let shown = UserPromptText.humanText(text) { dict["user_prompt"] = shown }
         }
         // Open decisions — surfaced so remote clients (Watch) can show/answer them
         // (`pane/{slot}/event`). Remote clients publish these retained and clear

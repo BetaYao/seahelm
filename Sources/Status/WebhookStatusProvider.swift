@@ -171,48 +171,28 @@ class WebhookStatusProvider {
     /// Extract the user's prompt text from a userPrompt event
     private static func extractUserPrompt(from event: WebhookEvent) -> String? {
         guard event.event == .userPrompt else { return nil }
-        // Claude Code sends the prompt text in the "prompt" field
+        // Claude Code sends the prompt text in the "prompt" field. `humanText`
+        // is nil for a turn the harness opened on its own account, which keeps
+        // `<task-notification>` out of window titles and phone notifications.
         if let prompt = event.data?["prompt"] as? String, !prompt.isEmpty {
-            return unwrapPastedContent(prompt)
+            return UserPromptText.humanText(prompt)
         }
         if let input = event.data?["input"] as? String, !input.isEmpty {
-            return unwrapPastedContent(input)
+            return UserPromptText.humanText(input)
         }
         if let text = event.data?["text"] as? String, !text.isEmpty {
-            return unwrapPastedContent(text)
+            return UserPromptText.humanText(text)
         }
         if let message = event.data?["message"] as? String, !message.isEmpty {
-            return unwrapPastedContent(message)
+            return UserPromptText.humanText(message)
         }
         return nil
     }
 
-    /// Take Claude Code's paste wrapper off a prompt.
-    ///
-    /// Anything long enough arriving as a bracketed paste — which is how every
-    /// message seahelm delivers to a pane arrives, and how a person's own ⌘V
-    /// arrives — is recorded by Claude Code wrapped in
-    /// `<pasted_content id="240b">…</pasted_content id="240b">`. The marker is
-    /// for the agent, telling it which part of the turn was pasted rather than
-    /// typed. Every reader on this side is a human looking at a title, a
-    /// timeline row or a phone notification, and to them it is noise around
-    /// their own words.
-    ///
-    /// Only the wrapper goes; what was pasted is the message. The closing tag
-    /// repeats the attribute (`</pasted_content id="240b">`), which no parser
-    /// would accept, so this matches the shape Claude Code actually writes
-    /// rather than well-formed markup.
+    /// Lives on `UserPromptText` now, next to the machine-block filter that
+    /// every reader of a prompt wants applied with it.
     static func unwrapPastedContent(_ text: String) -> String {
-        guard text.contains("<pasted_content") else { return text }
-        let stripped = text.replacingOccurrences(
-            of: "</?pasted_content[^>]*>",
-            with: "",
-            options: .regularExpression)
-        // The tags sat on lines of their own; removing them leaves the blank
-        // lines that held them apart.
-        return stripped
-            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        UserPromptText.unwrapPastedContent(text)
     }
 
     private func fallbackUserPrompt(for event: WebhookEvent) -> String? {
