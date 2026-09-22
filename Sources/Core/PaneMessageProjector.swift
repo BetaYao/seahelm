@@ -56,10 +56,12 @@ enum PaneMessageProjector {
         switch outcome.event.kind {
         case .userPrompt(let text):
             coal.lastDecision = nil
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
+            // nil when the harness opened this turn itself (a finished background
+            // task), so the timeline's user side stays the user's — see
+            // `UserPromptText`. The event still counts as the turn starting.
+            if let shown = UserPromptText.humanText(text) {
                 var e = base(.user)
-                e.text = trimmed
+                e.text = shown
                 out.append(e)
             }
         case .toolUse(let act):
