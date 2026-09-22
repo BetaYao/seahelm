@@ -71,9 +71,54 @@ final class ClaudeHooksSetupTests: XCTestCase {
         XCTAssertNotNil(hooks["TeammateIdle"])
     }
 
-    func testUserOwnedObservationHookIsNotOverwritten() {
-        let (hooks, _) = ClaudeHooksSetup.reconcile(existingHooks: ["Stop": userEntry()])
-        XCTAssertTrue(ClaudeHooksSetup.entriesEqual(hooks["Stop"], userEntry()))
+    /// A user's own hook on an event we need must survive — and ours has to go
+    /// in beside it. Bailing out of the whole event (what this used to do) left
+    /// that event reporting nothing to seahelm, silently.
+    func testUserOwnedObservationHookKeepsOursAlongside() throws {
+        let (hooks, changed) = ClaudeHooksSetup.reconcile(existingHooks: ["Stop": userEntry()])
+        XCTAssertTrue(changed)
+
+        let groups = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        let commands = groups.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["command"] as? String }
+        XCTAssertTrue(commands.contains("/usr/local/bin/my-own-worktree-maker"),
+                      "user hook was disturbed: \(commands)")
+        XCTAssertEqual(commands.filter { $0.contains("seahelm-hook") }.count, 1,
+                       "ours must be present exactly once: \(commands)")
+    }
+
+    /// The worse half of the same bug: `isSeahelmManaged` tested the whole event
+    /// for the string `seahelm-hook`, so an event holding ours *and* the user's
+    /// counted as ours and was replaced wholesale — deleting theirs.
+    func testMixedEventDoesNotLoseTheUserHook() throws {
+        let mixed: [[String: Any]] = [
+            ["hooks": [["type": "command", "command": "/usr/local/bin/my-own-worktree-maker"]]],
+            ["hooks": [["type": "http", "url": "http://127.0.0.1:8765/webhook"]]],
+        ]
+        let (hooks, _) = ClaudeHooksSetup.reconcile(existingHooks: ["Stop": mixed])
+
+        let groups = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        let entries = groups.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+        XCTAssertTrue(entries.contains { $0["command"] as? String == "/usr/local/bin/my-own-worktree-maker" },
+                      "user hook was deleted: \(entries)")
+        // The legacy http entry is ours, so it migrates rather than doubling up.
+        XCTAssertEqual(entries.filter { ($0["command"] as? String)?.contains("seahelm-hook") == true }.count, 1)
+        XCTAssertFalse(entries.contains { $0["type"] as? String == "http" }, "legacy entry was not migrated")
+    }
+
+    /// A retired event holding both is the mirror image: ours goes, theirs stays.
+    func testRetiredSweepKeepsAUserHookInTheSameEvent() throws {
+        let mixed: [[String: Any]] = [
+            ["hooks": [["type": "command", "command": "/usr/local/bin/my-own-worktree-maker"]]],
+            ["hooks": [["type": "command", "command": "/Users/x/.local/bin/seahelm-hook claude-code"]]],
+        ]
+        let (hooks, changed) = ClaudeHooksSetup.reconcile(existingHooks: ["WorktreeCreate": mixed])
+        XCTAssertTrue(changed)
+
+        let groups = try XCTUnwrap(hooks["WorktreeCreate"] as? [[String: Any]])
+        let commands = groups.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["command"] as? String }
+        XCTAssertEqual(commands, ["/usr/local/bin/my-own-worktree-maker"])
     }
 
     func testAlreadyCorrectConfigReportsNoChange() {

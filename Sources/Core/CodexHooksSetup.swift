@@ -21,17 +21,23 @@ enum CodexHooksSetup {
         "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) codex >/dev/null 2>&1 || true'"
     }
 
-    private static func hookConfig() -> [[String: Any]] {
-        [[
-            "hooks": [[
-                "type": "command",
-                "command": hookCommand(),
-            ]],
-        ]]
+    /// What reconciling one file did. Separating these two matters because
+    /// `OnboardingHookInstaller` renders this function's result as the wizard's
+    /// `ok:` tick: returning "changed" meant a machine that was *already*
+    /// configured showed Codex hooks as **failed**, which is a good way to make
+    /// a customer chase a working integration.
+    private enum Reconciled {
+        case unchanged
+        case written
+        case failed
+
+        var ok: Bool { self != .failed }
+        var changed: Bool { self == .written }
     }
 
     /// Check and patch ~/.codex/config.toml + ~/.codex/hooks.json on app launch.
-    /// Returns true if either file was modified.
+    /// Returns whether Codex ends up configured — true when it already was,
+    /// false only when a write that was needed failed.
     @discardableResult
     static func ensureHooksConfigured() -> Bool {
         let codexDir = URL(fileURLWithPath: NSString("~/.codex").expandingTildeInPath)
@@ -42,12 +48,31 @@ enum CodexHooksSetup {
             return false
         }
 
-        let configChanged = ensureCodexHooksFeatureEnabled(at: codexDir.appendingPathComponent("config.toml"))
-        let hooksChanged = ensureHooksJSON(at: codexDir.appendingPathComponent("hooks.json"))
-        return configChanged || hooksChanged
+        let config = ensureHooksFeatureEnabled(at: codexDir.appendingPathComponent("config.toml"))
+        let hooks = ensureHooksJSON(at: codexDir.appendingPathComponent("hooks.json"))
+        return config.ok && hooks.ok
     }
 
-    private static func ensureCodexHooksFeatureEnabled(at configURL: URL) -> Bool {
+    /// The bare key a `key = value` line assigns — nil for blanks, comments and
+    /// table headers. Keys are compared whole rather than by prefix, so `hooks`
+    /// is never confused with `codex_hooks` or a future `hooks_*`.
+    private static func tomlKey(of line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+              let equals = trimmed.firstIndex(of: "=") else { return nil }
+        let key = trimmed[trimmed.startIndex..<equals].trimmingCharacters(in: .whitespaces)
+        return key.isEmpty ? nil : key
+    }
+
+    /// Enable `[features].hooks`, dropping the deprecated `codex_hooks` alias.
+    ///
+    /// `codex_hooks` was the original name and is still honoured (aliased in
+    /// openai/codex#20522, 2026-05-01, so anything newer than that understands
+    /// `hooks` — the 0.140.0 in the field included), but leaving it in place
+    /// makes Codex print a deprecation warning into the agent's transcript on
+    /// every run. Builds predating that alias know only `codex_hooks`; they are
+    /// over a year stale and not carried here.
+    private static func ensureHooksFeatureEnabled(at configURL: URL) -> Reconciled {
         let original = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
         let normalized = original.replacingOccurrences(of: "\r\n", with: "\n")
         var lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -72,48 +97,58 @@ enum CodexHooksSetup {
                 }
             }
 
-            var keyIndex: Int?
-            for index in (headerIndex + 1)..<sectionEnd {
-                let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("codex_hooks") {
-                    keyIndex = index
-                    break
-                }
+            // Rewrite the section as a whole rather than by index — removing the
+            // alias and inserting the canonical key otherwise shift each other's
+            // positions.
+            var body = Array(lines[(headerIndex + 1)..<sectionEnd])
+
+            let withoutAlias = body.filter { tomlKey(of: $0) != "codex_hooks" }
+            if withoutAlias.count != body.count {
+                body = withoutAlias
+                changed = true
             }
 
-            if let keyIndex {
-                let trimmed = lines[keyIndex].trimmingCharacters(in: .whitespaces)
-                if trimmed != "codex_hooks = true" {
-                    lines[keyIndex] = "codex_hooks = true"
+            if let keyIndex = body.firstIndex(where: { tomlKey(of: $0) == "hooks" }) {
+                if body[keyIndex].trimmingCharacters(in: .whitespaces) != "hooks = true" {
+                    body[keyIndex] = "hooks = true"
                     changed = true
                 }
             } else {
-                lines.insert("codex_hooks = true", at: headerIndex + 1)
+                body.insert("hooks = true", at: 0)
                 changed = true
+            }
+
+            if changed {
+                lines.replaceSubrange((headerIndex + 1)..<sectionEnd, with: body)
             }
         } else {
             if !lines.isEmpty, !(lines.last?.isEmpty ?? true) {
                 lines.append("")
             }
             lines.append("[features]")
-            lines.append("codex_hooks = true")
+            lines.append("hooks = true")
             changed = true
         }
 
-        guard changed else { return false }
+        guard changed else { return .unchanged }
 
         let output = lines.joined(separator: "\n") + "\n"
         do {
             try output.write(to: configURL, atomically: true, encoding: .utf8)
-            NSLog("[CodexHooksSetup] Enabled codex_hooks in ~/.codex/config.toml")
-            return true
+            NSLog("[CodexHooksSetup] Enabled [features].hooks in ~/.codex/config.toml")
+            return .written
         } catch {
             NSLog("[CodexHooksSetup] Failed to write config.toml: \(error)")
-            return false
+            return .failed
         }
     }
 
-    private static func ensureHooksJSON(at hooksURL: URL) -> Bool {
+    /// The entry every required event should carry.
+    private static func hookEntry() -> [String: Any] {
+        ["type": "command", "command": hookCommand()]
+    }
+
+    private static func ensureHooksJSON(at hooksURL: URL) -> Reconciled {
         var root: [String: Any]
         if let data = try? Data(contentsOf: hooksURL),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -123,23 +158,25 @@ enum CodexHooksSetup {
         }
 
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        let config = hookConfig()
         var changed = false
 
-        let expectedCommand = hookCommand()
+        let entry = hookEntry()
         for event in requiredEvents {
-            let current = hooks[event] as? [[String: Any]]
-            let currentCommand = (current?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
-            let isSeahelmOwned = (currentCommand?.contains("/webhook") ?? false)
-                || (currentCommand?.contains("seahelm-hook") ?? false)
-            if current == nil || (isSeahelmOwned && currentCommand != expectedCommand) {
-                hooks[event] = config
+            // A present-but-unreadable value is someone else's problem to fix;
+            // clobbering their file is worse than not reporting that event.
+            if hooks[event] != nil, hooks[event] as? [[String: Any]] == nil {
+                NSLog("[CodexHooksSetup] Skipping \(event): unrecognised shape in hooks.json")
+                continue
+            }
+            let groups = hooks[event] as? [[String: Any]] ?? []
+            if let merged = HookEventMerge.merging(event: groups, entry: entry) {
+                hooks[event] = merged
                 changed = true
                 NSLog("[CodexHooksSetup] Installed/updated hook: \(event)")
             }
         }
 
-        guard changed else { return false }
+        guard changed else { return .unchanged }
 
         root["hooks"] = hooks
 
@@ -147,22 +184,24 @@ enum CodexHooksSetup {
             let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: hooksURL, options: .atomic)
             NSLog("[CodexHooksSetup] Updated ~/.codex/hooks.json with \(requiredEvents.count) hooks")
-            return true
+            return .written
         } catch {
             NSLog("[CodexHooksSetup] Failed to write hooks.json: \(error)")
-            return false
+            return .failed
         }
     }
 }
 
 #if DEBUG
 extension CodexHooksSetup {
-    static func ensureCodexHooksFeatureEnabledForTests(at configURL: URL) -> Bool {
-        ensureCodexHooksFeatureEnabled(at: configURL)
+    /// Both shims report *changed*, which is what the tests are pinning; the
+    /// public entry point reports ok.
+    static func ensureHooksFeatureEnabledForTests(at configURL: URL) -> Bool {
+        ensureHooksFeatureEnabled(at: configURL).changed
     }
 
     static func ensureHooksJSONForTests(at hooksURL: URL) -> Bool {
-        ensureHooksJSON(at: hooksURL)
+        ensureHooksJSON(at: hooksURL).changed
     }
 }
 #endif

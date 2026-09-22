@@ -12,26 +12,26 @@ enum ClaudeHooksSetup {
     /// the receiving side has to guess Claude vs Codex from payload keys, and
     /// Claude's own `agent_id`/`agent_type`/`duration_ms` fields make that guess
     /// land on Codex — retyping the pane on every tool call.
-    private static func requiredHooks() -> [String: [[String: Any]]] {
-        let hookEntry: [String: Any] = [
+    private static func hookEntry() -> [String: Any] {
+        [
             "type": "command",
             "command": "\(SeahelmHookInstaller.scriptPath()) claude-code",
         ]
-        let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]
-        return [
-            "SessionStart": hookGroup,
-            "UserPromptSubmit": hookGroup,
-            "PreToolUse": hookGroup,
-            "PostToolUse": hookGroup,
-            "PostToolUseFailure": hookGroup,
-            "Stop": hookGroup,
-            "StopFailure": hookGroup,
-            "SubagentStart": hookGroup,
-            "SubagentStop": hookGroup,
-            "Notification": hookGroup,
-            "CwdChanged": hookGroup,
-        ]
     }
+
+    private static let requiredEvents = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Stop",
+        "StopFailure",
+        "SubagentStart",
+        "SubagentStop",
+        "Notification",
+        "CwdChanged",
+    ]
 
     /// Hook events seahelm used to install and must now actively remove.
     ///
@@ -57,11 +57,7 @@ enum ClaudeHooksSetup {
     /// Structural equality of two hook entries via canonical JSON (sorted keys),
     /// so an already-correct config isn't needlessly rewritten.
     static func entriesEqual(_ a: Any?, _ b: Any?) -> Bool {
-        func canon(_ v: Any?) -> String? {
-            guard let v, let d = try? JSONSerialization.data(withJSONObject: v, options: [.sortedKeys]) else { return nil }
-            return String(data: d, encoding: .utf8)
-        }
-        return canon(a) == canon(b)
+        HookEventMerge.canonical(a) == HookEventMerge.canonical(b)
     }
 
     /// Pure merge: given the hooks already in settings.json, return what they
@@ -71,30 +67,44 @@ enum ClaudeHooksSetup {
     static func reconcile(existingHooks: [String: Any]) -> (hooks: [String: Any], changed: Bool) {
         var hooks = existingHooks
         var changed = false
+        let entry = hookEntry()
 
-        for (event, config) in requiredHooks() {
-            // Install when missing, or migrate a seahelm-managed entry (old
-            // http→/webhook or a stale seahelm-hook command) to the current
-            // config. A user's own unrelated hook for this event is left alone.
-            if hooks[event] == nil || isSeahelmManaged(hooks[event]) {
-                if !entriesEqual(hooks[event], config) {
-                    hooks[event] = config
-                    changed = true
-                    NSLog("[ClaudeHooksSetup] Set hook: \(event)")
-                }
+        for event in requiredEvents {
+            // A present-but-unreadable value is the user's to fix; clobbering
+            // their settings.json is worse than not reporting one event.
+            if hooks[event] != nil, hooks[event] as? [[String: Any]] == nil {
+                NSLog("[ClaudeHooksSetup] Skipping \(event): unrecognised shape in settings.json")
+                continue
+            }
+            // Ours goes in beside whatever else the event holds, and migrates in
+            // place if it is an older form — see `HookEventMerge` for why this is
+            // not "install only when the event is ours or absent".
+            let groups = hooks[event] as? [[String: Any]] ?? []
+            if let merged = HookEventMerge.merging(event: groups, entry: entry) {
+                hooks[event] = merged
+                changed = true
+                NSLog("[ClaudeHooksSetup] Set hook: \(event)")
             }
         }
 
-        // Dropping an event from `requiredHooks` is not enough — the merge above
+        // Dropping an event from `requiredEvents` is not enough — the merge above
         // only ever adds, so an entry we wrote in an earlier version stays on
         // disk forever. Sweep ours out, and only ours: a hook the user wrote
-        // themselves for the same event is theirs to keep.
-        for event in retiredHooks where hooks[event] != nil {
-            guard isSeahelmManaged(hooks[event]) else {
-                NSLog("[ClaudeHooksSetup] Leaving user-owned hook in place: \(event)")
+        // themselves for the same event is theirs to keep, including when it
+        // sits in the same event as ours.
+        for event in retiredHooks {
+            guard let groups = hooks[event] as? [[String: Any]],
+                  let remaining = HookEventMerge.removing(event: groups) else {
+                if hooks[event] != nil {
+                    NSLog("[ClaudeHooksSetup] Leaving user-owned hook in place: \(event)")
+                }
                 continue
             }
-            hooks.removeValue(forKey: event)
+            if remaining.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = remaining
+            }
             changed = true
             NSLog("[ClaudeHooksSetup] Removed retired hook: \(event)")
         }
@@ -103,7 +113,12 @@ enum ClaudeHooksSetup {
     }
 
     /// Check and patch ~/.claude/settings.json on app launch.
-    /// Returns true if the file was modified.
+    ///
+    /// Returns whether Claude ends up configured — true when it already was,
+    /// false only when a write that was needed failed. Not "was it modified":
+    /// `OnboardingHookInstaller` shows this as the wizard's `ok:` tick, so
+    /// reporting "unchanged" as failure made an already-working install look
+    /// broken to the user.
     @discardableResult
     static func ensureHooksConfigured() -> Bool {
         let settingsPath = NSString("~/.claude/settings.json").expandingTildeInPath
@@ -125,7 +140,7 @@ enum ClaudeHooksSetup {
         let existing = settings["hooks"] as? [String: Any] ?? [:]
         let (hooks, changed) = reconcile(existingHooks: existing)
 
-        guard changed else { return false }
+        guard changed else { return true }   // already says what it should
 
         settings["hooks"] = hooks
 

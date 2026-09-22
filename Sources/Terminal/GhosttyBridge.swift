@@ -6,10 +6,15 @@ class GhosttyBridge {
     static let shared = GhosttyBridge()
 
     private(set) var app: ghostty_app_t?
-    /// Owned config kept alive for soft `reload_config` (light/dark theme swap).
+    /// Owned config kept alive for soft `reload_config`.
     private var config: ghostty_config_t?
     private var isInitialized = false
-    private var appearanceObservation: NSKeyValueObservation?
+
+    /// The palette every pane in this run uses, resolved once. There is
+    /// deliberately **no** `NSApp.effectiveAppearance` observer: re-resolving it
+    /// live is precisely the bug `TerminalThemeMode` documents. A palette change
+    /// lands on the next launch.
+    private static var latchedIsDark: Bool?
 
     /// Nested live-resize sessions (chrome divider / window resize). While > 0,
     /// GhosttyNSView defers `ghostty_surface_set_size` so the PTY isn't flooded
@@ -96,13 +101,12 @@ class GhosttyBridge {
             ghostty_config_load_file(config, seahelmConfigPath)
         }
 
-        // Dual light/dark themes last so `ghostty_*_set_color_scheme` can swap
-        // palettes even when ~/.config/ghostty only names a single dark theme.
-        // Prefer `theme = light:…,dark:…` in seahelm/ghostty.conf if you want a
-        // custom pair — set both sides there and comment out this override later
-        // if needed; for now Seahelm owns appearance-toggle correctness.
-        if let dualThemePath = Self.writeDualThemeOverride() {
-            ghostty_config_load_file(config, (dualThemePath as NSString).fileSystemRepresentation)
+        // One resolved theme last, so nothing downstream can swap the palette:
+        // a single `theme` has no conditional state for `set_color_scheme` to
+        // re-resolve, which makes "the palette never moves under a running
+        // agent" structural rather than a promise about who calls what.
+        if let themePath = Self.writeTerminalThemeOverride() {
+            ghostty_config_load_file(config, (themePath as NSString).fileSystemRepresentation)
         }
 
         ghostty_config_finalize(config)
@@ -163,26 +167,34 @@ class GhosttyBridge {
             return
         }
 
-        // Keep config for soft reload when the color scheme flips. libghostty
-        // asks the embedder to `reload_config`; without this the palette never swaps.
+        // Keep config for soft reload of keys the user can edit live (font size,
+        // copy-on-select). The palette is not among them — see `syncColorScheme`.
         self.config = config
         self.app = ghosttyApp
         self.isInitialized = true
 
-        // Follow the system light/dark appearance so `theme = light:...,dark:...`
-        // configs switch automatically. libghostty only learns about appearance
-        // changes when the host tells it.
+        // Tell libghostty which scheme we render, so what it reports to apps
+        // (DEC mode 2031) matches the palette they can actually see.
         syncColorScheme()
-        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.syncColorScheme() }
-        }
     }
 
-    /// The Ghostty color scheme matching the current system appearance.
+    /// The scheme every pane renders with, for this whole run.
     var currentColorScheme: ghostty_color_scheme_e {
-        let isDark = NSApp.effectiveAppearance
+        Self.terminalIsDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+    }
+
+    /// Resolve `terminal_theme_mode` once and hold it — the whole point of
+    /// `TerminalThemeMode`. First read happens in `initialize()`, before any
+    /// surface exists and after `main.swift` has already forced the app
+    /// appearance, so `app` sees a settled value. Main thread only.
+    static var terminalIsDark: Bool {
+        if let latchedIsDark { return latchedIsDark }
+        let appIsDark = NSApp.effectiveAppearance
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+        let resolved = TerminalThemeMode.parse(Config.load().terminalThemeMode)
+            .isDark(appAppearanceIsDark: appIsDark)
+        latchedIsDark = resolved
+        return resolved
     }
 
     /// Matches bundled Catppuccin Mocha / Latte `background` — used for immersive
@@ -205,8 +217,11 @@ class GhosttyBridge {
         }
     }
 
-    /// Push the current app appearance to Ghostty and every live surface.
-    /// Call after theme toggles so light/dark terminal palettes apply immediately.
+    /// Re-assert the run's scheme and let terminal chrome restyle.
+    ///
+    /// Called after an app theme toggle, which no longer moves the terminal
+    /// palette — chrome re-reads `terminalChromeBackground` and so stays matched
+    /// to the surface it frames rather than to the app around it.
     func refreshColorScheme() {
         syncColorScheme()
         NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
@@ -221,28 +236,27 @@ class GhosttyBridge {
         reloadConfig(target: target, soft: false)
     }
 
-    /// Push the current system appearance to the app and every live surface.
+    /// Tell libghostty which scheme this run renders.
+    ///
+    /// App level only, and idempotent: `latchedIsDark` never changes, so this
+    /// reports the same answer every time it is called. It exists so the scheme
+    /// libghostty *reports* to a TUI (DEC mode 2031, `ghostty_surface_read_text`
+    /// colors, OSC 10/11) is the one on screen.
+    ///
+    /// It deliberately does not walk `StationRegistry` calling
+    /// `ghostty_surface_set_color_scheme`. That loop is what used to repaint
+    /// live panes on an appearance flip, and a pane is the one place a palette
+    /// must not move: the agent inside it read those colors once, at startup,
+    /// and has no way to learn they changed (`TerminalThemeMode`). New surfaces
+    /// inherit the app's conditional state at creation, so they come up correct
+    /// without it.
     private func syncColorScheme() {
         guard let app else { return }
-        let scheme = currentColorScheme
-        // Surfaces first: `ghostty_app_update_config` fans `change_config` out to
-        // every surface using each surface's own conditional state. If app-level
-        // set_color_scheme runs first, that fan-out still sees the old theme.
-        for station in StationRegistry.shared.allStations() {
-            guard let surface = station.surface else { continue }
-            station.ghosttyLock.lock()
-            ghostty_surface_set_color_scheme(surface, scheme)
-            station.ghosttyLock.unlock()
-        }
-        ghostty_app_set_color_scheme(app, scheme)
-        // Explicit soft reload so a live palette swap doesn't depend solely on
-        // the RELOAD_CONFIG action callback (stale ghostty.h has dropped it).
-        if let config {
-            ghostty_app_update_config(app, config)
-        }
+        ghostty_app_set_color_scheme(app, currentColorScheme)
     }
 
-    /// Soft-reload config so `theme = light:…,dark:…` resolves to the active scheme.
+    /// Soft-reload config. The palette is a single resolved `theme`, so this
+    /// only moves keys the user can edit live (font size, copy-on-select).
     private func reloadConfig(target: ghostty_target_s, soft: Bool) {
         guard let config else { return }
         switch target.tag {
@@ -279,8 +293,8 @@ class GhosttyBridge {
         if FileManager.default.fileExists(atPath: seahelmConfigPath) {
             ghostty_config_load_file(config, seahelmConfigPath)
         }
-        if let dualThemePath = Self.writeDualThemeOverride() {
-            ghostty_config_load_file(config, (dualThemePath as NSString).fileSystemRepresentation)
+        if let themePath = Self.writeTerminalThemeOverride() {
+            ghostty_config_load_file(config, (themePath as NSString).fileSystemRepresentation)
         }
         ghostty_config_finalize(config)
         return config
@@ -333,24 +347,29 @@ class GhosttyBridge {
         Bundle.main.resourceURL?.appendingPathComponent("ghostty")
     }
 
-    /// Writes a tiny conf that pins absolute light/dark theme paths from the bundle.
-    private static func writeDualThemeOverride() -> String? {
+    /// Writes a tiny conf pinning the run's single theme to an absolute bundle
+    /// path.
+    ///
+    /// One theme, not `light:…,dark:…`: a dual pair leaves the palette on
+    /// Ghostty's conditional state, where any later `set_color_scheme` re-resolves
+    /// it — which is the flip that strands a running agent on stale colors
+    /// (`TerminalThemeMode`). Resolving here instead means there is nothing left
+    /// to flip.
+    private static func writeTerminalThemeOverride() -> String? {
         guard let themes = bundledResourcesURL()?.appendingPathComponent("themes") else { return nil }
-        let light = themes.appendingPathComponent("Catppuccin Latte").path
-        let dark = themes.appendingPathComponent("Catppuccin Mocha").path
-        guard FileManager.default.fileExists(atPath: light),
-              FileManager.default.fileExists(atPath: dark) else {
-            NSLog("Ghostty dual themes missing under %@", themes.path)
+        let name = terminalIsDark ? "Catppuccin Mocha" : "Catppuccin Latte"
+        let theme = themes.appendingPathComponent(name).path
+        guard FileManager.default.fileExists(atPath: theme) else {
+            NSLog("Ghostty theme %@ missing under %@", name, themes.path)
             return nil
         }
-        let conf = "theme = light:\(light),dark:\(dark)\n"
         let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("seahelm-ghostty-dual-theme.conf")
+            .appendingPathComponent("seahelm-ghostty-theme.conf")
         do {
-            try conf.write(to: tmp, atomically: true, encoding: .utf8)
+            try "theme = \(theme)\n".write(to: tmp, atomically: true, encoding: .utf8)
             return tmp.path
         } catch {
-            NSLog("Failed to write Ghostty dual-theme override: %@", "\(error)")
+            NSLog("Failed to write Ghostty theme override: %@", "\(error)")
             return nil
         }
     }

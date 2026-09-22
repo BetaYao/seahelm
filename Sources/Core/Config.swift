@@ -11,6 +11,10 @@ struct Config: Codable {
     var cardOrder: [String]
     var zoomIndex: Int
     var themeMode: String
+    /// Palette for the terminal surfaces, independent of `themeMode` — see
+    /// `TerminalThemeMode` for why a pane's palette must not follow the app's
+    /// live appearance. `"app"` (default) matches the appearance at launch.
+    var terminalThemeMode: String
     var worktreeStartedAt: [String: String]
     /// Per-worktree last real-activity timestamp (ISO8601). Persisted so the
     /// >8h idle-collapse survives app restarts instead of resetting to launch.
@@ -80,6 +84,7 @@ struct Config: Codable {
         case cardOrder = "card_order"
         case zoomIndex = "zoom_index"
         case themeMode = "theme_mode"
+        case terminalThemeMode = "terminal_theme_mode"
         case worktreeStartedAt = "worktree_started_at"
         case worktreeLastActivityAt = "worktree_last_activity_at"
         case splitLayouts = "split_layouts"
@@ -120,6 +125,7 @@ struct Config: Codable {
         cardOrder = []
         zoomIndex = 3
         themeMode = "system"
+        terminalThemeMode = TerminalThemeMode.app.rawValue
         worktreeStartedAt = [:]
         worktreeLastActivityAt = [:]
         splitLayouts = [:]
@@ -162,6 +168,8 @@ struct Config: Codable {
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
+        terminalThemeMode = try container.decodeIfPresent(String.self, forKey: .terminalThemeMode)
+            ?? TerminalThemeMode.app.rawValue
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
         worktreeLastActivityAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeLastActivityAt) ?? [:]
         splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
