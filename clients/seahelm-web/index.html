@@ -113,6 +113,16 @@
     border-radius:var(--r);padding:5px 9px;font-size:13px;line-height:1;cursor:pointer;
     font-family:var(--mono)}
   #drawerBtn:hover{border-color:var(--accent);color:var(--accent)}
+  /* Panes other than the one on screen waiting on you. It rides the ☰ that
+     leads to them rather than taking a row above the transcript: the count is
+     usually zero, and permanent furniture for "usually nothing" is what cost
+     the phone its reading height. */
+  #drawerBtn{position:relative}
+  #drawerBtn[data-waiting]{border-color:var(--attention)}
+  #drawerBtn[data-waiting]::after{content:attr(data-waiting);position:absolute;
+    top:-5px;right:-5px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;
+    background:var(--attention);color:#08222a;font-family:var(--mono);font-size:9px;
+    font-weight:600;line-height:15px;text-align:center}
   #scrim{display:none}
 
   /* ── responsive ───────────────────────────────────────────
@@ -324,7 +334,6 @@
   #messageTimeline{display:none;flex:1;overflow:auto;padding:4px 16px 28px;flex-direction:column}
   #messageTimeline.on{display:flex}
   #termWrap.text-hidden{display:none}
-  #toBottom.text-hidden{display:none}
   .tl{width:100%;max-width:760px;margin:0 auto}
   .tl-empty{padding:48px 0;text-align:center;color:var(--muted);font-size:12px}
   .tl-more{padding:10px 0 2px;text-align:center;font-size:11px;color:var(--idle)}
@@ -344,6 +353,26 @@
   .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
   .tl-tool em{flex:none;font-style:normal;color:var(--idle)}
   .tl-tool.err b{color:var(--danger)}
+  /* A folded run of calls. Same line as one call, plus a caret that turns. */
+  .tl-tools{display:flex;gap:8px;min-width:0;white-space:nowrap;cursor:pointer;
+    font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
+  .tl-tools i{flex:none;font-style:normal;color:var(--idle);
+    transition:transform .12s ease-out;transform-origin:45% 55%}
+  .tl-tools[aria-expanded="true"] i{transform:rotate(90deg)}
+  .tl-tools b{flex:none;font-weight:500;color:#a8c3c5}
+  .tl-tools span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
+  .tl-tools em{flex:none;font-style:normal;color:var(--idle)}
+  .tl-tools.err b{color:var(--danger)}
+  .tl-tools:focus-visible{outline:1px solid var(--line-12);outline-offset:2px;border-radius:3px}
+  /* Still going: the line breathes rather than blinks, so a working agent is
+     visible from the corner of the eye without pulling it there. */
+  .tl-tool.live span,.tl-tools.live span{animation:tl-breathe 1.5s ease-in-out infinite}
+  @keyframes tl-breathe{0%,100%{opacity:.34}50%{opacity:.95}}
+  @media (prefers-reduced-motion:reduce){
+    .tl-tool.live span,.tl-tools.live span{animation:none;opacity:.8}}
+  /* Open: the calls sit under their own line, hung off a rule so a long run
+     still reads as one thing. */
+  .tl-tools-body{margin-left:3px;padding-left:14px;border-left:1px solid var(--line-12)}
   .tl-asst{margin:10px 0 8px;font-family:var(--sans);
     font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
   .tl-notice{margin:4px 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
@@ -361,18 +390,6 @@
   .reply-bar{flex:none;border-top:1px solid var(--line-12);max-height:40vh;overflow-y:auto;
     padding:10px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans)}
   .reply-bar[hidden]{display:none}
-  /* What the pane on screen is doing now. The timeline above only shows what
-     already happened, so without this a quiet agent and a busy one look alike. */
-  .run-line{flex:none;display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-12);
-    padding:8px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
-  .run-line[hidden]{display:none}
-  .run-line i{width:6px;height:6px;border-radius:50%;flex:none}
-  .run-line .rl-running{color:var(--running)}
-  .run-line .rl-waiting{color:var(--attention)}
-  .run-line .rl-failed{color:var(--danger)}
-  .run-line .rl-time{font-family:var(--mono);font-size:11px;color:var(--idle)}
-  .run-line:not([hidden]) ~ .reply-bar,
-  .run-line:not([hidden]) ~ .msg-composer{border-top:0}
   /* Choices and the input are one place to answer from, not two panels. */
   .reply-bar:not([hidden]) ~ .msg-composer{border-top:0}
   .rb-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;font-size:12px;color:var(--attention)}
@@ -387,14 +404,6 @@
     line-height:1.4;color:var(--text)}
   .rb-opts button:first-child{border-color:var(--accent-20);color:var(--accent)}
   .rb-opts button:hover{border-color:var(--accent)}
-  /* Other panes waiting on you: one quiet line under the head, never a card. */
-  .attention-line{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;
-    margin:-4px 0 6px;padding:0 max(16px, calc((100% - 760px) / 2));font-family:var(--sans);font-size:12px}
-  .attention-line[hidden]{display:none}
-  .attention-line button{background:none;border:0;padding:2px 0;cursor:pointer;
-    font-family:var(--sans);font-size:12px;color:var(--attention)}
-  .attention-line button b{font-weight:500;color:var(--text)}
-  .attention-line em{font-style:normal;color:var(--muted)}
   .md p{margin:0 0 .65em}
   .md>:last-child{margin-bottom:0}
   .md strong{font-weight:600;color:#e6f2f2}
@@ -416,27 +425,52 @@
   .md th,.md td{padding:5px 14px 5px 0;border-bottom:1px solid var(--line-12);text-align:left;vertical-align:top}
   .md th{font-weight:500;color:var(--muted)}
   /* Lines up with the transcript column on a wide window. */
-  .msg-composer{display:none;gap:8px;border-top:1px solid var(--line-12);
+  .msg-composer{display:none;border-top:1px solid var(--line-12);
     padding:10px max(16px, calc((100% - 760px) / 2))}
-  /* Bottom-aligned so the button stays put while the field grows upward. */
-  .msg-composer.on{display:flex;align-items:flex-end}
-  /* One row is 42px: 20px of line, 20px of padding, 2px of border. The cap is
-     eight rows, past which the field scrolls instead of eating the pane. */
-  .msg-composer textarea{flex:1;min-width:0;border-radius:8px;border:1px solid var(--line-12);
-    background:rgba(150,215,225,.04);color:var(--text);padding:10px 12px;
-    font-family:var(--sans);font-size:14px;line-height:20px;outline:none;
-    height:42px;max-height:182px;resize:none;overflow-y:auto}
-  .msg-composer textarea:focus{border-color:var(--accent-20)}
-  .msg-composer button{flex:none;height:42px;border:0;border-radius:8px;background:var(--accent);
-    color:#041018;font-family:var(--sans);font-size:13px;font-weight:600;padding:0 16px;cursor:pointer}
+  .msg-composer.on{display:block}
+  /* The border belongs to the field, not the textarea: Send sits inside it, so
+     the two read as one control. Bottom-aligned so the button stays on the last
+     line while the text grows upward past it. */
+  .mc-field{display:flex;align-items:flex-end;gap:6px;
+    border:1px solid var(--line-12);border-radius:21px;
+    background:rgba(150,215,225,.04);padding:5px 5px 5px 14px}
+  .mc-field:focus-within{border-color:var(--accent-20)}
+  /* One row leaves the field 42px tall: 20px of line + 10px inside the textarea
+     + 10px of field padding + 2px of border. That inner 30px is the button's
+     size too, so an empty composer is a pill at the 21px radius above. The cap
+     is eight rows (170px), past which the text scrolls instead of eating the pane. */
+  .mc-field textarea{flex:1;min-width:0;border:0;background:none;color:var(--text);
+    padding:5px 0;font-family:var(--sans);font-size:14px;line-height:20px;outline:none;
+    height:30px;max-height:170px;resize:none;overflow-y:auto}
+  .mc-field button{position:relative;flex:none;width:30px;height:30px;padding:0;border:0;
+    border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:var(--accent);color:#041018;cursor:pointer;transition:background .12s}
+  .mc-field button svg{width:17px;height:17px;fill:none;stroke:currentColor;
+    stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  /* Nothing to send: still there, visibly inert, rather than gone — the field
+     must not resize under the thumb between one character and none. */
+  .mc-field button:disabled{background:var(--line-20);color:var(--muted);cursor:default}
+  /* One glyph at a time; `data-action` says which (composer-action.js). */
+  .mc-field button .ic-stop{width:13px;height:13px}
+  .mc-field button .ic-stop rect{fill:currentColor;stroke:none}
+  .mc-field button .ic-stop,
+  .mc-field button[data-action="stop"] .ic-send{display:none}
+  .mc-field button[data-action="stop"] .ic-stop{display:block}
+  /* The status the removed run line used to spell out, worn by the button. It
+     shows even when the button's job is Send, so an agent still reads as busy
+     while you type at it. */
+  .mc-field button[data-status="running"]{background:var(--running)}
+  .mc-field button[data-status="waiting"]{background:var(--attention)}
+  .mc-field button:disabled[data-status="running"],
+  .mc-field button:disabled[data-status="waiting"]{background:var(--line-20)}
+  /* Running: a ring turning just inside the button's edge. */
+  .mc-field button[data-status="running"]:not(:disabled)::after{content:'';position:absolute;
+    inset:2px;border-radius:50%;border:1.5px solid rgba(4,16,24,.55);
+    border-right-color:transparent;animation:fmspin .9s linear infinite}
   .seg{display:inline-flex;flex:none;gap:2px;padding:2px;border:1px solid var(--line-12);border-radius:6px}
   .seg button{background:none;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;
     font-family:var(--mono);font-size:11px;color:var(--muted)}
   .seg button.on{background:var(--accent-12);color:var(--accent)}
-  .interrupt-btn{flex:none;background:none;border:1px solid rgba(232,70,53,.35);border-radius:6px;
-    padding:4px 12px;font-family:var(--sans);font-size:12px;color:var(--danger);cursor:pointer}
-  .interrupt-btn:hover:not(:disabled){background:var(--danger-14)}
-  .interrupt-btn:disabled{opacity:.35;cursor:default}
   /* ── log ────────────────────────────────────────────────── */
   #log{font-family:var(--mono);font-size:11px;line-height:1.45}
   .logline{padding:3px 0;border-bottom:1px solid var(--line-12)}
@@ -453,6 +487,20 @@
     border:1px solid var(--line-20);color:var(--muted);border-radius:var(--r);cursor:pointer;letter-spacing:.04em}
   .toolbar button:hover{color:var(--text);border-color:var(--line-38)}
   #detailHead{color:var(--muted);letter-spacing:.04em}
+  /* iOS Safari magnifies the page whenever the field it focuses is set below
+     16px, and never undoes it — so every tap on the composer left the page
+     zoomed in and the reader pinching their way back out. 16px is the whole
+     fix. Scoped to soft-keyboard devices so the desktop keeps its compact type;
+     `maximum-scale=1` in the viewport tag would also stop it, by taking
+     pinch-zoom away from the people who need it. Last in the sheet, and naming
+     each field, because a media query buys no specificity over the rules above. */
+  @media (pointer: coarse){
+    /* 22px of line keeps 16px readable, so a row is 44px and the pill radius
+       follows it. Eight rows is still the cap. */
+    .mc-field{border-radius:22px}
+    .mc-field textarea{font-size:16px;line-height:22px;height:32px;max-height:186px}
+    .gate-input, header input{font-size:16px}
+  }
 </style>
 </head>
 <body>
@@ -492,17 +540,23 @@
         <button class="renderer-badge" id="vtModeBadge" title="VT subscription mode">Single</button>
         <button class="renderer-badge" id="rendererBadge" title="Terminal renderer">xterm.js</button>
         <span class="term-keys" id="termKeys"></span>
-        <button class="interrupt-btn" id="interruptBtn" type="button" hidden>Interrupt</button>
       </div>
-      <div class="attention-line" id="attentionLine" hidden></div>
       <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="Jump to the latest output">↓ Latest</button>
-      <div class="run-line" id="runLine" hidden></div>
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer">
-        <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off"></textarea>
-        <button id="msgSend" type="button">Send</button>
+        <div class="mc-field">
+          <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off"></textarea>
+          <!-- Send, stop and the pane's status in one control — see
+               composer-action.js. Both glyphs stay in the DOM and `data-action`
+               picks one; icon only, so the label lives in the accessible name. -->
+          <button id="msgSend" type="button" data-action="none" data-status="idle"
+                  title="Send" aria-label="Send" disabled>
+            <svg class="ic-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg>
+            <svg class="ic-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3.5"/></svg>
+          </button>
+        </div>
       </div>
     </div>
     <div class="col" id="rightcol" style="border-right:0">
@@ -527,9 +581,12 @@
 <script src="./vt-apply.js"></script>
 <script src="./term-focus.js"></script>
 <script src="./message-timeline.js"></script>
+<script src="./tool-group.js"></script>
+<script src="./timeline-scroll.js"></script>
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
 <script src="./composer-keys.js"></script>
+<script src="./composer-action.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -567,6 +624,8 @@ const S = {
   gw:null,   // gateway WebSocket state
   panes:new Map(), worktrees:new Map(),
   focus:null, dnd:null, events:new Map(),
+  // Tool runs the reader has opened, by the run's first `seq` (tool-group.js).
+  toolOpen:new Set(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
   sel:null, selPane:null,
   authPass:null, pendingCode:null,   // authPass = long-lived token; pendingCode for first pair
@@ -701,7 +760,7 @@ function setStatus(on, txt){
   // The gate is a function of connection state, so it re-renders wherever that
   // state is set — including the paths that drop the socket without asking.
   renderGate();
-  renderInterruptButton();
+  renderSendButton();
 }
 
 // ── connect ───────────────────────────────────────────────────────────────
@@ -1001,11 +1060,37 @@ function onPaneMessage(params){
 // As many as the Mac keeps on disk per pane, so paging back never evicts what
 // it just loaded.
 const MESSAGE_CAP = 2000;
+// How close to the end still counts as being at it. A phone never lands on a
+// whole pixel — device-pixel rounding and rubber-band both leave a few over —
+// and a reader who stopped a line short of the end meant to be at the end.
+const TL_BOTTOM_SLOP = 48;
 
 /** Events never change once sent, so each row is built — and its markdown
  *  parsed — once, not on every repaint of a long history. */
 function renderMessageRow(m){
-  return m._html || (m._html = messageRowHTML(m));
+  if (m._html == null) {
+    const body = messageRowHTML(m);
+    // `data-seq` is how the scroll keeper finds this row again after the list
+    // is rebuilt — every branch below opens with a single `<div`.
+    m._html = body ? body.replace(/^<div/, `<div data-seq="${Number(m.seq)}"`) : '';
+  }
+  return m._html;
+}
+
+/** A folded run of calls: one line, click to open. Unlike a row this is not
+ *  cached — whether it is the one still running depends on what has arrived
+ *  since, not on the calls themselves. */
+function renderToolGroup(g, live){
+  const open = S.toolOpen.has(g.key);
+  const cls = `tl-tools${g.isError ? ' err' : ''}${live && !open ? ' live' : ''}`;
+  // `data-seq` only while closed: open, the calls carry their own, and the
+  // scroll keeper reads the list top to bottom (timeline-scroll.js).
+  const head = `<div class="${cls}" role="button" tabindex="0" aria-expanded="${open}"`
+    + ` data-tools="${g.key}"${open ? '' : ` data-seq="${g.seq}"`}>`
+    + `<i>\u203a</i><b>${esc(g.tool)}</b><span>${esc(g.detail)}</span><em>\u00d7${g.count}</em></div>`;
+  return open
+    ? `<div>${head}<div class="tl-tools-body">${g.rows.map(renderMessageRow).join('')}</div></div>`
+    : head;
 }
 
 function messageRowHTML(m){
@@ -1041,7 +1126,7 @@ function messageRowHTML(m){
 function renderMessageTimeline(key){
   const host = $('messageTimeline');
   if (!host) return;
-  renderInterruptButton();
+  renderSendButton();
   // Text mode hides #termWrap, and with it the "Select a worktree" hint the
   // terminal path shows — so without this a phone opens on an empty page.
   if (!key) {
@@ -1049,33 +1134,72 @@ function renderMessageTimeline(key){
       ? 'Pick a pane from the list on the left' : 'Tap ☰ at the top left to pick a pane';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
+    renderTimelineToBottom();
     return;
   }
   const rows = S.messages[key] || [];
-  // Follow new output only when already at the bottom; someone scrolled up to
-  // read must not be yanked down by the next tool call. A different pane
-  // always opens at its latest.
-  const follow = host.dataset.key !== key
-    || host.scrollHeight - host.scrollTop - host.clientHeight < 48;
+  const items = SeahelmToolGroup.fold(rows);
+  // Only the newest run can be the one still being run, and only while the pane
+  // is actually working — a finished turn's last run must not keep breathing.
+  const live = normStatus((S.panes.get(key) || {}).status) === 'running';
+  // Follow new output only while already at the bottom; someone scrolled up to
+  // read holds their row instead (timeline-scroll.js). A different pane always
+  // opens at its latest.
+  const anchor = host.dataset.key !== key
+    ? { follow: true }
+    : SeahelmTimelineScroll.capture(host, timelineRowIndex(host), TL_BOTTOM_SLOP);
   const h = S.history[key] || {};
   const top = h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
     : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
   host.innerHTML = rows.length
-    ? `<div class="tl">${top}${rows.map(renderMessageRow).join('')}</div>`
+    ? `<div class="tl">${top}${items.map((it, i) => {
+        // Only the newest line can be the one being run, and only while the
+        // pane is working — a finished turn's last call must not keep breathing.
+        const now = live && i === items.length - 1;
+        if (it.kind === 'tools') return renderToolGroup(it, now);
+        const row = renderMessageRow(it.msg);
+        // A call still on its own breathes the same way a folded run does: the
+        // moment you most want it to is before a second call has arrived.
+        return now && it.msg.kind === 'tool' ? row.replace('class="tl-tool', 'class="tl-tool live') : row;
+      }).join('')}</div>`
     : '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
   host.dataset.key = key;
-  if (follow) host.scrollTop = host.scrollHeight;
-  // Near the top, or too little to scroll at all: fetch the page before. Checked
-  // a frame later, once a caller holding the reading position has put it back.
+  // Synchronously, before anything can paint or read the position back: the
+  // innerHTML above emptied the scroller, so scrollTop is 0 until this lands.
+  host.scrollTop = SeahelmTimelineScroll.restore(host, anchor, (seq) => timelineRowTop(host, seq));
+  renderTimelineToBottom();
+  // Near the top, or too little to scroll at all: fetch the page before.
   requestAnimationFrame(() => { if (host.scrollTop < 200) loadOlderMessages(key); });
 }
 
-/** Repaint without moving what is on screen: history lands above it. */
-function renderKeepingPosition(key){
-  const host = $('messageTimeline');
-  const fromBottom = host.scrollHeight - host.scrollTop;
-  renderMessageTimeline(key);
-  host.scrollTop = host.scrollHeight - fromBottom;
+/** The rendered rows, top to bottom, as timeline-scroll.js reads them. `top` is
+ *  measured against the scroller's own content so it survives the composer
+ *  growing or the head changing height underneath us. */
+function timelineRowIndex(host){
+  const nodes = host.querySelectorAll('[data-seq]');
+  const base = host.getBoundingClientRect().top - host.scrollTop;
+  return {
+    length: nodes.length,
+    seqAt: (i) => Number(nodes[i].dataset.seq),
+    topAt: (i) => nodes[i].getBoundingClientRect().top - base,
+  };
+}
+
+function timelineRowTop(host, seq){
+  const row = host.querySelector(`[data-seq="${seq}"]`);
+  if (!row) return null;
+  return row.getBoundingClientRect().top - (host.getBoundingClientRect().top - host.scrollTop);
+}
+
+/** "↓ Latest" while the timeline is held above the end. The button lives in
+ *  #midcol, whose bottom is the composer's — so it is parked on the timeline's
+ *  own bottom edge, wherever a grown composer has pushed that to. */
+function renderTimelineToBottom(){
+  const btn = $('toBottom'), host = $('messageTimeline'), mid = $('midcol');
+  if (!btn || !host || loadSurfaceMode() !== 'text') return;
+  const held = host.scrollHeight - host.scrollTop - host.clientHeight > TL_BOTTOM_SLOP;
+  btn.classList.toggle('on', held);
+  if (held && mid) btn.style.bottom = (mid.clientHeight - host.offsetTop - host.offsetHeight + 12) + 'px';
 }
 
 function loadOlderMessages(key){
@@ -1085,7 +1209,7 @@ function loadOlderMessages(key){
   const h = (S.history[key] = S.history[key] || { loading: false, done: false });
   if (h.loading || h.done) return;
   h.loading = true;
-  renderKeepingPosition(key);
+  renderMessageTimeline(key);
   sendCommand('message.history', { pane_session_key: key, before_seq: SeahelmMessageTimeline.oldestSeq(list), limit: 50 }, (r) => {
     h.loading = false;
     if (S.messages[key] !== list) return;          // the socket dropped meanwhile
@@ -1097,12 +1221,38 @@ function loadOlderMessages(key){
       for (const m of older) SeahelmMessageTimeline.appendMessage(list, m, MESSAGE_CAP);
       if (!r.result.has_more || !older.length) h.done = true;
     }
-    if (S.selPane === key && loadSurfaceMode() === 'text') renderKeepingPosition(key);
+    if (S.selPane === key && loadSurfaceMode() === 'text') renderMessageTimeline(key);
   });
 }
 $('messageTimeline').addEventListener('scroll', (ev) => {
   if (ev.target.scrollTop < 200) loadOlderMessages(ev.target.dataset.key);
+  // The swipe that ends at the bottom is what re-arms following, so the button
+  // has to go the moment it does.
+  renderTimelineToBottom();
 }, { passive: true });
+
+/** Open or shut a folded run of calls. Delegated, because every event rebuilds
+ *  the list and the line that was clicked stops existing. The re-render keeps
+ *  the reader's place the same way any other repaint does. */
+function toggleToolGroup(head){
+  const key = Number(head.dataset.tools);
+  if (S.toolOpen.has(key)) S.toolOpen.delete(key); else S.toolOpen.add(key);
+  renderMessageTimeline(S.selPane);
+}
+
+$('messageTimeline').addEventListener('click', (ev) => {
+  const head = ev.target.closest('[data-tools]');
+  if (head) toggleToolGroup(head);
+});
+
+// It is a button, so it answers the keys a button answers.
+$('messageTimeline').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const head = ev.target.closest('[data-tools]');
+  if (!head) return;
+  ev.preventDefault();
+  toggleToolGroup(head);
+});
 
 // Every agent seahelm knows says "esc to interrupt" in its status line, and ^C
 // at an idle Claude or Codex prompt is the first half of quitting it. A shell
@@ -1110,15 +1260,12 @@ $('messageTimeline').addEventListener('scroll', (ev) => {
 const CTRL_C_INTERRUPTS = new Set(['brew', 'btop', 'top', 'htop', 'docker', 'npm', 'yarn',
   'make', 'cargo', 'go', 'python', 'pip', 'shellCommand']);
 
-function renderInterruptButton(){
-  const btn = $('interruptBtn');
-  if (!btn) return;
-  btn.hidden = loadSurfaceMode() !== 'text';
-  btn.disabled = !(S.selPane && isLinked());
-  const pane = S.panes.get(S.selPane) || {};
-  btn.title = CTRL_C_INTERRUPTS.has(pane.agent_type)
-    ? 'Interrupt — send Ctrl+C' : 'Interrupt — send Esc, stopping this agent turn';
-}
+const SEND_LABEL = {
+  send: 'Send',
+  none: 'Send',
+  stop: { running: 'Stop — interrupt this turn', waiting: 'Stop — never mind, take it back' },
+};
+
 
 function interruptPane(){
   const key = S.selPane;
@@ -1133,7 +1280,6 @@ function interruptPane(){
     showActionToast('Interrupted');
   });
 }
-$('interruptBtn').onclick = interruptPane;
 
 const SURFACE_KEY = 'seahelm_surface_mode';
 function defaultSurfaceMode(){
@@ -1156,7 +1302,12 @@ function applySurfaceMode(){
   const rendererBadge = $('rendererBadge');
   if (tl) tl.classList.toggle('on', text);
   if (wrap) wrap.classList.toggle('text-hidden', text);
-  if (toBottom) toBottom.classList.toggle('text-hidden', text);
+  // Both surfaces scroll back and need the way home; each drives `on` itself,
+  // so switching modes only has to drop the other's answer.
+  if (toBottom) {
+    toBottom.classList.remove('on');
+    toBottom.style.bottom = '';   // text mode parks it on the timeline's edge instead
+  }
   if (composer) composer.classList.toggle('on', text);
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
@@ -1164,7 +1315,7 @@ function applySurfaceMode(){
   // timeline keeps one of them, as Interrupt.
   const keys = $('termKeys');
   if (keys) keys.style.display = text ? 'none' : '';
-  renderInterruptButton();
+  renderSendButton();
   // With a worktree open the head names it (renderDetail); only fall back to
   // the mode when there is nothing to name.
   const head = $('detailHead');
@@ -1213,6 +1364,12 @@ applySurfaceMode();
 function autoGrowComposer(){
   const input = $('msgInput');
   if (!input) return;
+  // A taller composer takes the height off the timeline, which on its own
+  // leaves someone who was reading the newest line a line or two above it —
+  // and, being no longer at the bottom, no longer following either. So whoever
+  // was at the end is put back there once the field has settled.
+  const host = $('messageTimeline');
+  const wasAtEnd = host && host.scrollHeight - host.scrollTop - host.clientHeight <= TL_BOTTOM_SLOP;
   // Measure from nothing, or a field that just lost a line keeps the taller
   // scrollHeight it had and never shrinks back.
   input.style.height = 'auto';
@@ -1222,9 +1379,52 @@ function autoGrowComposer(){
   const border = input.offsetHeight - input.clientHeight;
   // No ceiling here: `max-height` in the CSS clamps it, and the field scrolls.
   input.style.height = (input.scrollHeight + border) + 'px';
+  if (wasAtEnd) host.scrollTop = host.scrollHeight;
+  renderTimelineToBottom();
+  renderSendButton();
 }
 
-function sendComposerText(){
+/** The composer's one button: what it will do, and what the pane is doing.
+ *  An icon carries no label, so both have to be visible on it. */
+function renderSendButton(){
+  const btn = $('msgSend'), input = $('msgInput');
+  if (!btn) return;
+  const pane = (S.selPane && S.panes.get(S.selPane)) || null;
+  const status = pane ? normStatus(pane.status) : 'idle';
+  const action = SeahelmComposerAction.composerAction({
+    hasText: !!(input && input.value.trim()),
+    status,
+    ready: !!(S.selPane && isLinked()),
+  });
+  btn.dataset.action = action;
+  // The status is worn whether or not it is the button's job right now, so a
+  // running agent still reads as running while you type at it.
+  btn.dataset.status = status;
+  btn.disabled = action === 'none';
+
+  let label = action === 'stop' ? SEND_LABEL.stop[status] : SEND_LABEL[action];
+  if (action === 'stop' && !CTRL_C_INTERRUPTS.has(pane && pane.agent_type)) {
+    label += ' (Esc)';
+  } else if (action === 'stop') {
+    label += ' (Ctrl+C)';
+  }
+  // The elapsed time the status line used to show: no longer worth a row, but
+  // it costs nothing here.
+  const since = status === 'running' && pane
+    ? (S.rowTimes.get(pane.worktree_path) || {}).running_since : 0;
+  if (since) label += ` — running ${compactDuration(since)}`;
+  else if (action !== 'stop' && status === 'running') label += ' — the agent is running';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+/**
+ * @param {boolean} byTap  true when the send button was pressed, rather than Enter.
+ *   Reaching for the button means "done typing", so on a phone the keyboard is
+ *   dismissed — half the screen back, and what you just sent is what you want to
+ *   look at. Enter keeps the caret: someone typing is likely still typing.
+ */
+function sendComposerText(byTap){
   const input = $('msgInput');
   const text = (input && input.value || '').trim();
   const key = S.selPane;
@@ -1233,12 +1433,21 @@ function sendComposerText(){
   const paneId = pane.pane_id || key;
   sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, () => {});
   input.value = '';
+  if (byTap) input.blur();
   autoGrowComposer();
+  // Sending re-arms following, wherever you had scrolled back to: the reply is
+  // what you are now waiting for.
+  const host = $('messageTimeline');
+  if (host && loadSurfaceMode() === 'text') { host.scrollTop = host.scrollHeight; renderTimelineToBottom(); }
 }
 (function wireComposer(){
   const send = $('msgSend');
   const input = $('msgInput');
-  if (send) send.onclick = sendComposerText;
+  // One button, so the click dispatches on what it currently means.
+  if (send) send.onclick = () => {
+    if (send.dataset.action === 'stop') interruptPane();
+    else sendComposerText(true);
+  };
   if (input) input.addEventListener('input', autoGrowComposer);
   if (input) input.addEventListener('keydown', (ev) => {
     // Enter and Escape mean nothing here while an IME is composing — see
@@ -1466,8 +1675,8 @@ function renderSuggestions(){
   const host = $('suggestDock'); host.innerHTML='';
   const text = loadSurfaceMode() === 'text';
   renderReplyBar(text);
-  renderAttentionLine(text);
-  renderRunLine();
+  renderWaitingBadge(text);
+  renderSendButton();
   // The timeline has its own places for these; the floating dock would cover
   // the head and the history it pages in, and repeat what the timeline says.
   if (text) return;
@@ -1521,40 +1730,19 @@ function renderReplyBar(text){
   bar.appendChild(opts);
 }
 
-const RUN_LINE_LABEL = { running: 'Running', waiting: 'Waiting on you', failed: 'Failed' };
-/** The selected pane's live status above the composer; hidden while it rests. */
-function renderRunLine(){
-  const line = $('runLine');
-  const pane = loadSurfaceMode() === 'text' && S.selPane ? S.panes.get(S.selPane) : null;
-  const st = pane ? normStatus(pane.status) : '';
-  line.hidden = !RUN_LINE_LABEL[st];
-  if (line.hidden) { line.innerHTML = ''; return; }
-  const since = st === 'running' ? (S.rowTimes.get(pane.worktree_path) || {}).running_since : 0;
-  line.innerHTML = (st === 'running' ? '<span class="fm-spin"></span>' : `<i style="background:${STC[st]}"></i>`)
-    + `<span class="rl-${st}">${RUN_LINE_LABEL[st]}</span>`
-    + (since ? `<span class="rl-time" data-running-since="${since}">${esc(compactDuration(since))}</span>` : '');
-}
 
 /** Other panes waiting on a decision: one line under the head, a tap away. */
-function renderAttentionLine(text){
-  const line = $('attentionLine');
-  const waiting = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane) : [];
-  line.hidden = !waiting.length;
-  line.innerHTML = '';
-  for (const [pid, e] of waiting.slice(0, 3)) {
-    const p = S.panes.get(pid) || {};
-    const name = [p.project, p.branch].filter(Boolean).join(' · ') || (p.title || '').trim() || shortId(p.pane_id || pid);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.innerHTML = `<b>${esc(name)}</b> ${e.type === 'question' ? 'needs approval' : 'has a suggestion'} ›`;
-    b.onclick = () => selectPaneByKey(pid);
-    line.appendChild(b);
-  }
-  if (waiting.length > 3) {
-    const more = document.createElement('em');
-    more.textContent = `+${waiting.length - 3} more`;
-    line.appendChild(more);
-  }
+/** How many panes other than the one on screen are waiting on you, counted on
+ *  the ☰ that opens the fleet list — where those panes are, each already
+ *  carrying its own status dot. The pane you are looking at is not counted: its
+ *  decision is already in the reply bar above the composer. */
+function renderWaitingBadge(text){
+  const btn = $('drawerBtn');
+  if (!btn) return;
+  const n = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length : 0;
+  if (n) btn.setAttribute('data-waiting', n > 9 ? '9+' : String(n));
+  else btn.removeAttribute('data-waiting');
+  btn.title = n ? `Fleet list — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Fleet list';
 }
 
 // ── First Mate list ────────────────────────────────────────────────────────
@@ -1782,9 +1970,6 @@ function rowTimeText(runningSince, lastActivityAt){
 function tickTimes(){
   for (const el of document.querySelectorAll('.fm-time')){
     el.textContent = rowTimeText(Number(el.dataset.runningSince) || 0, Number(el.dataset.lastActivity) || 0);
-  }
-  for (const el of document.querySelectorAll('.rl-time')){
-    el.textContent = compactDuration(Number(el.dataset.runningSince) || 0);
   }
 }
 setInterval(tickTimes, 1000);
@@ -2496,6 +2681,8 @@ async function handleVT(paneKey, v){
 function updateToBottom(){
   const btn = $('toBottom');
   if (!btn) return;
+  // Text mode has no xterm buffer to ask; renderTimelineToBottom owns it there.
+  if (loadSurfaceMode() === 'text') { renderTimelineToBottom(); return; }
   const entry = S.vt.focus ? S.vt.panes.get(S.vt.focus) : null;
   if (!entry){ btn.classList.remove('on'); return; }
   const b = entry.term.buffer.active;
@@ -2554,6 +2741,14 @@ renderGate();   // the gate is the page until a connection exists
 $('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
 $('scrim').onclick=()=>setDrawer(false);
 $('toBottom').onclick=()=>{
+  if (loadSurfaceMode() === 'text') {
+    const host = $('messageTimeline');
+    // Instant, not smooth: a smooth scroll runs past the next repaint, which
+    // would read a position still on its way and hold the reader short of the end.
+    if (host) host.scrollTop = host.scrollHeight;
+    renderTimelineToBottom();
+    return;
+  }
   const e = S.vt.focus && S.vt.panes.get(S.vt.focus);
   if (e) e.term.scrollToBottom();
   updateToBottom();

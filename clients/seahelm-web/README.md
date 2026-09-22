@@ -58,6 +58,8 @@ push:     {"type":"notify","method","params"}
 | `vt-apply.js` | serializes VT frame writes; waits for `term.write` before applying the next frame |
 | `term-focus.js` | a click on the chrome does not steal the terminal caret — real input fields excepted |
 | `composer-keys.js` | what Enter / Esc mean in the timeline composer; hands both back to an IME while it is composing |
+| `timeline-scroll.js` | the timeline sticks to the bottom while you are at it and holds your row when you are not — a repaint rebuilds every row, so the place has to be taken and put back by hand |
+| `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
 
 ## The interface
