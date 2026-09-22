@@ -118,6 +118,7 @@
 		3BE5AE4B30540C9F80527B7F /* ChromeDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AD78048C5DC1D7D1D5E3F /* ChromeDividerView.swift */; };
 		3C498141117B2348743A7A3E /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */; };
 		3D18A10A7522058688B2A1F7 /* ChromeCollapseAnimationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FD43578EB5A227077BAA11 /* ChromeCollapseAnimationTests.swift */; };
+		3D1C568BB1699013669F2DC6 /* TerminalThemeModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0CACD5EA4A4607C6C1D8532 /* TerminalThemeModeTests.swift */; };
 		3D2531372E08D4B5475FF17A /* PaneReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 280B84339A7AE83C77426D07 /* PaneReducer.swift */; };
 		3D646290FE05FFC7FE24794B /* StatusBarViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */; };
 		3DB03858C29C479B5A8E7885 /* MailBody.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A702B5B856603AEC1DAAFA /* MailBody.swift */; };
@@ -210,6 +211,7 @@
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
 		68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */; };
+		69C021D47F0CD0650E986C43 /* HookEventMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
 		6AC11D3AF38BF0EEAD1C57F3 /* PaneTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49437644810F143C24E9273B /* PaneTitleResolverTests.swift */; };
 		6B44C70CFE8C5CE5F00533F6 /* ChromeCollapseUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A61F49272C1D9D5FAF19F2 /* ChromeCollapseUITests.swift */; };
@@ -362,6 +364,7 @@
 		AA44F31E55A3443F4FED6247 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64961AFD1B97D23C0490E083 /* StatusBarView.swift */; };
 		AB8BB34F2EF47F1FAA9C958C /* MessageConfigManifestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0AAE876DA8948CFA5C5D17 /* MessageConfigManifestTests.swift */; };
 		ABD409C2FE27613FADC3369E /* github-pr-list.json in Resources */ = {isa = PBXBuildFile; fileRef = D00FBF5F2A32A2CF327AF6E1 /* github-pr-list.json */; };
+		ABD834E24F253C99A199E9FF /* TerminalThemeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FFE253ABA10CC21CD7D8D8B /* TerminalThemeMode.swift */; };
 		ACF7082F13C72511EDEBDA61 /* GitDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */; };
 		AD2BB97C703A9CEAA447467C /* ProcessProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BE708AEC9451A9A8135976C /* ProcessProbeTests.swift */; };
 		AD608FF60D293BA96BCB01B8 /* TerminalHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */; };
@@ -451,6 +454,7 @@
 		D5E1195B106F29ACCB59D516 /* LayoutNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9854E3679A7AF9524F5077 /* LayoutNode.swift */; };
 		D63952B04D839AFBF04F5FC1 /* SeahelmCliInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB13F37078B010D666F6E81E /* SeahelmCliInstallerTests.swift */; };
 		D6494907C3E68AED14842187 /* DashboardViewControllerClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */; };
+		D65114CD26784E14FAA8D333 /* HookEventMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762E7115E9FB9B88ECD72CE5 /* HookEventMerge.swift */; };
 		D6DE797420B8D057066CCF78 /* GmailOAuthCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA55CCCA9FF0DB650A2D0CDE /* GmailOAuthCoordinator.swift */; };
 		D6E31C311D70B3762B8835CF /* ClaudeHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */; };
 		D843B81E4F0FBE92865D80E4 /* OnboardingAgentStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4B1DF4150360B756C4539C /* OnboardingAgentStepView.swift */; };
@@ -599,6 +603,7 @@
 		1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySessionTests.swift; sourceTree = "<group>"; };
 		1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewController.swift; sourceTree = "<group>"; };
 		1DCFDDC4C498DF9532ABDBE4 /* PairingCodeStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCodeStoreTests.swift; sourceTree = "<group>"; };
+		1FFE253ABA10CC21CD7D8D8B /* TerminalThemeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalThemeMode.swift; sourceTree = "<group>"; };
 		201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGrouping.swift; sourceTree = "<group>"; };
 		20D815BD3789070197196037 /* CodexHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetupTests.swift; sourceTree = "<group>"; };
@@ -782,6 +787,7 @@
 		7598CDC2F8E33DD35632FAB7 /* StatusDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorTests.swift; sourceTree = "<group>"; };
 		75A3D6310957D04ABCB2768A /* AppPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPage.swift; sourceTree = "<group>"; };
 		75EE0AFE306266CD4A4EE940 /* ChromeTitlebarRegionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeTitlebarRegionTests.swift; sourceTree = "<group>"; };
+		762E7115E9FB9B88ECD72CE5 /* HookEventMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookEventMerge.swift; sourceTree = "<group>"; };
 		777994FF5519110FAD559388 /* Region.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Region.swift; sourceTree = "<group>"; };
 		77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoStore.swift; sourceTree = "<group>"; };
 		7842E00A1A18C4FAD50AF0ED /* HostGatewaySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySession.swift; sourceTree = "<group>"; };
@@ -874,6 +880,7 @@
 		9FEA86B38AB3BEE8AA18906A /* HeadlessCommandHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadlessCommandHost.swift; sourceTree = "<group>"; };
 		A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHistoryBuffer.swift; sourceTree = "<group>"; };
 		A09CD18DFB68633987C0BD28 /* TelegramInboundMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramInboundMedia.swift; sourceTree = "<group>"; };
+		A0CACD5EA4A4607C6C1D8532 /* TerminalThemeModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalThemeModeTests.swift; sourceTree = "<group>"; };
 		A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayFrame.swift; sourceTree = "<group>"; };
 		A17E46AFD48BFAA312D7D627 /* WorktreeGitStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGitStatsTests.swift; sourceTree = "<group>"; };
 		A1876E1900448D0350043DB3 /* IntegrationBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationBuilderTests.swift; sourceTree = "<group>"; };
@@ -1002,6 +1009,7 @@
 		D7C9832D9B06996A7156C57D /* ActivityFeedRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRenderer.swift; sourceTree = "<group>"; };
 		D7D0D89A0CC921901B1016D2 /* TerminalDropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalDropTests.swift; sourceTree = "<group>"; };
 		D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEventTests.swift; sourceTree = "<group>"; };
+		D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookEventMergeTests.swift; sourceTree = "<group>"; };
 		D8F411B82FDF917ED61460FC /* QuickLookUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookUI.framework; path = System/Library/Frameworks/QuickLookUI.framework; sourceTree = SDKROOT; };
 		D8F5245DB2D144DD5964D270 /* PendingOrdersQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueueTests.swift; sourceTree = "<group>"; };
 		DA02A8188B616E0F6F413FC1 /* EventHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventHub.swift; sourceTree = "<group>"; };
@@ -1171,6 +1179,7 @@
 				E32DE93C37CE90D70B03D84D /* GmailOAuthCredentialStore.swift */,
 				B99782104F7A320C332326AC /* GmailOutboundMail.swift */,
 				F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */,
+				762E7115E9FB9B88ECD72CE5 /* HookEventMerge.swift */,
 				97A7E8E322E5A353D4457DBC /* HooksChannel.swift */,
 				FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */,
 				CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */,
@@ -1600,6 +1609,7 @@
 				47F339357674536CA6736266 /* GlobalKeymapTests.swift */,
 				17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */,
 				EB82719AC58E2E0289564007 /* HookDecoderTests.swift */,
+				D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */,
 				16C8F047AD222C44B3E5DD1A /* HostGatewayAuthTests.swift */,
 				BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */,
 				D09525B8D6C093323B62D10B /* HostGatewayDecisionsTests.swift */,
@@ -1707,6 +1717,7 @@
 				D7D0D89A0CC921901B1016D2 /* TerminalDropTests.swift */,
 				472ACEFBD0F23747FC60EB0D /* TerminalHeaderViewTests.swift */,
 				964F34F7086821A02793C06D /* TerminalLinkPolicyTests.swift */,
+				A0CACD5EA4A4607C6C1D8532 /* TerminalThemeModeTests.swift */,
 				52BC82FB2BA068E9AAA2C118 /* TerminalTranscriptTests.swift */,
 				3F67CBC84404085C3483C910 /* TestViewHelpers.swift */,
 				DBC2859D1D589D68F33F0552 /* TodoStoreTests.swift */,
@@ -1795,6 +1806,7 @@
 				40CAD3E9929AC9E5E32EBA9F /* Station.swift */,
 				B031AB8F05EAC5C260C26F92 /* TerminalDrop.swift */,
 				FF5F2FDB1192CD6A1E031DD1 /* TerminalLinkOpener.swift */,
+				1FFE253ABA10CC21CD7D8D8B /* TerminalThemeMode.swift */,
 				B767FA4381095CD7B0F537CF /* ZmxSessionRecovery.swift */,
 			);
 			path = Terminal;
@@ -2190,6 +2202,7 @@
 				5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */,
 				9F5D2E6010FDB991FA2F0B32 /* HTMLPreviewResourceTests.swift in Sources */,
 				6D66FA7BE6A91F8748F3F780 /* HookDecoderTests.swift in Sources */,
+				69C021D47F0CD0650E986C43 /* HookEventMergeTests.swift in Sources */,
 				4DC9B67D9DB3EE1C96C65503 /* HostGatewayAuthTests.swift in Sources */,
 				FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */,
 				785DB0B4417DD04E94CD58AD /* HostGatewayDecisionsTests.swift in Sources */,
@@ -2296,6 +2309,7 @@
 				B6F1609C3D2F53E8BA6296A0 /* TerminalDropTests.swift in Sources */,
 				9C35BEC65A084B6F21FF11DB /* TerminalHeaderViewTests.swift in Sources */,
 				7E4CF1EE17A0339C8570B80F /* TerminalLinkPolicyTests.swift in Sources */,
+				3D1C568BB1699013669F2DC6 /* TerminalThemeModeTests.swift in Sources */,
 				7DCD8971DE8D081747EA3A9A /* TerminalTranscriptTests.swift in Sources */,
 				FA7FE7F8722B6916762E68E3 /* TestViewHelpers.swift in Sources */,
 				62FF9B7688CD065BE7DEBF35 /* TodoStoreTests.swift in Sources */,
@@ -2459,6 +2473,7 @@
 				0334F26D1F43B1A6530D2D6A /* GrowingTextView.swift in Sources */,
 				3498F0F3D7028F811DF7DF34 /* HeadlessCommandHost.swift in Sources */,
 				F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */,
+				D65114CD26784E14FAA8D333 /* HookEventMerge.swift in Sources */,
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,
 				C85F0294741CB37B07986458 /* HostGatewayAuth.swift in Sources */,
 				4DEB41D0F7E47035706006E2 /* HostGatewayConfig.swift in Sources */,
@@ -2603,6 +2618,7 @@
 				AD608FF60D293BA96BCB01B8 /* TerminalHeaderView.swift in Sources */,
 				085D40690A4B00AC13036C2D /* TerminalLinkOpener.swift in Sources */,
 				5F570733876E3D98C419587D /* TerminalLinkPolicy.swift in Sources */,
+				ABD834E24F253C99A199E9FF /* TerminalThemeMode.swift in Sources */,
 				350E1C39CF2682EBE1BC9E3D /* TerminalTranscript.swift in Sources */,
 				CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */,
 				964D05E6C8C5D093CB6633E2 /* ThemedBackgroundView.swift in Sources */,
@@ -2691,7 +2707,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.59;
+				MARKETING_VERSION = 2.0.63;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2928,7 +2944,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.59;
+				MARKETING_VERSION = 2.0.63;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
