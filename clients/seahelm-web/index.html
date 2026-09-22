@@ -353,6 +353,26 @@
   .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
   .tl-tool em{flex:none;font-style:normal;color:var(--idle)}
   .tl-tool.err b{color:var(--danger)}
+  /* A folded run of calls. Same line as one call, plus a caret that turns. */
+  .tl-tools{display:flex;gap:8px;min-width:0;white-space:nowrap;cursor:pointer;
+    font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
+  .tl-tools i{flex:none;font-style:normal;color:var(--idle);
+    transition:transform .12s ease-out;transform-origin:45% 55%}
+  .tl-tools[aria-expanded="true"] i{transform:rotate(90deg)}
+  .tl-tools b{flex:none;font-weight:500;color:#a8c3c5}
+  .tl-tools span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
+  .tl-tools em{flex:none;font-style:normal;color:var(--idle)}
+  .tl-tools.err b{color:var(--danger)}
+  .tl-tools:focus-visible{outline:1px solid var(--line-12);outline-offset:2px;border-radius:3px}
+  /* Still going: the line breathes rather than blinks, so a working agent is
+     visible from the corner of the eye without pulling it there. */
+  .tl-tool.live span,.tl-tools.live span{animation:tl-breathe 1.5s ease-in-out infinite}
+  @keyframes tl-breathe{0%,100%{opacity:.34}50%{opacity:.95}}
+  @media (prefers-reduced-motion:reduce){
+    .tl-tool.live span,.tl-tools.live span{animation:none;opacity:.8}}
+  /* Open: the calls sit under their own line, hung off a rule so a long run
+     still reads as one thing. */
+  .tl-tools-body{margin-left:3px;padding-left:14px;border-left:1px solid var(--line-12)}
   .tl-asst{margin:10px 0 8px;font-family:var(--sans);
     font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
   .tl-notice{margin:4px 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
@@ -561,6 +581,7 @@
 <script src="./vt-apply.js"></script>
 <script src="./term-focus.js"></script>
 <script src="./message-timeline.js"></script>
+<script src="./tool-group.js"></script>
 <script src="./timeline-scroll.js"></script>
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
@@ -603,6 +624,8 @@ const S = {
   gw:null,   // gateway WebSocket state
   panes:new Map(), worktrees:new Map(),
   focus:null, dnd:null, events:new Map(),
+  // Tool runs the reader has opened, by the run's first `seq` (tool-group.js).
+  toolOpen:new Set(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
   sel:null, selPane:null,
   authPass:null, pendingCode:null,   // authPass = long-lived token; pendingCode for first pair
@@ -1054,6 +1077,22 @@ function renderMessageRow(m){
   return m._html;
 }
 
+/** A folded run of calls: one line, click to open. Unlike a row this is not
+ *  cached — whether it is the one still running depends on what has arrived
+ *  since, not on the calls themselves. */
+function renderToolGroup(g, live){
+  const open = S.toolOpen.has(g.key);
+  const cls = `tl-tools${g.isError ? ' err' : ''}${live && !open ? ' live' : ''}`;
+  // `data-seq` only while closed: open, the calls carry their own, and the
+  // scroll keeper reads the list top to bottom (timeline-scroll.js).
+  const head = `<div class="${cls}" role="button" tabindex="0" aria-expanded="${open}"`
+    + ` data-tools="${g.key}"${open ? '' : ` data-seq="${g.seq}"`}>`
+    + `<i>\u203a</i><b>${esc(g.tool)}</b><span>${esc(g.detail)}</span><em>\u00d7${g.count}</em></div>`;
+  return open
+    ? `<div>${head}<div class="tl-tools-body">${g.rows.map(renderMessageRow).join('')}</div></div>`
+    : head;
+}
+
 function messageRowHTML(m){
   switch (m.kind) {
     case 'tool': {
@@ -1099,6 +1138,10 @@ function renderMessageTimeline(key){
     return;
   }
   const rows = S.messages[key] || [];
+  const items = SeahelmToolGroup.fold(rows);
+  // Only the newest run can be the one still being run, and only while the pane
+  // is actually working — a finished turn's last run must not keep breathing.
+  const live = normStatus((S.panes.get(key) || {}).status) === 'running';
   // Follow new output only while already at the bottom; someone scrolled up to
   // read holds their row instead (timeline-scroll.js). A different pane always
   // opens at its latest.
@@ -1109,7 +1152,16 @@ function renderMessageTimeline(key){
   const top = h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
     : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
   host.innerHTML = rows.length
-    ? `<div class="tl">${top}${rows.map(renderMessageRow).join('')}</div>`
+    ? `<div class="tl">${top}${items.map((it, i) => {
+        // Only the newest line can be the one being run, and only while the
+        // pane is working — a finished turn's last call must not keep breathing.
+        const now = live && i === items.length - 1;
+        if (it.kind === 'tools') return renderToolGroup(it, now);
+        const row = renderMessageRow(it.msg);
+        // A call still on its own breathes the same way a folded run does: the
+        // moment you most want it to is before a second call has arrived.
+        return now && it.msg.kind === 'tool' ? row.replace('class="tl-tool', 'class="tl-tool live') : row;
+      }).join('')}</div>`
     : '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
   host.dataset.key = key;
   // Synchronously, before anything can paint or read the position back: the
@@ -1178,6 +1230,29 @@ $('messageTimeline').addEventListener('scroll', (ev) => {
   // has to go the moment it does.
   renderTimelineToBottom();
 }, { passive: true });
+
+/** Open or shut a folded run of calls. Delegated, because every event rebuilds
+ *  the list and the line that was clicked stops existing. The re-render keeps
+ *  the reader's place the same way any other repaint does. */
+function toggleToolGroup(head){
+  const key = Number(head.dataset.tools);
+  if (S.toolOpen.has(key)) S.toolOpen.delete(key); else S.toolOpen.add(key);
+  renderMessageTimeline(S.selPane);
+}
+
+$('messageTimeline').addEventListener('click', (ev) => {
+  const head = ev.target.closest('[data-tools]');
+  if (head) toggleToolGroup(head);
+});
+
+// It is a button, so it answers the keys a button answers.
+$('messageTimeline').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const head = ev.target.closest('[data-tools]');
+  if (!head) return;
+  ev.preventDefault();
+  toggleToolGroup(head);
+});
 
 // Every agent seahelm knows says "esc to interrupt" in its status line, and ^C
 // at an idle Claude or Codex prompt is the first half of quitting it. A shell
