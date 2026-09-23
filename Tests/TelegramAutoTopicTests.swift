@@ -171,18 +171,34 @@ final class TelegramAutoTopicTests: XCTestCase {
 
     // MARK: - The session store
 
-    func testAutoTopicBindsAndIsFoundByPane() {
+    func testAutoTopicBindsAndIsFoundByWorktree() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let address = "-1001234567890#77"
         let key = CommandSession.key(surface: "telegram", id: address)
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "seahelm · review")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "seahelm · review")
 
-        let found = store.autoTopic(forPaneKey: "pane-a")
+        let found = store.autoTopic(forWorktreePath: "/tmp/a")
         XCTAssertEqual(found?.id, address)
         XCTAssertEqual(found?.topicName, "seahelm · review")
+        XCTAssertEqual(found?.topicScope, .worktree)
         XCTAssertEqual(store.autoTopicAddresses(), [address])
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-b"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/b"))
+    }
+
+    /// The thread follows the work: a bare order goes to whoever reported last,
+    /// not to whichever pane happened to open the thread.
+    func testTheTopicFollowsWhoeverSpokeLast() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let key = CommandSession.key(surface: "telegram", id: "-100#3")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        store.noteActivePane("pane-b", paneId: "B", inWorktree: "/tmp/a")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
+        // A pane in another worktree is not this thread's business.
+        store.noteActivePane("pane-z", paneId: "Z", inWorktree: "/tmp/other")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
     }
 
     /// A topic bound by hand is not ours: prose in it stays conversation, and
@@ -191,31 +207,63 @@ final class TelegramAutoTopicTests: XCTestCase {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#5")
         store.bind(key, toPaneKey: "pane-a", paneId: "A", worktreePath: "/tmp/a")
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-a"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/a"))
         XCTAssertTrue(store.autoTopicAddresses().isEmpty)
     }
 
-    /// A closed pane's topic stops being one we would route to or rename.
-    func testClosingThePaneRetiresItsTopic() {
+    /// A pane ending is no longer the end of the conversation — the others in
+    /// the worktree are still working, and still reporting there.
+    func testClosingOnePaneLeavesTheWorktreeTopicOpen() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#9")
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "n")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
 
-        let closed = store.close(paneId: "A")
+        XCTAssertTrue(store.close(paneId: "A").isEmpty, "a pane ending must not retire the topic")
+        let still = store.autoTopic(forWorktreePath: "/tmp/a")
+        XCTAssertEqual(still?.id, "-100#9")
+        // The pointer goes with the pane; the next to speak claims it.
+        XCTAssertNil(still?.boundPaneId)
+        store.noteActivePane("pane-b", paneId: "B", inWorktree: "/tmp/a")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
+    }
+
+    /// The worktree going is what ends the topic.
+    func testDeletingTheWorktreeRetiresItsTopic() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let key = CommandSession.key(surface: "telegram", id: "-100#9")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        let closed = store.close(worktreePath: "/tmp/a")
         XCTAssertEqual(closed.count, 1)
         XCTAssertTrue(closed[0].autoTopic)
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-a"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/a"))
         XCTAssertTrue(store.autoTopicAddresses().isEmpty)
+    }
+
+    /// Topics opened while one covered a single pane are swept on launch; the
+    /// ones opened since are not.
+    func testOnlyPaneScopedTopicsAreSwept() throws {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let old = """
+        {"key":"telegram:-100#1","autoTopic":true,"boundPaneKey":"p","closed":false}
+        """.data(using: .utf8)!
+        store.save(try JSONDecoder().decode(CommandSession.self, from: old))
+        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#2"),
+                            toWorktreePath: "/tmp/a", paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        let stale = store.paneScopedAutoTopics()
+        XCTAssertEqual(stale.map(\.id), ["-100#1"])
     }
 
     func testTopicNameIsRecordedSoRenamesAreOnlySpentOnChanges() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#9")
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "old")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "old")
         store.noteTopicName("new", for: key)
-        XCTAssertEqual(store.autoTopic(forPaneKey: "pane-a")?.topicName, "new")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.topicName, "new")
     }
 
     /// A session file written before this feature has neither key.
@@ -320,31 +368,48 @@ final class TelegramAutoTopicTests: XCTestCase {
         XCTAssertFalse(TelegramAPIError.network("timeout").isNotModified)
     }
 
-    /// A pane with nothing better to call itself falls back to its repo, and
-    /// `teamclaw · teamclaw` reads as a bug.
-    func testTopicNameSaysTheRepoOnceWhenTheTitleIsTheRepo() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "teamclaw")),
+    /// A worktree on the repo's own trunk would read `teamclaw · teamclaw`.
+    /// Say it once.
+    func testTopicNameSaysTheRepoOnceWhenTheBranchIsTheRepo() {
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", branch: "teamclaw")),
                        "teamclaw")
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "TeamClaw")),
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", branch: "TeamClaw")),
                        "teamclaw")
     }
 
     func testTopicNameKeepsBothWhenTheyDiffer() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "run.sh 无法启动")),
-                       "seahelm · run.sh 无法启动")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", branch: "fix/run-sh")),
+                       "seahelm · fix/run-sh")
     }
 
-    /// A pane in a repo with no title at all still names its room.
-    func testTopicNameFallsBackToTheRepoAlone() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "")),
-                       "seahelm")
+    /// A detached checkout answers to its directory, as it does in the fleet
+    /// listing. Falling back to the bare repo left the integration worktree's
+    /// thread called `teamclaw`, beside the trunk's `teamclaw · main` — and a
+    /// detached HEAD has no branch arriving later to correct it.
+    func testADetachedWorktreeIsNamedAfterItsDirectory() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/Volumes/openbeta/workspace/teamclaw-worktrees/integration")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw · integration")
     }
 
-    /// `PaneTitleResolver` answers from the pane's own fields; a bare pane with
-    /// no station falls through to its branch, then its repo.
-    private func pane(project: String, title: String) -> PaneInfo {
-        PaneInfo(id: "t", worktreePath: "/w/\(project)", agentType: .claudeCode,
-                 project: project, branch: title.isEmpty ? project : title,
+    /// The repo's own checkout, detached: the directory *is* the repo, so it is
+    /// still said once.
+    func testADetachedTrunkIsStillJustTheRepo() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/Volumes/openbeta/workspace/teamclaw")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw")
+    }
+
+    /// A trailing slash must not make the directory read as empty.
+    func testATrailingSlashDoesNotLoseTheDirectory() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/w/teamclaw-worktrees/integration/")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw · integration")
+    }
+
+    private func pane(project: String, branch: String, worktreePath: String? = nil) -> PaneInfo {
+        PaneInfo(id: "t", worktreePath: worktreePath ?? "/w/\(project)", agentType: .claudeCode,
+                 project: project, branch: branch,
                  status: .idle, lastMessage: "", commandLine: nil, roundDuration: 0,
                  startedAt: nil, station: nil, channel: nil, taskProgress: TaskProgress())
     }

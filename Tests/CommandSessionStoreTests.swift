@@ -93,17 +93,17 @@ final class CommandSessionStoreTests: XCTestCase {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let me = "42"
         // Unbound: fleet listener gets every event.
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me])), [me])
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])), [me])
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: [me])), [me])
 
         store.bind("telegram:\(me)", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
         // Bound to #16: only #16 events.
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
-        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me]).isEmpty)
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])), [me])
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: [me]).isEmpty)
 
         // A group bound to the same pane still hears it; the personal chat does too.
         store.bind("telegram:group99", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])),
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])),
                        Set([me, "group99"]))
     }
 
@@ -118,9 +118,9 @@ final class CommandSessionStoreTests: XCTestCase {
     func testBoundChatHearsItsPaneWithNoFleetListeners() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         store.bind("telegram:42", toPaneKey: "k12", paneId: "p12", worktreePath: "/w")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "k12", fleetListenerChatIds: []), ["42"])
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "k12", worktreePath: nil, fleetListenerChatIds: []), ["42"])
         // Another pane's event still says nothing while the fleet is silenced.
-        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: []).isEmpty)
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: []).isEmpty)
     }
 }
 
@@ -175,9 +175,9 @@ final class PaneHandleRegistryTests: XCTestCase {
         store.bind(CommandSession.key(surface: "telegram", id: "-100#46"),
                    toPaneKey: "p", paneId: "A", worktreePath: "/w")
         store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#102"),
-                            toPaneKey: "p", paneId: "A", worktreePath: "/w", topicName: "n")
+                            toWorktreePath: "/w", paneKey: "p", paneId: "A", topicName: "n")
 
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: []),
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: "/w", fleetListenerChatIds: []),
                        ["-100#102"])
         XCTAssertEqual(store.telegramChats(boundToPaneKey: "p"), ["-100#102"])
     }
@@ -186,8 +186,8 @@ final class PaneHandleRegistryTests: XCTestCase {
     func testFleetListenerDoesNotDoubleUpOnABoundGroup() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#7"),
-                            toPaneKey: "p", paneId: "A", worktreePath: "/w", topicName: "n")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: ["-100"]),
+                            toWorktreePath: "/w", paneKey: "p", paneId: "A", topicName: "n")
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: "/w", fleetListenerChatIds: ["-100"]),
                        ["-100#7"])
     }
 
@@ -262,7 +262,7 @@ final class PaneHandleRegistryTests: XCTestCase {
                    toPaneKey: "p", paneId: "A", worktreePath: "/w")
         store.bind(CommandSession.key(surface: "telegram", id: "42"),
                    toPaneKey: "p", paneId: "A", worktreePath: "/w")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: []).sorted(),
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: nil, fleetListenerChatIds: []).sorted(),
                        ["-100#4", "42"])
     }
 }

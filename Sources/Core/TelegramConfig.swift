@@ -38,26 +38,26 @@ struct TelegramConfig: Codable, Equatable {
     /// seahelm never doubles as a trigger.
     var rules: [TelegramRule]?
 
-    /// Give each pane a forum topic of its own in `topicChatId`.
+    /// Give each worktree a forum topic of its own.
     ///
     /// Off by default, and not merely out of caution: it needs a forum group
     /// the bot administers with "Manage Topics", which nothing else here
-    /// requires. Turned on, a pane's first notice opens a thread named after it
-    /// and everything that pane says goes there — which also means the pane
-    /// stops reporting to the fleet-wide chat, or every notice would arrive
-    /// twice.
+    /// requires. Turned on, a worktree's first notice opens a thread named
+    /// `repo · branch` and every pane in that worktree reports there — which
+    /// also means they stop reporting to the fleet-wide chat, or every notice
+    /// would arrive twice.
     var autoTopics: Bool?
 
     /// The forum supergroup topics are opened in when nothing more specific
     /// matches. Its own id, with no topic: what a topic is created *in*.
     var topicChatId: String?
 
-    /// Which group a pane's topic is opened in, keyed by **worktree path** or
-    /// **project name**.
+    /// Which group a worktree's topic is opened in, keyed by **worktree path**
+    /// or **project name**.
     ///
-    /// One group holding every pane in the fleet does not scale — twenty panes
-    /// is twenty threads in one list — so the fleet is split across groups the
-    /// way the work already is. A bot cannot create a group (the Bot API opens
+    /// One group holding the whole fleet does not scale — a busy week is more
+    /// threads than a phone can skim in one list — so the fleet is split across
+    /// groups the way the work already is. A bot cannot create a group (the Bot API opens
     /// topics, not chats), so these are groups someone made by hand and added
     /// the bot to; this table only says which is which.
     ///
@@ -97,16 +97,16 @@ struct TelegramConfig: Codable, Equatable {
         autoTopics == true && (nonBlank(topicChatId) != nil || !(topicChats ?? [:]).isEmpty)
     }
 
-    /// The fallback group: where a pane goes when the table names none for it.
+    /// The fallback group: where a worktree goes when the table names none for it.
     var resolvedTopicChatId: String? {
         guard autoTopics == true, let chat = nonBlank(topicChatId) else { return nil }
         return TelegramChatAddress.chatId(of: chat)
     }
 
-    /// Which group this pane's topic belongs in.
+    /// Which group this worktree's topic belongs in.
     ///
-    /// Most specific first: the worktree it is working in, then the repo that
-    /// worktree belongs to, then the fallback. A value that carries a topic of
+    /// Most specific first: the worktree itself, then the repo it belongs to,
+    /// then the fallback. A value that carries a topic of
     /// its own is taken down to the group — a topic is opened *in* a chat.
     func topicChatId(worktreePath: String, project: String) -> String? {
         guard autoTopics == true else { return nil }

@@ -212,20 +212,32 @@ final class ChatProgressReporter {
         return outcome.newStatus == .idle || outcome.newStatus == .waiting || outcome.newStatus == .error
     }
 
-    /// The line itself: which pane and for how long, then what it has been
-    /// saying and doing — this turn's stream rows, or with none yet, the
-    /// latest activity the screen showed.
+    /// The line itself: which pane and for how long, then anything the agent
+    /// has stopped to say this turn.
+    ///
+    /// A turn that says nothing is just the head, and that is the honest thing
+    /// to show: the pane is working, this long, and has not reported anything
+    /// yet. The screen-scanned activity that used to fill the gap was the same
+    /// tool noise `row(for:)` drops, arriving by another road.
     static func line(for info: PaneInfo, handle: Int, feed: [String] = [],
                      since: Date, now: Date) -> String {
         let head = "⏳ **#\(handle) \(info.project)/\(info.branch)** · \(elapsed(now.timeIntervalSince(since)))"
-        if !feed.isEmpty { return head + "\n\n" + feed.joined(separator: "\n") }
-        guard let latest = info.activityEvents.first else { return head }
-        let detail = latest.detail.isEmpty ? latest.tool : "\(latest.tool) — \(latest.detail)"
-        return "\(head)\n\(truncated(detail))"
+        return feed.isEmpty ? head : head + "\n\n" + feed.joined(separator: "\n")
     }
 
-    /// One stream row as a line of the message. What the agent says reads as
-    /// prose; a tool call is marked, kept short, and flagged when it failed.
+    /// One stream row as a line of the message — what the agent *said*, and
+    /// nothing else.
+    ///
+    /// Tool calls used to be here too, and they drowned the line they were
+    /// supposed to be context for: a turn reads as four truncated shell
+    /// commands and one sentence, where the sentence was the whole point. On a
+    /// phone the commands are unreadable anyway — cut to 100 characters, a
+    /// `gh run view … --json jobs 2>&1 | python3 -c "…` tells you nothing you
+    /// could act on. What is worth knowing while a turn runs is that it is
+    /// running (the elapsed time in the head says so) and anything the agent
+    /// stopped to say. The calls are all still on the timeline, in the web
+    /// client and on the Mac, where there is room to read them.
+    ///
     /// The rest of the stream — your own prompt, status edges, decisions — has
     /// its own messages in the chat already.
     static func row(for message: MessageEvent) -> String? {
@@ -233,12 +245,7 @@ final class ChatProgressReporter {
         case .assistant, .thinking:
             let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : truncated(text, limit: 200)
-        case .tool:
-            guard let tool = message.tool, !tool.isEmpty else { return nil }
-            let detail = message.detail ?? ""
-            let mark = message.isError == true ? "✗" : "›"
-            return truncated(detail.isEmpty ? "\(mark) \(tool)" : "\(mark) \(tool) — \(detail)", limit: 100)
-        case .user, .status, .decision, .notice:
+        case .tool, .user, .status, .decision, .notice:
             return nil
         }
     }
