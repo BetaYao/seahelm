@@ -18,6 +18,11 @@ struct PendingAction: Equatable {
 /// this is for the surfaces that have no selection to look at — a Telegram
 /// chat, a mail thread — each of which keeps its own binding, so a phone's
 /// `/go` cannot move the desktop and a desktop click cannot redirect a phone.
+enum TopicScope: String, Codable {
+    case pane
+    case worktree
+}
+
 struct CommandSession: Codable, Equatable {
     /// `telegram:<chat id>`, `mail:<thread id>`.
     let key: String
@@ -43,13 +48,26 @@ struct CommandSession: Codable, Equatable {
     /// thread somebody else opened, where the binding is simply let go of and
     /// the room told.
     var autoTopic: Bool
-    /// The name the topic currently carries, so a rename is only spent when the
-    /// pane's title has actually moved.
+    /// The name the topic currently carries, so a rename is only spent when
+    /// what it is called has actually moved.
     var topicName: String?
+    /// What an auto-opened topic covers.
+    ///
+    /// One topic per *pane* is what shipped first, and on a real fleet it made
+    /// the group's topic list too long to skim — twenty threads for work that
+    /// lives in five worktrees. A topic now covers a **worktree**, and the panes
+    /// in it share one thread.
+    ///
+    /// The value is stored rather than assumed because it is also the migration
+    /// marker: a record written before this decodes as `.pane`, which is how the
+    /// topics already opened are told apart from the ones opened since, and
+    /// swept.
+    var topicScope: TopicScope
 
     init(key: String, boundPaneKey: String? = nil, boundPaneId: String? = nil,
          boundWorktreePath: String? = nil, commander: String? = nil, closed: Bool = false,
-         autoTopic: Bool = false, topicName: String? = nil) {
+         autoTopic: Bool = false, topicName: String? = nil,
+         topicScope: TopicScope = .worktree) {
         self.key = key
         self.boundPaneKey = boundPaneKey
         self.boundPaneId = boundPaneId
@@ -58,11 +76,12 @@ struct CommandSession: Codable, Equatable {
         self.closed = closed
         self.autoTopic = autoTopic
         self.topicName = topicName
+        self.topicScope = topicScope
     }
 
     enum CodingKeys: String, CodingKey {
         case key, boundPaneKey, boundPaneId, boundWorktreePath, commander, closed
-        case autoTopic, topicName
+        case autoTopic, topicName, topicScope
     }
 
     /// Hand-written so a store written before auto-topics still decodes.
@@ -75,6 +94,8 @@ struct CommandSession: Codable, Equatable {
         commander = try c.decodeIfPresent(String.self, forKey: .commander)
         closed = try c.decodeIfPresent(Bool.self, forKey: .closed) ?? false
         autoTopic = try c.decodeIfPresent(Bool.self, forKey: .autoTopic) ?? false
+        // Absent means it was written before topics covered a worktree.
+        topicScope = try c.decodeIfPresent(TopicScope.self, forKey: .topicScope) ?? .pane
         topicName = try c.decodeIfPresent(String.self, forKey: .topicName)
     }
 
@@ -154,29 +175,62 @@ final class CommandSessionStore {
         }
     }
 
-    /// Bind a topic seahelm just opened to the pane it was opened for.
+    /// Bind a topic seahelm just opened to the worktree it was opened for.
     ///
-    /// Separate from `bind` because it also records the two things that make a
-    /// topic *ours* — see `CommandSession.autoTopic`.
-    func bindAutoTopic(_ key: String, toPaneKey paneKey: String, paneId: String,
-                       worktreePath: String, topicName: String) {
+    /// Separate from `bind` because it also records the things that make a topic
+    /// *ours* — see `CommandSession.autoTopic`. The pane fields are the *current*
+    /// target within that worktree, not the topic's identity: whoever spoke last
+    /// is who a bare order goes to.
+    func bindAutoTopic(_ key: String, toWorktreePath path: String,
+                       paneKey: String?, paneId: String?, topicName: String) {
         queue.sync {
             var session = sessions[key] ?? CommandSession(key: key)
             session.boundPaneKey = paneKey
             session.boundPaneId = paneId
-            session.boundWorktreePath = worktreePath
+            session.boundWorktreePath = path
             session.closed = false
             session.autoTopic = true
             session.topicName = topicName
+            session.topicScope = .worktree
             sessions[key] = session
             persist()
         }
     }
 
-    /// The live topic seahelm opened for this pane, if it has one.
-    func autoTopic(forPaneKey paneKey: String) -> CommandSession? {
+    /// The live topic seahelm opened for this worktree, if it has one.
+    func autoTopic(forWorktreePath path: String) -> CommandSession? {
         queue.sync {
-            sessions.values.first { $0.autoTopic && !$0.closed && $0.boundPaneKey == paneKey }
+            sessions.values.first {
+                $0.autoTopic && !$0.closed && $0.topicScope == .worktree
+                    && $0.boundWorktreePath == path
+            }
+        }
+    }
+
+    /// Point a worktree's topic at the pane that just spoke, so a bare order
+    /// follows the work rather than whichever pane happened to open the thread.
+    /// Only moves what changed — every notice comes through here.
+    func noteActivePane(_ paneKey: String, paneId: String, inWorktree path: String) {
+        queue.sync {
+            guard var session = sessions.values.first(where: {
+                $0.autoTopic && !$0.closed && $0.topicScope == .worktree
+                    && $0.boundWorktreePath == path
+            }), session.boundPaneKey != paneKey else { return }
+            session.boundPaneKey = paneKey
+            session.boundPaneId = paneId
+            sessions[session.key] = session
+            persist()
+        }
+    }
+
+    /// The topics opened back when one covered a single pane. Swept on launch:
+    /// the fleet they describe no longer exists in that shape, and leaving them
+    /// is leaving the very list that made this change necessary.
+    func paneScopedAutoTopics() -> [CommandSession] {
+        queue.sync {
+            sessions.values.filter {
+                $0.autoTopic && $0.topicScope == .pane && $0.surface == "telegram"
+            }
         }
     }
 
@@ -248,17 +302,19 @@ final class CommandSessionStore {
     /// are all the same room. Deduping here rather than at each call site is
     /// deliberate; the first fix missed two of the three and the duplicates
     /// came straight back. See `TelegramChatAddress.oneAddressPerChat`.
-    func telegramChatsToNotify(paneKey: String?,
+    func telegramChatsToNotify(paneKey: String?, worktreePath: String?,
                                fleetListenerChatIds: [String]) -> [String] {
         queue.sync {
             var chats = Set<String>()
-            if let paneKey {
-                for session in sessions.values
-                where session.surface == "telegram"
-                    && !session.closed
-                    && session.boundPaneKey == paneKey {
-                    chats.insert(session.id)
-                }
+            for session in sessions.values
+            where session.surface == "telegram" && !session.closed {
+                // A topic seahelm opened covers a worktree, so every pane in it
+                // reports to the same thread. A binding somebody made by hand is
+                // still to the one pane they bound.
+                let mine = session.autoTopic && session.topicScope == .worktree
+                    ? (worktreePath != nil && session.boundWorktreePath == worktreePath)
+                    : (paneKey != nil && session.boundPaneKey == paneKey)
+                if mine { chats.insert(session.id) }
             }
             for chatId in fleetListenerChatIds {
                 let session = sessions[CommandSession.key(surface: "telegram", id: chatId)]
@@ -268,8 +324,11 @@ final class CommandSessionStore {
                 }
             }
             return TelegramChatAddress.oneAddressPerChat(
-                Array(chats), preferring: paneKey.flatMap { key in
-                    sessions.values.first { $0.autoTopic && !$0.closed && $0.boundPaneKey == key }?.id
+                Array(chats), preferring: worktreePath.flatMap { path in
+                    sessions.values.first {
+                        $0.autoTopic && !$0.closed && $0.topicScope == .worktree
+                            && $0.boundWorktreePath == path
+                    }?.id
                 })
         }
     }
@@ -292,7 +351,38 @@ final class CommandSessionStore {
     func close(paneId: String) -> [CommandSession] {
         queue.sync {
             var closed: [CommandSession] = []
+            var repointed = false
             for (key, value) in sessions where value.boundPaneId == paneId && !value.closed {
+                // A worktree's topic outlives the panes in it. The pane that
+                // ended was only the thread's current target, so the pointer
+                // goes and the conversation stays — the next pane to speak in
+                // that worktree claims it.
+                if value.autoTopic && value.topicScope == .worktree {
+                    var changed = value
+                    changed.boundPaneKey = nil
+                    changed.boundPaneId = nil
+                    sessions[key] = changed
+                    repointed = true
+                    continue
+                }
+                var changed = value
+                changed.closed = true
+                sessions[key] = changed
+                closed.append(changed)
+            }
+            if !closed.isEmpty || repointed { persist() }
+            return closed
+        }
+    }
+
+    /// Close every conversation this worktree owns. The worktree going is what
+    /// ends a topic seahelm opened for it — a pane ending is not, because the
+    /// others in it are still talking.
+    func close(worktreePath: String) -> [CommandSession] {
+        queue.sync {
+            var closed: [CommandSession] = []
+            for (key, value) in sessions
+            where value.boundWorktreePath == worktreePath && !value.closed {
                 var changed = value
                 changed.closed = true
                 sessions[key] = changed

@@ -417,6 +417,7 @@ class MainWindowController: NSWindowController {
         // opened in earlier runs; the session store is what remembers them.
         // Not from `statusPublisher`'s initializer: this reads `tabCoordinator`,
         // whose own initializer reads `statusPublisher`.
+        sweepPaneScopedTopics()
         syncDedicatedTopics()
 
         NotificationCenter.default.addObserver(
@@ -2811,6 +2812,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
         // Sweep the worktree's cards before the UI drops it: deleting a worktree
         // takes every pane with it, so worktree-scoped cards are stale too.
         tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
+        endChatBindings(forWorktreePath: info.path, reason: "its worktree was deleted")
         worktreeDidDelete(info)
     }
 
@@ -3245,11 +3247,13 @@ extension MainWindowController: CommandHost {
         // banner is delayed — by one round trip, once per pane, and the
         // alternative is announcing the pane in General and then never again.
         if let pane, let paneKey, config.telegram?.autoTopicsEnabled == true {
-            switch ensureAutoTopic(for: pane, paneKey: paneKey, pending: text) {
+            let labelled = Self.topicLabelled(text, pane: pane, paneKey: paneKey)
+            switch ensureAutoTopic(for: pane, paneKey: paneKey, pending: labelled) {
             case .deferred:
                 return
             case .ready:
-                deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: [])
+                deliverTelegram(terminalID: terminalID, text: labelled, paneKey: paneKey,
+                                worktreePath: pane.worktreePath, fleet: [])
                 return
             case .unavailable:
                 break
@@ -3263,13 +3267,24 @@ extension MainWindowController: CommandHost {
                 fleet.append(chat)
             }
         }
-        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: fleet)
+        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey,
+                        worktreePath: pane?.worktreePath, fleet: fleet)
     }
 
-    private func deliverTelegram(terminalID: String, text: String, paneKey: String?, fleet: [String]) {
+    /// A worktree's topic carries every pane in it, so once there is more than
+    /// one the reader has to be told which is speaking. One pane is the common
+    /// case and gets nothing: a handle on every line of a thread that only ever
+    /// has one voice is furniture.
+    static func topicLabelled(_ text: String, pane: PaneInfo, paneKey: String) -> String {
+        guard AgentRegistry.shared.panes(forWorktree: pane.worktreePath).count > 1 else { return text }
+        return "#\(PaneHandleRegistry.shared.handle(for: paneKey)) \(text)"
+    }
+
+    private func deliverTelegram(terminalID: String, text: String, paneKey: String?,
+                                 worktreePath: String?, fleet: [String]) {
         // Already one address per chat — see `telegramChatsToNotify`.
         let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
-            paneKey: paneKey, fleetListenerChatIds: fleet)
+            paneKey: paneKey, worktreePath: worktreePath, fleetListenerChatIds: fleet)
         for chatId in chats {
             AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
@@ -3305,26 +3320,34 @@ extension MainWindowController {
         telegramChannel ?? (AgentRegistry.shared.externalChannel("telegram") as? TelegramChannel)
     }
 
-    /// Make sure this pane has a topic of its own, opening one if it does not.
+    /// Make sure this pane's *worktree* has a topic, opening one if it does not.
     ///
-    /// Opening is lazy on purpose. A fleet of twenty panes is twenty threads if
-    /// they are created up front — most of them for panes that never say
-    /// anything — and twenty `createForumTopic` calls in a burst is exactly the
-    /// shape Telegram rate-limits. The first thing a pane has to say is also
-    /// the first moment a thread for it is worth reading.
+    /// A topic used to cover one pane. On a real fleet that made the group's
+    /// topic list too long to skim — twenty threads for work living in five
+    /// worktrees — so the worktree is the thread now and its panes share it.
+    ///
+    /// Opening stays lazy. Creating one up front for every worktree is a burst
+    /// of `createForumTopic` calls, which is exactly the shape Telegram
+    /// rate-limits, and most of them would be for work that never says
+    /// anything. The first thing a worktree has to say is the first moment a
+    /// thread for it is worth reading.
     func ensureAutoTopic(for pane: PaneInfo, paneKey: String, pending text: String) -> AutoTopicState {
-        // Which group this pane belongs in — its worktree's, its repo's, or the
-        // fallback. A pane whose repo names no group and where there is no
+        // Which group this worktree belongs in — its own, its repo's, or the
+        // fallback. A worktree whose repo names no group and where there is no
         // fallback simply has no topic, and reports the ordinary way.
         guard !autoTopicsBlocked,
               let chatId = config.telegram?.topicChatId(worktreePath: pane.worktreePath,
                                                         project: pane.project) else {
             return .unavailable
         }
+        let worktreePath = pane.worktreePath
         let name = Self.autoTopicName(for: pane)
 
-        if let session = tabCoordinator.commandSessions.autoTopic(forPaneKey: paneKey) {
-            // The agent renames itself as the work turns; follow it, but only
+        if let session = tabCoordinator.commandSessions.autoTopic(forWorktreePath: worktreePath) {
+            // Whoever spoke last is who a bare order goes to.
+            tabCoordinator.commandSessions.noteActivePane(paneKey, paneId: pane.id,
+                                                          inWorktree: worktreePath)
+            // The branch can be renamed under the worktree; follow it, but only
             // when it actually moved.
             if session.topicName != name {
                 liveTelegramChannel?.renameTopic(address: session.id, name: name)
@@ -3335,17 +3358,16 @@ extension MainWindowController {
 
         guard let channel = liveTelegramChannel else { return .unavailable }
 
-        pendingTopicNotices[paneKey, default: []].append(text)
-        guard !topicCreationInFlight.contains(paneKey) else { return .deferred }
-        topicCreationInFlight.insert(paneKey)
+        pendingTopicNotices[worktreePath, default: []].append(text)
+        guard !topicCreationInFlight.contains(worktreePath) else { return .deferred }
+        topicCreationInFlight.insert(worktreePath)
 
         let paneId = pane.id
-        let worktreePath = pane.worktreePath
         channel.createTopic(chatId: chatId, name: name, iconKey: pane.project) { [weak self] address in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.topicCreationInFlight.remove(paneKey)
-                let buffered = self.pendingTopicNotices.removeValue(forKey: paneKey) ?? []
+                self.topicCreationInFlight.remove(worktreePath)
+                let buffered = self.pendingTopicNotices.removeValue(forKey: worktreePath) ?? []
 
                 guard let address else {
                     // Almost always the missing admin right. Stop asking until
@@ -3353,7 +3375,7 @@ extension MainWindowController {
                     // one per pane — and let the buffered notices go out the
                     // ordinary way rather than vanish.
                     self.autoTopicsBlocked = true
-                    NSLog("[Telegram] Per-pane topics are off for this session — see the error above.")
+                    NSLog("[Telegram] Per-worktree topics are off for this session — see the error above.")
                     for text in buffered {
                         self.notifyTelegramSessions(terminalID: paneId, text: text)
                     }
@@ -3362,11 +3384,12 @@ extension MainWindowController {
 
                 let key = CommandSession.key(surface: "telegram", id: address)
                 self.tabCoordinator.commandSessions.bindAutoTopic(
-                    key, toPaneKey: paneKey, paneId: paneId,
-                    worktreePath: worktreePath, topicName: name)
+                    key, toWorktreePath: worktreePath,
+                    paneKey: paneKey, paneId: paneId, topicName: name)
                 self.syncDedicatedTopics()
                 for text in buffered {
-                    self.deliverTelegram(terminalID: paneId, text: text, paneKey: paneKey, fleet: [])
+                    self.deliverTelegram(terminalID: paneId, text: text, paneKey: paneKey,
+                                         worktreePath: worktreePath, fleet: [])
                 }
             }
         }
@@ -3386,6 +3409,18 @@ extension MainWindowController {
     func endChatBindings(forPaneId paneId: String, reason: String) {
         tabCoordinator.pendingOrders.resolvePane(terminalID: paneId)
         for session in tabCoordinator.commandSessions.close(paneId: paneId) {
+            retireChatBinding(session, reason: reason)
+        }
+    }
+
+    /// The worktree is gone, so the thread seahelm opened for it is too.
+    ///
+    /// This is the ending a topic actually has now. A pane closing used to be
+    /// it, which was right while a topic covered one pane and is wrong now that
+    /// it covers the worktree: the other panes in it are still working, and
+    /// still reporting there.
+    func endChatBindings(forWorktreePath path: String, reason: String) {
+        for session in tabCoordinator.commandSessions.close(worktreePath: path) {
             retireChatBinding(session, reason: reason)
         }
     }
@@ -3457,20 +3492,41 @@ extension MainWindowController {
 
     /// Tell the channel which threads are its own panes' command lines, so bare
     /// prose in them counts as an order.
+    /// Delete the topics opened back when one covered a single pane.
+    ///
+    /// Run once at launch, after which there are none left to find. Leaving
+    /// them would leave exactly the list that made the worktree the thread —
+    /// a group with one thread per pane, now none of which will ever be written
+    /// to again. Only topics seahelm opened are touched; a thread somebody else
+    /// made was never ours to delete.
+    func sweepPaneScopedTopics() {
+        let store = tabCoordinator.commandSessions
+        let stale = store.paneScopedAutoTopics()
+        guard !stale.isEmpty else { return }
+        for session in stale {
+            liveTelegramChannel?.deleteTopic(address: session.id)
+            store.remove(session.key)
+        }
+        NSLog("[Telegram] Swept \(stale.count) per-pane topic(s) — a topic now covers a worktree.")
+    }
+
     func syncDedicatedTopics() {
         liveTelegramChannel?.setDedicatedTopics(tabCoordinator.commandSessions.autoTopicAddresses())
     }
 
-    /// What the thread is called: the repo, then whatever the pane is calling
-    /// itself. The repo leads because a phone shows a truncated list of thread
-    /// names and "seahelm" first is what makes that list skimmable.
+    /// What the thread is called: the repo, then the branch the worktree is on.
+    ///
+    /// The repo leads because a phone shows a truncated list of thread names and
+    /// having it first is what makes that list skimmable. The branch rather than
+    /// an agent's title because the thread now outlives any one pane in it —
+    /// naming it after whatever a pane happened to be doing would leave the
+    /// other panes in the worktree reporting under a title about none of them.
     static func autoTopicName(for pane: PaneInfo) -> String {
-        let title = PaneTitleResolver.title(for: pane).trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = pane.branch.trimmingCharacters(in: .whitespacesAndNewlines)
         let project = pane.project.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A pane with nothing better to call itself falls back to its repo, and
-        // prefixing that with the repo again reads as a bug: `teamclaw ·
-        // teamclaw`. Say it once.
-        let parts = title.caseInsensitiveCompare(project) == .orderedSame ? [project] : [project, title]
+        // A worktree on the repo's own trunk would otherwise read `seahelm ·
+        // seahelm`. Say it once.
+        let parts = branch.caseInsensitiveCompare(project) == .orderedSame ? [project] : [project, branch]
         let joined = parts.filter { !$0.isEmpty }.joined(separator: " · ")
         return TelegramBotAPI.trimTopicName(joined.isEmpty ? "seahelm" : joined)
     }
@@ -3578,13 +3634,15 @@ extension MainWindowController {
         // resolves itself, and a chat bound to another pane is still the only
         // way its owner can answer this one without walking back to the Mac.
         var chats = Set(tabCoordinator.commandSessions.telegramChatsToNotify(
-            paneKey: paneKey, fleetListenerChatIds: []))
+            paneKey: paneKey, worktreePath: pane?.worktreePath, fleetListenerChatIds: []))
         if let chat = config.telegram?.resolvedDefaultChatId { chats.insert(chat) }
         if let chat = telegramChannel?.fleetNotifyChatId { chats.insert(chat) }
         // The fleet inserts above are bare chat ids, and one of them is often
         // the group a bound topic already covers — so dedupe after them, not
         // only inside the lookup.
-        let home = paneKey.flatMap { tabCoordinator.commandSessions.autoTopic(forPaneKey: $0)?.id }
+        let home = pane.flatMap {
+            tabCoordinator.commandSessions.autoTopic(forWorktreePath: $0.worktreePath)?.id
+        }
         let ordered = TelegramChatAddress.oneAddressPerChat(Array(chats), preferring: home)
         guard !ordered.isEmpty else { return }
 

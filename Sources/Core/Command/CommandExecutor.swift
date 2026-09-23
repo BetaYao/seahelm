@@ -472,7 +472,13 @@ final class CommandExecutor {
         guard !session.closed else { return nil }
         if let key = session.boundPaneKey, let pane = index.pane(handleKey: key) { return pane }
         if let path = session.boundWorktreePath, let pane = index.panes(inWorktree: path).first {
-            // A worktree binding resolves to its first pane and sticks to it.
+            // A topic seahelm opened for a worktree follows the work: its pane
+            // pointer is whoever reported last, so an order goes to whoever is
+            // actually running. Sticking to the pane picked here would freeze
+            // that — this is only the answer until the next report moves it.
+            guard !(session.autoTopic && session.topicScope == .worktree) else { return pane }
+            // A worktree binding somebody made by hand resolves to its first
+            // pane and sticks to it.
             sessions.bind(surface.sessionKey, toPaneKey: pane.handleKey, paneId: pane.id, worktreePath: path)
             return pane
         }

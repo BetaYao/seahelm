@@ -171,18 +171,34 @@ final class TelegramAutoTopicTests: XCTestCase {
 
     // MARK: - The session store
 
-    func testAutoTopicBindsAndIsFoundByPane() {
+    func testAutoTopicBindsAndIsFoundByWorktree() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let address = "-1001234567890#77"
         let key = CommandSession.key(surface: "telegram", id: address)
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "seahelm · review")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "seahelm · review")
 
-        let found = store.autoTopic(forPaneKey: "pane-a")
+        let found = store.autoTopic(forWorktreePath: "/tmp/a")
         XCTAssertEqual(found?.id, address)
         XCTAssertEqual(found?.topicName, "seahelm · review")
+        XCTAssertEqual(found?.topicScope, .worktree)
         XCTAssertEqual(store.autoTopicAddresses(), [address])
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-b"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/b"))
+    }
+
+    /// The thread follows the work: a bare order goes to whoever reported last,
+    /// not to whichever pane happened to open the thread.
+    func testTheTopicFollowsWhoeverSpokeLast() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let key = CommandSession.key(surface: "telegram", id: "-100#3")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        store.noteActivePane("pane-b", paneId: "B", inWorktree: "/tmp/a")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
+        // A pane in another worktree is not this thread's business.
+        store.noteActivePane("pane-z", paneId: "Z", inWorktree: "/tmp/other")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
     }
 
     /// A topic bound by hand is not ours: prose in it stays conversation, and
@@ -191,31 +207,63 @@ final class TelegramAutoTopicTests: XCTestCase {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#5")
         store.bind(key, toPaneKey: "pane-a", paneId: "A", worktreePath: "/tmp/a")
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-a"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/a"))
         XCTAssertTrue(store.autoTopicAddresses().isEmpty)
     }
 
-    /// A closed pane's topic stops being one we would route to or rename.
-    func testClosingThePaneRetiresItsTopic() {
+    /// A pane ending is no longer the end of the conversation — the others in
+    /// the worktree are still working, and still reporting there.
+    func testClosingOnePaneLeavesTheWorktreeTopicOpen() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#9")
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "n")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
 
-        let closed = store.close(paneId: "A")
+        XCTAssertTrue(store.close(paneId: "A").isEmpty, "a pane ending must not retire the topic")
+        let still = store.autoTopic(forWorktreePath: "/tmp/a")
+        XCTAssertEqual(still?.id, "-100#9")
+        // The pointer goes with the pane; the next to speak claims it.
+        XCTAssertNil(still?.boundPaneId)
+        store.noteActivePane("pane-b", paneId: "B", inWorktree: "/tmp/a")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.boundPaneId, "B")
+    }
+
+    /// The worktree going is what ends the topic.
+    func testDeletingTheWorktreeRetiresItsTopic() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let key = CommandSession.key(surface: "telegram", id: "-100#9")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        let closed = store.close(worktreePath: "/tmp/a")
         XCTAssertEqual(closed.count, 1)
         XCTAssertTrue(closed[0].autoTopic)
-        XCTAssertNil(store.autoTopic(forPaneKey: "pane-a"))
+        XCTAssertNil(store.autoTopic(forWorktreePath: "/tmp/a"))
         XCTAssertTrue(store.autoTopicAddresses().isEmpty)
+    }
+
+    /// Topics opened while one covered a single pane are swept on launch; the
+    /// ones opened since are not.
+    func testOnlyPaneScopedTopicsAreSwept() throws {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        let old = """
+        {"key":"telegram:-100#1","autoTopic":true,"boundPaneKey":"p","closed":false}
+        """.data(using: .utf8)!
+        store.save(try JSONDecoder().decode(CommandSession.self, from: old))
+        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#2"),
+                            toWorktreePath: "/tmp/a", paneKey: "pane-a", paneId: "A", topicName: "n")
+
+        let stale = store.paneScopedAutoTopics()
+        XCTAssertEqual(stale.map(\.id), ["-100#1"])
     }
 
     func testTopicNameIsRecordedSoRenamesAreOnlySpentOnChanges() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let key = CommandSession.key(surface: "telegram", id: "-100#9")
-        store.bindAutoTopic(key, toPaneKey: "pane-a", paneId: "A",
-                            worktreePath: "/tmp/a", topicName: "old")
+        store.bindAutoTopic(key, toWorktreePath: "/tmp/a",
+                            paneKey: "pane-a", paneId: "A", topicName: "old")
         store.noteTopicName("new", for: key)
-        XCTAssertEqual(store.autoTopic(forPaneKey: "pane-a")?.topicName, "new")
+        XCTAssertEqual(store.autoTopic(forWorktreePath: "/tmp/a")?.topicName, "new")
     }
 
     /// A session file written before this feature has neither key.
