@@ -11,6 +11,12 @@ protocol TabCoordinatorDelegate: AnyObject {
     /// window controller lets go of whatever was bound to it; `reason`
     /// completes the sentence those conversations are told.
     func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String)
+    /// Worktrees that discovery used to list and no longer does — removed
+    /// outside seahelm, which for the `.worktrees/` checkouts an agent makes
+    /// and unmakes itself is the normal way they go. The deletion paths inside
+    /// the app report themselves; this is the only word anyone gets about the
+    /// rest.
+    func tabCoordinator(_ coordinator: TabCoordinator, worktreesDidVanish paths: [String])
 }
 
 class TabCoordinator {
@@ -386,6 +392,19 @@ class TabCoordinator {
         return tabIndex
     }
 
+    /// Worktrees discovery used to list and no longer does.
+    ///
+    /// Empty when the new list is empty, and that guard is the point: a
+    /// `git worktree list` that failed, or a removable volume that went away,
+    /// comes back as *nothing* — indistinguishable from a fleet deleted one
+    /// worktree at a time, except that one of those readings deletes every
+    /// Telegram thread the fleet has and cannot be undone. So it is not
+    /// believed: something must still be there for anything to have gone.
+    static func vanishedWorktrees(previous: Set<String>, current: Set<String>) -> Set<String> {
+        guard !current.isEmpty else { return [] }
+        return previous.subtracting(current)
+    }
+
     /// Drop per-worktree config entries whose directory no longer exists, so a
     /// deleted worktree doesn't leave timestamps/layouts/session names behind
     /// forever. Runs once per loadWorkspaces.
@@ -705,7 +724,14 @@ class TabCoordinator {
                     }
                 }
 
+                let previousPaths = Set(self.allWorktrees.map(\.info.path))
                 self.allWorktrees = allWorktreeInfos
+
+                let vanished = Self.vanishedWorktrees(
+                    previous: previousPaths, current: Set(allWorktreeInfos.map(\.info.path)))
+                if !vanished.isEmpty {
+                    self.delegate?.tabCoordinator(self, worktreesDidVanish: Array(vanished))
+                }
 
                 // Register all agents with AgentRegistry
                 for (info, _) in allWorktreeInfos {

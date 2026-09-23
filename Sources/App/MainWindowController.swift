@@ -419,6 +419,10 @@ class MainWindowController: NSWindowController {
         // Not from `statusPublisher`'s initializer: this reads `tabCoordinator`,
         // whose own initializer reads `statusPublisher`.
         sweepPaneScopedTopics()
+        // A worktree deleted while the app was closed leaves nobody to report
+        // it: discovery has no previous list to miss it from, so this is the
+        // only pass that catches it.
+        reconcileChatBindings()
         syncDedicatedTopics()
 
         NotificationCenter.default.addObserver(
@@ -2800,6 +2804,13 @@ extension MainWindowController: TabCoordinatorDelegate {
     func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String) {
         endChatBindings(forPaneId: terminalID, reason: reason)
     }
+
+    func tabCoordinator(_ coordinator: TabCoordinator, worktreesDidVanish paths: [String]) {
+        for path in paths {
+            tabCoordinator.pendingOrders.resolveWorktree(path: path)
+            endChatBindings(forWorktreePath: path, reason: "the worktree was deleted")
+        }
+    }
 }
 
 // MARK: - TerminalCoordinatorDelegate
@@ -3474,9 +3485,25 @@ extension MainWindowController {
     @discardableResult
     func reconcileChatBindings() -> Int {
         let store = tabCoordinator.commandSessions
+        let sessions = store.allSessions()
+        let paths = sessions.filter { !$0.closed }
+            .compactMap(\.boundWorktreePath).filter { !$0.isEmpty }
+        guard !paths.isEmpty else { return 0 }
+        // Probed off the main thread and with a deadline: these paths live on a
+        // removable volume, and a stale mount's `stat()` blocks forever. Only
+        // what is *definitively* absent counts as missing — a probe that timed
+        // out is not an answer.
+        let missing = FileSystemProbe.missingPaths(from: paths)
+        // Every last one missing reads as a volume that went away, not a fleet
+        // deleted one worktree at a time. Believing it would delete every
+        // thread, which is the one mistake here nobody can undo.
+        guard missing.count < Set(paths).count else {
+            NSLog("[Telegram] Binding sweep skipped — every worktree probed missing, which reads as an unmounted volume.")
+            return 0
+        }
         let stale = StaleChatBindings.stale(
-            in: store.allSessions(),
-            worktreeExists: { FileManager.default.fileExists(atPath: $0) },
+            in: sessions,
+            worktreeExists: { !missing.contains($0) },
             paneIsLive: { AgentRegistry.shared.pane(for: $0) != nil })
         var retired = 0
         for session in stale {
