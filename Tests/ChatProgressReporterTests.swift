@@ -102,13 +102,16 @@ final class ChatProgressReporterTests: XCTestCase {
         ingest(working("Bash", "pnpm test"), at: 20)
         XCTAssertEqual(sent.count, 1)
         XCTAssertEqual(sent.first?.chat, "555")
-        XCTAssertTrue(sent[0].text.contains("Bash — pnpm test"), sent[0].text)
+        XCTAssertTrue(sent[0].text.contains("#26 alpha/feat-x"), sent[0].text)
+        XCTAssertTrue(sent[0].text.contains("20s"), sent[0].text)
 
+        // Nothing was said either time, so what moves the line on is the clock.
         ingest(working("Read", "main.swift"), at: 30)
         XCTAssertEqual(sent.count, 1, "the line is edited, never re-sent")
         XCTAssertEqual(edited.count, 1)
         XCTAssertEqual(edited[0].id, "100")
-        XCTAssertTrue(edited[0].text.contains("Read — main.swift"), edited[0].text)
+        XCTAssertTrue(edited[0].text.contains("30s"), edited[0].text)
+        XCTAssertFalse(edited[0].text.contains("main.swift"), edited[0].text)
     }
 
     /// Only chats that asked to watch this pane. A fleet listener hears
@@ -187,17 +190,20 @@ final class ChatProgressReporterTests: XCTestCase {
     // MARK: - The stream
 
     /// The words between tool calls are what a phone could not see before:
-    /// the line carries them, and the calls, as the stream has them.
-    func testTheLineShowsWhatTheAgentSaidAndDidThisTurn() {
+    /// the line carries them, and only them — the calls they sit between would
+    /// drown them at the width a phone has.
+    func testTheLineShowsWhatTheAgentSaidThisTurn() {
         bindChat("555")
         ingest(working(), at: 0)
         stream(said("The server path looks right; checking the client."), at: 5)
         stream(called("Bash", "grep -n pane.event index.html"), at: 6)
+        stream(said("It was the client."), at: 7)
         ingest(working(), at: 13)
         XCTAssertEqual(sent.count, 1)
         let text = sent[0].text
         XCTAssertTrue(text.hasPrefix("⏳ **#26 alpha/feat-x** · 13s\n\n"), text)
-        XCTAssertTrue(text.hasSuffix("The server path looks right; checking the client.\n› Bash — grep -n pane.event index.html"), text)
+        XCTAssertTrue(text.hasSuffix("The server path looks right; checking the client.\nIt was the client."), text)
+        XCTAssertFalse(text.contains("grep -n"), "a call must not reach the line: \(text)")
     }
 
     /// A row alone keeps the line current: prose streamed from the transcript
@@ -235,11 +241,11 @@ final class ChatProgressReporterTests: XCTestCase {
     func testOnlyTheLatestRowsAreShown() {
         bindChat("555")
         ingest(working(), at: 0)
-        for n in 1...8 { stream(called("Read", "file\(n).swift"), at: 1) }
+        for n in 1...8 { stream(said("step \(n) done"), at: 1) }
         ingest(working(), at: 13)
         let text = sent[0].text
-        XCTAssertFalse(text.contains("file2.swift"), text)
-        for n in 3...8 { XCTAssertTrue(text.contains("file\(n).swift"), text) }
+        XCTAssertFalse(text.contains("step 2 done"), text)
+        for n in 3...8 { XCTAssertTrue(text.contains("step \(n) done"), text) }
     }
 
     /// A row that lands inside the throttle is not dropped: it goes up once the
@@ -248,13 +254,14 @@ final class ChatProgressReporterTests: XCTestCase {
         bindChat("555")
         ingest(working(), at: 0)
         ingest(working(), at: 13)
-        stream(called("Bash", "xcodebuild test"), at: 14)
-        stream(called("Bash", "swift build"), at: 15)
+        stream(said("Building."), at: 14)
+        stream(said("Now the tests."), at: 15)
         XCTAssertTrue(edited.isEmpty)
         XCTAssertEqual(scheduled.count, 1, "one flush per pane, however many rows it holds")
         scheduled[0].work(start.addingTimeInterval(16))
         XCTAssertEqual(edited.count, 1)
-        XCTAssertTrue(edited[0].text.hasSuffix("› Bash — xcodebuild test\n› Bash — swift build"), edited[0].text)
+        guard edited.count == 1 else { return }
+        XCTAssertTrue(edited[0].text.hasSuffix("Building.\nNow the tests."), edited[0].text)
     }
 
     func testAFlushAfterTheTurnEndedPutsNothingUp() {
@@ -268,11 +275,9 @@ final class ChatProgressReporterTests: XCTestCase {
         XCTAssertEqual(removed.count, 1)
     }
 
-    func testRowsReadAsProseOrAMarkedCall() {
+    func testRowsAreWhatTheAgentSaidAndNothingElse() {
         XCTAssertEqual(ChatProgressReporter.row(for: said("  Looking at it.\n")), "Looking at it.")
         XCTAssertEqual(ChatProgressReporter.row(for: said("Weighing it.", kind: .thinking)), "Weighing it.")
-        XCTAssertEqual(ChatProgressReporter.row(for: called("Bash", "ls")), "› Bash — ls")
-        XCTAssertEqual(ChatProgressReporter.row(for: called("Bash", "false", failed: true)), "✗ Bash — false")
         let long = ChatProgressReporter.row(for: said("a\nb " + String(repeating: "x", count: 300)))
         XCTAssertEqual(long?.count, 200)
         for kind: MessageKind in [.user, .status, .decision, .notice] {
@@ -280,24 +285,41 @@ final class ChatProgressReporterTests: XCTestCase {
         }
     }
 
+    /// Tool calls drowned the sentence they were context for: four truncated
+    /// shell commands around the one line that was the point. They stay on the
+    /// timeline, where there is room to read them.
+    func testAToolCallIsNotALineOfTheProgressMessage() {
+        XCTAssertNil(ChatProgressReporter.row(for: called("Bash", "ls")))
+        XCTAssertNil(ChatProgressReporter.row(for: called("Bash", "false", failed: true)))
+    }
+
     // MARK: - The line
 
-    func testTheLineNamesThePaneWhatItIsDoingAndForHowLong() {
+    func testTheLineNamesThePaneAndForHowLong() {
         let text = ChatProgressReporter.line(
-            for: pane(activity: [tool("Bash", "pnpm test")]), handle: 26,
+            for: pane(), handle: 26, feed: ["Running the tests."],
             since: start, now: start.addingTimeInterval(95))
         XCTAssertTrue(text.contains("#26 alpha/feat-x"), text)
-        XCTAssertTrue(text.contains("Bash — pnpm test"), text)
+        XCTAssertTrue(text.contains("Running the tests."), text)
         XCTAssertTrue(text.contains("1m"), text)
     }
 
-    /// A turn that has reported no tool yet is still worth a line — it says the
-    /// pane is alive, which is the whole point.
-    func testTheLineStandsWithoutAnyToolYet() {
+    /// A turn that has said nothing yet is still worth a line — it says the
+    /// pane is alive and for how long, which is the whole point.
+    func testTheLineStandsWithNothingSaidYet() {
         let text = ChatProgressReporter.line(for: pane(), handle: 3,
                                              since: start, now: start.addingTimeInterval(30))
         XCTAssertTrue(text.contains("#3 alpha/feat-x"), text)
         XCTAssertTrue(text.contains("30s"), text)
+    }
+
+    /// Screen-scanned activity was the same tool noise arriving by another
+    /// road, and it filled the gap the head is meant to describe.
+    func testScannedToolActivityNoLongerFillsTheLine() {
+        let text = ChatProgressReporter.line(
+            for: pane(activity: [tool("Bash", "pnpm test")]), handle: 26,
+            since: start, now: start.addingTimeInterval(95))
+        XCTAssertFalse(text.contains("pnpm test"), text)
     }
 
     /// Whole units only: a line that ticks every second is a message edit every
