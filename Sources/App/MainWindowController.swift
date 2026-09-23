@@ -81,11 +81,12 @@ class MainWindowController: NSWindowController {
     /// `telegramChannel` so ending pairing restores the configured bridge
     /// rather than leaving the wizard's token in place.
     private var telegramPairingChannel: TelegramChannel?
-    /// Panes whose topic is being opened right now, so a second notice arriving
-    /// in that round trip joins the first rather than opening a second thread.
+    /// Worktree paths whose topic is being opened right now, so a second notice
+    /// arriving in that round trip — from that pane or another in the same
+    /// worktree — joins the first rather than opening a second thread.
     var topicCreationInFlight: Set<String> = []
-    /// Notices held while a pane's topic is opened, flushed into it once it is
-    /// (or sent the ordinary way if it could not be).
+    /// Notices held by worktree path while its topic is opened, flushed into it
+    /// once it is (or sent the ordinary way if it could not be).
     var pendingTopicNotices: [String: [String]] = [:]
     /// Set when Telegram refuses to open a topic — in practice, the bot is not
     /// an admin with "Manage Topics". Cleared when the bridge restarts, so

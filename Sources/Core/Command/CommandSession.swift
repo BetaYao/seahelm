@@ -39,14 +39,15 @@ struct CommandSession: Codable, Equatable {
     /// The bound pane was closed. Kept rather than deleted so a mail thread
     /// can still be told its pane is gone.
     var closed: Bool
-    /// seahelm opened this Telegram topic for the pane itself, rather than
-    /// someone binding a topic that already existed.
+    /// seahelm opened this Telegram topic for a worktree of its own, rather
+    /// than someone binding a topic that already existed.
     ///
     /// Two things turn on it. Inside such a topic prose is an order, because
-    /// the thread is that pane's command line and nothing else. And when the
-    /// pane ends, the topic is deleted — which would be unthinkable to do to a
-    /// thread somebody else opened, where the binding is simply let go of and
-    /// the room told.
+    /// the thread is that worktree's command line and nothing else. And when
+    /// the worktree is deleted the topic goes with it — which would be
+    /// unthinkable to do to a thread somebody else opened, where the binding is
+    /// simply let go of and the room told. A *pane* ending is not that ending:
+    /// the others in the worktree are still reporting there.
     var autoTopic: Bool
     /// The name the topic currently carries, so a rename is only spent when
     /// what it is called has actually moved.

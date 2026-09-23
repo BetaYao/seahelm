@@ -54,7 +54,7 @@ final class TelegramChannel: ExternalChannel {
     /// When each group was last told how to address the bot — see
     /// `shouldHintAddressing`.
     private var lastAddressingHint: [String: Date] = [:]
-    /// Addresses of topics seahelm opened for a pane of its own — kept in step
+    /// Addresses of topics seahelm opened for a worktree of its own — kept in step
     /// with the session store by the owner. See `setDedicatedTopics`.
     private var dedicatedTopics: Set<String> = []
 
@@ -224,8 +224,8 @@ final class TelegramChannel: ExternalChannel {
                 NSLog("[Telegram] → \(target): \(chunk.count) chars")
                 return id
             } catch let error as TelegramAPIError where error.isMissingThread && threadId != nil {
-                // The thread went while this was in flight — a pane's own topic
-                // deleted with the pane, or one somebody removed by hand. The
+                // The thread went while this was in flight — a worktree's own
+                // topic deleted with it, or one somebody removed by hand. The
                 // group is still the right room, so the message lands there
                 // rather than nowhere.
                 NSLog("[Telegram] Topic \(target) is gone — sending to the group instead")
@@ -398,7 +398,7 @@ final class TelegramChannel: ExternalChannel {
         }
     }
 
-    /// Take a topic away entirely — for a pane's own thread once the pane is
+    /// Take a topic away entirely — for a worktree's own thread once it is
     /// gone. Callers must have established that the thread is one seahelm
     /// opened; this end only knows how to address it.
     ///
@@ -902,10 +902,10 @@ final class TelegramChannel: ExternalChannel {
     ///
     ///    `dedicatedTopic` is the exception, and it is not a loosening of that
     ///    rule so much as the rule not applying: a topic seahelm opened for one
-    ///    pane *is* that pane's command line, the way a private chat is. Nobody
-    ///    wanders into it to discuss lunch, and making people type `@thebot`
-    ///    under a thread named after the very agent they are answering is the
-    ///    friction this whole feature exists to remove.
+    ///    worktree *is* that worktree's command line, the way a private chat
+    ///    is. Nobody wanders into it to discuss lunch, and making people type
+    ///    `@thebot` under a thread named after the very work they are answering
+    ///    is the friction this whole feature exists to remove.
     ///
     /// No echo guard is needed. The bot's own messages never come back as
     /// updates — that was the whole trouble with a transport that shared the
