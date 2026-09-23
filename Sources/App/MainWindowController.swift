@@ -3522,11 +3522,20 @@ extension MainWindowController {
     /// naming it after whatever a pane happened to be doing would leave the
     /// other panes in the worktree reporting under a title about none of them.
     static func autoTopicName(for pane: PaneInfo) -> String {
-        let branch = pane.branch.trimmingCharacters(in: .whitespacesAndNewlines)
         let project = pane.project.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = pane.branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A detached checkout answers to its directory, the same as it does in
+        // the fleet listing. Falling back to the bare repo instead left the
+        // integration worktree's thread called `teamclaw` beside the trunk's
+        // `teamclaw · main` — two threads in one group, the second one named
+        // after neither the work in it nor anything that would ever correct
+        // itself, since a detached HEAD has no branch to arrive later.
+        let leaf = branch.isEmpty
+            ? URL(fileURLWithPath: pane.worktreePath).lastPathComponent
+            : branch
         // A worktree on the repo's own trunk would otherwise read `seahelm ·
         // seahelm`. Say it once.
-        let parts = branch.caseInsensitiveCompare(project) == .orderedSame ? [project] : [project, branch]
+        let parts = leaf.caseInsensitiveCompare(project) == .orderedSame ? [project] : [project, leaf]
         let joined = parts.filter { !$0.isEmpty }.joined(separator: " · ")
         return TelegramBotAPI.trimTopicName(joined.isEmpty ? "seahelm" : joined)
     }

@@ -368,31 +368,48 @@ final class TelegramAutoTopicTests: XCTestCase {
         XCTAssertFalse(TelegramAPIError.network("timeout").isNotModified)
     }
 
-    /// A pane with nothing better to call itself falls back to its repo, and
-    /// `teamclaw · teamclaw` reads as a bug.
-    func testTopicNameSaysTheRepoOnceWhenTheTitleIsTheRepo() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "teamclaw")),
+    /// A worktree on the repo's own trunk would read `teamclaw · teamclaw`.
+    /// Say it once.
+    func testTopicNameSaysTheRepoOnceWhenTheBranchIsTheRepo() {
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", branch: "teamclaw")),
                        "teamclaw")
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", title: "TeamClaw")),
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "teamclaw", branch: "TeamClaw")),
                        "teamclaw")
     }
 
     func testTopicNameKeepsBothWhenTheyDiffer() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "run.sh 无法启动")),
-                       "seahelm · run.sh 无法启动")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", branch: "fix/run-sh")),
+                       "seahelm · fix/run-sh")
     }
 
-    /// A pane in a repo with no title at all still names its room.
-    func testTopicNameFallsBackToTheRepoAlone() {
-        XCTAssertEqual(MainWindowController.autoTopicName(for: pane(project: "seahelm", title: "")),
-                       "seahelm")
+    /// A detached checkout answers to its directory, as it does in the fleet
+    /// listing. Falling back to the bare repo left the integration worktree's
+    /// thread called `teamclaw`, beside the trunk's `teamclaw · main` — and a
+    /// detached HEAD has no branch arriving later to correct it.
+    func testADetachedWorktreeIsNamedAfterItsDirectory() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/Volumes/openbeta/workspace/teamclaw-worktrees/integration")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw · integration")
     }
 
-    /// `PaneTitleResolver` answers from the pane's own fields; a bare pane with
-    /// no station falls through to its branch, then its repo.
-    private func pane(project: String, title: String) -> PaneInfo {
-        PaneInfo(id: "t", worktreePath: "/w/\(project)", agentType: .claudeCode,
-                 project: project, branch: title.isEmpty ? project : title,
+    /// The repo's own checkout, detached: the directory *is* the repo, so it is
+    /// still said once.
+    func testADetachedTrunkIsStillJustTheRepo() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/Volumes/openbeta/workspace/teamclaw")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw")
+    }
+
+    /// A trailing slash must not make the directory read as empty.
+    func testATrailingSlashDoesNotLoseTheDirectory() {
+        let detached = pane(project: "teamclaw", branch: "",
+                            worktreePath: "/w/teamclaw-worktrees/integration/")
+        XCTAssertEqual(MainWindowController.autoTopicName(for: detached), "teamclaw · integration")
+    }
+
+    private func pane(project: String, branch: String, worktreePath: String? = nil) -> PaneInfo {
+        PaneInfo(id: "t", worktreePath: worktreePath ?? "/w/\(project)", agentType: .claudeCode,
+                 project: project, branch: branch,
                  status: .idle, lastMessage: "", commandLine: nil, roundDuration: 0,
                  startedAt: nil, station: nil, channel: nil, taskProgress: TaskProgress())
     }
