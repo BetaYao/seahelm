@@ -31,6 +31,11 @@ private class MockTabCoordinatorDelegate: TabCoordinatorDelegate {
     func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String) {
         endedPanes.append((terminalID, reason))
     }
+
+    var vanishedWorktrees: [String] = []
+    func tabCoordinator(_ coordinator: TabCoordinator, worktreesDidVanish paths: [String]) {
+        vanishedWorktrees.append(contentsOf: paths)
+    }
 }
 
 final class TabCoordinatorTests: XCTestCase {
