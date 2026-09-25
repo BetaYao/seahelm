@@ -90,7 +90,8 @@ final class HostGatewayStaticFilesTests: XCTestCase {
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(response.contentEncoding, "gzip")
         XCTAssertLessThan(response.body.count, raw.count)
-        XCTAssertEqual(response.cacheControl, "public, max-age=86400")
+        // Unversioned: revalidated, so a new page never runs an old script.
+        XCTAssertEqual(response.cacheControl, "no-cache")
         XCTAssertNotNil(response.etag)
     }
 

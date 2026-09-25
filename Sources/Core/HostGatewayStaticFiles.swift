@@ -143,7 +143,12 @@ struct HostGatewayStaticFiles {
             if target.contains("?v=") || target.contains("?v&") {
                 return "public, max-age=31536000, immutable"
             }
-            return "public, max-age=86400"
+            // Revalidate, never trust a stored copy: the page is `no-cache`, so a
+            // day-long max-age here paired a fresh index.html with the scripts
+            // of the build before, and a page calling a function its stale
+            // script lacked threw mid-render and drew an empty fleet. The ETag
+            // makes the check a 304 when nothing changed.
+            return "no-cache"
         }
     }
 

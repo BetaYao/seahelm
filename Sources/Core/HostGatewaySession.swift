@@ -60,6 +60,9 @@ final class HostGatewaySession {
     /// hop to the VT queue, which is where the observer takes this same lock.
     private let lock = NSLock()
     private var authenticated = false
+    /// Last `agent_type` sent per pane, so a `pane.updated` that changes it —
+    /// an agent starting, or exiting back to the shell — still reaches the page.
+    private var sentAgentTypes: [String: String] = [:]
     private var openVTKeys: Set<String> = []
     private var pending: [Pending] = []
     /// pane → last forced-resync time. Also the rate-limit clock.
@@ -301,26 +304,40 @@ final class HostGatewaySession {
     /// Server → session: a pane changed status or closed — what keeps the fleet
     /// list in step after the snapshot it was sent on authentication.
     func pushPaneEvent(_ event: [String: Any]) {
-        guard let note = Self.paneNotify(for: event) else { return }
         lock.lock()
         let ready = authenticated
+        let note = ready ? Self.paneNotify(for: event, sentAgentTypes: &sentAgentTypes) : nil
         lock.unlock()
-        guard ready else { return }
+        guard let note else { return }
         enqueue(.text(HostGatewayFrame.encode(.notify(method: note.method, params: note.params))))
     }
 
     /// The EventHub events the fleet list needs, in wire shape. `pane.updated`
-    /// is left out: it fires on every hook and changes nothing the list draws.
-    static func paneNotify(for event: [String: Any]) -> (method: String, params: [String: Any])? {
+    /// fires on every hook and mostly changes nothing the list draws, so it is
+    /// passed on only when it moves the pane's `agent_type` — the page tells an
+    /// agent from a bare shell by it, and an agent exiting at rest changes no
+    /// status. `sentAgentTypes` is what this client was last told, per pane.
+    static func paneNotify(
+        for event: [String: Any],
+        sentAgentTypes: inout [String: String]
+    ) -> (method: String, params: [String: Any])? {
         let method: String, keys: [String]
+        let paneKey = (event["pane_id"] as? String) ?? ""
+        let agentType = event["agent_type"] as? String
         switch event["type"] as? String {
         case "pane.status_changed":
             method = "pane.status"
-            keys = ["pane_id", "pane_session_key", "status", "old_status", "agent_type",
-                    "worktree_path", "last_message"]
+            keys = Self.paneStatusKeys
+            if let agentType { sentAgentTypes[paneKey] = agentType }
+        case "pane.updated":
+            guard let agentType, sentAgentTypes[paneKey] != agentType else { return nil }
+            sentAgentTypes[paneKey] = agentType
+            method = "pane.status"
+            keys = Self.paneStatusKeys
         case "pane.closed":
             method = "pane.closed"
             keys = ["pane_id", "pane_session_key", "worktree_path"]
+            sentAgentTypes.removeValue(forKey: paneKey)
         default:
             return nil
         }
@@ -328,6 +345,19 @@ final class HostGatewaySession {
         for key in keys { params[key] = event[key] }
         return (method, params)
     }
+
+    static func agentTypes(inSnapshotPanes panes: Any) -> [String: String] {
+        var out: [String: String] = [:]
+        for pane in panes as? [[String: Any]] ?? [] {
+            if let id = pane["pane_id"] as? String, let type = pane["agent_type"] as? String {
+                out[id] = type
+            }
+        }
+        return out
+    }
+
+    private static let paneStatusKeys = ["pane_id", "pane_session_key", "status", "old_status",
+                                         "agent_type", "worktree_path", "last_message"]
 
     /// Server → session: a MessageStream timeline item.
     func pushMessage(_ event: MessageEvent) {
@@ -467,6 +497,11 @@ final class HostGatewaySession {
             if case .ok(let snapshot) = router.handle(method: "session.snapshot", params: [:]),
                let panes = snapshot["panes"] {
                 result["panes"] = panes
+                // What the page now believes, so the first `pane.updated` is
+                // compared against it rather than sent for every pane.
+                lock.lock()
+                sentAgentTypes = Self.agentTypes(inSnapshotPanes: panes)
+                lock.unlock()
             }
         }
         var out = [HostGatewayFrame.encode(.response(id: id, result: result, error: nil))]

@@ -45,6 +45,8 @@ class StatusPublisher {
     private var probedTypes: [String: AgentType] = [:]
     private var probedCommandLines: [String: String] = [:]
     private var probedAtCycle: [String: Int] = [:]
+    /// Panes whose last probe saw the session and no agent in it.
+    private var probedNoAgent: Set<String> = []
     private let probeRefreshStride = 5
     // Pre-lowercased agent names for faster matching
     private var lowercasedPaneNames: [(name: String, def: AgentDef)] = []
@@ -118,6 +120,7 @@ class StatusPublisher {
         probedTypes.removeValue(forKey: terminalID)
         probedCommandLines.removeValue(forKey: terminalID)
         probedAtCycle.removeValue(forKey: terminalID)
+        probedNoAgent.remove(terminalID)
     }
 
     func updateSurfaces(_ trees: [String: SplitTree]) {
@@ -317,10 +320,13 @@ class StatusPublisher {
             // off screen. Falls back to text detection when the probe is unsure.
             let probe = probedSession(terminalID: terminalID, paneSessionKey: surface.paneSessionKey,
                                       pollCycle: pollCycle, context: probeContext)
-            let probedType = probe.agentType
             let commandLine = probe.commandLine
-            let detectedAgentType = probedType != .unknown ? probedType : AgentType.detect(fromLowercased: lowerContent)
-            var agentType = detectedAgentType == .unknown ? existingAgentType : detectedAgentType
+            var agentType = Self.resolveAgentType(
+                probed: probe.agentType,
+                noAgent: probe.noAgent,
+                screen: AgentType.detect(fromLowercased: lowerContent),
+                existing: existingAgentType,
+                probeCanSee: Self.probeCanSee)
             // Shell jobs (brew, make, …) are not in AI manifests — classify from argv.
             if let commandLine, !agentType.isAIAgent {
                 let fromCmd = AgentType.detect(fromCommand: commandLine)
@@ -408,31 +414,42 @@ class StatusPublisher {
         paneSessionKey: String?,
         pollCycle: Int,
         context: () -> ProcessProbe.ProbeContext?
-    ) -> (agentType: AgentType, commandLine: String?) {
-        guard let paneSessionKey else { return (.unknown, nil) }
+    ) -> (agentType: AgentType, commandLine: String?, noAgent: NoAgentSighting) {
+        guard let paneSessionKey else { return (.unknown, nil, .none) }
         lock.lock()
         let cachedType = probedTypes[terminalID]
         let cachedCmd = probedCommandLines[terminalID]
+        let cachedNoAgent = probedNoAgent.contains(terminalID)
         let last = probedAtCycle[terminalID]
         lock.unlock()
         // Reuse cache when still fresh. Allow a known command line with unknown
-        // agent type (shell jobs) — that is the brew-update title path.
+        // agent type (shell jobs) — that is the brew-update title path — and a
+        // bare shell, which is what an empty session has to look like.
         if let last, pollCycle - last < probeRefreshStride {
             if let cachedType, cachedType != .unknown {
-                return (cachedType, cachedCmd)
+                return (cachedType, cachedCmd, .none)
             }
-            if cachedCmd != nil {
-                return (cachedType ?? .unknown, cachedCmd)
+            if cachedCmd != nil || cachedNoAgent {
+                return (cachedType ?? .unknown, cachedCmd, cachedNoAgent ? .cached : .none)
             }
         }
         // No context means `zmx list` failed this cycle — the same miss the probe
         // itself used to report, so fall through with the same bookkeeping.
         let probe = context().map { ProcessProbe.probeSession(paneSessionKey: paneSessionKey, context: $0) }
-            ?? (agentId: nil, commandLine: nil)
+            ?? .miss
         let type = AgentType.fromManifestId(probe.agentId)
+        let sawNoAgent = probe.sawSession && type == .unknown
         lock.lock()
-        // Never downgrade a known identity to unknown on a transient probe miss.
-        if type != .unknown { probedTypes[terminalID] = type }
+        // A miss keeps the known identity: it says nothing about the agent. A
+        // probe that saw the session with no agent in it is different — the
+        // agent exited, and the identity goes with it.
+        if type != .unknown {
+            probedTypes[terminalID] = type
+            probedNoAgent.remove(terminalID)
+        } else if sawNoAgent {
+            probedTypes.removeValue(forKey: terminalID)
+            probedNoAgent.insert(terminalID)
+        }
         // Unlike agent identity, the command line tracks the *current* foreground
         // job: a nil probe means the job ended, so clear the cache — otherwise a
         // finished `brew update` would title the pane until app restart.
@@ -441,7 +458,50 @@ class StatusPublisher {
         let resultType = probedTypes[terminalID] ?? .unknown
         let resultCmd = probedCommandLines[terminalID]
         lock.unlock()
-        return (resultType, resultCmd)
+        return (resultType, resultCmd, sawNoAgent ? .fresh : .none)
+    }
+
+    /// Whether the process probe saw the session and found no agent in it, and
+    /// whether that was this cycle or an earlier one still inside the stride.
+    enum NoAgentSighting {
+        case none
+        /// This cycle's probe: strong enough to take an agent identity away.
+        case fresh
+        /// Remembered from a recent probe: enough to distrust the screen, not to
+        /// overrule a hook that has since said an agent started.
+        case cached
+    }
+
+    /// The pane's agent type for this cycle.
+    ///
+    /// An identity used to be permanent once seen: a miss fell back to the one
+    /// before. That kept a pane whose agent had exited labelled with it for the
+    /// rest of the run, so a bare shell read as an agent — a remote client had no
+    /// way to tell whether a message would reach one. The probe settles it when it
+    /// can see the session: no agent in the tree means the agent is gone. The
+    /// screen cannot be asked instead, because its scrollback still names the
+    /// agent long after it exited.
+    ///
+    /// Only agents the probe can recognize are taken away; for the rest, not
+    /// finding one proves nothing.
+    static func resolveAgentType(
+        probed: AgentType,
+        noAgent: NoAgentSighting,
+        screen: AgentType,
+        existing: AgentType,
+        probeCanSee: (AgentType) -> Bool
+    ) -> AgentType {
+        if probed != .unknown { return probed }
+        let screenCounts = noAgent == .none || !probeCanSee(screen)
+        let detected = screenCounts ? screen : .unknown
+        let type = detected == .unknown ? existing : detected
+        if noAgent == .fresh, type.isAIAgent, probeCanSee(type) { return .shellCommand }
+        return type
+    }
+
+    static func probeCanSee(_ type: AgentType) -> Bool {
+        ProcessProbe.canIdentify(manifestId: type.manifestId,
+                                 manifests: ManifestStore.shared.all.map(\.manifest))
     }
 
     /// Find agent definition using pre-lowercased content and names
