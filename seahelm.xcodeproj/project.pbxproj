@@ -80,6 +80,7 @@
 		270AFAAC108BA4157E1DFF3D /* HostGatewayKeyFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7593CE0AF827928487EEC349 /* HostGatewayKeyFrame.swift */; };
 		275231BB779F6BDD75987815 /* CommandSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C343A8D3A5164AA2BF4DB650 /* CommandSession.swift */; };
 		277DAB1789BBBA842FAB8C5F /* UsageSummaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A912279D16E32ED9BADB27B /* UsageSummaryStore.swift */; };
+		28D2CC78397CD185243F9906 /* AgentTypeResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DE718F49310D67B0839609F /* AgentTypeResolutionTests.swift */; };
 		28F64A45113C9031DE991377 /* WrappedPathAtClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */; };
 		29495AEAADEAB3360FDADEDB /* GmailAccessToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88D1AA083189266856E9B02 /* GmailAccessToken.swift */; };
 		29FFE70A579739BDA4A737AC /* GitHubPRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864EF5AD3DEA27B0135D7D1 /* GitHubPRService.swift */; };
@@ -606,6 +607,7 @@
 		1D9E5FDD907FFB3D57373A8A /* HostGatewaySessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySessionTests.swift; sourceTree = "<group>"; };
 		1DB77CC892E8D4F3F9285B90 /* OnboardingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewController.swift; sourceTree = "<group>"; };
 		1DCFDDC4C498DF9532ABDBE4 /* PairingCodeStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCodeStoreTests.swift; sourceTree = "<group>"; };
+		1DE718F49310D67B0839609F /* AgentTypeResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTypeResolutionTests.swift; sourceTree = "<group>"; };
 		1FFE253ABA10CC21CD7D8D8B /* TerminalThemeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalThemeMode.swift; sourceTree = "<group>"; };
 		201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSessionTitleLookupTests.swift; sourceTree = "<group>"; };
 		20B4DF69385BC294488EF109 /* WorktreeGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGrouping.swift; sourceTree = "<group>"; };
@@ -1572,6 +1574,7 @@
 				7F4985A21CB0E9D8B4708E26 /* AgentRegistryWebhookPathTests.swift */,
 				6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */,
 				2C697E3FD9E28F1643C259EB /* AgentTranscriptTailTests.swift */,
+				1DE718F49310D67B0839609F /* AgentTypeResolutionTests.swift */,
 				F4D445453693B8D5A3D088F1 /* AgentTypeTests.swift */,
 				01DB279E827314DBFA97331B /* ChatCallbackRegistryTests.swift */,
 				B8816ECB0847ABFD594B1AB3 /* ChatNoticeBookTests.swift */,
@@ -2166,6 +2169,7 @@
 				7AD64F51F6EE5BA663EEF30D /* AgentRegistryWebhookPathTests.swift in Sources */,
 				F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */,
 				0F4BB9D94A3D634A90083C81 /* AgentTranscriptTailTests.swift in Sources */,
+				28D2CC78397CD185243F9906 /* AgentTypeResolutionTests.swift in Sources */,
 				53D46BF1B3E00A35B53A86C4 /* AgentTypeTests.swift in Sources */,
 				E898E9379622EC8D16777977 /* ChatCallbackRegistryTests.swift in Sources */,
 				1055CF6524AAB2DC4EE2C835 /* ChatNoticeBookTests.swift in Sources */,
@@ -2719,7 +2723,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.64;
+				MARKETING_VERSION = 2.0.65;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2956,7 +2960,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.64;
+				MARKETING_VERSION = 2.0.65;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",

@@ -37,5 +37,22 @@
     return STOPPABLE[o.status] ? 'stop' : 'none';
   }
 
-  return { composerAction, STOPPABLE };
+  // What is on the other end of the composer. The Mac reports a pane's
+  // `agent_type`, and drops it back to a shell type when the agent exits, so a
+  // pane is an agent only while one of these is running in it. Anything else —
+  // `unknown` (never had one), `shellCommand`, `npm` and the other jobs — is a
+  // terminal, and text sent there runs as a command.
+  const AGENT_LABELS = {
+    claudeCode: 'Claude Code', codex: 'Codex', openCode: 'OpenCode', gemini: 'Gemini',
+    cline: 'Cline', goose: 'Goose', amp: 'Amp', aider: 'Aider', cursor: 'Cursor',
+    kiro: 'Kiro', pi: 'Pi',
+  };
+
+  /** @returns {{kind:'agent'|'shell', label:string}} */
+  function paneKind(agentType) {
+    const label = AGENT_LABELS[agentType];
+    return label ? { kind: 'agent', label } : { kind: 'shell', label: 'Terminal' };
+  }
+
+  return { composerAction, STOPPABLE, paneKind, AGENT_LABELS };
 });

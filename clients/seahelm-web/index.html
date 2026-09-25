@@ -29,6 +29,9 @@
     --running-14:rgba(27,176,98,.14);
     --danger-14:rgba(232,70,53,.14);
     --attention-12:rgba(224,164,88,.12);
+    /* A bare terminal, as opposed to an agent. Not amber: that is "needs you". */
+    --shell:#b3a4f2;
+    --shell-38:rgba(179,164,242,.38);
     --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Segoe UI','Microsoft YaHei',sans-serif;
     --r:4px;
@@ -277,6 +280,11 @@
   .fm-git{flex:none;font-size:10px;white-space:nowrap}
   .fm-git .add{color:#5fb87a} .fm-git .del{color:#e07a6a} .fm-git .ab{color:var(--muted)}
   .fm-sailors{flex:none;margin-left:auto;font-size:10px;color:var(--muted)}
+  /* What runs in the pane: an agent's name, or `>_` for a bare terminal. */
+  .fm-kind{flex:none;font-size:9.5px;line-height:14px;padding:0 5px;border-radius:4px;
+    border:1px solid var(--line-12);color:var(--muted);white-space:nowrap}
+  .fm-kind.agent{color:var(--accent);border-color:var(--accent-20)}
+  .fm-kind.shell{color:var(--shell);border-color:var(--shell-38);font-family:var(--mono)}
   /* Shrinks first, but never to nothing — the Mac always keeps a stub ("teamc…"),
      and a row whose deck vanished entirely reads as if it had none. */
   .fm-deck-tag{flex:0 1 auto;min-width:2.6em;flex-shrink:4;font-size:10px;font-weight:600;
@@ -435,6 +443,21 @@
     border:1px solid var(--line-12);border-radius:21px;
     background:rgba(150,215,225,.04);padding:5px 5px 5px 14px}
   .mc-field:focus-within{border-color:var(--accent-20)}
+  /* Who reads what you type. Agent: the accent, prose. Terminal: a square-ish
+     monospace field with a $ prompt and an amber edge, so a command line never
+     passes for a chat box at a glance. */
+  .mc-kind{font-size:10px;letter-spacing:.04em;color:var(--accent);opacity:.8;
+    margin:0 0 5px 14px}
+  .mc-prompt{display:none}
+  .msg-composer[data-kind="shell"] .mc-kind{color:var(--shell);font-family:var(--mono)}
+  .msg-composer[data-kind="shell"] .mc-field{border-radius:8px;border-color:var(--shell-38);
+    background:rgba(0,0,0,.22);padding-left:10px}
+  .msg-composer[data-kind="shell"] .mc-field:focus-within{border-color:var(--shell)}
+  .msg-composer[data-kind="shell"] .mc-prompt{display:block;flex:none;align-self:flex-start;
+    font-family:var(--mono);font-size:13px;line-height:30px;color:var(--shell);user-select:none}
+  .msg-composer[data-kind="shell"] .mc-field textarea{font-family:var(--mono);font-size:13px}
+  /* Only at rest: a running or waiting pane keeps the status colour below. */
+  .msg-composer[data-kind="shell"] .mc-field button:not(:disabled):not([data-status="running"]):not([data-status="waiting"]){background:var(--shell)}
   /* One row leaves the field 42px tall: 20px of line + 10px inside the textarea
      + 10px of field padding + 2px of border. That inner 30px is the button's
      size too, so an empty composer is a pill at the 21px radius above. The cap
@@ -545,8 +568,10 @@
       <div id="termWrap" class="empty"><div id="term"></div></div>
       <button id="toBottom" title="Jump to the latest output">↓ Latest</button>
       <div class="reply-bar" id="replyBar" hidden></div>
-      <div class="msg-composer" id="msgComposer">
+      <div class="msg-composer" id="msgComposer" data-kind="agent">
+        <div class="mc-kind" id="mcKind" hidden></div>
         <div class="mc-field">
+          <span class="mc-prompt" aria-hidden="true">$</span>
           <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off"></textarea>
           <!-- Send, stop and the pane's status in one control — see
                composer-action.js. Both glyphs stay in the DOM and `data-action`
@@ -586,7 +611,9 @@
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
 <script src="./composer-keys.js"></script>
-<script src="./composer-action.js"></script>
+<!-- ?r= only renames it: copies cached under the old day-long max-age still
+     hold a composer-action.js without paneKind, which empties the fleet list. -->
+<script src="./composer-action.js?r=2"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1013,6 +1040,7 @@ function onPaneStatus(p){
   if (p.agent_type) pane.agent_type = p.agent_type;
   if (typeof p.last_message === 'string') pane.last_message = p.last_message;
   refreshFleetSoon(false);
+  if (key === S.selPane) renderSendButton();
 }
 
 function onPaneClosed(p){
@@ -1265,9 +1293,9 @@ $('messageTimeline').addEventListener('keydown', (ev) => {
 
 // Every agent seahelm knows says "esc to interrupt" in its status line, and ^C
 // at an idle Claude or Codex prompt is the first half of quitting it. A shell
-// task is the other way round: Esc does nothing, ^C stops it.
-const CTRL_C_INTERRUPTS = new Set(['brew', 'btop', 'top', 'htop', 'docker', 'npm', 'yarn',
-  'make', 'cargo', 'go', 'python', 'pip', 'shellCommand']);
+// is the other way round: Esc does nothing, ^C stops it.
+const paneKindOf = (pane) => SeahelmComposerAction.paneKind(pane && pane.agent_type);
+const interruptsWithCtrlC = (pane) => paneKindOf(pane).kind === 'shell';
 
 const SEND_LABEL = {
   send: 'Send',
@@ -1280,7 +1308,7 @@ function interruptPane(){
   const key = S.selPane;
   if (!key || !isLinked()) return;
   const pane = S.panes.get(key) || {};
-  const keys = CTRL_C_INTERRUPTS.has(pane.agent_type) ? ['ctrl+c'] : ['esc'];
+  const keys = interruptsWithCtrlC(pane) ? ['ctrl+c'] : ['esc'];
   sendCommand('pane.send_keys', { pane_id: pane.pane_id || key, keys }, (r) => {
     if (r && r.ok === false) {
       showActionToast((r.error && r.error.message) || 'Interrupt failed', true);
@@ -1393,6 +1421,25 @@ function autoGrowComposer(){
   renderSendButton();
 }
 
+/** Dress the composer for what is on the other end: an agent reads what you
+ *  write, a bare terminal runs it as a command. The two looked identical, and
+ *  prose sent to a shell is a string of errors — or worse, a command. */
+function renderComposerKind(pane){
+  const box = $('msgComposer'), input = $('msgInput'), tag = $('mcKind');
+  if (!box || !input) return;
+  const k = pane ? paneKindOf(pane) : null;
+  const kind = k ? k.kind : 'agent';
+  if (box.dataset.kind !== kind) box.dataset.kind = kind;
+  const placeholder = !k ? 'Send to this pane…'
+    : kind === 'shell' ? 'Run a command in this terminal…'
+    : `Message ${k.label}…`;
+  if (input.placeholder !== placeholder) input.placeholder = placeholder;
+  if (tag) {
+    tag.textContent = k ? (kind === 'shell' ? 'Terminal · no agent' : k.label) : '';
+    tag.hidden = !k;
+  }
+}
+
 /** The composer's one button: what it will do, and what the pane is doing.
  *  An icon carries no label, so both have to be visible on it. */
 function renderSendButton(){
@@ -1411,8 +1458,11 @@ function renderSendButton(){
   btn.dataset.status = status;
   btn.disabled = action === 'none';
 
-  let label = action === 'stop' ? SEND_LABEL.stop[status] : SEND_LABEL[action];
-  if (action === 'stop' && !CTRL_C_INTERRUPTS.has(pane && pane.agent_type)) {
+  renderComposerKind(pane);
+  const shell = !!pane && paneKindOf(pane).kind === 'shell';
+  let label = action === 'stop' ? SEND_LABEL.stop[status]
+    : (shell ? 'Run in terminal' : SEND_LABEL[action]);
+  if (action === 'stop' && !interruptsWithCtrlC(pane)) {
     label += ' (Esc)';
   } else if (action === 'stop') {
     label += ' (Ctrl+C)';
@@ -1508,6 +1558,7 @@ function applySessionSnapshot(result){
     if (key) S.panes.set(key, p);
   }
   refreshGroups();
+  renderSendButton();
 }
 
 
@@ -1889,6 +1940,13 @@ function groupsToRender(rows){
     .map(([title, list]) => ({ title, status:null, isRepo:true, rows:list }));
 }
 
+function kindTagHTML(pane){
+  const k = paneKindOf(pane);
+  return k.kind === 'shell'
+    ? `<span class="fm-kind shell" title="Terminal — no agent running">&gt;_</span>`
+    : `<span class="fm-kind agent" title="${esc(k.label)}">${esc(k.label)}</span>`;
+}
+
 function renderTree(){
   const t = $('tree'); t.innerHTML='';
   const rows = buildFleet();
@@ -1917,11 +1975,15 @@ function renderTree(){
       row.className = 'fm-row' + (sel ? ' sel' : '');
       const timeText = rowTimeText(r.runningSince, r.lastActivityAt);
       const git = gitInfoHTML(r.git);
+      // A lone pane is the row itself, so its kind goes here; with several,
+      // each pane row below carries its own.
+      const kind = r.panes.length === 1 ? kindTagHTML(r.panes[0][1]) : '';
       row.innerHTML =
         statusDotHTML(r.status, 'fm-dot') +
         `<span class="fm-txt">
            <span class="fm-l1">
              <span class="fm-name">${esc(r.title)}</span>
+             ${kind}
              <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}">${esc(timeText)}</span>
            </span>
            <span class="fm-l2">
@@ -1941,7 +2003,8 @@ function renderTree(){
           const pr = document.createElement('div');
           pr.className = 'fm-pane' + (S.selPane === key ? ' sel' : '');
           pr.innerHTML = statusDotHTML(p.status, 'pdot')
-            + `<span class="ptitle">${esc((p.title||'').trim() || shortId(p.pane_id||key))}</span>`;
+            + `<span class="ptitle">${esc((p.title||'').trim() || shortId(p.pane_id||key))}</span>`
+            + kindTagHTML(p);
           pr.onclick = (e) => { e.stopPropagation(); selectWorktree(r, key); };
           box.appendChild(pr);
         }

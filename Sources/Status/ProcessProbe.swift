@@ -99,9 +99,22 @@ enum ProcessProbe {
         }
     }
 
+    /// What one probe of a session found.
+    ///
+    /// `sawSession` separates "looked, and no agent is running" from "could not
+    /// look": the session was listed and its shell is alive. Only
+    /// then does a nil `agentId` mean the agent is gone rather than unknown.
+    struct SessionProbe {
+        var agentId: String?
+        var commandLine: String?
+        var sawSession = false
+
+        static let miss = SessionProbe()
+    }
+
     /// One sysctl walk: agent identity (if any) + foreground command line.
-    static func probeSession(paneSessionKey: String) -> (agentId: String?, commandLine: String?) {
-        guard let context = ProbeContext.capture() else { return (nil, nil) }
+    static func probeSession(paneSessionKey: String) -> SessionProbe {
+        guard let context = ProbeContext.capture() else { return .miss }
         return probeSession(paneSessionKey: paneSessionKey, context: context)
     }
 
@@ -109,18 +122,33 @@ enum ProcessProbe {
     static func probeSession(
         paneSessionKey: String,
         context: ProbeContext
-    ) -> (agentId: String?, commandLine: String?) {
+    ) -> SessionProbe {
         guard let root = sessionPid(paneSessionKey: paneSessionKey,
                                     zmxListOutput: context.zmxListOutput) else {
-            return (nil, nil)
+            return .miss
         }
         // argv is read only for this session's own descendants — a handful —
         // rather than for every process on the machine, almost all of which the
         // very next line would have discarded.
         let descendants = withArgv(descendants(of: root, in: context.table))
-        guard !descendants.isEmpty else { return (nil, nil) }
+        // The session pid is the shell itself, so a bare shell has no
+        // descendants at all: that is the plainest "no agent", as long as the
+        // shell is really there.
+        guard !descendants.isEmpty else {
+            return context.table.contains { $0.pid == root } ? SessionProbe(sawSession: true) : .miss
+        }
         let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
-        return (agentId, foregroundCommandLine(from: descendants))
+        return SessionProbe(agentId: agentId,
+                            commandLine: foregroundCommandLine(from: descendants),
+                            sawSession: true)
+    }
+
+    /// Whether a probe can see this agent at all: its manifest names the
+    /// processes to look for. For one that does not, a probe finding nothing
+    /// says nothing, so it must not be read as the agent having exited.
+    static func canIdentify(manifestId: String, manifests: [AgentManifest]) -> Bool {
+        guard let m = manifests.first(where: { $0.id == manifestId }), let pm = m.process else { return false }
+        return !pm.execNames.isEmpty || !pm.argvContains.isEmpty
     }
 
     /// Aggregate memory under a zmx session root. `totalBytes` includes the root
