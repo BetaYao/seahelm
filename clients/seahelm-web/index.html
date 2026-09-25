@@ -768,6 +768,14 @@ function setStatus(on, txt){
 // mounted, and which pane had focus. The panes themselves are torn down — their
 // attach leases died with the socket — and rebuilt on the way back.
 let lastMount = null;
+// Whether this page has been linked at least once. A drop after that is a blip
+// the reconnector is already fixing, so the gate stays out of the way; before
+// it, there is nothing on the page to keep showing.
+let hadLink = false;
+// Auto-retries a drop gets with the gate kept down. The first ones come back in
+// well under a few seconds; past this the Mac is plausibly gone and the user
+// should see it, with a way to retry now.
+const QUIET_RETRIES = 3;
 
 const reconnector = SeahelmReconnect.createReconnector({
   attempt: () => openGatewaySocket(),
@@ -839,6 +847,7 @@ function openGatewaySocket(){
       } catch (e) {}
       if ($('mac')) $('mac').value = S.mac;
       log('sys', '(vt format)', S.gw.binary ? (S.gw.deflate ? 'binary+deflate' : 'binary') : 'json+base64');
+      hadLink = true;
       reconnector.succeeded();
       setStatus(true, 'Connected');
       // The Mac folds the snapshot into the auth reply, because a round trip
@@ -1572,9 +1581,33 @@ function renderGate(){
     gate.innerHTML = '';
     return;
   }
+
+  // Paired and the reconnector is on it (not stopped by a rejected credential or
+  // the Disconnect button). Showing the Connect button here is what made it
+  // flash up on every drop and vanish a second later, with nothing to press.
+  if (S.authPass && !reconnector.isStopped){
+    const n = reconnector.attempts;
+    if (hadLink && n <= QUIET_RETRIES){  // a blip: the header says Reconnecting…
+      gate.hidden = true;
+      gate.innerHTML = '';
+      return;
+    }
+    gate.hidden = false;
+    const giveUpHint = n > QUIET_RETRIES;
+    gate.innerHTML = `
+      <div class="gate-card">
+        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
+        <div class="gate-hint">${n > 0 ? `Reconnecting… (${n})` : 'Connecting…'}</div>
+        ${giveUpHint ? '<button class="gate-primary" id="gateRetry">Retry now</button>' : ''}
+        <button class="gate-link" id="gateUnpair">Unpair</button>
+      </div>`;
+    if (giveUpHint) $('gateRetry').onclick = () => { connect(); renderGate(); };
+    $('gateUnpair').onclick = () => { reconnector.stop(); disconnectAll(); clearPair(); };
+    return;
+  }
   gate.hidden = false;
 
-  if (S.authPass){                       // paired, disconnected
+  if (S.authPass){                       // paired, disconnected on purpose or rejected
     gate.innerHTML = `
       <div class="gate-card">
         <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>

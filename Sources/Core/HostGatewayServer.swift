@@ -35,6 +35,16 @@ final class HostGatewayServer {
     private var proxied: [ObjectIdentifier: NWConnection] = [:]
     private var readyHandlers: [() -> Void] = []
     private let stateLock = NSLock()
+    /// Pings every open socket so an idle one is not reaped in transit.
+    ///
+    /// Nothing else crosses the wire while the fleet is quiet and no pane is
+    /// mounted — the client's `pane.vt_keepalive` runs only per open pane — and a
+    /// proxy in front (Cloudflare drops an idle WebSocket after ~100s) closes it.
+    /// The page then reconnects on its own, but every drop flashes the connect
+    /// gate and tears down whatever was mounted. The browser answers a ping frame
+    /// by itself, so the pong is the traffic that keeps the path open.
+    private var pingTimer: DispatchSourceTimer?
+    static let pingInterval: TimeInterval = 30
     /// Rebind attempts left for the public port.
     ///
     /// `NWListener.cancel()` is asynchronous, so `stop()` returns while the old
@@ -103,8 +113,23 @@ final class HostGatewayServer {
             self.frontBindAttemptsLeft = Self.frontBindAttempts
             self.subscribeToAgentEvents()
             self.subscribeToMessageStream()
+            self.startPingTimer()
             self.startWebSocketListener()
         }
+    }
+
+    private func startPingTimer() {
+        guard pingTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            for state in self.connections.values {
+                self.sendPing(on: state.connection)
+            }
+        }
+        timer.resume()
+        pingTimer = timer
     }
 
     /// AgentRegistry → EventHub → every authenticated session.
@@ -146,6 +171,8 @@ final class HostGatewayServer {
                 state.connection.cancel()
             }
             connections.removeAll()
+            pingTimer?.cancel()
+            pingTimer = nil
             if let eventToken { EventHub.shared.unsubscribe(eventToken) }
             eventToken = nil
             if let messageToken { MessageStreamHub.shared.unsubscribe(messageToken) }
@@ -588,6 +615,17 @@ final class HostGatewayServer {
         let context = NWConnection.ContentContext(identifier: "hostgateway", metadata: [metadata])
         connection.send(
             content: body,
+            contentContext: context,
+            isComplete: true,
+            completion: .contentProcessed { _ in })
+    }
+
+    private func sendPing(on connection: NWConnection) {
+        guard connection.state == .ready else { return }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .ping)
+        let context = NWConnection.ContentContext(identifier: "hostgateway.ping", metadata: [metadata])
+        connection.send(
+            content: Data(),
             contentContext: context,
             isComplete: true,
             completion: .contentProcessed { _ in })
