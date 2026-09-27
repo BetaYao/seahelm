@@ -598,8 +598,7 @@
   <!-- Suggestions float over the page at the upper centre (island-style). -->
   <div class="suggest-dock" id="suggestDock"></div>
 
-<link rel="stylesheet" href="./xterm.css" />
-<script src="./xterm.js"></script>
+<!-- xterm.js (~120KB on the wire) loads on first use: see loadXterm(). -->
 <script src="./input-coalescer.js"></script>
 <script src="./touch-scroll.js"></script>
 <script src="./reconnect.js"></script>
@@ -859,17 +858,26 @@ function openGatewaySocket(){
   // auth — no close either way, so without this the reconnector sat on its
   // first retry forever.
   const gwAttempt = S.gw;
-  setTimeout(() => { if (S.gw === gwAttempt && !gwAttempt.ready) dropDeadSocket(gwAttempt); }, CONNECT_TIMEOUT_MS);
+  // Opened is progress: auth is one round trip away, which on a very slow link
+  // is seconds, so an open socket gets the auth allowance on top.
+  const attemptDeadline = (ms) => setTimeout(() => {
+    if (S.gw !== gwAttempt || gwAttempt.ready) return;
+    if (gwAttempt.opened && !gwAttempt.authWaited) { gwAttempt.authWaited = true; attemptDeadline(AUTH_TIMEOUT_MS); return; }
+    dropDeadSocket(gwAttempt);
+  }, ms);
+  attemptDeadline(CONNECT_TIMEOUT_MS);
   ws.onopen = () => {
-    // The gateway replays every ring after auth. Start empty so that replay is
-    // the whole history — and because a restarted Mac numbers `seq` from 1.
-    S.messages = {};
-    S.history = {};
+    gwAttempt.opened = true;
     const params = {
       vt_binary: true,
       vt_deflate: VTFrame.deflateSupported(),
       keys_binary: true,
     };
+    // Keep the timeline across the drop and ask only for what came after it.
+    // Every ring in full was ~400KB, on every screen unlock — half a minute on
+    // a slow link, long enough for the heartbeat to give up and start it over.
+    const since = heldMessageSeq();
+    if (since > 0) params.since_seq = since;
     if (S.pendingCode) params.code = S.pendingCode;
     else { params.mac_id = S.mac; params.token = S.authPass; }
     gwSend('auth', params, (r, err) => {
@@ -891,6 +899,15 @@ function openGatewaySocket(){
         return;
       }
       gateErrorMsg = null;
+      // "delta": what we hold stands, and only newer frames follow. Anything
+      // else — "full", or a Mac from before deltas — replays every ring, so
+      // start empty as we always used to.
+      if (r.replay === 'delta') {
+        for (const key of r.reset_panes || []) { delete S.messages[key]; delete S.history[key]; }
+      } else {
+        S.messages = {};
+        S.history = {};
+      }
       S.gw.ready = true;
       S.gw.binary = !!(r && r.vt_binary);
       S.gw.deflate = !!(r && r.vt_deflate);
@@ -921,11 +938,22 @@ function openGatewaySocket(){
     });
   };
   ws.onmessage = (ev) => {
+    gwAttempt.lastRx = performance.now();
     if (ev.data instanceof ArrayBuffer) { onGatewayBinaryFrame(new Uint8Array(ev.data)); return; }
     try { onGatewayFrame(JSON.parse(ev.data)); } catch {}
   };
   ws.onclose = () => onSocketGone(ws);
   ws.onerror = () => { if (reconnector.isStopped) setStatus(false, 'Error'); };
+}
+
+/** The newest `seq` this page holds, across every pane: `seq` is one sequence
+ *  for the whole Mac, so this is where a delta replay picks up. */
+function heldMessageSeq(){
+  let max = 0;
+  for (const list of Object.values(S.messages)) {
+    for (const m of list) { const n = Number(m.seq); if (n > max) max = n; }
+  }
+  return max;
 }
 
 function onSocketGone(ws){
@@ -950,14 +978,23 @@ function onSocketGone(ws){
 const HEARTBEAT_MS = 15000;
 const HEARTBEAT_TIMEOUT_MS = 8000;
 const WAKE_PROBE_TIMEOUT_MS = 4000;
-const CONNECT_TIMEOUT_MS = 10000;
+const CONNECT_TIMEOUT_MS = 15000;
+const AUTH_TIMEOUT_MS = 20000;
 
 function probeLink(timeoutMs){
   const gw = S.gw;
   if (!gw || !gw.ready || gw.probe) return;    // one in flight is enough
-  const t = setTimeout(() => { if (S.gw === gw) dropDeadSocket(gw); }, timeoutMs);
-  gw.probe = t;
-  gwSend('ping', {}, () => { clearTimeout(t); if (gw.probe === t) gw.probe = null; });
+  // Dead means silent, not slow: on a thin link the reply queues behind
+  // whatever is still streaming in, and giving up on a socket that is busy
+  // delivering was what looped a slow phone through reconnect after reconnect.
+  const check = () => {
+    if (S.gw !== gw || !gw.probe) return;
+    if (performance.now() - (gw.lastRx || 0) < timeoutMs) { gw.probe = setTimeout(check, timeoutMs); return; }
+    gw.probe = null;
+    dropDeadSocket(gw);
+  };
+  gw.probe = setTimeout(check, timeoutMs);
+  gwSend('ping', {}, () => { clearTimeout(gw.probe); gw.probe = null; });
 }
 
 /** Give up on a socket that stopped answering. `close()` on a dead path waits
@@ -1671,6 +1708,10 @@ function sendComposerText(byTap){
 /** Ask the Mac to group the fleet the way its dashboard would. */
 function refreshGroups(){
   if (S.transport !== 'gateway' || !isLinked()) { renderTree(); return; }
+  // Draw what we have now — the panes came with auth — rather than an empty
+  // list until the Mac's grouping arrives: on a thin link that reply queues
+  // behind everything else, and the list stayed blank for seconds, or for good.
+  if (!S.grouping.groups || !$('tree').querySelector('.fm-row')) renderTree();
   const mode = S.grouping.mode;
   sendCommand('fleet.groups', { mode }, (r) => {
     if (S.grouping.mode !== mode) return;            // mode changed while in flight
@@ -2233,13 +2274,33 @@ const RENDERER = (() => {
 
 let TerminalCtor = null;
 let rendererReady = null;
+let xtermReady = null;
+
+/** xterm.js and its stylesheet, fetched the first time a terminal is mounted.
+ *  They were two thirds of the page's first load, and a phone opens on the
+ *  text timeline, which uses neither. */
+function loadXterm(){
+  if (xtermReady) return xtermReady;
+  xtermReady = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = './xterm.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = './xterm.js';
+    js.onload = () => resolve(window.Terminal);
+    js.onerror = () => { xtermReady = null; reject(new Error('xterm.js failed to load')); };
+    document.head.appendChild(js);
+  });
+  return xtermReady;
+}
 
 /** Resolve the terminal implementation once. Both expose the xterm.js surface. */
 function ensureRenderer(){
   if (rendererReady) return rendererReady;
   if (RENDERER !== 'ghostty'){
-    TerminalCtor = window.Terminal;
-    rendererReady = Promise.resolve('xterm');
+    rendererReady = loadXterm()
+      .then((T) => { TerminalCtor = T; return 'xterm'; })
+      .catch((e) => { rendererReady = null; throw e; });   // a later mount retries
     return rendererReady;
   }
   rendererReady = import('./vendor/ghostty-web.js')
@@ -2249,10 +2310,10 @@ function ensureRenderer(){
       log('sys', '(renderer)', 'ghostty-web — Ghostty VT parser (wasm) + Canvas 2D');
       return 'ghostty';
     })
-    .catch((e) => {
+    .catch(async (e) => {
       // Falling back is the right failure mode for a spike: an experimental
       // renderer that will not load must not take the client down with it.
-      TerminalCtor = window.Terminal;
+      TerminalCtor = await loadXterm();
       log('sys', '(renderer failed)', `ghostty-web failed to load, falling back to xterm.js: ${e && e.message}`);
       return 'xterm';
     });
@@ -2275,7 +2336,9 @@ function renderRendererBadge(active){
 
 // Resolve the renderer once the declarations above exist: `rendererReady` is a
 // `let`, so any call placed earlier in the file hits its temporal dead zone.
-ensureRenderer().then(renderRendererBadge);
+// Named from the choice, not the load: resolving it here fetched xterm.js on
+// every page open.
+renderRendererBadge(RENDERER);
 
 const VT_MODE_KEY = 'seahelm_vt_mode';
 function loadVtMode(){
@@ -2480,7 +2543,7 @@ function requestLayout(path){
         return;
       }
       mountPanes(root, r.result.focused_pane_session_key || null, path);
-    });
+    }).catch((e) => log('sys', '(renderer failed)', String(e && e.message || e)));
   });
 }
 

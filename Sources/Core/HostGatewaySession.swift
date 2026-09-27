@@ -346,6 +346,13 @@ final class HostGatewaySession {
         return (method, params)
     }
 
+    /// The `since_seq` a reconnecting client sends, if any. Zero is "nothing
+    /// held", which is the full replay anyway.
+    static func sinceSeq(_ params: [String: Any]) -> UInt64? {
+        guard let n = params["since_seq"] as? NSNumber, n.int64Value > 0 else { return nil }
+        return n.uint64Value
+    }
+
     static func agentTypes(inSnapshotPanes panes: Any) -> [String: String] {
         var out: [String: String] = [:]
         for pane in panes as? [[String: Any]] ?? [] {
@@ -483,7 +490,13 @@ final class HostGatewaySession {
             "vt_deflate": deflate,
             "keys_binary": keysBin,
         ]
+        // A client that kept its timeline across the drop says how far it got,
+        // and gets only what came after. `replay` tells it which one it got:
+        // "full" means drop what it holds, as a client from before this does.
+        let delta = ok ? Self.sinceSeq(params).flatMap { MessageStreamHub.shared.replay(after: $0) } : nil
         if ok {
+            result["replay"] = delta == nil ? "full" : "delta"
+            if let delta, !delta.truncated.isEmpty { result["reset_panes"] = delta.truncated }
             result["mac_id"] = expectedMacId
             if let issuedToken { result["token"] = issuedToken }
             // Fold the session snapshot into the reply. The client asked for it
@@ -514,7 +527,7 @@ final class HostGatewaySession {
             }
             // Replay MessageStream rings so text-mode clients paint without an
             // extra round trip (and without needing VT).
-            for ev in MessageStreamHub.shared.snapshot(paneId: nil) {
+            for ev in delta?.events ?? MessageStreamHub.shared.snapshot(paneId: nil) {
                 out.append(HostGatewayFrame.encode(
                     .notify(method: "pane.message", params: ev.dict)))
             }

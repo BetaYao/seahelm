@@ -104,6 +104,27 @@ final class MessageStreamHub {
         return (Array(older.suffix(limit)), older.count > limit)
     }
 
+    /// What a client that already holds everything up to `seq` is missing.
+    ///
+    /// A phone reconnects on every screen unlock, and sending it every ring each
+    /// time (~400KB) is what kept a slow link busy for half a minute. `seq` is
+    /// global and carries on across launches, so "after" is well defined — unless
+    /// the numbering went backwards (history wiped), which `nil` reports so the
+    /// caller falls back to everything. `truncated` names the rings that may have
+    /// evicted part of the gap: full, and nothing in them at or before `seq`.
+    func replay(after seq: UInt64) -> (events: [MessageEvent], truncated: [String])? {
+        lock.lock(); defer { lock.unlock() }
+        guard seq <= nextSeq else { return nil }
+        var events: [MessageEvent] = []
+        var truncated: [String] = []
+        for (key, ring) in rings {
+            let newer = ring.filter { $0.seq > seq }
+            events.append(contentsOf: newer)
+            if ring.count >= perPaneCap, newer.count == ring.count { truncated.append(key) }
+        }
+        return (events.sorted { $0.seq < $1.seq }, truncated)
+    }
+
     func eventsAfter(_ seq: UInt64) -> [MessageEvent] {
         lock.lock(); defer { lock.unlock() }
         return rings.values.flatMap { $0 }.filter { $0.seq > seq }.sorted { $0.seq < $1.seq }
