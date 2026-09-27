@@ -43,6 +43,34 @@ final class MessageStreamHubTests: XCTestCase {
         XCTAssertEqual(got.first?.text, "n")
     }
 
+    /// A reconnecting client gets only what came after the `seq` it holds.
+    func testDeltaReplayCarriesOnlyNewerEvents() {
+        let hub = MessageStreamHub()
+        hub.append([event("1"), event("2"), event("x", pane: "b", key: "k2")])
+        let delta = hub.replay(after: 2)
+        XCTAssertEqual(delta?.events.map(\.text), ["x"])
+        XCTAssertEqual(delta?.truncated, [])
+    }
+
+    /// Numbering behind the client's means the history was reset: no delta.
+    func testDeltaReplayRefusesASeqAheadOfTheHub() {
+        let hub = MessageStreamHub()
+        hub.append([event("1")])
+        XCTAssertNil(hub.replay(after: 50))
+    }
+
+    /// A full ring with nothing the client already holds may have evicted part
+    /// of the gap, so the client is told to drop that pane and take the ring.
+    func testDeltaReplayFlagsARingThatMayHaveLostPartOfTheGap() {
+        let hub = MessageStreamHub(perPaneCap: 3)
+        hub.append([event("1"), event("2")])                          // client holds up to 2
+        hub.append((3...7).map { event("\($0)") })                   // ring now 5, 6, 7
+        hub.append([event("b", pane: "b", key: "k2")])
+        let delta = hub.replay(after: 2)
+        XCTAssertEqual(delta?.truncated, ["k"])
+        XCTAssertEqual(delta?.events.map(\.text), ["5", "6", "7", "b"])
+    }
+
     func testEventsAfterReplay() {
         let hub = MessageStreamHub()
         hub.append([event("1"), event("2")])
