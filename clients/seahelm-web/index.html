@@ -757,7 +757,7 @@ function disconnectAll(){
 // drowns everything worth reading — the log was a wall of `RX vt.data`. Filtered
 // by default, with a switch for when the terminal stream is the thing you are
 // debugging.
-const VT_METHODS = new Set(['vt.data', 'vt.snapshot', 'pane.send_keys', 'pane.vt_keepalive']);
+const VT_METHODS = new Set(['vt.data', 'vt.snapshot', 'pane.send_keys', 'pane.vt_keepalive', 'ping']);
 let showVTFrames = localStorage.getItem('seahelm_log_vt') === '1';
 
 function setShowVTFrames(on){
@@ -767,12 +767,36 @@ function setShowVTFrames(on){
   if (btn){ btn.classList.toggle('on', on); btn.title = on ? 'Hide VT frames' : 'Show VT frames'; }
 }
 
+// Bounded, and built only while it is on screen. It used to add a line — five
+// nodes and the frame's whole JSON — for every frame, hidden or not, and never
+// let one go: each reconnect's replay alone added a thousand, and a phone left
+// open for a day carried hundreds of thousands of nodes nobody could see.
+const LOG_MAX = 500;
+const logRing = [];            // newest last: { dir, topic, payload, ts }
+let logVisible = false;        // set by applyLogVisibility
+
 function log(dir, topic, payload){
   if (!showVTFrames && VT_METHODS.has(String(topic))) return;
+  const entry = { dir, topic, payload, ts: new Date().toLocaleTimeString('en-GB') };  // HH:MM:SS
+  logRing.push(entry);
+  if (logRing.length > LOG_MAX) logRing.shift();
+  if (!logVisible) return;
+  const box = $('log');
+  box.prepend(logLineEl(entry));   // newest on top (reverse-chronological)
+  while (box.childElementCount > LOG_MAX) box.lastElementChild.remove();
+}
+
+/** Put the ring back on screen, for a log that was hidden while it filled. */
+function renderLogRing(){
+  const box = $('log');
+  box.innerHTML = '';
+  for (let i = logRing.length - 1; i >= 0; i--) box.appendChild(logLineEl(logRing[i]));
+}
+
+function logLineEl({ dir, topic, payload, ts }){
   const el = document.createElement('div');
   el.className = 'logline ' + dir;
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  const ts = new Date().toLocaleTimeString('en-GB');   // HH:MM:SS
   const head = document.createElement('div');
   head.className = 'll-head';
   head.textContent = `${ts} ${dir.toUpperCase()} ${topic}`;   // collapsed one-liner
@@ -780,7 +804,7 @@ function log(dir, topic, payload){
   bd.className = 'll-body'; bd.textContent = body; bd.hidden = true;
   head.onclick = () => { bd.hidden = !bd.hidden; el.classList.toggle('open', !bd.hidden); };
   el.appendChild(head); el.appendChild(bd);
-  $('log').prepend(el);   // newest on top (reverse-chronological)
+  return el;
 }
 function setStatus(on, txt){
   const s = $('status'); s.textContent = txt; s.className = on ? 'st-on' : 'st-off';
@@ -831,6 +855,11 @@ function openGatewaySocket(){
   const ws = new WebSocket(wsURL);
   ws.binaryType = 'arraybuffer';
   S.gw = { ws, ready: false, req: new Map(), n: 0, binary: false, deflate: false, keysBinary: false };
+  // An attempt on a dead path hangs in CONNECTING, or opens and never answers
+  // auth — no close either way, so without this the reconnector sat on its
+  // first retry forever.
+  const gwAttempt = S.gw;
+  setTimeout(() => { if (S.gw === gwAttempt && !gwAttempt.ready) dropDeadSocket(gwAttempt); }, CONNECT_TIMEOUT_MS);
   ws.onopen = () => {
     // The gateway replays every ring after auth. Start empty so that replay is
     // the whole history — and because a restarted Mac numbers `seq` from 1.
@@ -895,18 +924,57 @@ function openGatewaySocket(){
     if (ev.data instanceof ArrayBuffer) { onGatewayBinaryFrame(new Uint8Array(ev.data)); return; }
     try { onGatewayFrame(JSON.parse(ev.data)); } catch {}
   };
-  ws.onclose = () => {
-    S.gw = null; S.transport = null;
-    // The panes' attach leases went with the socket; keep where we were so
-    // the reconnect can put it back rather than landing on an empty page.
-    if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
-    unmountPanes();
-    // Do not overwrite a gate-visible auth error with a generic "offline".
-    if (reconnector.isStopped && !gateErrorMsg) setStatus(false, 'Offline');
-    reconnector.closed();
-  };
+  ws.onclose = () => onSocketGone(ws);
   ws.onerror = () => { if (reconnector.isStopped) setStatus(false, 'Error'); };
 }
+
+function onSocketGone(ws){
+  if (S.gw && S.gw.ws !== ws) return;          // a socket already replaced
+  S.gw = null; S.transport = null;
+  // The panes' attach leases went with the socket; keep where we were so
+  // the reconnect can put it back rather than landing on an empty page.
+  if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
+  unmountPanes();
+  // Do not overwrite a gate-visible auth error with a generic "offline".
+  if (reconnector.isStopped && !gateErrorMsg) setStatus(false, 'Offline');
+  reconnector.closed();
+}
+
+// ── liveness ─────────────────────────────────────────────────────────────
+// A phone that sleeps through a WiFi hand-off, or a tunnel that drops the path,
+// leaves a socket nobody will ever close: `readyState` stays OPEN, sends vanish,
+// nothing arrives, and the page reads "Connected" until it is reloaded. Only a
+// round trip proves the other end is there, so one is made on a timer and again
+// whenever the page comes back to the foreground — the moment a dead socket is
+// most likely and most noticed.
+const HEARTBEAT_MS = 15000;
+const HEARTBEAT_TIMEOUT_MS = 8000;
+const WAKE_PROBE_TIMEOUT_MS = 4000;
+const CONNECT_TIMEOUT_MS = 10000;
+
+function probeLink(timeoutMs){
+  const gw = S.gw;
+  if (!gw || !gw.ready || gw.probe) return;    // one in flight is enough
+  const t = setTimeout(() => { if (S.gw === gw) dropDeadSocket(gw); }, timeoutMs);
+  gw.probe = t;
+  gwSend('ping', {}, () => { clearTimeout(t); if (gw.probe === t) gw.probe = null; });
+}
+
+/** Give up on a socket that stopped answering. `close()` on a dead path waits
+ *  for a closing handshake that will never come, so its `onclose` could be
+ *  minutes away: detach it and run the teardown now. */
+function dropDeadSocket(gw){
+  const ws = gw.ws;
+  log('sys', '(dead socket)', gw.ready ? 'no reply to ping — reconnecting' : 'connect timed out — retrying');
+  ws.onclose = null; ws.onmessage = null; ws.onerror = null;
+  try { ws.close(); } catch (e) {}
+  onSocketGone(ws);
+}
+
+setInterval(() => { if (isLinked()) probeLink(HEARTBEAT_TIMEOUT_MS); }, HEARTBEAT_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isLinked()) probeLink(WAKE_PROBE_TIMEOUT_MS);
+});
 
 /** Put back the worktree that was on screen before the drop. */
 function restoreMount(){
@@ -1089,9 +1157,7 @@ function onPaneMessage(params){
   if (!SeahelmMessageTimeline.appendMessage(list, params, MESSAGE_CAP)) return;
   // Only the selected pane: the composer sends to `S.selPane`, so the timeline
   // on screen must be that pane's and nobody else's.
-  if (loadSurfaceMode() === 'text' && S.selPane === key) {
-    renderMessageTimeline(key);
-  }
+  if (loadSurfaceMode() === 'text' && S.selPane === key) scheduleTimeline();
 }
 
 // As many as the Mac keeps on disk per pane, so paging back never evicts what
@@ -1101,6 +1167,41 @@ const MESSAGE_CAP = 2000;
 // whole pixel — device-pixel rounding and rubber-band both leave a few over —
 // and a reader who stopped a line short of the end meant to be at the end.
 const TL_BOTTOM_SLOP = 48;
+// Messages drawn at once. Every repaint rebuilds what is drawn, so its cost is
+// this, not the history: at the 2000 kept it was ~130ms a message on a phone,
+// and a busy agent sends four a second. Scrolling near the top draws more.
+const TL_WINDOW = 200;
+const TL_WINDOW_STEP = 100;
+// How long after the last scroll event the list counts as still moving —
+// momentum on a phone keeps scrolling after the finger lifts.
+const TL_SETTLE_MS = 150;
+
+/**
+ * The text timeline's scroll state.
+ *  follow    stick to the end. Latched from what the reader did — moving up
+ *            lets go, arriving at the end takes hold — not read from the
+ *            position at repaint time: a slow swipe up covers less than the
+ *            "at the bottom" slop between two messages, so each one used to
+ *            decide the reader was still at the bottom and pull them back.
+ *  startSeq  first message drawn; held still while the reader is back in the
+ *            history, so a new message cannot slide rows out from above them.
+ */
+const tl = { follow: true, startSeq: null, lastTop: 0, touching: false, quietAt: 0, frame: 0, wait: 0 };
+
+/** Repaint the timeline once for however many messages arrive in a frame, and
+ *  not while a finger or momentum is moving it: replacing the list under an
+ *  iOS scroll stops the scroll dead and puts the reader somewhere else. */
+function scheduleTimeline(){
+  if (tl.frame || tl.wait) return;
+  if (tl.touching || performance.now() < tl.quietAt) {
+    tl.wait = setTimeout(() => { tl.wait = 0; scheduleTimeline(); }, TL_SETTLE_MS);
+    return;
+  }
+  tl.frame = requestAnimationFrame(() => {
+    tl.frame = 0;
+    if (S.selPane && loadSurfaceMode() === 'text') renderMessageTimeline(S.selPane);
+  });
+}
 
 /** Events never change once sent, so each row is built — and its markdown
  *  parsed — once, not on every repaint of a long history. */
@@ -1174,7 +1275,16 @@ function renderMessageTimeline(key){
     renderTimelineToBottom();
     return;
   }
-  const rows = S.messages[key] || [];
+  const all = S.messages[key] || [];
+  if (host.dataset.key !== key) { tl.follow = true; tl.startSeq = null; }
+  let start = 0;
+  if (tl.follow || tl.startSeq == null) start = Math.max(0, all.length - TL_WINDOW);
+  else {
+    const i = all.findIndex(m => Number(m.seq) === tl.startSeq);
+    start = i < 0 ? Math.max(0, all.length - TL_WINDOW) : i;
+  }
+  tl.startSeq = all.length ? Number(all[start].seq) : null;
+  const rows = start ? all.slice(start) : all;
   const items = SeahelmToolGroup.fold(rows);
   // Only the newest run can be the one still being run, and only while the pane
   // is actually working — a finished turn's last run must not keep breathing.
@@ -1182,11 +1292,13 @@ function renderMessageTimeline(key){
   // Follow new output only while already at the bottom; someone scrolled up to
   // read holds their row instead (timeline-scroll.js). A different pane always
   // opens at its latest.
-  const anchor = host.dataset.key !== key
+  // Slop -1: the follow decision is `tl.follow`'s, so capture only anchors.
+  const anchor = (host.dataset.key !== key || tl.follow)
     ? { follow: true }
-    : SeahelmTimelineScroll.capture(host, timelineRowIndex(host), TL_BOTTOM_SLOP);
+    : SeahelmTimelineScroll.capture(host, timelineRowIndex(host), -1);
   const h = S.history[key] || {};
-  const top = h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
+  const top = start > 0 ? ''
+    : h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
     : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
   host.innerHTML = rows.length
     ? `<div class="tl">${top}${items.map((it, i) => {
@@ -1204,6 +1316,7 @@ function renderMessageTimeline(key){
   // Synchronously, before anything can paint or read the position back: the
   // innerHTML above emptied the scroller, so scrollTop is 0 until this lands.
   host.scrollTop = SeahelmTimelineScroll.restore(host, anchor, (seq) => timelineRowTop(host, seq));
+  tl.lastTop = host.scrollTop;   // ours, so the scroll handler does not read it as the reader's
   renderTimelineToBottom();
   // Near the top, or too little to scroll at all: fetch the page before.
   requestAnimationFrame(() => { if (host.scrollTop < 200) loadOlderMessages(key); });
@@ -1242,7 +1355,16 @@ function renderTimelineToBottom(){
 function loadOlderMessages(key){
   const list = S.messages[key];
   if (!key || key !== S.selPane || !list || !list.length) return;
-  if (loadSurfaceMode() !== 'text' || !isLinked()) return;
+  if (loadSurfaceMode() !== 'text') return;
+  // What is already here but not drawn comes first — no round trip.
+  const drawnFrom = tl.startSeq == null ? 0 : list.findIndex(m => Number(m.seq) === tl.startSeq);
+  if (drawnFrom > 0) {
+    tl.follow = false;
+    tl.startSeq = Number(list[Math.max(0, drawnFrom - TL_WINDOW_STEP)].seq);
+    renderMessageTimeline(key);
+    return;
+  }
+  if (!isLinked()) return;
   const h = (S.history[key] = S.history[key] || { loading: false, done: false });
   if (h.loading || h.done) return;
   h.loading = true;
@@ -1257,16 +1379,34 @@ function loadOlderMessages(key){
       const older = r.result.messages || [];
       for (const m of older) SeahelmMessageTimeline.appendMessage(list, m, MESSAGE_CAP);
       if (!r.result.has_more || !older.length) h.done = true;
+      // Draw from the new top, or the page just fetched would sit above the window.
+      if (older.length && S.selPane === key) { tl.follow = false; tl.startSeq = Number(list[0].seq); }
     }
     if (S.selPane === key && loadSurfaceMode() === 'text') renderMessageTimeline(key);
   });
 }
 $('messageTimeline').addEventListener('scroll', (ev) => {
-  if (ev.target.scrollTop < 200) loadOlderMessages(ev.target.dataset.key);
+  const h = ev.target;
+  const fromEnd = h.scrollHeight - h.scrollTop - h.clientHeight;
+  // Up by the reader lets go — even a few pixels, even inside the slop. The
+  // `fromEnd > 2` keeps iOS's bounce back from the end out of it.
+  if (h.scrollTop < tl.lastTop - 1 && fromEnd > 2) tl.follow = false;
+  else if (fromEnd <= TL_BOTTOM_SLOP && h.scrollTop >= tl.lastTop) tl.follow = true;
+  tl.lastTop = h.scrollTop;
+  tl.quietAt = performance.now() + TL_SETTLE_MS;
+  if (h.scrollTop < 200) loadOlderMessages(h.dataset.key);
   // The swipe that ends at the bottom is what re-arms following, so the button
   // has to go the moment it does.
   renderTimelineToBottom();
 }, { passive: true });
+
+{
+  const host = $('messageTimeline');
+  host.addEventListener('touchstart', () => { tl.touching = true; }, { passive: true });
+  const lift = () => { tl.touching = false; tl.quietAt = performance.now() + TL_SETTLE_MS; };
+  host.addEventListener('touchend', lift, { passive: true });
+  host.addEventListener('touchcancel', lift, { passive: true });
+}
 
 /** Open or shut a folded run of calls. Delegated, because every event rebuilds
  *  the list and the line that was clicked stops existing. The re-render keeps
@@ -1497,7 +1637,12 @@ function sendComposerText(byTap){
   // Sending re-arms following, wherever you had scrolled back to: the reply is
   // what you are now waiting for.
   const host = $('messageTimeline');
-  if (host && loadSurfaceMode() === 'text') { host.scrollTop = host.scrollHeight; renderTimelineToBottom(); }
+  if (host && loadSurfaceMode() === 'text') {
+    tl.follow = true;
+    host.scrollTop = host.scrollHeight;
+    tl.lastTop = host.scrollTop;
+    renderTimelineToBottom();
+  }
 }
 (function wireComposer(){
   const send = $('msgSend');
@@ -2801,7 +2946,8 @@ window.addEventListener('pagehide', () => {
 // way, since their attach leases do not survive the socket.
 window.addEventListener('pageshow', () => {
   if (reconnector.isStopped) return;          // disconnected on purpose
-  if (isLinked()) { restoreMount(); return; } // socket outlived the trip
+  // Looks alive — which a dead path also does — so ask before trusting it.
+  if (isLinked()) { probeLink(WAKE_PROBE_TIMEOUT_MS); restoreMount(); return; }
   if (!S.authPass && !S.pendingCode) return;  // never paired
   reconnector.resume();
   openGatewaySocket();
@@ -2841,7 +2987,9 @@ $('toBottom').onclick=()=>{
     const host = $('messageTimeline');
     // Instant, not smooth: a smooth scroll runs past the next repaint, which
     // would read a position still on its way and hold the reader short of the end.
-    if (host) host.scrollTop = host.scrollHeight;
+    tl.follow = true;
+    if (S.selPane) renderMessageTimeline(S.selPane);   // back to the latest window
+    else if (host) host.scrollTop = host.scrollHeight;
     renderTimelineToBottom();
     return;
   }
@@ -2865,6 +3013,9 @@ function applyLogVisibility(){
   // it also costs the terminals ~380px — enough to push a worktree from a
   // mirrored split down to one pane at a time.
   const off = !logShown();
+  logVisible = !off;
+  if (off) $('log').innerHTML = '';
+  else renderLogRing();
   document.querySelector('main').classList.toggle('nolog', off);
   const btn = $('logBtn');
   btn.classList.toggle('on', !off);
@@ -2887,7 +3038,7 @@ $('logBtn').onclick = () => {
 applyLogVisibility();
 $('logVtBtn').onclick = () => setShowVTFrames(!showVTFrames);
 setShowVTFrames(showVTFrames);
-$('clearLog').onclick=()=>$('log').innerHTML='';
+$('clearLog').onclick=()=>{ logRing.length = 0; $('log').innerHTML=''; };
 // Buttons steal the caret in a browser; the pane highlight does not move.
 // Keep xterm's helper textarea focused unless the user is in a real field.
 SeahelmTermFocus.install(document, restoreTermFocus);

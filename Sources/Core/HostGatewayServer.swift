@@ -45,6 +45,13 @@ final class HostGatewayServer {
     /// by itself, so the pong is the traffic that keeps the path open.
     private var pingTimer: DispatchSourceTimer?
     static let pingInterval: TimeInterval = 30
+    /// When each socket was last heard from — any frame, or a pong. A phone that
+    /// slept through a WiFi hand-off leaves a socket nobody will ever FIN, and
+    /// without this the session (and every VT attach lease it holds) lived on
+    /// until TCP gave up, hours later.
+    private var lastHeard: [ObjectIdentifier: Date] = [:]
+    /// Silence past this is a dead socket: two and a half missed pongs.
+    static let silenceLimit: TimeInterval = 75
     /// Rebind attempts left for the public port.
     ///
     /// `NWListener.cancel()` is asynchronous, so `stop()` returns while the old
@@ -124,7 +131,13 @@ final class HostGatewayServer {
         timer.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            for state in self.connections.values {
+            let now = Date()
+            for (key, state) in self.connections {
+                if let heard = self.lastHeard[key], now.timeIntervalSince(heard) > Self.silenceLimit {
+                    // `.cancelled` runs the usual teardown in the state handler.
+                    state.connection.cancel()
+                    continue
+                }
                 self.sendPing(on: state.connection)
             }
         }
@@ -171,6 +184,7 @@ final class HostGatewayServer {
                 state.connection.cancel()
             }
             connections.removeAll()
+            lastHeard.removeAll()
             pingTimer?.cancel()
             pingTimer = nil
             if let eventToken { EventHub.shared.unsubscribe(eventToken) }
@@ -547,8 +561,10 @@ final class HostGatewayServer {
             guard let self else { return }
             switch connState {
             case .ready:
+                self.lastHeard[key] = Date()
                 self.receive(on: connection, session: session)
             case .failed, .cancelled:
+                self.lastHeard.removeValue(forKey: key)
                 // Unsubscribe here rather than leaving it to ARC: the session is
                 // still referenced by Network.framework's own handler graph at
                 // this point, and until it unsubscribes it keeps queueing frames
@@ -568,6 +584,7 @@ final class HostGatewayServer {
                 connection.cancel()
                 return
             }
+            self.lastHeard[ObjectIdentifier(connection)] = Date()
 
             let wsMeta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata
@@ -623,6 +640,11 @@ final class HostGatewayServer {
     private func sendPing(on connection: NWConnection) {
         guard connection.state == .ready else { return }
         let metadata = NWProtocolWebSocket.Metadata(opcode: .ping)
+        let key = ObjectIdentifier(connection)
+        metadata.setPongHandler(queue) { [weak self] error in
+            guard let self, error == nil, self.connections[key] != nil else { return }
+            self.lastHeard[key] = Date()
+        }
         let context = NWConnection.ContentContext(identifier: "hostgateway.ping", metadata: [metadata])
         connection.send(
             content: Data(),
