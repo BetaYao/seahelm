@@ -105,6 +105,10 @@ class TabCoordinator {
     var statusPublisher: StatusPublisher!
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
+    /// Set by the window: start a worktree (task, repo, agent) the way the
+    /// desktop does, calling back with its path or nil. Lets the control API —
+    /// the web client's composer — start work too.
+    var worktreeCreator: ((String, String, AgentType, @escaping (String?) -> Void) -> Void)?
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
     let watchFeed = WatchFeed()
@@ -896,6 +900,13 @@ class TabCoordinator {
                     }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]
+                    }
+                    controlDataSource.repoPathsHandler = { [weak self] in
+                        self?.config.workspacePaths ?? []
+                    }
+                    controlDataSource.createWorktreeHandler = { [weak self] repo, agent, prompt, done in
+                        guard let create = self?.worktreeCreator else { done(nil); return }
+                        create(prompt, repo, agent, done)
                     }
                     controlDataSource.worktreeGroupsHandler = { [weak self] mode in
                         self?.worktreeGroups(mode: mode) ?? []

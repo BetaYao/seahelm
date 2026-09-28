@@ -277,6 +277,12 @@ class MainWindowController: NSWindowController {
         tc.statusAggregator = statusAggregator
         tc.runtimeBackend = runtimeBackend
         tc.panelCoordinator = panelCoordinator
+        tc.worktreeCreator = { [weak self] task, repoPath, agent, done in
+            guard let self else { done(nil); return }
+            // Failure also reaches onComplete (as nil), so it is the only callback.
+            self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: agent, reuseEnv: false,
+                                       onComplete: done)
+        }
         return tc
     }()
 
