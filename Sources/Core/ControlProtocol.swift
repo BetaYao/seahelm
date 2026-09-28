@@ -55,6 +55,11 @@ struct PaneSnapshot {
 /// (read-only); write methods (send_text/split) extend this later.
 protocol ControlDataSource: AnyObject {
     func snapshotPanes() -> [PaneSnapshot]
+    // Requirements, not just extension methods, so a conformer's own version
+    // is the one the router reaches; defaults live in the extension below.
+    func worktreeCreateOptions() -> [String: Any]?
+    func createWorktree(repoPath: String, agentType: AgentType, prompt: String)
+        -> Result<[String: Any], ControlCreateError>
     /// Same, but optionally attaching per-pane memory. Opt-in because probing
     /// means one `zmx list` plus a full process-table walk (argv included) —
     /// far too costly to put on every `pane.list`, which agents poll.
@@ -134,6 +139,13 @@ extension ControlDataSource {
     /// Default ignores the flag, so read-only conformers and test fakes that
     /// only implement the plain form keep working.
     func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] { snapshotPanes() }
+    /// Projects a worktree can be started in and the agents that can be
+    /// launched in it: `["repos": [[name, path]], "agents": [[id, label]]]`.
+    func worktreeCreateOptions() -> [String: Any]? { nil }
+    /// Start a worktree in `repoPath` with `agentType` and hand it `prompt`.
+    /// Blocks until the worktree exists — never call it on the main thread.
+    func createWorktree(repoPath: String, agentType: AgentType, prompt: String)
+        -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
     func sendText(paneId: String, text: String, enter: Bool) -> Bool { false }
     func sendKeys(paneId: String, keys: [String]) -> Bool { false }
     func paneStatus(paneId: String) -> String? { nil }
@@ -238,6 +250,29 @@ enum ControlError {
     static let methodNotFound = -32601
     static let invalidParams = -32602
     static let notFound = -32004
+}
+
+/// Why `worktree.create` did not produce a worktree.
+enum ControlCreateError: Error, Equatable {
+    case unavailable
+    case unknownRepo
+    case failed(String)
+    case timedOut
+
+    var code: Int {
+        switch self {
+        case .unavailable, .unknownRepo: return ControlError.notFound
+        case .failed, .timedOut: return ControlError.invalidRequest
+        }
+    }
+    var message: String {
+        switch self {
+        case .unavailable: return "worktree creation unavailable"
+        case .unknownRepo: return "not a project seahelm knows"
+        case .failed(let why): return why
+        case .timedOut: return "worktree creation timed out"
+        }
+    }
 }
 
 /// Pure request router. No IO, no singletons — the data source is injected.
@@ -390,6 +425,28 @@ final class ControlRouter {
                 return .ok(one)
             }
             return .ok(["layouts": layouts])
+
+        case "worktree.options":
+            guard let options = dataSource?.worktreeCreateOptions() else {
+                return .error(code: ControlError.notFound, message: "worktree creation unavailable")
+            }
+            return .ok(options)
+
+        case "worktree.create":
+            let repoPath = (params["repo_path"] as? String) ?? ""
+            let prompt = ((params["prompt"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !repoPath.isEmpty, !prompt.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "repo_path and prompt are required")
+            }
+            let agent = AgentType(rawValue: (params["agent_type"] as? String) ?? "claudeCode") ?? .unknown
+            guard agent.isAIAgent, agent.bareLaunchCommand() != nil else {
+                return .error(code: ControlError.invalidParams, message: "agent_type cannot be launched")
+            }
+            switch dataSource?.createWorktree(repoPath: repoPath, agentType: agent, prompt: prompt)
+                ?? .failure(.unavailable) {
+            case .success(let result): return .ok(result)
+            case .failure(let e): return .error(code: e.code, message: e.message)
+            }
 
         case "fleet.groups":
             let groupingMode = (params["mode"] as? String) ?? "repository"

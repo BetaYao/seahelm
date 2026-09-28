@@ -423,9 +423,24 @@ final class HostGatewaySession {
                 }
                 return handleAuth(id: id, params: params).map { .text($0) }
             }
+            if Self.slowMethods.contains(method) {
+                // Seconds of git: run it off the gateway queue, which every
+                // pane's VT stream shares, and send the reply when it lands.
+                let router = self.router
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let result = router.handle(method: method, params: params)
+                    guard let self else { return }
+                    self.enqueue(.text(self.encodeControlResult(id: id, result: result)))
+                }
+                return []
+            }
             return [.text(handleAuthenticated(id: id, method: method, params: params))]
         }
     }
+
+    /// Methods that block — git, or a PATH lookup per agent — and must not
+    /// hold the gateway queue.
+    static let slowMethods: Set<String> = ["worktree.create", "worktree.options"]
 
     /// Negotiated binary `send_keys` — fire-and-forget, no RPC id.
     func handle(binary: Data) -> [HostGatewayWireFrame] {

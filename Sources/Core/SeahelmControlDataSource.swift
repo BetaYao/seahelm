@@ -30,6 +30,11 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// and the dashboard's grouping for a given mode.
     var liveLayoutsHandler: (() -> [String: [String: Any]])?
     var worktreeGroupsHandler: ((String) -> [[String: Any]])?
+    /// Owner-set, main thread: the projects a worktree can start in.
+    var repoPathsHandler: (() -> [String])?
+    /// Owner-set, main thread: start a worktree (repo, agent, prompt) and call
+    /// back with its path, or nil when it could not be created.
+    var createWorktreeHandler: ((String, AgentType, String, @escaping (String?) -> Void) -> Void)?
     /// Decline a pane's pending suggestion (main thread — it is UI state).
     var dismissDecisionHandler: ((String) -> Bool)?
 
@@ -423,6 +428,42 @@ extension SeahelmControlDataSource {
 }
 
 extension SeahelmControlDataSource {
+    func worktreeCreateOptions() -> [String: Any]? {
+        guard let h = repoPathsHandler, createWorktreeHandler != nil else { return nil }
+        var paths: [String] = []
+        runOnMain { paths = h() }
+        let repos = paths.map { ["name": URL(fileURLWithPath: $0).lastPathComponent, "path": $0] }
+            .sorted { ($0["name"] ?? "").localizedCaseInsensitiveCompare($1["name"] ?? "") == .orderedAscending }
+        // Installed ones only: offering an agent the Mac cannot run would make
+        // a worktree whose pane just says "command not found".
+        let agents = OnboardingAgentDetector.scan()
+            .filter(\.detected)
+            .map { ["id": $0.type.rawValue, "label": $0.type.displayName] }
+        return ["repos": repos, "agents": agents]
+    }
+
+    func createWorktree(repoPath: String, agentType: AgentType, prompt: String)
+        -> Result<[String: Any], ControlCreateError> {
+        // Blocks until git is done, so a caller on main would wait on itself.
+        guard !Thread.isMainThread, let create = createWorktreeHandler,
+              let repos = repoPathsHandler else { return .failure(.unavailable) }
+        var known: [String] = []
+        runOnMain { known = repos() }
+        guard known.contains(repoPath) else { return .failure(.unknownRepo) }
+        let done = DispatchSemaphore(value: 0)
+        var created: String?
+        DispatchQueue.main.async {
+            create(repoPath, agentType, prompt) { path in created = path; done.signal() }
+        }
+        // `git worktree add` in a large repo takes seconds, not minutes.
+        guard done.wait(timeout: .now() + 90) == .success else { return .failure(.timedOut) }
+        guard let path = created else { return .failure(.failed("couldn't create the worktree")) }
+        return .success([
+            "worktree_path": path,
+            "pane_session_key": SessionManager.persistentSessionName(for: path),
+        ])
+    }
+
     func dismissDecision(paneId: String) -> Bool {
         guard let h = dismissDecisionHandler else { return false }
         var ok = false

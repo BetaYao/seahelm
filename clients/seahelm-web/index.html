@@ -116,8 +116,8 @@
     border-radius:var(--r);padding:5px 9px;font-size:13px;line-height:1;cursor:pointer;
     font-family:var(--mono)}
   #drawerBtn:hover{border-color:var(--accent);color:var(--accent)}
-  /* Panes other than the one on screen waiting on you. It rides the ☰ that
-     leads to them rather than taking a row above the transcript: the count is
+  /* Panes other than the one on screen waiting on you. It rides the ‹ that
+     leads back to them rather than taking a row above the transcript: the count is
      usually zero, and permanent furniture for "usually nothing" is what cost
      the phone its reading height. */
   #drawerBtn{position:relative}
@@ -126,7 +126,6 @@
     top:-5px;right:-5px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;
     background:var(--attention);color:#08222a;font-family:var(--mono);font-size:9px;
     font-weight:600;line-height:15px;text-align:center}
-  #scrim{display:none}
 
   /* ── responsive ───────────────────────────────────────────
      `main.nolog` outranks `main`, so every override below has to name both or
@@ -136,18 +135,18 @@
     main #rightcol, main.nolog #rightcol{display:none}   /* no room to debug and work */
     #logBtn{display:none}
   }
-  /* Phone / narrow window: one column, First Mate slides over it. */
+  /* Phone / narrow window: two full screens, not a drawer. The fleet list is
+     the home screen; a worktree opens over the whole width and ‹ (or the
+     system back gesture) returns. A drawer gave the list 86% of the width and
+     the transcript a strip beside it, and a side swipe on a phone is easy to
+     start by accident and awkward to finish. */
   @media (max-width:760px){
     main, main.nolog{grid-template-columns:1fr}
-    #drawerBtn{display:inline-flex}
-    #leftcol{position:fixed;top:0;bottom:0;left:0;z-index:80;
-      width:min(86vw,320px);background:var(--bg);
-      border-right:1px solid var(--line-20);box-shadow:0 0 40px rgba(0,0,0,.55);
-      transform:translateX(-101%);transition:transform .18s ease;will-change:transform}
-    #leftcol.open{transform:none}
-    #scrim{display:block;position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.5);
-      opacity:0;pointer-events:none;transition:opacity .18s ease}
-    #scrim.on{opacity:1;pointer-events:auto}
+    #leftcol{border-right:0}
+    body[data-screen="list"] #midcol{display:none}
+    body[data-screen="detail"] #leftcol{display:none}
+    body[data-screen="detail"] #drawerBtn{display:inline-flex}
+    #drawerBtn{font-size:17px;padding:2px 10px 4px}
     header{padding:6px 8px;gap:6px;min-height:36px}
     .wordmark{font-size:13px}
     .detail-head{margin:0 0 8px}
@@ -246,9 +245,38 @@
   .fm-group-head{display:flex;align-items:center;gap:7px;padding-bottom:7px;
     font-size:11px;font-weight:600;color:var(--muted)}
   .fm-group-head .fm-deck{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-add{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;
-    font-family:var(--mono);font-size:13px;line-height:1;padding:0 2px;border-radius:3px}
-  .fm-add:hover{color:var(--accent)}
+  /* ── new work: the list's bottom composer ─────────────────────
+     One line at rest. Focused, it opens upward into a project and an agent
+     choice — the three things a worktree needs, in the order you decide them. */
+  .nw{flex:none;border-top:1px solid var(--line-12);
+    padding:8px 10px max(22px, calc(10px + env(safe-area-inset-bottom)))}
+  .nw-opts{display:flex;flex-direction:column;gap:7px;margin:0 0 8px}
+  .nw-opts[hidden]{display:none}
+  .nw-row{display:flex;align-items:center;gap:8px;min-width:0}
+  .nw-label{flex:none;width:52px;font-size:10px;letter-spacing:.04em;color:var(--muted)}
+  .nw-chips{flex:1;min-width:0;display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;
+    -webkit-overflow-scrolling:touch}
+  .nw-chips::-webkit-scrollbar{display:none}
+  .nw-chips button{flex:none;background:var(--panel);color:var(--muted);border:1px solid var(--line-12);
+    border-radius:12px;padding:4px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;
+    white-space:nowrap}
+  .nw-chips button.on{background:var(--accent-12);border-color:var(--accent-20);color:var(--accent)}
+  .nw-chips .muted{font-size:11px}
+  .nw-field{display:flex;align-items:flex-end;gap:6px;border:1px solid var(--line-12);
+    border-radius:21px;background:rgba(150,215,225,.04);padding:5px 5px 5px 14px}
+  .nw-field:focus-within{border-color:var(--accent-20)}
+  .nw-field textarea{flex:1;min-width:0;border:0;background:none;color:var(--text);outline:none;
+    padding:5px 0;font-family:var(--sans);font-size:14px;line-height:20px;height:30px;
+    max-height:130px;resize:none;overflow-y:auto}
+  .nw-field button{flex:none;width:30px;height:30px;padding:0;border:0;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;background:var(--accent);
+    color:#041018;cursor:pointer}
+  .nw-field button:disabled{background:var(--line-20);color:var(--muted);cursor:default}
+  .nw-field button svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.2;
+    stroke-linecap:round;stroke-linejoin:round}
+  .nw.busy .nw-field button svg{animation:fmspin .9s linear infinite}
+  .nw-error{margin:6px 4px 0;font-size:11px;color:var(--danger)}
+  .nw-error[hidden]{display:none}
   .fm-modes{display:flex;gap:4px;margin:0 0 10px}
   .fm-modes button{flex:1;background:var(--panel);color:var(--muted);
     border:1px solid var(--line-12);border-radius:var(--r);padding:4px 0;
@@ -433,8 +461,11 @@
   .md th,.md td{padding:5px 14px 5px 0;border-bottom:1px solid var(--line-12);text-align:left;vertical-align:top}
   .md th{font-weight:500;color:var(--muted)}
   /* Lines up with the transcript column on a wide window. */
+  /* With #midcol's own padding, the field lands where the list's composer does,
+     so switching screens does not move it; the safe-area term matters once the
+     page is added to a home screen. */
   .msg-composer{display:none;border-top:1px solid var(--line-12);
-    padding:10px max(16px, calc((100% - 760px) / 2))}
+    padding:10px max(16px, calc((100% - 760px) / 2)) max(10px, calc(env(safe-area-inset-bottom) - 4px))}
   .msg-composer.on{display:block}
   /* The border belongs to the field, not the textarea: Send sits inside it, so
      the two read as one control. Bottom-aligned so the button stays on the last
@@ -522,13 +553,16 @@
        follows it. Eight rows is still the cap. */
     .mc-field{border-radius:22px}
     .mc-field textarea{font-size:16px;line-height:22px;height:32px;max-height:186px}
+    /* Under 16px, iOS zooms the whole page in on focus and leaves it there. */
+    .nw-field{border-radius:22px}
+    .nw-field textarea{font-size:16px;line-height:22px;height:32px;max-height:142px}
     .gate-input, header input{font-size:16px}
   }
 </style>
 </head>
-<body>
+<body data-screen="list">
   <header>
-    <button id="drawerBtn" title="Fleet list">☰</button>
+    <button id="drawerBtn" title="Back to the fleet list" aria-label="Back to the fleet list">‹</button>
     <span class="wordmark"><span class="sea">sea</span>helm</span>
     <span class="spacer"></span>
     <!-- hidden manual fields: connect() reads these; pairing overrides them -->
@@ -555,6 +589,19 @@
       <div class="fm-scroll">
         <div id="tree"></div>
       </div>
+      <form class="nw" id="newWork" autocomplete="off">
+        <div class="nw-opts" id="nwOpts" hidden>
+          <div class="nw-row"><span class="nw-label">Project</span><div class="nw-chips" id="nwRepos"></div></div>
+          <div class="nw-row"><span class="nw-label">Agent</span><div class="nw-chips" id="nwAgents"></div></div>
+        </div>
+        <div class="nw-field">
+          <textarea id="nwPrompt" rows="1" placeholder="Start new work…" enterkeyhint="go"></textarea>
+          <button id="nwGo" type="submit" disabled title="Start a worktree" aria-label="Start a worktree">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg>
+          </button>
+        </div>
+        <div class="nw-error" id="nwError" hidden></div>
+      </form>
     </div>
     <div class="col" id="midcol">
       <div class="detail-head">
@@ -593,7 +640,6 @@
       <div id="log"></div>
     </div>
   </main>
-  <div id="scrim"></div>
   <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
   <!-- Suggestions float over the page at the upper centre (island-style). -->
   <div class="suggest-dock" id="suggestDock"></div>
@@ -734,6 +780,9 @@ const stColor = s => STC[normStatus(s)] || STC.unknown;
 const shortId = id => String(id||'').split('-')[0].slice(0,8) || '—';
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const $ = id => document.getElementById(id);
+// Phone layout: list and worktree as two full screens (see showScreen). Up here
+// because the first render runs long before the navigation code below.
+const NARROW = window.matchMedia('(max-width:760px)');
 const base = () => `seahelm/${S.mac}`;
 
 // Same-origin Host Gateway WSS. Prefer this whenever the page is served by
@@ -1021,7 +1070,7 @@ function restoreMount(){
   // Addressed by path, because the row objects are rebuilt from the fresh
   // snapshot — the ones we held before the drop are stale.
   const row = buildFleet().find(r => r.path === path);
-  if (row) selectWorktree(row, focus);
+  if (row) selectWorktree(row, focus, { navigate: false });
 }
 
 function gwSend(method, params, onReply){
@@ -1305,8 +1354,8 @@ function renderMessageTimeline(key){
   // Text mode hides #termWrap, and with it the "Select a worktree" hint the
   // terminal path shows — so without this a phone opens on an empty page.
   if (!key) {
-    const hint = getComputedStyle($('drawerBtn')).display === 'none'
-      ? 'Pick a pane from the list on the left' : 'Tap ☰ at the top left to pick a pane';
+    const hint = NARROW.matches ? 'Tap ‹ to pick a pane from the fleet list'
+      : 'Pick a pane from the list on the left';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
     renderTimelineToBottom();
@@ -2003,7 +2052,7 @@ function renderReplyBar(text){
 
 /** Other panes waiting on a decision: one line under the head, a tap away. */
 /** How many panes other than the one on screen are waiting on you, counted on
- *  the ☰ that opens the fleet list — where those panes are, each already
+ *  the ‹ that returns to the fleet list — where those panes are, each already
  *  carrying its own status dot. The pane you are looking at is not counted: its
  *  decision is already in the reply bar above the composer. */
 function renderWaitingBadge(text){
@@ -2012,7 +2061,7 @@ function renderWaitingBadge(text){
   const n = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length : 0;
   if (n) btn.setAttribute('data-waiting', n > 9 ? '9+' : String(n));
   else btn.removeAttribute('data-waiting');
-  btn.title = n ? `Fleet list — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Fleet list';
+  btn.title = n ? `Back to the fleet list — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to the fleet list';
 }
 
 // ── First Mate list ────────────────────────────────────────────────────────
@@ -2143,15 +2192,7 @@ function renderTree(){
     const g = document.createElement('div'); g.className='fm-group';
     const head = document.createElement('div'); head.className='fm-group-head';
     head.innerHTML = (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
-      + `<span class="fm-deck">${esc(group.title)}</span>`
-      + (group.isRepo ? `<button class="fm-add" title="New worktree">+</button>` : '');
-    // The Mac opens the helm prefilled with `/worktree @<project>`; the web has
-    // no helm, so this is deliberately inert rather than pretending to work.
-    const add = head.querySelector('.fm-add');
-    if (add) add.onclick = (e) => {
-      e.stopPropagation();
-      log('sys','(not wired)', `New worktree @${group.title} — not wired up on the web yet`);
-    };
+      + `<span class="fm-deck">${esc(group.title)}</span>`;
     g.appendChild(head);
 
     const box = document.createElement('div'); box.className='fm-rows';
@@ -2202,20 +2243,194 @@ function renderTree(){
   renderSuggestions();
 }
 
-/** Narrow layouts hide First Mate behind a drawer; wide ones ignore the class. */
-function setDrawer(open){
-  $('leftcol').classList.toggle('open', open);
-  $('scrim').classList.toggle('on', open);
+// ── phone navigation ──────────────────────────────────────────────────────
+// Narrow screens show one of two screens: the fleet list, or one worktree.
+// `data-screen` on <body> says which; wide layouts show both and ignore it.
+
+/** Switch screens. Opening a worktree pushes a history entry, so the browser's
+ *  back — the iOS edge swipe included — returns to the list, as ‹ does. */
+function showScreen(screen){
+  const was = document.body.dataset.screen;
+  document.body.dataset.screen = screen;
+  if (screen === 'detail' && was !== 'detail' && NARROW.matches) {
+    history.pushState({ seahelmScreen: 'detail' }, '');
+  }
+  if (screen === 'detail' && was !== 'detail') {
+    // The detail was display:none, which drops its scroll position and its
+    // size: open at the latest, and refit any terminal to the width it now has.
+    tl.follow = true;
+    requestAnimationFrame(() => {
+      if (S.selPane && loadSurfaceMode() === 'text') renderMessageTimeline(S.selPane);
+      fitAllPanes();
+    });
+  }
 }
 
-/** Selecting anything in the list means: show that pane's terminal. */
-function selectWorktree(row, paneKey){
+function backToList(){
+  if (history.state && history.state.seahelmScreen === 'detail') history.back();   // popstate does the rest
+  else showScreen('list');
+}
+window.addEventListener('popstate', () => {
+  if (document.body.dataset.screen === 'detail') showScreen('list');
+});
+
+/** Selecting anything in the list means: show that pane's terminal.
+ *  `navigate: false` keeps the screen — a reconnect putting the selection back
+ *  must not pull a phone off the list it is reading. */
+function selectWorktree(row, paneKey, { navigate = true } = {}){
   S.sel = row.path;
   S.selPane = paneKey || (row.panes[0] || [])[0] || null;
+  if (navigate) showScreen('detail');
   renderTree();
   renderDetail();
-  setDrawer(false);      // on a phone the list is covering the terminal it just opened
 }
+// ── new work ─────────────────────────────────────────────────────────────
+// The composer at the foot of the list: pick a project and an agent, write the
+// prompt, and the Mac starts a worktree the way its own helm does — the prompt
+// names the branch and becomes the agent's first message. The page goes
+// straight to it rather than leaving the reader to find it in the list.
+const NW_REPO_KEY = 'seahelm_nw_repo';
+const NW_AGENT_KEY = 'seahelm_nw_agent';
+const nw = { options: null, repo: null, agent: null, busy: false, loading: false };
+
+function nwStored(key){ try { return localStorage.getItem(key); } catch (e) { return null; } }
+function nwStore(key, v){ try { localStorage.setItem(key, v); } catch (e) {} }
+
+/** Open the choices, fetching them the first time. The project defaults to the
+ *  last one used, else the one on screen; the agent to the last one used. */
+function nwOpen(){
+  $('nwOpts').hidden = false;
+  if (nw.options) { nwRenderChips(); return; }
+  if (nw.loading) return;
+  if (!isLinked()) { nwError('Not connected'); return; }
+  nw.loading = true;
+  nwRenderChips();
+  sendCommand('worktree.options', {}, (r) => {
+    nw.loading = false;
+    if (!r || r.ok === false) { nwError('This Mac cannot start worktrees from here'); nwRenderChips(); return; }
+    nw.options = r.result;
+    const repos = nw.options.repos || [], agents = nw.options.agents || [];
+    const current = S.sel && buildFleet().find(x => x.path === S.sel);
+    const byName = (name) => repos.find(x => x.name === name);
+    nw.repo = (repos.find(x => x.path === nwStored(NW_REPO_KEY)) || (current && byName(current.project)) || repos[0] || {}).path || null;
+    nw.agent = (agents.find(x => x.id === nwStored(NW_AGENT_KEY)) || agents.find(x => x.id === 'claudeCode') || agents[0] || {}).id || null;
+    nwRenderChips();
+  });
+}
+
+function nwRenderChips(){
+  const repos = $('nwRepos'), agents = $('nwAgents');
+  if (!nw.options) {
+    const msg = `<span class="muted">${nw.loading ? 'Loading…' : '—'}</span>`;
+    repos.innerHTML = msg; agents.innerHTML = msg;
+    nwSyncButton();
+    return;
+  }
+  const chip = (id, label, on, kind) =>
+    `<button type="button" class="${on ? 'on' : ''}" data-${kind}="${esc(id)}">${esc(label)}</button>`;
+  repos.innerHTML = (nw.options.repos || []).map(r => chip(r.path, r.name, r.path === nw.repo, 'repo')).join('')
+    || '<span class="muted">No projects</span>';
+  agents.innerHTML = (nw.options.agents || []).map(a => chip(a.id, a.label, a.id === nw.agent, 'agent')).join('')
+    || '<span class="muted">No agents</span>';
+  const on = repos.querySelector('.on');
+  if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  nwSyncButton();
+}
+
+function nwSyncButton(){
+  $('nwGo').disabled = nw.busy || !nw.repo || !nw.agent || !$('nwPrompt').value.trim();
+}
+
+function nwError(msg){
+  const el = $('nwError');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+}
+
+function nwGrow(){
+  const t = $('nwPrompt');
+  t.style.height = 'auto';
+  t.style.height = (t.scrollHeight + t.offsetHeight - t.clientHeight) + 'px';
+}
+
+function nwSubmit(){
+  const prompt = $('nwPrompt').value.trim();
+  if (nw.busy || !prompt || !nw.repo || !nw.agent) return;
+  if (!isLinked()) { nwError('Not connected'); return; }
+  const repo = (nw.options.repos || []).find(r => r.path === nw.repo) || { name: '', path: nw.repo };
+  const agent = (nw.options.agents || []).find(a => a.id === nw.agent) || { id: nw.agent, label: nw.agent };
+  nw.busy = true;
+  $('newWork').classList.add('busy');
+  nwError('');
+  nwSyncButton();
+  sendCommand('worktree.create', { repo_path: repo.path, agent_type: agent.id, prompt }, (r) => {
+    nw.busy = false;
+    $('newWork').classList.remove('busy');
+    if (!r || r.ok === false) {
+      nwError((r && r.error && r.error.message) || 'Could not start the worktree');
+      nwSyncButton();
+      return;
+    }
+    nwStore(NW_REPO_KEY, repo.path);
+    nwStore(NW_AGENT_KEY, agent.id);
+    $('nwPrompt').value = '';
+    nwGrow();
+    $('nwPrompt').blur();
+    $('nwOpts').hidden = true;
+    nwSyncButton();
+    openNewWorktree(r.result.worktree_path, r.result.pane_session_key, repo.name, agent.label);
+  });
+}
+
+/** Go to a worktree the Mac has only just made. It reaches the fleet list a
+ *  moment later — the pane registers once its agent starts — so the detail
+ *  opens on its pane at once and the list catches up as the snapshot does. */
+function openNewWorktree(path, paneKey, repoName, agentLabel){
+  S.sel = path;
+  S.selPane = paneKey || null;
+  showScreen('detail');
+  $('detailHead').textContent = `${repoName} · starting ${agentLabel}…`;
+  if (paneKey && loadSurfaceMode() === 'text') renderMessageTimeline(paneKey);
+  let tries = 0;
+  const look = () => {
+    if (S.sel !== path) return;                     // the reader went elsewhere
+    const row = buildFleet().find(x => x.path === path);
+    if (row && row.panes.length) { selectWorktree(row, paneKey, { navigate: false }); return; }
+    if (++tries > 30 || !isLinked()) return;
+    gwSend('session.snapshot', {}, (snap) => { if (snap && snap.panes) applySessionSnapshot(snap); });
+    setTimeout(look, 1000);
+  };
+  look();
+}
+
+(function wireNewWork(){
+  const form = $('newWork'), input = $('nwPrompt');
+  input.addEventListener('focus', nwOpen);
+  input.addEventListener('input', () => { nwGrow(); nwSyncButton(); if (!$('nwError').hidden) nwError(''); });
+  input.addEventListener('keydown', (ev) => {
+    if (SeahelmComposerKeys.composerKeyAction(ev) === 'send') { ev.preventDefault(); nwSubmit(); }
+  });
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); nwSubmit(); });
+  // A chip tap must not take focus from the prompt: on a phone that closes the
+  // keyboard mid-sentence.
+  form.addEventListener('mousedown', (ev) => { if (ev.target.closest('.nw-chips button')) ev.preventDefault(); });
+  form.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-repo], button[data-agent]');
+    if (!b) return;
+    if (b.dataset.repo) nw.repo = b.dataset.repo;
+    if (b.dataset.agent) nw.agent = b.dataset.agent;
+    nwRenderChips();
+    input.focus();
+  });
+  // Folds back to one line when attention leaves it with nothing written.
+  form.addEventListener('focusout', (ev) => {
+    if (form.contains(ev.relatedTarget)) return;
+    setTimeout(() => {
+      if (!form.contains(document.activeElement) && !input.value.trim() && !nw.busy) $('nwOpts').hidden = true;
+    }, 150);
+  });
+})();
+
 /** Same, addressed by pane key — used by the suggestion dock. */
 function selectPaneByKey(key){
   const row = buildFleet().find(r => r.panes.some(([k]) => k === key));
@@ -3043,8 +3258,7 @@ renderGate();   // the gate is the page until a connection exists
 (function restorePair(){
   if (restoreCreds()) renderGate();
 })();
-$('drawerBtn').onclick=()=>setDrawer(!$('leftcol').classList.contains('open'));
-$('scrim').onclick=()=>setDrawer(false);
+$('drawerBtn').onclick = backToList;
 $('toBottom').onclick=()=>{
   if (loadSurfaceMode() === 'text') {
     const host = $('messageTimeline');

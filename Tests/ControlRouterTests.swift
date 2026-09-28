@@ -69,6 +69,12 @@ private final class FakeDataSource: ControlDataSource {
     func wakePane(paneId: String?) -> [String]? { wakeCalls.append(paneId); return wakeResult }
     var memory: [String: Any]? = ["phys_footprint": 123]
     func memoryStats() -> [String: Any]? { memory }
+    var creates: [(repo: String, agent: AgentType, prompt: String)] = []
+    var createResult: Result<[String: Any], ControlCreateError> = .success(["worktree_path": "/wt/new"])
+    func createWorktree(repoPath: String, agentType: AgentType, prompt: String)
+        -> Result<[String: Any], ControlCreateError> {
+        creates.append((repoPath, agentType, prompt)); return createResult
+    }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -82,6 +88,45 @@ final class ControlRouterTests: XCTestCase {
         let (r, _) = router()
         guard case .ok(let d) = r.handle(method: "ping", params: [:]) else { return XCTFail() }
         XCTAssertEqual(d["pong"] as? Bool, true)
+    }
+
+    func testWorktreeCreatePassesRepoAgentAndTrimmedPrompt() {
+        let (r, ds) = router()
+        guard case .ok(let d) = r.handle(method: "worktree.create",
+            params: ["repo_path": "/repo", "agent_type": "codex", "prompt": "  fix the login bug \n"])
+        else { return XCTFail() }
+        XCTAssertEqual(d["worktree_path"] as? String, "/wt/new")
+        XCTAssertEqual(ds.creates.first?.repo, "/repo")
+        XCTAssertEqual(ds.creates.first?.agent, .codex)
+        XCTAssertEqual(ds.creates.first?.prompt, "fix the login bug")
+    }
+
+    func testWorktreeCreateNeedsARepoAndAPrompt() {
+        let (r, ds) = router()
+        for params: [String: Any] in [["repo_path": "/repo", "prompt": "   "], ["prompt": "do it"]] {
+            guard case .error(let code, _) = r.handle(method: "worktree.create", params: params)
+            else { return XCTFail() }
+            XCTAssertEqual(code, ControlError.invalidParams)
+        }
+        XCTAssertTrue(ds.creates.isEmpty)
+    }
+
+    /// Only an agent seahelm can launch; a shell job type is not one.
+    func testWorktreeCreateRefusesAnAgentItCannotLaunch() {
+        let (r, ds) = router()
+        guard case .error(let code, _) = r.handle(method: "worktree.create",
+            params: ["repo_path": "/repo", "agent_type": "npm", "prompt": "x"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.invalidParams)
+        XCTAssertTrue(ds.creates.isEmpty)
+    }
+
+    func testWorktreeCreateReportsTheFailure() {
+        let (r, ds) = router()
+        ds.createResult = .failure(.unknownRepo)
+        guard case .error(let code, let message) = r.handle(method: "worktree.create",
+            params: ["repo_path": "/nope", "prompt": "x"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.notFound)
+        XCTAssertEqual(message, ControlCreateError.unknownRepo.message)
     }
 
     func testUnknownMethod() {
