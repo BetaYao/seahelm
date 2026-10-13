@@ -20,4 +20,26 @@ final class WorktreeAgentTypeStore {
     func set(_ type: AgentType, forWorktree path: String) {
         store.set(type.rawValue, forKey: path)
     }
+
+    // MARK: - Last chosen
+
+    /// Worktree keys are absolute paths, so this one can never collide.
+    private static let lastChosenKey = "@last-chosen"
+
+    /// The agent the user last picked for a new worktree, on whichever surface
+    /// (the desktop form or the web client) — the next form starts on it.
+    var lastChosen: AgentType? {
+        store[Self.lastChosenKey].flatMap { AgentType(rawValue: $0) }
+    }
+
+    func recordChoice(_ type: AgentType) {
+        store.set(type.rawValue, forKey: Self.lastChosenKey)
+    }
+
+    /// The choices with the last one picked moved to the front, the rest in
+    /// their given order.
+    static func lastChosenFirst(_ choices: [AgentType], lastChosen: AgentType?) -> [AgentType] {
+        guard let last = lastChosen, choices.contains(last) else { return choices }
+        return [last] + choices.filter { $0 != last }
+    }
 }

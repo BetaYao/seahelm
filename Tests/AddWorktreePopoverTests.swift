@@ -97,6 +97,15 @@ final class AddWorktreePopoverTests: XCTestCase {
         XCTAssertNil(controller.errorTextForTesting)
     }
 
+    func testLastChosenAgentLeadsAndTheRestKeepTheirOrder() {
+        let choices: [AgentType] = [.claudeCode, .codex, .gemini]
+        XCTAssertEqual(WorktreeAgentTypeStore.lastChosenFirst(choices, lastChosen: .gemini),
+                       [.gemini, .claudeCode, .codex])
+        XCTAssertEqual(WorktreeAgentTypeStore.lastChosenFirst(choices, lastChosen: nil), choices)
+        // Uninstalled since it was picked: it does not come back.
+        XCTAssertEqual(WorktreeAgentTypeStore.lastChosenFirst(choices, lastChosen: .aider), choices)
+    }
+
     func testAgentChoicesAreTheAIAgents() {
         let controller = makeLoadedController()
         XCTAssertEqual(controller.agentChoiceTitlesForTesting,
