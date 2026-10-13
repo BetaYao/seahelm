@@ -151,7 +151,6 @@
     .wordmark{font-size:13px}
     .detail-head{margin:0 0 8px}
     .col{padding:8px}
-    .suggest-dock{padding:calc(8px + env(safe-area-inset-top)) 8px 8px}
   }
   .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
   #midcol{display:flex;flex-direction:column;overflow:hidden}
@@ -326,42 +325,6 @@
   .fm-pane .ptitle{flex:1;min-width:0;font-size:11px;color:var(--muted);opacity:.78;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-pane.sel .ptitle,.fm-pane:hover .ptitle{opacity:1}
-  /* ── suggestion dock ─────────────────────────────────────────
-     Floats over the whole page at the upper centre — same place the Mac
-     island opens its suggestion card — so a suggestion is reachable from any
-     column without covering the terminal's latest output at the bottom. */
-  .suggest-dock{position:fixed;left:0;right:0;top:0;z-index:60;
-    display:flex;flex-direction:column;gap:8px;align-items:center;
-    padding:calc(12px + env(safe-area-inset-top)) 12px 20px;
-    background:linear-gradient(to bottom, rgba(6,26,32,.97) 55%, rgba(6,26,32,0));
-    max-height:52vh;overflow-y:auto;pointer-events:none}
-  .suggest-dock:empty{display:none}
-  .suggest-dock>*{pointer-events:auto;width:100%;max-width:540px;
-    animation:suggest-in .18s ease-out}
-  @keyframes suggest-in{
-    from{opacity:0;transform:translateY(-10px)}
-    to{opacity:1;transform:translateY(0)}
-  }
-  /* ── event / suggestion cards ───────────────────────────── */
-  .ev{background:var(--panel);border:1px solid var(--attention);
-    border-radius:var(--r);padding:10px;margin-bottom:8px}
-  .ev .eb{font-family:var(--mono);font-size:10px;color:var(--attention);text-transform:uppercase;
-    letter-spacing:.16em;display:flex;align-items:center;justify-content:space-between;gap:8px}
-  .ev .ev-meta{font-size:10px;color:var(--muted);margin-top:2px}
-  /* The dock floats over the terminal, so an agent that wrote three paragraphs
-     before its options must not bury the thing it is asking. Clamped, with the
-     full text one tap away in the pane itself. */
-  .ev-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
-    line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
-  .ev-x:hover{color:var(--danger);background:var(--danger-14)}
-  .ev .prompt{margin:6px 0 4px;font-size:12px;line-height:1.45;white-space:pre-wrap;
-    display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
-  .ev .opt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line-20);
-    color:var(--text);border-radius:var(--r);padding:7px 10px;margin-top:5px;cursor:pointer;font-size:12px;
-    font-family:var(--mono);transition:border-color .1s}
-  .ev .opt:hover{border-color:var(--accent)}
-  .ev .opt:first-of-type{background:var(--accent-12);border-color:var(--accent-20)}
-  .ev .opt b{font-family:var(--mono);color:var(--muted);margin-right:8px;font-weight:500}
   /* ── MessageStream text mode ─────────────────────────────── */
   /* Read like a transcript, not a stack of cards: no boxes, no side bars.
      Kinds are told apart by type — what you sent is a bubble on the right,
@@ -641,8 +604,6 @@
     </div>
   </main>
   <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
-  <!-- Suggestions float over the page at the upper centre (island-style). -->
-  <div class="suggest-dock" id="suggestDock"></div>
 
 <!-- xterm.js (~120KB on the wire) loads on first use: see loadXterm(). -->
 <script src="./input-coalescer.js"></script>
@@ -1593,7 +1554,7 @@ function setSurfaceMode(mode){
   localStorage.setItem(SURFACE_KEY, S.surfaceMode);
   renderSurfaceBadge();
   applySurfaceMode();
-  renderSuggestions();      // dock for the terminal, reply bar for the timeline
+  renderSuggestions();      // the reply bar is the timeline's only
   if (next === prev) return;
   if (next === 'text') {
     if (S.vt.panes.size) unmountPanes();
@@ -1955,54 +1916,15 @@ function updateFirstMateHeader(rows){
   const running = fleet.filter(r => normStatus(r.status) === 'running').length;
   $('fmSub').textContent = running > 0 ? `${fleet.length} · ${running} running` : `${fleet.length}`;
 }
-function renderSuggestCard(pid, e){
-  const box=document.createElement('div'); box.className='ev';
-  const p = S.panes.get(pid)||{};
-  const label = (p.title||'').trim() || shortId(p.pane_id||pid);
-  const meta = [p.project, p.branch].filter(Boolean).join(' · ');
-  const method = e.type==='question' ? 'question.answer' : 'suggest.pick';
-  box.innerHTML=`<div class="eb">${esc(e.type||'suggest')}`
-    + `<button class="ev-x" title="Dismiss this suggestion">✕</button></div>`
-    + `<div class="ev-meta">${esc(label)}${meta?' · '+esc(meta):''}</div>`
-    + `<div class="prompt">${esc(e.prompt||e.message||'')}</div>`;
-  // Tapping the card jumps to the pane that asked, so you can see the context
-  // before answering.
-  box.onclick=(ev)=>{ if (ev.target.closest('button')) return; selectPaneByKey(pid); };
-  // The dock floats over the terminal, so without this the only way out is to
-  // pick an option — which types into the pane. Declining has to be free.
-  box.querySelector('.ev-x').onclick=(ev)=>{
-    ev.stopPropagation();
-    S.events.delete(pid);          // optimistic: the card goes now
-    renderSuggestions();
-    sendCommand('decision.dismiss', { pane_session_key: pid });
-  };
-  (e.options||[]).forEach((opt,i)=>{
-    const b=document.createElement('button'); b.className='opt'; b.innerHTML=`<b>${i}</b>${esc(opt)}`;
-    b.onclick=(ev)=>{ ev.stopPropagation();
-      selectPaneByKey(pid);
-      // Addressed by pane: a question is answered by driving that pane's prompt,
-      // a suggestion by typing the option we were shown.
-      sendCommand(method, { pane_session_key: pid, index: i });
-    };
-    box.appendChild(b);
-  });
-  return box;
-}
+/** Open questions and suggestions are answered in the reply bar above the
+ *  timeline's composer. The terminal view used to float them as cards over the
+ *  top of the page; they covered the head and the output they were about, and
+ *  the terminal itself is where such a prompt is answered there. */
 function renderSuggestions(){
-  // Docked at the upper centre of the page (like the Mac island), not to a
-  // column: a suggestion must be reachable no matter which pane you are looking at.
-  const host = $('suggestDock'); host.innerHTML='';
   const text = loadSurfaceMode() === 'text';
   renderReplyBar(text);
   renderWaitingBadge(text);
   renderSendButton();
-  // The timeline has its own places for these; the floating dock would cover
-  // the head and the history it pages in, and repeat what the timeline says.
-  if (text) return;
-  for (const [pid,e] of S.events){
-    if (!e) continue;
-    host.appendChild(renderSuggestCard(pid, e));
-  }
 }
 
 /** The open decision of the pane on screen, answered above the composer. The
