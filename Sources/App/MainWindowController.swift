@@ -280,8 +280,10 @@ class MainWindowController: NSWindowController {
         tc.worktreeCreator = { [weak self] task, repoPath, agent, done in
             guard let self else { done(nil); return }
             // Failure also reaches onComplete (as nil), so it is the only callback.
-            self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: agent, reuseEnv: false,
-                                       onComplete: done)
+            self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: agent, reuseEnv: false) { path in
+                if path != nil { WorktreeAgentTypeStore.shared.recordChoice(agent) }
+                done(path)
+            }
         }
         return tc
     }()
@@ -1042,6 +1044,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 onError: { message in creator?.reportFailure(message) }
             ) { path in
                 guard let path else { return }
+                WorktreeAgentTypeStore.shared.recordChoice(agentType)
                 popover?.performClose(nil)
                 self?.dashboardVC?.commitWorktreeSelection(path: path)
             }

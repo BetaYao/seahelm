@@ -247,15 +247,20 @@ final class AddWorktreePopoverController: NSViewController {
         preferredContentSize = NSSize(width: Self.contentWidth, height: ceil(height))
     }
 
-    /// The agents a new worktree can be staffed with.
-    static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
+    /// The agents a new worktree can be staffed with, the last one picked first.
+    static var agentChoices: [AgentType] {
+        WorktreeAgentTypeStore.lastChosenFirst(AgentType.allCases.filter { $0.isAIAgent },
+                                               lastChosen: WorktreeAgentTypeStore.shared.lastChosen)
+    }
 
     /// A borderless pop-up in a soft chip, so the one choice in the footer reads
     /// as a setting on the brief rather than a second big button.
     private func configureAgentPicker() {
         agentPopup.removeAllItems()
-        let defaultAgent = AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
-        for choice in Self.agentChoices {
+        let choices = Self.agentChoices
+        let defaultAgent = WorktreeAgentTypeStore.shared.lastChosen
+            ?? AgentType(rawValue: Config.load().defaultAgent) ?? .claudeCode
+        for choice in choices {
             let item = NSMenuItem(title: choice.displayName, action: nil, keyEquivalent: "")
             item.representedObject = choice.rawValue
             agentPopup.menu?.addItem(item)

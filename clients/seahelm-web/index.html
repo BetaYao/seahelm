@@ -2212,14 +2212,14 @@ function selectWorktree(row, paneKey, { navigate = true } = {}){
 // names the branch and becomes the agent's first message. The page goes
 // straight to it rather than leaving the reader to find it in the list.
 const NW_REPO_KEY = 'seahelm_nw_repo';
-const NW_AGENT_KEY = 'seahelm_nw_agent';
 const nw = { options: null, repo: null, agent: null, busy: false, loading: false };
 
 function nwStored(key){ try { return localStorage.getItem(key); } catch (e) { return null; } }
 function nwStore(key, v){ try { localStorage.setItem(key, v); } catch (e) {} }
 
 /** Open the choices, fetching them the first time. The project defaults to the
- *  last one used, else the one on screen; the agent to the last one used. */
+ *  last one used, else the one on screen. The agent is the Mac's call: it lists
+ *  the one last picked — here or on its own form — first. */
 function nwOpen(){
   $('nwOpts').hidden = false;
   if (nw.options) { nwRenderChips(); return; }
@@ -2235,7 +2235,7 @@ function nwOpen(){
     const current = S.sel && buildFleet().find(x => x.path === S.sel);
     const byName = (name) => repos.find(x => x.name === name);
     nw.repo = (repos.find(x => x.path === nwStored(NW_REPO_KEY)) || (current && byName(current.project)) || repos[0] || {}).path || null;
-    nw.agent = (agents.find(x => x.id === nwStored(NW_AGENT_KEY)) || agents.find(x => x.id === 'claudeCode') || agents[0] || {}).id || null;
+    nw.agent = (agents[0] || {}).id || null;
     nwRenderChips();
   });
 }
@@ -2294,7 +2294,8 @@ function nwSubmit(){
       return;
     }
     nwStore(NW_REPO_KEY, repo.path);
-    nwStore(NW_AGENT_KEY, agent.id);
+    const agents = nw.options.agents || [];
+    nw.options.agents = agents.filter(a => a.id === agent.id).concat(agents.filter(a => a.id !== agent.id));
     $('nwPrompt').value = '';
     nwGrow();
     $('nwPrompt').blur();
