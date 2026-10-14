@@ -216,6 +216,52 @@ enum ProcessRunner {
             .first { !$0.isEmpty }
     }
 
+    /// Resolve several commands at once through the user's own shell, started
+    /// the way a pane starts its agent (`$SHELL -lic`, see
+    /// `SessionManager.detachedLaunchCommands`). `commandPath`'s `bash -l`
+    /// misses anything a zsh user only puts on PATH in `~/.zshrc` — Claude
+    /// Code's native installer drops `claude` in `~/.local/bin`, which is
+    /// exactly that — so an agent that launches fine in a pane went undetected.
+    /// One shell for the lot: an interactive zsh with a full rc takes about a
+    /// second to start. Each answer is tagged so rc noise on stdout can't pass
+    /// for a path. Missing commands are absent from the result.
+    static func commandPaths(_ commands: [String]) -> [String: String] {
+        guard !commands.isEmpty else { return [:] }
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let script = commands.map { cmd in
+            "printf '\\n\(commandPathMarker)%s=%s\\n' \(shellQuote(cmd)) \"$(command -v \(shellQuote(cmd)))\""
+        }.joined(separator: "; ")
+        let result = capture(
+            executable: URL(fileURLWithPath: shell),
+            arguments: ["-lic", script],
+            standardInput: "",
+            timeout: lookupTimeout
+        )
+        let found = parseCommandPaths(result.stdout)
+        // The shell didn't get as far as answering (an odd $SHELL, a broken rc):
+        // fall back to the bash lookup rather than report nothing installed.
+        guard result.stdout.contains(commandPathMarker) else {
+            return Dictionary(uniqueKeysWithValues: commands.compactMap { cmd in
+                commandPath(cmd).map { (cmd, $0) }
+            })
+        }
+        return found
+    }
+
+    static let commandPathMarker = "__seahelm_command_path__"
+
+    static func parseCommandPaths(_ stdout: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for line in stdout.components(separatedBy: .newlines) {
+            guard let range = line.range(of: commandPathMarker) else { continue }
+            let entry = line[range.upperBound...]
+            guard let eq = entry.firstIndex(of: "=") else { continue }
+            let path = entry[entry.index(after: eq)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty { out[String(entry[..<eq])] = path }
+        }
+        return out
+    }
+
     /// Run a command and return trimmed stdout, or nil on failure.
     /// `timeout: nil` means no deadline — only for genuinely open-ended work
     /// like a user-configured inspection command.
