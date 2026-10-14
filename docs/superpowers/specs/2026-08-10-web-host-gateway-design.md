@@ -231,7 +231,7 @@ Authenticated: Control-tier remote (full terminal). Optional v1.1: first remote 
 | `seahelm-web` + MQTT.js | Retarget to Gateway; MQTT mode = debug |
 | `devbroker` / `mock-seahelm` / `mock:zmx` | Local contract tests + VT fidelity experiments |
 | `live-bridge.js` | Dev bridge to sock; not shipping architecture |
-| `clients/seahelm-stack` (`gw.seahelm.dev`) | Optional edge for Watch/HTTP; not required for Mac-tunnel web |
+| `clients/seahelm-stack` (`gw.seahelm.dev`) | Removed — the tunnel points straight at the host gateway (:2783) |
 
 ---
 
