@@ -43,11 +43,13 @@ packages:
   CodeEditLanguages:
     url: https://github.com/BetaYao/CodeEditLanguages
     exactVersion: 0.1.20
-  # Auto-update. Pinned to the same major that ghostty vendors (2.9.0), so the
-  # reference implementation in ghostty/macos/Sources/Features/Update stays valid.
+  # Auto-update. Same major that ghostty vendors (2.9.0), so the reference
+  # implementation in ghostty/macos/Sources/Features/Update stays valid. The floor
+  # is 2.10.0 because CI resolves fresh and already ships it (from v2.0.66); a
+  # lower one let local builds sit on an older Sparkle than the release.
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
-    from: 2.9.0
+    from: 2.10.0
   # Privacy-first product analytics (aptabase.com). US cloud key lives in
   # Sources/Core/Analytics.swift — events are opt-in by us calling trackEvent.
   Aptabase:
