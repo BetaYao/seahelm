@@ -37,8 +37,6 @@ node_modules/
 
 # secrets
 .env
-clients/seahelm-stack/.env
-clients/seahelm-stack/cloudflared.yml
 
 # Local Watch gateway API key
 apple-watch/Secrets.xcconfig
