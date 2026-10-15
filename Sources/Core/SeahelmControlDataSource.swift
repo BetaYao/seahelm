@@ -329,8 +329,10 @@ final class SeahelmControlDataSource: ControlDataSource {
             manifest: manifest, osc: osc)
         let hookStatus = pane?.hookStatus ?? .unknown
         let hookIdleFresh = AgentRegistry.shared.hookIdleIsFresh(terminalID: station.id)
+        let programStatus = station.programStatus
         let decided = AgentRegistry.arbitrateDetailed(scan: scan.state, hook: hookStatus,
-                                                      agentType: agentType, hookIdleFresh: hookIdleFresh)
+                                                      agentType: agentType, hookIdleFresh: hookIdleFresh,
+                                                      program: programStatus.liveRoot?.agentStatus ?? .unknown)
 
         var result: [String: Any] = [
             "pane_id": station.id,
@@ -355,6 +357,20 @@ final class SeahelmControlDataSource: ControlDataSource {
             "process_status": "\(station.processStatus)",
             "osc_title": osc.title,
             "osc_progress": osc.progress,
+            // OSC 7501 records, root first. `program_status_live` is false once the
+            // program has handed the terminal back to the shell: its done/error
+            // records are kept but no longer decide the status.
+            "program_status_live": programStatus.liveRoot != nil,
+            "program_status": programStatus.records
+                .sorted { ($0.key.isEmpty ? "" : "/" + $0.key) < ($1.key.isEmpty ? "" : "/" + $1.key) }
+                .map { id, r -> [String: Any] in
+                    var d: [String: Any] = ["id": id, "state": "\(r.state)", "app": r.app]
+                    if let kind = r.report.kind { d["kind"] = "\(kind)" }
+                    if let progress = r.report.progress { d["progress"] = progress }
+                    if !r.report.title.isEmpty { d["title"] = r.report.title }
+                    if !r.report.msg.isEmpty { d["msg"] = r.report.msg }
+                    return d
+                },
         ]
         if let match = manifest?.matchDetail(input) {
             result["matched_rule"] = [

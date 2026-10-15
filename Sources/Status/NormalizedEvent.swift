@@ -6,6 +6,7 @@ enum EventSource {
     case hook(String)   // raw webhook source string, e.g. "claude-code" / "codex"
     case mcp            // future
     case shell          // future
+    case osc7501        // program status the program itself reported (ProgramStatus.swift)
 }
 
 /// The single input language. Event-native cases (hook/mcp/shell) carry no status —
@@ -37,6 +38,9 @@ enum NormalizedEventKind {
                         roundDuration: TimeInterval,
                         tasks: [TaskItem],
                         backgroundBusy: Bool = false)
+    // The pane's live OSC 7501 root record changed; nil = 7501 has nothing live
+    // to say any more (cleared, or the program returned to the shell).
+    case programStatus(ProgramStatusRecord?)
 }
 
 struct NormalizedEvent {

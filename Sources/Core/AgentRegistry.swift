@@ -313,10 +313,16 @@ class AgentRegistry {
     ///   - screen_only / unknown: screen only.
     /// An urgent state (waiting/error) from either source always surfaces — never
     /// hide a blocked or errored agent behind an authority rule.
+    ///
+    /// Above all of that sits OSC 7501 (`program`): the program's own statement of
+    /// what it is doing, which needs no authority rule — it is neither a guess
+    /// from the screen nor an edge a hook may fail to deliver. It decides whenever
+    /// it has a live root record; otherwise the rules above apply unchanged.
     static func arbitrate(scan: AgentStatus, hook: AgentStatus, agentType: AgentType,
-                          hookIdleFresh: Bool = false) -> AgentStatus {
+                          hookIdleFresh: Bool = false,
+                          program: AgentStatus = .unknown) -> AgentStatus {
         arbitrateDetailed(scan: scan, hook: hook, agentType: agentType,
-                          hookIdleFresh: hookIdleFresh).status
+                          hookIdleFresh: hookIdleFresh, program: program).status
     }
 
     /// Whether this pane's hook `.idle` is still inside its trailing-edge window.
@@ -352,9 +358,11 @@ class AgentRegistry {
     /// Same as `arbitrate` but also reports which source won (`urgent` / `hook` /
     /// `screen`) and the pane's authority — for `pane.explain`.
     static func arbitrateDetailed(scan: AgentStatus, hook: AgentStatus, agentType: AgentType,
-                                  hookIdleFresh: Bool = false)
+                                  hookIdleFresh: Bool = false,
+                                  program: AgentStatus = .unknown)
         -> (status: AgentStatus, decidedBy: String, authority: String) {
         let authority = ManifestStore.shared.manifest(for: agentType.manifestId)?.manifest.authority ?? "session_only"
+        if program != .unknown { return (program, "osc7501", authority) }
         let urgent = AgentStatus.highestPriority([scan, hook].filter { $0.isUrgent })
         if urgent.isUrgent { return (urgent, "urgent", authority) }
         switch authority {
@@ -489,13 +497,25 @@ class AgentRegistry {
         case .suggest:
             // Intentionally preserves prior hookStatus; suggest events carry options only, not status.
             break   // does not touch status; passed through via outcome.event
+        case .programStatus(let record):
+            next.programStatus = record?.agentStatus ?? .unknown
+            next.programState = record?.state
+            if let text = record?.message, !text.isEmpty { message = text }
+            // `done` after `working` is a finished turn. A pane whose agent also
+            // reports hooks gets its completion from the Stop hook, and counting
+            // both would notify twice; 7501 is the completion only without hooks.
+            if let state = record?.state, state == .done || state == .error,
+               current.programStatus == .running, next.hookStatus == .unknown {
+                isCompletion = true
+            }
         }
 
         next.lastMessage = message
         let oldStatus = current.status
         let newStatus = Self.arbitrate(scan: next.scanStatus, hook: next.hookStatus,
                                        agentType: next.agentType,
-                                       hookIdleFresh: hookIdleIsFreshLocked(event.terminalID, now: now))
+                                       hookIdleFresh: hookIdleIsFreshLocked(event.terminalID, now: now),
+                                       program: next.programStatus)
         next.status = newStatus
         agents[event.terminalID] = next
 
@@ -538,6 +558,7 @@ class AgentRegistry {
             && a.agentType == b.agentType
             && a.scanStatus == b.scanStatus
             && a.hookStatus == b.hookStatus
+            && a.programStatus == b.programStatus
             && a.tasks == b.tasks
             && a.activityEvents == b.activityEvents
     }

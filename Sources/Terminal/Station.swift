@@ -45,6 +45,22 @@ class Station {
     func setOscProgress(_ p: String) { oscLock.lock(); _oscProgress = p; oscLock.unlock() }
     func setPwd(_ p: String) { oscLock.lock(); _pwd = p; oscLock.unlock() }
 
+    /// OSC 7501 records the pane's programs reported (see `ProgramStatusStore`).
+    private var _programStatus = ProgramStatusStore()
+    var programStatus: ProgramStatusStore {
+        oscLock.lock(); defer { oscLock.unlock() }; return _programStatus
+    }
+
+    /// Mutate the 7501 records under the lock, returning the live root record
+    /// before and after — the only part of the store the pane's status reads.
+    func updateProgramStatus(_ body: (inout ProgramStatusStore) -> Void)
+        -> (before: ProgramStatusRecord?, after: ProgramStatusRecord?) {
+        oscLock.lock(); defer { oscLock.unlock() }
+        let before = _programStatus.liveRoot
+        body(&_programStatus)
+        return (before, _programStatus.liveRoot)
+    }
+
     /// Last hook-reported location for this pane. Drives the chrome "away"
     /// title when the agent is not in the pane's filed worktree. Nil until a
     /// hook names this pane (`SEAHELM_PANE_ID`).
