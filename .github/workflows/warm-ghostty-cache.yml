@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - "ghostty"
+      - "scripts/ghostty-patches/**"
       - "scripts/setup.sh"
       - ".github/workflows/warm-ghostty-cache.yml"
   workflow_dispatch:
@@ -36,7 +37,9 @@ jobs:
 
       - name: Resolve Ghostty commit
         id: ghostty
-        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+        # The pinned commit plus the local patches setup.sh applies on top of
+        # it (scripts/ghostty-patches), so editing a patch is a cache miss.
+        run: echo "sha=$(git ls-tree HEAD ghostty | awk '{print $3}')-$(cat scripts/ghostty-patches/*.patch 2>/dev/null | shasum -a 256 | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Cache GhosttyKit.xcframework
         id: cache
