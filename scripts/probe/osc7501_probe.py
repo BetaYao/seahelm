@@ -200,6 +200,8 @@ def main():
     ap.add_argument('--zmx-bin', default=os.environ.get('ZMX', 'zmx'))
     ap.add_argument('--no-reply', action='store_true')
     ap.add_argument('--timeout', type=float, default=90)
+    ap.add_argument('--watch', type=float, metavar='S',
+                    help='only watch for S seconds: no prompt, no keys (startup reports)')
     ap.add_argument('--log', default='osc7501-probe.log')
     ap.add_argument('cmd', nargs=argparse.REMAINDER)
     a = ap.parse_args()
@@ -212,7 +214,10 @@ def main():
         t = Term(argv, not a.no_reply, log)
         t.note(f'spawn {argv}')
         try:
-            drive_claude(t, a.timeout)
+            if a.watch:
+                t.pump(a.watch)
+            else:
+                drive_claude(t, a.timeout)
         finally:
             try:
                 os.kill(t.pid, signal.SIGTERM)

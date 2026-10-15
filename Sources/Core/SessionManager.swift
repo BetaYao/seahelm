@@ -517,6 +517,7 @@ enum SessionManager {
             let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
                 + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
             let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd))"
+                + " && \(waitForClientCommand(zmx: ZmxLocator.executable(), name: name))"
                 + " && \(TerminalEnvironment.clearScreenCommand) && \(agentCommandLine)"
             // Prefixed as `env` assignments rather than exported inside `inner`
             // so the *session* PTY carries them: the shell zmx spawns, the rc
@@ -528,6 +529,37 @@ enum SessionManager {
         default:
             return []
         }
+    }
+
+    /// How long a detached launch holds the agent for a client (see
+    /// `waitForClientCommand`) before starting it anyway.
+    static let clientWaitSeconds = 10
+
+    /// Shell that waits until a client attaches to session `name`, or
+    /// `clientWaitSeconds` pass. Always succeeds, so it can sit in an `&&` chain.
+    ///
+    /// An agent's terminal queries are answered by whoever is attached when it
+    /// asks, and it asks once, at startup. A detached session has nobody but the
+    /// zmx daemon, which answers DA1 and swallows the rest — so an agent started
+    /// there concludes, for its whole life, that the terminal supports nothing:
+    /// Claude Code never reports OSC 7501 program status, and nobody answers OSC
+    /// 10/11 color queries. Seahelm attaches its pane a beat after creating the
+    /// session, but that beat is too long: measured, an attach 0.2s after `zmx
+    /// run` caught Claude's probe and one at 1s missed it. Holding the agent
+    /// until the pane is there costs that beat and nothing else.
+    ///
+    /// It waits for the client count to *rise*, not to be nonzero: the `zmx run`
+    /// that typed this line is itself a client for as long as the agent runs, so
+    /// a detached session already reads `clients=1`.
+    static func waitForClientCommand(zmx: String, name: String) -> String {
+        let pattern = "s/.*name=\(NSRegularExpression.escapedPattern(for: name))[[:space:]].*clients=([0-9]+).*/\\1/p"
+        let polls = clientWaitSeconds * 5
+        // A brace group, so the `;`s inside cannot break the caller's `&&` chain,
+        // and a function name no rc file aliases (`-lic` loads them all).
+        return "{ __seahelm_clients() { \(ShellEscape.singleQuote(zmx)) list 2>/dev/null"
+            + " | sed -En \(ShellEscape.singleQuote(pattern)); }; c0=$(__seahelm_clients)"
+            + "; for _ in $(seq \(polls)); do [ \"$(__seahelm_clients)\" -gt \"${c0:-0}\" ] 2>/dev/null"
+            + " && break; sleep 0.2; done; }"
     }
 
     /// Whether a persistent session with `name` already exists for `backend`.
