@@ -30,6 +30,11 @@ struct PaneInfo {
     var activityEvents: [ActivityEvent] = []
     var scanStatus: AgentStatus = .unknown   // latest screen-scan observation (component)
     var hookStatus: AgentStatus = .unknown   // webhook-accumulated inference (component)
+    var programStatus: AgentStatus = .unknown // OSC 7501 live root record (component; wins when known)
+    /// The 7501 state behind `programStatus`. Kept because two of them map to
+    /// `.idle` and mean different things: `done` finished something, `idle` is
+    /// merely at rest (just started, or interrupted) and announces nothing.
+    var programState: ProgramStatusReport.State?
     /// The session has background work of its own — a shell it launched, a monitor
     /// it watches. A separate axis from `status` on purpose: the agent can be idle
     /// at an empty prompt while this is true, and folding it into the status
@@ -83,6 +88,8 @@ extension PaneInfo {
         copy.activityEvents = activityEvents
         copy.scanStatus = scanStatus
         copy.hookStatus = hookStatus
+        copy.programStatus = programStatus
+        copy.programState = programState
         copy.backgroundBusy = backgroundBusy
         return copy
     }

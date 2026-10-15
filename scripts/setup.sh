@@ -16,9 +16,25 @@ fi
 
 # Get current ghostty commit SHA
 GHOSTTY_SHA=$(cd "$GHOSTTY_DIR" && git rev-parse HEAD)
-CACHED_XCFRAMEWORK="$CACHE_DIR/$GHOSTTY_SHA/GhosttyKit.xcframework"
 
-echo "==> Ghostty commit: $GHOSTTY_SHA"
+# Local patches on top of the pinned commit (scripts/ghostty-patches/*.patch,
+# applied in name order). They are applied to a throwaway worktree, never to
+# the submodule checkout, and the cache key carries their hash so editing a
+# patch rebuilds instead of reusing a framework built without it.
+PATCH_DIR="$REPO_ROOT/scripts/ghostty-patches"
+PATCHES=()
+if [ -d "$PATCH_DIR" ]; then
+    while IFS= read -r p; do PATCHES+=("$p"); done < <(find "$PATCH_DIR" -name '*.patch' | sort)
+fi
+CACHE_KEY="$GHOSTTY_SHA"
+if [ ${#PATCHES[@]} -gt 0 ]; then
+    PATCH_HASH=$(cat "${PATCHES[@]}" | shasum -a 256 | cut -c1-12)
+    CACHE_KEY="$GHOSTTY_SHA-$PATCH_HASH"
+fi
+CACHED_XCFRAMEWORK="$CACHE_DIR/$CACHE_KEY/GhosttyKit.xcframework"
+CACHED_SHARE="$CACHE_DIR/$CACHE_KEY/share"
+
+echo "==> Ghostty commit: $GHOSTTY_SHA (${#PATCHES[@]} local patch(es))"
 
 # Preflight only matters when we are about to build; a cache hit needs neither
 # toolchain. Both of these fail deep inside `zig build` with errors that read as
@@ -49,15 +65,30 @@ if [ -d "$CACHED_XCFRAMEWORK" ]; then
     echo "==> Using cached GhosttyKit.xcframework"
 else
     preflight_build_tools
+    BUILD_DIR="$GHOSTTY_DIR"
+    if [ ${#PATCHES[@]} -gt 0 ]; then
+        BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/seahelm-ghostty.XXXXXX")"
+        trap 'git -C "$GHOSTTY_DIR" worktree remove --force "$BUILD_DIR" >/dev/null 2>&1 || rm -rf "$BUILD_DIR"' EXIT
+        git -C "$GHOSTTY_DIR" worktree add --detach "$BUILD_DIR" "$GHOSTTY_SHA" >/dev/null
+        for p in "${PATCHES[@]}"; do
+            echo "==> Applying $(basename "$p")"
+            git -C "$BUILD_DIR" apply "$p"
+        done
+    fi
     echo "==> Building GhosttyKit.xcframework (this may take a few minutes)..."
-    cd "$GHOSTTY_DIR"
+    cd "$BUILD_DIR"
     # -Demit-macos-app=false: emit-macos-app defaults to emit-xcframework, and we
     # only need the xcframework — building the full Ghostty.app fails on CI's Xcode.
     zig build -Demit-xcframework=true -Demit-macos-app=false -Dxcframework-target=universal -Doptimize=ReleaseFast
 
-    # Cache the build
-    mkdir -p "$CACHE_DIR/$GHOSTTY_SHA"
-    cp -R "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" "$CACHED_XCFRAMEWORK"
+    # Cache the build, with the resources it produced: a patched build happens
+    # in a worktree that is gone after this script, so zig-out cannot be read
+    # back later.
+    mkdir -p "$CACHE_DIR/$CACHE_KEY"
+    cp -R "$BUILD_DIR/macos/GhosttyKit.xcframework" "$CACHED_XCFRAMEWORK"
+    if [ -d "$BUILD_DIR/zig-out/share" ]; then
+        cp -R "$BUILD_DIR/zig-out/share" "$CACHED_SHARE"
+    fi
     echo "==> Cached build at $CACHED_XCFRAMEWORK"
 fi
 
@@ -100,14 +131,19 @@ fi
 RESOURCES_DIR="$REPO_ROOT/Resources/ghostty"
 mkdir -p "$RESOURCES_DIR"
 
-if [ -d "$GHOSTTY_DIR/zig-out/share/ghostty" ]; then
-    cp -R "$GHOSTTY_DIR/zig-out/share/ghostty/" "$RESOURCES_DIR/"
+# Prefer the resources cached with this build; fall back to an in-tree build
+# (caches from before resources were cached alongside the framework).
+SHARE_DIR="$CACHED_SHARE"
+[ -d "$SHARE_DIR" ] || SHARE_DIR="$GHOSTTY_DIR/zig-out/share"
+
+if [ -d "$SHARE_DIR/ghostty" ]; then
+    cp -R "$SHARE_DIR/ghostty/" "$RESOURCES_DIR/"
     echo "==> Copied Ghostty resources"
 fi
 
-if [ -d "$GHOSTTY_DIR/zig-out/share/terminfo" ]; then
+if [ -d "$SHARE_DIR/terminfo" ]; then
     mkdir -p "$RESOURCES_DIR/terminfo"
-    cp -R "$GHOSTTY_DIR/zig-out/share/terminfo/" "$RESOURCES_DIR/terminfo/"
+    cp -R "$SHARE_DIR/terminfo/" "$RESOURCES_DIR/terminfo/"
     echo "==> Copied terminfo"
 fi
 

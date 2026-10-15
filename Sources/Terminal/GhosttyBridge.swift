@@ -393,6 +393,29 @@ class GhosttyBridge {
 
     // MARK: - Static callback helpers
 
+    /// Copy a `ghostty_action_program_status_s` out of the callback: its strings
+    /// are only valid until the callback returns.
+    private static func programStatusReport(_ c: ghostty_action_program_status_s) -> ProgramStatusReport {
+        func str(_ p: UnsafePointer<CChar>?) -> String { p.map { String(cString: $0) } ?? "" }
+        let text = c.text?.pointee
+        return ProgramStatusReport(
+            state: ProgramStatusReport.State(rawValue: Int(c.state.rawValue)) ?? .idle,
+            kind: c.kind < 0 ? nil : ProgramStatusReport.Kind(rawValue: Int(c.kind)),
+            progress: c.progress < 0 ? nil : Int(c.progress),
+            id: str(text?.id), app: str(text?.app),
+            title: str(text?.title), msg: str(text?.msg))
+    }
+
+    /// Apply a change to a pane's 7501 records and, when its live root record
+    /// moved, feed that to the status pipeline. Child records and re-reports of
+    /// the same thing do not touch the pane's status.
+    private static func applyProgramStatus(_ station: Station, _ body: (inout ProgramStatusStore) -> Void) {
+        let (before, after) = station.updateProgramStatus(body)
+        guard before?.report != after?.report else { return }
+        AgentRegistry.shared.ingest(NormalizedEvent(
+            terminalID: station.id, source: .osc7501, kind: .programStatus(after)))
+    }
+
     /// Resolve the Station owning an action's target surface, if any.
     private static func station(for target: ghostty_target_s) -> Station? {
         guard target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface else { return nil }
@@ -437,6 +460,22 @@ class GhosttyBridge {
                 DispatchQueue.main.async { station.view?.updateProgress(decoded) }
             }
             return true
+        case GHOSTTY_ACTION_PROGRAM_STATUS:
+            // OSC 7501. libghostty validated the report; the records and their
+            // lifetime are ours (ProgramStatusStore).
+            if let station = station(for: target) {
+                let report = programStatusReport(action.action.program_status)
+                applyProgramStatus(station) { $0.apply(report) }
+            }
+            return true
+        case GHOSTTY_ACTION_COMMAND_FINISHED:
+            // The shell has the terminal back (OSC 133), which ends the
+            // `working` / `blocked` records of whatever just ran. Not consumed:
+            // libghostty also uses it for its own command notifications.
+            if let station = station(for: target) {
+                applyProgramStatus(station) { $0.promptReturned() }
+            }
+            return false
         case GHOSTTY_ACTION_RELOAD_CONFIG:
             // Required for light/dark `theme = light:…,dark:…` to take effect.
             // libghostty flips conditional state then asks the embedder to reload.

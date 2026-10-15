@@ -225,7 +225,7 @@ class TabCoordinator {
             switch outcome.event.source {
             case .scan:
                 break
-            case .hook, .mcp, .shell:
+            case .hook, .mcp, .shell, .osc7501:
                 self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
             }
             self.firstMate?.handle(outcome)
@@ -1756,6 +1756,15 @@ class TabCoordinator {
         newStatus == .idle && hookStatus == .running
     }
 
+    /// Whether the program itself said this `.idle` is not a completion. OSC 7501
+    /// tells the two apart: `done` is a finished piece of work, `idle` is at rest —
+    /// what Claude Code reports the moment it starts (right after its SessionStart
+    /// hook has flipped the pane to running) and after an interrupt. Announcing
+    /// those as "finished" sent a banner for every agent launched.
+    static func programSaysAtRest(newStatus: AgentStatus, programState: ProgramStatusReport.State?) -> Bool {
+        newStatus == .idle && programState == .idle
+    }
+
     /// How long to hold such a completion, and how often to look again. Each
     /// pass re-reads the pane, so the wait ends the moment the agent's own Stop
     /// lands — the full window is only spent when it never does.
@@ -1790,6 +1799,8 @@ class TabCoordinator {
         NSLog("[notify] pane=\(terminalID.suffix(8)) \(oldStatus.rawValue)→\(newStatus.rawValue) " +
               "hook=\(pane?.hookStatus.rawValue ?? "no-pane") prose=\(lastAssistantMessage.count) " +
               "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft)")
+
+        if Self.programSaysAtRest(newStatus: newStatus, programState: pane?.programState) { return }
 
         if attemptsLeft > 0,
            Self.shouldWaitForCompletion(newStatus: newStatus,
