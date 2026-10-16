@@ -52,7 +52,7 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelm clean
 
 The project uses XcodeGen (`project.yml`) to generate the Xcode project file. After modifying `project.yml`, regenerate with `xcodegen generate`.
 
-**Helper scripts:** since zmx underpins session persistence, several scripts manage the vendored `zmx` binary — `scripts/fetch-zmx.sh` (fetch the pinned arm64 binary to a dest, verifying its SHA-256), `scripts/check-zmx.sh` (check whether a newer release exists than `Vendor/zmx.pin`; exit 10 if so), `scripts/bump-zmx.sh <version>` (download + rewrite the pin, no commit), and root `zmx-cleanup.sh` (kill all zmx sessions). `scripts/install-hooks.sh` symlinks `scripts/hooks/` into `.git/hooks`.
+**Helper scripts:** since zmx underpins session persistence, several scripts manage the vendored `zmx` binary — `scripts/fetch-zmx.sh` (fetch the pinned arm64 binary to a dest, verifying its SHA-256), `scripts/check-zmx.sh` (check whether a newer release exists than `Vendor/zmx.pin`; exit 10 if so), `scripts/bump-zmx.sh <version>` (download + rewrite the pin, no commit), and root `zmx-cleanup.sh` (kill all zmx sessions). `scripts/disk-drop-recover.sh` recovers from the workspace volume dropping out, which wedges every session daemon permanently (`zmx list` answers `status=unreachable` and remounting does not heal it): it captures each pane's `claude --resume` id, kills the app and all zmx processes, clears the stale sockets, and relaunches the bundle — `--check` diagnoses only (exit 10 = wedged), `--kill-strays` also reaps non-zmx processes spinning on a dead cwd. `scripts/install-hooks.sh` symlinks `scripts/hooks/` into `.git/hooks`.
 
 ## Architecture
 
