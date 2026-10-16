@@ -486,6 +486,9 @@ final class HostGatewaySession {
                 NSLog("[HostGateway] Pairing code refused on the Telegram host")
                 return finishAuth(id: id, ok: false, params: params, issuedToken: nil)
             }
+            // Every proxied upgrade reaches the session from loopback, so the
+            // address that means anything is the one the front door saw.
+            let clientIP = access.frontClientIP() ?? self.clientIP
             if let rateLimiter, !rateLimiter.allow(ip: clientIP) {
                 return [encodeError(id: id, code: -32029, message: "rate_limited")]
             }

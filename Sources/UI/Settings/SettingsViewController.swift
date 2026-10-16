@@ -139,6 +139,8 @@ class SettingsViewController: NSViewController {
     private let telegramUsersView = NSTextView()
     private let telegramUsersScrollView = NSScrollView()
     private let telegramDefaultChatField = SettingsTextField()
+    private let telegramMiniAppField = SettingsTextField()
+    private let telegramMiniAppStatus = NSTextField(labelWithString: "")
     private lazy var telegramAutoConnectToggle = SettingsControls.toggle(
         on: config.telegram?.resolvedAutoConnect ?? true, target: self, action: #selector(controlChanged))
     private let telegramStatusLabel = NSTextField(labelWithString: "")
@@ -472,6 +474,27 @@ class SettingsViewController: NSViewController {
 
         telegramAutoConnectToggle.setAccessibilityIdentifier("settings.telegram.autoConnect")
 
+        telegramMiniAppField.placeholderString = "https://tg.example.com/"
+        telegramMiniAppField.font = AppFont.mono(size: 12, weight: .regular)
+        telegramMiniAppField.stringValue = cfg?.miniAppURL ?? ""
+        telegramMiniAppField.setAccessibilityIdentifier("settings.telegram.miniApp")
+        telegramMiniAppField.target = self
+        telegramMiniAppField.action = #selector(controlChanged)
+        telegramMiniAppStatus.font = NSFont.systemFont(ofSize: 11)
+        telegramMiniAppStatus.lineBreakMode = .byWordWrapping
+        telegramMiniAppStatus.maximumNumberOfLines = 4
+        telegramMiniAppStatus.preferredMaxLayoutWidth = 460
+        telegramMiniAppStatus.translatesAutoresizingMaskIntoConstraints = false
+        telegramMiniAppStatus.isSelectable = true
+        refreshTelegramMiniAppStatus()
+        let copyMiniAppButton = SettingsControls.button("Copy URL", target: self,
+                                                        action: #selector(copyMiniAppURLClicked))
+        let miniAppStack = NSStackView(views: [telegramMiniAppField, telegramMiniAppStatus, copyMiniAppButton])
+        miniAppStack.orientation = .vertical
+        miniAppStack.alignment = .leading
+        miniAppStack.spacing = 6
+        telegramMiniAppField.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+
         telegramStatusLabel.font = NSFont.systemFont(ofSize: 11)
         telegramStatusLabel.preferredMaxLayoutWidth = 460
         telegramStatusLabel.lineBreakMode = .byWordWrapping
@@ -529,8 +552,13 @@ class SettingsViewController: NSViewController {
                                  control: telegramDefaultChatField),
                 SettingsRow.make("Connect at launch", control: telegramAutoConnectToggle),
                 SettingsRow.make("In a group",
-                                 subtitle: "Send a slash command: /status, /help. Telegram's privacy mode hands a bot only the group messages that begin with a slash, so \u{201C}@yourbot /status\u{201D} never arrives at all \u{2014} put the mention last instead, /status@yourbot, when several bots share the group. Plain prose is an order in a private chat only; in a group it stays conversation."),
+                                 subtitle: "Send a slash command (/status, or /status@yourbot when several bots share the group), start a line with @yourbot, or reply to one of the bot's messages. A bare line in a group stays conversation \u{2014} only a private chat takes plain prose as an order."),
                 SettingsRow.stacked(nil, content: statusStack),
+            ]),
+            SettingsGroupView(title: "Mini App", rows: [
+                SettingsRow.stacked("Mini App URL",
+                                    subtitle: "Opens seahelm-web inside Telegram, signed in as you \u{2014} no pairing code. It must be an https address that reaches this Mac's Host Gateway (a Cloudflare Tunnel, Tailscale Funnel or similar) and is not behind a login page of its own, since Telegram frames it. On that host the pairing code is refused: only a Telegram user on the list above gets in.",
+                                    content: miniAppStack),
             ]),
             SettingsGroupView(title: "Triggers", rows: [
                 SettingsRow.stacked(nil,
@@ -538,6 +566,34 @@ class SettingsViewController: NSViewController {
                                     content: telegramRulesView),
             ]),
         ]
+    }
+
+    /// What the Mini App URL will do, or why it will not.
+    private func refreshTelegramMiniAppStatus() {
+        let text = telegramMiniAppField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            telegramMiniAppStatus.stringValue = "Off."
+            telegramMiniAppStatus.textColor = Theme.textSecondary
+        } else if TelegramConfig.miniAppURL(from: text) == nil {
+            telegramMiniAppStatus.stringValue = "Needs a full https:// address."
+            telegramMiniAppStatus.textColor = .systemRed
+        } else {
+            telegramMiniAppStatus.stringValue = "The bot's menu button opens it. For the \u{201C}Open\u{201D} button in the chat list as well, "
+                + "tell @BotFather: /mybots \u{25B8} your bot \u{25B8} Bot Settings \u{25B8} Configure Mini App, and send it this URL."
+            telegramMiniAppStatus.textColor = Theme.textSecondary
+        }
+    }
+
+    @objc private func copyMiniAppURLClicked() {
+        let text = telegramMiniAppField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private static func nonBlank(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 
     // MARK: - Pairing
@@ -936,8 +992,10 @@ class SettingsViewController: NSViewController {
                     // Carried through rather than re-read: no field in this
                     // tab, so rebuilding the struct would erase it.
                     backfillSeconds: config.telegram?.backfillSeconds,
-                    rules: telegramRulesView.rules
+                    rules: telegramRulesView.rules,
+                    miniAppURL: Self.nonBlank(telegramMiniAppField.stringValue)
                 )
+                refreshTelegramMiniAppStatus()
             }
         }
 

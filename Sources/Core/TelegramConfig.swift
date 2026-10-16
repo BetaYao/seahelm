@@ -38,24 +38,44 @@ struct TelegramConfig: Codable, Equatable {
     /// seahelm never doubles as a trigger.
     var rules: [TelegramRule]?
 
+    /// Where the bot's Mini App lives: an https URL that reaches this Mac's
+    /// Host Gateway (seahelm-web). Set, the bridge points the bot's menu button
+    /// at it, and the gateway treats its host as the Mini App's — signed in by
+    /// Telegram, pairing code refused (see `HostGatewayAccess`). The bot's
+    /// chat-list "Open" button is BotFather's to set; there is no API for it.
+    var miniAppURL: String?
+
     init(botToken: String? = nil,
          allowedUsers: [String] = [],
          defaultChatId: String? = nil,
          autoConnect: Bool? = nil,
          backfillSeconds: Double? = nil,
-         rules: [TelegramRule]? = nil) {
+         rules: [TelegramRule]? = nil,
+         miniAppURL: String? = nil) {
         self.botToken = botToken
         self.allowedUsers = allowedUsers
         self.defaultChatId = defaultChatId
         self.autoConnect = autoConnect
         self.backfillSeconds = backfillSeconds
         self.rules = rules
+        self.miniAppURL = miniAppURL
     }
 
     var resolvedAutoConnect: Bool { autoConnect ?? true }
     var resolvedBackfillSeconds: Double { backfillSeconds ?? 60 }
     var resolvedRules: [TelegramRule] { rules ?? [] }
     var resolvedBotToken: String? { nonBlank(botToken) }
+
+    /// `miniAppURL` when it is usable: https, with a host. Telegram refuses
+    /// anything else for a Mini App.
+    var resolvedMiniAppURL: URL? { Self.miniAppURL(from: miniAppURL) }
+
+    static func miniAppURL(from text: String?) -> URL? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+              let url = URL(string: text), url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
+    }
 
     var resolvedDefaultChatId: String? {
         if let explicit = nonBlank(defaultChatId) { return explicit }
@@ -108,6 +128,7 @@ struct TelegramConfig: Codable, Equatable {
         case autoConnect = "auto_connect"
         case backfillSeconds = "backfill_seconds"
         case rules
+        case miniAppURL = "mini_app_url"
     }
 
     init(from decoder: Decoder) throws {
@@ -118,5 +139,6 @@ struct TelegramConfig: Codable, Equatable {
         autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect)
         backfillSeconds = try c.decodeIfPresent(Double.self, forKey: .backfillSeconds)
         rules = try c.decodeIfPresent([TelegramRule].self, forKey: .rules)
+        miniAppURL = try c.decodeIfPresent(String.self, forKey: .miniAppURL)
     }
 }
