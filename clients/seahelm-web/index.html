@@ -2,587 +2,550 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Seahelm · cockpit</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<title>Seahelm · First Mate</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e2d37'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%231fc8da' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%231fc8da'/%3E%3C/svg%3E" />
 <!-- Plain static page: WS/WSS to the same-origin Host Gateway. No external deps, works offline. -->
 <style>
-  /* Bare-TUI cockpit — matches Sources/UI/Shared/SemanticColors.swift (dark) */
+  /* Dark, iOS-grouped. The phone is the reference device: 17px body, 44pt
+     targets, the system font for prose and SF Mono only for what is code.
+     The desktop takes the same parts at a step smaller. */
   :root{
-    --bg:#08222a;
-    --panel:#0e2d37;
-    --panel2:#103440;
-    --text:#cfe0e0;
-    --muted:#7fa0a3;
-    --line:#96d7e1;
-    --accent:#1fc8da;
-    --running:#1bb062;
-    --waiting:#5b93f0;
-    --idle:#557170;
-    --danger:#e84635;
-    --attention:#e0a458;
-    --line-12:rgba(150,215,225,.12);
-    --line-20:rgba(150,215,225,.20);
-    --line-38:rgba(150,215,225,.38);
-    --accent-12:rgba(31,200,218,.12);
-    --accent-20:rgba(31,200,218,.20);
-    --running-14:rgba(27,176,98,.14);
-    --danger-14:rgba(232,70,53,.14);
-    --attention-12:rgba(224,164,88,.12);
+    color-scheme:dark;
+    --bg:#000000;
+    --side:#121214;
+    --panel:#1c1c1e;
+    --panel2:#2c2c2e;
+    --panel3:#3a3a3c;
+    --sep:#38383a;
+    --text:#f2f2f7;
+    --text2:#aeaeb2;
+    --muted:#98989f;
+    --faint:#636366;
+    --accent:#3fd3e3;
+    --accent-ink:#00262b;
+    --accent-14:rgba(63,211,227,.14);
+    --accent-30:rgba(63,211,227,.30);
+    --running:#30d158;
+    --running-18:rgba(48,209,88,.18);
+    --attention:#ffb340;
+    --attention-16:rgba(255,179,64,.16);
+    --danger:#ff6961;
+    --danger-16:rgba(255,105,97,.16);
+    --idle:#8e8e93;
     /* A bare terminal, as opposed to an agent. Not amber: that is "needs you". */
     --shell:#b3a4f2;
-    --shell-38:rgba(179,164,242,.38);
-    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Segoe UI','Microsoft YaHei',sans-serif;
-    --r:4px;
+    --user:#0a84a0;
+    --term-bg:#0b0b0c;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Hiragino Sans GB','Segoe UI','Microsoft YaHei',system-ui,sans-serif;
+    /* Type scale: body, secondary, caption. The phone overrides below. */
+    --fs-body:15px;
+    --fs-sub:13px;
+    --fs-cap:12px;
+    --fs-title:28px;
+  }
+  @media (max-width:760px){
+    :root{ --fs-body:17px; --fs-sub:15px; --fs-cap:13px; --fs-title:34px; }
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  ::selection{background:var(--accent-20);color:var(--text)}
+  ::selection{background:var(--accent-30);color:var(--text)}
+  button{font:inherit;color:inherit}
+  html{background:var(--bg)}
   body{
-    background:var(--bg);color:var(--text);font-family:var(--mono);height:100vh;
+    background:var(--bg);color:var(--text);font-family:var(--sans);
+    /* --app-h follows visualViewport, so a soft keyboard shrinks the page
+       instead of covering its bottom bar (see trackViewport). */
+    height:var(--app-h,100dvh);
     display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;
-    font-size:13px;line-height:1.4;
-    background-image:radial-gradient(120% 80% at 50% -10%, #0c303a 0%, var(--bg) 55%);
+    font-size:var(--fs-body);line-height:1.4;
+    -webkit-tap-highlight-color:transparent;
   }
-  /* ── header ─────────────────────────────────────────────── */
-  header{display:flex;gap:8px;align-items:center;padding:8px 12px;
-    background:rgba(8,34,42,.85);backdrop-filter:blur(10px);
-    border-bottom:1px solid var(--line-12);flex-wrap:wrap;min-height:40px}
-  .wordmark{font-family:var(--mono);font-weight:600;font-size:14px;letter-spacing:.04em;
-    color:var(--text);margin-right:4px;text-transform:lowercase}
-  .wordmark .sea{color:var(--accent)}
-  header input{background:var(--panel);border:1px solid var(--line-20);color:var(--text);
-    border-radius:var(--r);padding:5px 8px;font-family:var(--mono);font-size:12px;outline:none}
-  header input:focus{border-color:var(--accent)}
-  header input.url{width:270px} header input.sm{width:92px}
-  header button{background:var(--accent);color:#042028;border:0;border-radius:var(--r);
-    padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px;font-family:var(--mono);
-    letter-spacing:.02em;transition:filter .12s}
-  header button:hover{filter:brightness(1.08)}
-  header button.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line-20)}
-  header button.ghost.on{background:var(--panel2);border-color:var(--accent);color:var(--accent)}
-  .pairzone{display:flex;align-items:center;gap:8px}
-  .spacer{flex:1}
-  header button.pair-primary{font-weight:600;padding-left:14px;padding-right:14px}
-  .chip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-12);
-    border:1px solid var(--line-38);border-radius:var(--r);padding:4px 6px 4px 10px;
-    font-size:12px;color:var(--text)}
-  .chip .lock{font-size:11px;opacity:.85}
-  .chip b{font-family:var(--mono);font-weight:600;letter-spacing:.02em}
-  .chip .chip-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;
-    line-height:1;padding:2px 4px;border-radius:3px;font-family:var(--mono)}
-  .chip .chip-x:hover{color:var(--danger);background:var(--danger-14)}
-  .advrow{display:flex;align-items:center;gap:8px}
-  .advrow[hidden]{display:none}
-  #status{font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:3px 8px;
-    border-radius:var(--r);margin-left:auto;text-transform:uppercase}
-  .st-off{background:var(--danger-14);color:var(--danger)}
-  .st-on{background:var(--running-14);color:var(--running)}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .muted{color:var(--muted);font-size:var(--fs-sub);font-style:normal}
+  svg.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;
+    stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .icon-btn{flex:none;width:44px;height:44px;border:0;border-radius:22px;background:transparent;
+    color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .icon-btn:hover{background:rgba(255,255,255,.06)}
+
   /* ── connection gate ────────────────────────────────────── */
-  .gate{position:fixed;top:0;left:0;right:0;bottom:0;z-index:90;
-    display:flex;align-items:center;justify-content:center;padding:24px;
-    background:var(--bg);
-    background-image:radial-gradient(120% 80% at 50% -10%, #0c303a 0%, var(--bg) 55%)}
+  .gate{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+    padding:24px;background:var(--bg)}
   .gate[hidden]{display:none}
-  .gate-card{width:min(440px,100%);display:flex;flex-direction:column;gap:12px;text-align:center}
-  .gate-title{font-size:15px;font-weight:600;letter-spacing:.02em}
-  .gate-hint{font-size:12px;color:var(--muted);line-height:1.5}
-  .gate-input{width:100%;background:var(--panel);border:1px solid var(--line-20);
-    color:var(--text);border-radius:var(--r);padding:10px;font-family:var(--mono);
-    font-size:12px;outline:none;resize:vertical}
+  .gate-card{width:min(400px,100%);display:flex;flex-direction:column;gap:14px;text-align:center}
+  .gate-title{font-size:var(--fs-title);font-weight:700;letter-spacing:.01em}
+  .gate-hint{font-size:var(--fs-sub);color:var(--muted);line-height:1.45}
+  .gate-input{width:100%;height:52px;background:var(--panel);border:0.5px solid var(--sep);
+    color:var(--text);border-radius:12px;padding:0 16px;font-family:var(--mono);
+    font-size:20px;letter-spacing:.12em;text-align:center;outline:none}
   .gate-input:focus{border-color:var(--accent)}
-  .gate-primary{background:var(--accent);color:#042028;border:0;border-radius:var(--r);
-    padding:11px 16px;font-weight:600;font-size:13px;font-family:var(--mono);cursor:pointer}
-  .gate-primary:hover{filter:brightness(1.08)}
-  .gate-link{background:none;border:0;color:var(--muted);font-family:var(--mono);
-    font-size:11px;cursor:pointer;padding:4px}
-  .gate-link:hover{color:var(--danger)}
-  .gate-mac{display:inline-flex;align-items:center;justify-content:center;gap:8px;
-    font-size:13px;color:var(--text)}
-  .gate-error{color:var(--danger);font-size:12px;line-height:1.5;text-align:left}
+  .gate-primary{height:52px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:14px;
+    font-weight:600;font-size:17px;cursor:pointer}
+  .gate-primary:hover{filter:brightness(1.06)}
+  .gate-link{height:44px;background:none;border:0;color:var(--danger);font-size:var(--fs-sub);cursor:pointer}
+  .gate-mac{font-size:var(--fs-body);font-weight:600;font-family:var(--mono)}
+  .gate-error{color:var(--danger);font-size:var(--fs-sub);line-height:1.45}
   .gate-error[hidden]{display:none}
+
   /* ── layout ─────────────────────────────────────────────── */
-  main{flex:1;display:grid;grid-template-columns:300px 1fr 360px;overflow:hidden;
-    transition:grid-template-columns .16s ease}
+  main{flex:1;min-height:0;display:grid;grid-template-columns:360px 1fr 360px;overflow:hidden}
   /* Debug panel collapsed — the terminal takes the width back. */
-  main.nolog{grid-template-columns:300px 1fr 0}
+  main.nolog{grid-template-columns:360px 1fr 0}
   main.nolog #rightcol{display:none}
-
-  /* Narrow-layout affordances. These base rules must precede the media queries:
-     same specificity means source order decides, and declaring them afterwards
-     silently re-hid the drawer button at every width. */
-  #drawerBtn{display:none;align-items:center;justify-content:center;
-    background:var(--panel);color:var(--text);border:1px solid var(--line-20);
-    border-radius:var(--r);padding:5px 9px;font-size:13px;line-height:1;cursor:pointer;
-    font-family:var(--mono)}
-  #drawerBtn:hover{border-color:var(--accent);color:var(--accent)}
-  /* Panes other than the one on screen waiting on you. It rides the ‹ that
-     leads back to them rather than taking a row above the transcript: the count is
-     usually zero, and permanent furniture for "usually nothing" is what cost
-     the phone its reading height. */
-  #drawerBtn{position:relative}
-  #drawerBtn[data-waiting]{border-color:var(--attention)}
-  #drawerBtn[data-waiting]::after{content:attr(data-waiting);position:absolute;
-    top:-5px;right:-5px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;
-    background:var(--attention);color:#08222a;font-family:var(--mono);font-size:9px;
-    font-weight:600;line-height:15px;text-align:center}
-
-  /* ── responsive ───────────────────────────────────────────
-     `main.nolog` outranks `main`, so every override below has to name both or
-     the debug toggle would decide the narrow layout. */
+  .col{overflow-y:auto;min-width:0}
+  #drawerBtn{display:none}
+  /* `main.nolog` outranks `main`, so every override below names both or the
+     debug toggle would decide the narrow layout. */
   @media (max-width:1100px){
-    main, main.nolog{grid-template-columns:260px 1fr 0}
+    main, main.nolog{grid-template-columns:320px 1fr 0}
     main #rightcol, main.nolog #rightcol{display:none}   /* no room to debug and work */
     #logBtn{display:none}
   }
-  /* Phone / narrow window: two full screens, not a drawer. The fleet list is
-     the home screen; a worktree opens over the whole width and ‹ (or the
-     system back gesture) returns. A drawer gave the list 86% of the width and
-     the transcript a strip beside it, and a side swipe on a phone is easy to
-     start by accident and awkward to finish. */
+  /* Phone / narrow window: two full screens. The list is the home screen; a
+     worktree opens over the whole width and ‹ (or the system back gesture)
+     returns. */
   @media (max-width:760px){
     main, main.nolog{grid-template-columns:1fr}
-    #leftcol{border-right:0}
     body[data-screen="list"] #midcol{display:none}
     body[data-screen="detail"] #leftcol{display:none}
-    body[data-screen="detail"] #drawerBtn{display:inline-flex}
-    #drawerBtn{font-size:17px;padding:2px 10px 4px}
-    header{padding:6px 8px;gap:6px;min-height:36px}
-    .wordmark{font-size:13px}
-    .detail-head{margin:0 0 8px}
-    .col{padding:8px}
+    body[data-screen="detail"] #drawerBtn{display:flex}
   }
-  .col{overflow-y:auto;padding:12px;border-right:1px solid var(--line-12)}
-  #midcol{display:flex;flex-direction:column;overflow:hidden}
-  /* The terminal is the mid column now — there is nothing else to share it with. */
-  #termWrap{flex:1 1 auto;min-height:0;background:#05090c;
-    border:1px solid var(--line-12);border-radius:var(--r);padding:6px;overflow:auto}
+
+  /* ── First Mate (the list) ─────────────────────────────── */
+  #leftcol{display:flex;flex-direction:column;overflow:hidden;background:var(--side);
+    border-right:0.5px solid var(--sep)}
+  @media (max-width:760px){ #leftcol{background:var(--bg);border-right:0} }
+  .fm-top{flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:max(4px, env(safe-area-inset-top)) 8px 0 12px;min-height:48px}
+  .conn{display:flex;align-items:center;gap:8px;min-height:44px;font-size:var(--fs-sub);color:var(--muted)}
+  #status::before{content:'';display:inline-block;width:8px;height:8px;border-radius:4px;margin-right:8px;
+    vertical-align:1px;background:var(--danger)}
+  #status.st-on::before{background:var(--running)}
+  .fm-header{flex:none;display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    padding:0 16px}
+  .fm-title{font-size:var(--fs-title);line-height:1.2;font-weight:700;letter-spacing:.01em;white-space:nowrap}
+  .fm-sub{font-size:var(--fs-sub);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;padding:2px;
+    border-radius:10px;background:var(--panel)}
+  .seg button{border:0;border-radius:8px;background:transparent;color:#c7c7cc;cursor:pointer;
+    font-size:var(--fs-sub);white-space:nowrap;padding:0 12px}
+  .seg button.on{background:var(--panel3);color:var(--text);font-weight:600}
+  .fm-modes{flex:none;margin:12px 16px 4px;height:40px}
+  @media (min-width:761px){ .fm-modes{height:34px} }
+  .fm-scroll{flex:1;min-height:0;overflow-y:auto;padding:0 16px 16px;-webkit-overflow-scrolling:touch}
+  .fm-group-head{display:flex;align-items:center;gap:8px;padding:20px 16px 7px;
+    font-size:var(--fs-cap);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  .fm-group-head .fm-deck{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-group-head .fm-dot{width:auto;height:auto}
+  .fm-rows{border-radius:12px;background:var(--panel);overflow:hidden}
+  #leftcol .fm-rows{background:var(--panel)}
+  @media (min-width:761px){ #leftcol .fm-rows{background:transparent;border-radius:0} }
+  .fm-row{width:100%;display:flex;gap:12px;padding:12px 16px;min-height:76px;border:0;
+    background:transparent;text-align:left;cursor:pointer;color:inherit;align-items:flex-start}
+  .fm-row + .fm-row{box-shadow:inset 0 0.5px 0 var(--sep)}
+  .fm-row:hover{background:rgba(255,255,255,.04)}
+  .fm-row.sel{background:var(--panel2)}
+  @media (min-width:761px){
+    .fm-row{min-height:0;padding:10px 12px;border-radius:10px;gap:10px;margin-bottom:2px}
+    .fm-row + .fm-row{box-shadow:none}
+  }
+  /* The dot sits in its own column so all three lines share one leading edge. */
+  .fm-dot{flex:none;width:10px;height:22px;display:flex;align-items:center;justify-content:center}
+  .fm-dot i{width:10px;height:10px;border-radius:5px;display:block}
+  .fm-dot i.live{box-shadow:0 0 0 4px var(--glow)}
+  /* `running` turns, so a working agent reads from the corner of the eye. */
+  .fm-spin{width:10px;height:10px;border-radius:50%;border:2px solid var(--running);
+    border-right-color:transparent;animation:fmspin .9s linear infinite}
+  @keyframes fmspin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .fm-spin{animation:none;border-right-color:var(--running)} }
+  .fm-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .fm-l1{display:flex;align-items:baseline;gap:8px}
+  .fm-name{flex:1;min-width:0;font-size:var(--fs-body);line-height:22px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-time{flex:none;font-size:var(--fs-sub);color:var(--muted);font-variant-numeric:tabular-nums}
+  .fm-l2{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:var(--fs-sub);line-height:20px;
+    color:var(--muted);white-space:nowrap;overflow:hidden}
+  .fm-st{flex:none;font-weight:500}
+  .fm-meta{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .fm-git{flex:none;font-size:var(--fs-cap);font-family:var(--mono)}
+  .fm-git .add{color:var(--running)} .fm-git .del{color:var(--danger)} .fm-git .ab{color:var(--muted)}
+  .fm-msg{font-size:var(--fs-sub);line-height:20px;color:var(--text2);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+  @media (min-width:761px){ .fm-msg{-webkit-line-clamp:1} }
+  .fm-empty{padding:48px 16px;text-align:center;color:var(--muted)}
+
+  /* New work: a pill at the foot of the list that opens a sheet. */
+  .nw-bar{flex:none;padding:12px 16px max(16px, calc(8px + env(safe-area-inset-bottom)))}
+  .nw-open{width:100%;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;
+    border-radius:26px;border:0.5px solid var(--sep);background:var(--panel);color:var(--muted);
+    font-size:var(--fs-body);cursor:pointer;text-align:left}
+  .nw-open svg{stroke:var(--accent)}
+  .nw-open kbd{margin-left:auto;font:inherit;font-size:var(--fs-cap);color:var(--faint)}
+  @media (max-width:760px){ .nw-open kbd{display:none} }
+  @media (min-width:761px){ .nw-open{height:44px;border-radius:22px} }
+
+  .sheet{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;
+    background:rgba(0,0,0,.55)}
+  .sheet[hidden]{display:none}
+  .sheet-card{width:100%;max-width:560px;max-height:calc(var(--app-h,100dvh) - 48px);display:flex;flex-direction:column;
+    background:var(--panel);border-radius:14px 14px 0 0;overflow:hidden}
+  @media (min-width:761px){
+    .sheet{align-items:center;padding:24px}
+    .sheet-card{border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+    .sheet-grab{display:none}
+  }
+  .sheet-grab{width:36px;height:5px;border-radius:3px;background:#48484a;margin:6px auto 0;flex:none}
+  .sheet-head{flex:none;height:52px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 8px}
+  .sheet-head h2{font-size:17px;font-weight:600}
+  .sheet-head button{height:44px;padding:0 8px;border:0;background:none;color:var(--accent);font-size:17px;cursor:pointer}
+  .sheet-head button:last-child{justify-self:end;font-weight:600}
+  .sheet-head button:disabled{color:var(--faint);cursor:default}
+  .sheet-body{flex:1;min-height:0;overflow-y:auto;padding:8px 16px 0;display:flex;flex-direction:column;gap:6px}
+  .sheet-label{font-size:var(--fs-cap);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+    padding:14px 16px 2px}
+  .sheet-label:first-child{padding-top:6px}
+  .sheet-hint{font-size:var(--fs-cap);line-height:1.4;color:var(--muted);padding:0 16px}
+  #nwPrompt{width:100%;min-height:120px;max-height:240px;resize:none;border:0;border-radius:12px;
+    background:var(--panel2);color:var(--text);font-family:var(--sans);font-size:17px;line-height:24px;
+    padding:12px 16px;outline:none}
+  .nw-list{border-radius:12px;background:var(--panel2);overflow:hidden}
+  .nw-list button{width:100%;min-height:48px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 16px;border:0;background:transparent;color:var(--text);font-size:17px;cursor:pointer;text-align:left}
+  .nw-list button + button{box-shadow:inset 0 0.5px 0 var(--panel3)}
+  .nw-list button.on::after{content:'';width:7px;height:13px;border:solid var(--accent);border-width:0 2.5px 2.5px 0;
+    transform:rotate(45deg) translate(-2px,-2px)}
+  .nw-chips{display:flex;flex-wrap:wrap;gap:8px}
+  .nw-chips button{height:40px;padding:0 16px;border-radius:20px;border:1.5px solid var(--panel3);
+    background:var(--panel2);color:#e5e5ea;font-size:16px;cursor:pointer}
+  .nw-chips button.on{border-color:var(--accent);background:var(--accent-14);color:#8be6ef;font-weight:600}
+  .nw-list .muted,.nw-chips .muted{padding:14px 16px;display:block}
+  .nw-error{font-size:var(--fs-sub);color:var(--danger);padding:8px 16px 0}
+  .nw-error[hidden]{display:none}
+  .sheet-foot{flex:none;padding:12px 16px max(16px, calc(8px + env(safe-area-inset-bottom)))}
+  #nwGo{width:100%;height:52px;border:0;border-radius:14px;background:var(--accent);color:var(--accent-ink);
+    font-size:17px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+  #nwGo:disabled{background:var(--panel3);color:var(--faint);cursor:default}
+  #newWork.busy #nwGo::before{content:'';width:16px;height:16px;border-radius:50%;
+    border:2px solid currentColor;border-right-color:transparent;animation:fmspin .9s linear infinite}
+
+  /* Menus: a short list of actions anchored to the ⋯ that opened it. */
+  .menu{position:fixed;z-index:85;min-width:240px;max-width:calc(100vw - 24px);padding:6px;border-radius:14px;
+    background:rgba(44,44,46,.97);border:0.5px solid var(--panel3);box-shadow:0 12px 40px rgba(0,0,0,.55)}
+  .menu[hidden]{display:none}
+  .menu button{width:100%;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:0 12px;border:0;border-radius:9px;background:transparent;color:var(--text);
+    font-size:var(--fs-body);cursor:pointer;text-align:left}
+  .menu button:hover:not(:disabled){background:rgba(255,255,255,.07)}
+  .menu button:disabled{color:var(--faint);cursor:default}
+  .menu button[hidden]{display:none}
+  .menu button.danger{color:var(--danger)}
+  .menu button .val{color:var(--muted);font-size:var(--fs-sub)}
+  .menu button.on .val,.menu .renderer-badge.alt .val{color:var(--attention)}
+  .menu hr{border:0;height:0.5px;background:var(--panel3);margin:4px 8px}
+
+  /* ── the detail: one worktree ──────────────────────────── */
+  #midcol{display:flex;flex-direction:column;overflow:hidden;position:relative;background:var(--bg)}
+  .detail-head{flex:none;display:grid;align-items:center;column-gap:8px;
+    grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"back title menu" "tabs tabs tabs";
+    padding:8px 12px 8px 24px;border-bottom:0.5px solid var(--sep);background:rgba(22,22,24,.86);
+    -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+  #drawerBtn{grid-area:back;position:relative;align-items:center;justify-content:center;height:44px;min-width:44px;padding:0 6px;
+    border:0;border-radius:22px;background:none;color:var(--accent);font-size:17px;cursor:pointer}
+  #drawerBtn svg{width:12px;height:20px;stroke-width:2.4}
+  /* Other panes waiting on you, on the ‹ that leads back to them. */
+  #drawerBtn[data-waiting]::after{content:attr(data-waiting);margin-left:6px;
+    min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--attention);color:#1c1300;
+    font-size:13px;font-weight:700;line-height:20px;text-align:center}
+  .dh-title{grid-area:title;min-width:0;display:flex;flex-direction:column}
+  #detailHead{font-size:17px;font-weight:600;line-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #detailSub{font-size:var(--fs-cap);line-height:16px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #detailSub:empty{display:none}
+  /* Timeline / Terminal lives at the top of the pane's ⋯ menu: the head keeps
+     its height for the content. */
+  .menu #surfaceBadge{height:40px;margin:2px 2px 6px}
+  .menu #surfaceBadge button{width:auto;min-height:0;justify-content:center;border-radius:8px;font-size:var(--fs-sub)}
+  .menu #surfaceBadge button.on{background:var(--panel3)}
+  #paneMenuBtn{grid-area:menu}
+  .pane-tabs{grid-area:tabs;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-top:8px;
+    -webkit-overflow-scrolling:touch}
+  .pane-tabs::-webkit-scrollbar{display:none}
+  .pane-tabs[hidden]{display:none}
+  .pane-tab{flex:none;height:36px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:18px;
+    border:1.5px solid var(--panel3);background:var(--panel);color:#e5e5ea;font-size:var(--fs-sub);
+    cursor:pointer;white-space:nowrap;max-width:70vw}
+  .pane-tab.on{border-color:var(--accent);background:var(--accent-14);color:var(--text);font-weight:600}
+  .pane-tab i{width:8px;height:8px;border-radius:4px;flex:none}
+  .pane-tab .pt-name{overflow:hidden;text-overflow:ellipsis}
+  .pane-tab .pt-name.shell{font-family:var(--mono);font-size:.93em}
+  .pane-tab .pt-st{font-weight:400;font-size:var(--fs-cap)}
+  @media (max-width:760px){
+    /* Nav bar, then the panes, then the view switch: three rows, like iOS. */
+    .detail-head{padding:max(0px, env(safe-area-inset-top)) 4px 8px}
+    .dh-title{align-items:center;text-align:center}
+    .pane-tab{height:40px;border-radius:20px}
+    .pane-tabs{padding:4px 12px 0}
+    body[data-screen="detail"] .dh-title{padding-right:0}
+  }
+
+  /* ── terminal ──────────────────────────────────────────── */
+  #termWrap{flex:1 1 auto;min-height:0;background:var(--term-bg);padding:6px;overflow:auto}
+  #termWrap.text-hidden{display:none}
+  #termWrap.empty{display:flex;align-items:center;justify-content:center}
   #term{width:100%;height:100%}
   /* Mirrored split tree. Slots are flex shares of the Mac's ratios; there are
-     deliberately no drag handles — this is a mirror, and the panes belong to
-     the machine that owns them. */
+     deliberately no drag handles — this is a mirror. */
   .vt-split{display:flex;width:100%;height:100%;gap:5px;min-width:0;min-height:0}
   .vt-slot{display:flex;min-width:0;min-height:0}
   .vt-slot>*{flex:1 1 auto;min-width:0;min-height:0}
   .vt-leaf{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
-    border:1px solid var(--line-12);border-radius:var(--r);background:#05090c}
-  .vt-leaf.on{border-color:var(--accent-20)}
-  .vt-leaf-title{flex:none;font-size:10px;letter-spacing:.06em;color:var(--muted);
-    padding:3px 7px;background:var(--panel);border-bottom:1px solid var(--line-12);
+    border:1px solid #232325;border-radius:8px;background:var(--term-bg)}
+  .vt-leaf.on{border-color:var(--accent-30)}
+  .vt-leaf-title{flex:none;font-size:var(--fs-cap);color:var(--muted);padding:3px 8px;background:var(--panel);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vt-leaf.on .vt-leaf-title{color:var(--accent)}
   .vt-host{flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;touch-action:none}
-  /* Single-pane fallback: the strip stands in for the panes we stopped drawing,
-     so the layout is still legible even though only one of them is on screen. */
-  .vt-single{flex:1 1 auto;min-height:0;min-width:0;display:flex}
+  /* One pane at a time: the tabs in the head say which, so it needs no title. */
+  .vt-single{flex:1 1 auto;min-height:0;min-width:0;display:flex;height:100%}
   .vt-single>*{flex:1 1 auto;min-width:0;min-height:0}
-  #termWrap:has(.vt-single){display:flex;flex-direction:column;gap:6px}
-  .pane-strip{flex:none;display:flex;gap:4px;overflow-x:auto;padding-bottom:2px}
-  .pane-chip{flex:none;display:inline-flex;align-items:center;gap:5px;
-    background:var(--panel);color:var(--muted);border:1px solid var(--line-12);
-    border-radius:var(--r);padding:4px 9px;font-family:var(--mono);font-size:11px;
-    cursor:pointer;white-space:nowrap;max-width:46vw;overflow:hidden}
-  .pane-chip.on{background:var(--accent-12);border-color:var(--line-38);color:var(--accent)}
-  .pane-chip span{overflow:hidden;text-overflow:ellipsis}
-  #termWrap.empty{display:flex;align-items:center;justify-content:center}
-  /* Scrolled back in a live terminal, there is otherwise no way home but to
-     swipe all the way down — and new output keeps arriving below you. */
-  #toBottom{position:absolute;right:16px;bottom:16px;z-index:40;display:none;
-    background:var(--panel2);color:var(--accent);border:1px solid var(--accent-20);
-    border-radius:14px;padding:5px 12px;font-family:var(--mono);font-size:11px;
-    cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)}
-  #toBottom.on{display:block}
-  #midcol{position:relative}
-  .col::-webkit-scrollbar{width:6px}
-  .col::-webkit-scrollbar-thumb{background:var(--line-20);border-radius:3px}
-  .col h2{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;
-    color:var(--muted);margin:2px 0 10px;font-weight:500}
-  .col h2:not(:first-child){margin-top:18px}
-  .detail-head{display:flex;align-items:center;gap:8px;margin:2px 0 10px;flex:none}
-  .detail-head h2{margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* Keys the browser will not give us. Cmd+W closes the tab and cannot be
-     intercepted by any page, so for those the button is not a convenience — it
-     is the only way to reach the action at all. */
-  .renderer-badge{flex:none;background:var(--panel);color:var(--muted);
-    border:1px solid var(--line-12);border-radius:var(--r);padding:3px 7px;
-    font-family:var(--mono);font-size:10px;letter-spacing:.04em;cursor:pointer}
-  .renderer-badge:hover{border-color:var(--accent);color:var(--accent)}
-  .renderer-badge.alt{color:var(--attention);border-color:var(--attention-12)}
-  .term-keys{display:flex;gap:4px;flex:none;align-items:center;overflow-x:auto;max-width:55%}
-  .term-keys button{flex:none;background:var(--panel);color:var(--muted);
-    border:1px solid var(--line-12);border-radius:var(--r);padding:3px 7px;
-    font-family:var(--mono);font-size:11px;line-height:1.2;cursor:pointer;white-space:nowrap}
-  .term-keys button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .vt-single .vt-leaf{border:0;border-radius:0}
+  .vt-single .vt-leaf-title{display:none}
+  /* Keys a phone keyboard does not have, and a browser will not pass on. */
+  .key-bar{flex:none;border-top:0.5px solid var(--sep);background:rgba(22,22,24,.94);
+    padding:8px 0 max(8px, env(safe-area-inset-bottom))}
+  .key-bar[hidden]{display:none}
+  .term-keys{display:flex;gap:6px;overflow-x:auto;padding:0 12px;scrollbar-width:none}
+  .term-keys::-webkit-scrollbar{display:none}
+  .term-keys button{flex:none;min-width:44px;height:40px;padding:0 10px;border:0;border-radius:8px;
+    background:var(--panel2);color:var(--text);font-family:var(--mono);font-size:14px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center}
   .term-keys button:disabled{opacity:.35;cursor:default}
-  .term-keys button.danger:hover:not(:disabled){border-color:var(--danger);color:var(--danger)}
-  .term-keys .sep{width:1px;height:14px;background:var(--line-20);flex:none;margin:0 2px}
-  .action-toast{position:fixed;top:52px;right:14px;z-index:100;max-width:min(420px,calc(100vw - 28px));
-    padding:8px 12px;border:1px solid var(--accent-20);border-radius:var(--r);
-    background:var(--panel2);color:var(--accent);font-family:var(--mono);font-size:11px;
-    box-shadow:0 4px 18px rgba(0,0,0,.45)}
-  .action-toast.error{border-color:var(--danger);color:var(--danger)}
+  .term-keys button.kb{color:var(--accent)}
+  .term-keys button.danger{color:var(--danger)}
+  .term-keys button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+  .term-keys .sep{flex:none;width:0.5px;align-self:stretch;margin:6px 2px;background:var(--panel3)}
+  @media (min-width:761px){ .term-keys button{height:32px;min-width:38px;font-size:13px} }
+  /* Scrolled back, there is otherwise no way home but to swipe all the way
+     down — and new output keeps arriving below you. */
+  #toBottom{position:absolute;right:14px;bottom:16px;z-index:40;display:none;height:36px;padding:0 14px;
+    border-radius:18px;background:rgba(44,44,46,.94);border:0.5px solid #48484a;color:var(--text);
+    font-size:14px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.45)}
+  #toBottom.on{display:block}
+  .action-toast{position:fixed;top:max(12px, env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:100;
+    max-width:min(420px,calc(100vw - 32px));padding:10px 16px;border-radius:20px;
+    background:rgba(44,44,46,.97);color:var(--text);font-size:var(--fs-sub);box-shadow:0 8px 28px rgba(0,0,0,.5)}
+  .action-toast.error{color:var(--danger)}
   .action-toast[hidden]{display:none}
-  .detail-head button{flex:none;background:var(--panel);color:var(--text);border:1px solid var(--line-20);
-    border-radius:var(--r);padding:5px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600}
-  .detail-head button:hover{border-color:var(--accent);color:var(--accent)}
-  .detail-head button:disabled{opacity:.45;cursor:default;border-color:var(--line-12);color:var(--muted)}
-  /* ── First Mate header (matches Mac DashboardOverviewView) ─ */
-  #leftcol{display:flex;flex-direction:column;padding:0;overflow:hidden}
-  .fm-scroll{flex:1;min-height:0;overflow-y:auto;padding:8px 10px 12px}
-  .fm-header{display:flex;align-items:baseline;gap:10px;padding:10px 12px 8px;
-    border-bottom:1px solid var(--line-12);flex:none}
-  .fm-header .fm-glyph{color:var(--accent);font-size:13px;line-height:1}
-  .fm-header .fm-title{font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:.02em}
-  .fm-header .fm-sub{font-size:11px;color:var(--muted);margin-left:2px}
-  /* ── First Mate list ─────────────────────────────────────────
-     Ported 1:1 from DashboardOverviewView (DashboardViewController.swift):
-     group header mono 11 semibold inkDim with 13/7 gaps; rows 8pt radius,
-     8/10 padding, 4 apart; dot column then a 3pt-spaced two-line text column.
-     Colours are SemanticColors' dark values. */
-  .fm-group{padding-top:13px}
-  .fm-group:first-child{padding-top:0}
-  .fm-group-head{display:flex;align-items:center;gap:7px;padding-bottom:7px;
-    font-size:11px;font-weight:600;color:var(--muted)}
-  .fm-group-head .fm-deck{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* ── new work: the list's bottom composer ─────────────────────
-     One line at rest. Focused, it opens upward into a project and an agent
-     choice — the three things a worktree needs, in the order you decide them. */
-  .nw{flex:none;border-top:1px solid var(--line-12);
-    padding:8px 10px max(22px, calc(10px + env(safe-area-inset-bottom)))}
-  .nw-opts{display:flex;flex-direction:column;gap:7px;margin:0 0 8px}
-  .nw-opts[hidden]{display:none}
-  .nw-row{display:flex;align-items:center;gap:8px;min-width:0}
-  .nw-label{flex:none;width:52px;font-size:10px;letter-spacing:.04em;color:var(--muted)}
-  .nw-chips{flex:1;min-width:0;display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;
+
+  /* ── the timeline ──────────────────────────────────────── */
+  /* Read like a transcript, not a stack of cards: what you sent is a bubble on
+     the right, prose is set for reading, tools are quiet monospace. */
+  #messageTimeline{display:none;flex:1;min-height:0;overflow:auto;padding:4px 16px 28px;flex-direction:column;
     -webkit-overflow-scrolling:touch}
-  .nw-chips::-webkit-scrollbar{display:none}
-  .nw-chips button{flex:none;background:var(--panel);color:var(--muted);border:1px solid var(--line-12);
-    border-radius:12px;padding:4px 10px;font-family:var(--mono);font-size:11px;cursor:pointer;
-    white-space:nowrap}
-  .nw-chips button.on{background:var(--accent-12);border-color:var(--accent-20);color:var(--accent)}
-  .nw-chips .muted{font-size:11px}
-  .nw-field{display:flex;align-items:flex-end;gap:6px;border:1px solid var(--line-12);
-    border-radius:21px;background:rgba(150,215,225,.04);padding:5px 5px 5px 14px}
-  .nw-field:focus-within{border-color:var(--accent-20)}
-  .nw-field textarea{flex:1;min-width:0;border:0;background:none;color:var(--text);outline:none;
-    padding:5px 0;font-family:var(--sans);font-size:14px;line-height:20px;height:30px;
-    max-height:130px;resize:none;overflow-y:auto}
-  .nw-field button{flex:none;width:30px;height:30px;padding:0;border:0;border-radius:50%;
-    display:flex;align-items:center;justify-content:center;background:var(--accent);
-    color:#041018;cursor:pointer}
-  .nw-field button:disabled{background:var(--line-20);color:var(--muted);cursor:default}
-  .nw-field button svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.2;
-    stroke-linecap:round;stroke-linejoin:round}
-  .nw.busy .nw-field button svg{animation:fmspin .9s linear infinite}
-  .nw-error{margin:6px 4px 0;font-size:11px;color:var(--danger)}
-  .nw-error[hidden]{display:none}
-  .fm-modes{display:flex;gap:4px;margin:0 0 10px}
-  .fm-modes button{flex:1;background:var(--panel);color:var(--muted);
-    border:1px solid var(--line-12);border-radius:var(--r);padding:4px 0;
-    font-family:var(--mono);font-size:11px;cursor:pointer}
-  .fm-modes button.on{background:var(--accent-12);border-color:var(--line-38);color:var(--accent)}
-  .fm-rows{display:flex;flex-direction:column;gap:4px}
-  .fm-row{display:flex;gap:7px;padding:8px 10px;border-radius:8px;cursor:pointer;
-    transition:background .12s}
-  .fm-row:hover{background:rgba(255,255,255,.05)}
-  .fm-row.sel{background:rgba(255,255,255,.10)}
-  /* The dot sits in its own column so both text lines share one leading edge. */
-  .fm-dot{flex:none;width:9px;display:flex;justify-content:center;align-items:center;
-    height:17px;font-size:9px;line-height:1}
-  /* `running` is a spinning 3/4 arc on the Mac (SpinnerDotView), not a glyph. */
-  .fm-spin{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--running);
-    border-right-color:transparent;animation:fmspin .9s linear infinite}
-  @keyframes fmspin{to{transform:rotate(360deg)}}
-  .fm-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
-  .fm-l1{display:flex;align-items:center;gap:7px}
-  .fm-name{flex:1;min-width:0;font-size:12px;color:var(--text);
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-time{flex:none;font-size:10px;color:var(--muted)}
-  .fm-l2{display:flex;align-items:baseline;gap:8px}
-  /* Both can truncate, but the deck gives way first — it is the one fact the
-     group header above already tells you. Matches the Mac, where the deck label
-     compresses to "teamc…" while the branch stays whole. */
-  .fm-branch{flex:0 1 auto;min-width:0;flex-shrink:1;font-size:11px;color:var(--muted);
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-git{flex:none;font-size:10px;white-space:nowrap}
-  .fm-git .add{color:#5fb87a} .fm-git .del{color:#e07a6a} .fm-git .ab{color:var(--muted)}
-  .fm-sailors{flex:none;margin-left:auto;font-size:10px;color:var(--muted)}
-  /* What runs in the pane: an agent's name, or `>_` for a bare terminal. */
-  .fm-kind{flex:none;font-size:9.5px;line-height:14px;padding:0 5px;border-radius:4px;
-    border:1px solid var(--line-12);color:var(--muted);white-space:nowrap}
-  .fm-kind.agent{color:var(--accent);border-color:var(--accent-20)}
-  .fm-kind.shell{color:var(--shell);border-color:var(--shell-38);font-family:var(--mono)}
-  /* Shrinks first, but never to nothing — the Mac always keeps a stub ("teamc…"),
-     and a row whose deck vanished entirely reads as if it had none. */
-  .fm-deck-tag{flex:0 1 auto;min-width:2.6em;flex-shrink:4;font-size:10px;font-weight:600;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* Third level (PaneRowView): indented 27px to clear the worktree dot+gutter. */
-  .fm-pane{display:flex;align-items:center;gap:7px;padding:4px 10px 4px 27px;
-    border-radius:6px;cursor:pointer;transition:background .12s}
-  .fm-pane:hover{background:rgba(255,255,255,.05)}
-  .fm-pane.sel{background:rgba(255,255,255,.10)}
-  .fm-pane .pdot{flex:none;font-size:7px;line-height:1}
-  .fm-pane .ptitle{flex:1;min-width:0;font-size:11px;color:var(--muted);opacity:.78;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-pane.sel .ptitle,.fm-pane:hover .ptitle{opacity:1}
-  /* ── MessageStream text mode ─────────────────────────────── */
-  /* Read like a transcript, not a stack of cards: no boxes, no side bars.
-     Kinds are told apart by type — what you sent is a bubble on the right,
-     tools are dim monospace, prose is set for reading. Everything else shares
-     the left edge of the status rules, with no indent of its own. */
-  #messageTimeline{display:none;flex:1;overflow:auto;padding:4px 16px 28px;flex-direction:column}
   #messageTimeline.on{display:flex}
-  #termWrap.text-hidden{display:none}
   .tl{width:100%;max-width:760px;margin:0 auto}
-  .tl-empty{padding:48px 0;text-align:center;color:var(--muted);font-size:12px}
-  .tl-more{padding:10px 0 2px;text-align:center;font-size:11px;color:var(--idle)}
-  .tl-status{display:flex;align-items:center;gap:8px;margin:20px 0 10px;
-    font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--idle)}
-  .tl-status::before,.tl-status::after{content:'';flex:1;height:1px;background:var(--line-12)}
-  .tl-status i{width:5px;height:5px;border-radius:50%;flex:none}
-  /* What you sent is the one thing on the right, and the one thing with a fill —
-     so a long run of agent output never hides where a turn began. */
-  .tl-user{display:flex;justify-content:flex-end;margin:18px 0 12px;padding-left:15%}
-  .tl-user div{min-width:0;padding:9px 14px;border-radius:16px 16px 4px 16px;
-    background:rgba(31,200,218,.26);color:#f4fdfe;font-family:var(--sans);
-    font-size:14px;line-height:1.55;font-weight:500;white-space:pre-wrap;word-break:break-word}
+  .tl-empty{padding:56px 8px;text-align:center;color:var(--muted);font-size:var(--fs-sub)}
+  .tl-more{padding:12px 0 2px;text-align:center;font-size:var(--fs-cap);color:var(--faint)}
+  .tl-status{display:flex;align-items:center;gap:8px;margin:22px 0 12px;
+    font-size:var(--fs-cap);color:var(--faint)}
+  .tl-status::before,.tl-status::after{content:'';flex:1;height:0.5px;background:var(--sep)}
+  .tl-status i{width:6px;height:6px;border-radius:50%;flex:none}
+  .tl-user{display:flex;justify-content:flex-end;margin:20px 0 14px;padding-left:15%}
+  .tl-user div{min-width:0;padding:10px 14px;border-radius:20px 20px 6px 20px;background:var(--user);color:#fff;
+    font-size:var(--fs-body);line-height:1.4;white-space:pre-wrap;word-break:break-word}
   .tl-tool{display:flex;gap:8px;min-width:0;white-space:nowrap;
-    font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
-  .tl-tool b{flex:none;font-weight:500;color:#a8c3c5}
+    font-family:var(--mono);font-size:13px;line-height:1.9;color:var(--muted)}
+  .tl-tool b{flex:none;font-weight:500;color:#c7c7cc}
   .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
-  .tl-tool em{flex:none;font-style:normal;color:var(--idle)}
+  .tl-tool em{flex:none;font-style:normal;color:var(--faint)}
   .tl-tool.err b{color:var(--danger)}
-  /* A folded run of calls. Same line as one call, plus a caret that turns. */
-  .tl-tools{display:flex;gap:8px;min-width:0;white-space:nowrap;cursor:pointer;
-    font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--muted)}
-  .tl-tools i{flex:none;font-style:normal;color:var(--idle);
+  /* A folded run of calls: one row you can open. */
+  .tl-tools{display:flex;align-items:center;gap:10px;min-width:0;min-height:48px;margin:8px 0;padding:0 14px;
+    white-space:nowrap;cursor:pointer;border-radius:14px;background:var(--panel);
+    font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .tl-tools i{flex:none;font-style:normal;color:var(--faint);font-size:18px;
     transition:transform .12s ease-out;transform-origin:45% 55%}
   .tl-tools[aria-expanded="true"] i{transform:rotate(90deg)}
-  .tl-tools b{flex:none;font-weight:500;color:#a8c3c5}
-  .tl-tools span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
-  .tl-tools em{flex:none;font-style:normal;color:var(--idle)}
+  .tl-tools b{flex:none;font-weight:500;color:var(--text)}
+  .tl-tools span{overflow:hidden;text-overflow:ellipsis;opacity:.85}
+  .tl-tools em{flex:none;margin-left:auto;font-style:normal;color:var(--muted)}
   .tl-tools.err b{color:var(--danger)}
-  .tl-tools:focus-visible{outline:1px solid var(--line-12);outline-offset:2px;border-radius:3px}
-  /* Still going: the line breathes rather than blinks, so a working agent is
-     visible from the corner of the eye without pulling it there. */
+  .tl-tools:focus-visible{outline:2px solid var(--accent-30);outline-offset:2px}
   .tl-tool.live span,.tl-tools.live span{animation:tl-breathe 1.5s ease-in-out infinite}
   @keyframes tl-breathe{0%,100%{opacity:.34}50%{opacity:.95}}
-  @media (prefers-reduced-motion:reduce){
-    .tl-tool.live span,.tl-tools.live span{animation:none;opacity:.8}}
-  /* Open: the calls sit under their own line, hung off a rule so a long run
-     still reads as one thing. */
-  .tl-tools-body{margin-left:3px;padding-left:14px;border-left:1px solid var(--line-12)}
-  .tl-asst{margin:10px 0 8px;font-family:var(--sans);
-    font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
-  .tl-notice{margin:4px 0;font-family:var(--sans);font-size:12px;color:var(--muted)}
-  /* Narration while the agent works: the same column as its replies, a step
-     quieter, so what it said still reads first. */
-  .tl-thinking{margin:8px 0 6px;font-family:var(--sans);
-    font-size:13px;line-height:1.65;color:var(--muted);word-break:break-word}
+  @media (prefers-reduced-motion:reduce){ .tl-tool.live span,.tl-tools.live span{animation:none;opacity:.8} }
+  .tl-tools-body{margin:-2px 0 8px 14px;padding-left:14px;border-left:1px solid var(--sep)}
+  .tl-asst{margin:12px 0 10px;font-size:var(--fs-body);line-height:1.55;color:var(--text);word-break:break-word}
+  .tl-notice{margin:6px 0;font-size:var(--fs-sub);color:var(--muted)}
+  .tl-thinking{margin:10px 0 8px;font-size:var(--fs-sub);line-height:1.55;color:var(--muted);word-break:break-word}
   .tl-thinking strong{color:inherit}
-  /* A past decision point. The one still open is answered in the reply bar;
-     amber is kept for that. */
-  .tl-decision{margin:6px 0;font-family:var(--sans);font-size:12px;
-    line-height:1.6;color:var(--muted)}
-  /* Timeline mode answers where you type: the open decision of the pane on
-     screen sits above the composer instead of floating over the page. */
-  .reply-bar{flex:none;border-top:1px solid var(--line-12);max-height:40vh;overflow-y:auto;
-    padding:10px max(16px, calc((100% - 760px) / 2)) 0;font-family:var(--sans)}
-  .reply-bar[hidden]{display:none}
-  /* Choices and the input are one place to answer from, not two panels. */
-  .reply-bar:not([hidden]) ~ .msg-composer{border-top:0}
-  .rb-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;font-size:12px;color:var(--attention)}
-  .rb-head span{flex:1;min-width:0}
-  .rb-head.danger{color:var(--danger)}
-  .rb-skip{flex:none;background:none;border:0;padding:0;cursor:pointer;
-    font-family:var(--sans);font-size:12px;color:var(--muted)}
-  .rb-skip:hover{color:var(--text)}
-  .rb-opts{display:flex;flex-wrap:wrap;gap:6px}
-  .rb-opts button{max-width:100%;background:none;border:1px solid var(--line-20);border-radius:16px;
-    padding:6px 12px;cursor:pointer;text-align:left;font-family:var(--sans);font-size:13px;
-    line-height:1.4;color:var(--text)}
-  .rb-opts button:first-child{border-color:var(--accent-20);color:var(--accent)}
-  .rb-opts button:hover{border-color:var(--accent)}
+  .tl-decision{margin:8px 0;font-size:var(--fs-sub);line-height:1.5;color:var(--muted)}
   .md p{margin:0 0 .65em}
   .md>:last-child{margin-bottom:0}
-  .md strong{font-weight:600;color:#e6f2f2}
-  .md a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-20);word-break:break-all}
-  .md code{font-family:var(--mono);font-size:.86em;padding:.1em .35em;border-radius:3px;
-    background:rgba(150,215,225,.08)}
-  .md pre{margin:.3em 0 .8em;padding:10px 12px;border-radius:6px;overflow:auto;
-    background:rgba(0,0,0,.2);font-family:var(--mono);font-size:12px;line-height:1.55}
+  .md strong{font-weight:600;color:#fff}
+  .md a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-30);word-break:break-all}
+  .md code{font-family:var(--mono);font-size:.86em;padding:.1em .35em;border-radius:5px;background:var(--panel2)}
+  .md pre{margin:.3em 0 .8em;padding:12px 14px;border-radius:12px;overflow:auto;background:var(--panel);
+    font-family:var(--mono);font-size:13px;line-height:1.55}
   .md pre code{padding:0;background:none;font-size:inherit}
-  .md ul,.md ol{margin:.2em 0 .65em;padding-left:1.25em}
-  .md li{margin:.15em 0}
-  .md li::marker{color:var(--idle)}
+  .md ul,.md ol{margin:.2em 0 .65em;padding-left:1.3em}
+  .md li{margin:.2em 0}
+  .md li::marker{color:var(--faint)}
   .md li>ul,.md li>ol{margin:.15em 0 .2em}
-  .md h3,.md h4{margin:.9em 0 .35em;font-size:14px;font-weight:600;color:#e6f2f2}
+  .md h3,.md h4{margin:.9em 0 .35em;font-size:1em;font-weight:600;color:#fff}
   .md blockquote{margin:0 0 .65em;padding-left:1em;color:var(--muted)}
-  .md hr{margin:1em 0;border:0;height:1px;background:var(--line-12)}
+  .md hr{margin:1em 0;border:0;height:0.5px;background:var(--sep)}
   .md-table{overflow-x:auto;margin:.3em 0 .8em}
-  .md table{border-collapse:collapse;font-size:13px}
-  .md th,.md td{padding:5px 14px 5px 0;border-bottom:1px solid var(--line-12);text-align:left;vertical-align:top}
+  .md table{border-collapse:collapse;font-size:.88em}
+  .md th,.md td{padding:6px 14px 6px 0;border-bottom:0.5px solid var(--sep);text-align:left;vertical-align:top}
   .md th{font-weight:500;color:var(--muted)}
-  /* Lines up with the transcript column on a wide window. */
-  /* With #midcol's own padding, the field lands where the list's composer does,
-     so switching screens does not move it; the safe-area term matters once the
-     page is added to a home screen. */
-  .msg-composer{display:none;border-top:1px solid var(--line-12);
-    padding:10px max(16px, calc((100% - 760px) / 2)) max(10px, calc(env(safe-area-inset-bottom) - 4px))}
+
+  /* An open decision: a card above the composer, with buttons big enough to
+     answer from a phone without zooming in. */
+  .reply-bar{flex:none;padding:0 max(12px, calc((100% - 784px) / 2)) 10px}
+  .reply-bar[hidden]{display:none}
+  .rb-card{border-radius:22px;background:var(--panel);border:0.5px solid #48484a;padding:16px;
+    display:flex;flex-direction:column;gap:12px;max-height:46vh;overflow-y:auto;box-shadow:0 -8px 40px rgba(0,0,0,.5)}
+  .rb-head{display:flex;align-items:center;gap:10px}
+  .rb-head .rb-ic{flex:none;width:32px;height:32px;border-radius:16px;background:var(--attention-16);color:var(--attention);
+    display:flex;align-items:center;justify-content:center}
+  .rb-head .rb-ic svg{width:18px;height:18px}
+  .rb-head.danger .rb-ic{background:var(--danger-16);color:var(--danger)}
+  .rb-head span{flex:1;min-width:0;font-size:var(--fs-body);font-weight:600;line-height:1.35;word-break:break-word}
+  .rb-skip{flex:none;height:36px;padding:0 4px;background:none;border:0;cursor:pointer;
+    font-size:var(--fs-sub);color:var(--muted)}
+  .rb-opts{display:flex;flex-direction:column;gap:8px}
+  .rb-opts button{min-height:50px;padding:10px 16px;border:0;border-radius:14px;background:var(--panel2);
+    color:var(--text);font-size:var(--fs-body);line-height:1.3;cursor:pointer;text-align:center;word-break:break-word}
+  .rb-opts button:first-child{background:var(--accent);color:var(--accent-ink);font-weight:600}
+  .rb-opts button:hover{filter:brightness(1.1)}
+  @media (min-width:761px){
+    .rb-opts{flex-direction:row;flex-wrap:wrap}
+    .rb-opts button{min-height:40px;border-radius:12px;text-align:left}
+  }
+
+  /* The composer: a pill with one button inside it. */
+  .msg-composer{display:none;flex:none;border-top:0.5px solid var(--sep);background:rgba(22,22,24,.92);
+    padding:8px max(12px, calc((100% - 784px) / 2)) max(10px, env(safe-area-inset-bottom))}
   .msg-composer.on{display:block}
-  /* The border belongs to the field, not the textarea: Send sits inside it, so
-     the two read as one control. Bottom-aligned so the button stays on the last
-     line while the text grows upward past it. */
-  .mc-field{display:flex;align-items:flex-end;gap:6px;
-    border:1px solid var(--line-12);border-radius:21px;
-    background:rgba(150,215,225,.04);padding:5px 5px 5px 14px}
-  .mc-field:focus-within{border-color:var(--accent-20)}
-  /* Who reads what you type. Agent: the accent, prose. Terminal: a square-ish
-     monospace field with a $ prompt and an amber edge, so a command line never
-     passes for a chat box at a glance. */
-  .mc-kind{font-size:10px;letter-spacing:.04em;color:var(--accent);opacity:.8;
-    margin:0 0 5px 14px}
+  .reply-bar:not([hidden]) ~ .msg-composer{border-top:0;background:transparent}
+  .mc-kind{font-size:var(--fs-cap);color:var(--accent);margin:0 0 6px 16px}
+  .mc-kind[hidden]{display:none}
   .mc-prompt{display:none}
+  .mc-field{display:flex;align-items:flex-end;gap:8px;border:0.5px solid var(--panel3);border-radius:22px;
+    background:var(--panel);padding:0 0 0 16px}
+  .mc-field:focus-within{border-color:var(--accent-30)}
+  /* A bare terminal runs what you type: a $ prompt and a monospace field, so a
+     command line never passes for a chat box at a glance. */
   .msg-composer[data-kind="shell"] .mc-kind{color:var(--shell);font-family:var(--mono)}
-  .msg-composer[data-kind="shell"] .mc-field{border-radius:8px;border-color:var(--shell-38);
-    background:rgba(0,0,0,.22);padding-left:10px}
-  .msg-composer[data-kind="shell"] .mc-field:focus-within{border-color:var(--shell)}
-  .msg-composer[data-kind="shell"] .mc-prompt{display:block;flex:none;align-self:flex-start;
-    font-family:var(--mono);font-size:13px;line-height:30px;color:var(--shell);user-select:none}
-  .msg-composer[data-kind="shell"] .mc-field textarea{font-family:var(--mono);font-size:13px}
-  /* Only at rest: a running or waiting pane keeps the status colour below. */
+  .msg-composer[data-kind="shell"] .mc-field{border-radius:14px;border-color:rgba(179,164,242,.4);padding-left:12px}
+  .msg-composer[data-kind="shell"] .mc-prompt{display:block;flex:none;align-self:center;
+    font-family:var(--mono);font-size:16px;color:var(--shell);user-select:none}
+  .msg-composer[data-kind="shell"] .mc-field textarea{font-family:var(--mono)}
   .msg-composer[data-kind="shell"] .mc-field button:not(:disabled):not([data-status="running"]):not([data-status="waiting"]){background:var(--shell)}
-  /* One row leaves the field 42px tall: 20px of line + 10px inside the textarea
-     + 10px of field padding + 2px of border. That inner 30px is the button's
-     size too, so an empty composer is a pill at the 21px radius above. The cap
-     is eight rows (170px), past which the text scrolls instead of eating the pane. */
+  /* 16px or more: below that iOS zooms the whole page in on focus and leaves it there. */
   .mc-field textarea{flex:1;min-width:0;border:0;background:none;color:var(--text);
-    padding:5px 0;font-family:var(--sans);font-size:14px;line-height:20px;outline:none;
-    height:30px;max-height:170px;resize:none;overflow-y:auto}
-  .mc-field button{position:relative;flex:none;width:30px;height:30px;padding:0;border:0;
+    padding:11px 0;font-family:var(--sans);font-size:max(16px, var(--fs-body));line-height:22px;outline:none;
+    height:44px;max-height:198px;resize:none;overflow-y:auto}
+  /* One line, always: a placeholder that wraps in a one-row field is cut in
+     half by its bottom edge. */
+  .mc-field textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--faint)}
+  .mc-field button{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;
     border-radius:50%;display:flex;align-items:center;justify-content:center;
-    background:var(--accent);color:#041018;cursor:pointer;transition:background .12s}
-  .mc-field button svg{width:17px;height:17px;fill:none;stroke:currentColor;
-    stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-  /* Nothing to send: still there, visibly inert, rather than gone — the field
-     must not resize under the thumb between one character and none. */
-  .mc-field button:disabled{background:var(--line-20);color:var(--muted);cursor:default}
-  /* One glyph at a time; `data-action` says which (composer-action.js). */
-  .mc-field button .ic-stop{width:13px;height:13px}
+    background:var(--accent);color:var(--accent-ink);cursor:pointer;transition:background .12s;
+    background-clip:content-box;padding:4px}
+  .mc-field button svg{width:20px;height:20px;fill:none;stroke:currentColor;
+    stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .mc-field button:disabled{background-color:var(--panel3);color:var(--faint);cursor:default}
+  .mc-field button .ic-stop{width:14px;height:14px}
   .mc-field button .ic-stop rect{fill:currentColor;stroke:none}
   .mc-field button .ic-stop,
   .mc-field button[data-action="stop"] .ic-send{display:none}
   .mc-field button[data-action="stop"] .ic-stop{display:block}
-  /* The status the removed run line used to spell out, worn by the button. It
-     shows even when the button's job is Send, so an agent still reads as busy
-     while you type at it. */
-  .mc-field button[data-status="running"]{background:var(--running)}
-  .mc-field button[data-status="waiting"]{background:var(--attention)}
+  /* The pane's status, worn by the button whatever its job is right now. */
+  .mc-field button[data-status="running"]{background-color:var(--running)}
+  .mc-field button[data-status="waiting"]{background-color:var(--attention)}
   .mc-field button:disabled[data-status="running"],
-  .mc-field button:disabled[data-status="waiting"]{background:var(--line-20)}
-  /* Running: a ring turning just inside the button's edge. */
+  .mc-field button:disabled[data-status="waiting"]{background-color:var(--panel3)}
   .mc-field button[data-status="running"]:not(:disabled)::after{content:'';position:absolute;
-    inset:2px;border-radius:50%;border:1.5px solid rgba(4,16,24,.55);
+    inset:6px;border-radius:50%;border:1.5px solid rgba(0,0,0,.45);
     border-right-color:transparent;animation:fmspin .9s linear infinite}
-  .seg{display:inline-flex;flex:none;gap:2px;padding:2px;border:1px solid var(--line-12);border-radius:6px}
-  .seg button{background:none;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;
-    font-family:var(--mono);font-size:11px;color:var(--muted)}
-  .seg button.on{background:var(--accent-12);color:var(--accent)}
-  /* ── log ────────────────────────────────────────────────── */
+
+  /* ── log (developer surface) ───────────────────────────── */
+  #rightcol{padding:12px;border-left:0.5px solid var(--sep);background:var(--side)}
+  #rightcol h2{font-size:var(--fs-cap);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    margin:2px 0 10px;font-weight:500}
   #log{font-family:var(--mono);font-size:11px;line-height:1.45}
-  .logline{padding:3px 0;border-bottom:1px solid var(--line-12)}
+  .logline{padding:3px 0;border-bottom:0.5px solid var(--sep)}
   .ll-head{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
-  .ll-head:hover{opacity:1;color:var(--text)}
+  .ll-head:hover{opacity:1}
   .ll-head::before{content:'▸ ';color:var(--muted)}
   .logline.open .ll-head::before{content:'▾ '}
-  .logline.open .ll-head{color:var(--text);opacity:1}
   .ll-body{white-space:pre-wrap;word-break:break-all;margin:3px 0 2px 12px;color:var(--muted)}
-  .rx{color:var(--waiting)} .tx{color:var(--attention)} .sys{color:var(--muted)}
-  .muted{color:var(--muted);font-size:12px;font-style:normal}
+  .rx{color:#64d2ff} .tx{color:var(--attention)} .sys{color:var(--muted)}
   .toolbar{display:flex;gap:6px;margin-bottom:8px}
-  .toolbar button{font-family:var(--mono);font-size:10px;padding:3px 8px;background:var(--panel);
-    border:1px solid var(--line-20);color:var(--muted);border-radius:var(--r);cursor:pointer;letter-spacing:.04em}
-  .toolbar button:hover{color:var(--text);border-color:var(--line-38)}
-  #detailHead{color:var(--muted);letter-spacing:.04em}
-  /* iOS Safari magnifies the page whenever the field it focuses is set below
-     16px, and never undoes it — so every tap on the composer left the page
-     zoomed in and the reader pinching their way back out. 16px is the whole
-     fix. Scoped to soft-keyboard devices so the desktop keeps its compact type;
-     `maximum-scale=1` in the viewport tag would also stop it, by taking
-     pinch-zoom away from the people who need it. Last in the sheet, and naming
-     each field, because a media query buys no specificity over the rules above. */
-  @media (pointer: coarse){
-    /* 22px of line keeps 16px readable, so a row is 44px and the pill radius
-       follows it. Eight rows is still the cap. */
-    .mc-field{border-radius:22px}
-    .mc-field textarea{font-size:16px;line-height:22px;height:32px;max-height:186px}
-    /* Under 16px, iOS zooms the whole page in on focus and leaves it there. */
-    .nw-field{border-radius:22px}
-    .nw-field textarea{font-size:16px;line-height:22px;height:32px;max-height:142px}
-    .gate-input, header input{font-size:16px}
-  }
+  .toolbar button{font-size:var(--fs-cap);height:30px;padding:0 10px;background:var(--panel2);
+    border:0;color:var(--text2);border-radius:8px;cursor:pointer}
+  .toolbar button.on{color:var(--accent)}
 </style>
 </head>
 <body data-screen="list">
-  <header>
-    <button id="drawerBtn" title="Back to the fleet list" aria-label="Back to the fleet list">‹</button>
-    <span class="wordmark"><span class="sea">sea</span>helm</span>
-    <span class="spacer"></span>
-    <!-- hidden manual fields: connect() reads these; pairing overrides them -->
-    <span id="advRow" class="advrow" hidden>
-      <input class="sm" id="mac" value="live" title="mac_id" />
-    </span>
-    <span id="status" class="st-off">Offline</span>
-    <button class="ghost" id="logBtn" title="Hide message log">Log</button>
-    <button class="ghost" id="disconnectBtn" title="Disconnect">Disconnect</button>
-  </header>
+  <!-- connect() reads this; pairing overrides it -->
+  <input type="hidden" id="mac" value="live" />
   <div id="gate" class="gate" hidden></div>
   <main>
     <div class="col" id="leftcol">
-      <div class="fm-header">
-        <span class="fm-glyph">◍</span>
-        <span class="fm-title">First mate</span>
-        <span class="fm-sub" id="fmSub">0 projects · 0 running</span>
+      <div class="fm-top">
+        <span class="conn"><span id="status" class="st-off">Offline</span></span>
+        <button class="icon-btn" id="menuBtn" type="button" aria-haspopup="menu" aria-label="More">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+        </button>
       </div>
-      <div class="fm-modes" id="fmModes">
-        <button data-mode="repository">Project</button>
-        <button data-mode="status">Status</button>
-        <button data-mode="activity">Activity</button>
+      <div class="fm-header">
+        <h1 class="fm-title">First Mate</h1>
+        <span class="fm-sub" id="fmSub"></span>
+      </div>
+      <div class="fm-modes seg" id="fmModes" role="tablist" aria-label="Group by">
+        <button type="button" role="tab" data-mode="repository">Project</button>
+        <button type="button" role="tab" data-mode="status">Status</button>
+        <button type="button" role="tab" data-mode="activity">Activity</button>
       </div>
       <div class="fm-scroll">
         <div id="tree"></div>
       </div>
-      <form class="nw" id="newWork" autocomplete="off">
-        <div class="nw-opts" id="nwOpts" hidden>
-          <div class="nw-row"><span class="nw-label">Project</span><div class="nw-chips" id="nwRepos"></div></div>
-          <div class="nw-row"><span class="nw-label">Agent</span><div class="nw-chips" id="nwAgents"></div></div>
-        </div>
-        <div class="nw-field">
-          <textarea id="nwPrompt" rows="1" placeholder="Start new work…" enterkeyhint="go"></textarea>
-          <button id="nwGo" type="submit" disabled title="Start a worktree" aria-label="Start a worktree">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg>
-          </button>
-        </div>
-        <div class="nw-error" id="nwError" hidden></div>
-      </form>
+      <div class="nw-bar">
+        <button class="nw-open" id="nwOpenBtn" type="button">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Start new work…</span>
+        </button>
+      </div>
     </div>
     <div class="col" id="midcol">
       <div class="detail-head">
-        <h2 id="detailHead">Terminal</h2>
-        <span class="seg" id="surfaceBadge"></span>
-        <button class="renderer-badge" id="vtModeBadge" title="VT subscription mode">Single</button>
-        <button class="renderer-badge" id="rendererBadge" title="Terminal renderer">xterm.js</button>
-        <span class="term-keys" id="termKeys"></span>
+        <button id="drawerBtn" type="button" title="Back to First Mate" aria-label="Back to First Mate">
+          <svg class="ic" viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2L2 10l8 8"/></svg>
+        </button>
+        <div class="dh-title">
+          <h2 id="detailHead">Terminal</h2>
+          <span id="detailSub"></span>
+        </div>
+        <button class="icon-btn" id="paneMenuBtn" type="button" aria-haspopup="menu" aria-label="Pane actions">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+        </button>
+        <div class="pane-tabs" id="paneTabs" role="tablist" aria-label="Panes" hidden></div>
       </div>
       <div id="messageTimeline"></div>
       <div id="termWrap" class="empty"><div id="term"></div></div>
-      <button id="toBottom" title="Jump to the latest output">↓ Latest</button>
+      <button id="toBottom" type="button" title="Jump to the latest output">↓ Latest</button>
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer" data-kind="agent">
         <div class="mc-kind" id="mcKind" hidden></div>
         <div class="mc-field">
           <span class="mc-prompt" aria-hidden="true">$</span>
-          <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off"></textarea>
+          <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off" aria-label="Message"></textarea>
           <!-- Send, stop and the pane's status in one control — see
                composer-action.js. Both glyphs stay in the DOM and `data-action`
                picks one; icon only, so the label lives in the accessible name. -->
@@ -593,16 +556,61 @@
           </button>
         </div>
       </div>
+      <!-- Terminal mode types straight into the pane; this is only the keys a
+           phone keyboard lacks. -->
+      <div class="key-bar" id="keyBar" hidden>
+        <div class="term-keys" id="termKeys" role="toolbar" aria-label="Terminal keys"></div>
+      </div>
     </div>
-    <div class="col" id="rightcol" style="border-right:0">
+    <div class="col" id="rightcol">
       <h2>Message log</h2>
       <div class="toolbar">
-        <button id="clearLog">Clear</button>
-        <button id="logVtBtn">VT frames</button>
+        <button id="clearLog" type="button">Clear</button>
+        <button id="logVtBtn" type="button">VT frames</button>
       </div>
       <div id="log"></div>
     </div>
   </main>
+
+  <div class="menu" id="menu" role="menu" hidden>
+    <button id="logBtn" type="button" role="menuitem">Message log <span class="val"></span></button>
+    <button id="disconnectBtn" type="button" role="menuitem" class="danger">Disconnect</button>
+  </div>
+  <div class="menu" id="paneMenu" role="menu" hidden>
+    <div class="seg" id="surfaceBadge" role="tablist" aria-label="View"></div>
+    <button id="vtModeBadge" type="button" role="menuitem">Terminal layout <span class="val"></span></button>
+    <button id="rendererBadge" class="renderer-badge" type="button" role="menuitem">Renderer <span class="val"></span></button>
+    <hr />
+    <button id="copyBtn" type="button" role="menuitem">Copy selection</button>
+    <button id="splitBtn" type="button" role="menuitem">Split pane</button>
+    <button id="closePaneBtn" type="button" role="menuitem" class="danger">Close pane…</button>
+  </div>
+
+  <div class="sheet" id="nwSheet" hidden>
+    <form class="sheet-card" id="newWork" role="dialog" aria-modal="true" aria-labelledby="nwTitle" autocomplete="off">
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <div class="sheet-head">
+        <button type="button" id="nwCancel">Cancel</button>
+        <h2 id="nwTitle">New work</h2>
+        <button type="submit" id="nwStartTop" disabled>Start</button>
+      </div>
+      <div class="sheet-body">
+        <label class="sheet-label" for="nwPrompt">What should it do?</label>
+        <textarea id="nwPrompt" rows="4" enterkeyhint="go" placeholder="Describe the task"></textarea>
+        <span class="sheet-hint">A new worktree and branch are named from it, and it becomes the agent's first message.</span>
+        <div id="nwOpts">
+          <div class="sheet-label" id="nwRepoLabel">Project</div>
+          <div class="nw-list" id="nwRepos" role="radiogroup" aria-labelledby="nwRepoLabel"></div>
+          <div class="sheet-label" id="nwAgentLabel">Agent</div>
+          <div class="nw-chips" id="nwAgents" role="radiogroup" aria-labelledby="nwAgentLabel"></div>
+        </div>
+        <div class="nw-error" id="nwError" hidden></div>
+      </div>
+      <div class="sheet-foot">
+        <button id="nwGo" type="submit" disabled>Start</button>
+      </div>
+    </form>
+  </div>
   <div id="actionToast" class="action-toast" role="status" aria-live="polite" hidden></div>
 
 <!-- xterm.js (~120KB on the wire) loads on first use: see loadXterm(). -->
@@ -617,6 +625,7 @@
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
 <script src="./composer-keys.js"></script>
+<script src="./pane-pick.js"></script>
 <!-- ?r= only renames it: copies cached under the old day-long max-age still
      hold a composer-action.js without paneKind, which empties the fleet list. -->
 <script src="./composer-action.js?r=2"></script>
@@ -700,17 +709,15 @@ const VT_COLS = 120, VT_ROWS = 32;
 // below this you cannot read the pane anyway, so we pan instead.
 const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
 
-// SailorStatus.color, 1:1 with Sources/Core/SailorStatus.swift (dark values).
-// `waiting` is the amber attention accent, NOT the blue one — the Mac routes
-// waiting through SemanticColors.attention, and exited shares idle's grey.
+// Status colours — the same roles as SailorStatus on the Mac, in the page's
+// palette. `waiting` is amber ("needs you"), and the four differ in lightness as
+// well as hue, so they still part for a reader who cannot tell red from green.
 const STC = {
-  running:'#1bb062', waiting:'#e0a458', done:'#557170',
-  failed:'#e84635', idle:'#557170', unknown:'#7fa0a3',
+  running:'#30d158', waiting:'#ffb340', done:'#8e8e93',
+  failed:'#ff6961', idle:'#8e8e93', unknown:'#636366',
 };
-// SailorStatus.glyph. `running` is drawn as a spinning arc instead (SpinnerDotView).
-const STG = {
-  running:'◐', waiting:'●', done:'◌', failed:'✕', idle:'○', unknown:'◌',
-};
+// The halo a live dot wears in the list.
+const STGLOW = { running:'rgba(48,209,88,.18)', waiting:'rgba(255,179,64,.2)' };
 // DeckColor — same 10-swatch djb2 hash as Sources/UI/Dashboard/DeckColor.swift
 const DECK = [0xd97757,0x10a37f,0x8b7fd9,0x4285f4,0x6aa84f,
               0xb07ad9,0xe0a030,0x4aa3a3,0xd96f9a,0x7a9bd9];
@@ -1315,8 +1322,8 @@ function renderMessageTimeline(key){
   // Text mode hides #termWrap, and with it the "Select a worktree" hint the
   // terminal path shows — so without this a phone opens on an empty page.
   if (!key) {
-    const hint = NARROW.matches ? 'Tap ‹ to pick a pane from the fleet list'
-      : 'Pick a pane from the list on the left';
+    const hint = NARROW.matches ? 'Tap ‹ First Mate to pick a worktree'
+      : 'Pick a worktree from First Mate';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
     renderTimelineToBottom();
@@ -1532,13 +1539,14 @@ function applySurfaceMode(){
     toBottom.classList.remove('on');
     toBottom.style.bottom = '';   // text mode parks it on the timeline's edge instead
   }
+  // The timeline has a composer; the terminal is typed into directly and only
+  // gets the bar of keys a phone keyboard lacks.
   if (composer) composer.classList.toggle('on', text);
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
-  // Terminal keys and split/close only make sense against a live terminal; the
-  // timeline keeps one of them, as Interrupt.
-  const keys = $('termKeys');
-  if (keys) keys.style.display = text ? 'none' : '';
+  const keys = $('keyBar');
+  if (keys) keys.hidden = text || !S.sel;
+  document.body.dataset.surface = text ? 'text' : 'vt';
   renderSendButton();
   // With a worktree open the head names it (renderDetail); only fall back to
   // the mode when there is nothing to name.
@@ -1577,6 +1585,8 @@ function renderSurfaceBadge(){
     b.textContent = label;
     b.title = title;
     b.className = value === mode ? 'on' : '';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(value === mode));
     b.onclick = () => setSurfaceMode(value);
     el.appendChild(b);
   }
@@ -1618,7 +1628,7 @@ function renderComposerKind(pane){
   const kind = k ? k.kind : 'agent';
   if (box.dataset.kind !== kind) box.dataset.kind = kind;
   const placeholder = !k ? 'Send to this pane…'
-    : kind === 'shell' ? 'Run a command in this terminal…'
+    : kind === 'shell' ? 'Run a command…'
     : `Message ${k.label}…`;
   if (input.placeholder !== placeholder) input.placeholder = placeholder;
   if (tag) {
@@ -1740,8 +1750,10 @@ function setGroupingMode(mode){
   refreshGroups();
 }
 function syncModeButtons(){
-  for (const b of document.querySelectorAll('#fmModes button'))
+  for (const b of document.querySelectorAll('#fmModes button')) {
     b.classList.toggle('on', b.dataset.mode === S.grouping.mode);
+    b.setAttribute('aria-selected', String(b.dataset.mode === S.grouping.mode));
+  }
 }
 for (const b of document.querySelectorAll('#fmModes button'))
   b.onclick = () => setGroupingMode(b.dataset.mode);
@@ -1843,7 +1855,7 @@ function renderGate(){
     const giveUpHint = n > QUIET_RETRIES;
     gate.innerHTML = `
       <div class="gate-card">
-        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
+        <div class="gate-mac">${esc(S.mac)}</div>
         <div class="gate-hint">${n > 0 ? `Reconnecting… (${n})` : 'Connecting…'}</div>
         ${giveUpHint ? '<button class="gate-primary" id="gateRetry">Retry now</button>' : ''}
         <button class="gate-link" id="gateUnpair">Unpair</button>
@@ -1857,7 +1869,7 @@ function renderGate(){
   if (S.authPass){                       // paired, disconnected on purpose or rejected
     gate.innerHTML = `
       <div class="gate-card">
-        <div class="gate-mac"><span class="lock">🔒</span><b>${esc(S.mac)}</b></div>
+        <div class="gate-mac">${esc(S.mac)}</div>
         <button class="gate-primary" id="gateConnect">Connect</button>
         <button class="gate-link" id="gateUnpair">Unpair</button>
         <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
@@ -1910,11 +1922,15 @@ function highestStatus(statuses){
   return best;
 }
 function updateFirstMateHeader(rows){
-  // Verbatim from DashboardOverviewView.render: "N · M running", and just "N"
-  // when nothing is running — no "projects" noun, the count stands alone.
+  // What the title says at a glance: how many need you first, since that is
+  // what a glance at a phone is for; otherwise how many are working.
   const fleet = rows || buildFleet();
-  const running = fleet.filter(r => normStatus(r.status) === 'running').length;
-  $('fmSub').textContent = running > 0 ? `${fleet.length} · ${running} running` : `${fleet.length}`;
+  const count = (st) => fleet.filter(r => normStatus(r.status) === st).length;
+  const waiting = count('waiting'), running = count('running');
+  const parts = [`${fleet.length} worktree${fleet.length === 1 ? '' : 's'}`];
+  if (waiting) parts.push(`${waiting} need${waiting === 1 ? 's' : ''} you`);
+  else if (running) parts.push(`${running} running`);
+  $('fmSub').textContent = fleet.length ? parts.join(' · ') : '';
 }
 /** Open questions and suggestions are answered in the reply bar above the
  *  timeline's composer. The terminal view used to float them as cards over the
@@ -1937,16 +1953,25 @@ function renderReplyBar(text){
   bar.innerHTML = '';
   if (!e) return;
   const question = e.type === 'question';
+  const card = document.createElement('div');
+  card.className = 'rb-card';
+  card.setAttribute('role', 'group');
   const head = document.createElement('div');
   head.className = 'rb-head' + (e.danger ? ' danger' : '');
-  head.innerHTML = `<span>${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
+  const icon = question
+    ? '<path d="M12 3l8 4v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7z"/>'
+    : '<path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0012 3z"/>';
+  head.innerHTML = `<span class="rb-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24">${icon}</svg></span>`
+    + `<span>${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
     + '<button class="rb-skip" type="button">Skip</button>';
+  card.setAttribute('aria-label', question ? (e.prompt || 'Needs your approval') : 'What next?');
   head.querySelector('.rb-skip').onclick = () => {
     S.events.delete(pid);
     renderSuggestions();
     sendCommand('decision.dismiss', { pane_session_key: pid });
   };
-  bar.appendChild(head);
+  card.appendChild(head);
+  bar.appendChild(card);
   const opts = document.createElement('div');
   opts.className = 'rb-opts';
   (e.options || []).forEach((opt, i) => {
@@ -1968,7 +1993,7 @@ function renderReplyBar(text){
     };
     opts.appendChild(b);
   });
-  bar.appendChild(opts);
+  card.appendChild(opts);
 }
 
 
@@ -1983,14 +2008,17 @@ function renderWaitingBadge(text){
   const n = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length : 0;
   if (n) btn.setAttribute('data-waiting', n > 9 ? '9+' : String(n));
   else btn.removeAttribute('data-waiting');
-  btn.title = n ? `Back to the fleet list — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to the fleet list';
+  const label = n ? `Back to First Mate — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to First Mate';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
 }
 
 // ── First Mate list ────────────────────────────────────────────────────────
-// A port of DashboardOverviewView's "Group by Sailor" mode: repository groups,
-// one row per worktree, and — only where a worktree owns more than one pane —
-// an indented row per pane. Metrics and colours come from the Swift source, not
-// from eyeballing a screenshot.
+// One row per worktree, in every grouping: the groups come from the Mac
+// (fleet.groups), the rows stop at the worktree, and a worktree's panes are
+// chosen in the detail, from the tabs above the timeline or terminal. A third
+// level of pane rows made "Project" three levels deep while Status and Activity
+// were two, and on a phone it was a list inside a list.
 
 /** SailorDisplayHelpers.relativeAge — coarse age for anything not running. */
 function relativeAge(sinceEpoch){
@@ -2025,12 +2053,14 @@ function gitInfoHTML(g){
   const head = bits.join(' ');
   return head + (ab ? (head ? '  ' : '') + `<span class="ab">${ab}</span>` : '');
 }
-/** Status dot: a spinning arc for running, the SailorStatus glyph otherwise. */
+/** Status dot: a turning arc for running, a filled dot otherwise — haloed when
+ *  it needs you. Decorative: the row spells the status out beside it. */
 function statusDotHTML(status, cls){
   const st = normStatus(status);
-  return st === 'running'
-    ? `<span class="${cls}"><span class="fm-spin"></span></span>`
-    : `<span class="${cls}" style="color:${STC[st]||STC.unknown}">${STG[st]||STG.unknown}</span>`;
+  if (st === 'running') return `<span class="${cls}" aria-hidden="true"><span class="fm-spin"></span></span>`;
+  const glow = STGLOW[st];
+  return `<span class="${cls}" aria-hidden="true"><i class="${glow ? 'live' : ''}"`
+    + ` style="background:${STC[st] || STC.unknown}${glow ? `;--glow:${glow}` : ''}"></i></span>`;
 }
 
 /** Collapse panes + worktree records into the rows the list draws. */
@@ -2053,13 +2083,19 @@ function buildFleet(){
     const w = entry.wt || {};
     const lead = (entry.panes[0] || [])[1] || {};
     const statuses = entry.panes.map(([,p]) => p.status);
+    // The Mac's own roll-up for the worktree, from fleet.groups — the same
+    // number its Status grouping files the row under. Rolling the panes up here
+    // instead could only be as fresh as the last pane.status push, and a push
+    // lost to a reconnect left a running worktree drawn idle in every grouping
+    // but Status, whose headers come straight from the Mac.
+    const mac = (S.rowTimes.get(entry.path) || {}).status;
     rows.push({
       path: entry.path,
       // DashboardOverviewView's own fallback for a worktree with no deck.
       project: w.project || lead.project || 'Unknown deck',
       branch: w.branch || lead.branch || '',
       title: w.title || (entry.path.split('/').pop() || entry.path),
-      status: w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
+      status: mac || w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
       runningSince: (S.rowTimes.get(entry.path) || {}).running_since || null,
       lastActivityAt: (S.rowTimes.get(entry.path) || {}).last_activity_at || w.started_at || null,
       git: w.git || null,
@@ -2097,72 +2133,143 @@ function groupsToRender(rows){
     .map(([title, list]) => ({ title, status:null, isRepo:true, rows:list }));
 }
 
-function kindTagHTML(pane){
+/** What a pane is called in its tab: the agent, or `>_` and where the shell
+ *  is. A shell's title is whatever its prompt set — `user@host:/a/long/path`,
+ *  `…/workspace/seahelm` — so only the last directory is kept. */
+function paneLabel(pane){
   const k = paneKindOf(pane);
-  return k.kind === 'shell'
-    ? `<span class="fm-kind shell" title="Terminal — no agent running">&gt;_</span>`
-    : `<span class="fm-kind agent" title="${esc(k.label)}">${esc(k.label)}</span>`;
+  if (k.kind === 'agent') return { text: k.label, shell: false };
+  const title = String(pane && pane.title || '').trim().replace(/^[^\s@:]+@[^\s:]+:/, '');
+  const leaf = title.includes('/') ? title.replace(/\/+$/, '').split('/').pop() : title;
+  return { text: '>_ ' + (leaf || 'Terminal'), shell: true };
+}
+
+/** Panes with normalised statuses, as pane-pick.js reads them. */
+const pickablePanes = (row) => row.panes.map(([key, p]) => [key, { status: normStatus(p.status) }]);
+
+// The pane last shown for each worktree, so coming back to one that has nothing
+// live lands where you were rather than on its first pane.
+const lastPaneByPath = new Map();
+
+/** The pane a worktree speaks through in the list, and opens on. */
+function leadPane(row){
+  const key = SeahelmPanePick.pickPane(pickablePanes(row), lastPaneByPath.get(row.path) || null);
+  return key ? [key, S.panes.get(key) || {}] : [null, {}];
 }
 
 function renderTree(){
   const t = $('tree'); t.innerHTML='';
   const rows = buildFleet();
   updateFirstMateHeader(rows);
-  if (!rows.length){ t.innerHTML='<div class="muted">No panes</div>'; renderSuggestions(); return; }
+  if (!rows.length){
+    t.innerHTML = `<div class="fm-empty">${isLinked() ? 'No worktrees yet' : 'Not connected'}</div>`;
+    renderSuggestions();
+    renderDetailChrome();
+    return;
+  }
+  const byRepo = S.grouping.mode === 'repository';
 
   for (const group of groupsToRender(rows)){
-    const g = document.createElement('div'); g.className='fm-group';
-    const head = document.createElement('div'); head.className='fm-group-head';
+    const g = document.createElement('section'); g.className='fm-group';
+    const head = document.createElement('h3'); head.className='fm-group-head';
     head.innerHTML = (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
-      + `<span class="fm-deck">${esc(group.title)}</span>`;
+      + `<span class="fm-deck">${esc(group.title)}</span><span>${group.rows.length}</span>`;
     g.appendChild(head);
 
     const box = document.createElement('div'); box.className='fm-rows';
     for (const r of group.rows){
-      const sel = S.sel === r.path;
-      const row = document.createElement('div');
-      row.className = 'fm-row' + (sel ? ' sel' : '');
+      const st = normStatus(r.status);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'fm-row' + (S.sel === r.path ? ' sel' : '');
+      row.dataset.path = r.path;
+      if (S.sel === r.path) row.setAttribute('aria-current', 'true');
+      const [, lead] = leadPane(r);
+      const who = r.panes.length > 1 ? `${r.panes.length} panes`
+        : r.panes.length === 1 ? paneLabel(r.panes[0][1]).text : 'No panes';
+      const meta = [who];
+      // The group header already names the project when grouping by it.
+      if (!byRepo) meta.push(r.project);
+      if (r.branch && r.branch !== r.title) meta.push(r.branch);
+      const label = SeahelmPanePick.statusLabel(st);
+      const msg = String(lead.last_message || '').trim();
       const timeText = rowTimeText(r.runningSince, r.lastActivityAt);
-      const git = gitInfoHTML(r.git);
-      // A lone pane is the row itself, so its kind goes here; with several,
-      // each pane row below carries its own.
-      const kind = r.panes.length === 1 ? kindTagHTML(r.panes[0][1]) : '';
       row.innerHTML =
         statusDotHTML(r.status, 'fm-dot') +
         `<span class="fm-txt">
            <span class="fm-l1">
              <span class="fm-name">${esc(r.title)}</span>
-             ${kind}
              <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}">${esc(timeText)}</span>
            </span>
            <span class="fm-l2">
-             <span class="fm-deck-tag" style="color:${deckColor(r.project)}">${esc(r.project)}</span>
-             <span class="fm-branch">${esc(r.branch)}</span>
-             <span class="fm-git">${git}</span>
-             <span class="fm-sailors">${r.paneCount > 0 ? r.paneCount + ' sailors' : '—'}</span>
+             ${label ? `<span class="fm-st" style="color:${STC[st]}">${esc(label)}</span><span aria-hidden="true">·</span>` : ''}
+             <span class="fm-meta">${esc(meta.join(' · '))}</span>
+             <span class="fm-git">${gitInfoHTML(r.git)}</span>
            </span>
+           ${msg ? `<span class="fm-msg">${esc(msg)}</span>` : ''}
          </span>`;
       row.onclick = () => selectWorktree(r);
       box.appendChild(row);
-
-      // Third level only when the worktree owns more than one pane — a lone
-      // pane is already represented by the worktree row itself.
-      if (r.panes.length > 1){
-        for (const [key,p] of r.panes){
-          const pr = document.createElement('div');
-          pr.className = 'fm-pane' + (S.selPane === key ? ' sel' : '');
-          pr.innerHTML = statusDotHTML(p.status, 'pdot')
-            + `<span class="ptitle">${esc((p.title||'').trim() || shortId(p.pane_id||key))}</span>`
-            + kindTagHTML(p);
-          pr.onclick = (e) => { e.stopPropagation(); selectWorktree(r, key); };
-          box.appendChild(pr);
-        }
-      }
     }
     g.appendChild(box);
     t.appendChild(g);
   }
   renderSuggestions();
+  renderDetailChrome();
+}
+
+/** The detail's head: which worktree, and — when it has more than one — a tab
+ *  per pane. The tabs serve both surfaces: in the timeline they pick whose
+ *  messages you read and whom the composer talks to, in the terminal they pick
+ *  the screen. */
+function renderDetailChrome(){
+  const head = $('detailHead'), sub = $('detailSub'), tabs = $('paneTabs');
+  const row = S.sel ? buildFleet().find(r => r.path === S.sel) : null;
+  if (!row){
+    tabs.hidden = true;
+    tabs.innerHTML = '';
+    if (S.sel) return;               // a worktree still being made: openNewWorktree named it
+    sub.textContent = '';
+    return;
+  }
+  head.textContent = row.title || row.branch || row.path;
+  const pane = S.selPane && S.panes.get(S.selPane);
+  if (row.panes.length > 1 || !pane) {
+    sub.textContent = [row.project, `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`].join(' · ');
+  } else {
+    const st = normStatus(pane.status);
+    const since = st === 'running' ? (S.rowTimes.get(row.path) || {}).running_since : 0;
+    const label = SeahelmPanePick.statusLabel(st);
+    sub.innerHTML = [
+      label ? `<span style="color:${STC[st]}">${esc(label)}${since ? ' ' + esc(compactDuration(since)) : ''}</span>` : '',
+      esc(paneLabel(pane).text), esc(row.project),
+    ].filter(Boolean).join(' · ');
+  }
+  tabs.hidden = row.panes.length < 2;
+  if (tabs.hidden) { tabs.innerHTML = ''; return; }
+  tabs.innerHTML = '';
+  for (const [key, p] of row.panes){
+    const st = normStatus(p.status);
+    const on = key === S.selPane;
+    const name = paneLabel(p);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pane-tab' + (on ? ' on' : '');
+    b.dataset.key = key;
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(on));
+    const stText = st === 'running'
+      ? compactDuration((S.rowTimes.get(row.path) || {}).running_since) || 'Running'
+      : (st === 'waiting' || st === 'failed') ? SeahelmPanePick.statusLabel(st) : '';
+    b.innerHTML = `<i aria-hidden="true" style="background:${STC[st] || STC.unknown}"></i>`
+      + `<span class="pt-name${name.shell ? ' shell' : ''}">${esc(name.text)}</span>`
+      + (stText ? `<span class="pt-st" style="color:${STC[st]}">${esc(stText)}</span>` : '');
+    b.title = [name.text, SeahelmPanePick.statusLabel(st), (p.title || '').trim()].filter(Boolean).join(' — ');
+    b.onclick = () => { if (key !== S.selPane) selectWorktree(row, key, { navigate: false }); };
+    tabs.appendChild(b);
+  }
+  const current = tabs.querySelector('.on');
+  if (current) current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 // ── phone navigation ──────────────────────────────────────────────────────
@@ -2196,20 +2303,23 @@ window.addEventListener('popstate', () => {
   if (document.body.dataset.screen === 'detail') showScreen('list');
 });
 
-/** Selecting anything in the list means: show that pane's terminal.
+/** Open a worktree on one of its panes: the one asked for (a tab, a restored
+ *  mount), else the one that wants you (pane-pick.js).
  *  `navigate: false` keeps the screen — a reconnect putting the selection back
  *  must not pull a phone off the list it is reading. */
 function selectWorktree(row, paneKey, { navigate = true } = {}){
   S.sel = row.path;
-  S.selPane = paneKey || (row.panes[0] || [])[0] || null;
+  const known = paneKey && row.panes.some(([k]) => k === paneKey);
+  S.selPane = (known ? paneKey : leadPane(row)[0]) || null;
+  if (S.selPane) lastPaneByPath.set(row.path, S.selPane);
   if (navigate) showScreen('detail');
   renderTree();
   renderDetail();
 }
 // ── new work ─────────────────────────────────────────────────────────────
-// The composer at the foot of the list: pick a project and an agent, write the
-// prompt, and the Mac starts a worktree the way its own helm does — the prompt
-// names the branch and becomes the agent's first message. The page goes
+// A sheet opened from the foot of the list: write the prompt, pick a project
+// and an agent, and the Mac starts a worktree the way its own helm does — the
+// prompt names the branch and becomes the agent's first message. The page goes
 // straight to it rather than leaving the reader to find it in the list.
 const NW_REPO_KEY = 'seahelm_nw_repo';
 const nw = { options: null, repo: null, agent: null, busy: false, loading: false };
@@ -2217,9 +2327,9 @@ const nw = { options: null, repo: null, agent: null, busy: false, loading: false
 function nwStored(key){ try { return localStorage.getItem(key); } catch (e) { return null; } }
 function nwStore(key, v){ try { localStorage.setItem(key, v); } catch (e) {} }
 
-/** Open the choices, fetching them the first time. The project defaults to the
- *  last one used, else the one on screen. The agent is the Mac's call: it lists
- *  the one last picked — here or on its own form — first. */
+/** Fetch the choices the first time. The project defaults to the last one
+ *  used, else the one on screen. The agent is the Mac's call: it lists the one
+ *  last picked — here or on its own form — first. */
 function nwOpen(){
   $('nwOpts').hidden = false;
   if (nw.options) { nwRenderChips(); return; }
@@ -2240,6 +2350,23 @@ function nwOpen(){
   });
 }
 
+function nwShowSheet(){
+  const sheet = $('nwSheet');
+  sheet.hidden = false;
+  nwError('');
+  nwOpen();
+  nwGrow();
+  // Focus after the sheet is laid out, or iOS scrolls the page to find it.
+  setTimeout(() => $('nwPrompt').focus(), 30);
+}
+
+function nwHideSheet(){
+  if (nw.busy) return;
+  $('nwSheet').hidden = true;
+  $('nwPrompt').blur();
+  $('nwOpenBtn').focus({ preventScroll: true });
+}
+
 function nwRenderChips(){
   const repos = $('nwRepos'), agents = $('nwAgents');
   if (!nw.options) {
@@ -2248,19 +2375,21 @@ function nwRenderChips(){
     nwSyncButton();
     return;
   }
-  const chip = (id, label, on, kind) =>
-    `<button type="button" class="${on ? 'on' : ''}" data-${kind}="${esc(id)}">${esc(label)}</button>`;
-  repos.innerHTML = (nw.options.repos || []).map(r => chip(r.path, r.name, r.path === nw.repo, 'repo')).join('')
+  const choice = (id, label, on, kind) =>
+    `<button type="button" role="radio" aria-checked="${on}" class="${on ? 'on' : ''}" data-${kind}="${esc(id)}">${esc(label)}</button>`;
+  repos.innerHTML = (nw.options.repos || []).map(r => choice(r.path, r.name, r.path === nw.repo, 'repo')).join('')
     || '<span class="muted">No projects</span>';
-  agents.innerHTML = (nw.options.agents || []).map(a => chip(a.id, a.label, a.id === nw.agent, 'agent')).join('')
+  agents.innerHTML = (nw.options.agents || []).map(a => choice(a.id, a.label, a.id === nw.agent, 'agent')).join('')
     || '<span class="muted">No agents</span>';
-  const on = repos.querySelector('.on');
-  if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   nwSyncButton();
 }
 
 function nwSyncButton(){
-  $('nwGo').disabled = nw.busy || !nw.repo || !nw.agent || !$('nwPrompt').value.trim();
+  const off = nw.busy || !nw.repo || !nw.agent || !$('nwPrompt').value.trim();
+  $('nwGo').disabled = off;
+  $('nwStartTop').disabled = off;
+  const repo = nw.options && (nw.options.repos || []).find(r => r.path === nw.repo);
+  $('nwGo').textContent = nw.busy ? 'Starting…' : repo ? `Start in ${repo.name}` : 'Start';
 }
 
 function nwError(msg){
@@ -2298,9 +2427,8 @@ function nwSubmit(){
     nw.options.agents = agents.filter(a => a.id === agent.id).concat(agents.filter(a => a.id !== agent.id));
     $('nwPrompt').value = '';
     nwGrow();
-    $('nwPrompt').blur();
-    $('nwOpts').hidden = true;
     nwSyncButton();
+    nwHideSheet();
     openNewWorktree(r.result.worktree_path, r.result.pane_session_key, repo.name, agent.label);
   });
 }
@@ -2312,7 +2440,9 @@ function openNewWorktree(path, paneKey, repoName, agentLabel){
   S.sel = path;
   S.selPane = paneKey || null;
   showScreen('detail');
-  $('detailHead').textContent = `${repoName} · starting ${agentLabel}…`;
+  $('detailHead').textContent = repoName || 'New worktree';
+  $('detailSub').textContent = `Starting ${agentLabel}…`;
+  $('paneTabs').hidden = true;
   if (paneKey && loadSurfaceMode() === 'text') renderMessageTimeline(paneKey);
   let tries = 0;
   const look = () => {
@@ -2327,30 +2457,31 @@ function openNewWorktree(path, paneKey, repoName, agentLabel){
 }
 
 (function wireNewWork(){
-  const form = $('newWork'), input = $('nwPrompt');
-  input.addEventListener('focus', nwOpen);
+  const form = $('newWork'), input = $('nwPrompt'), sheet = $('nwSheet');
+  $('nwOpenBtn').onclick = nwShowSheet;
+  $('nwCancel').onclick = nwHideSheet;
+  // A tap on the dimmed page behind the sheet closes it, as it does on iOS.
+  sheet.addEventListener('click', (ev) => { if (ev.target === sheet) nwHideSheet(); });
+  sheet.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !ev.isComposing) { ev.preventDefault(); nwHideSheet(); }
+  });
   input.addEventListener('input', () => { nwGrow(); nwSyncButton(); if (!$('nwError').hidden) nwError(''); });
   input.addEventListener('keydown', (ev) => {
+    // Enter sends only from a hardware keyboard: on a phone it is the way to
+    // write a second line, and "Start" is a button away.
+    if (NARROW.matches) return;
     if (SeahelmComposerKeys.composerKeyAction(ev) === 'send') { ev.preventDefault(); nwSubmit(); }
   });
   form.addEventListener('submit', (ev) => { ev.preventDefault(); nwSubmit(); });
-  // A chip tap must not take focus from the prompt: on a phone that closes the
-  // keyboard mid-sentence.
-  form.addEventListener('mousedown', (ev) => { if (ev.target.closest('.nw-chips button')) ev.preventDefault(); });
+  // A choice tap must not take focus from the prompt: on a phone that closes
+  // the keyboard mid-sentence.
+  form.addEventListener('mousedown', (ev) => { if (ev.target.closest('#nwOpts button')) ev.preventDefault(); });
   form.addEventListener('click', (ev) => {
     const b = ev.target.closest('button[data-repo], button[data-agent]');
     if (!b) return;
     if (b.dataset.repo) nw.repo = b.dataset.repo;
     if (b.dataset.agent) nw.agent = b.dataset.agent;
     nwRenderChips();
-    input.focus();
-  });
-  // Folds back to one line when attention leaves it with nothing written.
-  form.addEventListener('focusout', (ev) => {
-    if (form.contains(ev.relatedTarget)) return;
-    setTimeout(() => {
-      if (!form.contains(document.activeElement) && !input.value.trim() && !nw.busy) $('nwOpts').hidden = true;
-    }, 150);
   });
 })();
 
@@ -2393,6 +2524,15 @@ function tickTimes(){
   }
 }
 setInterval(tickTimes, 1000);
+
+// A safety net under the pushes: while the page is on screen, re-ask the Mac
+// for its panes (and with them its grouping) now and then, so a status change
+// whose push went missing still reaches the list and the pane tabs.
+const FLEET_RESYNC_MS = 15000;
+setInterval(() => {
+  if (document.visibilityState !== 'visible' || !isLinked()) return;
+  gwSend('session.snapshot', {}, (snap) => { if (snap && snap.panes) applySessionSnapshot(snap); });
+}, FLEET_RESYNC_MS);
 
 // ── Renderer (spike) ────────────────────────────────────────────────────────
 // `?renderer=ghostty` swaps xterm.js for ghostty-web, which runs Ghostty's own
@@ -2461,7 +2601,7 @@ function ensureRenderer(){
 function renderRendererBadge(active){
   const el = $('rendererBadge');
   if (!el) return;
-  el.textContent = active === 'ghostty' ? 'ghostty-web' : 'xterm.js';
+  el.innerHTML = `Renderer <span class="val">${active === 'ghostty' ? 'ghostty-web' : 'xterm.js'}</span>`;
   el.title = active === 'ghostty'
     ? 'Ghostty VT parser (wasm) + Canvas 2D — click to switch back to xterm.js'
     : 'xterm.js — click to try ghostty-web';
@@ -2501,7 +2641,7 @@ function renderVtModeBadge(){
   const el = $('vtModeBadge');
   if (!el) return;
   const mode = loadVtMode();
-  el.textContent = mode === 'mirror' ? 'Mirror' : 'Single';
+  el.innerHTML = `Terminal layout <span class="val">${mode === 'mirror' ? 'Mirror the Mac' : 'One pane'}</span>`;
   el.title = mode === 'mirror'
     ? 'Mirror: one VT stream per pane — click for single'
     : 'Single: only the focused pane is subscribed — click for mirror';
@@ -2509,100 +2649,132 @@ function renderVtModeBadge(){
 }
 renderVtModeBadge();
 
-// ── Shortcut bar ────────────────────────────────────────────────────────────
-// Some keys never reach a web page. Cmd+W closes the tab and is unpreventable
-// in every major browser; Cmd+D is the bookmark shortcut. Neither can be bound
-// here, and both are real seahelm actions (split / close a pane), so the only
-// way to offer them is a button that calls the control API directly.
+// ── Key bar ────────────────────────────────────────────────────────────────
+// Terminal mode is typed into directly: tap the screen and the system keyboard
+// comes up, every key going straight to the pane. This bar is only the keys a
+// phone keyboard does not have (Esc, Tab, Ctrl, the arrows), plus the
+// keyboard's own show/hide — it sits above the keyboard (trackViewport).
 //
-// The terminal keys beside them are a different case — they do reach xterm and
-// work when a pane holds focus. They are here because focus is easy to lose in
-// a browser (click the list, and Esc or ^C go nowhere), and because on a phone
-// there is no Ctrl key at all.
+// The keys act on touchstart and cancel it. A tap that went on to a click would
+// first blur the terminal, and on a phone a blurred terminal is a keyboard that
+// slides away under the finger between one key and the next.
 
-/** Raw bytes: what a real key press would have produced. */
+/** Raw bytes: what a real key press would have produced. Arrows depend on the
+ *  pane's cursor-key mode, so they are resolved at press time. */
 const TERM_KEYS = [
-  { label: 'Esc',  bytes: '\x1b',     title: 'Escape — interrupt what Claude is printing' },
-  { label: '^C',   bytes: '\x03',     title: 'Ctrl+C — interrupt the foreground process' },
-  { label: '^D',   bytes: '\x04',     title: 'Ctrl+D — EOF' },
-  { label: '⇥',    bytes: '\t',       title: 'Tab — completion (the browser steals Tab for focus)' },
-  { label: '⇧⇥',   bytes: '\x1b[Z',   title: 'Shift+Tab — Claude Code permission mode' },
-  { label: '↑',    bytes: '\x1b[A',   title: 'Up arrow — command history' },
+  { label: 'esc', bytes: '\x1b',   title: 'Escape — interrupt what the agent is doing' },
+  { label: 'tab', bytes: '\t',     title: 'Tab — completion (the browser keeps Tab for itself)' },
+  { label: '⇧tab', bytes: '\x1b[Z', title: 'Shift+Tab — Claude Code permission mode' },
+  { label: 'ctrl', ctrl: true,     title: 'Ctrl — applies to the next key you type' },
+  { label: '^C',  bytes: '\x03',   title: 'Ctrl+C — interrupt the foreground process', danger: true },
+  { label: '^D',  bytes: '\x04',   title: 'Ctrl+D — end of input' },
+  { label: '↑', arrow: 'A', title: 'Up' },
+  { label: '↓', arrow: 'B', title: 'Down' },
+  { label: '←', arrow: 'D', title: 'Left' },
+  { label: '→', arrow: 'C', title: 'Right' },
 ];
+
+// On a touch screen focus is the keyboard, so the terminal takes it back only
+// when the reader had the keyboard up; a mouse page restores it always.
+const COARSE = window.matchMedia('(pointer: coarse)');
+const kb = { wanted: false, ctrl: false };
+
+function focusedEntry(){ return S.vt.focus ? S.vt.panes.get(S.vt.focus) : null; }
+function terminalHasFocus(){
+  const el = document.activeElement;
+  return !!(el && el.classList && el.classList.contains('xterm-helper-textarea'));
+}
+
+/** One handler for a touch and a click, and never both for the same tap. */
+function onTap(el, fn){
+  let touchedAt = 0;
+  el.addEventListener('touchstart', (ev) => { ev.preventDefault(); touchedAt = performance.now(); fn(ev); }, { passive: false });
+  el.addEventListener('click', (ev) => { if (performance.now() - touchedAt > 600) fn(ev); });
+}
 
 function renderTermKeys(){
   const bar = $('termKeys');
   if (!bar) return;
   bar.innerHTML = '';
-  const focused = S.vt.focus;
-  const live = !!(focused && S.vt.panes.has(focused) && isLinked());
+  const live = !!(focusedEntry() && isLinked());
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'kb';
+  toggle.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h.01M10 9.5h.01M14 9.5h.01M17.5 9.5h.01M8 14h8"/></svg>';
+  toggle.disabled = !live;
+  toggle.setAttribute('aria-label', 'Show or hide the keyboard');
+  toggle.title = 'Keyboard';
+  // Read before the tap can move focus: the question is whether it was up.
+  let wasUp = false;
+  toggle.addEventListener('pointerdown', () => { wasUp = terminalHasFocus(); });
+  toggle.addEventListener('click', () => {
+    const entry = focusedEntry();
+    if (!entry) return;
+    if (wasUp || terminalHasFocus()) { kb.wanted = false; document.activeElement.blur(); }
+    else { kb.wanted = true; try { entry.term.focus(); } catch (e) {} }
+  });
+  bar.appendChild(toggle);
 
   for (const k of TERM_KEYS){
     const b = document.createElement('button');
+    b.type = 'button';
     b.textContent = k.label;
     b.title = k.title;
     b.disabled = !live;
-    b.onclick = () => sendRawKey(k.bytes);
+    if (k.danger) b.className = 'danger';
+    if (k.arrow) b.setAttribute('aria-label', k.title);
+    if (k.ctrl) {
+      b.setAttribute('aria-pressed', String(kb.ctrl));
+      onTap(b, () => { kb.ctrl = !kb.ctrl; b.setAttribute('aria-pressed', String(kb.ctrl)); });
+    } else {
+      onTap(b, () => sendRawKey(k.arrow ? arrowBytes(k.arrow) : k.bytes));
+    }
     bar.appendChild(b);
   }
+}
 
-  const copy = document.createElement('button');
-  copy.textContent = '⧉';
-  copy.title = 'Copy the selection (a phone has no ⌘C)';
-  copy.disabled = !live;
-  copy.onclick = () => copySelection();
-  bar.appendChild(copy);
+/** Cursor keys as the pane expects them: SS3 once an app (vim, a TUI) asks for
+ *  application cursor mode, CSI otherwise. */
+function arrowBytes(dir){
+  const entry = focusedEntry();
+  const app = !!(entry && entry.term.modes && entry.term.modes.applicationCursorKeysMode);
+  return (app ? '\x1bO' : '\x1b[') + dir;
+}
 
-  const sep = document.createElement('span');
-  sep.className = 'sep';
-  bar.appendChild(sep);
-
-  const split = document.createElement('button');
-  split.textContent = '⌘D';
-  split.title = 'Split — divide this pane in two on the Mac';
-  split.disabled = !live;
-  split.onclick = () => paneAction('pane.split', { direction: 'right', focus: false });
-  bar.appendChild(split);
-
-  const close = document.createElement('button');
-  close.textContent = '⌘W';
-  close.className = 'danger';
-  close.title = 'Close this pane';
-  close.disabled = !live;
-  close.onclick = () => {
-    const name = (S.panes.get(S.vt.focus) || {}).title || S.vt.focus;
-    // Closing takes a running agent with it, and the button is one click from
-    // every other button on this bar.
-    if (!confirm(`Close pane “${name}”? Anything running in it is killed.`)) return;
-    paneAction('pane.close', {});
-  };
-  bar.appendChild(close);
+/** Ctrl, armed from the bar, folds the next typed key into its control code. */
+function applyStickyCtrl(data){
+  if (!kb.ctrl || data.length !== 1) return data;
+  const code = data.toUpperCase().charCodeAt(0);
+  kb.ctrl = false;
+  renderTermKeys();
+  if (code >= 64 && code <= 95) return String.fromCharCode(code - 64);
+  if (data === ' ') return '\x00';
+  return data;
 }
 
 /** Button path: no `copy` event to hijack, so write the clipboard directly. */
 function copySelection(){
-  const entry = S.vt.focus ? S.vt.panes.get(S.vt.focus) : null;
+  const entry = focusedEntry();
   if (!entry) return;
   const text = entry.term.getSelection();
-  if (!text){ log('sys', '(copy)', 'nothing selected'); return; }
+  if (!text){ showActionToast('Nothing selected'); return; }
   // Requires a secure context, which the page already needs for pairing anyway.
   navigator.clipboard.writeText(text)
-    .then(() => log('sys', '(copy)', `copied ${text.length} chars`))
-    .catch((e) => log('sys', '(copy failed)', String(e && e.message)));
-  try { entry.term.focus(); } catch (e) {}
+    .then(() => showActionToast('Copied'))
+    .catch((e) => showActionToast('Copy failed', true));
 }
 
 function sendRawKey(bytes){
   const key = S.vt.focus;
   if (!key || !isLinked()) return;
   sendKeysPayload(key, new TextEncoder().encode(bytes));
-  const entry = S.vt.panes.get(key);
-  if (entry) { try { entry.term.focus(); } catch (e) {} }   // hand the keyboard back
+  if (!COARSE.matches) restoreTermFocus();   // a mouse click took the caret; hand it back
 }
 
 /** Structural changes happen on the Mac; we re-read the tree rather than guess. */
 function paneAction(method, extra){
-  const key = S.vt.focus;
+  const key = S.vt.focus || S.selPane;
   if (!key || !isLinked()) return;
   const pane = S.panes.get(key) || {};
   sendCommand(method, Object.assign({ pane_id: pane.pane_id || key }, extra), (r) => {
@@ -2641,18 +2813,18 @@ function showActionToast(message, isError){
 /** The mid column is the worktree. Selecting one mounts its whole layout. */
 function renderDetail(){
   const head = $('detailHead'), wrap = $('termWrap');
+  applySurfaceMode();
+  renderDetailChrome();
   if (!S.sel){
     unmountPanes();
-    head.textContent = 'Terminal';
+    head.textContent = loadSurfaceMode() === 'text' ? 'Timeline' : 'Terminal';
     wrap.classList.add('empty');
     wrap.innerHTML = '<div class="muted">Select a worktree</div>';
     renderTermKeys();
     return;
   }
-  const row = buildFleet().find(r => r.path === S.sel);
-  head.textContent = [row && row.project, row && row.branch].filter(Boolean).join(' · ') || S.sel;
   wrap.classList.remove('empty');
-  // Already mirroring this worktree — a click inside it only moves focus.
+  // Already showing this worktree — a tab only changes which pane.
   if (S.vt.worktree === S.sel){
     // Text mode attaches nothing, so `S.vt.panes` is empty and focusPane has
     // nothing to move: switching panes here means painting the new one.
@@ -2662,6 +2834,8 @@ function renderDetail(){
       return;
     }
     if (S.selPane && S.vt.panes.has(S.selPane)) focusPane(S.selPane);
+    // One pane at a time: attach the newly chosen one in its place.
+    else if (S.selPane && S.vt.mode === 'single' && S.vt.tree) mountSinglePane(S.selPane);
     return;
   }
   requestLayout(S.sel);
@@ -2741,6 +2915,15 @@ function layoutFitsMirror(tree, containerWidth){
   return narrowestLeafFraction(tree) * containerWidth >= needed;
 }
 
+/** The leaf to show: the pane chosen here first — the tab, or pane-pick.js's
+ *  answer — and only then the one the Mac has focused, which may be a pane the
+ *  reader never asked for. */
+function pickLeaf(tree, focusKey){
+  const leaves = treeLeaves(tree);
+  return leaves.find(l => l.pane_session_key === S.selPane)
+    || leaves.find(l => l.pane_session_key === focusKey) || leaves[0];
+}
+
 function mountPanes(tree, focusKey, path){
   unmountPanes();
   const wrap = $('termWrap');
@@ -2755,11 +2938,10 @@ function mountPanes(tree, focusKey, path){
 
   // Text mode: paint MessageStream, do not attach VT.
   if (loadSurfaceMode() === 'text') {
-    const leaves = treeLeaves(tree);
-    const wanted = leaves.find(l => l.pane_session_key === (focusKey || S.selPane)) || leaves[0];
+    const wanted = pickLeaf(tree, focusKey);
     const key = wanted && wanted.pane_session_key;
-    // The composer sends to `S.selPane`; when the Mac's focus moved it, the
-    // list highlight has to follow or it names a pane the text will not reach.
+    // The composer sends to `S.selPane`; when the chosen pane is not in this
+    // layout, the tabs have to follow or they name a pane the text will not reach.
     if (key && key !== S.selPane) { S.selPane = key; renderTree(); }
     S.vt.focus = key;
     applySurfaceMode();
@@ -2772,8 +2954,7 @@ function mountPanes(tree, focusKey, path){
   S.vt.mode = (preferMirror && layoutFitsMirror(tree, wrap.clientWidth)) ? 'mirror' : 'single';
 
   if (S.vt.mode === 'single'){
-    const leaves = treeLeaves(tree);
-    const wanted = leaves.find(l => l.pane_session_key === (focusKey || S.selPane)) || leaves[0];
+    const wanted = pickLeaf(tree, focusKey);
     mountSinglePane(wanted && wanted.pane_session_key);
     return;
   }
@@ -2781,7 +2962,7 @@ function mountPanes(tree, focusKey, path){
   S.vt.scrollback = scrollbackForLeafCount(treeLeaves(tree).length);
   wrap.appendChild(buildLayoutNode(tree));
   openMountedPanes();
-  focusPane(focusKey || S.selPane || S.vt.panes.keys().next().value || null);
+  focusPane((pickLeaf(tree, focusKey) || {}).pane_session_key || S.vt.panes.keys().next().value || null);
   fitAllPanes();
 }
 
@@ -2795,7 +2976,7 @@ function openMountedPanes(){
 }
 
 /**
- * One pane, full width, plus a strip to move between them.
+ * One pane, full width; the tabs in the head move between them.
  *
  * Only the visible pane is attached. That is not just tidiness: each attach is a
  * real client of the zmx session (#44), and the layouts that trigger this mode
@@ -2822,7 +3003,6 @@ function mountSinglePane(key){
   S.vt.panes.clear();
 
   wrap.innerHTML = '';
-  wrap.appendChild(renderPaneStrip(leaf.pane_session_key));
   const holder = document.createElement('div');
   holder.className = 'vt-single';
   holder.appendChild(buildLayoutLeaf(leaf));
@@ -2831,25 +3011,6 @@ function mountSinglePane(key){
   openMountedPanes();
   focusPane(leaf.pane_session_key);
   fitAllPanes();
-}
-
-/** Tap targets standing in for the panes we are no longer drawing. */
-function renderPaneStrip(activeKey){
-  const strip = document.createElement('div');
-  strip.className = 'pane-strip';
-  for (const leaf of treeLeaves(S.vt.tree)){
-    const key = leaf.pane_session_key;
-    const known = S.panes.get(key) || {};
-    const chip = document.createElement('button');
-    chip.className = 'pane-chip' + (key === activeKey ? ' on' : '');
-    chip.innerHTML = statusDotHTML(known.status || 'unknown', 'pdot')
-      + `<span>${esc(leaf.title || known.title || shortId(known.pane_id || key))}</span>`;
-    // Explicit tap, not a swipe: a horizontal drag belongs to whatever TUI is
-    // running, and mis-swiping away from the pane you are reading is expensive.
-    chip.onclick = () => { if (key !== S.vt.focus) mountSinglePane(key); };
-    strip.appendChild(chip);
-  }
-  return strip;
 }
 
 function unmountPanes(){
@@ -2903,7 +3064,7 @@ function buildLayoutLeaf(node){
   const t = new TerminalCtor({
     cols:VT_COLS, rows:VT_ROWS, convertEol:false, scrollback:S.vt.scrollback,
     fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:VT_FONT_BASE,
-    theme:{ background:'#05090c', foreground:'#c8d6d5' },
+    theme:{ background:'#0b0b0c', foreground:'#e5e5ea', cursor:'#3fd3e3' },
   });
   t.open(host);
   attachWebglRenderer(t);
@@ -2919,7 +3080,7 @@ function buildLayoutLeaf(node){
 
   // xterm only fires onData for the terminal that actually holds focus, so each
   // pane can own its own outbound path — no routing table, no focus bookkeeping.
-  t.onData((data) => entry.keys.push(data));
+  t.onData((data) => entry.keys.push(applyStickyCtrl(data)));
   t.onScroll(() => { if (S.vt.focus === key) updateToBottom(); });
   // xterm/ghostty-web scroll on wheel. The canvas swallows touch, so a
   // swipe has to be translated — vertical only; a tap or a horizontal
@@ -2992,7 +3153,10 @@ function attachWebglRenderer(term){
   });
 }
 
+/** Give the terminal the caret back. On a touch screen the caret is the
+ *  keyboard, so only while the reader wants it up. */
 function restoreTermFocus(){
+  if (COARSE.matches && !kb.wanted) return;
   const entry = S.vt.focus && S.vt.panes.get(S.vt.focus);
   if (entry) { try { entry.term.focus(); } catch (e) {} }
 }
@@ -3000,6 +3164,13 @@ function restoreTermFocus(){
 function focusPane(key){
   S.vt.focus = key;
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
+  // Clicking into a mirrored pane is choosing it: the tabs follow.
+  if (key && key !== S.selPane && S.panes.has(key)) {
+    S.selPane = key;
+    if (S.sel) lastPaneByPath.set(S.sel, key);
+    renderDetailChrome();
+    renderSendButton();
+  }
   restoreTermFocus();
   updateToBottom();
   renderTermKeys();
@@ -3129,6 +3300,8 @@ function updateToBottom(){
   if (!entry){ btn.classList.remove('on'); return; }
   const b = entry.term.buffer.active;
   btn.classList.toggle('on', b.viewportY < b.baseY);
+  // Above the key bar, not on it.
+  btn.style.bottom = ($('keyBar').offsetHeight + 12) + 'px';
 }
 
 // An attach client is a real client of the zmx session, so leaving one behind is
@@ -3219,6 +3392,7 @@ function applyLogVisibility(){
   document.querySelector('main').classList.toggle('nolog', off);
   const btn = $('logBtn');
   btn.classList.toggle('on', !off);
+  btn.querySelector('.val').textContent = off ? 'Hidden' : 'Shown';
   btn.title = off ? 'Show message log' : 'Hide message log';
   setTimeout(fitAllPanes, 200);   // the panes just got wider
 }
@@ -3242,6 +3416,92 @@ $('clearLog').onclick=()=>{ logRing.length = 0; $('log').innerHTML=''; };
 // Buttons steal the caret in a browser; the pane highlight does not move.
 // Keep xterm's helper textarea focused unless the user is in a real field.
 SeahelmTermFocus.install(document, restoreTermFocus);
+
+// ── menus ────────────────────────────────────────────────────────────────────
+// Two ⋯ menus: the page's (log, disconnect) and the pane's (terminal layout,
+// renderer, copy, split, close). Anchored under the button that opened them,
+// closed by a tap anywhere else or Escape.
+function openMenu(menu, anchor){
+  closeMenus();
+  menu.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  menu.style.top = Math.round(r.bottom + 6) + 'px';
+  menu.style.left = Math.round(Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w))) + 'px';
+  anchor.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('button:not([hidden]):not(:disabled)');
+  if (first && !COARSE.matches) first.focus({ preventScroll: true });
+}
+function closeMenus(){
+  for (const m of document.querySelectorAll('.menu')) m.hidden = true;
+  for (const b of document.querySelectorAll('[aria-haspopup="menu"]')) b.setAttribute('aria-expanded', 'false');
+}
+document.addEventListener('pointerdown', (ev) => {
+  if (!ev.target.closest('.menu, [aria-haspopup="menu"]')) closeMenus();
+}, true);
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeMenus(); });
+// Any choice closes the menu it was made in.
+for (const m of document.querySelectorAll('.menu')) m.addEventListener('click', (ev) => {
+  if (ev.target.closest('button')) setTimeout(closeMenus, 0);
+});
+$('menuBtn').onclick = (ev) => {
+  const m = $('menu');
+  if (!m.hidden) { closeMenus(); return; }
+  openMenu(m, ev.currentTarget);
+};
+$('paneMenuBtn').onclick = (ev) => {
+  const m = $('paneMenu');
+  if (!m.hidden) { closeMenus(); return; }
+  const live = !!(S.sel && (S.vt.focus || S.selPane) && isLinked());
+  const vt = loadSurfaceMode() === 'vt';
+  $('copyBtn').hidden = !vt;
+  $('copyBtn').disabled = !focusedEntry();
+  $('splitBtn').disabled = !live;
+  $('closePaneBtn').disabled = !live;
+  openMenu(m, ev.currentTarget);
+};
+$('copyBtn').onclick = () => copySelection();
+$('splitBtn').onclick = () => paneAction('pane.split', { direction: 'right', focus: false });
+$('closePaneBtn').onclick = () => {
+  const key = S.vt.focus || S.selPane;
+  const pane = S.panes.get(key) || {};
+  const name = paneLabel(pane).text + ((pane.title || '').trim() ? ` (${pane.title.trim()})` : '');
+  // Closing takes a running agent with it.
+  if (!confirm(`Close ${name}? Anything running in it is killed.`)) return;
+  paneAction('pane.close', {});
+};
+
+// ── the keyboard and the viewport ───────────────────────────────────────────
+// iOS lays the soft keyboard over the page rather than shrinking it, so the
+// composer and the key bar would sit under it. visualViewport is the part of
+// the page still visible; the body is sized to it, and any scroll iOS added to
+// bring the caret into view is taken back, since the page itself never scrolls.
+(function trackViewport(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  let frame = 0;
+  const apply = () => {
+    frame = 0;
+    document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+    if (window.scrollY) window.scrollTo(0, 0);
+    fitAllPanes();
+    renderTimelineToBottom();
+  };
+  const soon = () => { if (!frame) frame = requestAnimationFrame(apply); };
+  vv.addEventListener('resize', soon);
+  vv.addEventListener('scroll', soon);
+  apply();
+})();
+
+// Tapping the terminal brings the keyboard up; leaving it puts it away. Kept in
+// `kb.wanted` so a tap on the chrome does not throw it back up (restoreTermFocus).
+$('termWrap').addEventListener('focusin', (ev) => {
+  if (ev.target.classList.contains('xterm-helper-textarea')) kb.wanted = true;
+});
+$('termWrap').addEventListener('focusout', (ev) => {
+  if (!ev.target.classList.contains('xterm-helper-textarea')) return;
+  setTimeout(() => { if (!terminalHasFocus()) kb.wanted = false; }, 0);
+});
 </script>
 </body>
 </html>
