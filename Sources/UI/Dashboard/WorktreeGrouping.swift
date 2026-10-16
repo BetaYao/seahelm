@@ -64,6 +64,19 @@ struct WorktreeGroupingItem: Equatable {
 }
 
 extension WorktreeRowInfo {
+    /// The row's first line: the focused pane's title (its agent session's,
+    /// when it has one). Nil when there is none yet.
+    var rowTitle: String? {
+        let title = currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    /// The row's second line: the worktree, by its directory (`main` for a
+    /// repo's own checkout).
+    var rowSubtitle: String {
+        (thread.isEmpty ? name : thread).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func groupingItem(creationDate: Date, isIntegration: Bool = false) -> WorktreeGroupingItem {
         WorktreeGroupingItem(
             id: id,

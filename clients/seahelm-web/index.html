@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#000000" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-<title>Seahelm · First Mate</title>
+<title>Seahelm</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e2d37'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%231fc8da' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%231fc8da'/%3E%3C/svg%3E" />
 <!-- Plain static page: WS/WSS to the same-origin Host Gateway. No external deps, works offline. -->
 <style>
@@ -119,23 +119,33 @@
   #leftcol{display:flex;flex-direction:column;overflow:hidden;background:var(--side);
     border-right:0.5px solid var(--sep)}
   @media (max-width:760px){ #leftcol{background:var(--bg);border-right:0} }
-  .fm-top{flex:none;display:flex;align-items:center;justify-content:space-between;
-    padding:max(4px, env(safe-area-inset-top)) 8px 0 12px;min-height:48px}
-  .conn{display:flex;align-items:center;gap:8px;min-height:44px;font-size:var(--fs-sub);color:var(--muted)}
+  /* One row: the name and the ⋯. Connection, the fleet count and grouping
+     are in the menu — three fixed rows of header was a third of a phone. */
+  .fm-top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:max(6px, env(safe-area-inset-top)) 8px 4px 16px;min-height:52px}
+  #menuBtn{position:relative}
+  /* Not connected: the only trace of it left on the list, since the status
+     line went into the menu. */
+  #menuBtn[data-offline]::after{content:'';position:absolute;top:9px;right:8px;width:8px;height:8px;
+    border-radius:4px;background:var(--danger);box-shadow:0 0 0 2px var(--bg)}
+  @media (min-width:761px){ #menuBtn[data-offline]::after{box-shadow:0 0 0 2px var(--side)} }
+  .menu .menu-info{display:flex;flex-direction:column;gap:2px;padding:8px 12px 6px;
+    font-size:var(--fs-sub);color:var(--muted)}
+  .menu .menu-info #status{color:var(--text)}
+  .menu #fmModes{height:40px;margin:2px 2px 6px}
+  .menu #fmModes button{width:auto;min-height:0;justify-content:center;border-radius:8px;font-size:var(--fs-sub)}
+  .menu #fmModes button.on{background:var(--panel3)}
   #status::before{content:'';display:inline-block;width:8px;height:8px;border-radius:4px;margin-right:8px;
     vertical-align:1px;background:var(--danger)}
   #status.st-on::before{background:var(--running)}
-  .fm-header{flex:none;display:flex;align-items:baseline;justify-content:space-between;gap:12px;
-    padding:0 16px}
   .fm-title{font-size:var(--fs-title);line-height:1.2;font-weight:700;letter-spacing:.01em;white-space:nowrap}
-  .fm-sub{font-size:var(--fs-sub);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fm-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fm-sub:empty{display:none}
   .seg{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;padding:2px;
     border-radius:10px;background:var(--panel)}
   .seg button{border:0;border-radius:8px;background:transparent;color:#c7c7cc;cursor:pointer;
     font-size:var(--fs-sub);white-space:nowrap;padding:0 12px}
   .seg button.on{background:var(--panel3);color:var(--text);font-weight:600}
-  .fm-modes{flex:none;margin:12px 16px 4px;height:40px}
-  @media (min-width:761px){ .fm-modes{height:34px} }
   .fm-scroll{flex:1;min-height:0;overflow-y:auto;padding:0 16px 16px;-webkit-overflow-scrolling:touch}
   .fm-group-head{display:flex;align-items:center;gap:8px;padding:20px 16px 7px;
     font-size:var(--fs-cap);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
@@ -350,6 +360,13 @@
   #messageTimeline{display:none;flex:1;min-height:0;overflow:auto;padding:4px 16px 28px;flex-direction:column;
     -webkit-overflow-scrolling:touch}
   #messageTimeline.on{display:flex}
+  /* The timeline reads a size smaller than the rest of the page: it is the
+     dense part, and a smaller size puts more of a turn on a phone's screen.
+     The scale is set here, one step down, so every rule below that reads it
+     follows; the composer is left alone (iOS zooms the page into a field
+     under 16px). */
+  #messageTimeline{--fs-body:14px;--fs-sub:12px;--fs-cap:11px;--fs-mono:12px}
+  @media (max-width:760px){ #messageTimeline{--fs-body:16px;--fs-sub:14px;--fs-cap:12px;--fs-mono:12px} }
   .tl{width:100%;max-width:760px;margin:0 auto}
   .tl-empty{padding:56px 8px;text-align:center;color:var(--muted);font-size:var(--fs-sub)}
   .tl-more{padding:12px 0 2px;text-align:center;font-size:var(--fs-cap);color:var(--faint)}
@@ -361,7 +378,7 @@
   .tl-user div{min-width:0;padding:10px 14px;border-radius:20px 20px 6px 20px;background:var(--user);color:#fff;
     font-size:var(--fs-body);line-height:1.4;white-space:pre-wrap;word-break:break-word}
   .tl-tool{display:flex;gap:8px;min-width:0;white-space:nowrap;
-    font-family:var(--mono);font-size:13px;line-height:1.9;color:var(--muted)}
+    font-family:var(--mono);font-size:var(--fs-mono,13px);line-height:1.9;color:var(--muted)}
   .tl-tool b{flex:none;font-weight:500;color:#c7c7cc}
   .tl-tool span{overflow:hidden;text-overflow:ellipsis;opacity:.8}
   .tl-tool em{flex:none;font-style:normal;color:var(--faint)}
@@ -369,7 +386,7 @@
   /* A folded run of calls: one row you can open. */
   .tl-tools{display:flex;align-items:center;gap:10px;min-width:0;min-height:48px;margin:8px 0;padding:0 14px;
     white-space:nowrap;cursor:pointer;border-radius:14px;background:var(--panel);
-    font-family:var(--mono);font-size:13px;color:var(--muted)}
+    font-family:var(--mono);font-size:var(--fs-mono,13px);color:var(--muted)}
   .tl-tools i{flex:none;font-style:normal;color:var(--faint);font-size:18px;
     transition:transform .12s ease-out;transform-origin:45% 55%}
   .tl-tools[aria-expanded="true"] i{transform:rotate(90deg)}
@@ -393,7 +410,7 @@
   .md a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-30);word-break:break-all}
   .md code{font-family:var(--mono);font-size:.86em;padding:.1em .35em;border-radius:5px;background:var(--panel2)}
   .md pre{margin:.3em 0 .8em;padding:12px 14px;border-radius:12px;overflow:auto;background:var(--panel);
-    font-family:var(--mono);font-size:13px;line-height:1.55}
+    font-family:var(--mono);font-size:var(--fs-mono,13px);line-height:1.55}
   .md pre code{padding:0;background:none;font-size:inherit}
   .md ul,.md ol{margin:.2em 0 .65em;padding-left:1.3em}
   .md li{margin:.2em 0}
@@ -504,19 +521,10 @@
   <main>
     <div class="col" id="leftcol">
       <div class="fm-top">
-        <span class="conn"><span id="status" class="st-off">Offline</span></span>
-        <button class="icon-btn" id="menuBtn" type="button" aria-haspopup="menu" aria-label="More">
+        <h1 class="fm-title">Seahelm</h1>
+        <button class="icon-btn" id="menuBtn" type="button" aria-haspopup="menu" aria-label="More" data-offline>
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
         </button>
-      </div>
-      <div class="fm-header">
-        <h1 class="fm-title">First Mate</h1>
-        <span class="fm-sub" id="fmSub"></span>
-      </div>
-      <div class="fm-modes seg" id="fmModes" role="tablist" aria-label="Group by">
-        <button type="button" role="tab" data-mode="repository">Project</button>
-        <button type="button" role="tab" data-mode="status">Status</button>
-        <button type="button" role="tab" data-mode="activity">Activity</button>
       </div>
       <div class="fm-scroll">
         <div id="tree"></div>
@@ -530,7 +538,7 @@
     </div>
     <div class="col" id="midcol">
       <div class="detail-head">
-        <button id="drawerBtn" type="button" title="Back to First Mate" aria-label="Back to First Mate">
+        <button id="drawerBtn" type="button" title="Back to the list" aria-label="Back to the list">
           <svg class="ic" viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2L2 10l8 8"/></svg>
         </button>
         <div class="dh-title">
@@ -578,6 +586,16 @@
   </main>
 
   <div class="menu" id="menu" role="menu" hidden>
+    <div class="menu-info">
+      <span id="status" class="st-off">Offline</span>
+      <span class="fm-sub" id="fmSub"></span>
+    </div>
+    <div class="seg" id="fmModes" role="tablist" aria-label="Group by">
+      <button type="button" role="tab" data-mode="repository">Project</button>
+      <button type="button" role="tab" data-mode="status">Status</button>
+      <button type="button" role="tab" data-mode="activity">Activity</button>
+    </div>
+    <hr />
     <button id="logBtn" type="button" role="menuitem">Message log <span class="val"></span></button>
     <button id="disconnectBtn" type="button" role="menuitem" class="danger">Disconnect</button>
   </div>
@@ -829,6 +847,8 @@ function logLineEl({ dir, topic, payload, ts }){
 }
 function setStatus(on, txt){
   const s = $('status'); s.textContent = txt; s.className = on ? 'st-on' : 'st-off';
+  $('menuBtn').toggleAttribute('data-offline', !on);
+  $('menuBtn').setAttribute('aria-label', on ? 'More' : `More — ${txt}`);
   // The gate is a function of connection state, so it re-renders wherever that
   // state is set — including the paths that drop the socket without asking.
   renderGate();
@@ -1330,8 +1350,8 @@ function renderMessageTimeline(key){
   // Text mode hides #termWrap, and with it the "Select a worktree" hint the
   // terminal path shows — so without this a phone opens on an empty page.
   if (!key) {
-    const hint = NARROW.matches ? 'Tap ‹ First Mate to pick a worktree'
-      : 'Pick a worktree from First Mate';
+    const hint = NARROW.matches ? 'Tap ‹ to pick a worktree'
+      : 'Pick a worktree from the list';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
     renderTimelineToBottom();
@@ -2044,7 +2064,7 @@ function renderWaitingBadge(){
   const n = [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length;
   if (n) btn.setAttribute('data-waiting', n > 9 ? '9+' : String(n));
   else btn.removeAttribute('data-waiting');
-  const label = n ? `Back to First Mate — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to First Mate';
+  const label = n ? `Back to the list — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to the list';
   btn.title = label;
   btn.setAttribute('aria-label', label);
 }
@@ -2124,13 +2144,19 @@ function buildFleet(){
     // instead could only be as fresh as the last pane.status push, and a push
     // lost to a reconnect left a running worktree drawn idle in every grouping
     // but Status, whose headers come straight from the Mac.
-    const mac = (S.rowTimes.get(entry.path) || {}).status;
+    const macRow = S.rowTimes.get(entry.path) || {};
+    const mac = macRow.status;
+    const dir = entry.path.split('/').pop() || entry.path;
     rows.push({
       path: entry.path,
       // DashboardOverviewView's own fallback for a worktree with no deck.
       project: w.project || lead.project || 'Unknown deck',
       branch: w.branch || lead.branch || '',
-      title: w.title || (entry.path.split('/').pop() || entry.path),
+      // The dashboard's own words for the row, from fleet.groups: the focused
+      // pane's title, then the worktree. The directory stands in until the
+      // first grouping arrives, and for a Mac from before it sent them.
+      title: macRow.title || w.title || dir,
+      subtitle: macRow.subtitle || dir,
       status: mac || w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
       runningSince: (S.rowTimes.get(entry.path) || {}).running_since || null,
       lastActivityAt: (S.rowTimes.get(entry.path) || {}).last_activity_at || w.started_at || null,
@@ -2239,7 +2265,8 @@ function renderTree(){
       const meta = [who];
       // The group header already names the project when grouping by it.
       if (!byRepo) meta.push(r.project);
-      if (r.branch && r.branch !== r.title) meta.push(r.branch);
+      // The dashboard's second line names the worktree; so does this one.
+      if (r.subtitle && r.subtitle !== r.title) meta.push(r.subtitle);
       // An open decision speaks louder than the status: a suggestion comes in
       // as the agent goes idle, and "Idle" is exactly what it is not asking for.
       const decision = rowDecision(r);
@@ -2288,14 +2315,16 @@ function renderDetailChrome(){
   head.textContent = row.title || row.branch || row.path;
   const pane = S.selPane && S.panes.get(S.selPane);
   if (row.panes.length > 1 || !pane) {
-    sub.textContent = [row.project, `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`].join(' · ');
+    sub.textContent = [row.subtitle !== row.title ? row.subtitle : '', row.project,
+      `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
   } else {
     const st = normStatus(pane.status);
     const since = st === 'running' ? (S.rowTimes.get(row.path) || {}).running_since : 0;
     const label = SeahelmPanePick.statusLabel(st);
     sub.innerHTML = [
       label ? `<span style="color:${STC[st]}">${esc(label)}${since ? ' ' + esc(compactDuration(since)) : ''}</span>` : '',
-      esc(paneLabel(pane).text), esc(row.project),
+      // Not the agent: the composer is labelled with it right below.
+      row.subtitle !== row.title ? esc(row.subtitle) : '', esc(row.project),
     ].filter(Boolean).join(' · ');
   }
   tabs.hidden = row.panes.length < 2;
@@ -3507,7 +3536,10 @@ function openMenu(menu, anchor){
   menu.style.top = Math.round(r.bottom + 6) + 'px';
   menu.style.left = Math.round(Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w))) + 'px';
   anchor.setAttribute('aria-expanded', 'true');
-  const first = menu.querySelector('button:not([hidden]):not(:disabled)');
+  // The first real item, not a segmented control at the top: a focus ring on
+  // the selected segment reads as a second selection.
+  const first = menu.querySelector('button[role="menuitem"]:not([hidden]):not(:disabled)')
+    || menu.querySelector('button:not([hidden]):not(:disabled)');
   if (first && !COARSE.matches) first.focus({ preventScroll: true });
 }
 function closeMenus(){
