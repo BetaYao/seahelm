@@ -14,6 +14,8 @@ enum ChatCallbackAction: Equatable {
     case suggestionOption(orderId: String, index: Int)
     /// Clear a First Mate card without answering it.
     case dismissSuggestion(orderId: String)
+    /// Withdraw the confirmation this chat was asked — the Cancel beside `/yes`.
+    case cancelPending
 }
 
 /// Mints the short tokens chat buttons carry.
@@ -59,6 +61,18 @@ final class ChatCallbackRegistry {
         return token
     }
 
+    /// A command reply's buttons, minted for a chat.
+    func buttons(for commandButtons: [CommandButton]) -> [MessageButton] {
+        commandButtons.map { button in
+            switch button.effect {
+            case .line(let line):
+                return MessageButton(label: button.label, token: mint(.command(line)))
+            case .cancelPending:
+                return MessageButton(label: button.label, token: mint(.cancelPending))
+            }
+        }
+    }
+
     /// What the button means, or nil once it has gone stale.
     func action(for token: String) -> ChatCallbackAction? {
         lock.lock()
@@ -85,7 +99,7 @@ final class ChatCallbackRegistry {
 
     private static func orderId(of action: ChatCallbackAction) -> String? {
         switch action {
-        case .command: return nil
+        case .command, .cancelPending: return nil
         case .suggestionOption(let orderId, _): return orderId
         case .dismissSuggestion(let orderId): return orderId
         }

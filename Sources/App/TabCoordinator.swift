@@ -64,6 +64,11 @@ class TabCoordinator {
         reporter.remove = { chatId, messageId in
             AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
         }
+        reporter.draft = { chatId, text, canStop in
+            AgentRegistry.shared.draftInChannel("telegram", chatId: chatId,
+                                                draftId: ChatProgressReporter.boardDraftId,
+                                                content: text, canStop: canStop)
+        }
         // Rows are appended on main, in order with the outcomes that start and
         // end the turn they belong to.
         _ = MessageStreamHub.shared.subscribe { [weak reporter] message in

@@ -30,11 +30,23 @@ enum TerminalTranscript {
                         #"[\#u{00}-\#u{08}\#u{0B}\#u{0C}\#u{0E}-\#u{1F}]"#] {    // stray control bytes
             stripped = stripped.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
         }
-        var lines = stripped.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.replacingOccurrences(of: "\r", with: "").trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        if let footer = composerFrame(in: lines) { lines.removeSubrange(footer...) }
-        return conversation(lines).joined(separator: "\n")
+        // Judged trimmed — every rule below reads a line from its first glyph —
+        // but printed with its indent, which is half of what a shell's output
+        // (`cat -n`, a stack trace, a diff) says.
+        var rows = stripped.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { raw -> Row in
+                let line = raw.replacingOccurrences(of: "\r", with: "")
+                let text = line.trimmingCharacters(in: .whitespaces)
+                return Row(text: text, indent: String(line.prefix { $0 == " " || $0 == "\t" }))
+            }
+            .filter { !$0.text.isEmpty }
+        if let footer = composerFrame(in: rows.map(\.text)) { rows.removeSubrange(footer...) }
+        return conversation(rows).joined(separator: "\n")
+    }
+
+    private struct Row {
+        let text: String
+        let indent: String
     }
 
     // MARK: - Where the conversation ends
@@ -92,10 +104,11 @@ enum TerminalTranscript {
 
     // MARK: - What is left
 
-    private static func conversation(_ lines: [String]) -> [String] {
+    private static func conversation(_ rows: [Row]) -> [String] {
         var out: [String] = []
         var insideSuggestions = false
-        for line in lines {
+        for row in rows {
+            let line = row.text
             // Rules, frames, logo rows, bare gutters: decoration and nothing else.
             if isDecorationLine(line) || isBannerRow(line) { continue }
             let text = unframed(line)
@@ -113,7 +126,8 @@ enum TerminalTranscript {
                 insideSuggestions = false
             }
             if isChrome(text) { continue }
-            out.append(text)
+            // A framed line's indent belongs to the frame, not to the text.
+            out.append(text == line ? row.indent + text : text)
         }
         return out
     }

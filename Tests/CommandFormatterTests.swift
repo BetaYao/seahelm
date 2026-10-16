@@ -196,13 +196,36 @@ final class CommandFormatterTests: XCTestCase {
     // MARK: - Spec-driven help
 
     func testHelpListsEveryVerbOnce() {
-        let help = CommandSpecs.help
+        let help = CommandSpecs.help(desktop: true)
         for spec in CommandSpecs.all {
             XCTAssertEqual(help.components(separatedBy: "`\(spec.usage)`").count - 1, 1, spec.verb)
         }
         XCTAssertTrue(help.contains("<anything>"), help)
         XCTAssertNil(CommandSpecs.help(for: "nope"))
         XCTAssertTrue(CommandSpecs.help(for: "return")?.contains("/yes") == true)
+    }
+
+    func testChatHelpLeavesOutDesktopOnlyVerbs() {
+        XCTAssertFalse(CommandSpecs.help(desktop: false).contains("/add"))
+        XCTAssertTrue(CommandSpecs.help(desktop: true).contains("/add"))
+    }
+
+    // MARK: - /show transcript
+
+    func testTranscriptKeepsTheNewestOutput() {
+        let lines = (1...500).map { "line \($0)" }.joined(separator: "\n")
+        let tail = CommandFormatter.transcriptTail(lines, limit: 200)
+        XCTAssertTrue(tail.hasSuffix("line 500"), tail)
+        XCTAssertFalse(tail.contains("line 1\n"), tail)
+        XCTAssertTrue(tail.hasPrefix("…\nline "), tail)
+    }
+
+    func testTranscriptCannotCloseItsOwnFence() {
+        XCTAssertFalse(CommandFormatter.transcriptTail("a\n```\nb").contains("```"))
+    }
+
+    func testTranscriptKeepsIndentation() {
+        XCTAssertEqual(CommandFormatter.transcriptTail("x\n     1  hello"), "x\n     1  hello")
     }
 
     func testMailSignatureAndMenuComeFromTheSpecs() {

@@ -88,7 +88,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// A turn that ends in seconds must leave no trace: posting a line and
     /// taking it back again is worse than never having posted it.
     func testAShortTurnNeverPostsAnything() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working("Read"), at: 4)
         ingest(outcome(pane(status: .idle), statusChanged: true, newStatus: .idle), at: 8)
@@ -97,11 +97,11 @@ final class ChatProgressReporterTests: XCTestCase {
     }
 
     func testALongTurnPostsOnceAndThenEditsInPlace() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working("Bash", "pnpm test"), at: 0)
         ingest(working("Bash", "pnpm test"), at: 20)
         XCTAssertEqual(sent.count, 1)
-        XCTAssertEqual(sent.first?.chat, "555")
+        XCTAssertEqual(sent.first?.chat, "-555")
         XCTAssertTrue(sent[0].text.contains("#26 alpha/feat-x"), sent[0].text)
         XCTAssertTrue(sent[0].text.contains("20s"), sent[0].text)
 
@@ -125,7 +125,7 @@ final class ChatProgressReporterTests: XCTestCase {
     // MARK: - Throttling
 
     func testEditsAreThrottledAndNeverRepeatTheSameWords() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working("Bash", "one"), at: 20)   // posts
         ingest(working("Bash", "two"), at: 21)   // too soon
@@ -142,7 +142,7 @@ final class ChatProgressReporterTests: XCTestCase {
     // MARK: - When the turn ends
 
     func testTheLineIsTakenBackWhenTheTurnEnds() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working(), at: 20)
         ingest(outcome(pane(status: .idle), statusChanged: true, newStatus: .idle), at: 40)
@@ -157,7 +157,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// The send is asynchronous. A turn that ends while it is in flight must
     /// still take back the message that lands afterwards.
     func testALineThatArrivesAfterItsTurnEndedIsStillTakenBack() {
-        bindChat("555")
+        bindChat("-555")
         var late: ((String?) -> Void)?
         reporter.send = { [weak self] chat, text, done in
             self?.sent.append((chat, text))
@@ -177,7 +177,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// A send that reported no id (the bridge was down) must not be edited or
     /// deleted by id later, and must not wedge the pane's line forever.
     func testASendThatFailedDoesNotWedgeTheLine() {
-        bindChat("555")
+        bindChat("-555")
         nextMessageId = nil
         ingest(working(), at: 0)
         ingest(working("Read"), at: 20)
@@ -193,7 +193,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// the line carries them, and only them — the calls they sit between would
     /// drown them at the width a phone has.
     func testTheLineShowsWhatTheAgentSaidThisTurn() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         stream(said("The server path looks right; checking the client."), at: 5)
         stream(called("Bash", "grep -n pane.event index.html"), at: 6)
@@ -209,7 +209,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// A row alone keeps the line current: prose streamed from the transcript
     /// arrives with no outcome of its own.
     func testARowEditsTheLineWithoutWaitingForAnOutcome() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working(), at: 13)
         stream(said("Running the full suite now."), at: 20)
@@ -220,7 +220,7 @@ final class ChatProgressReporterTests: XCTestCase {
     /// The reply that closed the last turn is streamed after its Stop. It must
     /// not open the next turn's line.
     func testRowsOutsideATurnAreNotShown() {
-        bindChat("555")
+        bindChat("-555")
         stream(said("Last turn's answer."), at: 0)
         ingest(working(), at: 1)
         stream(said("New work."), at: 2)
@@ -239,7 +239,7 @@ final class ChatProgressReporterTests: XCTestCase {
     }
 
     func testOnlyTheLatestRowsAreShown() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         for n in 1...8 { stream(said("step \(n) done"), at: 1) }
         ingest(working(), at: 13)
@@ -251,21 +251,22 @@ final class ChatProgressReporterTests: XCTestCase {
     /// A row that lands inside the throttle is not dropped: it goes up once the
     /// interval is over, even if nothing else happens — a long build is quiet.
     func testAHeldBackRowIsPutUpWhenTheIntervalIsOver() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working(), at: 13)
         stream(said("Building."), at: 14)
         stream(said("Now the tests."), at: 15)
         XCTAssertTrue(edited.isEmpty)
-        XCTAssertEqual(scheduled.count, 1, "one flush per pane, however many rows it holds")
-        scheduled[0].work(start.addingTimeInterval(16))
+        let flushes = scheduled.filter { $0.delay == ChatProgressReporter.minEditInterval }
+        XCTAssertEqual(flushes.count, 1, "one flush per pane, however many rows it holds")
+        flushes.first?.work(start.addingTimeInterval(16))
         XCTAssertEqual(edited.count, 1)
         guard edited.count == 1 else { return }
         XCTAssertTrue(edited[0].text.hasSuffix("Building.\nNow the tests."), edited[0].text)
     }
 
     func testAFlushAfterTheTurnEndedPutsNothingUp() {
-        bindChat("555")
+        bindChat("-555")
         ingest(working(), at: 0)
         ingest(working(), at: 13)
         stream(called("Bash", "make"), at: 14)
@@ -355,5 +356,137 @@ final class ChatProgressReporterTests: XCTestCase {
         XCTAssertFalse(ChatProgressReporter.endsTurn(outcome(pane())))
         XCTAssertFalse(ChatProgressReporter.endsTurn(
             outcome(pane(), statusChanged: false, newStatus: .idle)))
+    }
+
+    /// An event after the turn ended — the pane idle — must not open a new
+    /// turn: nothing would ever end it, and its line would outlive the pane.
+    func testAnEventWhileIdleDoesNotOpenATurn() {
+        bindChat("-42")
+        ingest(outcome(pane(status: .idle), newStatus: .idle), at: 0)
+        ingest(outcome(pane(status: .idle), newStatus: .idle), at: 20)
+        XCTAssertTrue(sent.isEmpty, "\(sent)")
+    }
+
+    func testExitEndsTheTurnAndTakesTheLineDown() {
+        bindChat("-42")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        XCTAssertEqual(sent.count, 1)
+        ingest(outcome(pane(status: .exited), newStatus: .exited), at: 14)
+        XCTAssertEqual(removed.count, 1)
+    }
+
+    // MARK: - Private chats: the board
+
+    private var drafts: [(chat: String, text: String, canStop: Bool)] = []
+
+    private func enableBoard(fleet: [String] = []) {
+        drafts = []
+        reporter.draft = { [weak self] chat, text, canStop in self?.drafts.append((chat, text, canStop)) }
+        reporter.fleetChats = { fleet }
+    }
+
+    private func otherPane(_ id: String, status: AgentStatus = .running) -> PaneInfo {
+        PaneInfo(id: id, worktreePath: "/repo/beta", agentType: .claudeCode, project: "beta", branch: "fix-\(id)",
+                 status: status, lastMessage: "", commandLine: nil, roundDuration: 0, startedAt: nil,
+                 station: nil, channel: nil, taskProgress: TaskProgress())
+    }
+
+    /// A private chat never gets an edited message — only the draft.
+    func testPrivateChatGetsADraftNotAMessage() {
+        enableBoard()
+        bindChat("42")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        XCTAssertTrue(sent.isEmpty, "\(sent)")
+        XCTAssertEqual(drafts.last?.chat, "42")
+        XCTAssertTrue(drafts.last?.text.contains("#26 alpha/feat-x") == true, drafts.last?.text ?? "")
+        XCTAssertEqual(drafts.last?.canStop, true, "the bound pane is working, so Stop means it")
+    }
+
+    func testNothingBeforeTheGracePeriod() {
+        enableBoard()
+        bindChat("42")
+        ingest(working(), at: 0)
+        ingest(working(), at: 5)
+        XCTAssertTrue(drafts.isEmpty)
+    }
+
+    /// The fleet chat, unbound, still sees what is running — without Stop,
+    /// since there is no pane for it to mean.
+    func testFleetChatSeesOtherPanesWithoutStop() {
+        enableBoard(fleet: ["7"])
+        reporter.identify = { info in (info.id == self.paneId ? self.paneKey : "k-\(info.id)", info.id == self.paneId ? 26 : 9) }
+        ingest(outcome(otherPane("B")), at: 0)
+        ingest(outcome(otherPane("B")), at: 13)
+        XCTAssertEqual(drafts.last?.chat, "7")
+        XCTAssertTrue(drafts.last?.text.contains("⏳ #9 beta/fix-B · 13s") == true, drafts.last?.text ?? "")
+        XCTAssertEqual(drafts.last?.canStop, false)
+    }
+
+    /// The bound pane in full, then a line per other pane — a question first.
+    func testBoardListsTheRestOfTheFleet() {
+        enableBoard()
+        bindChat("42")
+        reporter.identify = { info in
+            switch info.id {
+            case self.paneId: return (self.paneKey, 26)
+            case "B": return ("k-B", 9)
+            default: return ("k-C", 11)
+            }
+        }
+        ingest(outcome(otherPane("C", status: .waiting), newStatus: .waiting), at: 0)
+        ingest(outcome(otherPane("B")), at: 1)
+        ingest(working(), at: 2)
+        ingest(working(), at: 20)
+        let text = drafts.last?.text ?? ""
+        XCTAssertTrue(text.hasPrefix("⏳ **#26 alpha/feat-x** · 18s"), text)
+        let question = text.range(of: "❗ #11 beta/fix-C · waiting for you")
+        let running = text.range(of: "⏳ #9 beta/fix-B · 19s")
+        XCTAssertNotNil(question, text)
+        XCTAssertNotNil(running, text)
+        if let question, let running { XCTAssertLessThan(question.lowerBound, running.lowerBound) }
+    }
+
+    /// A board of nothing but questions is not put up: the card said it.
+    func testOnlyQuestionsIsNoBoard() {
+        enableBoard(fleet: ["7"])
+        ingest(outcome(pane(status: .waiting), newStatus: .waiting), at: 0)
+        ingest(outcome(pane(status: .waiting), newStatus: .waiting), at: 30)
+        XCTAssertTrue(drafts.isEmpty)
+    }
+
+    /// The draft fades in ~12s, so it is put up again on a beat while work
+    /// goes on, and the beat stops once nothing is running.
+    func testHeartbeatKeepsTheBoardUpAndStopsWithTheWork() {
+        enableBoard()
+        bindChat("42")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        let afterFirst = drafts.count
+        let beat = scheduled.last { $0.delay == ChatProgressReporter.boardRefresh }
+        XCTAssertNotNil(beat)
+        beat?.work(start.addingTimeInterval(21))
+        XCTAssertEqual(drafts.count, afterFirst + 1, "the same board, put up again")
+
+        ingest(outcome(pane(status: .idle), statusChanged: true, newStatus: .idle), at: 22)
+        let afterIdle = drafts.count
+        scheduled.last { $0.delay == ChatProgressReporter.boardRefresh }?.work(start.addingTimeInterval(30))
+        XCTAssertEqual(drafts.count, afterIdle, "nothing running, nothing put up")
+    }
+
+    func testThrottleHoldsRapidUpdates() {
+        enableBoard()
+        bindChat("42")
+        ingest(working(), at: 0)
+        ingest(working(), at: 13)
+        ingest(working(), at: 13.5)
+        XCTAssertEqual(drafts.count, 1)
+    }
+
+    func testChatIdsTellPrivateFromGroup() {
+        XCTAssertTrue(ChatProgressReporter.isPrivateChat("8817232020"))
+        XCTAssertFalse(ChatProgressReporter.isPrivateChat("-5316951956"))
+        XCTAssertFalse(ChatProgressReporter.isPrivateChat("nonsense"))
     }
 }

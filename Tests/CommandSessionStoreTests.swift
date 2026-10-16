@@ -93,17 +93,17 @@ final class CommandSessionStoreTests: XCTestCase {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         let me = "42"
         // Unbound: fleet listener gets every event.
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])), [me])
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: [me])), [me])
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me])), [me])
 
         store.bind("telegram:\(me)", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
         // Bound to #16: only #16 events.
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])), [me])
-        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: [me]).isEmpty)
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])), [me])
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: [me]).isEmpty)
 
         // A group bound to the same pane still hears it; the personal chat does too.
         store.bind("telegram:group99", toPaneKey: "k16", paneId: "p16", worktreePath: "/w")
-        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", worktreePath: nil, fleetListenerChatIds: [me])),
+        XCTAssertEqual(Set(store.telegramChatsToNotify(paneKey: "k16", fleetListenerChatIds: [me])),
                        Set([me, "group99"]))
     }
 
@@ -118,9 +118,9 @@ final class CommandSessionStoreTests: XCTestCase {
     func testBoundChatHearsItsPaneWithNoFleetListeners() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         store.bind("telegram:42", toPaneKey: "k12", paneId: "p12", worktreePath: "/w")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "k12", worktreePath: nil, fleetListenerChatIds: []), ["42"])
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "k12", fleetListenerChatIds: []), ["42"])
         // Another pane's event still says nothing while the fleet is silenced.
-        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", worktreePath: nil, fleetListenerChatIds: []).isEmpty)
+        XCTAssertTrue(store.telegramChatsToNotify(paneKey: "k9", fleetListenerChatIds: []).isEmpty)
     }
 }
 
@@ -163,42 +163,14 @@ final class PaneHandleRegistryTests: XCTestCase {
         XCTAssertEqual(PaneHandleRegistry.key(sessionKey: "seahelm-x", paneId: "st9"), "seahelm-x")
     }
 
-    // MARK: - One address per room
-
-    /// The duplicate that shipped twice: three bindings on one pane, all in the
-    /// same group, and every notice arriving three times. Deduping lives in the
-    /// store because the first fix patched one call site and missed two.
-    func testNotifyGivesOneAddressPerChat() {
-        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
-        store.bind(CommandSession.key(surface: "telegram", id: "-100"),
-                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
-        store.bind(CommandSession.key(surface: "telegram", id: "-100#46"),
-                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
-        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#102"),
-                            toWorktreePath: "/w", paneKey: "p", paneId: "A", topicName: "n")
-
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: "/w", fleetListenerChatIds: []),
-                       ["-100#102"])
-        XCTAssertEqual(store.telegramChats(boundToPaneKey: "p"), ["-100#102"])
-    }
-
-    /// A fleet listener naming the same group is the same room too.
-    func testFleetListenerDoesNotDoubleUpOnABoundGroup() {
-        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
-        store.bindAutoTopic(CommandSession.key(surface: "telegram", id: "-100#7"),
-                            toWorktreePath: "/w", paneKey: "p", paneId: "A", topicName: "n")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: "/w", fleetListenerChatIds: ["-100"]),
-                       ["-100#7"])
-    }
-
     // MARK: - Letting go of a binding
 
     func testCloseByKeyClosesOnceAndReportsWhoDidIt() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
         store.bind("telegram:1", toPaneKey: "k7", paneId: "b", worktreePath: "/w")
         XCTAssertEqual(store.close(key: "telegram:1")?.key, "telegram:1")
-        // The second caller is told it was not theirs to clean up — otherwise a
-        // topic could be deleted twice over.
+        // The second caller is told it was not theirs to clean up — otherwise
+        // the chat would be told it was unbound twice.
         XCTAssertNil(store.close(key: "telegram:1"))
         XCTAssertNil(store.close(key: "telegram:absent"))
     }
@@ -258,11 +230,38 @@ final class PaneHandleRegistryTests: XCTestCase {
     /// Another chat is another conversation and still hears it.
     func testADifferentChatIsStillNotified() {
         let store = CommandSessionStore(url: nil, legacyMailURL: nil)
-        store.bind(CommandSession.key(surface: "telegram", id: "-100#4"),
+        store.bind(CommandSession.key(surface: "telegram", id: "-100"),
                    toPaneKey: "p", paneId: "A", worktreePath: "/w")
         store.bind(CommandSession.key(surface: "telegram", id: "42"),
                    toPaneKey: "p", paneId: "A", worktreePath: "/w")
-        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", worktreePath: nil, fleetListenerChatIds: []).sorted(),
-                       ["-100#4", "42"])
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: []),
+                       ["-100", "42"])
+    }
+
+    /// A fleet listener that is also bound to the pane is still told once.
+    func testFleetListenerBoundToThePaneHearsItOnce() {
+        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
+        store.bind(CommandSession.key(surface: "telegram", id: "-100"),
+                   toPaneKey: "p", paneId: "A", worktreePath: "/w")
+        XCTAssertEqual(store.telegramChatsToNotify(paneKey: "p", fleetListenerChatIds: ["-100"]), ["-100"])
+    }
+
+    /// Sessions for forum topics (`<chat>#<thread>`) are dropped on load:
+    /// nothing addresses a topic any more.
+    func testForumTopicSessionsAreDroppedOnLoad() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sessions-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let json = """
+        {"telegram:-100#42":{"key":"telegram:-100#42","boundPaneKey":"p","closed":false,"autoTopic":true},
+         "telegram:-100":{"key":"telegram:-100","boundPaneKey":"q","closed":false},
+         "mail:abc#1":{"key":"mail:abc#1","closed":false}}
+        """
+        try json.data(using: .utf8)!.write(to: url)
+        let store = CommandSessionStore(url: url, legacyMailURL: nil)
+        XCTAssertEqual(Set(store.allSessions().map(\.key)), ["telegram:-100", "mail:abc#1"])
+        // Persisted, so the next launch does not find them again.
+        XCTAssertEqual(Set(CommandSessionStore(url: url, legacyMailURL: nil).allSessions().map(\.key)),
+                       ["telegram:-100", "mail:abc#1"])
     }
 }

@@ -23,19 +23,14 @@ struct TelegramChat: Decodable, Equatable {
     let type: String
     let title: String?
     let username: String?
-    /// True when the supergroup has topics turned on. Not consulted for
-    /// routing — a message says which topic it is in — but it is what tells a
-    /// log line why one group threads its replies and another does not.
-    let isForum: Bool?
 
     var isPrivate: Bool { type == "private" }
 
-    init(id: Int64, type: String, title: String?, username: String?, isForum: Bool? = nil) {
+    init(id: Int64, type: String, title: String?, username: String?) {
         self.id = id
         self.type = type
         self.title = title
         self.username = username
-        self.isForum = isForum
     }
 }
 
@@ -92,22 +87,11 @@ struct TelegramMessage: Decodable, Equatable {
     let document: TelegramDocument?
     /// The message this one replies to, when it replies to anything.
     let replyToMessage: TelegramReplyTarget?
-    /// The forum topic this message sits in — but also, in a plain group, the
-    /// reply chain it belongs to, and since Bot API 10.0 a private chat's own
-    /// topic. Only `TelegramChatAddress` decides which of those can be replied
-    /// into; nothing else should read this field.
-    let messageThreadId: Int?
-    /// True when the message was posted to a topic rather than to the chat at
-    /// large. Absent for General, which is the chat at large.
-    let isTopicMessage: Bool?
 
     init(messageId: Int, date: TimeInterval, chat: TelegramChat, from: TelegramUser?,
          senderChat: TelegramChat?, text: String?, caption: String?,
          photo: [TelegramPhotoSize]? = nil, document: TelegramDocument? = nil,
-         replyToMessage: TelegramReplyTarget? = nil,
-         messageThreadId: Int? = nil, isTopicMessage: Bool? = nil) {
-        self.messageThreadId = messageThreadId
-        self.isTopicMessage = isTopicMessage
+         replyToMessage: TelegramReplyTarget? = nil) {
         self.messageId = messageId
         self.date = date
         self.chat = chat
@@ -138,6 +122,9 @@ struct TelegramUpdate: Decodable, Equatable {
     let message: TelegramMessage?
     let channelPost: TelegramMessage?
     let callbackQuery: TelegramCallbackQuery?
+    /// Someone pressed Stop under a streamed draft (`sendMessageDraft` with
+    /// `can_stop`).
+    var stoppedMessageGeneration: TelegramGenerationStopped? = nil
 
     /// The one kind of payload the bridge acts on. Edits, reactions and the
     /// rest are deliberately not requested (`allowedUpdates`), so they never
@@ -145,24 +132,33 @@ struct TelegramUpdate: Decodable, Equatable {
     var payload: TelegramMessage? { message ?? channelPost }
 }
 
-/// The slice of `getChatMember` the bridge reads: what this bot may do in a
-/// chat. `canManageTopics` is absent for anyone who is not an administrator,
-/// which reads the same as not having it.
-struct TelegramChatMember: Decodable, Equatable {
-    let status: String
-    let canManageTopics: Bool?
+/// The Stop button under a draft was pressed.
+///
+/// `draft_id` is documented as an Integer and arrives as a string (`"62"`, seen
+/// live), so it is read as either.
+struct TelegramGenerationStopped: Decodable, Equatable {
+    let chat: TelegramChat
+    let draftId: Int
 
-    var isAdministrator: Bool { status == "administrator" || status == "creator" }
-    /// The group's creator may always manage topics; Telegram leaves the flag
-    /// off for them rather than setting it true.
-    var mayManageTopics: Bool { status == "creator" || canManageTopics == true }
-}
+    init(chat: TelegramChat, draftId: Int) {
+        self.chat = chat
+        self.draftId = draftId
+    }
 
-/// What `createForumTopic` answers with: the thread id every later message
-/// into this topic carries.
-struct TelegramForumTopic: Decodable, Equatable {
-    let messageThreadId: Int
-    let name: String
+    private enum CodingKeys: String, CodingKey { case chat, draftId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        chat = try c.decode(TelegramChat.self, forKey: .chat)
+        if let number = try? c.decode(Int.self, forKey: .draftId) {
+            draftId = number
+        } else if let text = try? c.decode(String.self, forKey: .draftId), let number = Int(text) {
+            draftId = number
+        } else {
+            throw DecodingError.dataCorruptedError(forKey: .draftId, in: c,
+                                                   debugDescription: "draft_id is neither a number nor a numeric string")
+        }
+    }
 }
 
 struct TelegramBotInfo: Decodable, Equatable {
@@ -237,19 +233,6 @@ enum TelegramAPIError: LocalizedError, Equatable {
         return false
     }
 
-    /// The topic this message was addressed to no longer exists.
-    ///
-    /// It happens both ways now: seahelm deletes a pane's own thread when the
-    /// pane ends, and a person can delete any thread at any time. Either way
-    /// the words still have somewhere to go — the group itself — and a notice
-    /// that silently evaporates is the one outcome worth ruling out.
-    var isMissingThread: Bool {
-        if case .api(400, let description) = self {
-            return description.lowercased().contains("message thread not found")
-        }
-        return false
-    }
-
     /// Telegram's way of saying "that edit would change nothing".
     ///
     /// It arrives as a 400, but it is the API agreeing with us: the message
@@ -273,16 +256,10 @@ enum TelegramAPIError: LocalizedError, Equatable {
 /// `getUpdates` is *meant* to sit open for twenty seconds. A completion-handler
 /// shape would only reinvent that loop with more state.
 ///
-/// The transport is `/usr/bin/curl`, not URLSession — deliberately. Inside
-/// this process, URLSession requests to Telegram hung: the first one or two
-/// completed, then most sat until their timeout, and some past it, with
-/// neither a response nor an error, while the identical requests from a
-/// standalone process (and from curl) completed every time. Per-request
-/// sessions, a client-side watchdog and shorter polls all failed to make it
-/// reliable. curl in a child process shares none of this process's network
-/// state, ships with every macOS, and worked without a single failure. The
-/// token never appears on a command line: it travels in a 0600 config file
-/// curl reads and that is deleted the moment the request ends.
+/// The transport is the system libcurl (`CurlClient`), not URLSession —
+/// deliberately; see `CurlClient` for why, and for the connection reuse that
+/// keeps a reply from costing a fresh TLS handshake. The token is in the URL
+/// and so never leaves this process: no command line, no temp file.
 final class TelegramBotAPI {
     static let host = "https://api.telegram.org"
     /// How long `getUpdates` holds the request open. Telegram closes it
@@ -291,12 +268,11 @@ final class TelegramBotAPI {
     /// Slack past the long poll before a call is abandoned; short calls get
     /// this alone.
     static let stallSeconds = 15
-    static let curlPath = "/usr/bin/curl"
 
     private let token: String
+    private let http = CurlClient()
     private let lock = NSLock()
     private var invalidated = false
-    private var processes: [ObjectIdentifier: Process] = [:]
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
@@ -307,25 +283,19 @@ final class TelegramBotAPI {
         self.token = token
     }
 
-    /// Ends whatever is in flight; the blocked caller sees `.cancelled`.
-    /// The client is unusable afterwards — make a new one to reconnect.
+    /// Ends whatever is in flight — within a second, the next time libcurl
+    /// checks — and the blocked caller sees `.cancelled`. The client is
+    /// unusable afterwards — make a new one to reconnect.
     func invalidate() {
         lock.lock()
         invalidated = true
-        let live = Array(processes.values)
         lock.unlock()
-        for process in live where process.isRunning { process.terminate() }
     }
 
-    /// What a chat is — asked for one thing only: whether it is a forum.
-    func getChat(chatId: String) throws -> TelegramChat {
-        try call("getChat", params: ["chat_id": chatId], deadline: Self.stallSeconds)
-    }
-
-    /// This bot's standing in a chat, for the rights it needs there.
-    func getChatMember(chatId: String, userId: Int64) throws -> TelegramChatMember {
-        try call("getChatMember", params: ["chat_id": chatId, "user_id": userId],
-                 deadline: Self.stallSeconds)
+    private var isInvalidated: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return invalidated
     }
 
     func getMe() throws -> TelegramBotInfo {
@@ -340,7 +310,10 @@ final class TelegramBotAPI {
             // added to a busy group is not woken for every reaction. A button
             // tap is a `callback_query` and arrives on no other channel — leave
             // it out and the inline keyboards below are decorative.
-            "allowed_updates": ["message", "channel_post", "callback_query"],
+            // A draft's Stop button is `stopped_message_generation`; Telegram
+            // drops it outright — no later delivery — unless it is asked for.
+            "allowed_updates": ["message", "channel_post", "callback_query",
+                                "stopped_message_generation"],
         ]
         if let offset { params["offset"] = offset }
         let lenient: [LenientUpdate] = try call("getUpdates", params: params,
@@ -354,13 +327,9 @@ final class TelegramBotAPI {
     /// `buttons` become a one-per-row inline keyboard. Returns the sent
     /// message's id, which is what a later `editMessageReplyMarkup` needs to
     /// take those buttons off again.
-    ///
-    /// `messageThreadId` posts into a forum topic. It is left off for every
-    /// other kind of chat — including a forum's General topic, which Telegram
-    /// rejects a thread id for; see `TelegramChatAddress`.
     @discardableResult
     func sendMessage(chatId: String, text: String, parseMode: String?,
-                     buttons: [MessageButton] = [], messageThreadId: Int? = nil) throws -> Int {
+                     buttons: [MessageButton] = []) throws -> Int {
         var params: [String: Any] = [
             "chat_id": chatId,
             "text": text,
@@ -369,12 +338,27 @@ final class TelegramBotAPI {
             "link_preview_options": ["is_disabled": true],
         ]
         if let parseMode { params["parse_mode"] = parseMode }
-        if let messageThreadId { params["message_thread_id"] = messageThreadId }
         if !buttons.isEmpty {
             params["reply_markup"] = ["inline_keyboard": Self.keyboard(buttons)]
         }
         let sent: TelegramMessage = try call("sendMessage", params: params, deadline: Self.stallSeconds)
         return sent.messageId
+    }
+
+    /// Stream a partial message into a private chat — Telegram's own
+    /// "typing" preview, animated in place while `draftId` stays the same.
+    ///
+    /// Private chats only (a group answers `TEXTDRAFT_PEER_INVALID`), one draft
+    /// per chat at a time (a different id replaces it), and ephemeral: it
+    /// fades about 12s after the last call (the docs say 30) and the moment
+    /// the bot sends anything else there. Nothing is ever persisted — what is
+    /// worth keeping goes out with `sendMessage`.
+    func sendMessageDraft(chatId: String, draftId: Int, text: String, parseMode: String?,
+                          canStop: Bool) throws {
+        var params: [String: Any] = ["chat_id": chatId, "draft_id": draftId, "text": text]
+        if let parseMode { params["parse_mode"] = parseMode }
+        if canStop { params["can_stop"] = true }
+        let _: Bool = try call("sendMessageDraft", params: params, deadline: Self.stallSeconds)
     }
 
     /// One button per row: an option is a sentence, and Telegram truncates a
@@ -456,82 +440,6 @@ final class TelegramBotAPI {
                                deadline: Self.stallSeconds)
     }
 
-    // MARK: - Forum topics
-
-    /// Open a topic in a forum supergroup and return it.
-    ///
-    /// Needs the bot to be an administrator with `can_manage_topics`; without
-    /// it Telegram answers 400 and there is nothing to retry — someone has to
-    /// grant the right in the group.
-    func createForumTopic(chatId: String, name: String, iconColor: Int?) throws -> TelegramForumTopic {
-        var params: [String: Any] = ["chat_id": chatId, "name": Self.trimTopicName(name)]
-        if let iconColor { params["icon_color"] = iconColor }
-        return try call("createForumTopic", params: params, deadline: Self.stallSeconds)
-    }
-
-    /// Rename a topic. Agents rewrite their own session titles as the work
-    /// turns, and a thread still called by the first prompt three hours in is
-    /// worse than no name at all.
-    func editForumTopic(chatId: String, messageThreadId: Int, name: String) throws {
-        let _: Bool = try call("editForumTopic",
-                               params: ["chat_id": chatId,
-                                        "message_thread_id": messageThreadId,
-                                        "name": Self.trimTopicName(name)],
-                               deadline: Self.stallSeconds)
-    }
-
-    /// Close a topic: it folds into the group's closed list and stops taking
-    /// messages, but keeps everything said in it.
-    ///
-    /// For a thread that is being *moved* rather than ended — a repo re-homed
-    /// to another group — where what the agent said is still worth reading in
-    /// the room it was said in. A thread whose pane is gone is deleted
-    /// instead; see `deleteForumTopic`.
-    func closeForumTopic(chatId: String, messageThreadId: Int) throws {
-        let _: Bool = try call("closeForumTopic",
-                               params: ["chat_id": chatId, "message_thread_id": messageThreadId],
-                               deadline: Self.stallSeconds)
-    }
-
-    /// Delete a topic, taking every message in it.
-    ///
-    /// What a pane's own thread gets when the pane ends: the thread exists to
-    /// be that pane's command line and nothing else, so once there is no pane
-    /// it is a dead entry in a list people have to scroll past. Closing would
-    /// leave it exactly that, only greyed out.
-    ///
-    /// Only ever aimed at a thread seahelm opened itself (`CommandSession
-    /// .autoTopic`) — deletion cannot be undone, and a thread somebody else
-    /// opened is not ours to destroy. Needs the same `can_manage_topics` as
-    /// opening one. General cannot be deleted, and never reaches here: it has
-    /// no thread id to address (see `TelegramChatAddress`).
-    func deleteForumTopic(chatId: String, messageThreadId: Int) throws {
-        let _: Bool = try call("deleteForumTopic",
-                               params: ["chat_id": chatId, "message_thread_id": messageThreadId],
-                               deadline: Self.stallSeconds)
-    }
-
-    /// Telegram caps a topic name at 128 characters and rejects an empty one.
-    static func trimTopicName(_ name: String, limit: Int = 128) -> String {
-        let flat = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        if flat.isEmpty { return "seahelm" }
-        guard flat.count > limit else { return flat }
-        return String(flat.prefix(limit - 1)) + "\u{2026}"
-    }
-
-    /// The six colours Telegram allows a topic icon to take. Anything else is a
-    /// 400, so a colour is chosen from this list rather than computed.
-    static let topicIconColors = [0x6FB9F0, 0xFFD67E, 0xCB86DB, 0x8EEE98, 0xFF93B2, 0xFB6F5F]
-
-    /// One colour per project, stable across launches, so a glance at the topic
-    /// list groups by repo. A sum of scalars rather than `hashValue`: Swift's
-    /// hashing is seeded per process and would repaint the list on every start.
-    static func topicIconColor(for key: String) -> Int {
-        guard !key.isEmpty else { return topicIconColors[0] }
-        let sum = key.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % 100_003 }
-        return topicIconColors[sum % topicIconColors.count]
-    }
-
     /// Drop any webhook registered against this bot.
     ///
     /// A webhook and `getUpdates` are mutually exclusive — the second one to
@@ -551,137 +459,50 @@ final class TelegramBotAPI {
     /// Download the bytes at `filePath` from a prior `getFile`. Caps at
     /// `maxBytes` so a hostile or huge upload cannot fill the disk.
     func downloadFile(path filePath: String, maxBytes: Int = TelegramInboundMedia.maxBytes) throws -> Data {
-        lock.lock()
-        let dead = invalidated
-        lock.unlock()
-        if dead { throw TelegramAPIError.cancelled }
-
-        let configURL = try writeFileConfig(filePath: filePath)
-        defer { try? FileManager.default.removeItem(at: configURL) }
-
-        let output = try runCurl(configURL: configURL, deadline: Self.stallSeconds, body: nil)
-        guard output.count <= maxBytes else {
-            throw TelegramAPIError.network("file exceeds \(maxBytes) bytes")
-        }
-        guard !output.isEmpty else {
-            throw TelegramAPIError.badResponse
-        }
-        return output
-    }
-
-    // MARK: - Transport
-
-    private func call<T: Decodable>(_ method: String, params: [String: Any], deadline: Int) throws -> T {
-        let body = try JSONSerialization.data(withJSONObject: params)
-        let configURL = try writeConfig(url: "\(Self.host)/bot\(token)/\(method)")
-        defer { try? FileManager.default.removeItem(at: configURL) }
-        let output = try runCurl(configURL: configURL, deadline: deadline, body: body)
-        return try unwrap(output)
-    }
-
-    /// GET a file URL — raw bytes, no `{ok, result}` envelope.
-    private func writeFileConfig(filePath: String) throws -> URL {
         // Paths from Telegram are relative (`photos/file_0.jpg`); reject anything
         // that could escape the file host prefix.
         guard !filePath.hasPrefix("/"), !filePath.contains(".."),
               !filePath.contains("://") else {
             throw TelegramAPIError.badResponse
         }
-        return try writeConfig(url: "\(Self.host)/file/bot\(token)/\(filePath)")
+        let response = try request(url: "\(Self.host)/file/bot\(token)/\(filePath)", body: nil,
+                                   deadline: Self.stallSeconds, maxBytes: maxBytes)
+        // A file path that went stale answers with a JSON error, not bytes.
+        guard response.status == 200, !response.body.isEmpty else {
+            throw TelegramAPIError.badResponse
+        }
+        return response.body
     }
 
-    private func runCurl(configURL: URL, deadline: Int, body: Data?) throws -> Data {
-        lock.lock()
-        let dead = invalidated
-        lock.unlock()
-        if dead { throw TelegramAPIError.cancelled }
+    // MARK: - Transport
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.curlPath)
-        var args = [
-            "--silent", "--show-error",
-            "--config", configURL.path,
-            "--max-time", "\(deadline)",
-        ]
-        if body != nil {
-            args += ["--request", "POST",
-                     "--header", "Content-Type: application/json",
-                     "--data-binary", "@-"]
-        }
-        process.arguments = args
-        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
+    private func call<T: Decodable>(_ method: String, params: [String: Any], deadline: Int) throws -> T {
+        let body = try JSONSerialization.data(withJSONObject: params)
+        // Not judged on the HTTP status: Telegram's 4xx answers carry the
+        // `{ok: false, …}` envelope, and its description is the useful part.
+        let response = try request(url: "\(Self.host)/bot\(token)/\(method)", body: body,
+                                   deadline: deadline)
+        return try unwrap(response.body)
+    }
 
-        // Every end, not just the ones we read. `readDataToEndOfFile` does not
-        // close, and the poll thread that owns these calls has no autorelease
-        // pool of its own — leaving a handle open leaked two descriptors per
-        // call (~2800 pipes after a workday of long-polls). Same rule as
-        // `ProcessRunner.drain`.
-        let allHandles = [
-            stdin.fileHandleForReading, stdin.fileHandleForWriting,
-            stdout.fileHandleForReading, stdout.fileHandleForWriting,
-            stderr.fileHandleForReading, stderr.fileHandleForWriting,
-        ]
-        func closePipes() {
-            for handle in allHandles { try? handle.close() }
-        }
-
-        let id = ObjectIdentifier(process)
-        lock.lock()
-        processes[id] = process
-        lock.unlock()
-        defer {
-            lock.lock()
-            processes.removeValue(forKey: id)
-            lock.unlock()
-            closePipes()
-        }
-
+    private func request(url: String, body: Data?, deadline: Int,
+                         maxBytes: Int = .max) throws -> CurlClient.Response {
+        if isInvalidated { throw TelegramAPIError.cancelled }
         do {
-            try process.run()
-        } catch {
-            throw TelegramAPIError.network("could not start curl: \(error.localizedDescription)")
+            return try http.perform(url: url, body: body, timeout: deadline, maxBytes: maxBytes,
+                                    isCancelled: { [weak self] in self?.isInvalidated ?? true })
+        } catch let failure as CurlClient.Failure {
+            switch failure {
+            case .cancelled:
+                throw TelegramAPIError.cancelled
+            case .timedOut:
+                throw TelegramAPIError.network("no response within \(deadline)s")
+            case .tooLarge:
+                throw TelegramAPIError.network("file exceeds \(maxBytes) bytes")
+            case .transport(let reason):
+                throw TelegramAPIError.network(scrub(reason))
+            }
         }
-        if let body {
-            stdin.fileHandleForWriting.write(body)
-        }
-        try? stdin.fileHandleForWriting.close()
-        // Drain both pipes before waiting, or a large reply fills the pipe and
-        // curl blocks on write while we block on exit.
-        let output = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        process.waitUntilExit()
-
-        lock.lock()
-        let cancelled = invalidated
-        lock.unlock()
-        if cancelled { throw TelegramAPIError.cancelled }
-
-        switch process.terminationStatus {
-        case 0:
-            return output
-        case 28:
-            throw TelegramAPIError.network("no response within \(deadline)s")
-        default:
-            let reason = errorText.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw TelegramAPIError.network(scrub(reason.isEmpty ? "curl exit \(process.terminationStatus)" : reason))
-        }
-    }
-
-    /// The URL — and so the token — goes to curl through a private file
-    /// rather than an argument, where every other user on the machine could
-    /// read it with `ps`.
-    private func writeConfig(url: String) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-        let configURL = dir.appendingPathComponent("seahelm-telegram-\(UUID().uuidString).curlrc")
-        let contents = "url = \"\(url)\"\n"
-        guard FileManager.default.createFile(atPath: configURL.path, contents: Data(contents.utf8),
-                                             attributes: [.posixPermissions: 0o600]) else {
-            throw TelegramAPIError.network("could not write curl config")
-        }
-        return configURL
     }
 
     /// Every method answers `{ok, result}` or `{ok: false, error_code,

@@ -160,10 +160,11 @@ enum CommandFormatter {
             if let footer, !footer.isEmpty { out.append(footer) }
             return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
         }
-        if let transcript = transcript.map({ MailContentRedactor.summary($0, limit: 6_000) }),
-           !transcript.isEmpty {
+        if let transcript = transcript.map({ transcriptTail($0) }), !transcript.isEmpty {
             out.append("**Session**")
+            out.append("```")
             out.append(transcript)
+            out.append("```")
             out.append("")
         }
         let message = MailContentRedactor.summary(pane.lastMessage, limit: 1_500)
@@ -179,6 +180,20 @@ enum CommandFormatter {
         }
         if let footer, !footer.isEmpty { out.append(footer) }
         return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
+    }
+
+    /// A terminal's recent screen, as `/show` prints it: redacted, the *end*
+    /// kept when it is too long — the newest output is what was asked for —
+    /// and safe inside a code fence, which is what keeps its indentation and
+    /// stops `*` and `_` in it being read as markdown.
+    static func transcriptTail(_ text: String, limit: Int = 3_000) -> String {
+        let redacted = MailContentRedactor.summary(text, limit: .max)
+            .replacingOccurrences(of: "```", with: "'''")
+        guard redacted.count > limit else { return redacted }
+        let tail = redacted.suffix(limit)
+        // Start on a whole line.
+        let start = tail.firstIndex(of: "\n").map { tail.index(after: $0) } ?? tail.startIndex
+        return "…\n" + tail[start...]
     }
 
     /// The stream from the latest prompt on — the whole ring when that prompt
@@ -310,18 +325,6 @@ enum CommandFormatter {
         }
     }
 
-    /// The footer on a listing a room narrowed.
-    ///
-    /// It says both halves — what this room is about, and that there is more
-    /// elsewhere — because a listing that quietly omits half the fleet is
-    /// indistinguishable from a fleet that lost half its panes. Nothing hidden,
-    /// nothing said.
-    static func narrowedNote(keys: Set<String>, hidden: Int) -> String {
-        guard !keys.isEmpty, hidden > 0 else { return "" }
-        let names = keys.sorted().map { $0.hasPrefix("/") ? URL(fileURLWithPath: $0).lastPathComponent : $0 }
-        return "\n\n_\(names.joined(separator: ", ")) only — \(hidden) more elsewhere; `/status all` for the fleet._"
-    }
-
     /// The tail `/status` adds when the listing it just built was preceded by
     /// a cleanup. Said rather than done silently: a thread that vanished from
     /// the group is the kind of thing a reader should be able to trace back to
@@ -331,22 +334,6 @@ enum CommandFormatter {
         return "\n\n_Let go of \(retired) binding\(retired == 1 ? "" : "s") whose worktree is gone._"
     }
 
-    /// What `/home` prints on its own: which group each repo's topics go to.
-    ///
-    /// Chat ids, not names — the bot cannot ask Telegram what a group is called
-    /// without a round trip per row, and the id is what the reader would put in
-    /// the config anyway. The group the reader is standing in is the one whose
-    /// id they just saw in their own address bar.
-    static func topicHomes(_ homes: [String: String]) -> String {
-        guard !homes.isEmpty else {
-            return "No group opens topics yet. Say `/home @repo` in a forum group "
-                 + "to give that repo's panes a topic each here."
-        }
-        let rows = homes.sorted { $0.key < $1.key }
-            .map { "• `\($0.key)` → `\($0.value)`" }
-            .joined(separator: "\n")
-        return "**Topics open in:**\n\(rows)\n\n`/home @repo off` removes one."
-    }
 
     private static func usageHint(_ verb: String) -> String {
         guard let spec = CommandSpecs.spec(for: verb) else { return "" }

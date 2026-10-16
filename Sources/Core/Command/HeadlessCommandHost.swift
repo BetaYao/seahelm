@@ -41,14 +41,8 @@ final class HeadlessCommandHost: CommandHost {
     func openIssue(title: String) {}
     func addRepo() {}
     func confirm(_ summary: String, completion: @escaping (Bool) -> Void) { completion(false) }
-    func topicHomes() -> [String: String] { [:] }
-    @discardableResult
-    func setTopicHome(key: String, chatId: String?) -> Int { 0 }
-    func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void) {
-        completion("Not running.")
-    }
-    /// Nothing to reconcile without the app: the bindings and the topics both
-    /// belong to the running instance.
+    /// Nothing to reconcile without the app: the bindings belong to the
+    /// running instance.
     @discardableResult
     func reconcileChatBindings() -> Int { 0 }
 }

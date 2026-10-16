@@ -14,7 +14,14 @@ import Foundation
 /// message. That separation is deliberate: the progress line is disposable,
 /// and anything the reader needs to keep must not be.
 ///
-/// Three rules keep it from becoming the noisiest thing in the chat:
+/// That is how a **group** gets it. A **private chat** gets a board instead,
+/// streamed with `sendMessageDraft` — Telegram's own typing preview, which
+/// never enters the history and so needs no message to edit or take back. A
+/// private chat holds one draft at a time, so the board is the whole fleet in
+/// one: the pane the chat is bound to in detail, with a Stop button, then a
+/// line for every other pane running or waiting. See `boardText`.
+///
+/// Three rules keep the group line from becoming the noisiest thing there:
 ///
 ///   - **Only bound chats.** A `/go #n` conversation asked to watch this pane.
 ///     A fleet listener did not, and a live line per pane across a fleet is a
@@ -36,6 +43,12 @@ final class ChatProgressReporter {
     var send: ((_ chatId: String, _ text: String, _ done: @escaping (String?) -> Void) -> Void)?
     var edit: ((_ chatId: String, _ messageId: String, _ text: String) -> Void)?
     var remove: ((_ chatId: String, _ messageId: String) -> Void)?
+    /// Streams the board into a private chat; `canStop` puts Telegram's Stop
+    /// button under it.
+    var draft: ((_ chatId: String, _ text: String, _ canStop: Bool) -> Void)?
+    /// Private chats that hear the whole fleet even unbound — the configured
+    /// default chat. Bound private chats are found in the session store.
+    var fleetChats: () -> [String] = { [] }
     /// Runs `work` once `delay` has passed, with the time it ran. An edit held
     /// back by the throttle is put up when the interval is over — otherwise the
     /// row that starts a long build waits for whatever the build does next.
@@ -73,6 +86,20 @@ final class ChatProgressReporter {
     private var feeds: [String: [String]] = [:]
     /// Panes with a held-back edit already scheduled.
     private var flushing: Set<String> = []
+
+    /// A pane on the board: running, or stopped on a question.
+    private struct BoardEntry {
+        var info: PaneInfo
+        var handle: Int
+        /// When it started running, or started waiting.
+        var since: Date
+        var waiting: Bool
+    }
+    private var board: [String: BoardEntry] = [:]
+    /// When each private chat's board was last put up.
+    private var boardSentAt: [String: Date] = [:]
+    /// A refresh is already scheduled — the heartbeat, or a throttled update.
+    private var boardScheduled = false
     private let sessions: CommandSessionStore
 
     init(sessions: CommandSessionStore) {
@@ -86,11 +113,25 @@ final class ChatProgressReporter {
     static let minEditInterval: TimeInterval = 3
     /// Rows under the pane's name — about what a phone shows without scrolling.
     static let feedRows = 6
+    /// A draft fades about 12s after the last call (measured; the docs say
+    /// 30), and any message the bot sends to the chat wipes it at once, so
+    /// it is put up again on this beat for as long as anything is running.
+    static let boardRefresh: TimeInterval = 8
+    /// Drafts are not rate-limited the way edits are (60 back to back went
+    /// through), but redrawing faster than a phone can be read is pointless.
+    static let boardThrottle: TimeInterval = 1.5
+    /// Lines for the panes other than the bound one.
+    static let boardRows = 8
+    /// One draft per chat; the same id keeps its updates animated.
+    static let boardDraftId = 1
 
     // MARK: - Ingest
 
     func ingest(_ outcome: IngestOutcome, now: Date = Date()) {
         guard let (paneKey, handle) = identify(outcome.info) else { return }
+
+        track(outcome, paneKey: paneKey, handle: handle, now: now)
+        defer { refreshBoards(now: now) }
 
         if Self.endsTurn(outcome) {
             turnStartedAt[paneKey] = nil
@@ -101,6 +142,12 @@ final class ChatProgressReporter {
         }
 
         if turnStartedAt[paneKey] == nil {
+            // Only work starts a turn. Events keep arriving after a turn has
+            // ended — the reply streamed after Stop, a session closing — and
+            // one of those opening a turn left a "working" line behind that
+            // no end would ever come to clear, most visibly when the pane was
+            // closed right after.
+            guard outcome.newStatus == .running else { return }
             turnStartedAt[paneKey] = now
             feeds[paneKey] = []
         }
@@ -119,6 +166,7 @@ final class ChatProgressReporter {
         feed.append(row)
         feeds[paneKey] = Array(feed.suffix(Self.feedRows))
         report(paneKey: paneKey, now: now)
+        refreshBoards(now: now)
     }
 
     private func report(paneKey: String, now: Date) {
@@ -146,10 +194,116 @@ final class ChatProgressReporter {
         }
     }
 
-    /// Every chat whose conversation is bound to this pane. A fleet listener is
-    /// deliberately not one of them.
+    /// Every group whose conversation is bound to this pane. A fleet listener is
+    /// deliberately not one of them, and a private chat has the board instead.
     private func chatIds(forPane paneKey: String) -> [String] {
-        sessions.telegramChats(boundToPaneKey: paneKey)
+        sessions.telegramChats(boundToPaneKey: paneKey).filter { !Self.isPrivateChat($0) }
+    }
+
+    // MARK: - Board
+
+    private func track(_ outcome: IngestOutcome, paneKey: String, handle: Int, now: Date) {
+        switch outcome.newStatus {
+        case .running where !Self.endsTurn(outcome):
+            if var entry = board[paneKey], !entry.waiting {
+                entry.info = outcome.info
+                board[paneKey] = entry
+            } else {
+                board[paneKey] = BoardEntry(info: outcome.info, handle: handle, since: now, waiting: false)
+                // Nothing may arrive between now and the end of the grace
+                // period — an agent thinking quietly — so look again then.
+                schedule(Self.graceSeconds) { [weak self] ranAt in self?.refreshBoards(now: ranAt) }
+            }
+        case .waiting:
+            if var entry = board[paneKey], entry.waiting {
+                entry.info = outcome.info
+                board[paneKey] = entry
+            } else {
+                board[paneKey] = BoardEntry(info: outcome.info, handle: handle, since: now, waiting: true)
+            }
+        case .unknown:
+            // Detection lost the thread for a moment; neither started nor ended.
+            break
+        default:
+            board[paneKey] = nil
+        }
+    }
+
+    /// The board is up while some pane has been working past the grace period.
+    /// A board of nothing but questions would be put up every few seconds
+    /// for as long as one sits unanswered — the question card already said it.
+    private func boardIsLive(now: Date) -> Bool {
+        board.values.contains { !$0.waiting && now.timeIntervalSince($0.since) >= Self.graceSeconds }
+    }
+
+    /// Private chats that get a board: the bound ones and the fleet's own.
+    private func boardChatIds() -> [String] {
+        let bound = sessions.allSessions()
+            .filter { $0.surface == "telegram" && !$0.closed && $0.boundPaneKey != nil }
+            .map(\.id)
+        return Array(Set(bound + fleetChats())).filter(Self.isPrivateChat).sorted()
+    }
+
+    private func refreshBoards(now: Date, heartbeat: Bool = false) {
+        guard let draft, boardIsLive(now: now) else { return }
+        var heldBack = false
+        for chatId in boardChatIds() {
+            if !heartbeat, let last = boardSentAt[chatId],
+               now.timeIntervalSince(last) < Self.boardThrottle {
+                heldBack = true
+                continue
+            }
+            let focusKey = sessions.session(for: CommandSession.key(surface: "telegram", id: chatId)).boundPaneKey
+            let (text, canStop) = boardText(focusKey: focusKey, now: now)
+            draft(chatId, text, canStop)
+            boardSentAt[chatId] = now
+        }
+        guard !boardScheduled else { return }
+        boardScheduled = true
+        // A throttled update goes up when the throttle allows; otherwise this
+        // is the heartbeat that keeps the draft from fading.
+        schedule(heldBack ? Self.boardThrottle : Self.boardRefresh) { [weak self] ranAt in
+            guard let self else { return }
+            self.boardScheduled = false
+            self.refreshBoards(now: ranAt, heartbeat: true)
+        }
+    }
+
+    /// The board for one chat: the pane it is bound to in full, if that pane
+    /// is working — the only one Stop can mean — then a line per other pane.
+    private func boardText(focusKey: String?, now: Date) -> (text: String, canStop: Bool) {
+        var blocks: [String] = []
+        var canStop = false
+        if let focusKey, let focus = board[focusKey], !focus.waiting {
+            blocks.append(Self.line(for: focus.info, handle: focus.handle,
+                                    feed: feeds[focusKey] ?? [], since: focus.since, now: now))
+            canStop = true
+        }
+        let others = board.filter { $0.key != focusKey }.map(\.value).sorted {
+            // Questions first: they are the ones waiting on the reader.
+            $0.waiting != $1.waiting ? $0.waiting : $0.since < $1.since
+        }
+        let rows = others.prefix(Self.boardRows).map {
+            Self.boardRow(info: $0.info, handle: $0.handle, waiting: $0.waiting, since: $0.since, now: now)
+        }
+        if !rows.isEmpty {
+            var list = rows.joined(separator: "\n")
+            if others.count > rows.count { list += "\n… \(others.count - rows.count) more" }
+            blocks.append(list)
+        }
+        return (blocks.joined(separator: "\n\n"), canStop)
+    }
+
+    static func boardRow(info: PaneInfo, handle: Int, waiting: Bool, since: Date, now: Date) -> String {
+        let place = "#\(handle) \(info.project)/\(info.branch)"
+        return waiting ? "❗ \(place) · waiting for you"
+                       : "⏳ \(place) · \(elapsed(now.timeIntervalSince(since)))"
+    }
+
+    /// Telegram chat ids: a user (and so a private chat) is positive, a group
+    /// negative.
+    static func isPrivateChat(_ chatId: String) -> Bool {
+        (Int64(chatId) ?? 0) > 0
     }
 
     /// Puts `text` up in `chatId`. False when the throttle held a changed line
@@ -208,6 +362,8 @@ final class ChatProgressReporter {
     /// "running Bash" over a question is worse than saying nothing at all.
     static func endsTurn(_ outcome: IngestOutcome) -> Bool {
         if outcome.isCompletionSignal { return true }
+        // A pane that has exited is not coming back to finish the turn.
+        if outcome.newStatus == .exited { return true }
         guard outcome.statusChanged else { return false }
         return outcome.newStatus == .idle || outcome.newStatus == .waiting || outcome.newStatus == .error
     }

@@ -108,24 +108,8 @@ protocol CommandHost: AnyObject {
     func openIssue(title: String)
     func addRepo()
 
-    // MARK: Per-pane chat topics
-
-    /// The `topic_chats` table: repo name or worktree path → group chat id.
-    func topicHomes() -> [String: String]
-    /// Write one entry, or remove it with a nil chat. Saved through the app's
-    /// own config, which is the only writer — editing the file underneath a
-    /// running app loses the edit at its next save.
-    ///
-    /// Returns how many existing topics the change stranded: moving a repo's
-    /// home archives the threads it had in the old group, and the reader is
-    /// told rather than left to wonder why their history moved.
-    @discardableResult
-    func setTopicHome(key: String, chatId: String?) -> Int
-    /// Whether this chat can actually hold topics: nil when it can, otherwise
-    /// what is missing, in words the reader can act on.
-    func verifyTopicHost(chatId: String, completion: @escaping (String?) -> Void)
-    /// Let go of the bindings whose worktree is no longer on disk — deleting
-    /// the topics seahelm opened for them — and return how many.
+    /// Let go of the bindings whose worktree is no longer on disk, and return
+    /// how many.
     ///
     /// Asked by `/status`, which is already the inventory this reconciles
     /// against, so the listing that follows describes a fleet that exists.
@@ -259,31 +243,25 @@ final class CommandExecutor {
                 reply(CommandReply("Sent to \(sent) pane\(sent == 1 ? "" : "s")."))
             }
 
-        case .status(let scope, let all):
+        case .status(let scope):
             // Reconcile before listing, not after: a binding whose worktree was
             // deleted behind the app's back would otherwise be marked "talking
             // to this one" against a pane the listing cannot show.
             let retired = host.reconcileChatBindings()
-            // A room given to a repo answers about that repo. `bound` is
-            // resolved against the whole fleet, so a pane this conversation is
-            // talking to is still marked even when it is not in the listing.
             let bound = boundPane(surface, index: index)
-            let keys = all ? [] : Self.homeKeys(for: surface, homes: host.topicHomes())
-            let shown = index.narrowed(to: keys)
             let text: String
             var buttons: [CommandButton] = []
             switch scope {
             case .panes:
-                text = CommandFormatter.panes(shown, bound: bound)
-                buttons = CommandFormatter.paneButtons(shown, bound: bound)
+                text = CommandFormatter.panes(index, bound: bound)
+                buttons = CommandFormatter.paneButtons(index, bound: bound)
             case .worktrees:
-                text = CommandFormatter.worktrees(shown, bound: bound)
-                buttons = CommandFormatter.worktreeButtons(shown, bound: bound)
+                text = CommandFormatter.worktrees(index, bound: bound)
+                buttons = CommandFormatter.worktreeButtons(index, bound: bound)
             case .repos:
-                text = CommandFormatter.repos(shown)
+                text = CommandFormatter.repos(index)
             }
-            let note = CommandFormatter.narrowedNote(keys: keys, hidden: index.panes.count - shown.panes.count)
-                + CommandFormatter.reconciledNote(retired)
+            let note = CommandFormatter.reconciledNote(retired)
             reply(CommandReply(text + note, showsOverview: surface.isDesktop, buttons: buttons))
 
         case .returnAll:
@@ -357,8 +335,6 @@ final class CommandExecutor {
                 }
             }
 
-        case .home(let target, let off):
-            runHome(target, off: off, host: host, surface: surface, reply: reply)
 
         case .idea(let text):
             let stored = host.addIdea(text: text, source: surface.sessionKey)
@@ -376,7 +352,7 @@ final class CommandExecutor {
                 }
                 reply(CommandReply(text))
             } else {
-                reply(CommandReply(CommandSpecs.help))
+                reply(CommandReply(CommandSpecs.help(desktop: surface.isDesktop)))
             }
 
         case .yes:
@@ -438,6 +414,14 @@ final class CommandExecutor {
             reply(deliver(text, to: pane))
             return
         }
+        // Bound to a pane that is not there. Not sent anywhere: the pane may
+        // still be restoring, and guessing another one is how an order meant
+        // for one agent lands in another's prompt.
+        if !surface.isDesktop, sessions.session(for: surface.sessionKey).boundPaneKey != nil {
+            reply(.error("The pane this chat was talking to isn't running — nothing sent. "
+                       + "`/status` lists what is, `/go #n` picks one."))
+            return
+        }
         // One pane is no choice at all; bind it and say so once.
         if !surface.isDesktop, index.panes.count == 1 {
             let pane = index.panes[0]
@@ -461,8 +445,13 @@ final class CommandExecutor {
 
     // MARK: - Binding
 
-    /// The pane this surface is talking to. A binding that names a pane which
-    /// has since closed falls back to the worktree it was in, then to nothing.
+    /// The pane this surface is talking to.
+    ///
+    /// A binding to a pane that is no longer in the fleet resolves to nothing —
+    /// never to a neighbour in the same worktree, which is a different agent
+    /// that never asked to be spoken to. Only a binding to a *worktree* (`/go
+    /// @worktree`, or `/new` racing the agent launch) takes the first pane
+    /// there.
     func boundPane(_ surface: CommandSurface, index: FleetIndex) -> PaneRef? {
         if surface.isDesktop {
             guard let key = host?.desktopBoundPaneKey else { return nil }
@@ -470,15 +459,9 @@ final class CommandExecutor {
         }
         let session = sessions.session(for: surface.sessionKey)
         guard !session.closed else { return nil }
-        if let key = session.boundPaneKey, let pane = index.pane(handleKey: key) { return pane }
+        if let key = session.boundPaneKey { return index.pane(handleKey: key) }
         if let path = session.boundWorktreePath, let pane = index.panes(inWorktree: path).first {
-            // A topic seahelm opened for a worktree follows the work: its pane
-            // pointer is whoever reported last, so an order goes to whoever is
-            // actually running. Sticking to the pane picked here would freeze
-            // that — this is only the answer until the next report moves it.
-            guard !(session.autoTopic && session.topicScope == .worktree) else { return pane }
-            // A worktree binding somebody made by hand resolves to its first
-            // pane and sticks to it.
+            // A worktree binding resolves to its first pane and sticks to it.
             sessions.bind(surface.sessionKey, toPaneKey: pane.handleKey, paneId: pane.id, worktreePath: path)
             return pane
         }
@@ -516,78 +499,6 @@ final class CommandExecutor {
         reply(CommandReply("\(summary)\nReply `/yes` within \(Int(PendingAction.lifetime))s to go ahead.",
                            buttons: [.line("Go ahead", "/yes"),
                                      CommandButton(label: "Cancel", effect: .cancelPending)]))
-    }
-
-    // MARK: - /home
-
-    /// Give the group this was said in to a repo (or one worktree).
-    ///
-    /// The group is never typed: it is where the line came from, which is the
-    /// whole point — a chat id is not something anybody should have to look up,
-    /// and the surface already knows it. Any topic on the address is dropped,
-    /// because a topic is opened *in* a chat, not in another topic.
-    private func runHome(_ target: HomeTarget?, off: Bool, host: CommandHost,
-                         surface: CommandSurface, reply: @escaping (CommandReply) -> Void) {
-        guard let target else {
-            reply(CommandReply(CommandFormatter.topicHomes(host.topicHomes())))
-            return
-        }
-        if off {
-            let archived = host.setTopicHome(key: target.configKey, chatId: nil)
-            reply(CommandReply("**\(target.label)** no longer opens topics here."
-                             + Self.archivedNote(archived)))
-            return
-        }
-        guard let chatId = Self.chatId(of: surface) else {
-            reply(.error("Say `/home` in the Telegram group you want the topics in — "
-                       + "it is the group the line comes from, so there is nothing to type."))
-            return
-        }
-        // Checked now rather than at the first notice: the two ways this fails
-        // are both something only a person can fix, and a quiet failure hours
-        // later reads as the feature not working.
-        host.verifyTopicHost(chatId: chatId) { problem in
-            if let problem {
-                reply(.error(problem))
-                return
-            }
-            let archived = host.setTopicHome(key: target.configKey, chatId: chatId)
-            reply(CommandReply("**\(target.label)** will open its panes' topics here — "
-                             + "one per pane, named after what it is working on, the first time it has "
-                             + "something to say."
-                             + Self.archivedNote(archived)))
-        }
-    }
-
-    /// Said when a home change strands topics. They are archived where they
-    /// were rather than moved: Telegram cannot move a thread between groups,
-    /// and closing keeps what was said in it readable.
-    static func archivedNote(_ count: Int) -> String {
-        guard count > 0 else { return "" }
-        let threads = count == 1 ? "topic" : "topics"
-        return "\n\n\(count) existing \(threads) archived where \(count == 1 ? "it was" : "they were") — "
-             + "\(count == 1 ? "that pane opens" : "those panes open") a fresh one here next time "
-             + "\(count == 1 ? "it has" : "they have") something to say."
-    }
-
-    /// What this room is about: every `topic_chats` key whose group is the chat
-    /// this line came from.
-    ///
-    /// Empty for the desktop, for a private chat and for a group nobody gave to
-    /// anything — all of which are rooms about the whole fleet, and so listings
-    /// that should not be narrowed. Several keys can share a group (two repos
-    /// homed together), and then the room is about both.
-    static func homeKeys(for surface: CommandSurface, homes: [String: String]) -> Set<String> {
-        guard let chatId = chatId(of: surface) else { return [] }
-        return Set(homes.filter { TelegramChatAddress.chatId(of: $0.value) == chatId }.map(\.key))
-    }
-
-    /// The chat a surface speaks for, with any topic dropped. Nil for every
-    /// surface that is not a Telegram chat.
-    static func chatId(of surface: CommandSurface) -> String? {
-        let session = CommandSession(key: surface.sessionKey)
-        guard session.surface == "telegram", !session.id.isEmpty else { return nil }
-        return TelegramChatAddress.chatId(of: session.id)
     }
 
     private func confirmPending(surface: CommandSurface, reply: @escaping (CommandReply) -> Void) {
