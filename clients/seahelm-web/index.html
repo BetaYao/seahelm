@@ -450,6 +450,9 @@
   .mc-field textarea{flex:1;min-width:0;border:0;background:none;color:var(--text);
     padding:11px 0;font-family:var(--sans);font-size:max(16px, var(--fs-body));line-height:22px;outline:none;
     height:44px;max-height:198px;resize:none;overflow-y:auto}
+  /* One line, always: a placeholder that wraps in a one-row field is cut in
+     half by its bottom edge. */
+  .mc-field textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--faint)}
   .mc-field button{position:relative;flex:none;width:44px;height:44px;padding:0;border:0;
     border-radius:50%;display:flex;align-items:center;justify-content:center;
     background:var(--accent);color:var(--accent-ink);cursor:pointer;transition:background .12s;
@@ -1625,7 +1628,7 @@ function renderComposerKind(pane){
   const kind = k ? k.kind : 'agent';
   if (box.dataset.kind !== kind) box.dataset.kind = kind;
   const placeholder = !k ? 'Send to this pane…'
-    : kind === 'shell' ? 'Run a command in this terminal…'
+    : kind === 'shell' ? 'Run a command…'
     : `Message ${k.label}…`;
   if (input.placeholder !== placeholder) input.placeholder = placeholder;
   if (tag) {
