@@ -251,8 +251,12 @@
   #midcol{display:flex;flex-direction:column;overflow:hidden;position:relative;background:var(--bg)}
   .detail-head{flex:none;display:grid;align-items:center;column-gap:8px;
     grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"back title menu" "tabs tabs tabs";
-    padding:8px 12px 8px 24px;border-bottom:0.5px solid var(--sep);background:rgba(22,22,24,.86);
-    -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+    padding:8px 12px 8px 24px;border-bottom:0.5px solid var(--sep);background:var(--bg)}
+  /* On a phone the head is the same ground as First Mate's, with no rule
+     under it: opening a worktree reads as one surface, the way an iOS
+     navigation push does. A grey bar here made the list and the detail look
+     like two different apps. */
+  @media (max-width:760px){ .detail-head{border-bottom-color:transparent} }
   #drawerBtn{grid-area:back;position:relative;align-items:center;justify-content:center;height:44px;min-width:44px;padding:0 6px;
     border:0;border-radius:22px;background:none;color:var(--accent);font-size:17px;cursor:pointer}
   #drawerBtn svg{width:12px;height:20px;stroke-width:2.4}
@@ -428,9 +432,10 @@
   }
 
   /* The composer: a pill with one button inside it. */
-  .msg-composer{display:none;flex:none;border-top:0.5px solid var(--sep);background:rgba(22,22,24,.92);
+  .msg-composer{display:none;flex:none;border-top:0.5px solid var(--sep);background:var(--bg);
     padding:8px max(12px, calc((100% - 784px) / 2)) max(10px, env(safe-area-inset-bottom))}
   .msg-composer.on{display:block}
+  @media (max-width:760px){ .msg-composer{border-top-color:transparent} }
   .reply-bar:not([hidden]) ~ .msg-composer{border-top:0;background:transparent}
   .mc-kind{font-size:var(--fs-cap);color:var(--accent);margin:0 0 6px 16px}
   .mc-kind[hidden]{display:none}
