@@ -20,6 +20,9 @@ final class TelegramChannel: ExternalChannel {
     /// Stop was pressed under a draft in a private chat: `(chatId, draftId)`.
     /// Main thread; only from someone on the allowlist.
     var onDraftStopped: ((String, Int) -> Void)?
+    /// A send found the chat gone for good — see `TelegramAPIError.isChatGone`.
+    /// Main thread.
+    var onChatGone: ((String) -> Void)?
     var onStateChange: ((GatewayState) -> Void)?
 
     private var config: TelegramConfig
@@ -222,6 +225,12 @@ final class TelegramChannel: ExternalChannel {
                                              buttons: buttons)
                 NSLog("[Telegram] → \(target): \(chunk.count) chars")
                 return id
+            } catch let error as TelegramAPIError where error.isChatGone {
+                // Retrying cannot help, and every later notice would fail the
+                // same way: say so once and let the owner let the chat go.
+                NSLog("[Telegram] \(target) is gone: \(error.localizedDescription)")
+                reportChatGone(target)
+                return nil
             } catch let error as TelegramAPIError where error.isBadRequest && parseMode != nil {
                 // Telegram is strict about its HTML. Rather than lose the
                 // message over a stray tag, resend the same words flat.
@@ -265,6 +274,8 @@ final class TelegramChannel: ExternalChannel {
             do {
                 try api.sendMessageDraft(chatId: chatId, draftId: draft.draftId, text: text,
                                          parseMode: "HTML", canStop: draft.canStop)
+            } catch let error as TelegramAPIError where error.isChatGone {
+                self.reportChatGone(chatId)
             } catch let error as TelegramAPIError where error.isBadRequest {
                 // Same as a message: a stray tag must not cost the update.
                 try? api.sendMessageDraft(chatId: chatId, draftId: draft.draftId,
@@ -274,6 +285,10 @@ final class TelegramChannel: ExternalChannel {
                 NSLog("[Telegram] Draft to \(chatId) failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func reportChatGone(_ chatId: String) {
+        DispatchQueue.main.async { [weak self] in self?.onChatGone?(chatId) }
     }
 
     /// Put the buttons on a message already sent, or take them off with `[]`.

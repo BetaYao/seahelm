@@ -341,6 +341,9 @@ class MainWindowController: NSWindowController {
         AgentRegistry.shared.draftStopRoute = { [weak self] chatId, _ in
             self?.stopBoundPane(chatId: chatId)
         }
+        AgentRegistry.shared.chatGoneRoute = { [weak self] chatId in
+            self?.letGoOfGoneChat(chatId)
+        }
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
         statusAggregator.onActivity = { [weak self] path, date in
@@ -3448,6 +3451,16 @@ extension MainWindowController {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Telegram refused a send because the chat is gone — the bot was removed
+    /// from the group, or blocked. Close its binding, or every notice from the
+    /// pane it pointed at fails the same way forever. Nothing is said: there
+    /// is nowhere left to say it.
+    func letGoOfGoneChat(_ chatId: String) {
+        let key = CommandSession.key(surface: "telegram", id: chatId)
+        guard tabCoordinator.commandSessions.close(key: key) != nil else { return }
+        NSLog("[Telegram] Binding \(key) closed — the chat no longer accepts messages")
     }
 
     /// Stop was pressed under the progress board in a private chat: interrupt
