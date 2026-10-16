@@ -865,7 +865,7 @@ function connect(){
 
 function openGatewaySocket(){
   const url = gatewayWsURL();
-  if (!S.authPass && !S.pendingCode) {
+  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA) {
     reconnector.stop();            // nothing to authenticate with
     setStatus(false, 'Pairing code needed');
     return;
@@ -900,8 +900,10 @@ function openGatewaySocket(){
     // a slow link, long enough for the heartbeat to give up and start it over.
     const since = heldMessageSeq();
     if (since > 0) params.since_seq = since;
+    const usedTelegram = !S.pendingCode && !S.authPass && !!TG_INIT_DATA;
     if (S.pendingCode) params.code = S.pendingCode;
-    else { params.mac_id = S.mac; params.token = S.authPass; }
+    else if (S.authPass) { params.mac_id = S.mac; params.token = S.authPass; }
+    else params.telegram_init_data = TG_INIT_DATA;
     gwSend('auth', params, (r, err) => {
       // Capture before clearing: token vs code decides whether we drop the
       // remembered pair and put the gate back on the code form.
@@ -916,7 +918,7 @@ function openGatewaySocket(){
       if (err || !r || r.ok === false) {
         S.pendingCode = null;
         reconnector.stop();        // a rejected credential stays rejected
-        rejectAuth({ usedCode, rateLimited: false, detail: err || r });
+        rejectAuth({ usedCode, usedTelegram, rateLimited: false, detail: err || r });
         ws.close();
         return;
       }
@@ -1786,6 +1788,15 @@ function applySessionSnapshot(result){
 // of every pane. The token is scoped instead — it opens this gateway and nothing
 // else, and re-pairing invalidates it.
 const CREDS_KEY = 'seahelm_creds';
+
+// Opened as the bot's Telegram Mini App: Telegram puts the signed launch data
+// in the fragment as `tgWebAppData`. The gateway checks it against the bot
+// token and the allowlist, so it signs in with no pairing code — and on the
+// Mini App's host, where Cloudflare Access is not in front, a code is refused.
+const TG_INIT_DATA = (() => {
+  try { return new URLSearchParams(location.hash.slice(1)).get('tgWebAppData') || null; }
+  catch (e) { return null; }
+})();
 try { localStorage.removeItem('seahelm_pair'); } catch (e) {}   // drop the old plaintext
 
 // Sticky message for the gate card. The header status sits under the fullscreen
@@ -1811,8 +1822,12 @@ function clearPair(){
 }
 
 /** Auth rejected: drop a dead token and put the code form back on screen. */
-function rejectAuth({ usedCode, rateLimited, detail }){
-  if (rateLimited) {
+function rejectAuth({ usedCode, usedTelegram, rateLimited, detail }){
+  if (usedTelegram) {
+    gateErrorMsg = 'This Telegram account is not allowed on this Mac — add it in Seahelm ▸ Settings ▸ Telegram';
+    setStatus(false, 'Auth failed');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  } else if (rateLimited) {
     gateErrorMsg = 'Too many attempts — try again later';
     setStatus(false, 'Too many attempts');
     log('sys', '(auth-rate)', JSON.stringify(detail));
@@ -1826,6 +1841,8 @@ function rejectAuth({ usedCode, rateLimited, detail }){
     // with no visible error — the gate covers the header status.
     S.authPass = null;
     try { localStorage.removeItem(CREDS_KEY); } catch (e) {}
+    // Inside Telegram the launch itself can sign in again — no code to type.
+    if (TG_INIT_DATA) { gateErrorMsg = null; connect(); renderGate(); return; }
     gateErrorMsg = 'Pairing is no longer valid — enter the code again';
     setStatus(false, 'Auth failed');
     log('sys', '(auth-fail)', JSON.stringify(detail));
@@ -1883,6 +1900,19 @@ function renderGate(){
     if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
     $('gateConnect').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     $('gateUnpair').onclick = () => { clearPair(); };
+    return;
+  }
+
+  if (TG_INIT_DATA){                     // a Mini App signs in as its Telegram user
+    gate.innerHTML = `
+      <div class="gate-card">
+        <div class="gate-title">Seahelm</div>
+        <div class="gate-hint">${gateErrorMsg ? '' : 'Signing in with Telegram…'}</div>
+        <button class="gate-primary" id="gateTgRetry" ${gateErrorMsg ? '' : 'hidden'}>Try again</button>
+        <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
+      </div>`;
+    if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
+    $('gateTgRetry').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     return;
   }
 
@@ -3359,7 +3389,7 @@ window.addEventListener('pageshow', () => {
   if (reconnector.isStopped) return;          // disconnected on purpose
   // Looks alive — which a dead path also does — so ask before trusting it.
   if (isLinked()) { probeLink(WAKE_PROBE_TIMEOUT_MS); restoreMount(); return; }
-  if (!S.authPass && !S.pendingCode) return;  // never paired
+  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA) return;  // never paired
   reconnector.resume();
   openGatewaySocket();
 });

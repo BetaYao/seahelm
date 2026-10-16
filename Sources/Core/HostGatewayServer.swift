@@ -33,6 +33,13 @@ final class HostGatewayServer {
     private var messageToken: Int?
     private var connections: [ObjectIdentifier: ConnectionState] = [:]
     private var proxied: [ObjectIdentifier: NWConnection] = [:]
+    /// The Host each proxied upgrade arrived with, by the local port of its hop
+    /// to the internal listener — which is the peer port the internal side
+    /// sees, and so the only thing that ties a session back to its request.
+    /// Read at auth, long after the hop was made. Touched only on `queue`.
+    private var frontHosts: [UInt16: String] = [:]
+    private var frontPorts: [ObjectIdentifier: UInt16] = [:]
+    private let telegram: () -> TelegramConfig?
     private var readyHandlers: [() -> Void] = []
     private let stateLock = NSLock()
     /// Pings every open socket so an idle one is not reaped in transit.
@@ -96,8 +103,10 @@ final class HostGatewayServer {
          rootSecretBase64url: String,
          vt: HostGatewayVTAttaching,
          pairingCode: PairingCodeVerifying? = nil,
-         rateLimiter: PairRateLimiter? = nil) {
+         rateLimiter: PairRateLimiter? = nil,
+         telegram: @escaping () -> TelegramConfig? = { nil }) {
         self.config = config
+        self.telegram = telegram
         self.router = router
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
@@ -371,7 +380,7 @@ final class HostGatewayServer {
 
     private func route(_ connection: NWConnection, head: String, rawRequest: Data) {
         if Self.isWebSocketUpgrade(head: head) {
-            proxyToWebSocket(connection, initial: rawRequest)
+            proxyToWebSocket(connection, initial: rawRequest, host: Self.hostHeader(head: head))
             return
         }
         let (method, target) = Self.requestLine(head: head)
@@ -394,7 +403,7 @@ final class HostGatewayServer {
 
     /// Replay the client's handshake to the internal listener, then pump bytes both
     /// ways. Nothing here understands WebSocket framing — that stays the framework's.
-    private func proxyToWebSocket(_ client: NWConnection, initial: Data) {
+    private func proxyToWebSocket(_ client: NWConnection, initial: Data, host: String?) {
         guard wsPort != 0, let port = NWEndpoint.Port(rawValue: wsPort) else {
             client.cancel()
             return
@@ -406,6 +415,10 @@ final class HostGatewayServer {
             guard let self else { return }
             switch state {
             case .ready:
+                if let host, case .hostPort(_, let port)? = upstream.currentPath?.localEndpoint {
+                    self.frontHosts[port.rawValue] = host
+                    self.frontPorts[ObjectIdentifier(client)] = port.rawValue
+                }
                 upstream.send(content: initial, isComplete: true, completion: .contentProcessed { [weak self] error in
                     guard let self else { return }
                     if error != nil {
@@ -451,6 +464,23 @@ final class HostGatewayServer {
         second.cancel()
         proxied.removeValue(forKey: ObjectIdentifier(first))
         proxied.removeValue(forKey: ObjectIdentifier(second))
+        for connection in [first, second] {
+            if let port = frontPorts.removeValue(forKey: ObjectIdentifier(connection)) {
+                frontHosts.removeValue(forKey: port)
+            }
+        }
+    }
+
+    /// The request's Host, lowercased and without a port. Nil when absent.
+    static func hostHeader(head: String) -> String? {
+        for line in head.split(separator: "\r\n", omittingEmptySubsequences: true).dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            guard line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased() == "host" else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces).lowercased()
+            let bare = value.hasPrefix("[") ? value : String(value.prefix { $0 != ":" })
+            return bare.isEmpty ? nil : bare
+        }
+        return nil
     }
 
     // MARK: - Request parsing
@@ -527,6 +557,9 @@ final class HostGatewayServer {
     // MARK: - WebSocket sessions (internal listener)
 
     private func accept(_ connection: NWConnection) {
+        // The port, not the connection: a closure holding the connection would
+        // be held by the session it belongs to, and neither would ever go.
+        let peerPort = Self.clientPort(of: connection)
         let session = HostGatewaySession(
             router: router,
             expectedMacId: expectedMacId,
@@ -535,7 +568,14 @@ final class HostGatewayServer {
             decisions: decisions,
             pairingCode: pairingCode,
             rateLimiter: rateLimiter,
-            clientIP: Self.clientIP(of: connection))
+            clientIP: Self.clientIP(of: connection),
+            access: HostGatewayAccess(
+                telegramHost: config.telegramHost,
+                frontHost: { [weak self] in
+                    guard let self, let peerPort else { return nil }
+                    return self.frontHosts[peerPort]
+                },
+                telegram: telegram))
         let key = ObjectIdentifier(connection)
         let state = ConnectionState(connection: connection, session: session)
         connections[key] = state
@@ -655,6 +695,11 @@ final class HostGatewayServer {
 
     /// Best-effort remote address for pairing rate limits. Accepted connections
     /// expose the peer as `.hostPort`; anything else collapses to `"unknown"`.
+    static func clientPort(of connection: NWConnection) -> UInt16? {
+        if case .hostPort(_, let port) = connection.endpoint { return port.rawValue }
+        return nil
+    }
+
     static func clientIP(of connection: NWConnection) -> String {
         if case .hostPort(let host, _) = connection.endpoint {
             return "\(host)"

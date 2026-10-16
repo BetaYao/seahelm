@@ -77,6 +77,11 @@ class TabCoordinator {
         return reporter
     }()
 
+    /// The live Telegram settings — the window's, which Settings edits; this
+    /// coordinator's own `config` copy is not kept in step with them. Read by
+    /// the Host Gateway when a Mini App signs in.
+    var telegramConfigProvider: (() -> TelegramConfig?)?
+
     var activeTabIndex: Int = 0
     /// Every worktree across all repos. `tree` is optional because the tree is
     /// owned by `StationManager`, not by this list, and a worktree can be between
@@ -978,7 +983,8 @@ class TabCoordinator {
             rootSecretBase64url: rootB64,
             vt: vt,
             pairingCode: live,
-            rateLimiter: limiter)
+            rateLimiter: limiter,
+            telegram: { [weak self] in self?.telegramConfigProvider?() })
         server.start()
         hostGatewayServer = server
         NSLog("[TabCoordinator] Host Gateway started port=\(hgConfig.resolvedPort) pair=\(hgConfig.resolvedPublicURL)")
