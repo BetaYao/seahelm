@@ -2843,12 +2843,23 @@ function renderDetail(){
 
 /** Fetch the worktree's live tree; fall back to a stack if the Mac has none. */
 function requestLayout(path){
+  // The terminal code only when a terminal is wanted — the timeline draws
+  // without it, and it is ~190KB a phone reading messages has no use for. When
+  // it is wanted, fetch it alongside the layout rather than after: on a weak
+  // link that is a second, and the layout's round trip can hide it.
+  const wantsTerminal = loadSurfaceMode() === 'vt';
+  const renderer = wantsTerminal ? ensureRenderer() : Promise.resolve(null);
+  if (wantsTerminal && RENDERER !== 'ghostty') loadWebglAddon().catch(() => {});
+  renderer.catch(() => {});
   sendCommand('layout.live', { worktree_path: path }, (r) => {
     if (S.sel !== path) return;                    // selection moved while in flight
     const root = r && r.ok !== false && r.result && r.result.root;
-    ensureRenderer().then((active) => {
+    renderer.then((active) => {
       if (S.sel !== path) return;
-      renderRendererBadge(active);
+      // Asked for in timeline mode, answered after a switch to the terminal:
+      // that switch sent its own request, with the renderer, which mounts.
+      if (!active && loadSurfaceMode() === 'vt') return;
+      if (active) renderRendererBadge(active);
       if (!root){
         // No live tree (worktree closed on the Mac) — stack what we know of it.
         mountPanes(stackedTreeFor(path), null, path);
@@ -3417,6 +3428,17 @@ $('clearLog').onclick=()=>{ logRing.length = 0; $('log').innerHTML=''; };
 // Keep xterm's helper textarea focused unless the user is in a real field.
 SeahelmTermFocus.install(document, restoreTermFocus);
 
+/** Warm the terminal code without mounting anything. */
+function prefetchTerminal(){
+  ensureRenderer().catch(() => {});
+  if (RENDERER !== 'ghostty') loadWebglAddon().catch(() => {});
+}
+// A wide window has bandwidth to spare and switches to the terminal more often:
+// fetch it once the page is idle. A phone waits until it is asked for.
+if (!NARROW.matches) {
+  (window.requestIdleCallback || ((f) => setTimeout(f, 2000)))(() => prefetchTerminal(), { timeout: 5000 });
+}
+
 // ── menus ────────────────────────────────────────────────────────────────────
 // Two ⋯ menus: the page's (log, disconnect) and the pane's (terminal layout,
 // renderer, copy, split, close). Anchored under the button that opened them,
@@ -3452,6 +3474,9 @@ $('menuBtn').onclick = (ev) => {
 $('paneMenuBtn').onclick = (ev) => {
   const m = $('paneMenu');
   if (!m.hidden) { closeMenus(); return; }
+  // Timeline / Terminal is in here: someone opening this is likely about to
+  // switch, so start on the terminal code now rather than after the tap.
+  prefetchTerminal();
   const live = !!(S.sel && (S.vt.focus || S.selPane) && isLinked());
   const vt = loadSurfaceMode() === 'vt';
   $('copyBtn').hidden = !vt;

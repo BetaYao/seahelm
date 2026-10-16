@@ -4,7 +4,14 @@ import Foundation
 
 enum ZmxVTTiming {
     static let snapshotIdleMs: Int = 160
+    /// Measured from the open: the attach may take this long to say anything.
     static let snapshotMaxMs: Int = 2500
+    /// Measured from the first byte. The opening redraw lands as one burst, but
+    /// a pane that is busy — an agent's spinner repainting every 100ms — never
+    /// goes quiet for `snapshotIdleMs`, so without this every such pane waited
+    /// out the full `snapshotMaxMs` before its screen appeared. Whatever the
+    /// snapshot does not catch follows as ordinary data, in order.
+    static let snapshotSettleMaxMs: Int = 300
     static let flushMs: Int = 16
     static let leaseTTLMs: Int = 60_000
     static let maxChunkBytes: Int = 48 * 1024
@@ -140,6 +147,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         var flushWorkItem: DispatchWorkItem?
         var snapshotIdleWorkItem: DispatchWorkItem?
         var snapshotCapWorkItem: DispatchWorkItem?
+        var snapshotSettleWorkItem: DispatchWorkItem?
         var lastSeen: Date
         /// When this stream last emitted, so an idle pane can answer immediately
         /// instead of serving out a coalescing window nothing is filling.
@@ -154,6 +162,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     private let leaseTTL: TimeInterval
     private let snapshotIdle: TimeInterval
     private let snapshotMax: TimeInterval
+    private let snapshotSettleMax: TimeInterval
     private let flushInterval: TimeInterval
     private let queue: DispatchQueue
     private let queueKey = DispatchSpecificKey<UInt8>()
@@ -169,6 +178,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         leaseTTL: TimeInterval = TimeInterval(ZmxVTTiming.leaseTTLMs) / 1000,
         snapshotIdle: TimeInterval = TimeInterval(ZmxVTTiming.snapshotIdleMs) / 1000,
         snapshotMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotMaxMs) / 1000,
+        snapshotSettleMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotSettleMaxMs) / 1000,
         flushInterval: TimeInterval = TimeInterval(ZmxVTTiming.flushMs) / 1000,
         queue: DispatchQueue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager")
     ) {
@@ -180,6 +190,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         self.leaseTTL = leaseTTL
         self.snapshotIdle = snapshotIdle
         self.snapshotMax = snapshotMax
+        self.snapshotSettleMax = snapshotSettleMax
         self.flushInterval = flushInterval
         self.queue = queue
         queue.setSpecific(key: queueKey, value: 1)
@@ -416,6 +427,13 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             st.snapshotCapWorkItem = capWork
             queue.asyncAfter(deadline: .now() + snapshotMax, execute: capWork)
         }
+        if !st.buffer.isEmpty, st.snapshotSettleWorkItem == nil {
+            let settleWork = DispatchWorkItem { [weak self] in
+                self?.closeSnapshot(key: key)
+            }
+            st.snapshotSettleWorkItem = settleWork
+            queue.asyncAfter(deadline: .now() + snapshotSettleMax, execute: settleWork)
+        }
         streams[key] = st
         queue.asyncAfter(deadline: .now() + snapshotIdle, execute: idleWork)
     }
@@ -426,6 +444,8 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         st.snapshotIdleWorkItem = nil
         st.snapshotCapWorkItem?.cancel()
         st.snapshotCapWorkItem = nil
+        st.snapshotSettleWorkItem?.cancel()
+        st.snapshotSettleWorkItem = nil
         st.phase = .live
 
         let chunk = st.buffer
@@ -461,6 +481,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
         st.flushWorkItem?.cancel()
         st.snapshotIdleWorkItem?.cancel()
         st.snapshotCapWorkItem?.cancel()
+        st.snapshotSettleWorkItem?.cancel()
         st.proc.terminate()
         _ = reason
     }
