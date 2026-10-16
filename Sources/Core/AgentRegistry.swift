@@ -1237,6 +1237,9 @@ class AgentRegistry {
         (channel as? TelegramChannel)?.onDraftStopped = { [weak self] chatId, draftId in
             self?.draftStopRoute?(chatId, draftId)
         }
+        (channel as? TelegramChannel)?.onChatGone = { [weak self] chatId in
+            self?.chatGoneRoute?(chatId)
+        }
     }
 
     /// Unregister and disconnect an external channel
@@ -1412,6 +1415,9 @@ class AgentRegistry {
     /// Stop was pressed under a draft: `(chatId, draftId)`, on main. Set by
     /// `MainWindowController`, which knows which pane the chat is talking to.
     var draftStopRoute: ((String, Int) -> Void)?
+    /// A Telegram chat can no longer be written to (bot removed, blocked, chat
+    /// deleted). On main. Set by `MainWindowController`, which owns bindings.
+    var chatGoneRoute: ((String) -> Void)?
 
     func deleteInChannel(_ channelId: String, chatId: String, messageId: String) {
         lock.lock()

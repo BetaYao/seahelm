@@ -129,6 +129,17 @@ final class TelegramBridgeTests: XCTestCase {
         XCTAssertNil(update.payload?.from)
     }
 
+    /// Captured live (403 "bot was kicked from the supergroup chat"). A gone
+    /// chat is not a bad request to resend flat, nor a transient to retry.
+    func testChatGoneIsEveryForbiddenAndChatNotFound() {
+        XCTAssertTrue(TelegramAPIError.api(code: 403, description: "Forbidden: bot was kicked from the supergroup chat").isChatGone)
+        XCTAssertTrue(TelegramAPIError.api(code: 403, description: "Forbidden: bot was blocked by the user").isChatGone)
+        XCTAssertTrue(TelegramAPIError.api(code: 400, description: "Bad Request: chat not found").isChatGone)
+        XCTAssertFalse(TelegramAPIError.api(code: 400, description: "Bad Request: can't parse entities").isChatGone)
+        XCTAssertFalse(TelegramAPIError.api(code: 429, description: "Too Many Requests").isChatGone)
+        XCTAssertFalse(TelegramAPIError.network("timed out").isChatGone)
+    }
+
     /// Captured live: `draft_id` arrives as a string though documented as an
     /// Integer. Both must decode.
     func testStoppedGenerationDecodesEitherDraftIdShape() throws {

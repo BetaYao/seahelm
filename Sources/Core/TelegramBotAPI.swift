@@ -228,6 +228,16 @@ enum TelegramAPIError: LocalizedError, Equatable {
         return false
     }
 
+    /// The chat cannot be written to and will not come back on its own: the
+    /// bot was removed from the group, blocked by the user, or the chat no
+    /// longer exists. Every 403 Telegram returns for a send means one of these
+    /// ("bot was kicked…", "…blocked by the user", "bot is not a member…",
+    /// "user is deactivated"); "chat not found" arrives as a 400.
+    var isChatGone: Bool {
+        guard case .api(let code, let description) = self else { return false }
+        return code == 403 || (code == 400 && description.lowercased().contains("chat not found"))
+    }
+
     var isBadRequest: Bool {
         if case .api(400, _) = self { return true }
         return false
