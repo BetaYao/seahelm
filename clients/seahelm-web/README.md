@@ -50,7 +50,7 @@ push:     {"type":"notify","method","params"}
 
 | File | What it does |
 |---|---|
-| `index.html` | the client itself: First Mate on the left, timeline / VT terminal in the middle, message log on the right |
+| `index.html` | the client itself: First Mate, the worktree detail (timeline / terminal), the developer message log |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
 | `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
 | `touch-scroll.js` | vertical touch drag → terminal wheel, so a phone can scroll back |
@@ -59,32 +59,39 @@ push:     {"type":"notify","method","params"}
 | `term-focus.js` | a click on the chrome does not steal the terminal caret — real input fields excepted |
 | `composer-keys.js` | what Enter / Esc mean in the timeline composer; hands both back to an IME while it is composing |
 | `timeline-scroll.js` | the timeline sticks to the bottom while you are at it and holds your row when you are not — a repaint rebuilds every row, so the place has to be taken and put back by hand |
+| `pane-pick.js` | which pane a worktree opens on, and the words a row uses for its status |
 | `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
 
 ## The interface
 
-- **Left column = First Mate**, ported from the Mac dashboard's "Group by Sailor" mode.
-- **Middle = terminal**, picking a pane opens its VT.
-- **Right column = message log**, for development; can be hidden.
+Dark and iOS-native on a phone (17px body, 44pt targets, the system font for prose and monospace only for code); the same parts a step smaller on a desktop.
+
+- **First Mate** (the list) — one row per **worktree** in every grouping (Project / Status / Activity, grouped by the Mac's `fleet.groups`). A row says its status in words as well as colour, what runs there (the agent, or "N panes"), and the last message. There is no pane level in the list.
+- **The detail** — a slim head (‹ back, the worktree, ⋯) and a **tab per pane** when it has more than one. **Timeline / Terminal** is the first thing in the ⋯ menu, so the head gives its height to the content. The tabs serve both surfaces. A worktree opens on the pane that wants you: waiting on you, then failed, then running, then the one you last looked at (`pane-pick.js`).
+- **Timeline** has its own composer; an open question is a card above it with full-width answers.
+- **Terminal** has no composer of ours: tap the screen and type, keys go straight to the pane. A bar carries the keys a phone keyboard lacks — keyboard show/hide, esc, tab, ⇧tab, a sticky **ctrl** (applies to the next key), ^C, ^D and the arrows — and sits above the soft keyboard (`visualViewport`).
+- **⋯ menus** — the page's (message log, disconnect) and the pane's (Timeline / Terminal, terminal layout, renderer, copy, split, close).
+- **New work** — "Start new work…" at the foot of the list opens a sheet: prompt, project, agent.
+- **Message log** — a developer column, off by default, toggled from the page menu.
 
 ### Responsive
 
 | Width | Layout |
 |---|---|
-| > 1100px | three columns, log column toggled by hand |
-| ≤ 1100px | log column hidden automatically |
-| ≤ 760px | one column, First Mate in a drawer (☰) |
+| > 1100px | First Mate + detail, log column toggled by hand |
+| ≤ 1100px | log column hidden |
+| ≤ 760px | two full screens: First Mate, then a worktree; ‹ First Mate (or the system back gesture) returns |
 
-The terminal fits itself to the width, down to a 9px floor; a one-finger vertical drag scrolls back on a phone (a horizontal drag is left alone); the **↓ Latest** button appears in the lower right while you are reading back.
+The terminal fits itself to the width, down to a 9px floor, and pans past that; a one-finger vertical drag scrolls back on a phone; **↓ Latest** appears while you are reading back.
 
 ### VT subscription mode
 
-The **Single / Mirror** badge in the terminal head bar switches the VT attach policy (`localStorage seahelm_vt_mode`, default **`single`**):
+**Terminal layout** in the pane's ⋯ menu switches the VT attach policy (`localStorage seahelm_vt_mode`, default **`single`**):
 
 | Mode | Behaviour |
 |---|---|
-| **Single** (default) | attach only the focused pane — kind to a weak link and a small screen; with several panes you switch with the chips in the head bar |
+| **Single** (default) | attach only the focused pane — kind to a weak link and a small screen; with several panes you switch with the tabs in the head |
 | **Mirror** | one VT stream per pane, rendered together in the Mac's split layout |
 
 A narrow window is forced to single anyway (a mirror preference is ignored when `layoutFitsMirror` is not satisfied).
