@@ -77,6 +77,9 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         spawner: RecordingVTProcessSpawner,
         sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { _ in (rows: 40, cols: 100) },
         leaseTTL: TimeInterval = 5,
+        snapshotIdle: TimeInterval = TimeInterval(ZmxVTTiming.snapshotIdleMs) / 1000,
+        snapshotMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotMaxMs) / 1000,
+        snapshotSettleMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotSettleMaxMs) / 1000,
         queue: DispatchQueue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.test")
     ) -> ZmxVTAttachManager {
         let mgr = ZmxVTAttachManager(
@@ -86,6 +89,9 @@ final class ZmxVTAttachManagerTests: XCTestCase {
             sessionSize: sessionSize,
             now: { [unowned self] in self.fakeClock },
             leaseTTL: leaseTTL,
+            snapshotIdle: snapshotIdle,
+            snapshotMax: snapshotMax,
+            snapshotSettleMax: snapshotSettleMax,
             queue: queue)
         mgr.addObserver { [unowned self] event in
             self.notifications.append((event.kind.legacyMethod, event.legacyNotifyParams))
@@ -152,6 +158,59 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         XCTAssertEqual(notifications[1].method, "vt.data")
         let liveB64 = notifications[1].params["b64"] as? String
         XCTAssertEqual(String(data: Data(base64Encoded: liveB64!)!, encoding: .utf8), "world")
+    }
+
+    /// A busy pane never goes quiet for the idle window. Its snapshot must still
+    /// arrive shortly after the first byte — not at the open's cap — and what
+    /// the snapshot did not take must follow as data, in order.
+    func testBusyPaneSnapshotsSoonAfterFirstByte() {
+        let spawner = RecordingVTProcessSpawner()
+        let fake = FakeVTAttachedProcess()
+        spawner.nextProcess = fake
+        let queue = DispatchQueue(label: "busy.test")
+        let mgr = makeManager(spawner: spawner, snapshotIdle: 0.2, snapshotMax: 5, snapshotSettleMax: 0.1, queue: queue)
+        var got: [(String, Date, String)] = []
+        let lock = NSLock()
+        mgr.addObserver { e in
+            lock.lock(); got.append((e.kind.legacyMethod, Date(), String(decoding: e.payload, as: UTF8.self))); lock.unlock()
+        }
+        _ = mgr.open(paneSessionKey: "busy")
+        let start = Date()
+        // A frame every 30ms for ~0.6s: never 0.2s of quiet.
+        for i in 0..<20 {
+            fake.emit(Data("f\(i);".utf8))
+            Thread.sleep(forTimeInterval: 0.03)
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+        mgr.test_flushLiveData(paneSessionKey: "busy")
+        lock.lock(); let events = got; lock.unlock()
+
+        let snap = events.first { $0.0 == "vt.snapshot" }
+        XCTAssertNotNil(snap, "a busy pane still gets its snapshot")
+        if let snap {
+            XCTAssertLessThan(snap.1.timeIntervalSince(start), 0.5, "well before the 5s open cap")
+            XCTAssertTrue(snap.2.hasPrefix("f0;"), "the snapshot starts with the first output")
+        }
+        XCTAssertEqual(events.first?.0, "vt.snapshot", "nothing is sent before the snapshot")
+        let all = events.map { $0.2 }.joined()
+        XCTAssertEqual(all, (0..<20).map { "f\($0);" }.joined(), "every byte arrives once, in order")
+    }
+
+    /// A pane that goes quiet still closes on the idle window, settle cap or not.
+    func testQuietPaneSnapshotsOnIdle() {
+        let spawner = RecordingVTProcessSpawner()
+        let fake = FakeVTAttachedProcess()
+        spawner.nextProcess = fake
+        let mgr = makeManager(spawner: spawner, snapshotIdle: 0.05, snapshotMax: 5, snapshotSettleMax: 2)
+        let done = expectation(description: "snapshot")
+        var payload = ""
+        mgr.addObserver { e in
+            if e.kind.legacyMethod == "vt.snapshot" { payload = String(decoding: e.payload, as: UTF8.self); done.fulfill() }
+        }
+        _ = mgr.open(paneSessionKey: "quiet")
+        fake.emit(Data("prompt$ ".utf8))
+        wait(for: [done], timeout: 1)
+        XCTAssertEqual(payload, "prompt$ ")
     }
 
     func testCloseTerminatesAttachChildOnly() {
