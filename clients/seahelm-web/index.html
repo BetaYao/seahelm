@@ -47,7 +47,14 @@
     --fs-sub:13px;
     --fs-cap:12px;
     --fs-title:28px;
+    /* The edges content keeps clear of: the device's own (notch, home bar),
+       or, opened as a Telegram Mini App, Telegram's — in full screen its
+       close and ⋯ float over the top of the page. See tgMiniApp(). */
+    --inset-top:env(safe-area-inset-top, 0px);
+    --inset-bottom:env(safe-area-inset-bottom, 0px);
   }
+  html.tg{--inset-top:max(env(safe-area-inset-top, 0px), var(--tg-top, 0px));
+    --inset-bottom:max(env(safe-area-inset-bottom, 0px), var(--tg-bottom, 0px))}
   @media (max-width:760px){
     :root{ --fs-body:17px; --fs-sub:15px; --fs-cap:13px; --fs-title:34px; }
   }
@@ -122,7 +129,7 @@
   /* One row: the name and the ⋯. Connection, the fleet count and grouping
      are in the menu — three fixed rows of header was a third of a phone. */
   .fm-top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
-    padding:max(6px, env(safe-area-inset-top)) 8px 4px 16px;min-height:52px}
+    padding:max(6px, var(--inset-top)) 8px 4px 16px;min-height:52px}
   #menuBtn{position:relative}
   /* Not connected: the only trace of it left on the list, since the status
      line went into the menu. */
@@ -189,7 +196,7 @@
   .fm-empty{padding:48px 16px;text-align:center;color:var(--muted)}
 
   /* New work: a pill at the foot of the list that opens a sheet. */
-  .nw-bar{flex:none;padding:12px 16px max(16px, calc(8px + env(safe-area-inset-bottom)))}
+  .nw-bar{flex:none;padding:12px 16px max(16px, calc(8px + var(--inset-bottom)))}
   .nw-open{width:100%;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;
     border-radius:26px;border:0.5px solid var(--sep);background:var(--panel);color:var(--muted);
     font-size:var(--fs-body);cursor:pointer;text-align:left}
@@ -235,7 +242,7 @@
   .nw-list .muted,.nw-chips .muted{padding:14px 16px;display:block}
   .nw-error{font-size:var(--fs-sub);color:var(--danger);padding:8px 16px 0}
   .nw-error[hidden]{display:none}
-  .sheet-foot{flex:none;padding:12px 16px max(16px, calc(8px + env(safe-area-inset-bottom)))}
+  .sheet-foot{flex:none;padding:12px 16px max(16px, calc(8px + var(--inset-bottom)))}
   #nwGo{width:100%;height:52px;border:0;border-radius:14px;background:var(--accent);color:var(--accent-ink);
     font-size:17px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
   #nwGo:disabled{background:var(--panel3);color:var(--faint);cursor:default}
@@ -298,7 +305,7 @@
   .pane-tab .pt-st{font-weight:400;font-size:var(--fs-cap)}
   @media (max-width:760px){
     /* Nav bar, then the panes, then the view switch: three rows, like iOS. */
-    .detail-head{padding:max(0px, env(safe-area-inset-top)) 4px 8px}
+    .detail-head{padding:max(0px, var(--inset-top)) 4px 8px}
     .dh-title{align-items:center;text-align:center}
     .pane-tab{height:40px;border-radius:20px}
     .pane-tabs{padding:4px 12px 0}
@@ -329,7 +336,7 @@
   .vt-single .vt-leaf-title{display:none}
   /* Keys a phone keyboard does not have, and a browser will not pass on. */
   .key-bar{flex:none;border-top:0.5px solid var(--sep);background:rgba(22,22,24,.94);
-    padding:8px 0 max(8px, env(safe-area-inset-bottom))}
+    padding:8px 0 max(8px, var(--inset-bottom))}
   .key-bar[hidden]{display:none}
   .term-keys{display:flex;gap:6px;overflow-x:auto;padding:0 12px;scrollbar-width:none}
   .term-keys::-webkit-scrollbar{display:none}
@@ -348,7 +355,7 @@
     border-radius:18px;background:rgba(44,44,46,.94);border:0.5px solid #48484a;color:var(--text);
     font-size:14px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.45)}
   #toBottom.on{display:block}
-  .action-toast{position:fixed;top:max(12px, env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:100;
+  .action-toast{position:fixed;top:max(12px, var(--inset-top));left:50%;transform:translateX(-50%);z-index:100;
     max-width:min(420px,calc(100vw - 32px));padding:10px 16px;border-radius:20px;
     background:rgba(44,44,46,.97);color:var(--text);font-size:var(--fs-sub);box-shadow:0 8px 28px rgba(0,0,0,.5)}
   .action-toast.error{color:var(--danger)}
@@ -450,7 +457,7 @@
 
   /* The composer: a pill with one button inside it. */
   .msg-composer{display:none;flex:none;border-top:0.5px solid var(--sep);background:var(--bg);
-    padding:8px max(12px, calc((100% - 784px) / 2)) max(10px, env(safe-area-inset-bottom))}
+    padding:8px max(12px, calc((100% - 784px) / 2)) max(10px, var(--inset-bottom))}
   .msg-composer.on{display:block}
   @media (max-width:760px){ .msg-composer{border-top-color:transparent} }
   .reply-bar:not([hidden]) ~ .msg-composer{border-top:0;background:transparent}
@@ -1816,6 +1823,46 @@ const CREDS_KEY = 'seahelm_creds';
 const TG_INIT_DATA = (() => {
   try { return new URLSearchParams(location.hash.slice(1)).get('tgWebAppData') || null; }
   catch (e) { return null; }
+})();
+
+/** Inside Telegram: take the whole screen on a phone the way BotFather's own
+ *  app does, keep clear of the controls Telegram floats over it, and stop a
+ *  scroll from being read as the swipe that closes the app. Telegram's script
+ *  is loaded only here — a browser never fetches it. */
+(function tgMiniApp(){
+  if (!TG_INIT_DATA) return;
+  document.documentElement.classList.add('tg');
+  const script = document.createElement('script');
+  script.src = 'https://telegram.org/js/telegram-web-app.js?64';
+  script.onload = () => {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    const insets = () => {
+      const a = tg.safeAreaInset || {}, c = tg.contentSafeAreaInset || {};
+      const root = document.documentElement.style;
+      root.setProperty('--tg-top', ((a.top || 0) + (c.top || 0)) + 'px');
+      root.setProperty('--tg-bottom', ((a.bottom || 0) + (c.bottom || 0)) + 'px');
+    };
+    const call = (fn) => { try { fn(); } catch (e) {} };
+    call(() => tg.ready());
+    // Telegram takes #RRGGBB, not the rgb() a computed style reads back as.
+    const bg = '#' + (getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [0, 0, 0])
+      .slice(0, 3).map(n => Number(n).toString(16).padStart(2, '0')).join('');
+    call(() => tg.setBackgroundColor(bg));
+    call(() => tg.setHeaderColor(bg));
+    call(() => tg.expand());
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast('7.7')) call(() => tg.disableVerticalSwipes());
+    // A phone only: on the desktop app full screen is the whole monitor.
+    const phone = tg.platform === 'ios' || tg.platform === 'android';
+    if (phone && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0') && !tg.isFullscreen) {
+      call(() => tg.requestFullscreen());
+    }
+    for (const ev of ['safeAreaChanged', 'contentSafeAreaChanged', 'fullscreenChanged', 'viewportChanged']) {
+      call(() => tg.onEvent(ev, insets));
+    }
+    insets();
+  };
+  document.head.appendChild(script);
 })();
 try { localStorage.removeItem('seahelm_pair'); } catch (e) {}   // drop the old plaintext
 
