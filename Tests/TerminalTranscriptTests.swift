@@ -170,4 +170,11 @@ final class TerminalTranscriptTests: XCTestCase {
         XCTAssertTrue(text.contains("⚠ MCP startup incomplete (failed: supabase)"), text)
         XCTAssertTrue(text.hasPrefix(">_ OpenAI Codex (v0.153.4)"), text)
     }
+
+    /// A shell's indentation is part of what it printed: `cat -n`'s column,
+    /// a stack trace's frames.
+    func testPlainLinesKeepTheirIndent() {
+        let out = TerminalTranscript.clean("$ cat -n f\n     1\thello\n  indented\n")
+        XCTAssertEqual(out, "$ cat -n f\n     1\thello\n  indented")
+    }
 }

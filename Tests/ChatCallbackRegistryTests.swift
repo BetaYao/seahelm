@@ -66,4 +66,15 @@ final class ChatCallbackRegistryTests: XCTestCase {
         }
         XCTAssertEqual(registry.action(for: keeper), .command("/status"))
     }
+
+    /// A command reply's buttons reach the chat as tokens that mean what the
+    /// button said — including Cancel, which is not a line anyone types.
+    func testCommandButtonsBecomeTokens() {
+        let registry = ChatCallbackRegistry()
+        let buttons = registry.buttons(for: [.line("Go ahead", "/yes"),
+                                             CommandButton(label: "Cancel", effect: .cancelPending)])
+        XCTAssertEqual(buttons.map(\.label), ["Go ahead", "Cancel"])
+        XCTAssertEqual(registry.action(for: buttons[0].token), .command("/yes"))
+        XCTAssertEqual(registry.action(for: buttons[1].token), .cancelPending)
+    }
 }

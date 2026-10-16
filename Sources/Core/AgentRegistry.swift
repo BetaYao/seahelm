@@ -1234,15 +1234,9 @@ class AgentRegistry {
         channel.onCallback = { [weak self] callback in
             self?.handleCallback(callback)
         }
-    }
-
-    /// The registered channel, for the few operations that are a channel's own
-    /// rather than the generic protocol's — opening a Telegram forum topic has
-    /// no meaning in a mail thread, so it does not belong on `ExternalChannel`.
-    func externalChannel(_ channelId: String) -> ExternalChannel? {
-        lock.lock()
-        defer { lock.unlock() }
-        return externalChannels[channelId]
+        (channel as? TelegramChannel)?.onDraftStopped = { [weak self] chatId, draftId in
+            self?.draftStopRoute?(chatId, draftId)
+        }
     }
 
     /// Unregister and disconnect an external channel
@@ -1328,7 +1322,8 @@ class AgentRegistry {
         let route = commandRoute ?? headlessCommandRoute
         route(text, surface) { [weak self] result in
             guard !result.text.isEmpty else { return }
-            self?.reply(to: message, content: result.text, format: .markdown)
+            self?.reply(to: message, content: result.text, format: .markdown,
+                        buttons: ChatCallbackRegistry.shared.buttons(for: result.buttons))
         }
     }
 
@@ -1351,14 +1346,16 @@ class AgentRegistry {
     }
 
     /// Send a reply back through the same external channel
-    private func reply(to message: InboundMessage, content: String, format: MessageFormat = .text) {
+    private func reply(to message: InboundMessage, content: String, format: MessageFormat = .text,
+                       buttons: [MessageButton] = []) {
         let outbound = OutboundMessage(
             channelId: message.channelId,
             targetChatId: message.chatId,
             targetUserId: message.chatId == nil ? message.senderId : nil,
             content: content,
             format: format,
-            replyToMessageId: message.messageId
+            replyToMessageId: message.messageId,
+            buttons: buttons
         )
         pushToChannel(message.channelId, message: outbound)
     }
@@ -1400,6 +1397,21 @@ class AgentRegistry {
 
         channel?.editMessage(chatId: chatId, messageId: messageId, content: content, format: format)
     }
+
+    /// Stream a draft (Telegram private chats only; anything else ignores it).
+    func draftInChannel(_ channelId: String, chatId: String, draftId: Int, content: String,
+                        canStop: Bool) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        (channel as? TelegramChannel)?.sendDraft(chatId: chatId, draftId: draftId,
+                                                 content: content, canStop: canStop)
+    }
+
+    /// Stop was pressed under a draft: `(chatId, draftId)`, on main. Set by
+    /// `MainWindowController`, which knows which pane the chat is talking to.
+    var draftStopRoute: ((String, Int) -> Void)?
 
     func deleteInChannel(_ channelId: String, chatId: String, messageId: String) {
         lock.lock()

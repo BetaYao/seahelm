@@ -17,6 +17,9 @@ final class TelegramChannel: ExternalChannel {
     let channelType: ExternalChannelType = .telegram
     var onMessage: ((InboundMessage) -> Void)?
     var onCallback: ((InboundCallback) -> Void)?
+    /// Stop was pressed under a draft in a private chat: `(chatId, draftId)`.
+    /// Main thread; only from someone on the allowlist.
+    var onDraftStopped: ((String, Int) -> Void)?
     var onStateChange: ((GatewayState) -> Void)?
 
     private var config: TelegramConfig
@@ -29,6 +32,10 @@ final class TelegramChannel: ExternalChannel {
     private var generation = 0
     private let lock = NSLock()
     private let sendQueue = DispatchQueue(label: "com.seahelm.telegram.send", qos: .utility)
+    /// The newest draft not yet sent, per chat. A draft is a snapshot — only
+    /// the latest matters — so a burst of updates queued behind a long send
+    /// goes out as one call, not a replay of every intermediate state.
+    private var pendingDrafts: [String: (draftId: Int, text: String, canStop: Bool)] = [:]
     private let packets = TelegramPacketBook()
     /// Lets `disconnect` cut a retry backoff short instead of waiting it out.
     private let wake = DispatchSemaphore(value: 0)
@@ -43,20 +50,14 @@ final class TelegramChannel: ExternalChannel {
     /// allowlist; the channel only reports who it was.
     var onPaired: ((TelegramPairingResult) -> Void)?
     /// Chat each user last gave an order from, so a reply addressed to a user
-    /// lands where they were talking. A `TelegramChatAddress`, so "where they
-    /// were talking" means the forum topic, not merely the group.
+    /// lands where they were talking.
     private var chatIdBySender: [String: String] = [:]
     /// The chat the most recent order came from: the broadcast fallback when
-    /// the config names no chat and no allowed user is numeric. Also an
-    /// address — a fleet notice with nowhere else to go belongs in the topic
-    /// that was last spoken in, not above it in General.
+    /// the config names no chat and no allowed user is numeric.
     private var lastCommandChatId: String?
     /// When each group was last told how to address the bot — see
     /// `shouldHintAddressing`.
     private var lastAddressingHint: [String: Date] = [:]
-    /// Addresses of topics seahelm opened for a worktree of its own — kept in step
-    /// with the session store by the owner. See `setDedicatedTopics`.
-    private var dedicatedTopics: Set<String> = []
 
     /// Where unbound fleet notifications go: configured default, else the chat
     /// that last issued an order.
@@ -214,35 +215,19 @@ final class TelegramChannel: ExternalChannel {
     /// The sent message's id, or nil if the chunk was lost.
     private func sendChunk(api: TelegramBotAPI, target: String, chunk: String, parseMode: String?,
                           buttons: [MessageButton] = []) -> Int? {
-        // The one place a topic stops being part of the address and becomes a
-        // parameter.
-        let (chatId, threadId) = TelegramChatAddress.split(target)
+        let chatId = target
         for attempt in 1...Self.sendAttempts {
             do {
                 let id = try api.sendMessage(chatId: chatId, text: chunk, parseMode: parseMode,
-                                             buttons: buttons, messageThreadId: threadId)
+                                             buttons: buttons)
                 NSLog("[Telegram] → \(target): \(chunk.count) chars")
                 return id
-            } catch let error as TelegramAPIError where error.isMissingThread && threadId != nil {
-                // The thread went while this was in flight — a worktree's own
-                // topic deleted with it, or one somebody removed by hand. The
-                // group is still the right room, so the message lands there
-                // rather than nowhere.
-                NSLog("[Telegram] Topic \(target) is gone — sending to the group instead")
-                do {
-                    return try api.sendMessage(chatId: chatId, text: chunk, parseMode: parseMode,
-                                               buttons: buttons, messageThreadId: nil)
-                } catch {
-                    NSLog("[Telegram] Send failed (no topic): \(error.localizedDescription)")
-                    return nil
-                }
             } catch let error as TelegramAPIError where error.isBadRequest && parseMode != nil {
                 // Telegram is strict about its HTML. Rather than lose the
                 // message over a stray tag, resend the same words flat.
                 do {
                     return try api.sendMessage(chatId: chatId, text: TelegramFormatter.stripHTML(chunk),
-                                               parseMode: nil, buttons: buttons,
-                                               messageThreadId: threadId)
+                                               parseMode: nil, buttons: buttons)
                 } catch {
                     NSLog("[Telegram] Send failed (flat): \(error.localizedDescription)")
                     return nil
@@ -255,6 +240,40 @@ final class TelegramChannel: ExternalChannel {
             }
         }
         return nil
+    }
+
+    /// Stream a draft into a private chat (see `TelegramBotAPI.sendMessageDraft`).
+    ///
+    /// Through the send queue rather than beside it: a draft sent before a
+    /// message already queued would be wiped by that message the moment it
+    /// lands. Best effort and unretried — the next refresh replaces it.
+    func sendDraft(chatId: String, draftId: Int, content: String, canStop: Bool) {
+        lock.lock()
+        let api = self.api
+        let alreadyQueued = pendingDrafts[chatId] != nil
+        pendingDrafts[chatId] = (draftId, TelegramFormatter.html(from: content), canStop)
+        lock.unlock()
+        guard let api, !alreadyQueued else { return }
+        sendQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let draft = self.pendingDrafts.removeValue(forKey: chatId)
+            self.lock.unlock()
+            guard let draft else { return }
+            // One message's worth; a draft is a glance, never chunked.
+            let text = String(draft.text.prefix(TelegramFormatter.maxMessageLength))
+            do {
+                try api.sendMessageDraft(chatId: chatId, draftId: draft.draftId, text: text,
+                                         parseMode: "HTML", canStop: draft.canStop)
+            } catch let error as TelegramAPIError where error.isBadRequest {
+                // Same as a message: a stray tag must not cost the update.
+                try? api.sendMessageDraft(chatId: chatId, draftId: draft.draftId,
+                                          text: TelegramFormatter.stripHTML(text), parseMode: nil,
+                                          canStop: draft.canStop)
+            } catch {
+                NSLog("[Telegram] Draft to \(chatId) failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Put the buttons on a message already sent, or take them off with `[]`.
@@ -270,10 +289,7 @@ final class TelegramChannel: ExternalChannel {
         let api = self.api
         lock.unlock()
         guard let api else { return }
-        // Editing and deleting address a message by id, which is unique within
-        // the chat — the topic it sits in is not part of that and Telegram
-        // takes no thread here.
-        let chat = TelegramChatAddress.chatId(of: chatId)
+        let chat = chatId
         sendQueue.async {
             do {
                 try api.setReplyMarkup(chatId: chat, messageId: id, buttons: buttons)
@@ -303,7 +319,7 @@ final class TelegramChannel: ExternalChannel {
         guard let api else { return }
         let parseMode: String? = format == .text ? nil : "HTML"
         let rendered = parseMode == nil ? content : TelegramFormatter.html(from: content)
-        let chat = TelegramChatAddress.chatId(of: chatId)
+        let chat = chatId
         sendQueue.async {
             do {
                 try api.editMessageText(chatId: chat, messageId: id, text: rendered, parseMode: parseMode)
@@ -327,151 +343,10 @@ final class TelegramChannel: ExternalChannel {
         let api = self.api
         lock.unlock()
         guard let api else { return }
-        let chat = TelegramChatAddress.chatId(of: chatId)
+        let chat = chatId
         sendQueue.async {
             try? api.deleteMessage(chatId: chat, messageId: id)
         }
-    }
-
-    // MARK: - Forum topics
-
-    /// Open a topic and report its address, ready to bind. Nil when the bot
-    /// cannot open one — which in practice means one thing, so it is said
-    /// plainly rather than as a raw API error.
-    func createTopic(chatId: String, name: String, iconKey: String,
-                     completion: @escaping (String?) -> Void) {
-        lock.lock()
-        let api = self.api
-        lock.unlock()
-        guard let api else {
-            completion(nil)
-            return
-        }
-        sendQueue.async {
-            do {
-                let topic = try api.createForumTopic(
-                    chatId: chatId, name: name,
-                    iconColor: TelegramBotAPI.topicIconColor(for: iconKey))
-                let address = TelegramChatAddress.encode(chatId: chatId, threadId: topic.messageThreadId)
-                NSLog("[Telegram] Opened topic \(address) — \(topic.name)")
-                completion(address)
-            } catch {
-                NSLog("[Telegram] Could not open a topic in \(chatId): \(error.localizedDescription)"
-                    + " — the bot must be an admin of that group with \"Manage Topics\".")
-                completion(nil)
-            }
-        }
-    }
-
-    /// Best effort, like every other edit: a name that failed to change costs
-    /// the reader nothing the messages inside do not already say.
-    func renameTopic(address: String, name: String) {
-        let (chatId, threadId) = TelegramChatAddress.split(address)
-        guard let threadId else { return }
-        lock.lock()
-        let api = self.api
-        lock.unlock()
-        guard let api else { return }
-        sendQueue.async {
-            do {
-                try api.editForumTopic(chatId: chatId, messageThreadId: threadId, name: name)
-            } catch {
-                NSLog("[Telegram] Could not rename topic \(address): \(error.localizedDescription)")
-            }
-        }
-    }
-
-    func closeTopic(address: String) {
-        let (chatId, threadId) = TelegramChatAddress.split(address)
-        guard let threadId else { return }
-        lock.lock()
-        let api = self.api
-        lock.unlock()
-        guard let api else { return }
-        sendQueue.async {
-            do {
-                try api.closeForumTopic(chatId: chatId, messageThreadId: threadId)
-                NSLog("[Telegram] Closed topic \(address)")
-            } catch {
-                NSLog("[Telegram] Could not close topic \(address): \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// Take a topic away entirely — for a worktree's own thread once it is
-    /// gone. Callers must have established that the thread is one seahelm
-    /// opened; this end only knows how to address it.
-    ///
-    /// An address with no thread is a whole chat, and no failure here is worth
-    /// telling the reader about: they are about to notice either a thread that
-    /// went or one that stayed.
-    func deleteTopic(address: String) {
-        let (chatId, threadId) = TelegramChatAddress.split(address)
-        guard let threadId else { return }
-        lock.lock()
-        let api = self.api
-        lock.unlock()
-        guard let api else { return }
-        sendQueue.async {
-            do {
-                try api.deleteForumTopic(chatId: chatId, messageThreadId: threadId)
-                NSLog("[Telegram] Deleted topic \(address)")
-            } catch {
-                NSLog("[Telegram] Could not delete topic \(address): \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// Whether a chat can hold the topics seahelm would open in it.
-    enum TopicHostReport: Equatable {
-        case ok
-        case notAForum
-        case missingRight
-        case failed(String)
-    }
-
-    /// Two questions, asked before a group is promised topics rather than at
-    /// the first notice that needs one: does it have topics turned on, and may
-    /// this bot open them.
-    func inspectTopicHost(chatId: String, completion: @escaping (TopicHostReport) -> Void) {
-        lock.lock()
-        let api = self.api
-        lock.unlock()
-        guard let api else {
-            completion(.failed("the bridge is not connected"))
-            return
-        }
-        sendQueue.async {
-            do {
-                let chat = try api.getChat(chatId: chatId)
-                guard chat.isForum == true else {
-                    completion(.notAForum)
-                    return
-                }
-                let me = try api.getMe()
-                let member = try api.getChatMember(chatId: chatId, userId: me.id)
-                completion(member.mayManageTopics ? .ok : .missingRight)
-            } catch {
-                completion(.failed(error.localizedDescription))
-            }
-        }
-    }
-
-    /// The topics seahelm opened itself, by address.
-    ///
-    /// Inside one of these, prose is an order — see `command(in:)`. The owner
-    /// keeps this in step with the session store, which is what actually
-    /// remembers them across launches.
-    func setDedicatedTopics(_ addresses: Set<String>) {
-        lock.lock()
-        dedicatedTopics = addresses
-        lock.unlock()
-    }
-
-    private func isDedicatedTopic(_ address: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return dedicatedTopics.contains(address)
     }
 
     // MARK: - Config
@@ -533,6 +408,8 @@ final class TelegramChannel: ExternalChannel {
                         handle(message, config: live)
                     } else if let callback = update.callbackQuery {
                         handle(callback: callback, config: live)
+                    } else if let stopped = update.stoppedMessageGeneration {
+                        handle(stopped: stopped, config: live)
                     }
                 }
                 return true
@@ -590,16 +467,17 @@ final class TelegramChannel: ExternalChannel {
         // Photos (and image documents) download on this poll thread, then join
         // any caption as the order body. A photo with no caption used to be
         // dropped entirely because `body` was empty.
-        let mediaPaths = materializeAttachments(message)
+        //
+        // Only for someone who can give an order: nothing else reads the file
+        // (rules match the caption), and a group the bot sits in would
+        // otherwise have every stranger's image fetched onto this disk.
+        let mayOrder = message.from.map { cfg.allows(user: $0) } ?? false
+        let mediaPaths = mayOrder ? materializeAttachments(message) : []
         let text = TelegramInboundMedia.composeOrderText(
             paths: mediaPaths,
             caption: message.body)
         guard !text.isEmpty else { return }
-        // Not the chat id: in a forum, the topic is part of where this was
-        // said, and so part of where the answer goes. Two topics in one group
-        // are two conversations with their own binding — see
-        // `TelegramChatAddress`.
-        let chatId = TelegramChatAddress.of(message)
+        let chatId = String(message.chat.id)
 
         // `/start` is Telegram's own front door: the Start button sends it, and
         // a `t.me/<bot>?start=<code>` deep link sends it with the pairing code
@@ -613,8 +491,7 @@ final class TelegramChannel: ExternalChannel {
             return
         }
 
-        if let command = Self.command(in: message, body: text, config: cfg, botUsername: botUsername,
-                                      dedicatedTopic: isDedicatedTopic(chatId)) {
+        if let command = Self.command(in: message, body: text, config: cfg, botUsername: botUsername) {
             lock.lock()
             chatIdBySender[command.senderId] = chatId
             lastCommandChatId = chatId
@@ -744,7 +621,7 @@ final class TelegramChannel: ExternalChannel {
         // A channel post carries no user, and an allowlist entry has to name
         // one. Nothing to pair with.
         guard let from = message.from else { return }
-        let chatId = TelegramChatAddress.of(message)
+        let chatId = String(message.chat.id)
 
         lock.lock()
         let session = pairing
@@ -760,14 +637,10 @@ final class TelegramChannel: ExternalChannel {
                                 + "Generate a new one in seahelm ▸ Settings ▸ Telegram.")
                     return
                 }
-                // The reply goes back into the topic it was asked from, but
-                // what pairing *records* is the chat: it becomes
-                // `default_chat_id`, where fleet-wide notices land, and those
-                // belong to the group as a whole rather than to whichever
-                // topic happened to be open when the QR was scanned.
+                // The chat becomes `default_chat_id`, where fleet-wide notices land.
                 let result = TelegramPairingResult(userId: String(from.id),
                                                    displayName: from.displayName,
-                                                   chatId: TelegramChatAddress.chatId(of: chatId))
+                                                   chatId: chatId)
                 NSLog("[Telegram] Paired with \(from.displayName) (\(from.id)) in chat \(chatId)")
                 reply(chatId, "**Paired.** This chat can command the fleet now.\n\n"
                             + "`/status` lists what is running, `/help` lists the commands, "
@@ -821,9 +694,7 @@ final class TelegramChannel: ExternalChannel {
         try? api?.answerCallbackQuery(id: callback.id, text: nil)
 
         guard let token = callback.data, !token.isEmpty, let message = callback.message else { return }
-        // The card was sent to an address; the tap has to come back as the same
-        // one, or `ChatNoticeBook` cannot match the message it belongs to.
-        let chatId = TelegramChatAddress.of(message)
+        let chatId = String(message.chat.id)
 
         lock.lock()
         chatIdBySender[String(callback.from.id)] = chatId
@@ -839,6 +710,19 @@ final class TelegramChannel: ExternalChannel {
             messageId: String(message.messageId),
             token: token
         ))
+    }
+
+    /// Stop under a draft. A draft only ever goes to a private chat, whose id
+    /// *is* the user's, so the allowlist is checked against the chat.
+    private func handle(stopped: TelegramGenerationStopped, config cfg: TelegramConfig) {
+        guard stopped.chat.isPrivate,
+              cfg.allows(userId: stopped.chat.id, username: stopped.chat.username) else {
+            NSLog("[Telegram] Ignoring Stop from chat \(stopped.chat.id)")
+            return
+        }
+        let chatId = String(stopped.chat.id)
+        NSLog("[Telegram] ← Stop pressed in \(chatId) (draft \(stopped.draftId))")
+        DispatchQueue.main.async { [weak self] in self?.onDraftStopped?(chatId, stopped.draftId) }
     }
 
     /// A message that is not an order may still be work: a monitoring channel
@@ -864,7 +748,7 @@ final class TelegramChannel: ExternalChannel {
             channelId: channelId,
             senderId: sender,
             senderName: sender,
-            chatId: TelegramChatAddress.of(message),
+            chatId: String(message.chat.id),
             chatType: message.chat.isPrivate ? .direct : .group,
             content: match.prompt,
             messageId: String(message.messageId),
@@ -900,21 +784,13 @@ final class TelegramChannel: ExternalChannel {
     ///    ever protecting. Naming the bot is as deliberate as a slash, so
     ///    refusing it only taught people that the bot was broken in groups.
     ///
-    ///    `dedicatedTopic` is the exception, and it is not a loosening of that
-    ///    rule so much as the rule not applying: a topic seahelm opened for one
-    ///    worktree *is* that worktree's command line, the way a private chat
-    ///    is. Nobody wanders into it to discuss lunch, and making people type
-    ///    `@thebot` under a thread named after the very work they are answering
-    ///    is the friction this whole feature exists to remove.
-    ///
     /// No echo guard is needed. The bot's own messages never come back as
     /// updates — that was the whole trouble with a transport that shared the
     /// owner's identity.
     static func command(in message: TelegramMessage,
                         body override: String? = nil,
                         config: TelegramConfig,
-                        botUsername: String?,
-                        dedicatedTopic: Bool = false) -> Command? {
+                        botUsername: String?) -> Command? {
         // `override` carries downloaded media paths joined with any caption —
         // what the pane should see. Classification still uses the same gates.
         let source = override ?? message.body
@@ -931,7 +807,7 @@ final class TelegramChannel: ExternalChannel {
         }
 
         let body = stripBotMention(text, botUsername: botUsername)
-        if message.chat.isPrivate || dedicatedTopic || isSlashCommand(body) {
+        if message.chat.isPrivate || isSlashCommand(body) {
             return Command(body: body, senderId: String(from.id), senderName: from.displayName)
         }
         guard let addressed = addressedProse(body, message: message, botUsername: botUsername) else {

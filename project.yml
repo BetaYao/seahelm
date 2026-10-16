@@ -110,6 +110,8 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: CoreMedia.framework
       - sdk: QuickLookUI.framework
+      # The Telegram bridge's transport (`CurlClient`).
+      - sdk: libcurl.tbd
     preBuildScripts:
       - name: "Embed and sign bundled zmx"
         basedOnDependencyAnalysis: false

@@ -131,7 +131,6 @@
 		3FCB1E2EB9A36CFE3AA21F63 /* MergedPRLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A6A5C9293E818E242111A82 /* MergedPRLookupTests.swift */; };
 		40246B8D57009E03E8F737D7 /* TelegramBotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33734F601E5350F0D59C8596 /* TelegramBotAPI.swift */; };
 		40A381BEFFBC2C3848BF59F5 /* PaneProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */; };
-		40CF41521E14DAD8DCD43555 /* TelegramChatAddressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21E92F1505077ABACDFB0EA /* TelegramChatAddressTests.swift */; };
 		4106001E365F2AFE29B0F586 /* AgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055E765E62830F8CD924C76F /* AgentStatus.swift */; };
 		41EF2CDA6CE72813A7736497 /* WorktreeLabelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3811788C3A0B0FC8B1CD711 /* WorktreeLabelStoreTests.swift */; };
 		426F95A44B1C856837684FCF /* IslandPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2761438177A32EEF5CCFE031 /* IslandPanelController.swift */; };
@@ -150,6 +149,7 @@
 		478A900B42820F9CAC0829BF /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = 3C22FD399E95F8A453F40C3A /* ghostty */; };
 		478BA84CC6F98EA5F7F73B73 /* QRCodeRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D89A6016405AEDB17C3FB5E /* QRCodeRenderer.swift */; };
 		489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */; };
+		49042D7BD42C4FB04002DAAC /* libcurl.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 34E0E7E3509A350A7EBB5189 /* libcurl.tbd */; };
 		498DDC59CBB6DB32CB865CDC /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */; };
 		4B4B7E9CF98D494F5C2F76FB /* AddWorktreePopoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520082A00702435AC8280D60 /* AddWorktreePopoverTests.swift */; };
 		4B7B0C9498440A23F4D5C40E /* AgentRegistryIngestOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43175062905BAABB3109B693 /* AgentRegistryIngestOutcomeTests.swift */; };
@@ -181,7 +181,6 @@
 		576D38CAAD5415DA8864E501 /* IslandShapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AB034D22AB8AD81A9FA9DD /* IslandShapes.swift */; };
 		57B1D5979538741ABFEB708F /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C537B2B1B68C50EF9685736B /* SettingsViewController.swift */; };
 		57C58092E1257638F545FA4E /* CommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30353E5B3401026090F247F /* CommandParserTests.swift */; };
-		57FB441A467301F83E22AF41 /* TelegramAutoTopicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1868C530C185266814879290 /* TelegramAutoTopicTests.swift */; };
 		58049D45F0063825106D505F /* AgentMovedWorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0E1A8853C5AF1C9CF85FF8 /* AgentMovedWorktreeTests.swift */; };
 		581D15E5C37CD079FED3DB6D /* InitialAgentTaskDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7141297B1E6914887CFEB0 /* InitialAgentTaskDelivery.swift */; };
 		5885A585B9001DEEF6707C98 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CD4486C05DC41B6EBC51CC /* MarkdownPreviewView.swift */; };
@@ -230,6 +229,7 @@
 		6D77816EA35B10D7A42D5491 /* IslandProjectGroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C09670C63C69A22AF3AE348B /* IslandProjectGroupTests.swift */; };
 		6E2458E78B09E4B27F395CB3 /* VTEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01D0EBCC80C1AA901CA8E5B /* VTEvent.swift */; };
 		6E42728E3CA8DE873A074FD0 /* AgentChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5A39B8771184C83A422E99 /* AgentChannel.swift */; };
+		6EF0D3A70734647087C77BD7 /* CurlClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC2F6A0D652584CD189EF89 /* CurlClientTests.swift */; };
 		6EF47CD1C02411BA3C719E90 /* SettingsChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD8616FF9AAEF5CCCA0A710C /* SettingsChrome.swift */; };
 		6F46B38545D8EA067171AF5B /* EditorTheme+Seahelm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */; };
 		707F6BEF7FED22391823BAAD /* PairingCodeStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCFDDC4C498DF9532ABDBE4 /* PairingCodeStoreTests.swift */; };
@@ -440,6 +440,7 @@
 		CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */; };
 		CACDC5CE95525A265AC6F145 /* GmailOAuthCallbackPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8106508B943DF9C7053C6A11 /* GmailOAuthCallbackPage.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
+		CD7B83DE0BC3FB6951DF81C9 /* CurlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */; };
 		CE2F476AAE8E4F1A63F506EC /* TelegramRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 588A37DABECC74B634A5E45A /* TelegramRulesView.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
 		CEEBDC3FD19A477BA63F71C5 /* OnboardingPermissionsStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC981A1D0F39B20BE16B2F93 /* OnboardingPermissionsStepView.swift */; };
@@ -504,7 +505,6 @@
 		EC13CCF117877683F85E52FA /* MenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */; };
 		EC2BBE9EFCBECB0146AB3C79 /* GhosttyNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F3C2A8D8BBDA9181C858E4 /* GhosttyNSView.swift */; };
 		EC38D2802EC3D7901C1B5A51 /* ScanDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5943C79014C5FE35819487C /* ScanDecoder.swift */; };
-		EC780AC288D21EAB7FF4A2F7 /* TelegramChatAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE39199C8F720E7D567C9964 /* TelegramChatAddress.swift */; };
 		EC97D5CB826CD5F1B3DEAAF5 /* NormalizedEventDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC1F3A1FF1F0CC45B8BD0A8 /* NormalizedEventDecoderTests.swift */; };
 		EE4F825F3D00D178B6D3F67A /* WorktreeCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57450999185BB0E08B55593 /* WorktreeCleanup.swift */; };
 		EE61D03E90AEC25A247BE3C9 /* ManifestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBE28FEA6DE230823C9078B5 /* ManifestEngine.swift */; };
@@ -598,7 +598,6 @@
 		16F923AC4CC69AE72ABE17C5 /* ProcessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessProbe.swift; sourceTree = "<group>"; };
 		176DD9C40844C7ECA03950E6 /* StatusBarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarViewTests.swift; sourceTree = "<group>"; };
 		17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailMailConfigTests.swift; sourceTree = "<group>"; };
-		1868C530C185266814879290 /* TelegramAutoTopicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramAutoTopicTests.swift; sourceTree = "<group>"; };
 		1A051126E1460FEC0DA40ACE /* VolumeFence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeFence.swift; sourceTree = "<group>"; };
 		1A9D36C4513804B095CBABA5 /* PairRateLimiterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairRateLimiterTests.swift; sourceTree = "<group>"; };
 		1AB9B880E783FE26BA01DA38 /* GatewayStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayStateTests.swift; sourceTree = "<group>"; };
@@ -644,6 +643,7 @@
 		2A6A5C9293E818E242111A82 /* MergedPRLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergedPRLookupTests.swift; sourceTree = "<group>"; };
 		2A7D0D0FB11B64D9267C857F /* MergedPRLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergedPRLookup.swift; sourceTree = "<group>"; };
 		2B539381678923218614CD56 /* PaneMessageProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneMessageProjector.swift; sourceTree = "<group>"; };
+		2BC2F6A0D652584CD189EF89 /* CurlClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurlClientTests.swift; sourceTree = "<group>"; };
 		2C697E3FD9E28F1643C259EB /* AgentTranscriptTailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTranscriptTailTests.swift; sourceTree = "<group>"; };
 		2D06307CBEFF44025C8E9AD3 /* SplitPaneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneTests.swift; sourceTree = "<group>"; };
 		2D90204521BAE476A8EF340E /* ClaudeHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeHooksSetup.swift; sourceTree = "<group>"; };
@@ -657,6 +657,7 @@
 		33EB483855694F79BFA1A7B7 /* HostGatewayKeyFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayKeyFrameTests.swift; sourceTree = "<group>"; };
 		340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestOutcome.swift; sourceTree = "<group>"; };
 		34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeIconClusterView.swift; sourceTree = "<group>"; };
+		34E0E7E3509A350A7EBB5189 /* libcurl.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libcurl.tbd; path = usr/lib/libcurl.tbd; sourceTree = SDKROOT; };
 		358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatchTests.swift; sourceTree = "<group>"; };
 		35D82D53B83B8C48E71D9E57 /* TerminalCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinator.swift; sourceTree = "<group>"; };
 		361B9AD515334FDA65348EA8 /* InitialAgentTaskDeliveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitialAgentTaskDeliveryTests.swift; sourceTree = "<group>"; };
@@ -970,7 +971,6 @@
 		C122F14B425BC7F3DF1FEB8B /* WorktreeDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscovery.swift; sourceTree = "<group>"; };
 		C1768F75790892B5D280CBC0 /* NewBranchDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBranchDialog.swift; sourceTree = "<group>"; };
 		C197F88AECB09C7C3D4449DE /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
-		C21E92F1505077ABACDFB0EA /* TelegramChatAddressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramChatAddressTests.swift; sourceTree = "<group>"; };
 		C257053E5A9E9DC19BB550EB /* ChatQuestionCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatQuestionCardTests.swift; sourceTree = "<group>"; };
 		C282D98A9A6117C70B06D3F1 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		C30353E5B3401026090F247F /* CommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandParserTests.swift; sourceTree = "<group>"; };
@@ -995,11 +995,11 @@
 		CCF6409060B18FD8F316245D /* PairingCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCrypto.swift; sourceTree = "<group>"; };
 		CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 		CD8F0A0F456C94284935BE32 /* RegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegressionTests.swift; sourceTree = "<group>"; };
-		CE39199C8F720E7D567C9964 /* TelegramChatAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramChatAddress.swift; sourceTree = "<group>"; };
 		CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProvider.swift; sourceTree = "<group>"; };
 		CF285507461CAA5C36AF8D90 /* OSCProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSCProgress.swift; sourceTree = "<group>"; };
 		CF6E8352A4B0C1AE47D7B49A /* FileSystemProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSystemProbe.swift; sourceTree = "<group>"; };
 		CF9A024C6CD76762DD132684 /* AgentRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistry.swift; sourceTree = "<group>"; };
+		CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurlClient.swift; sourceTree = "<group>"; };
 		CFB1ED030DFAE92B65E7E8D1 /* HostGatewayConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayConfig.swift; sourceTree = "<group>"; };
 		CFD256925C8144E1C18DEC0E /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
 		D00FBF5F2A32A2CF327AF6E1 /* github-pr-list.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-pr-list.json"; sourceTree = "<group>"; };
@@ -1120,6 +1120,7 @@
 				8D46D0CD23A90F281380306A /* AVFoundation.framework in Frameworks */,
 				BF8A3204EE374D961A762929 /* CoreMedia.framework in Frameworks */,
 				BA68398C1166613FC959FDCD /* QuickLookUI.framework in Frameworks */,
+				49042D7BD42C4FB04002DAAC /* libcurl.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1165,6 +1166,7 @@
 				4F0C5FB141D86ECC0B6D8E66 /* Config.swift */,
 				42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */,
 				59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */,
+				CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */,
 				B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */,
 				2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */,
 				FAFF4D1021558298332264D5 /* DebugFlags.swift */,
@@ -1251,7 +1253,6 @@
 				22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */,
 				33734F601E5350F0D59C8596 /* TelegramBotAPI.swift */,
 				371F0BC6C00D849566000118 /* TelegramChannel.swift */,
-				CE39199C8F720E7D567C9964 /* TelegramChatAddress.swift */,
 				A78FEF7EF31BF2E3DD44AD5F /* TelegramConfig.swift */,
 				367C0A6616137695AEDA9D74 /* TelegramFormatter.swift */,
 				A09CD18DFB68633987C0BD28 /* TelegramInboundMedia.swift */,
@@ -1484,6 +1485,7 @@
 				6E1906E0816DDA737033BBF1 /* AVFoundation.framework */,
 				902196E72A614F0FF9C90514 /* AVKit.framework */,
 				B88BC86C7B6B48D00A1F8059 /* CoreMedia.framework */,
+				34E0E7E3509A350A7EBB5189 /* libcurl.tbd */,
 				D8F411B82FDF917ED61460FC /* QuickLookUI.framework */,
 				5DFD4558DAFB3276A91514A2 /* SwiftUI.framework */,
 			);
@@ -1603,6 +1605,7 @@
 				E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */,
 				4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */,
 				536A8D31229E4F3D3D5D4DE8 /* ControlSocketServerTests.swift */,
+				2BC2F6A0D652584CD189EF89 /* CurlClientTests.swift */,
 				5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */,
 				201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */,
 				BA242C3631BD163C19CFDD38 /* DashboardFocusControllerTests.swift */,
@@ -1720,9 +1723,7 @@
 				BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */,
 				DC183C3A20588D380EF62682 /* TabSelectionTests.swift */,
 				249CA31487C12997605E1512 /* TaskProgressParserTests.swift */,
-				1868C530C185266814879290 /* TelegramAutoTopicTests.swift */,
 				59CF8253BD7CAF318D05885C /* TelegramBridgeTests.swift */,
-				C21E92F1505077ABACDFB0EA /* TelegramChatAddressTests.swift */,
 				728C2C38D2A4B5627B149F88 /* TelegramInboundMediaTests.swift */,
 				803B8F8E6947C76080BAE3C2 /* TelegramPacketBookTests.swift */,
 				89AF451E1FC9B6E21F9B67A6 /* TelegramPairingTests.swift */,
@@ -2199,6 +2200,7 @@
 				34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */,
 				C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */,
 				1F17BE40E11A063D21FD2B1C /* ControlSocketServerTests.swift in Sources */,
+				6EF0D3A70734647087C77BD7 /* CurlClientTests.swift in Sources */,
 				B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */,
 				0B486DC8922CD428C8D48A90 /* CursorSessionTitleLookupTests.swift in Sources */,
 				43BD24E5D16ABA5AC477E89C /* DashboardFocusControllerTests.swift in Sources */,
@@ -2316,9 +2318,7 @@
 				2215E8F6A1F2571870A122F6 /* TabCoordinatorTests.swift in Sources */,
 				65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */,
 				B658CA193508F17D6F6BA66D /* TaskProgressParserTests.swift in Sources */,
-				57FB441A467301F83E22AF41 /* TelegramAutoTopicTests.swift in Sources */,
 				0202D5F27E405DFF0764DBA3 /* TelegramBridgeTests.swift in Sources */,
-				40CF41521E14DAD8DCD43555 /* TelegramChatAddressTests.swift in Sources */,
 				5FF231B7FD897BF5252E8648 /* TelegramInboundMediaTests.swift in Sources */,
 				F72F97A5DE0B316E3B90BDB5 /* TelegramPacketBookTests.swift in Sources */,
 				9095B660E7047E1815E67212 /* TelegramPairingTests.swift in Sources */,
@@ -2446,6 +2446,7 @@
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,
+				CD7B83DE0BC3FB6951DF81C9 /* CurlClient.swift in Sources */,
 				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,
 				1BB8C6D16F033D0337FB2BAD /* CursorSessionTitleLookup.swift in Sources */,
 				B624161842A284D12A4CBBB1 /* DashboardFocusController.swift in Sources */,
@@ -2625,7 +2626,6 @@
 				859DBEFE2BAE0BA0C975FD3E /* TaskProgressParser.swift in Sources */,
 				40246B8D57009E03E8F737D7 /* TelegramBotAPI.swift in Sources */,
 				FC2829917F91412C222E569F /* TelegramChannel.swift in Sources */,
-				EC780AC288D21EAB7FF4A2F7 /* TelegramChatAddress.swift in Sources */,
 				0ACBFB116D839F9A3BC9DD7C /* TelegramConfig.swift in Sources */,
 				B27CC6F1E02F01BDF914C664 /* TelegramFormatter.swift in Sources */,
 				FE109CCA64A2444D664C7FCC /* TelegramInboundMedia.swift in Sources */,
@@ -2731,7 +2731,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.66;
+				MARKETING_VERSION = 2.0.67;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2968,7 +2968,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.66;
+				MARKETING_VERSION = 2.0.67;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
