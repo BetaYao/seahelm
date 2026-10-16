@@ -227,6 +227,68 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual((decodeResponse(snap[0])["error"] as? [String: Any])?["code"] as? Int, -32001)
     }
 
+    // MARK: - Telegram Mini App sign-in
+
+    private func telegramSession(host: String?, code: String = "48291736",
+                                 allowed: [String] = ["8817232020"]) -> HostGatewaySession {
+        HostGatewaySession(
+            router: ControlRouter(dataSource: SessionFakeDataSource()),
+            expectedMacId: macId,
+            rootSecretBase64url: PairingCrypto.base64url(root),
+            vt: FakeVT(),
+            pairingCode: FakePairingCode(code),
+            access: HostGatewayAccess(
+                telegramHost: "tg.seahelm.dev", frontHost: { host },
+                telegram: { TelegramConfig(botToken: TelegramInitDataFixture.botToken, allowedUsers: allowed) }))
+    }
+
+    private func telegramAuth(_ s: HostGatewaySession, initData: String) -> [String: Any]? {
+        let params = try! JSONSerialization.data(withJSONObject: ["telegram_init_data": initData])
+        let frame = #"{"id":"t","method":"auth","params":"# + String(decoding: params, as: UTF8.self) + "}"
+        return decodeResponse(s.handle(text: frame)[0])["result"] as? [String: Any]
+    }
+
+    /// The launch is recent enough only relative to its own fixture date, so
+    /// the live clock would call it expired; sign one for "now".
+    private func freshInitData() -> String {
+        TelegramInitDataTests.sign(user: #"{"id":8817232020,"username":"matt_c"}"#,
+                                   authDate: Int(Date().timeIntervalSince1970),
+                                   botToken: TelegramInitDataFixture.botToken)
+    }
+
+    func testTelegramSignInIssuesTheToken() {
+        let result = telegramAuth(telegramSession(host: "tg.seahelm.dev"), initData: freshInitData())
+        XCTAssertEqual(result?["ok"] as? Bool, true)
+        XCTAssertEqual(result?["token"] as? String, token())
+    }
+
+    func testTelegramSignInRefusesSomeoneNotAllowed() {
+        let result = telegramAuth(telegramSession(host: "tg.seahelm.dev", allowed: ["42"]), initData: freshInitData())
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertNil(result?["token"])
+    }
+
+    /// The Mini App host has no Access in front of it: a right code is still no.
+    func testPairingCodeIsRefusedOnTheTelegramHost() {
+        let s = telegramSession(host: "tg.seahelm.dev")
+        let out = s.handle(text: #"{"id":"a","method":"auth","params":{"code":"48291736"}}"#)
+        XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["ok"] as? Bool, false)
+    }
+
+    func testPairingCodeStillWorksElsewhere() {
+        let s = telegramSession(host: "gw.seahelm.dev")
+        let out = s.handle(text: #"{"id":"a","method":"auth","params":{"code":"48291736"}}"#)
+        XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["ok"] as? Bool, true)
+    }
+
+    /// A token already issued keeps working on the Telegram host — reconnects
+    /// after the launch data has gone stale ride it.
+    func testTokenReconnectWorksOnTheTelegramHost() {
+        let s = telegramSession(host: "tg.seahelm.dev")
+        let out = s.handle(text: authFrame())
+        XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["ok"] as? Bool, true)
+    }
+
     func testAuthCodeRateLimited() {
         let lim = PairRateLimiter(maxFailures: 2, window: 60)
         let (s, _, _) = sessionWithCode("48291736", limiter: lim, ip: "9.9.9.9")

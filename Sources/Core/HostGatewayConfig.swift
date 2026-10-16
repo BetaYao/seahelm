@@ -11,17 +11,25 @@ struct HostGatewayConfig: Codable, Equatable {
     /// The code a remote client enters to pair with this host (see `PairingCodeStore`).
     /// Written only through `Config.persistPairCode`.
     var pairCode: String?
+    /// The public hostname a Telegram Mini App opens this gateway on (e.g.
+    /// `tg.seahelm.dev`). That host is reached without Cloudflare Access in
+    /// front, so on it the pairing code is refused outright: only a signed
+    /// Telegram launch from an allowed user, or a token already issued, gets
+    /// in. Nil: no such host, nothing changes.
+    var telegramHost: String?
 
     init(enabled: Bool? = nil,
          port: UInt16? = nil,
          publicURL: String? = nil,
          webRoot: String? = nil,
-         pairCode: String? = nil) {
+         pairCode: String? = nil,
+         telegramHost: String? = nil) {
         self.enabled = enabled
         self.port = port
         self.publicURL = publicURL
         self.webRoot = webRoot
         self.pairCode = pairCode
+        self.telegramHost = telegramHost
     }
 
     var resolvedEnabled: Bool { enabled ?? false }
@@ -60,7 +68,8 @@ struct HostGatewayConfig: Codable, Equatable {
             // No field carries the dev-only web root, so pass it through rather
             // than erase a working copy set by hand in config.json.
             webRoot: existing?.webRoot,
-            pairCode: existing?.pairCode)
+            pairCode: existing?.pairCode,
+            telegramHost: existing?.telegramHost)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -68,5 +77,6 @@ struct HostGatewayConfig: Codable, Equatable {
         case publicURL = "public_url"
         case webRoot = "web_root"
         case pairCode = "pair_code"
+        case telegramHost = "telegram_host"
     }
 }

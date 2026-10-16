@@ -427,6 +427,7 @@ class MainWindowController: NSWindowController {
         tabCoordinator.chatProgress.fleetChats = { [weak self] in
             [self?.config.telegram?.resolvedDefaultChatId].compactMap { $0 }
         }
+        tabCoordinator.telegramConfigProvider = { [weak self] in self?.config.telegram }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleNavigateToWorktree(_:)),

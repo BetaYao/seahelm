@@ -60,6 +60,7 @@ final class HostGatewaySession {
     /// hop to the VT queue, which is where the observer takes this same lock.
     private let lock = NSLock()
     private var authenticated = false
+    private let access: HostGatewayAccess
     /// Last `agent_type` sent per pane, so a `pane.updated` that changes it —
     /// an agent starting, or exiting back to the shell — still reaches the page.
     private var sentAgentTypes: [String: String] = [:]
@@ -84,7 +85,9 @@ final class HostGatewaySession {
          decisions: HostGatewayDecisions = HostGatewayDecisions(),
          pairingCode: PairingCodeVerifying? = nil,
          rateLimiter: PairRateLimiter? = nil,
-         clientIP: String = "unknown") {
+         clientIP: String = "unknown",
+         access: HostGatewayAccess = HostGatewayAccess()) {
+        self.access = access
         self.router = router
         self.expectedMacId = expectedMacId
         self.rootSecretBase64url = rootSecretBase64url
@@ -460,6 +463,8 @@ final class HostGatewaySession {
         let token = params["token"] as? String ?? ""
         let code = params["code"] as? String ?? ""
 
+        let initData = params["telegram_init_data"] as? String ?? ""
+
         // Token path wins when both are present (return visits).
         if !token.isEmpty {
             let ok = HostGatewayAuth.verify(
@@ -468,7 +473,19 @@ final class HostGatewaySession {
             return finishAuth(id: id, ok: ok, params: params, issuedToken: ok ? token : nil)
         }
 
+        if !initData.isEmpty {
+            let user = access.telegramUser(initData: initData)
+            let issued = user == nil ? nil : HostGatewayAuth.expectedToken(rootSecretBase64url: rootSecretBase64url)
+            NSLog("[HostGateway] Telegram sign-in \(issued == nil ? "refused" : "accepted") for \(user.map { String($0.id) } ?? "?")")
+            return finishAuth(id: id, ok: issued != nil, params: params, issuedToken: issued)
+        }
+
         if !code.isEmpty {
+            // No Access in front of this host: a code would be open to anyone.
+            guard !access.isTelegramOnly else {
+                NSLog("[HostGateway] Pairing code refused on the Telegram host")
+                return finishAuth(id: id, ok: false, params: params, issuedToken: nil)
+            }
             if let rateLimiter, !rateLimiter.allow(ip: clientIP) {
                 return [encodeError(id: id, code: -32029, message: "rate_limited")]
             }
