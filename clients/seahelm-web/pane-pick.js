@@ -7,9 +7,13 @@
 // that is happily running is why you tapped the row; opening on the Claude
 // would make you hunt for it.
 //
-// Order: waiting on you, then failed, then running, then the pane you last
-// looked at here, then whatever comes first. "Last looked at" ranks below the
-// live states on purpose — it is a memory of the past, they are the present.
+// Order: an open decision (a question to answer, or suggested next steps to
+// pick from), then waiting on you, then failed, then running, then the pane you
+// last looked at here, then whatever comes first. A decision outranks every
+// status because a suggestion arrives as the agent finishes — its pane reads
+// idle, and ranking by status alone opened the worktree on a busy neighbour
+// with the card nowhere in sight. "Last looked at" ranks below the live states
+// on purpose — it is a memory of the past, they are the present.
 //
 // Nothing here knows about the DOM; statuses are whatever normStatus produced.
 (function (root, factory) {
@@ -19,10 +23,10 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const RANK = { waiting: 0, failed: 1, running: 2 };
+  const RANK = { waiting: 1, failed: 2, running: 3 };
 
   /**
-   * @param {Array<[string, {status:string}]>} panes  [key, pane] in display order
+   * @param {Array<[string, {status:string, decision?:boolean}]>} panes  [key, pane] in display order
    * @param {string|null} lastKey  the pane last shown for this worktree
    * @returns {string|null} the key to open on
    */
@@ -30,7 +34,7 @@
     if (!Array.isArray(panes) || !panes.length) return null;
     let best = null, bestRank = 99;
     for (const [key, pane] of panes) {
-      const rank = RANK[pane && pane.status];
+      const rank = pane && pane.decision ? 0 : RANK[pane && pane.status];
       if (rank !== undefined && rank < bestRank) { best = key; bestRank = rank; }
     }
     if (best !== null) return best;
@@ -48,5 +52,13 @@
     return STATUS_LABEL[status] ?? '';
   }
 
-  return { pickPane, statusLabel, STATUS_LABEL };
+  /** What a row or tab says when one of its panes holds an open decision —
+   *  which speaks louder than its status. `null` when there is none. */
+  function decisionLabel(kind) {
+    if (kind === 'question') return 'Needs you';
+    if (kind === 'suggest') return 'Suggestion';
+    return null;
+  }
+
+  return { pickPane, statusLabel, decisionLabel, STATUS_LABEL };
 });

@@ -1127,6 +1127,7 @@ function onGatewayNotify(method, params){
     if (params.cleared) S.events.delete(key);
     else S.events.set(key, params);
     renderSuggestions();
+    refreshFleetSoon(false);   // the row and the pane's tab say so too
     return;
   }
   if (method === 'pane.message') {
@@ -1567,7 +1568,7 @@ function setSurfaceMode(mode){
   localStorage.setItem(SURFACE_KEY, S.surfaceMode);
   renderSurfaceBadge();
   applySurfaceMode();
-  renderSuggestions();      // the reply bar is the timeline's only
+  renderSuggestions();      // the card sits above whichever bar this mode has
   if (next === prev) return;
   if (next === 'text') {
     if (S.vt.panes.size) unmountPanes();
@@ -1937,23 +1938,23 @@ function updateFirstMateHeader(rows){
   else if (running) parts.push(`${running} running`);
   $('fmSub').textContent = fleet.length ? parts.join(' · ') : '';
 }
-/** Open questions and suggestions are answered in the reply bar above the
- *  timeline's composer. The terminal view used to float them as cards over the
- *  top of the page; they covered the head and the output they were about, and
- *  the terminal itself is where such a prompt is answered there. */
+/** Open questions and suggestions are answered in a card above the composer —
+ *  or, in terminal mode, above the key bar. It used to be the timeline's alone,
+ *  on the grounds that a terminal shows its own prompt; but a suggestion is
+ *  seahelm's, not the terminal's, and nothing on that screen offers it, so in
+ *  terminal mode the options simply never appeared. */
 function renderSuggestions(){
-  const text = loadSurfaceMode() === 'text';
-  renderReplyBar(text);
-  renderWaitingBadge(text);
+  renderReplyBar();
+  renderWaitingBadge();
   renderSendButton();
 }
 
 /** The open decision of the pane on screen, answered above the composer. The
  *  prose it is about is the reply just above, so only the choices are shown. */
-function renderReplyBar(text){
+function renderReplyBar(){
   const bar = $('replyBar');
   const pid = S.selPane;
-  const e = text && pid ? S.events.get(pid) : null;
+  const e = pid ? S.events.get(pid) : null;
   bar.hidden = !e;
   bar.innerHTML = '';
   if (!e) return;
@@ -2007,10 +2008,10 @@ function renderReplyBar(text){
  *  the ‹ that returns to the fleet list — where those panes are, each already
  *  carrying its own status dot. The pane you are looking at is not counted: its
  *  decision is already in the reply bar above the composer. */
-function renderWaitingBadge(text){
+function renderWaitingBadge(){
   const btn = $('drawerBtn');
   if (!btn) return;
-  const n = text ? [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length : 0;
+  const n = [...S.events].filter(([pid, e]) => e && pid !== S.selPane).length;
   if (n) btn.setAttribute('data-waiting', n > 9 ? '9+' : String(n));
   else btn.removeAttribute('data-waiting');
   const label = n ? `Back to First Mate — ${n} pane${n > 1 ? 's' : ''} waiting on you` : 'Back to First Mate';
@@ -2150,7 +2151,20 @@ function paneLabel(pane){
 }
 
 /** Panes with normalised statuses, as pane-pick.js reads them. */
-const pickablePanes = (row) => row.panes.map(([key, p]) => [key, { status: normStatus(p.status) }]);
+const pickablePanes = (row) => row.panes.map(([key, p]) => [key, { status: normStatus(p.status), decision: S.events.has(key) }]);
+
+/** One line for a row: the question, or what a suggestion offers. */
+function decisionSummary(e){
+  if (e.type === 'question') return String(e.prompt || 'Needs your approval').trim();
+  const opts = (e.options || []).map(o => String(o).trim()).filter(Boolean);
+  return opts.length ? 'Next: ' + opts.join(' · ') : String(e.prompt || '').trim();
+}
+
+/** The open decision in a worktree, if any of its panes holds one. */
+function rowDecision(row){
+  for (const [key] of row.panes) { const e = S.events.get(key); if (e) return e; }
+  return null;
+}
 
 // The pane last shown for each worktree, so coming back to one that has nothing
 // live lands where you were rather than on its first pane.
@@ -2196,8 +2210,12 @@ function renderTree(){
       // The group header already names the project when grouping by it.
       if (!byRepo) meta.push(r.project);
       if (r.branch && r.branch !== r.title) meta.push(r.branch);
-      const label = SeahelmPanePick.statusLabel(st);
-      const msg = String(lead.last_message || '').trim();
+      // An open decision speaks louder than the status: a suggestion comes in
+      // as the agent goes idle, and "Idle" is exactly what it is not asking for.
+      const decision = rowDecision(r);
+      const label = decision ? SeahelmPanePick.decisionLabel(decision.type) : SeahelmPanePick.statusLabel(st);
+      const labelColor = decision ? STC.waiting : STC[st];
+      const msg = decision ? decisionSummary(decision) : String(lead.last_message || '').trim();
       const timeText = rowTimeText(r.runningSince, r.lastActivityAt);
       row.innerHTML =
         statusDotHTML(r.status, 'fm-dot') +
@@ -2207,7 +2225,7 @@ function renderTree(){
              <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}">${esc(timeText)}</span>
            </span>
            <span class="fm-l2">
-             ${label ? `<span class="fm-st" style="color:${STC[st]}">${esc(label)}</span><span aria-hidden="true">·</span>` : ''}
+             ${label ? `<span class="fm-st" style="color:${labelColor}">${esc(label)}</span><span aria-hidden="true">·</span>` : ''}
              <span class="fm-meta">${esc(meta.join(' · '))}</span>
              <span class="fm-git">${gitInfoHTML(r.git)}</span>
            </span>
@@ -2263,13 +2281,16 @@ function renderDetailChrome(){
     b.dataset.key = key;
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(on));
-    const stText = st === 'running'
+    const decision = S.events.get(key);
+    const stText = decision ? SeahelmPanePick.decisionLabel(decision.type)
+      : st === 'running'
       ? compactDuration((S.rowTimes.get(row.path) || {}).running_since) || 'Running'
       : (st === 'waiting' || st === 'failed') ? SeahelmPanePick.statusLabel(st) : '';
-    b.innerHTML = `<i aria-hidden="true" style="background:${STC[st] || STC.unknown}"></i>`
+    const color = decision ? STC.waiting : (STC[st] || STC.unknown);
+    b.innerHTML = `<i aria-hidden="true" style="background:${color}"></i>`
       + `<span class="pt-name${name.shell ? ' shell' : ''}">${esc(name.text)}</span>`
-      + (stText ? `<span class="pt-st" style="color:${STC[st]}">${esc(stText)}</span>` : '');
-    b.title = [name.text, SeahelmPanePick.statusLabel(st), (p.title || '').trim()].filter(Boolean).join(' — ');
+      + (stText ? `<span class="pt-st" style="color:${color}">${esc(stText)}</span>` : '');
+    b.title = [name.text, stText || SeahelmPanePick.statusLabel(st), (p.title || '').trim()].filter(Boolean).join(' — ');
     b.onclick = () => { if (key !== S.selPane) selectWorktree(row, key, { navigate: false }); };
     tabs.appendChild(b);
   }
