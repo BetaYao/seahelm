@@ -374,6 +374,16 @@ final class TelegramChannel: ExternalChannel {
         lock.unlock()
     }
 
+    /// Put the bot's menu button back to the default — the Mini App URL was
+    /// cleared. Not done on every connect: a bot whose button somebody set by
+    /// hand, and that never had a URL here, must be left alone.
+    func resetMenuButton() {
+        lock.lock()
+        let api = self.api
+        lock.unlock()
+        sendQueue.async { try? api?.setMenuButton(webApp: nil) }
+    }
+
     /// Arm (or, with nil, disarm) pairing. Live for as long as the wizard is on
     /// screen: a code that outlived its window would be a second, quieter
     /// allowlist.
@@ -398,6 +408,12 @@ final class TelegramChannel: ExternalChannel {
         guard let me = retrying(generation: gen, "getMe", { try api.getMe() }) else { return }
         botUsername = me.username
         NSLog("[Telegram] Connected as @\(me.username ?? String(me.id))")
+        // Every connect, so a URL changed in Settings — which restarts the
+        // bridge — is on the button by the time anyone looks. Best effort.
+        if let miniApp = cfg.resolvedMiniAppURL {
+            do { try api.setMenuButton(webApp: miniApp) }
+            catch { NSLog("[Telegram] Could not set the menu button: \(error.localizedDescription)") }
+        }
 
         // The offset is the one piece of state the loop owns: everything below
         // it has been acknowledged to Telegram and will not be sent again.

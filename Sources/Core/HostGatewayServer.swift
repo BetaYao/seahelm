@@ -37,9 +37,15 @@ final class HostGatewayServer {
     /// to the internal listener — which is the peer port the internal side
     /// sees, and so the only thing that ties a session back to its request.
     /// Read at auth, long after the hop was made. Touched only on `queue`.
-    private var frontHosts: [UInt16: String] = [:]
+    private var fronts: [UInt16: FrontRequest] = [:]
     private var frontPorts: [ObjectIdentifier: UInt16] = [:]
     private let telegram: () -> TelegramConfig?
+
+    /// What the public side of a proxied upgrade said about itself.
+    struct FrontRequest: Equatable {
+        var host: String?
+        var clientIP: String?
+    }
     private var readyHandlers: [() -> Void] = []
     private let stateLock = NSLock()
     /// Pings every open socket so an idle one is not reaped in transit.
@@ -380,7 +386,8 @@ final class HostGatewayServer {
 
     private func route(_ connection: NWConnection, head: String, rawRequest: Data) {
         if Self.isWebSocketUpgrade(head: head) {
-            proxyToWebSocket(connection, initial: rawRequest, host: Self.hostHeader(head: head))
+            proxyToWebSocket(connection, initial: rawRequest,
+                             front: Self.frontRequest(head: head, peer: connection.endpoint))
             return
         }
         let (method, target) = Self.requestLine(head: head)
@@ -403,7 +410,7 @@ final class HostGatewayServer {
 
     /// Replay the client's handshake to the internal listener, then pump bytes both
     /// ways. Nothing here understands WebSocket framing — that stays the framework's.
-    private func proxyToWebSocket(_ client: NWConnection, initial: Data, host: String?) {
+    private func proxyToWebSocket(_ client: NWConnection, initial: Data, front: FrontRequest) {
         guard wsPort != 0, let port = NWEndpoint.Port(rawValue: wsPort) else {
             client.cancel()
             return
@@ -415,8 +422,8 @@ final class HostGatewayServer {
             guard let self else { return }
             switch state {
             case .ready:
-                if let host, case .hostPort(_, let port)? = upstream.currentPath?.localEndpoint {
-                    self.frontHosts[port.rawValue] = host
+                if case .hostPort(_, let port)? = upstream.currentPath?.localEndpoint {
+                    self.fronts[port.rawValue] = front
                     self.frontPorts[ObjectIdentifier(client)] = port.rawValue
                 }
                 upstream.send(content: initial, isComplete: true, completion: .contentProcessed { [weak self] error in
@@ -466,9 +473,37 @@ final class HostGatewayServer {
         proxied.removeValue(forKey: ObjectIdentifier(second))
         for connection in [first, second] {
             if let port = frontPorts.removeValue(forKey: ObjectIdentifier(connection)) {
-                frontHosts.removeValue(forKey: port)
+                fronts.removeValue(forKey: port)
             }
         }
+    }
+
+    /// The Host, and the real client address: the peer itself, unless the
+    /// peer is this machine — cloudflared — and says who it is relaying for.
+    /// Trusted only from loopback; anyone else could claim any address.
+    static func frontRequest(head: String, peer: NWEndpoint) -> FrontRequest {
+        var peerIP: String?
+        var loopback = false
+        if case .hostPort(let host, _) = peer {
+            peerIP = "\(host)"
+            switch host {
+            case .ipv4(let address): loopback = address.isLoopback
+            case .ipv6(let address): loopback = address.isLoopback
+            default: break
+            }
+        }
+        let relayed = loopback ? header("cf-connecting-ip", in: head) : nil
+        return FrontRequest(host: hostHeader(head: head), clientIP: relayed ?? peerIP)
+    }
+
+    static func header(_ name: String, in head: String) -> String? {
+        for line in head.split(separator: "\r\n", omittingEmptySubsequences: true).dropFirst() {
+            guard let colon = line.firstIndex(of: ":"),
+                  line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased() == name else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
     }
 
     /// The request's Host, lowercased and without a port. Nil when absent.
@@ -573,7 +608,11 @@ final class HostGatewayServer {
                 telegramHost: config.telegramHost,
                 frontHost: { [weak self] in
                     guard let self, let peerPort else { return nil }
-                    return self.frontHosts[peerPort]
+                    return self.fronts[peerPort]?.host
+                },
+                frontClientIP: { [weak self] in
+                    guard let self, let peerPort else { return nil }
+                    return self.fronts[peerPort]?.clientIP
                 },
                 telegram: telegram))
         let key = ObjectIdentifier(connection)

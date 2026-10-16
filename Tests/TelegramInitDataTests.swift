@@ -73,6 +73,41 @@ final class TelegramInitDataTests: XCTestCase {
         XCTAssertNil(access(host: "tg.seahelm.dev", allowed: ["42"]).telegramUser(initData: fx.valid, now: fx.authDate))
     }
 
+    func testTheMiniAppURLNamesTheHostWhenNoneIsSet() {
+        let access = HostGatewayAccess(frontHost: { "tg.example.com" }, telegram: {
+            TelegramConfig(botToken: "t", miniAppURL: "https://TG.example.com/app")
+        })
+        XCTAssertEqual(access.miniAppHost, "tg.example.com")
+        XCTAssertTrue(access.isTelegramOnly)
+        let explicit = HostGatewayAccess(telegramHost: "other.example.com", frontHost: { "tg.example.com" },
+                                         telegram: { TelegramConfig(miniAppURL: "https://tg.example.com/") })
+        XCTAssertFalse(explicit.isTelegramOnly, "an explicit telegram_host wins")
+    }
+
+    func testMiniAppURLMustBeHTTPSWithAHost() {
+        XCTAssertEqual(TelegramConfig.miniAppURL(from: " https://tg.example.com/ ")?.host, "tg.example.com")
+        XCTAssertNil(TelegramConfig.miniAppURL(from: "http://tg.example.com/"))
+        XCTAssertNil(TelegramConfig.miniAppURL(from: "tg.example.com"))
+        XCTAssertNil(TelegramConfig.miniAppURL(from: ""))
+        XCTAssertNil(TelegramConfig.miniAppURL(from: nil))
+    }
+
+    func testMiniAppURLRoundTripsThroughConfig() throws {
+        let data = try JSONEncoder().encode(TelegramConfig(botToken: "t", miniAppURL: "https://tg.example.com/"))
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"mini_app_url\""))
+        XCTAssertEqual(try JSONDecoder().decode(TelegramConfig.self, from: data).miniAppURL, "https://tg.example.com/")
+    }
+
+    /// The tunnel's word for the client is taken only from the tunnel itself
+    /// (loopback); from anywhere else the header is anyone's to forge.
+    func testRealClientAddressIsTrustedOnlyFromLoopback() {
+        let head = "GET /ws HTTP/1.1\r\nHost: tg.example.com\r\nCF-Connecting-IP: 203.0.113.9\r\n\r\n"
+        let viaTunnel = HostGatewayServer.frontRequest(head: head, peer: .hostPort(host: "127.0.0.1", port: 50_000))
+        XCTAssertEqual(viaTunnel, .init(host: "tg.example.com", clientIP: "203.0.113.9"))
+        let direct = HostGatewayServer.frontRequest(head: head, peer: .hostPort(host: "192.168.1.20", port: 50_000))
+        XCTAssertEqual(direct.clientIP, "192.168.1.20")
+    }
+
     func testHostHeaderParsing() {
         XCTAssertEqual(HostGatewayServer.hostHeader(head: "GET /ws HTTP/1.1\r\nHost: TG.seahelm.dev\r\n\r\n"),
                        "tg.seahelm.dev")

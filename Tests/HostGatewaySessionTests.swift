@@ -289,6 +289,24 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertEqual((decodeResponse(out[0])["result"] as? [String: Any])?["ok"] as? Bool, true)
     }
 
+    /// Every proxied session arrives from loopback; limiting by that address
+    /// let five wrong guesses from anyone lock everyone out.
+    func testRateLimitCountsTheRealClientNotLoopback() {
+        let limiter = PairRateLimiter(maxFailures: 1, window: 60)
+        func attempt(from ip: String, code: String) -> [String: Any] {
+            let s = HostGatewaySession(
+                router: ControlRouter(dataSource: SessionFakeDataSource()),
+                expectedMacId: macId, rootSecretBase64url: PairingCrypto.base64url(root), vt: FakeVT(),
+                pairingCode: FakePairingCode("48291736"), rateLimiter: limiter, clientIP: "127.0.0.1",
+                access: HostGatewayAccess(frontClientIP: { ip }))
+            return decodeResponse(s.handle(text: #"{"id":"a","method":"auth","params":{"code":"\#(code)"}}"#)[0])
+        }
+        _ = attempt(from: "203.0.113.1", code: "00000000")
+        XCTAssertEqual((attempt(from: "203.0.113.1", code: "00000000")["error"] as? [String: Any])?["code"] as? Int, -32029)
+        let other = attempt(from: "203.0.113.2", code: "48291736")
+        XCTAssertEqual((other["result"] as? [String: Any])?["ok"] as? Bool, true, "another client is not locked out")
+    }
+
     func testAuthCodeRateLimited() {
         let lim = PairRateLimiter(maxFailures: 2, window: 60)
         let (s, _, _) = sessionWithCode("48291736", limiter: lim, ip: "9.9.9.9")

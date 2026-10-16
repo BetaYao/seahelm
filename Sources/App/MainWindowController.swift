@@ -2671,6 +2671,11 @@ extension MainWindowController: SettingsDelegate {
         // and its own teardown brings the configured one back.
         if oldTelegram != config.telegram, telegramPairingChannel == nil {
             restartTelegramBridge()
+            // A Mini App URL just cleared leaves the menu button pointing at
+            // it; the new bridge only ever sets the button, so take it down.
+            if oldTelegram?.resolvedMiniAppURL != nil, config.telegram?.resolvedMiniAppURL == nil {
+                telegramChannel?.resetMenuButton()
+            }
         }
     }
 

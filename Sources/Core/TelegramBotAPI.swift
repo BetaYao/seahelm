@@ -450,6 +450,16 @@ final class TelegramBotAPI {
                                deadline: Self.stallSeconds)
     }
 
+    /// Point the bot's menu button (left of the message box, in every private
+    /// chat) at a Mini App, or put the default back with nil.
+    func setMenuButton(webApp url: URL?, text: String = "Seahelm") throws {
+        let button: [String: Any] = url.map {
+            ["type": "web_app", "text": text, "web_app": ["url": $0.absoluteString]]
+        } ?? ["type": "default"]
+        let _: Bool = try call("setChatMenuButton", params: ["menu_button": button],
+                               deadline: Self.stallSeconds)
+    }
+
     /// Drop any webhook registered against this bot.
     ///
     /// A webhook and `getUpdates` are mutually exclusive — the second one to
