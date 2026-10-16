@@ -1492,8 +1492,7 @@ final class DashboardOverviewView: NSView {
         }
 
         private func applyContent(pane: WorktreeRowInfo, status: AgentStatus) {
-            let nextTitle = pane.currentPaneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !nextTitle.isEmpty {
+            if let nextTitle = pane.rowTitle {
                 Self.setText(titleLabel, nextTitle)
             } else if titleLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Self.setText(titleLabel, PaneTitleResolver.shortenPath(pane.worktreePath))
@@ -1509,8 +1508,7 @@ final class DashboardOverviewView: NSView {
                 Self.setText(timeLabel, nextRuntime)
             }
 
-            let nextBranch = (pane.thread.isEmpty ? pane.name : pane.thread)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let nextBranch = pane.rowSubtitle
             if !nextBranch.isEmpty {
                 Self.setText(branchLabel, nextBranch)
             }

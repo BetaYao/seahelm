@@ -793,6 +793,23 @@ final class DashboardOverviewGroupingTests: XCTestCase {
     }
 }
 
+/// The words a remote list draws a row with come from here, so the web and
+/// the dashboard cannot disagree about what a worktree is called.
+final class WorktreeRowWordsTests: XCTestCase {
+    func testTitleIsTheFocusedPanesTitleTrimmed() {
+        let row = makePane(name: "fix-y", project: "alpha", worktreePath: "/w/fix-y", paneStatuses: [.idle],
+                           isMainWorktree: false, lastActivityAt: nil, currentPaneTitle: "  Telegram 话题设计 \n")
+        XCTAssertEqual(row.rowTitle, "Telegram 话题设计")
+        XCTAssertEqual(row.rowSubtitle, "feature")
+    }
+
+    func testNoTitleIsNilSoTheCallerChoosesTheFallback() {
+        let row = makePane(name: "fix-y", project: "alpha", worktreePath: "/w/fix-y", paneStatuses: [.idle],
+                           isMainWorktree: false, lastActivityAt: nil, currentPaneTitle: "   ")
+        XCTAssertNil(row.rowTitle)
+    }
+}
+
 private func makePane(
     name: String,
     project: String,

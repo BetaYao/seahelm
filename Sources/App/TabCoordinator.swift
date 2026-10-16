@@ -2129,14 +2129,34 @@ extension TabCoordinator {
     /// Remote clients render these groups verbatim; re-implementing the rules on
     /// the far side is what would let the browser and the desktop disagree.
     func worktreeGroups(mode: String) -> [[String: Any]] {
-        let items = buildWorktreeRowInfos().map {
+        let rows = buildWorktreeRowInfos()
+        let items = rows.map {
             $0.groupingItem(
                 creationDate: DashboardOverviewView.creationDate($0.worktreePath),
                 isIntegration: IntegrationWorktreeStore.shared.isIntegrationWorktree($0.worktreePath)
             )
         }
+        // The row's words, as the dashboard draws them — kept out of the
+        // grouping item itself, whose equality decides when the dashboard
+        // regroups, and a title changes far more often than a group does.
+        var words: [String: (title: String, subtitle: String)] = [:]
+        for row in rows {
+            words[row.worktreePath] = (row.rowTitle ?? PaneTitleResolver.shortenPath(row.worktreePath),
+                                       row.rowSubtitle)
+        }
         return WorktreeGrouping
             .groups(items, mode: WorktreeGroupingMode(wire: mode), now: Date())
-            .map(\.dict)
+            .map { group in
+                var dict = group.dict
+                dict["items"] = (dict["items"] as? [[String: Any]] ?? []).map { item in
+                    var item = item
+                    if let path = item["worktree_path"] as? String, let row = words[path] {
+                        item["title"] = row.title
+                        item["subtitle"] = row.subtitle
+                    }
+                    return item
+                }
+                return dict
+            }
     }
 }
