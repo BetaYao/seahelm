@@ -11,6 +11,7 @@ import Foundation
 struct HostGatewayStaticFiles {
     /// Directory holding `index.html` and its assets; nil disables static hosting.
     let root: URL?
+    private let cache = Cache()
 
     init(root: URL?) {
         self.root = root
@@ -59,27 +60,27 @@ struct HostGatewayStaticFiles {
         guard let file = Self.resolve(target: target, in: root) else {
             return Self.plain(404, "Not Found", "not found\n")
         }
-        guard let data = try? Data(contentsOf: file) else {
+        let ext = file.pathExtension.lowercased()
+        let wantGzip = Self.acceptsGzip(headers.acceptEncoding) && Self.gzipable(ext)
+        guard let served = cache.served(file, in: root, gzip: wantGzip) else {
             return Self.plain(404, "Not Found", "not found\n")
         }
 
-        let ext = file.pathExtension.lowercased()
         let contentType = Self.contentType(for: ext)
-        let cache = Self.cacheControl(for: target, pathExtension: ext)
-        let etag = Self.etag(for: data)
+        let cacheControl = Self.cacheControl(for: target, pathExtension: ext)
+        let etag = served.etag
 
         if let inm = headers.ifNoneMatch, inm == etag {
             return Response(status: 304, reason: "Not Modified",
                             contentType: contentType, body: Data(),
-                            cacheControl: cache,
+                            cacheControl: cacheControl,
                             contentEncoding: nil, etag: etag, vary: nil)
         }
 
-        let wantGzip = Self.acceptsGzip(headers.acceptEncoding) && Self.gzipable(ext)
-        var body = data
+        var body = served.data
         var encoding: String?
         var vary: String?
-        if wantGzip, let gz = Self.gzip(data), gz.count < data.count {
+        if let gz = served.gzip {
             body = gz
             encoding = "gzip"
             vary = "Accept-Encoding"
@@ -88,7 +89,7 @@ struct HostGatewayStaticFiles {
         return Response(status: 200, reason: "OK",
                         contentType: contentType,
                         body: body,
-                        cacheControl: cache,
+                        cacheControl: cacheControl,
                         contentEncoding: encoding,
                         etag: etag,
                         vary: vary)
@@ -147,7 +148,9 @@ struct HostGatewayStaticFiles {
             // day-long max-age here paired a fresh index.html with the scripts
             // of the build before, and a page calling a function its stale
             // script lacked threw mid-render and drew an empty fleet. The ETag
-            // makes the check a 304 when nothing changed.
+            // makes the check a 304 when nothing changed. A page's own scripts
+            // never land here — `Cache` serves it with them versioned — so this
+            // is for what they load in turn.
             return "no-cache"
         }
     }
@@ -267,6 +270,140 @@ struct HostGatewayStaticFiles {
         var data = Data(head.utf8)
         if includeBody { data.append(response.body) }
         return data
+    }
+}
+
+extension HostGatewayStaticFiles {
+    /// What one file serves as: its bytes, their ETag, and — when the client
+    /// takes it and it pays — the gzip of them.
+    struct Served {
+        let data: Data
+        let etag: String
+        let gzip: Data?
+    }
+
+    /// Files read, hashed and gzipped once rather than on every request.
+    ///
+    /// Each page open used to read every script off disk, SHA-256 it and gzip
+    /// it again (xterm.js is ~490KB, and the CRC loop alone walks every byte).
+    /// An entry stands while the file's size and mtime do, so a `web_root`
+    /// working copy is still picked up the moment it is saved.
+    ///
+    /// A page is also served with its own scripts versioned: every quoted
+    /// `./name.js` / `./name.css` it names that exists gets `?v=<etag prefix>`,
+    /// which `cacheControl` answers as immutable. Without it each open
+    /// revalidated a dozen scripts — a dozen round trips through the tunnel to
+    /// the Mac before the page could run — and the old cure, a long max-age,
+    /// paired a fresh page with the scripts of the build before. A page entry
+    /// therefore also stands only while every asset it versioned is unchanged.
+    final class Cache {
+        private struct Stamp: Equatable {
+            let size: Int
+            let mtime: Date?
+        }
+
+        private struct Entry {
+            let stamp: Stamp
+            let data: Data
+            let etag: String
+            /// nil: not computed yet. `.some(nil)`: computed, did not shrink it.
+            var gzip: Data??
+            /// Pages only: the assets versioned into `data`, with the ETag each
+            /// had when it was written in.
+            var versioned: [(file: URL, etag: String)] = []
+        }
+
+        private var entries: [String: Entry] = [:]
+        private let lock = NSLock()
+
+        func served(_ file: URL, in root: URL, gzip: Bool) -> Served? {
+            lock.lock()
+            defer { lock.unlock() }
+            let isPage = ["html", "htm"].contains(file.pathExtension.lowercased())
+            guard var entry = isPage ? page(file, in: root) : asset(file) else { return nil }
+            var gz: Data?
+            if gzip {
+                if entry.gzip == nil {
+                    let packed = HostGatewayStaticFiles.gzip(entry.data)
+                    entry.gzip = .some(packed.flatMap { $0.count < entry.data.count ? $0 : nil })
+                    entries[file.path] = entry
+                }
+                gz = entry.gzip ?? nil
+            }
+            return Served(data: entry.data, etag: entry.etag, gzip: gz)
+        }
+
+        private func stamp(_ file: URL) -> Stamp? {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                  (attrs[.type] as? FileAttributeType) != .typeDirectory else { return nil }
+            return Stamp(size: (attrs[.size] as? NSNumber)?.intValue ?? -1,
+                         mtime: attrs[.modificationDate] as? Date)
+        }
+
+        private func asset(_ file: URL) -> Entry? {
+            guard let stamp = stamp(file) else {
+                entries[file.path] = nil
+                return nil
+            }
+            if let hit = entries[file.path], hit.stamp == stamp { return hit }
+            guard let data = try? Data(contentsOf: file) else { return nil }
+            let entry = Entry(stamp: stamp, data: data, etag: HostGatewayStaticFiles.etag(for: data))
+            entries[file.path] = entry
+            return entry
+        }
+
+        private func page(_ file: URL, in root: URL) -> Entry? {
+            guard let stamp = stamp(file) else {
+                entries[file.path] = nil
+                return nil
+            }
+            if let hit = entries[file.path], hit.stamp == stamp,
+               hit.versioned.allSatisfy({ asset($0.file)?.etag == $0.etag }) {
+                return hit
+            }
+            guard let raw = try? Data(contentsOf: file) else { return nil }
+            var versioned: [(file: URL, etag: String)] = []
+            let data = HostGatewayStaticFiles.versionAssets(in: raw, page: file, root: root) { url in
+                guard let etag = self.asset(url)?.etag else { return nil }
+                versioned.append((url, etag))
+                return etag
+            }
+            var entry = Entry(stamp: stamp, data: data, etag: HostGatewayStaticFiles.etag(for: data))
+            entry.versioned = versioned
+            entries[file.path] = entry
+            return entry
+        }
+    }
+
+    /// Quoted `./…​.js|.mjs|.css` references with nothing after the extension.
+    private static let assetReference = try! NSRegularExpression(
+        pattern: #"(["'])(\./[A-Za-z0-9_\-./]+\.(?:js|mjs|css))\1"#)
+
+    /// `page` with each quoted reference to an asset under `root` turned into
+    /// `./name.js?v=<first 12 hex of its ETag>`. References that resolve to no
+    /// file, or outside `root`, are left as they are.
+    static func versionAssets(in page: Data, page file: URL, root: URL,
+                              etag: (URL) -> String?) -> Data {
+        guard let text = String(data: page, encoding: .utf8) else { return page }
+        let base = file.deletingLastPathComponent()
+        let rootPath = root.standardizedFileURL.path
+        let ns = text as NSString
+        var out = ""
+        var cursor = 0
+        for match in assetReference.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let refRange = match.range(at: 2)
+            let ref = ns.substring(with: refRange)
+            let url = base.appendingPathComponent(String(ref.dropFirst(2))).standardizedFileURL
+            guard url.path.hasPrefix(rootPath + "/"), let tag = etag(url) else { continue }
+            let hex = tag.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let end = refRange.location + refRange.length
+            out += ns.substring(with: NSRange(location: cursor, length: end - cursor))
+            out += "?v=" + hex.prefix(12)
+            cursor = end
+        }
+        guard cursor > 0 else { return page }
+        out += ns.substring(from: cursor)
+        return Data(out.utf8)
     }
 }
 

@@ -1,7 +1,10 @@
 // Holding a place in the text-mode timeline across a repaint.
 //
-// Every event rebuilds the whole list through `innerHTML`, which empties the
-// scroller for an instant and leaves `scrollTop` clamped to 0. A reader who had
+// A rebuild replaces the whole list through `innerHTML`, which empties the
+// scroller for an instant and leaves `scrollTop` clamped to 0. (Most messages
+// now only patch the tail — timeline-patch.js — but paging history in, opening
+// a run of calls or a late message still rebuild or rewrite rows above the
+// reader.) A reader who had
 // scrolled up was therefore thrown to the top of the history by the next tool
 // call — and the frame-later probe that pages older messages in then fired on
 // top of that. On a phone, where a working agent emits something every few
