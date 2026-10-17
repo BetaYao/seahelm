@@ -129,6 +129,91 @@ final class HostGatewayStaticFilesTests: XCTestCase {
         XCTAssertTrue(again.body.isEmpty)
     }
 
+    // MARK: - Versioned page, cached files
+
+    private func get(_ target: String, gzip: Bool = false, ifNoneMatch: String? = nil) -> HostGatewayStaticFiles.Response {
+        files.response(method: "GET", target: target,
+                       headers: .init(acceptEncoding: gzip ? "gzip" : nil, ifNoneMatch: ifNoneMatch))
+    }
+
+    private func write(_ text: String, _ name: String) throws {
+        let url = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+
+    private func version(of name: String) -> String {
+        let etag = get("/\(name)").etag ?? ""
+        return String(etag.trimmingCharacters(in: CharacterSet(charactersIn: "\"")).prefix(12))
+    }
+
+    func testPageVersionsItsOwnScripts() throws {
+        try write("""
+            <script src="./e2ee.js"></script>
+            <link href="./sub/a.css">
+            <script>js.src = './e2ee.js'; import('./sub/a.css');</script>
+            """, "index.html")
+        try write("p{}", "sub/a.css")
+        let page = String(decoding: get("/").body, as: UTF8.self)
+        let js = version(of: "e2ee.js"), css = version(of: "sub/a.css")
+        XCTAssertEqual(js.count, 12)
+        XCTAssertTrue(page.contains("src=\"./e2ee.js?v=\(js)\""))
+        XCTAssertTrue(page.contains("href=\"./sub/a.css?v=\(css)\""))
+        XCTAssertTrue(page.contains("js.src = './e2ee.js?v=\(js)'"))
+        XCTAssertTrue(page.contains("import('./sub/a.css?v=\(css)')"))
+        // And what the page now asks for is cached for good.
+        XCTAssertEqual(get("/e2ee.js?v=\(js)").cacheControl, "public, max-age=31536000, immutable")
+    }
+
+    func testPageLeavesUnknownAndQueriedReferencesAlone() throws {
+        let html = """
+            <script src="./missing.js"></script>
+            <script src="./e2ee.js?r=2"></script>
+            <script src="https://cdn.example/x.js"></script>
+            <script src="./../outside.js"></script>
+            """
+        try write(html, "index.html")
+        try write("x", "../outside.js")
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent().appendingPathComponent("outside.js")) }
+        XCTAssertEqual(String(decoding: get("/").body, as: UTF8.self), html)
+    }
+
+    func testEditedScriptChangesThePageAndItsETag() throws {
+        try write(#"<script src="./e2ee.js"></script>"#, "index.html")
+        let before = get("/")
+        let oldVersion = version(of: "e2ee.js")
+        // A different size, so the edit shows even where mtime is coarse.
+        try write("var E2EE = 2;", "e2ee.js")
+        let after = get("/")
+        XCTAssertNotEqual(before.etag, after.etag)
+        XCTAssertNotEqual(version(of: "e2ee.js"), oldVersion)
+        XCTAssertTrue(String(decoding: after.body, as: UTF8.self).contains("e2ee.js?v=\(version(of: "e2ee.js"))"))
+        // The browser's old copy of the page no longer matches.
+        XCTAssertEqual(get("/", ifNoneMatch: before.etag).status, 200)
+    }
+
+    func testEditedFileIsServedFresh() throws {
+        XCTAssertEqual(String(decoding: get("/e2ee.js").body, as: UTF8.self), "var E2EE;")
+        try write("var E2EE = 'new';", "e2ee.js")
+        XCTAssertEqual(String(decoding: get("/e2ee.js").body, as: UTF8.self), "var E2EE = 'new';")
+    }
+
+    func testDeletedFileIs404() throws {
+        XCTAssertEqual(get("/e2ee.js").status, 200)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("e2ee.js"))
+        XCTAssertEqual(get("/e2ee.js").status, 404)
+    }
+
+    func testCachedGzipStillMatchesTheFile() throws {
+        try write(String(repeating: "var E2EE = 1;\n", count: 200), "e2ee.js")
+        let first = get("/e2ee.js", gzip: true)
+        let again = get("/e2ee.js", gzip: true)
+        XCTAssertEqual(first.contentEncoding, "gzip")
+        XCTAssertEqual(first.body, again.body)
+        // Asked for plainly afterwards, the same entry answers uncompressed.
+        XCTAssertNil(get("/e2ee.js").contentEncoding)
+    }
+
     func testSerializeIncludesEncodingAndCache() {
         let response = HostGatewayStaticFiles.Response(
             status: 200, reason: "OK",

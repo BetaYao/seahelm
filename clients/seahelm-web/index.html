@@ -652,13 +652,12 @@
 <script src="./message-timeline.js"></script>
 <script src="./tool-group.js"></script>
 <script src="./timeline-scroll.js"></script>
+<script src="./timeline-patch.js"></script>
 <script src="./markdown.js"></script>
 <script src="./vt-frame.js"></script>
 <script src="./composer-keys.js"></script>
 <script src="./pane-pick.js"></script>
-<!-- ?r= only renames it: copies cached under the old day-long max-age still
-     hold a composer-action.js without paneKind, which empties the fleet list. -->
-<script src="./composer-action.js?r=2"></script>
+<script src="./composer-action.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1256,9 +1255,12 @@ const MESSAGE_CAP = 2000;
 // whole pixel — device-pixel rounding and rubber-band both leave a few over —
 // and a reader who stopped a line short of the end meant to be at the end.
 const TL_BOTTOM_SLOP = 48;
-// Messages drawn at once. Every repaint rebuilds what is drawn, so its cost is
-// this, not the history: at the 2000 kept it was ~130ms a message on a phone,
-// and a busy agent sends four a second. Scrolling near the top draws more.
+// Messages drawn at once. A rebuild costs this, not the history: at the 2000
+// kept it was ~130ms a message on a phone, and a busy agent sends four a
+// second. Following the end, a message only patches the tail
+// (timeline-patch.js), and the window is let grow by a step before it slides,
+// so a rebuild comes once per TL_WINDOW_STEP messages rather than every one.
+// Scrolling near the top draws more.
 const TL_WINDOW = 200;
 const TL_WINDOW_STEP = 100;
 // How long after the last scroll event the list counts as still moving —
@@ -1366,12 +1368,14 @@ function renderMessageTimeline(key){
   }
   const all = S.messages[key] || [];
   if (host.dataset.key !== key) { tl.follow = true; tl.startSeq = null; }
+  const held = tl.startSeq == null ? -1 : all.findIndex(m => Number(m.seq) === tl.startSeq);
   let start = 0;
-  if (tl.follow || tl.startSeq == null) start = Math.max(0, all.length - TL_WINDOW);
-  else {
-    const i = all.findIndex(m => Number(m.seq) === tl.startSeq);
-    start = i < 0 ? Math.max(0, all.length - TL_WINDOW) : i;
-  }
+  if (held < 0) start = Math.max(0, all.length - TL_WINDOW);
+  else if (!tl.follow) start = held;
+  // Following, the top stays put until the window has grown by a step: sliding
+  // it on every message would change the first row each time, and with it the
+  // whole list the patch compares against.
+  else start = all.length - held > TL_WINDOW + TL_WINDOW_STEP ? all.length - TL_WINDOW : held;
   tl.startSeq = all.length ? Number(all[start].seq) : null;
   const rows = start ? all.slice(start) : all;
   const items = SeahelmToolGroup.fold(rows);
@@ -1389,26 +1393,52 @@ function renderMessageTimeline(key){
   const top = start > 0 ? ''
     : h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
     : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
-  host.innerHTML = rows.length
-    ? `<div class="tl">${top}${items.map((it, i) => {
-        // Only the newest line can be the one being run, and only while the
-        // pane is working — a finished turn's last call must not keep breathing.
-        const now = live && i === items.length - 1;
-        if (it.kind === 'tools') return renderToolGroup(it, now);
-        const row = renderMessageRow(it.msg);
-        // A call still on its own breathes the same way a folded run does: the
-        // moment you most want it to is before a second call has arrived.
-        return now && it.msg.kind === 'tool' ? row.replace('class="tl-tool', 'class="tl-tool live') : row;
-      }).join('')}</div>`
-    : '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
+  const shown = top ? [{ id: 'top', html: top }] : [];
+  items.forEach((it, i) => {
+    // Only the newest line can be the one being run, and only while the
+    // pane is working — a finished turn's last call must not keep breathing.
+    const now = live && i === items.length - 1;
+    if (it.kind === 'tools') { shown.push({ id: `t${it.key}`, html: renderToolGroup(it, now) }); return; }
+    let row = renderMessageRow(it.msg);
+    if (!row) return;   // a kind this page does not draw: no element, so no item
+    // A call still on its own breathes the same way a folded run does: the
+    // moment you most want it to is before a second call has arrived.
+    if (now && it.msg.kind === 'tool') row = row.replace('class="tl-tool', 'class="tl-tool live');
+    shown.push({ id: `r${it.msg.seq}`, html: row });
+  });
+  if (rows.length) paintTimeline(host, key, shown);
+  else {
+    host.innerHTML = '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
+    tlShown = [];
+  }
   host.dataset.key = key;
-  // Synchronously, before anything can paint or read the position back: the
-  // innerHTML above emptied the scroller, so scrollTop is 0 until this lands.
+  // Synchronously, before anything can paint or read the position back: a
+  // rebuild emptied the scroller, so scrollTop is 0 until this lands.
   host.scrollTop = SeahelmTimelineScroll.restore(host, anchor, (seq) => timelineRowTop(host, seq));
   tl.lastTop = host.scrollTop;   // ours, so the scroll handler does not read it as the reader's
   renderTimelineToBottom();
   // Near the top, or too little to scroll at all: fetch the page before.
   requestAnimationFrame(() => { if (host.scrollTop < 200) loadOlderMessages(key); });
+}
+
+/** What `.tl` holds right now, item for item with its children, so the next
+ *  paint can be planned against it (timeline-patch.js). */
+let tlShown = [];
+
+/** Put `next` on screen: patch the tail when the list on screen is this pane's
+ *  and lines up with what was last drawn, otherwise rebuild. */
+function paintTimeline(host, key, next){
+  const box = host.dataset.key === key ? host.firstElementChild : null;
+  const p = box && box.classList.contains('tl') && box.childElementCount === tlShown.length
+    ? SeahelmTimelinePatch.plan(tlShown, next) : null;
+  if (p) {
+    for (let i = 0; i < p.dropFront; i++) box.firstElementChild.remove();
+    for (let i = 0; i < p.removeTail; i++) box.lastElementChild.remove();
+    if (p.append.length) box.insertAdjacentHTML('beforeend', p.append.map(it => it.html).join(''));
+  } else {
+    host.innerHTML = `<div class="tl">${next.map(it => it.html).join('')}</div>`;
+  }
+  tlShown = next;
 }
 
 /** The rendered rows, top to bottom, as timeline-scroll.js reads them. `top` is
@@ -1497,8 +1527,8 @@ $('messageTimeline').addEventListener('scroll', (ev) => {
   host.addEventListener('touchcancel', lift, { passive: true });
 }
 
-/** Open or shut a folded run of calls. Delegated, because every event rebuilds
- *  the list and the line that was clicked stops existing. The re-render keeps
+/** Open or shut a folded run of calls. Delegated, because a repaint can
+ *  replace the line that was clicked. The re-render keeps
  *  the reader's place the same way any other repaint does. */
 function toggleToolGroup(head){
   const key = Number(head.dataset.tools);
@@ -2279,33 +2309,65 @@ function leadPane(row){
   return key ? [key, S.panes.get(key) || {}] : [null, {}];
 }
 
+// The list's elements, kept from one paint to the next: a group's section by
+// its title, a row's button by its worktree path.
+const treeGroupEls = new Map();
+const treeRowEls = new Map();
+
+/** Repaint the fleet list in place. It used to be torn down and rebuilt on
+ *  every status change, event and resync — several times a second while agents
+ *  work — and a row replaced between a finger landing on it and lifting off
+ *  swallowed the tap. Now a row keeps its element for as long as its worktree
+ *  is listed, and only what changed is written. */
 function renderTree(){
-  const t = $('tree'); t.innerHTML='';
+  const t = $('tree');
   const rows = buildFleet();
   updateFirstMateHeader(rows);
   if (!rows.length){
+    treeGroupEls.clear(); treeRowEls.clear();
     t.innerHTML = `<div class="fm-empty">${isLinked() ? 'No worktrees yet' : 'Not connected'}</div>`;
     renderSuggestions();
     renderDetailChrome();
     return;
   }
   const byRepo = S.grouping.mode === 'repository';
+  const liveGroups = new Set(), liveRows = new Set();
+  const seenTitles = new Map();
+  let gi = 0;
 
   for (const group of groupsToRender(rows)){
-    const g = document.createElement('section'); g.className='fm-group';
-    const head = document.createElement('h3'); head.className='fm-group-head';
-    head.innerHTML = (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
-      + `<span class="fm-deck">${esc(group.title)}</span><span>${group.rows.length}</span>`;
-    g.appendChild(head);
+    // Two groups can share a title (two repos of one name), so count them.
+    const n = seenTitles.get(group.title) || 0;
+    seenTitles.set(group.title, n + 1);
+    const gkey = `${group.title}\u0000${n}`;
+    liveGroups.add(gkey);
+    let g = treeGroupEls.get(gkey);
+    if (!g) {
+      g = document.createElement('section'); g.className = 'fm-group';
+      const head = document.createElement('h3'); head.className = 'fm-group-head';
+      const box = document.createElement('div'); box.className = 'fm-rows';
+      g.append(head, box);
+      treeGroupEls.set(gkey, g);
+    }
+    setHTML(g.firstElementChild, (group.status ? statusDotHTML(group.status, 'fm-dot') : '')
+      + `<span class="fm-deck">${esc(group.title)}</span><span>${group.rows.length}</span>`);
+    placeChild(t, g, gi++);
 
-    const box = document.createElement('div'); box.className='fm-rows';
+    const box = g.lastElementChild;
+    let ri = 0;
     for (const r of group.rows){
+      liveRows.add(r.path);
+      let row = treeRowEls.get(r.path);
+      if (!row) {
+        row = document.createElement('button');
+        row.type = 'button';
+        row.dataset.path = r.path;
+        treeRowEls.set(r.path, row);
+      }
       const st = normStatus(r.status);
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'fm-row' + (S.sel === r.path ? ' sel' : '');
-      row.dataset.path = r.path;
-      if (S.sel === r.path) row.setAttribute('aria-current', 'true');
+      const sel = S.sel === r.path;
+      row.className = 'fm-row' + (sel ? ' sel' : '');
+      if (sel) row.setAttribute('aria-current', 'true'); else row.removeAttribute('aria-current');
       const [, lead] = leadPane(r);
       const who = r.panes.length > 1 ? `${r.panes.length} panes`
         : r.panes.length === 1 ? paneLabel(r.panes[0][1]).text : 'No panes';
@@ -2321,12 +2383,14 @@ function renderTree(){
       const labelColor = decision ? STC.waiting : STC[st];
       const msg = decision ? decisionSummary(decision) : String(lead.last_message || '').trim();
       const timeText = rowTimeText(r.runningSince, r.lastActivityAt);
-      row.innerHTML =
+      // The clock goes in after, as text: it moves every second, and inside the
+      // HTML it would make every row look changed on every paint.
+      setHTML(row,
         statusDotHTML(r.status, 'fm-dot') +
         `<span class="fm-txt">
            <span class="fm-l1">
              <span class="fm-name">${esc(r.title)}</span>
-             <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}">${esc(timeText)}</span>
+             <span class="fm-time" data-running-since="${r.runningSince||''}" data-last-activity="${r.lastActivityAt||''}"></span>
            </span>
            <span class="fm-l2">
              ${label ? `<span class="fm-st" style="color:${labelColor}">${esc(label)}</span><span aria-hidden="true">·</span>` : ''}
@@ -2334,15 +2398,41 @@ function renderTree(){
              <span class="fm-git">${gitInfoHTML(r.git)}</span>
            </span>
            ${msg ? `<span class="fm-msg">${esc(msg)}</span>` : ''}
-         </span>`;
+         </span>`);
+      setText(row.querySelector('.fm-time'), timeText);
+      // The row object is rebuilt every paint; the handler must see this one.
       row.onclick = () => selectWorktree(r);
-      box.appendChild(row);
+      placeChild(box, row, ri++);
     }
-    g.appendChild(box);
-    t.appendChild(g);
+    while (box.children.length > ri) box.lastElementChild.remove();
   }
+  while (t.children.length > gi) t.lastElementChild.remove();
+  for (const k of [...treeGroupEls.keys()]) if (!liveGroups.has(k)) treeGroupEls.delete(k);
+  for (const k of [...treeRowEls.keys()]) if (!liveRows.has(k)) treeRowEls.delete(k);
   renderSuggestions();
   renderDetailChrome();
+}
+
+/** Write `html` into `el` only when it differs from what was written last.
+ *  Compared against the string written, not `el.innerHTML`, which the browser
+ *  re-serializes and would never match. */
+function setHTML(el, html){
+  if (el._html === html) return;
+  el._html = html;
+  el.innerHTML = html;
+}
+
+/** `textContent`, written only when it changes: an unchanged write still
+ *  invalidates the node's layout. */
+function setText(el, text){
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+/** Make `el` the `i`th child of `parent`, moving it only if it is not already
+ *  there — a node that stays put keeps its hover, focus and any touch on it. */
+function placeChild(parent, el, i){
+  const at = parent.children[i];
+  if (at !== el) parent.insertBefore(el, at || null);
 }
 
 /** The detail's head: which worktree, and — when it has more than one — a tab
@@ -2651,8 +2741,9 @@ function rowTimeText(runningSince, lastActivityAt){
 }
 
 function tickTimes(){
+  if (document.visibilityState !== 'visible') return;
   for (const el of document.querySelectorAll('.fm-time')){
-    el.textContent = rowTimeText(Number(el.dataset.runningSince) || 0, Number(el.dataset.lastActivity) || 0);
+    setText(el, rowTimeText(Number(el.dataset.runningSince) || 0, Number(el.dataset.lastActivity) || 0));
   }
 }
 setInterval(tickTimes, 1000);
