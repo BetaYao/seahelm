@@ -1,11 +1,11 @@
 import AppKit
 import UserNotifications
 
-/// Step 4: the two OS permissions Seahelm needs, each with a live status.
+/// Step 4: the notification permission, with a live status.
 ///
-/// Both grants happen outside the app (a system prompt, or System Settings), so
+/// The grant happens outside the app (a system prompt, or System Settings), so
 /// the old static one-shot labels were routinely stale — you'd flip the switch
-/// in Settings, come back, and the wizard still said "Not enabled". Each row now
+/// in Settings, come back, and the wizard still said "Not enabled". The row
 /// re-checks on a timer and whenever the app regains focus, and says what breaks
 /// if you skip it.
 final class OnboardingPermissionsStepView: NSView {
@@ -14,12 +14,6 @@ final class OnboardingPermissionsStepView: NSView {
         title: "Notifications",
         detail: "How Seahelm tells you an agent finished, stalled, or needs an answer. "
             + "Without it, you have to watch the window."
-    )
-    private let axRow = PermissionRow(
-        symbol: "accessibility",
-        title: "Accessibility",
-        detail: "Lets Ctrl-double-tap summon the Island while Seahelm is in the background. "
-            + "Optional — everything else works without it."
     )
 
     private let soundPanel = OnboardingPanel()
@@ -74,12 +68,6 @@ final class OnboardingPermissionsStepView: NSView {
         notifRow.secondary.target = self
         notifRow.secondary.action = #selector(openNotifSettings)
 
-        axRow.primary.text = "Enable Accessibility"
-        axRow.primary.target = self
-        axRow.primary.action = #selector(enableAx)
-        axRow.secondary.target = self
-        axRow.secondary.action = #selector(openAxSettings)
-
         soundPopup.addItems(withTitles: ["System default", "Critical alert", "Silent"])
         soundPopup.controlSize = .regular
         soundPopup.target = self
@@ -95,7 +83,6 @@ final class OnboardingPermissionsStepView: NSView {
 
         addSubview(notifRow)
         addSubview(soundPanel)
-        addSubview(axRow)
 
         NSLayoutConstraint.activate([
             notifRow.topAnchor.constraint(equalTo: topAnchor),
@@ -119,10 +106,7 @@ final class OnboardingPermissionsStepView: NSView {
             soundPopup.widthAnchor.constraint(equalToConstant: 160),
             soundPopup.leadingAnchor.constraint(greaterThanOrEqualTo: soundLabel.trailingAnchor, constant: 16),
 
-            axRow.topAnchor.constraint(equalTo: soundPanel.bottomAnchor, constant: 20),
-            axRow.leadingAnchor.constraint(equalTo: leadingAnchor),
-            axRow.trailingAnchor.constraint(equalTo: trailingAnchor),
-            axRow.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            soundPanel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
     }
 
@@ -141,10 +125,6 @@ final class OnboardingPermissionsStepView: NSView {
     }
 
     private func refreshStatuses() {
-        let trusted = NotificationManager.isAccessibilityTrusted
-        axRow.status.state = trusted ? .ok("Enabled") : .pending("Not enabled")
-        axRow.primary.isEnabled = !trusted
-
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             let status = settings.authorizationStatus
             DispatchQueue.main.async { [weak self] in
@@ -183,15 +163,6 @@ final class OnboardingPermissionsStepView: NSView {
     @objc private func sendTest() {
         NotificationManager.shared.soundPreference = selectedSoundPreference()
         NotificationManager.shared.sendTestNotification()
-    }
-
-    @objc private func enableAx() {
-        _ = NotificationManager.requestAccessibilityPermission()
-        refreshStatuses()
-    }
-
-    @objc private func openAxSettings() {
-        NotificationManager.openAccessibilitySystemSettings()
     }
 }
 

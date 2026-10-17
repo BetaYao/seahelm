@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import UserNotifications
 
 extension Notification.Name {
@@ -92,22 +91,6 @@ class NotificationManager: NSObject {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    static func openAccessibilitySystemSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @discardableResult
-    static func requestAccessibilityPermission() -> Bool {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(opts)
-    }
-
-    static var isAccessibilityTrusted: Bool {
-        AXIsProcessTrusted()
     }
 
     func sendTestNotification(completion: ((Error?) -> Void)? = nil) {

@@ -27,7 +27,7 @@ final class KeyboardHelpOverlay: NSView {
         ("⌘W", "Close the focused pane"),
         ("⌘⌥ ← → ↑ ↓", "Move split focus"),
         ("⌘⌃ ← → ↑ ↓", "Resize split"),
-        ("⌘P / ⌃⌃", "Open the island command bar"),
+        ("⌘P", "Open the island command bar"),
         ("/ @ #", "Command / repo / agent completion"),
         ("↑ ↓ / ⇥", "Select / accept completion"),
         ("esc", "Close menu → close the island"),

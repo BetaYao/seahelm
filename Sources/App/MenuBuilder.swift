@@ -112,15 +112,6 @@ enum MenuBuilder {
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
         windowMenu.addItem(NSMenuItem.separator())
-        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(MainWindowController.selectNextTab), keyEquivalent: "}")
-        nextTabItem.keyEquivalentModifierMask = .command
-        nextTabItem.target = target
-        windowMenu.addItem(nextTabItem)
-        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(MainWindowController.selectPreviousTab), keyEquivalent: "{")
-        prevTabItem.keyEquivalentModifierMask = .command
-        prevTabItem.target = target
-        windowMenu.addItem(prevTabItem)
-        windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
