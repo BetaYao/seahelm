@@ -142,7 +142,7 @@ final class IslandModel {
     /// One-shot: when set, the opened surface prefills the command field with
     /// this text, focuses it, then clears the flag.
     var pendingCommandPrefill: String?
-    /// One-shot: focus the command field without changing its text (double-Ctrl).
+    /// One-shot: focus the command field without changing its text (Cmd+P).
     var pendingCommandFocus: Bool = false
 
     private var popRevertWork: DispatchWorkItem?

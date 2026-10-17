@@ -99,8 +99,7 @@ final class IslandPanelController {
         presentCommandBar { model.pendingCommandPrefill = prefill }
     }
 
-    /// Open the island and focus the command field without changing its text
-    /// (global double-Ctrl summon, Cmd+P).
+    /// Open the island and focus the command field without changing its text (Cmd+P).
     func openCommandBarFocused() {
         presentCommandBar { model.pendingCommandFocus = true }
     }
@@ -438,13 +437,7 @@ private final class IslandEventMonitors {
             mouseDownHandler(NSEvent.mouseLocation)
         }
 
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: onMove) {
-            monitors.append(m)
-        }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved, handler: { onMove($0); return $0 }) {
-            monitors.append(m)
-        }
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown, handler: onDown) {
             monitors.append(m)
         }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { onDown($0); return $0 }) {

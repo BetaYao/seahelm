@@ -9,7 +9,6 @@ struct Config: Codable {
     var webhook: WebhookConfig
     var autoUpdate: UpdateConfig
     var cardOrder: [String]
-    var zoomIndex: Int
     var themeMode: String
     /// Palette for the terminal surfaces, independent of `themeMode` — see
     /// `TerminalThemeMode` for why a pane's palette must not follow the app's
@@ -82,7 +81,6 @@ struct Config: Codable {
         case webhook
         case autoUpdate = "auto_update"
         case cardOrder = "card_order"
-        case zoomIndex = "zoom_index"
         case themeMode = "theme_mode"
         case terminalThemeMode = "terminal_theme_mode"
         case worktreeStartedAt = "worktree_started_at"
@@ -123,7 +121,6 @@ struct Config: Codable {
         webhook = WebhookConfig()
         autoUpdate = UpdateConfig()
         cardOrder = []
-        zoomIndex = 3
         themeMode = "system"
         terminalThemeMode = TerminalThemeMode.app.rawValue
         worktreeStartedAt = [:]
@@ -166,7 +163,6 @@ struct Config: Codable {
         webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
         autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
-        zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         terminalThemeMode = try container.decodeIfPresent(String.self, forKey: .terminalThemeMode)
             ?? TerminalThemeMode.app.rawValue

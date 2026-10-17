@@ -278,13 +278,7 @@ class MainWindowController: NSWindowController {
     }()
 
     // Dialog presentation
-    private lazy var dialogPresenter: DialogPresenter = {
-        DialogPresenter(
-            tabCoordinator: tabCoordinator,
-            terminalCoordinator: terminalCoordinator,
-            statusPublisher: statusPublisher
-        )
-    }()
+    private lazy var dialogPresenter = DialogPresenter()
 
     // Auto-update
     private lazy var updateCoordinator: UpdateCoordinator = {
@@ -411,7 +405,6 @@ class MainWindowController: NSWindowController {
         window.delegate = self
 
         setupMenuShortcuts()
-        installFnDoubleTapMonitor()
         // Before the layout: the Changes panel asks GitHub what has merged.
         MergedPRLookup.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
         setupLayout()
@@ -509,15 +502,6 @@ class MainWindowController: NSWindowController {
                 }
             }
         }
-    }
-
-    @objc func switchToDashboard() {
-        switchToTab(0)
-    }
-
-    @objc func showQuickSwitcher() {
-        let switcher = dialogPresenter.makeQuickSwitcher(quickSwitcherDelegate: self)
-        dialogPresenter.presentSheetOnActiveVC(switcher, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
     /// Held strongly so the window survives this call, and reused so ⌘, twice
@@ -746,58 +730,6 @@ class MainWindowController: NSWindowController {
         applyRegionFocus()
     }
 
-    // MARK: - Ctrl double-tap (summon island)
-
-    private static let ctrlDoubleTapWindow: TimeInterval = 0.35
-    private static let leftControlKeyCode: UInt16 = 59
-
-    /// Bare left-Ctrl double-tap (JetBrains-style) opens the island command bar.
-    /// Local monitor: works app-wide regardless of first responder.
-    /// Global monitor: works while Seahelm is in the background (needs
-    /// Accessibility permission). Any keyDown between taps breaks the sequence
-    /// so Ctrl+C chords don't trigger it.
-    private func installFnDoubleTapMonitor() {
-        let handle: (NSEvent) -> NSEvent? = { [weak self] event in
-            guard let self else { return event }
-            self.handleCtrlDoubleTapEvent(event)
-            return event
-        }
-        // Local: when Seahelm is frontmost. Global: when another app is active.
-        ctrlDoubleTapLocalMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.flagsChanged, .keyDown], handler: handle)
-        ctrlDoubleTapGlobalMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.flagsChanged, .keyDown]) { [weak self] event in
-                self?.handleCtrlDoubleTapEvent(event)
-            }
-        if config.islandEnabled {
-            _ = NotificationManager.requestAccessibilityPermission()
-        }
-    }
-
-    private func handleCtrlDoubleTapEvent(_ event: NSEvent) {
-        if event.type == .keyDown {
-            lastCtrlPressAt = 0
-            return
-        }
-        guard event.type == .flagsChanged,
-              event.keyCode == Self.leftControlKeyCode else { return }
-        let isPress = event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .contains(.control)
-        guard isPress else { return }
-        let now = ProcessInfo.processInfo.systemUptime
-        if now - lastCtrlPressAt < Self.ctrlDoubleTapWindow {
-            lastCtrlPressAt = 0
-            openIslandCommandFromHotkey()
-        } else {
-            lastCtrlPressAt = now
-        }
-    }
-
-    private func openIslandCommandFromHotkey() {
-        islandController.openCommandBarFocused()
-    }
-
     /// Cmd+P — the command palette. The island already *is* a focusable overlay
     /// panel with a command field, so this opens that rather than introducing a
     /// second floating surface. Pressing it again closes it.
@@ -808,12 +740,6 @@ class MainWindowController: NSWindowController {
             islandController.openCommandBarFocused()
         }
     }
-
-    /// Global key monitors require Accessibility trust; prompt once if missing.
-    private var ctrlDoubleTapLocalMonitor: Any?
-    private var ctrlDoubleTapGlobalMonitor: Any?
-    /// Timestamp of the last bare left-Ctrl press; 0 when broken by another key.
-    private var lastCtrlPressAt: TimeInterval = 0
 
     @objc func closeCurrentTab() {
         // No-op: dashboard is always the only tab; individual project close is handled via dashboard UI.
@@ -829,16 +755,8 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc func selectNextTab() {
-        // No-op: only the dashboard tab exists.
-    }
-
-    @objc func selectPreviousTab() {
-        // No-op: only the dashboard tab exists.
-    }
-
     @objc func showKeyboardShortcuts() {
-        DialogPresenter.showKeyboardShortcuts()
+        dashboardVC?.toggleHelp()
     }
 
     @objc func openDocumentation() {
@@ -2753,15 +2671,6 @@ extension MainWindowController: SettingsDelegate {
         // pre-pairing config and the save that follows immediately restarts the
         // bridge again with the new one; on cancel it is the only restart.
         restartTelegramBridge()
-    }
-}
-
-// MARK: - QuickSwitcherDelegate
-
-extension MainWindowController: QuickSwitcherDelegate {
-    func quickSwitcher(_ vc: QuickSwitcherViewController, didSelect worktree: WorktreeInfo) {
-        // Navigate to dashboard — quick switcher now selects the agent card
-        tabCoordinator.switchToTab(0)
     }
 }
 
