@@ -121,6 +121,16 @@
     body[data-screen="detail"] #leftcol{display:none}
     body[data-screen="detail"] #drawerBtn{display:flex}
   }
+  /* A shared pane link (?pane=) is that pane and nothing else: no fleet, no
+     sibling tabs, no way back to the list. */
+  body[data-share="pane"] main,
+  body[data-share="pane"] main.nolog{grid-template-columns:1fr}
+  body[data-share="pane"] #leftcol,
+  body[data-share="pane"] #rightcol,
+  body[data-share="pane"] #drawerBtn,
+  body[data-share="pane"] .pane-tabs,
+  body[data-share="pane"] .nw-bar{display:none}
+  body[data-share="pane"] #midcol{display:flex}
 
   /* ── First Mate (the list) ─────────────────────────────── */
   #leftcol{display:flex;flex-direction:column;overflow:hidden;background:var(--side);
@@ -1824,14 +1834,35 @@ for (const b of document.querySelectorAll('#fmModes button'))
   b.onclick = () => setGroupingMode(b.dataset.mode);
 syncModeButtons();
 
+// `?pane=<session key or id>` opens a page of that pane alone.
+const SHARE_PANE = (() => {
+  try { return new URLSearchParams(location.search).get('pane'); }
+  catch (e) { return null; }
+})();
+
 function applySessionSnapshot(result){
+  const incoming = SeahelmPanePick.panesMatchingShare(result.panes || [], SHARE_PANE);
   S.panes.clear();
-  for (const p of (result.panes || [])) {
+  for (const p of incoming) {
     const key = p.pane_session_key || p.pane_id;
     if (key) S.panes.set(key, p);
   }
+  if (SHARE_PANE) openSharedPane();
   refreshGroups();
   renderSendButton();
+}
+
+/** Land on the one pane this link names, and stay there. */
+function openSharedPane(){
+  document.body.dataset.share = 'pane';
+  document.body.dataset.screen = 'detail';
+  const row = buildFleet()[0];
+  if (!row || !row.panes.length) {
+    $('detailHead').textContent = 'Pane not found';
+    $('detailSub').textContent = '';
+    return;
+  }
+  selectWorktree(row, row.panes[0][0], { navigate: false });
 }
 
 

@@ -1438,6 +1438,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
             chrome.applyState(chromeState, animated: false)
             chrome.headerDelegate = self
+            chrome.shareOffer = { [weak self] in self?.focusedPaneShareOffer() }
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1617,6 +1618,20 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private var headerMemoryCache: [String: UInt64] = [:]
     private var headerMemoryProbedAt: [String: Date] = [:]
     private var headerMemoryInFlight: Set<String> = []
+
+    /// Link another machine opens to see only the focused pane.
+    private func focusedPaneShareOffer() -> PaneShareOffer? {
+        guard let path = tabCoordinator.selectedPane?.worktreePath,
+              let stationId = PaneTitleResolver.focusedStationId(
+                in: terminalCoordinator.stationManager.tree(forPath: path)),
+              let key = StationRegistry.shared.station(forId: stationId)?.paneSessionKey,
+              !key.isEmpty else { return nil }
+        let gateway = config.hostGateway ?? HostGatewayConfig()
+        let host = LANAddress.ipv4() ?? "127.0.0.1"
+        return PaneShareOffer(
+            url: HostGatewayConfig.shareURL(host: host, port: gateway.resolvedPort, paneSessionKey: key),
+            gatewayListening: tabCoordinator.hostGatewayIsListening)
+    }
 
     private func focusedPaneSessionKey(worktreePath: String) -> String? {
         let tree = terminalCoordinator.stationManager.tree(forPath: worktreePath)

@@ -78,6 +78,12 @@ final class HostGatewayConfigTests: XCTestCase {
         XCTAssertEqual(edited.resolvedPageURL, "https://gw.example/")
     }
 
+    func testShareURLNamesHostPortAndPane() {
+        XCTAssertEqual(
+            HostGatewayConfig.shareURL(host: "192.168.1.20", port: 2783, paneSessionKey: "seahelm-app-main"),
+            "http://192.168.1.20:2783/?pane=seahelm-app-main")
+    }
+
     func testHostGatewayEncodeRoundTrip() throws {
         let hg = HostGatewayConfig(enabled: true, port: 2783, publicURL: "wss://x/ws")
         let data = try JSONEncoder().encode(hg)

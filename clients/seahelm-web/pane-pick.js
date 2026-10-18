@@ -60,5 +60,16 @@
     return null;
   }
 
-  return { pickPane, statusLabel, decisionLabel, STATUS_LABEL };
+  /** Panes a `?pane=` share link is allowed to show. No key means the whole
+   *  fleet. A key keeps the pane whose session key or id matches, and nothing
+   *  else — the shared page is that pane alone. */
+  function panesMatchingShare(panes, shareKey) {
+    if (!shareKey) return panes || [];
+    return (panes || []).filter((p) => {
+      const key = p.pane_session_key || p.pane_id;
+      return key === shareKey || p.pane_id === shareKey;
+    });
+  }
+
+  return { pickPane, statusLabel, decisionLabel, STATUS_LABEL, panesMatchingShare };
 });

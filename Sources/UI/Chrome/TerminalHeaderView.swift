@@ -10,6 +10,11 @@ final class TerminalHeaderView: NSView {
     let trafficLightSlot = NSView()
 
     private let titleLabel = NSTextField(labelWithString: "")
+    /// Copies a seahelm-web link for the focused pane. Sits left of the memory
+    /// readout, which itself sits left of the centred title.
+    private let shareButton = ChromeIconButton()
+    /// What to copy. Nil means there is no focused pane to share.
+    var shareOffer: (() -> PaneShareOffer?)?
     /// Focused pane's session memory. Pinned to the leading edge rather than
     /// trailing the title: the title is centred and truncates from the tail, so
     /// a suffix would both drift as the title changes and be the first thing cut.
@@ -203,12 +208,18 @@ final class TerminalHeaderView: NSView {
             editModeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        // Expanded: true horizontal center in the terminal column. The memory
-        // readout sits at the leading edge and the title's minimum-leading now
-        // clears it, so a long title is truncated rather than overlapping it —
-        // the title keeps its exact centring while it fits.
+        configureShareButton()
+        addSubview(shareButton)
+
+        // Expanded: true horizontal center in the terminal column. Share, then
+        // the memory readout, sit at the leading edge and the title's
+        // minimum-leading clears them, so a long title is truncated rather than
+        // overlapping — the title keeps its exact centring while it fits.
         expandedConstraints = [
-            memoryLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            shareButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            shareButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            memoryLabel.leadingAnchor.constraint(equalTo: shareButton.trailingAnchor, constant: 6),
             memoryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -272,6 +283,70 @@ final class TerminalHeaderView: NSView {
         NSLayoutConstraint.activate(stripConstraints)
     }
 
+    private func configureShareButton() {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        if let image = NSImage(systemSymbolName: "square.and.arrow.up",
+                               accessibilityDescription: "Share pane") {
+            shareButton.image = image.withSymbolConfiguration(config)
+        }
+        shareButton.bezelStyle = .recessed
+        shareButton.isBordered = false
+        shareButton.imagePosition = .imageOnly
+        shareButton.contentTintColor = NSColor(hex: 0x888888)
+        shareButton.target = self
+        shareButton.action = #selector(shareClicked)
+        shareButton.translatesAutoresizingMaskIntoConstraints = false
+        shareButton.setAccessibilityIdentifier("chrome.icon.sharePane")
+        shareButton.setAccessibilityLabel("Share pane")
+        shareButton.toolTip = "Copy a link to this pane"
+        shareButton.wantsLayer = true
+        shareButton.layer?.cornerRadius = 7
+        NSLayoutConstraint.activate([
+            shareButton.widthAnchor.constraint(equalToConstant: 26),
+            shareButton.heightAnchor.constraint(equalToConstant: 26),
+        ])
+    }
+
+    /// Collapsed and edit-mode rows already fill the leading edge. The button
+    /// stays in the constraint graph either way; hiding it is enough because
+    /// those rows deactivate the expanded anchors or cover them with strips.
+    private func applyShareVisibility() {
+        shareButton.isHidden = isCollapsed || hasHoistedStrips
+    }
+
+    @objc private func shareClicked() {
+        guard let offer = shareOffer?() else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(offer.url, forType: .string)
+        presentSharePopover(offer)
+    }
+
+    private func presentSharePopover(_ offer: PaneShareOffer) {
+        let note = NSTextField(labelWithString: offer.gatewayListening
+            ? "Link copied"
+            : "Link copied. Host Gateway is not running, so nothing is listening yet.")
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .secondaryLabelColor
+        let link = NSTextField(wrappingLabelWithString: offer.url)
+        link.isSelectable = true
+        link.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        link.preferredMaxLayoutWidth = 320
+        let stack = NSStackView(views: [note, link])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        let size = stack.fittingSize
+        stack.frame = NSRect(origin: .zero, size: size)
+        let controller = NSViewController()
+        controller.view = stack
+        let popover = NSPopover()
+        popover.contentSize = size
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.show(relativeTo: shareButton.bounds, of: shareButton, preferredEdge: .minY)
+    }
+
     private func configureExpandButton() {
         let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
         if let image = NSImage(systemSymbolName: "sidebar.left",
@@ -318,6 +393,7 @@ final class TerminalHeaderView: NSView {
         // the instant collapse flips. Fading the slot would blink the window's
         // close/minimise/zoom out of existence for the length of the animation.
         trafficLightSlot.isHidden = !isCollapsed
+        applyShareVisibility()
 
         // Collapsed-only chrome. `isHidden` still does the layout/hit-testing
         // work; alpha only covers the transition, so it is reset either side.
@@ -458,6 +534,7 @@ final class TerminalHeaderView: NSView {
     private func applyTitleText() {
         // The strips occupy the whole row when hoisted; nothing else fits.
         titleLabel.isHidden = hasHoistedStrips
+        applyShareVisibility()
         let text = editModeOn ? worktreeContext : paneTitle
         titleLabel.stringValue = text
         // A file path loses the part that identifies it — the filename — to tail
