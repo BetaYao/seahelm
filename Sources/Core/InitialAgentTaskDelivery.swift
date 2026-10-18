@@ -117,11 +117,35 @@ enum InitialAgentTaskDelivery {
     ///
     /// A numbered choice with a cursor (Claude's folder-trust prompt) is the
     /// user's to answer: the brief's Return would pick the highlighted option.
+    /// Cursor Agent's MCP approval is the same kind of gate, drawn as
+    /// `[a] Approve all servers` / `[c]` / `[q]` instead of `1.` `2.` `3.`.
+    /// Typing the brief into it selects a letter and the composer never sees
+    /// the text. "Applying your selection…" is that dialog still settling.
     static func isReady(_ pane: PaneSnapshot) -> Bool {
         guard pane.runningAgent?.isAIAgent == true,
               let screen = pane.screen,
               screen.contains(where: { !$0.isWhitespace }) else { return false }
-        return ChoiceOptionParser.parse(screen).isEmpty
+        if !ChoiceOptionParser.parse(screen).isEmpty { return false }
+        return !hasLetterKeyMenu(screen)
+    }
+
+    private static let letterKeyLine = try! NSRegularExpression(
+        pattern: "^\\s*\\[[a-zA-Z]\\]\\s+\\S")
+
+    /// Two or more `[a] label` rows, or the line Cursor prints while it applies
+    /// the choice those rows offered.
+    private static func hasLetterKeyMenu(_ screen: String) -> Bool {
+        if screen.localizedCaseInsensitiveContains("applying your selection") { return true }
+        var hits = 0
+        for raw in screen.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            let range = NSRange(location: 0, length: (line as NSString).length)
+            if letterKeyLine.firstMatch(in: line, range: range) != nil {
+                hits += 1
+                if hits >= 2 { return true }
+            }
+        }
+        return false
     }
 
     // MARK: - Live defaults
