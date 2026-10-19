@@ -1984,7 +1984,10 @@ function clearPair(){
 /** Auth rejected: drop a dead token and put the code form back on screen. */
 function rejectAuth({ usedCode, usedTelegram, usedShare, rateLimited, detail }){
   if (usedShare) {
-    gateErrorMsg = 'This share link is no longer valid — ask for a new one';
+    // The Mac says which: a link that ran out, or one revoked (or never real).
+    gateErrorMsg = detail && detail.reason === 'expired'
+      ? 'This share link has expired — ask for a new one'
+      : 'This share link was revoked or is not valid — ask for a new one';
     setStatus(false, 'Auth failed');
     log('sys', '(auth-fail)', JSON.stringify(detail));
   } else if (usedTelegram) {

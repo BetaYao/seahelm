@@ -558,6 +558,12 @@ final class HostGatewaySessionTests: XCTestCase {
 /// it: what is sent, and what may be asked.
 final class HostGatewayShareSessionTests: XCTestCase {
     private let root = Data((0..<32).map { UInt8($0) })
+    private var links = ShareLinkStore(fileURL: nil)
+
+    override func setUp() {
+        super.setUp()
+        links = ShareLinkStore(fileURL: nil)
+    }
 
     private func session() -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
         let ds = SessionFakeDataSource()
@@ -573,14 +579,19 @@ final class HostGatewayShareSessionTests: XCTestCase {
             router: ControlRouter(dataSource: ds),
             expectedMacId: "live",
             rootSecretBase64url: PairingCrypto.base64url(root),
-            vt: vt)
+            vt: vt,
+            shareLinks: links)
         return (s, ds, vt)
     }
 
-    private func shareAuth(pane: String = "k1", tokenFor: String = "k1") -> String {
-        let token = HostGatewayAuth.shareToken(paneSessionKey: tokenFor,
-                                               rootSecretBase64url: PairingCrypto.base64url(root)) ?? ""
-        return #"{"id":"a","method":"auth","params":{"share":"\#(token)","pane":"\#(pane)"}}"#
+    private func shareAuth(pane: String = "k1", tokenFor: String = "k1",
+                           lifetime: ShareLinkLifetime = .day) -> String {
+        let token = links.mint(paneSessionKey: tokenFor, label: "", lifetime: lifetime).token
+        return shareAuth(pane: pane, token: token)
+    }
+
+    private func shareAuth(pane: String, token: String) -> String {
+        #"{"id":"a","method":"auth","params":{"share":"\#(token)","pane":"\#(pane)"}}"#
     }
 
     private func json(_ frame: HostGatewayWireFrame) -> [String: Any] {
@@ -604,6 +615,33 @@ final class HostGatewayShareSessionTests: XCTestCase {
         XCTAssertEqual(result["share"] as? String, "k1")
         let panes = try XCTUnwrap(result["panes"] as? [[String: Any]])
         XCTAssertEqual(panes.map { $0["pane_session_key"] as? String }, ["k1"])
+    }
+
+    func testTheSessionKnowsWhichLinkItCameInOn() {
+        let (s, _, _) = session()
+        let (link, token) = links.mint(paneSessionKey: "k1", label: "", lifetime: .day)
+        _ = s.handle(text: shareAuth(pane: "k1", token: token))
+        XCTAssertEqual(s.shareLinkId, link.id)
+    }
+
+    func testARevokedLinkIsRefused() {
+        let (s, _, _) = session()
+        let (link, token) = links.mint(paneSessionKey: "k1", label: "", lifetime: .day)
+        links.revoke(id: link.id)
+        let result = json(s.handle(text: shareAuth(pane: "k1", token: token))[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertEqual(result?["reason"] as? String, "invalid")
+        XCTAssertNil(result?["panes"])
+    }
+
+    func testAnExpiredLinkSaysSo() {
+        let (s, _, _) = session()
+        let (link, token) = links.mint(paneSessionKey: "k1", label: "", lifetime: .hour,
+                                       now: Date().addingTimeInterval(-7200))
+        XCTAssertNotNil(link.expiresAt)
+        let result = json(s.handle(text: shareAuth(pane: "k1", token: token))[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertEqual(result?["reason"] as? String, "expired")
     }
 
     func testATokenForOnePaneCannotOpenAnother() {

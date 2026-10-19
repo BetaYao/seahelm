@@ -17,6 +17,7 @@ final class HostGatewayServer {
     private let vt: HostGatewayVTAttaching
     private let pairingCode: PairingCodeVerifying?
     private let rateLimiter: PairRateLimiter?
+    private let shareLinks: ShareLinkVerifying?
     private let staticFiles: HostGatewayStaticFiles
     private let queue = DispatchQueue(label: "seahelm.hostgateway", qos: .userInitiated)
 
@@ -110,6 +111,7 @@ final class HostGatewayServer {
          vt: HostGatewayVTAttaching,
          pairingCode: PairingCodeVerifying? = nil,
          rateLimiter: PairRateLimiter? = nil,
+         shareLinks: ShareLinkVerifying? = nil,
          telegram: @escaping () -> TelegramConfig? = { nil }) {
         self.config = config
         self.telegram = telegram
@@ -119,6 +121,7 @@ final class HostGatewayServer {
         self.vt = vt
         self.pairingCode = pairingCode
         self.rateLimiter = rateLimiter
+        self.shareLinks = shareLinks
         self.staticFiles = HostGatewayStaticFiles(
             root: HostGatewayStaticFiles.resolveRoot(override: config.webRoot))
     }
@@ -155,9 +158,28 @@ final class HostGatewayServer {
                 }
                 self.sendPing(on: state.connection)
             }
+            self.dropDeadShareSessions(now: now)
         }
         timer.resume()
         pingTimer = timer
+    }
+
+    /// Close every page still open on a share link that has been revoked or has
+    /// run out. Called when the store changes, so a revoke takes effect at once;
+    /// the ping timer catches expiry, so a link outlives its time by at most
+    /// `pingInterval`. A closed page reconnects, is refused, and says why.
+    func enforceShareLinks() {
+        queue.async { [weak self] in self?.dropDeadShareSessions(now: Date()) }
+    }
+
+    /// Must run on `queue`.
+    private func dropDeadShareSessions(now: Date) {
+        guard let shareLinks else { return }
+        for state in connections.values {
+            guard let id = state.session.shareLinkId, !shareLinks.isLive(id: id, now: now) else { continue }
+            // `.cancelled` runs the usual teardown in the state handler.
+            state.connection.cancel()
+        }
     }
 
     /// AgentRegistry → EventHub → every authenticated session.
@@ -603,6 +625,7 @@ final class HostGatewayServer {
             decisions: decisions,
             pairingCode: pairingCode,
             rateLimiter: rateLimiter,
+            shareLinks: shareLinks,
             clientIP: Self.clientIP(of: connection),
             access: HostGatewayAccess(
                 telegramHost: config.telegramHost,

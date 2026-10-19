@@ -27,9 +27,9 @@ class TabCoordinator {
     private var hostGatewayServer: HostGatewayServer?
     /// Shared with Settings so "Refresh code" updates what live `auth` accepts.
     private(set) var pairingCodeLive: LivePairingCode?
-    /// The root secret the running gateway verifies against, so a share link is
-    /// signed with the same one rather than a copy of the config that may lag it.
-    private var hostGatewayRootSecret = ""
+    /// Every share link handed out. Outlives a gateway restart: a link is good
+    /// until it is revoked or runs out, not until the next settings change.
+    let shareLinks = ShareLinkStore()
     private var pairRateLimiter: PairRateLimiter?
     private var zmxVTAttachManager: ZmxVTAttachManager?
     /// The live control data source. Also the pane lookup + write channel the
@@ -959,7 +959,6 @@ class TabCoordinator {
         let mqtt = config.pairing!
         let macId = mqtt.macId ?? PairingIdentity.deriveMacId()
         let rootB64 = mqtt.rootSecret ?? ""
-        hostGatewayRootSecret = rootB64
 
         var store = PairingCodeStore(code: hgConfig.pairCode)
         let ensured = store.ensureCode()
@@ -988,15 +987,13 @@ class TabCoordinator {
             vt: vt,
             pairingCode: live,
             rateLimiter: limiter,
+            shareLinks: shareLinks,
             telegram: { [weak self] in self?.telegramConfigProvider?() })
         server.start()
         hostGatewayServer = server
+        // A revoke drops the pages open on that link now, not at the next ping.
+        shareLinks.onChange = { [weak self] in self?.hostGatewayServer?.enforceShareLinks() }
         NSLog("[TabCoordinator] Host Gateway started port=\(hgConfig.resolvedPort) pair=\(hgConfig.resolvedPublicURL)")
-    }
-
-    /// Token for a link that opens one pane on this gateway; nil until it runs.
-    func shareToken(paneSessionKey: String) -> String? {
-        HostGatewayAuth.shareToken(paneSessionKey: paneSessionKey, rootSecretBase64url: hostGatewayRootSecret)
     }
 
     private func stopHostGateway() {

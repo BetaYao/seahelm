@@ -20,6 +20,11 @@ protocol SettingsDelegate: AnyObject {
     /// Rotate root secret + refresh code; all stored browser tokens die.
     func settingsRevokeAllRemotes(_ settings: SettingsViewController)
 
+    /// Pane links still open, newest first, and the ways to take them back.
+    func settingsShareLinks(_ settings: SettingsViewController) -> [ShareLink]
+    func settings(_ settings: SettingsViewController, revokeShareLink id: String)
+    func settingsRevokeAllShareLinks(_ settings: SettingsViewController)
+
     /// Live panes, so a rule's target is picked from a project → worktree →
     /// pane cascade of what actually exists rather than typed from memory.
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot]
@@ -67,6 +72,9 @@ extension SettingsDelegate {
         return store.set(code)
     }
     func settingsRevokeAllRemotes(_ settings: SettingsViewController) {}
+    func settingsShareLinks(_ settings: SettingsViewController) -> [ShareLink] { [] }
+    func settings(_ settings: SettingsViewController, revokeShareLink id: String) {}
+    func settingsRevokeAllShareLinks(_ settings: SettingsViewController) {}
     func settingsActiveSessionNames(_ settings: SettingsViewController) -> Set<String> { [] }
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] { [] }
     func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {}
@@ -165,6 +173,7 @@ class SettingsViewController: NSViewController {
         "Open web client", target: self, action: #selector(openGatewayPageClicked))
     /// Held so an edited public URL can re-encode the QR in place.
     private var pairingPane: PairingPaneView?
+    private let shareLinksList = ShareLinksListView()
     /// The mqtt half of the pairing context, cached from the page build: asking
     /// the delegate again mints and reloads the gateway, which is not what a
     /// typed URL should cost.
@@ -243,6 +252,7 @@ class SettingsViewController: NSViewController {
         // Same reason: the gateway may have died, or bound, since the page was built.
         if id == "pairing" {
             refreshHostGatewayStatus()
+            shareLinksList.reload()   // links are made and revoked from the terminal header
         }
     }
 
@@ -648,8 +658,23 @@ class SettingsViewController: NSViewController {
             self.config.hostGateway?.pairCode = next
             pane.setCode(next)
             pane.accessURL = (self.config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
+            self.shareLinksList.reload()
         }
         pairingPane = pane
+
+        shareLinksList.links = { [weak self] in
+            guard let self else { return [] }
+            return self.settingsDelegate?.settingsShareLinks(self) ?? []
+        }
+        shareLinksList.onRevoke = { [weak self] id in
+            guard let self else { return }
+            self.settingsDelegate?.settings(self, revokeShareLink: id)
+        }
+        shareLinksList.onRevokeAll = { [weak self] in
+            guard let self else { return }
+            self.settingsDelegate?.settingsRevokeAllShareLinks(self)
+        }
+        shareLinksList.reload()
 
         return [
             gatewayGroup,
@@ -657,6 +682,11 @@ class SettingsViewController: NSViewController {
                 SettingsRow.stacked(nil,
                                     subtitle: "Open the access URL below in a browser and enter the pairing code.",
                                     content: pane),
+            ]),
+            SettingsGroupView(title: "Shared pane links", rows: [
+                SettingsRow.stacked(nil,
+                                    subtitle: "Links copied from the share button in the terminal header. Each opens its one pane without the pairing code, until it expires or is revoked here \u{2014} and a page open on it is closed the moment it is.",
+                                    content: shareLinksList),
             ]),
         ]
     }

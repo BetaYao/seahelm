@@ -13,8 +13,9 @@ final class TerminalHeaderView: NSView {
     /// Copies a seahelm-web link for the focused pane. Sits left of the memory
     /// readout, which itself sits left of the centred title.
     private let shareButton = ChromeIconButton()
-    /// What to copy. Nil means there is no focused pane to share.
-    var shareOffer: (() -> PaneShareOffer?)?
+    /// Mints, changes and revokes the links. Nil, or a nil offer, means there
+    /// is no focused pane to share.
+    weak var paneSharing: PaneSharing?
     /// Focused pane's session memory. Pinned to the leading edge rather than
     /// trailing the title: the title is centred and truncates from the tail, so
     /// a suffix would both drift as the title changes and be the first thing cut.
@@ -315,35 +316,22 @@ final class TerminalHeaderView: NSView {
     }
 
     @objc private func shareClicked() {
-        guard let offer = shareOffer?() else { NSSound.beep(); return }
+        guard let sharing = paneSharing,
+              let offer = sharing.shareFocusedPane(lifetime: ShareLinkLifetime.lastChosen) else {
+            NSSound.beep()
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(offer.url, forType: .string)
-        presentSharePopover(offer)
+        presentSharePopover(offer, sharing: sharing)
     }
 
-    private func presentSharePopover(_ offer: PaneShareOffer) {
-        let note = NSTextField(labelWithString: offer.gatewayListening
-            ? "Link copied"
-            : "Link copied. Host Gateway is not running, so nothing is listening yet.")
-        note.font = .systemFont(ofSize: 11)
-        note.textColor = .secondaryLabelColor
-        let link = NSTextField(wrappingLabelWithString: offer.url)
-        link.isSelectable = true
-        link.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        link.preferredMaxLayoutWidth = 320
-        let stack = NSStackView(views: [note, link])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        let size = stack.fittingSize
-        stack.frame = NSRect(origin: .zero, size: size)
-        let controller = NSViewController()
-        controller.view = stack
+    private func presentSharePopover(_ offer: PaneShareOffer, sharing: PaneSharing) {
+        let controller = SharePopoverController(offer: offer, sharing: sharing)
         let popover = NSPopover()
-        popover.contentSize = size
         popover.contentViewController = controller
         popover.behavior = .transient
+        controller.dismiss = { [weak popover] in popover?.performClose(nil) }
         popover.show(relativeTo: shareButton.bounds, of: shareButton, preferredEdge: .minY)
     }
 
