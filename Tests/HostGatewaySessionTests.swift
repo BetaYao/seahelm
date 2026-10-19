@@ -553,3 +553,134 @@ final class HostGatewaySessionTests: XCTestCase {
         XCTAssertTrue(s.drainNotifications().isEmpty)
     }
 }
+
+/// A share link signs in to one pane, and the gateway holds the connection to
+/// it: what is sent, and what may be asked.
+final class HostGatewayShareSessionTests: XCTestCase {
+    private let root = Data((0..<32).map { UInt8($0) })
+
+    private func session() -> (HostGatewaySession, SessionFakeDataSource, FakeVT) {
+        let ds = SessionFakeDataSource()
+        ds.panes = [
+            PaneSnapshot(paneId: "p1", worktreePath: "/w1", branch: "main", project: "proj",
+                         agentType: "claudeCode", status: "idle", lastMessage: "", paneSessionKey: "k1"),
+            PaneSnapshot(paneId: "p2", worktreePath: "/w2", branch: "feat", project: "proj",
+                         agentType: "codex", status: "running", lastMessage: "secret", paneSessionKey: "k2"),
+        ]
+        ds.knownPanes = ["k1", "k2", "p1", "p2"]
+        let vt = FakeVT()
+        let s = HostGatewaySession(
+            router: ControlRouter(dataSource: ds),
+            expectedMacId: "live",
+            rootSecretBase64url: PairingCrypto.base64url(root),
+            vt: vt)
+        return (s, ds, vt)
+    }
+
+    private func shareAuth(pane: String = "k1", tokenFor: String = "k1") -> String {
+        let token = HostGatewayAuth.shareToken(paneSessionKey: tokenFor,
+                                               rootSecretBase64url: PairingCrypto.base64url(root)) ?? ""
+        return #"{"id":"a","method":"auth","params":{"share":"\#(token)","pane":"\#(pane)"}}"#
+    }
+
+    private func json(_ frame: HostGatewayWireFrame) -> [String: Any] {
+        guard case .text(let text) = frame else { return [:] }
+        return (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]) ?? [:]
+    }
+
+    private func call(_ s: HostGatewaySession, _ method: String, _ params: String = "{}") -> [String: Any] {
+        json(s.handle(text: #"{"id":"r","method":"\#(method)","params":\#(params)}"#)[0])
+    }
+
+    private func errorCode(_ reply: [String: Any]) -> Int? {
+        (reply["error"] as? [String: Any])?["code"] as? Int
+    }
+
+    func testShareSignInSeesOnlyItsPaneAndGetsNoToken() throws {
+        let (s, _, _) = session()
+        let result = try XCTUnwrap(json(s.handle(text: shareAuth())[0])["result"] as? [String: Any])
+        XCTAssertEqual(result["ok"] as? Bool, true)
+        XCTAssertNil(result["token"], "a share link must not come away with the pairing token")
+        XCTAssertEqual(result["share"] as? String, "k1")
+        let panes = try XCTUnwrap(result["panes"] as? [[String: Any]])
+        XCTAssertEqual(panes.map { $0["pane_session_key"] as? String }, ["k1"])
+    }
+
+    func testATokenForOnePaneCannotOpenAnother() {
+        let (s, _, _) = session()
+        let result = json(s.handle(text: shareAuth(pane: "k2", tokenFor: "k1"))[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertNil(result?["panes"])
+    }
+
+    func testSnapshotLaterIsStillTheOnePane() {
+        let (s, _, _) = session()
+        _ = s.handle(text: shareAuth())
+        let panes = (call(s, "session.snapshot")["result"] as? [String: Any])?["panes"] as? [[String: Any]]
+        XCTAssertEqual(panes?.map { $0["pane_session_key"] as? String }, ["k1"])
+    }
+
+    func testFleetActionsAreRefused() {
+        let (s, _, _) = session()
+        _ = s.handle(text: shareAuth())
+        for method in ["pane.split", "pane.close", "worktree.create", "worktree.options", "pane.read",
+                       "layout.apply", "hook"] {
+            XCTAssertEqual(errorCode(call(s, method, #"{"pane_id":"k1"}"#)), HostGatewaySession.shareForbidden, method)
+        }
+    }
+
+    func testOtherPanesCannotBeReadOrDriven() {
+        let (s, ds, vt) = session()
+        _ = s.handle(text: shareAuth())
+        XCTAssertEqual(errorCode(call(s, "pane.send_keys", #"{"pane_id":"k2","keys":["enter"]}"#)),
+                       HostGatewaySession.shareForbidden)
+        XCTAssertEqual(errorCode(call(s, "pane.vt_open", #"{"pane_session_key":"k2"}"#)),
+                       HostGatewaySession.shareForbidden)
+        XCTAssertEqual(errorCode(call(s, "message.history", #"{"pane_session_key":"p2","before_seq":9}"#)),
+                       HostGatewaySession.shareForbidden)
+        // One name its own, the other someone else's: the router would act on the latter.
+        XCTAssertEqual(errorCode(call(s, "pane.send_keys", #"{"pane_session_key":"k1","pane_id":"k2","keys":["enter"]}"#)),
+                       HostGatewaySession.shareForbidden)
+        XCTAssertTrue(ds.sentKeys.isEmpty)
+        XCTAssertTrue(vt.opened.isEmpty)
+    }
+
+    func testItsOwnPaneCanBeDriven() {
+        let (s, ds, vt) = session()
+        _ = s.handle(text: shareAuth())
+        XCTAssertNil(errorCode(call(s, "pane.send_keys", #"{"pane_id":"k1","keys":["enter"]}"#)))
+        XCTAssertEqual(ds.sentKeys.map(\.pane), ["k1"])
+        XCTAssertNil(errorCode(call(s, "pane.vt_open", #"{"pane_session_key":"k1"}"#)))
+        XCTAssertEqual(vt.opened, ["k1"])
+    }
+
+    /// The worktree's split tree names its other panes.
+    func testLiveLayoutIsWithheld() {
+        let (s, _, _) = session()
+        _ = s.handle(text: shareAuth())
+        XCTAssertEqual(errorCode(call(s, "layout.live", #"{"worktree_path":"/w1"}"#)), ControlError.notFound)
+    }
+
+    func testOnlyItsPanesEventsAreSent() {
+        let (s, _, _) = session()
+        _ = s.handle(text: shareAuth())
+        _ = s.drainNotifications()
+        s.pushMessage(MessageEvent(seq: 1, paneId: "p2", paneSessionKey: "k2", kind: .assistant, ts: Date(), text: "no"))
+        s.pushPaneEvent(["type": "pane.status_changed", "pane_id": "p2", "pane_session_key": "k2", "status": "idle"])
+        s.pushDecision(.cleared(paneSessionKey: "k2"))
+        XCTAssertTrue(s.drainNotifications().isEmpty, "another pane's events reached a share link")
+        // Status events name the pane by station id: learnt from the snapshot.
+        s.pushPaneEvent(["type": "pane.status_changed", "pane_id": "p1", "status": "running"])
+        s.pushMessage(MessageEvent(seq: 2, paneId: "p1", paneSessionKey: "k1", kind: .assistant, ts: Date(), text: "yes"))
+        XCTAssertEqual(s.drainNotifications().count, 2)
+    }
+
+    func testAPairedClientIsUnaffected() {
+        let (s, _, _) = session()
+        let token = PairingCrypto(rootSecret: root).authPassword
+        _ = s.handle(text: #"{"id":"a","method":"auth","params":{"mac_id":"live","token":"\#(token)"}}"#)
+        let panes = (call(s, "session.snapshot")["result"] as? [String: Any])?["panes"] as? [[String: Any]]
+        XCTAssertEqual(panes?.count, 2)
+        XCTAssertNil(errorCode(call(s, "pane.send_keys", #"{"pane_id":"k2","keys":["enter"]}"#)))
+    }
+}

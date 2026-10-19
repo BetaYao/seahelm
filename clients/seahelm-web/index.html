@@ -131,6 +131,23 @@
   body[data-share="pane"] .pane-tabs,
   body[data-share="pane"] .nw-bar{display:none}
   body[data-share="pane"] #midcol{display:flex}
+  /* With one pane there is nothing else in the head, so Timeline / Terminal
+     comes out of the ⋯ menu and sits beside it, where a visitor sees it. */
+  #shareSurface{display:none;grid-area:surf;height:36px}
+  body[data-share="pane"] .detail-head{grid-template-columns:auto minmax(0,1fr) auto auto;
+    grid-template-areas:"back title surf menu" "tabs tabs tabs tabs"}
+  body[data-share="pane"] #shareSurface{display:grid}
+  body[data-share="pane"] .menu #surfaceBadge{display:none}
+  /* The gateway refuses these on a share link: a split makes a pane the page
+     cannot show, and the mirrored layout would name the worktree's others. */
+  body[data-share="pane"] #splitBtn,
+  body[data-share="pane"] #closePaneBtn,
+  body[data-share="pane"] #vtModeBadge{display:none}
+  /* No ‹ on the left to balance against, so the name starts at the edge. */
+  @media (max-width:760px){
+    body[data-share="pane"] .detail-head{padding-left:16px}
+    body[data-share="pane"] .dh-title{align-items:flex-start;text-align:left}
+  }
 
   /* ── First Mate (the list) ─────────────────────────────── */
   #leftcol{display:flex;flex-direction:column;overflow:hidden;background:var(--side);
@@ -562,6 +579,7 @@
           <h2 id="detailHead">Terminal</h2>
           <span id="detailSub"></span>
         </div>
+        <div class="seg" id="shareSurface" role="tablist" aria-label="View"></div>
         <button class="icon-btn" id="paneMenuBtn" type="button" aria-haspopup="menu" aria-label="Pane actions">
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
         </button>
@@ -901,7 +919,7 @@ function connect(){
 
 function openGatewaySocket(){
   const url = gatewayWsURL();
-  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA) {
+  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA && !SHARE_TOKEN) {
     reconnector.stop();            // nothing to authenticate with
     setStatus(false, 'Pairing code needed');
     return;
@@ -936,8 +954,12 @@ function openGatewaySocket(){
     // a slow link, long enough for the heartbeat to give up and start it over.
     const since = heldMessageSeq();
     if (since > 0) params.since_seq = since;
-    const usedTelegram = !S.pendingCode && !S.authPass && !!TG_INIT_DATA;
-    if (S.pendingCode) params.code = S.pendingCode;
+    // A share link signs in as itself, whatever pairing this browser holds:
+    // the gateway then sends this pane and nothing else.
+    const usedShare = !!SHARE_TOKEN;
+    const usedTelegram = !usedShare && !S.pendingCode && !S.authPass && !!TG_INIT_DATA;
+    if (usedShare) { params.share = SHARE_TOKEN; params.pane = SHARE_PANE; }
+    else if (S.pendingCode) params.code = S.pendingCode;
     else if (S.authPass) { params.mac_id = S.mac; params.token = S.authPass; }
     else params.telegram_init_data = TG_INIT_DATA;
     gwSend('auth', params, (r, err) => {
@@ -954,7 +976,7 @@ function openGatewaySocket(){
       if (err || !r || r.ok === false) {
         S.pendingCode = null;
         reconnector.stop();        // a rejected credential stays rejected
-        rejectAuth({ usedCode, usedTelegram, rateLimited: false, detail: err || r });
+        rejectAuth({ usedCode, usedTelegram, usedShare, rateLimited: false, detail: err || r });
         ws.close();
         return;
       }
@@ -975,7 +997,8 @@ function openGatewaySocket(){
       if (r.mac_id) S.mac = r.mac_id;
       if (r.token) S.authPass = r.token;
       S.pendingCode = null;
-      try {
+      // A share sign-in issues no token; keep whatever pairing was stored.
+      if (S.authPass) try {
         localStorage.setItem(CREDS_KEY, JSON.stringify({ m: S.mac, t: S.authPass }));
       } catch (e) {}
       if ($('mac')) $('mac').value = S.mac;
@@ -1646,24 +1669,26 @@ function setSurfaceMode(mode){
     requestLayout(S.sel);
   }
 }
+/** The switch in the ⋯ menu, and its copy in the head of a shared pane. */
 function renderSurfaceBadge(){
-  const el = $('surfaceBadge');
-  if (!el) return;
   const mode = loadSurfaceMode();
-  el.innerHTML = '';
-  for (const [value, label, title] of [
-    ['text', 'Timeline', 'The agent\'s replies and tool calls'],
-    ['vt', 'Terminal', 'Open the live terminal screen'],
-  ]) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = label;
-    b.title = title;
-    b.className = value === mode ? 'on' : '';
-    b.setAttribute('role', 'tab');
-    b.setAttribute('aria-selected', String(value === mode));
-    b.onclick = () => setSurfaceMode(value);
-    el.appendChild(b);
+  for (const el of [$('surfaceBadge'), $('shareSurface')]) {
+    if (!el) continue;
+    el.innerHTML = '';
+    for (const [value, label, title] of [
+      ['text', 'Timeline', 'The agent\'s replies and tool calls'],
+      ['vt', 'Terminal', 'Open the live terminal screen'],
+    ]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.title = title;
+      b.className = value === mode ? 'on' : '';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(value === mode));
+      b.onclick = () => setSurfaceMode(value);
+      el.appendChild(b);
+    }
   }
 }
 renderSurfaceBadge();
@@ -1834,11 +1859,18 @@ for (const b of document.querySelectorAll('#fmModes button'))
   b.onclick = () => setGroupingMode(b.dataset.mode);
 syncModeButtons();
 
-// `?pane=<session key or id>` opens a page of that pane alone.
+// `?pane=<session key or id>` opens a page of that pane alone. `&share=` is the
+// token the Mac minted for that pane: with it the page signs in to that pane
+// only, no pairing code, and the gateway sends nothing else.
 const SHARE_PANE = (() => {
   try { return new URLSearchParams(location.search).get('pane'); }
   catch (e) { return null; }
 })();
+const SHARE_TOKEN = (() => {
+  try { return SHARE_PANE && new URLSearchParams(location.search).get('share') || null; }
+  catch (e) { return null; }
+})();
+if (SHARE_PANE) document.body.dataset.share = 'pane';
 
 function applySessionSnapshot(result){
   const incoming = SeahelmPanePick.panesMatchingShare(result.panes || [], SHARE_PANE);
@@ -1950,8 +1982,12 @@ function clearPair(){
 }
 
 /** Auth rejected: drop a dead token and put the code form back on screen. */
-function rejectAuth({ usedCode, usedTelegram, rateLimited, detail }){
-  if (usedTelegram) {
+function rejectAuth({ usedCode, usedTelegram, usedShare, rateLimited, detail }){
+  if (usedShare) {
+    gateErrorMsg = 'This share link is no longer valid — ask for a new one';
+    setStatus(false, 'Auth failed');
+    log('sys', '(auth-fail)', JSON.stringify(detail));
+  } else if (usedTelegram) {
     gateErrorMsg = 'This Telegram account is not allowed on this Mac — add it in Seahelm ▸ Settings ▸ Telegram';
     setStatus(false, 'Auth failed');
     log('sys', '(auth-fail)', JSON.stringify(detail));
@@ -2028,6 +2064,17 @@ function renderGate(){
     if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
     $('gateConnect').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     $('gateUnpair').onclick = () => { clearPair(); };
+    return;
+  }
+
+  if (SHARE_TOKEN){                      // a share link is its own sign-in
+    gate.innerHTML = `
+      <div class="gate-card">
+        <div class="gate-title">Seahelm</div>
+        <div class="gate-hint">${gateErrorMsg ? '' : 'Opening the shared pane…'}</div>
+        <div class="gate-error" id="gateError" ${gateErrorMsg ? '' : 'hidden'}></div>
+      </div>`;
+    if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
     return;
   }
 
@@ -3587,7 +3634,7 @@ window.addEventListener('pageshow', () => {
   if (reconnector.isStopped) return;          // disconnected on purpose
   // Looks alive — which a dead path also does — so ask before trusting it.
   if (isLinked()) { probeLink(WAKE_PROBE_TIMEOUT_MS); restoreMount(); return; }
-  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA) return;  // never paired
+  if (!S.authPass && !S.pendingCode && !TG_INIT_DATA && !SHARE_TOKEN) return;  // never paired
   reconnector.resume();
   openGatewaySocket();
 });
@@ -3617,7 +3664,7 @@ function sendCommand(method, params, onReply){
 renderGate();   // the gate is the page until a connection exists
 // Restore a saved pairing so a reload stays logged in (creds derived, not stored raw).
 (function restorePair(){
-  if (restoreCreds()) renderGate();
+  if (!SHARE_TOKEN && restoreCreds()) renderGate();
 })();
 $('drawerBtn').onclick = backToList;
 $('toBottom').onclick=()=>{

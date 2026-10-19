@@ -1629,7 +1629,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let gateway = config.hostGateway ?? HostGatewayConfig()
         let host = LANAddress.ipv4() ?? "127.0.0.1"
         return PaneShareOffer(
-            url: HostGatewayConfig.shareURL(host: host, port: gateway.resolvedPort, paneSessionKey: key),
+            url: HostGatewayConfig.shareURL(
+                host: host, port: gateway.resolvedPort, paneSessionKey: key,
+                shareToken: tabCoordinator.shareToken(paneSessionKey: key)),
             gatewayListening: tabCoordinator.hostGatewayIsListening)
     }
 

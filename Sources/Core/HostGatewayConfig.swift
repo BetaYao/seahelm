@@ -74,14 +74,18 @@ struct HostGatewayConfig: Codable, Equatable {
     }
 
     /// Page a browser opens to see one pane: this Mac's address, the gateway
-    /// port, and `?pane=` so the web client hides the rest of the fleet.
-    static func shareURL(host: String, port: UInt16, paneSessionKey: String) -> String {
+    /// port, `?pane=`, and `&share=` — the token that signs in to that pane alone
+    /// (`HostGatewayAuth.shareToken`). Without a token the page asks for the
+    /// pairing code instead.
+    static func shareURL(host: String, port: UInt16, paneSessionKey: String, shareToken: String? = nil) -> String {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
         components.port = Int(port)
         components.path = "/"
-        components.queryItems = [URLQueryItem(name: "pane", value: paneSessionKey)]
+        var query = [URLQueryItem(name: "pane", value: paneSessionKey)]
+        if let shareToken, !shareToken.isEmpty { query.append(URLQueryItem(name: "share", value: shareToken)) }
+        components.queryItems = query
         return components.string ?? "http://\(host):\(port)/?pane=\(paneSessionKey)"
     }
 

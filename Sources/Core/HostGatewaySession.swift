@@ -77,6 +77,20 @@ final class HostGatewaySession {
     private var keysBinary = false
     private var pendingOutbound: ((HostGatewaySession) -> Void)?
     private var decisionCleared: ((HostGatewaySession, String) -> Void)?
+    /// Set when the client signed in with a share link: the one pane this
+    /// connection may see and act on. Nil is a paired client, who gets the fleet.
+    private var sharedPane: SharedPane?
+
+    /// A pane goes by two names on the wire — its session key, which the link
+    /// carries, and its station id, which some events use — so both are kept.
+    struct SharedPane: Equatable {
+        let key: String
+        var paneId: String?
+
+        func names(_ ref: String) -> Bool {
+            !ref.isEmpty && (ref == key || ref == paneId)
+        }
+    }
 
     init(router: ControlRouter,
          expectedMacId: String,
@@ -293,9 +307,11 @@ final class HostGatewaySession {
         guard ready else { return }
         switch change {
         case .opened(let d):
+            guard inScope(d.paneSessionKey, d.paneId) else { return }
             enqueue(.text(HostGatewayFrame.encode(
                 .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d)))))
         case .cleared(let key):
+            guard inScope(key) else { return }
             enqueue(.text(HostGatewayFrame.encode(
                 .notify(method: "pane.event",
                         params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))))
@@ -307,6 +323,7 @@ final class HostGatewaySession {
     /// Server → session: a pane changed status or closed — what keeps the fleet
     /// list in step after the snapshot it was sent on authentication.
     func pushPaneEvent(_ event: [String: Any]) {
+        guard inScope(event["pane_id"] as? String, event["pane_session_key"] as? String) else { return }
         lock.lock()
         let ready = authenticated
         let note = ready ? Self.paneNotify(for: event, sentAgentTypes: &sentAgentTypes) : nil
@@ -374,7 +391,7 @@ final class HostGatewaySession {
         lock.lock()
         let ready = authenticated
         lock.unlock()
-        guard ready else { return }
+        guard ready, inScope(event.paneSessionKey, event.paneId) else { return }
         enqueue(.text(HostGatewayFrame.encode(
             .notify(method: "pane.message", params: event.dict))))
     }
@@ -426,6 +443,9 @@ final class HostGatewaySession {
                 }
                 return handleAuth(id: id, params: params).map { .text($0) }
             }
+            if let shared = shareGate(id: id, method: method, params: params) {
+                return [.text(shared)]
+            }
             if Self.slowMethods.contains(method) {
                 // Seconds of git: run it off the gateway queue, which every
                 // pane's VT stream shares, and send the reply when it lands.
@@ -464,6 +484,21 @@ final class HostGatewaySession {
         let code = params["code"] as? String ?? ""
 
         let initData = params["telegram_init_data"] as? String ?? ""
+
+        // A share link: no pairing behind it, so it gets no token, and the
+        // session is held to the one pane the link was minted for.
+        let share = params["share"] as? String ?? ""
+        if !share.isEmpty {
+            let pane = params["pane"] as? String ?? ""
+            let ok = HostGatewayAuth.verifyShare(
+                paneSessionKey: pane, token: share, rootSecretBase64url: rootSecretBase64url)
+            if ok {
+                lock.lock()
+                sharedPane = SharedPane(key: pane, paneId: nil)
+                lock.unlock()
+            }
+            return finishAuth(id: id, ok: ok, params: params, issuedToken: nil)
+        }
 
         // Token path wins when both are present (return visits).
         if !token.isEmpty {
@@ -531,9 +566,11 @@ final class HostGatewaySession {
         let delta = ok ? Self.sinceSeq(params).flatMap { MessageStreamHub.shared.replay(after: $0) } : nil
         if ok {
             result["replay"] = delta == nil ? "full" : "delta"
-            if let delta, !delta.truncated.isEmpty { result["reset_panes"] = delta.truncated }
+            let reset = delta?.truncated.filter { inScope($0) } ?? []
+            if !reset.isEmpty { result["reset_panes"] = reset }
             result["mac_id"] = expectedMacId
             if let issuedToken { result["token"] = issuedToken }
+            if let shared = currentSharedPane() { result["share"] = shared.key }
             // Fold the session snapshot into the reply. The client asked for it
             // unconditionally on the very next round trip, and a round trip is
             // the expensive unit here: ~240ms p50 from a phone over the tunnel,
@@ -543,7 +580,8 @@ final class HostGatewaySession {
             // A client that predates this simply ignores the extra key and makes
             // the call it always made.
             if case .ok(let snapshot) = router.handle(method: "session.snapshot", params: [:]),
-               let panes = snapshot["panes"] {
+               let all = snapshot["panes"] {
+                let panes = scopedPanes(all)
                 result["panes"] = panes
                 // What the page now believes, so the first `pane.updated` is
                 // compared against it rather than sent for every pane.
@@ -556,13 +594,14 @@ final class HostGatewaySession {
         if ok {
             // Replay what is already open. Without this a client that connects a
             // second after a question is raised waits for an event it has missed.
-            for d in decisions.pending() {
+            for d in decisions.pending() where inScope(d.paneSessionKey, d.paneId) {
                 out.append(HostGatewayFrame.encode(
                     .notify(method: "pane.event", params: HostGatewayDecisions.notifyParams(for: d))))
             }
             // Replay MessageStream rings so text-mode clients paint without an
             // extra round trip (and without needing VT).
-            for ev in delta?.events ?? MessageStreamHub.shared.snapshot(paneId: nil) {
+            for ev in delta?.events ?? MessageStreamHub.shared.snapshot(paneId: nil)
+            where inScope(ev.paneSessionKey, ev.paneId) {
                 out.append(HostGatewayFrame.encode(
                     .notify(method: "pane.message", params: ev.dict)))
             }
@@ -655,6 +694,95 @@ final class HostGatewaySession {
         default:
             return encodeControlResult(id: id, result: router.handle(method: method, params: params))
         }
+    }
+
+    // MARK: - Share links
+
+    /// Refused on a share link: what was asked is not about the shared pane.
+    static let shareForbidden = -32003
+
+    /// What a share client may call. Anything that names a pane must name the
+    /// shared one; the rest of the control API — splitting, closing, creating
+    /// worktrees, reading or driving other panes — is not on offer.
+    static let shareMethods: Set<String> = [
+        "ping", "session.snapshot", "pane.list", "fleet.groups", "layout.live",
+        "pane.vt_open", "pane.vt_close", "pane.vt_keepalive", "pane.send_keys", "pane.send_text",
+        "message.history", "question.answer", "suggest.pick", "decision.dismiss",
+    ]
+
+    private func currentSharedPane() -> SharedPane? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sharedPane
+    }
+
+    /// True for a paired client, and for a share client only when one of
+    /// `refs` names its pane.
+    private func inScope(_ refs: String?...) -> Bool {
+        guard let shared = currentSharedPane() else { return true }
+        return refs.contains { $0.map(shared.names) ?? false }
+    }
+
+    /// The snapshot's panes as this client may see them. On a share link that
+    /// is the shared pane alone, whose station id is learnt here for the events
+    /// that name it by that.
+    private func scopedPanes(_ panes: Any) -> Any {
+        guard let shared = currentSharedPane() else { return panes }
+        let kept = (panes as? [[String: Any]] ?? []).filter {
+            shared.names($0["pane_session_key"] as? String ?? "") || shared.names($0["pane_id"] as? String ?? "")
+        }
+        if let id = kept.first?["pane_id"] as? String, !id.isEmpty {
+            lock.lock()
+            sharedPane?.paneId = id
+            lock.unlock()
+        }
+        return kept
+    }
+
+    /// A share client's request: answered here (filtered or refused), or nil to
+    /// go the way a paired client's does. Nil straight away for a paired client.
+    private func shareGate(id: String, method: String, params: [String: Any]) -> String? {
+        guard let shared = currentSharedPane() else { return nil }
+        let refuse = { self.encodeError(id: id, code: Self.shareForbidden, message: "not allowed on a shared pane") }
+        guard Self.shareMethods.contains(method) else { return refuse() }
+        switch method {
+        case "ping":
+            return nil
+        case "session.snapshot", "pane.list":
+            guard case .ok(var dict) = router.handle(method: method, params: params) else { return nil }
+            dict["panes"] = scopedPanes(dict["panes"] ?? [])
+            return encodeControlResult(id: id, result: .ok(dict))
+        case "fleet.groups":
+            // The shared pane's worktree only: it is the one row the page draws.
+            let mine = (scopedPanes(snapshotPanes()) as? [[String: Any]] ?? []).first
+            let worktree = mine?["worktree_path"] as? String ?? ""
+            guard case .ok(var dict) = router.handle(method: method, params: params) else { return nil }
+            dict["groups"] = (dict["groups"] as? [[String: Any]] ?? []).compactMap { group -> [String: Any]? in
+                let items = (group["items"] as? [[String: Any]] ?? [])
+                    .filter { ($0["worktree_path"] as? String) == worktree }
+                guard !items.isEmpty else { return nil }
+                var g = group
+                g["items"] = items
+                return g
+            }
+            return encodeControlResult(id: id, result: .ok(dict))
+        case "layout.live":
+            // A worktree's split tree names its other panes. Without one the page
+            // stacks the panes it knows, which here is the shared one.
+            return encodeError(id: id, code: ControlError.notFound, message: "no live layout")
+        default:
+            // Every name given must be the shared pane's: the router acts on
+            // `pane_id`, the gateway on `pane_session_key`, so checking only one
+            // would let the other point somewhere else.
+            let refs = ["pane_session_key", "pane_id"].compactMap { params[$0] as? String }
+            guard !refs.isEmpty, refs.allSatisfy(shared.names) else { return refuse() }
+            return nil
+        }
+    }
+
+    private func snapshotPanes() -> Any {
+        guard case .ok(let dict) = router.handle(method: "session.snapshot", params: [:]) else { return [] }
+        return dict["panes"] ?? []
     }
 
     private func isVTOpen(_ key: String) -> Bool {
