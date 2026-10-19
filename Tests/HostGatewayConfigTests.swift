@@ -84,6 +84,13 @@ final class HostGatewayConfigTests: XCTestCase {
             "http://192.168.1.20:2783/?pane=seahelm-app-main")
     }
 
+    func testShareURLCarriesTheShareToken() {
+        XCTAssertEqual(
+            HostGatewayConfig.shareURL(host: "192.168.1.20", port: 2783, paneSessionKey: "seahelm-app-main",
+                                       shareToken: "abc-_9"),
+            "http://192.168.1.20:2783/?pane=seahelm-app-main&share=abc-_9")
+    }
+
     func testHostGatewayEncodeRoundTrip() throws {
         let hg = HostGatewayConfig(enabled: true, port: 2783, publicURL: "wss://x/ws")
         let data = try JSONEncoder().encode(hg)

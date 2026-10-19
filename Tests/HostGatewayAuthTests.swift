@@ -29,4 +29,26 @@ final class HostGatewayAuthTests: XCTestCase {
         XCTAssertFalse(HostGatewayAuth.verify(
             macId: "other", token: token, expectedMacId: "live", rootSecretBase64url: b64))
     }
+
+    func testShareTokenOpensOnlyThePaneItWasMintedFor() throws {
+        let b64 = PairingCrypto.base64url(root)
+        let token = try XCTUnwrap(HostGatewayAuth.shareToken(paneSessionKey: "k1", rootSecretBase64url: b64))
+        XCTAssertTrue(HostGatewayAuth.verifyShare(paneSessionKey: "k1", token: token, rootSecretBase64url: b64))
+        XCTAssertFalse(HostGatewayAuth.verifyShare(paneSessionKey: "k2", token: token, rootSecretBase64url: b64))
+        XCTAssertFalse(HostGatewayAuth.verifyShare(paneSessionKey: "k1", token: "", rootSecretBase64url: b64))
+    }
+
+    /// A share link must not double as the pairing token, or forwarding it
+    /// would hand over the fleet.
+    func testShareTokenIsNotThePairingToken() {
+        let b64 = PairingCrypto.base64url(root)
+        let share = HostGatewayAuth.shareToken(paneSessionKey: "k1", rootSecretBase64url: b64)
+        XCTAssertNotEqual(share, HostGatewayAuth.expectedToken(rootSecretBase64url: b64))
+        XCTAssertFalse(HostGatewayAuth.verify(
+            macId: "live", token: share ?? "", expectedMacId: "live", rootSecretBase64url: b64))
+    }
+
+    func testNoRootSecretMintsNoShareToken() {
+        XCTAssertNil(HostGatewayAuth.shareToken(paneSessionKey: "k1", rootSecretBase64url: ""))
+    }
 }
