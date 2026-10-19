@@ -103,6 +103,22 @@ struct HostGatewayConfig: Codable, Equatable {
 struct PaneShareOffer: Equatable {
     var url: String
     var gatewayListening: Bool
+    var linkId: String
+    var paneSessionKey: String
+    var lifetime: ShareLinkLifetime
+    var expiresAt: Date?
+    /// Other live links to the same pane, not counting this one.
+    var otherLinks: Int
+}
+
+/// The header's share popover, answered by the window that owns the panes.
+protocol PaneSharing: AnyObject {
+    /// A new link to the focused pane. Nil when there is no pane to share.
+    func shareFocusedPane(lifetime: ShareLinkLifetime) -> PaneShareOffer?
+    /// Same link, same URL; the new lifetime counts from now.
+    func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime) -> PaneShareOffer?
+    func revokeShare(_ offer: PaneShareOffer)
+    func revokeAllShares(paneSessionKey: String)
 }
 
 /// IPv4 another machine on this network can open. `en0` (Wi-Fi) wins; otherwise

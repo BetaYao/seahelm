@@ -1438,7 +1438,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
             chrome.applyState(chromeState, animated: false)
             chrome.headerDelegate = self
-            chrome.shareOffer = { [weak self] in self?.focusedPaneShareOffer() }
+            chrome.paneSharing = self
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1619,20 +1619,17 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private var headerMemoryProbedAt: [String: Date] = [:]
     private var headerMemoryInFlight: Set<String> = []
 
-    /// Link another machine opens to see only the focused pane.
-    private func focusedPaneShareOffer() -> PaneShareOffer? {
-        guard let path = tabCoordinator.selectedPane?.worktreePath,
-              let stationId = PaneTitleResolver.focusedStationId(
-                in: terminalCoordinator.stationManager.tree(forPath: path)),
-              let key = StationRegistry.shared.station(forId: stationId)?.paneSessionKey,
-              !key.isEmpty else { return nil }
-        let gateway = config.hostGateway ?? HostGatewayConfig()
-        let host = LANAddress.ipv4() ?? "127.0.0.1"
+    private func shareOffer(_ link: ShareLink, url: String, lifetime: ShareLinkLifetime) -> PaneShareOffer {
+        let others = tabCoordinator.shareLinks.active()
+            .filter { $0.paneSessionKey == link.paneSessionKey && $0.id != link.id }.count
         return PaneShareOffer(
-            url: HostGatewayConfig.shareURL(
-                host: host, port: gateway.resolvedPort, paneSessionKey: key,
-                shareToken: tabCoordinator.shareToken(paneSessionKey: key)),
-            gatewayListening: tabCoordinator.hostGatewayIsListening)
+            url: url,
+            gatewayListening: tabCoordinator.hostGatewayIsListening,
+            linkId: link.id,
+            paneSessionKey: link.paneSessionKey,
+            lifetime: lifetime,
+            expiresAt: link.expiresAt,
+            otherLinks: others)
     }
 
     private func focusedPaneSessionKey(worktreePath: String) -> String? {
@@ -2492,6 +2489,18 @@ extension MainWindowController: SettingsDelegate {
         revokeAllRemotes()
     }
 
+    func settingsShareLinks(_ settings: SettingsViewController) -> [ShareLink] {
+        tabCoordinator.shareLinks.active()
+    }
+
+    func settings(_ settings: SettingsViewController, revokeShareLink id: String) {
+        tabCoordinator.shareLinks.revoke(id: id)
+    }
+
+    func settingsRevokeAllShareLinks(_ settings: SettingsViewController) {
+        tabCoordinator.shareLinks.revokeAll()
+    }
+
     func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool {
         tabCoordinator.hostGatewayIsListening
     }
@@ -2543,6 +2552,8 @@ extension MainWindowController: SettingsDelegate {
         _ = refreshPairingCode()
         config.saveNow()
         tabCoordinator.applyMqttRootSecret(config.pairing?.rootSecret ?? "")
+        // "Revoke all remote access" means the share links too.
+        tabCoordinator.shareLinks.revokeAll()
     }
 
     /// Live panes, so a rule's target is picked from what exists rather than
@@ -3513,5 +3524,41 @@ extension MainWindowController {
     private func clearChatButtons(_ callback: InboundCallback) {
         AgentRegistry.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
                                         messageId: callback.messageId, buttons: [])
+    }
+}
+
+// MARK: - Sharing one pane
+
+extension MainWindowController: PaneSharing {
+    /// A link another machine opens to see only the focused pane.
+    func shareFocusedPane(lifetime: ShareLinkLifetime) -> PaneShareOffer? {
+        guard let path = tabCoordinator.selectedPane?.worktreePath,
+              let stationId = PaneTitleResolver.focusedStationId(
+                in: terminalCoordinator.stationManager.tree(forPath: path)),
+              let key = StationRegistry.shared.station(forId: stationId)?.paneSessionKey,
+              !key.isEmpty else { return nil }
+        let pane = tabCoordinator.mqttDataSource?.snapshotPanes().first { $0.paneSessionKey == key }
+        let title = (pane?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = !title.isEmpty ? title
+            : pane.map { "\($0.project) \u{00B7} \($0.branch)" } ?? URL(fileURLWithPath: path).lastPathComponent
+        let (link, token) = tabCoordinator.shareLinks.mint(paneSessionKey: key, label: label, lifetime: lifetime)
+        let gateway = config.hostGateway ?? HostGatewayConfig()
+        let url = HostGatewayConfig.shareURL(
+            host: LANAddress.ipv4() ?? "127.0.0.1", port: gateway.resolvedPort,
+            paneSessionKey: key, shareToken: token)
+        return shareOffer(link, url: url, lifetime: lifetime)
+    }
+
+    func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime) -> PaneShareOffer? {
+        guard let link = tabCoordinator.shareLinks.setLifetime(id: offer.linkId, lifetime) else { return nil }
+        return shareOffer(link, url: offer.url, lifetime: lifetime)
+    }
+
+    func revokeShare(_ offer: PaneShareOffer) {
+        tabCoordinator.shareLinks.revoke(id: offer.linkId)
+    }
+
+    func revokeAllShares(paneSessionKey: String) {
+        tabCoordinator.shareLinks.revokeAll(paneSessionKey: paneSessionKey)
     }
 }

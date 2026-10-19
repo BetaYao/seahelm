@@ -11,9 +11,9 @@ final class WindowChromeController: NSViewController {
         }
     }
 
-    /// Builds the seahelm-web link for the focused pane. The header copies it.
-    var shareOffer: (() -> PaneShareOffer?)? {
-        didSet { terminalHeader.shareOffer = shareOffer }
+    /// Mints the seahelm-web links for the focused pane. The header copies them.
+    weak var paneSharing: PaneSharing? {
+        didSet { terminalHeader.paneSharing = paneSharing }
     }
 
     private var state = ChromeLayoutState(

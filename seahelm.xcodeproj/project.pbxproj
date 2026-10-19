@@ -261,6 +261,7 @@
 		7A6318A412EAE54150AEFA2F /* Command.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D31B3E4BC885E12572B19BF /* Command.swift */; };
 		7AD64F51F6EE5BA663EEF30D /* AgentRegistryWebhookPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4985A21CB0E9D8B4708E26 /* AgentRegistryWebhookPathTests.swift */; };
 		7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */; };
+		7B9A75A898CF014C44B03E51 /* SharePopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E87485817A45D71BCA83E094 /* SharePopoverController.swift */; };
 		7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */; };
 		7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */; };
 		7D04C2A61105F5AD7BD48E3F /* CommandSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7018E7ABB432ABCFCB9723F /* CommandSpec.swift */; };
@@ -272,6 +273,7 @@
 		7ED2875B97C74F9DF0DF3F79 /* PaneWorkingDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5DCCDD64708BEB08D20C0A /* PaneWorkingDirectory.swift */; };
 		7F9546C174F5D5E52457F7A8 /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7558A8D72AFCE237E39E401 /* MarkdownRendererTests.swift */; };
 		7FAB179ADDFF8EF7D3B14D93 /* DashboardOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */; };
+		80BF8041C4AFF3CD3A07C77F /* ShareLinkStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3447E936023BB5E245C79F39 /* ShareLinkStoreTests.swift */; };
 		80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C97F6C22C29552377720F4D /* WorktreePathNavigationTests.swift */; };
 		8103E9F323713DDD8EF66FD6 /* GmailRESTMailClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */; };
 		82716362C00AE8D58C2C0C97 /* ChromeHeaderPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E4048B5F3E4C7759600A8DD /* ChromeHeaderPage.swift */; };
@@ -328,6 +330,7 @@
 		9B2031117C016123927B4E93 /* CodexUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3A8892B1DC42E27FCD2A98 /* CodexUsageSummaryProvider.swift */; };
 		9B491C853EC9D44767FD6F90 /* PanelCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */; };
 		9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */; };
+		9B5BC1B92D37B6DACA6F6ABE /* ShareLinksListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC6C47A8014C70C0CC58CC30 /* ShareLinksListView.swift */; };
 		9B78DBBAF5994540D7C95C0B /* ExternalChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA151402CD4A6E95C947C0AB /* ExternalChannel.swift */; };
 		9B8C6AFF8B40BEA399096B15 /* SettingsRowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5189888D351C4E3BE7FD1B0C /* SettingsRowLayoutTests.swift */; };
 		9C35BEC65A084B6F21FF11DB /* TerminalHeaderViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472ACEFBD0F23747FC60EB0D /* TerminalHeaderViewTests.swift */; };
@@ -349,6 +352,7 @@
 		A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */ = {isa = PBXBuildFile; fileRef = E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
 		A30993302260CC1F5B1F7179 /* TelegramRuleCoalescerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A3B9CBE08762DDD19AA2C5 /* TelegramRuleCoalescerTests.swift */; };
+		A36D6F5375FBE77728D7A1FD /* ShareLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */; };
 		A3C6B5F047EBF420EA393C13 /* TodoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */; };
 		A4511021DEF08E77298E6F09 /* IntegrationStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811DF1463E1F5D6EFC56F68A /* IntegrationStatusStore.swift */; };
 		A56AD79B6223CC0089D6B6F6 /* SeahelmUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */; };
@@ -659,6 +663,7 @@
 		33E9418C39C2F95AA6193F67 /* AppFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFont.swift; sourceTree = "<group>"; };
 		33EB483855694F79BFA1A7B7 /* HostGatewayKeyFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayKeyFrameTests.swift; sourceTree = "<group>"; };
 		340F0D26DC8D1C8F72279B6A /* IngestOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestOutcome.swift; sourceTree = "<group>"; };
+		3447E936023BB5E245C79F39 /* ShareLinkStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLinkStoreTests.swift; sourceTree = "<group>"; };
 		34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeIconClusterView.swift; sourceTree = "<group>"; };
 		34E0E7E3509A350A7EBB5189 /* libcurl.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libcurl.tbd; path = usr/lib/libcurl.tbd; sourceTree = SDKROOT; };
 		358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatchTests.swift; sourceTree = "<group>"; };
@@ -1062,6 +1067,7 @@
 		E599A3810CED6E82EBD8BBC9 /* FirstMateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinator.swift; sourceTree = "<group>"; };
 		E664A1C5B1466EF19108D6B8 /* ShortcutHintBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHintBar.swift; sourceTree = "<group>"; };
 		E7B9CCF0AFEC7E34EB93A779 /* AgentSessionRef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRef.swift; sourceTree = "<group>"; };
+		E87485817A45D71BCA83E094 /* SharePopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePopoverController.swift; sourceTree = "<group>"; };
 		E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerLayoutTests.swift; sourceTree = "<group>"; };
 		E96EE302F1479073676DB584 /* FirstMateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateTests.swift; sourceTree = "<group>"; };
 		E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstaller.swift; sourceTree = "<group>"; };
@@ -1070,6 +1076,7 @@
 		EB9C0192916DE1D56E68048E /* StationReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationReparentTests.swift; sourceTree = "<group>"; };
 		EBE28FEA6DE230823C9078B5 /* ManifestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestEngine.swift; sourceTree = "<group>"; };
 		EC5B740F0E98B97A32CB0DB4 /* PRReviewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewCoordinator.swift; sourceTree = "<group>"; };
+		EC6C47A8014C70C0CC58CC30 /* ShareLinksListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLinksListView.swift; sourceTree = "<group>"; };
 		ECBEC0B8D9CEC4A93075C660 /* OpenedSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenedSurfaceView.swift; sourceTree = "<group>"; };
 		ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageSummaryProviderTests.swift; sourceTree = "<group>"; };
 		ED6A0AE5886DB08F5B0D024C /* StatusDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetector.swift; sourceTree = "<group>"; };
@@ -1087,6 +1094,7 @@
 		F31C2470C1A80AF0E0B825BA /* TelegramInitData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramInitData.swift; sourceTree = "<group>"; };
 		F3811788C3A0B0FC8B1CD711 /* WorktreeLabelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeLabelStoreTests.swift; sourceTree = "<group>"; };
 		F46850D7037DB8C66886F9AF /* AgentRegistryExternalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryExternalTests.swift; sourceTree = "<group>"; };
+		F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLinkStore.swift; sourceTree = "<group>"; };
 		F4D445453693B8D5A3D088F1 /* AgentTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTypeTests.swift; sourceTree = "<group>"; };
 		F5C834279572F6B0C73A94B6 /* JetBrainsMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Medium.ttf"; sourceTree = "<group>"; };
 		F749E954C706D5C69B5BCD0C /* GhosttyConfigImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigImporter.swift; sourceTree = "<group>"; };
@@ -1252,6 +1260,7 @@
 				E97FC10F15109A2EF528DD87 /* SeahelmSuggestInstaller.swift */,
 				968213FDE4B08CF2A98DB961 /* SessionManager.swift */,
 				FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */,
+				F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */,
 				F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */,
 				30F9565C3156144526A74B08 /* StationManager.swift */,
 				532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */,
@@ -1437,6 +1446,7 @@
 				DD8616FF9AAEF5CCCA0A710C /* SettingsChrome.swift */,
 				C537B2B1B68C50EF9685736B /* SettingsViewController.swift */,
 				5FE8A11E17EFB437EEA5C2A2 /* SettingsWindowController.swift */,
+				EC6C47A8014C70C0CC58CC30 /* ShareLinksListView.swift */,
 				588A37DABECC74B634A5E45A /* TelegramRulesView.swift */,
 				0B4705665C97FD7F9A95FDFC /* TelegramSetupWizard.swift */,
 			);
@@ -1706,6 +1716,7 @@
 				BFFAE60D0EF11A5DC22B2B73 /* SessionRestoreConfigTests.swift */,
 				9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */,
 				5189888D351C4E3BE7FD1B0C /* SettingsRowLayoutTests.swift */,
+				3447E936023BB5E245C79F39 /* ShareLinkStoreTests.swift */,
 				36FC6278CE9A15F68E6FAE89 /* ShellEscapeTests.swift */,
 				B7A33515B716406497BF7E74 /* ShortcutHintBarTests.swift */,
 				5B8AA825486A42DB3CCA97E1 /* SignalDecoderTests.swift */,
@@ -1899,6 +1910,7 @@
 				34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */,
 				F11134E3FD389088A2D35EEE /* ChromeLayoutMetrics.swift */,
 				3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */,
+				E87485817A45D71BCA83E094 /* SharePopoverController.swift */,
 				FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */,
 				D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */,
 				0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */,
@@ -2301,6 +2313,7 @@
 				0F486115B10D4353770B261C /* SessionRestoreConfigTests.swift in Sources */,
 				B489F50E6BDE70E1F24CB076 /* SessionTitleLookupTests.swift in Sources */,
 				9B8C6AFF8B40BEA399096B15 /* SettingsRowLayoutTests.swift in Sources */,
+				80BF8041C4AFF3CD3A07C77F /* ShareLinkStoreTests.swift in Sources */,
 				BCEFB12FC9264290C08C5D51 /* ShellEscapeTests.swift in Sources */,
 				E544B32F3C81016430ADB0A3 /* ShortcutHintBarTests.swift in Sources */,
 				EA4E21C29D5D3D06309B88ED /* SignalDecoderTests.swift in Sources */,
@@ -2613,6 +2626,9 @@
 				6EF47CD1C02411BA3C719E90 /* SettingsChrome.swift in Sources */,
 				57B1D5979538741ABFEB708F /* SettingsViewController.swift in Sources */,
 				E00A9B162C4B83D6AD34435A /* SettingsWindowController.swift in Sources */,
+				A36D6F5375FBE77728D7A1FD /* ShareLinkStore.swift in Sources */,
+				9B5BC1B92D37B6DACA6F6ABE /* ShareLinksListView.swift in Sources */,
+				7B9A75A898CF014C44B03E51 /* SharePopoverController.swift in Sources */,
 				459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */,
 				5FC647D840678AE10E2FF5BC /* ShortcutHintBar.swift in Sources */,
 				06CF922E9ABD675BEC1F7502 /* SidebarHeaderView.swift in Sources */,

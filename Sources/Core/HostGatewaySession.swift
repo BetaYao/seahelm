@@ -22,6 +22,7 @@ final class HostGatewaySession {
     private let decisions: HostGatewayDecisions
     private let pairingCode: PairingCodeVerifying?
     private let rateLimiter: PairRateLimiter?
+    private let shareLinks: ShareLinkVerifying?
     private let clientIP: String
 
     /// Caps on queued VT payload (uncompressed). Overflow drops oldest `.vt`
@@ -85,6 +86,9 @@ final class HostGatewaySession {
     /// carries, and its station id, which some events use — so both are kept.
     struct SharedPane: Equatable {
         let key: String
+        /// The link it came in on, so revoking or outliving that link can drop
+        /// this connection (`HostGatewayServer.enforceShareLinks`).
+        let linkId: String
         var paneId: String?
 
         func names(_ ref: String) -> Bool {
@@ -99,6 +103,7 @@ final class HostGatewaySession {
          decisions: HostGatewayDecisions = HostGatewayDecisions(),
          pairingCode: PairingCodeVerifying? = nil,
          rateLimiter: PairRateLimiter? = nil,
+         shareLinks: ShareLinkVerifying? = nil,
          clientIP: String = "unknown",
          access: HostGatewayAccess = HostGatewayAccess()) {
         self.access = access
@@ -109,6 +114,7 @@ final class HostGatewaySession {
         self.decisions = decisions
         self.pairingCode = pairingCode
         self.rateLimiter = rateLimiter
+        self.shareLinks = shareLinks
         self.clientIP = clientIP
         vtObserverToken = vt.addObserver { [weak self] event in
             self?.enqueueVT(event)
@@ -490,14 +496,15 @@ final class HostGatewaySession {
         let share = params["share"] as? String ?? ""
         if !share.isEmpty {
             let pane = params["pane"] as? String ?? ""
-            let ok = HostGatewayAuth.verifyShare(
-                paneSessionKey: pane, token: share, rootSecretBase64url: rootSecretBase64url)
-            if ok {
-                lock.lock()
-                sharedPane = SharedPane(key: pane, paneId: nil)
-                lock.unlock()
+            let check = shareLinks?.check(token: share, paneSessionKey: pane, now: Date()) ?? .invalid
+            guard case .valid(let linkId) = check else {
+                return finishAuth(id: id, ok: false, params: params, issuedToken: nil,
+                                  reason: check == .expired ? "expired" : "invalid")
             }
-            return finishAuth(id: id, ok: ok, params: params, issuedToken: nil)
+            lock.lock()
+            sharedPane = SharedPane(key: pane, linkId: linkId, paneId: nil)
+            lock.unlock()
+            return finishAuth(id: id, ok: true, params: params, issuedToken: nil)
         }
 
         // Token path wins when both are present (return visits).
@@ -540,7 +547,8 @@ final class HostGatewaySession {
         return finishAuth(id: id, ok: false, params: params, issuedToken: nil)
     }
 
-    private func finishAuth(id: String, ok: Bool, params: [String: Any], issuedToken: String?) -> [String] {
+    private func finishAuth(id: String, ok: Bool, params: [String: Any], issuedToken: String?,
+                            reason: String? = nil) -> [String] {
         // Opt-in, so a cached page from before the binary frame keeps working
         // against a new Mac rather than rendering nothing.
         let binary = ok && (params["vt_binary"] as? Bool ?? false)
@@ -560,6 +568,7 @@ final class HostGatewaySession {
             "vt_deflate": deflate,
             "keys_binary": keysBin,
         ]
+        if let reason { result["reason"] = reason }
         // A client that kept its timeline across the drop says how far it got,
         // and gets only what came after. `replay` tells it which one it got:
         // "full" means drop what it holds, as a client from before this does.
@@ -709,6 +718,9 @@ final class HostGatewaySession {
         "pane.vt_open", "pane.vt_close", "pane.vt_keepalive", "pane.send_keys", "pane.send_text",
         "message.history", "question.answer", "suggest.pick", "decision.dismiss",
     ]
+
+    /// The share link this connection signed in with; nil for a paired client.
+    var shareLinkId: String? { currentSharedPane()?.linkId }
 
     private func currentSharedPane() -> SharedPane? {
         lock.lock()
