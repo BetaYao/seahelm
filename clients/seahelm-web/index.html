@@ -232,7 +232,9 @@
   @media (max-width:760px){ .nw-open kbd{display:none} }
   @media (min-width:761px){ .nw-open{height:44px;border-radius:22px} }
 
-  .sheet{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;
+  /* Sized to the visible viewport, not the layout one: iOS lays the keyboard
+     over the page, and a sheet pinned to the layout bottom sits under it. */
+  .sheet{position:fixed;left:0;right:0;top:var(--vv-top,0px);height:var(--app-h,100dvh);z-index:80;display:flex;align-items:flex-end;justify-content:center;
     background:rgba(0,0,0,.55)}
   .sheet[hidden]{display:none}
   .sheet-card{width:100%;max-width:560px;max-height:calc(var(--app-h,100dvh) - 48px);display:flex;flex-direction:column;
@@ -3815,6 +3817,8 @@ $('closePaneBtn').onclick = () => {
   const apply = () => {
     frame = 0;
     document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+    // iOS may still pan the visual viewport to reach a field; fixed overlays follow it.
+    document.documentElement.style.setProperty('--vv-top', Math.max(0, Math.round(vv.offsetTop)) + 'px');
     if (window.scrollY) window.scrollTo(0, 0);
     fitAllPanes();
     renderTimelineToBottom();
