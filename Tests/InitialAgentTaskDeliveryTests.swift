@@ -94,6 +94,37 @@ final class InitialAgentTaskDeliveryTests: XCTestCase {
         XCTAssertEqual(result.lookups, 4)
     }
 
+    /// Cursor Agent's MCP approval is a letter menu, not a numbered list. Typing
+    /// the brief there selects `[a]`/`[c]`/`[q]` and the composer stays empty.
+    func testHoldsWhileCursorLetterKeyApprovalIsUpThenSendsOnceItClears() {
+        let dialog = Snapshot(paneId: "pane-7", runningAgent: .cursor, screen: """
+         ⚠ MCP Server Approval Required
+
+         The following MCP servers need to be approved:
+
+         • shadcn (command: npx)
+         • betly-bigdata (command: node)
+
+         [a] Approve all servers
+         [c] Continue without approval
+         [q] Quit
+        """)
+        let applying = Snapshot(paneId: "pane-7", runningAgent: .cursor, screen: """
+         MCP Server Approval Required
+         ⏳ Applying your selection...
+        """)
+        let ready = Snapshot(paneId: "pane-7", runningAgent: .cursor, screen: """
+         Cursor Agent
+         v2026.10.16
+
+         → Plan, search, build anything
+        """)
+        let result = deliver("fix the login redirect", snapshots: [dialog, applying, ready])
+        XCTAssertEqual(result.sent.map(\.text), ["fix the login redirect"])
+        XCTAssertEqual(result.sent.map(\.agent), [.cursor])
+        XCTAssertEqual(result.lookups, 2 + InitialAgentTaskDelivery.readyConfirmations)
+    }
+
     /// The brief's Return would pick "Yes, proceed" and trust the folder for the user.
     func testHoldsWhileADialogIsUpThenSendsOnceItIsAnswered() {
         let dialog = Snapshot(paneId: "pane-5", runningAgent: .claudeCode, screen: Self.trustDialog)

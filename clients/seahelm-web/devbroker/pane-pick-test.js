@@ -3,7 +3,7 @@
 // Run:  node devbroker/pane-pick-test.js
 'use strict';
 
-const { pickPane, statusLabel, decisionLabel } = require('../pane-pick.js');
+const { pickPane, statusLabel, decisionLabel, panesMatchingShare } = require('../pane-pick.js');
 
 let pass = 0, fail = 0;
 const check = (ok, name, extra = '') => {
@@ -42,6 +42,17 @@ check(statusLabel('bogus') === '', 'and so does a status it has never heard of')
 check(decisionLabel('suggest') === 'Suggestion', 'a suggestion is labelled as one');
 check(decisionLabel('question') === 'Needs you', 'an open question needs you');
 check(decisionLabel(undefined) === null, 'no decision, no label');
+
+const fleet = [
+  { pane_session_key: 'seahelm-a', pane_id: 'id-a' },
+  { pane_session_key: 'seahelm-b', pane_id: 'id-b' },
+];
+check(panesMatchingShare(fleet, null).length === 2, 'no share key keeps the fleet');
+check(panesMatchingShare(fleet, 'seahelm-b').map(p => p.pane_id).join() === 'id-b',
+  'a session key keeps only that pane');
+check(panesMatchingShare(fleet, 'id-a').map(p => p.pane_session_key).join() === 'seahelm-a',
+  'a pane id keeps only that pane');
+check(panesMatchingShare(fleet, 'missing').length === 0, 'an unknown pane shares nothing');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct HostGatewayConfig: Codable, Equatable {
     var enabled: Bool?
@@ -72,11 +73,61 @@ struct HostGatewayConfig: Codable, Equatable {
             telegramHost: existing?.telegramHost)
     }
 
+    /// Page a browser opens to see one pane: this Mac's address, the gateway
+    /// port, and `?pane=` so the web client hides the rest of the fleet.
+    static func shareURL(host: String, port: UInt16, paneSessionKey: String) -> String {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = host
+        components.port = Int(port)
+        components.path = "/"
+        components.queryItems = [URLQueryItem(name: "pane", value: paneSessionKey)]
+        return components.string ?? "http://\(host):\(port)/?pane=\(paneSessionKey)"
+    }
+
     enum CodingKeys: String, CodingKey {
         case enabled, port
         case publicURL = "public_url"
         case webRoot = "web_root"
         case pairCode = "pair_code"
         case telegramHost = "telegram_host"
+    }
+}
+
+/// What the header's share button copies. `gatewayListening` is false when the
+/// link is real but nothing is serving it yet.
+struct PaneShareOffer: Equatable {
+    var url: String
+    var gatewayListening: Bool
+}
+
+/// IPv4 another machine on this network can open. `en0` (Wi-Fi) wins; otherwise
+/// the first running interface that is not loopback, a tunnel, or a bridge.
+enum LANAddress {
+    static func ipv4() -> String? {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return nil }
+        defer { freeifaddrs(list) }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        var other: String?
+        while let node = cursor {
+            cursor = node.pointee.ifa_next
+            guard let sa = node.pointee.ifa_addr,
+                  sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(node.pointee.ifa_flags)
+            guard flags & IFF_UP != 0, flags & IFF_LOOPBACK == 0 else { continue }
+            var addr = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+            let ip = String(cString: buffer)
+            guard !ip.isEmpty, ip != "0.0.0.0" else { continue }
+            let name = String(cString: node.pointee.ifa_name)
+            if name == "en0" { return ip }
+            if other == nil, !name.hasPrefix("awdl"), !name.hasPrefix("llw"),
+               !name.hasPrefix("bridge"), !name.hasPrefix("utun") {
+                other = ip
+            }
+        }
+        return other
     }
 }
