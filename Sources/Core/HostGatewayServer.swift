@@ -299,7 +299,9 @@ final class HostGatewayServer {
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        parameters.acceptLocalOnly = true
+        // Not `acceptLocalOnly`: it means "on a directly attached subnet", so a
+        // colleague one router away gets the TCP handshake and is then dropped.
+        // Who gets in is decided by auth (pairing code, token, share link).
         parameters.includePeerToPeer = false
 
         do {
