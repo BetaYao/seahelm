@@ -5,8 +5,14 @@ private final class SessionFakeDataSource: ControlDataSource {
     var panes: [PaneSnapshot] = []
     var knownPanes: Set<String> = []
     var sentKeys: [(pane: String, keys: [String])] = []
+    var sentTexts: [(pane: String, text: String, enter: Bool)] = []
 
     func snapshotPanes() -> [PaneSnapshot] { panes }
+    func sendText(paneId: String, text: String, enter: Bool) -> Bool {
+        guard knownPanes.contains(paneId) else { return false }
+        sentTexts.append((paneId, text, enter))
+        return true
+    }
     func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
     func ingestHook(json: [String: Any]) {}
     func sendKeys(paneId: String, keys: [String]) -> Bool {
@@ -590,8 +596,59 @@ final class HostGatewayShareSessionTests: XCTestCase {
         return shareAuth(pane: pane, token: token)
     }
 
-    private func shareAuth(pane: String, token: String) -> String {
-        #"{"id":"a","method":"auth","params":{"share":"\#(token)","pane":"\#(pane)"}}"#
+    private func shareAuth(pane: String, token: String, name: String? = "Wang") -> String {
+        let named = name.map { #","name":"\#($0)""# } ?? ""
+        return #"{"id":"a","method":"auth","params":{"share":"\#(token)","pane":"\#(pane)"\#(named)}}"#
+    }
+
+    // MARK: - Who said it
+
+    func testAnOpenLinkWithoutANameAsksForOne() {
+        let (s, _, _) = session()
+        let token = links.mint(paneSessionKey: "k1", label: "", lifetime: .day).token
+        let result = json(s.handle(text: shareAuth(pane: "k1", token: token, name: nil))[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["ok"] as? Bool, false)
+        XCTAssertEqual(result?["reason"] as? String, "name_required")
+    }
+
+    func testAMessageIsSignedWithTheNameThePageGave() {
+        let (s, ds, _) = session()
+        let result = json(s.handle(text: shareAuth())[0])["result"] as? [String: Any]
+        XCTAssertEqual(result?["share_sender"] as? String, "Wang")
+        XCTAssertNil(errorCode(call(s, "pane.send_text", #"{"pane_id":"k1","text":"hi","enter":true}"#)))
+        XCTAssertEqual(ds.sentTexts.map(\.text), ["[from Wang] hi"])
+    }
+
+    func testTheRouterAliasIsSignedToo() {
+        let (s, ds, _) = session()
+        _ = s.handle(text: shareAuth())
+        _ = call(s, "pane.send_text", #"{"pane_id":"k1","command":"hi","enter":true}"#)
+        XCTAssertEqual(ds.sentTexts.map(\.text), ["[from Wang] hi"])
+    }
+
+    /// Typing into the terminal is keystrokes, not a message.
+    func testTextWithoutEnterIsNotSigned() {
+        let (s, ds, _) = session()
+        _ = s.handle(text: shareAuth())
+        _ = call(s, "pane.send_text", #"{"pane_id":"k1","text":"ls"}"#)
+        XCTAssertEqual(ds.sentTexts.map(\.text), ["ls"])
+    }
+
+    func testALinkMadeForSomeoneSpeaksAsThemWhateverThePageSays() {
+        let (s, ds, _) = session()
+        let token = links.mint(paneSessionKey: "k1", label: "", lifetime: .day, recipient: "Meng").token
+        _ = s.handle(text: shareAuth(pane: "k1", token: token, name: "Matt"))
+        XCTAssertEqual(s.shareSender, "Meng")
+        _ = call(s, "pane.send_text", #"{"pane_id":"k1","text":"hi","enter":true}"#)
+        XCTAssertEqual(ds.sentTexts.map(\.text), ["[from Meng] hi"])
+    }
+
+    func testAPairedClientsMessagesAreNotSigned() {
+        let (s, ds, _) = session()
+        let token = PairingCrypto(rootSecret: root).authPassword
+        _ = s.handle(text: #"{"id":"a","method":"auth","params":{"mac_id":"live","token":"\#(token)"}}"#)
+        _ = call(s, "pane.send_text", #"{"pane_id":"k1","text":"hi","enter":true}"#)
+        XCTAssertEqual(ds.sentTexts.map(\.text), ["hi"])
     }
 
     private func json(_ frame: HostGatewayWireFrame) -> [String: Any] {

@@ -1629,6 +1629,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             paneSessionKey: link.paneSessionKey,
             lifetime: lifetime,
             expiresAt: link.expiresAt,
+            recipient: link.recipient,
             otherLinks: others)
     }
 
@@ -3552,6 +3553,11 @@ extension MainWindowController: PaneSharing {
     func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime) -> PaneShareOffer? {
         guard let link = tabCoordinator.shareLinks.setLifetime(id: offer.linkId, lifetime) else { return nil }
         return shareOffer(link, url: offer.url, lifetime: lifetime)
+    }
+
+    func changeShare(_ offer: PaneShareOffer, recipient: String?) -> PaneShareOffer? {
+        guard let link = tabCoordinator.shareLinks.setRecipient(id: offer.linkId, recipient) else { return nil }
+        return shareOffer(link, url: offer.url, lifetime: offer.lifetime)
     }
 
     func revokeShare(_ offer: PaneShareOffer) {

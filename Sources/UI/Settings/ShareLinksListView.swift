@@ -55,7 +55,8 @@ final class ShareLinksListView: NSView {
     }
 
     private func makeRow(_ link: ShareLink, now: Date) -> NSView {
-        let name = NSTextField(labelWithString: link.label.isEmpty ? link.paneSessionKey : link.label)
+        let pane = link.label.isEmpty ? link.paneSessionKey : link.label
+        let name = NSTextField(labelWithString: link.recipient.map { "\(pane) \u{2192} \($0)" } ?? pane)
         name.font = .systemFont(ofSize: 12, weight: .medium)
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

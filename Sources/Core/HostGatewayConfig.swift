@@ -107,6 +107,8 @@ struct PaneShareOffer: Equatable {
     var paneSessionKey: String
     var lifetime: ShareLinkLifetime
     var expiresAt: Date?
+    /// Who the link is for; nil while anyone who opens it names themselves.
+    var recipient: String?
     /// Other live links to the same pane, not counting this one.
     var otherLinks: Int
 }
@@ -117,6 +119,8 @@ protocol PaneSharing: AnyObject {
     func shareFocusedPane(lifetime: ShareLinkLifetime) -> PaneShareOffer?
     /// Same link, same URL; the new lifetime counts from now.
     func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime) -> PaneShareOffer?
+    /// Bind the link to one person, or with nil open it to anyone.
+    func changeShare(_ offer: PaneShareOffer, recipient: String?) -> PaneShareOffer?
     func revokeShare(_ offer: PaneShareOffer)
     func revokeAllShares(paneSessionKey: String)
 }

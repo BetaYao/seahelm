@@ -176,7 +176,11 @@ final class HostGatewayServer {
     private func dropDeadShareSessions(now: Date) {
         guard let shareLinks else { return }
         for state in connections.values {
-            guard let id = state.session.shareLinkId, !shareLinks.isLive(id: id, now: now) else { continue }
+            guard let id = state.session.shareLinkId else { continue }
+            // A link bound to someone after a page opened it under another name
+            // drops that page; it comes back as the recipient.
+            let rebound = shareLinks.recipient(id: id).map { $0 != state.session.shareSender } ?? false
+            guard !shareLinks.isLive(id: id, now: now) || rebound else { continue }
             // `.cancelled` runs the usual teardown in the state handler.
             state.connection.cancel()
         }

@@ -86,6 +86,7 @@
   .gate-card{width:min(400px,100%);display:flex;flex-direction:column;gap:14px;text-align:center}
   .gate-title{font-size:var(--fs-title);font-weight:700;letter-spacing:.01em}
   .gate-hint{font-size:var(--fs-sub);color:var(--muted);line-height:1.45}
+  .gate-input.gate-name{font-family:var(--sans);letter-spacing:normal}
   .gate-input{width:100%;height:52px;background:var(--panel);border:0.5px solid var(--sep);
     color:var(--text);border-radius:12px;padding:0 16px;font-family:var(--mono);
     font-size:20px;letter-spacing:.12em;text-align:center;outline:none}
@@ -410,6 +411,11 @@
     font-size:var(--fs-cap);color:var(--faint)}
   .tl-status::before,.tl-status::after{content:'';flex:1;height:0.5px;background:var(--sep)}
   .tl-status i{width:6px;height:6px;border-radius:50%;flex:none}
+  /* A message sent through a share link: the Mac signs it "[from Name] ", and
+     the page shows that as a name above the bubble instead of in it. */
+  .tl-user.guest{flex-direction:column;align-items:flex-end;gap:4px}
+  .tl-user.guest .tl-from{font-size:var(--fs-cap);font-weight:600;color:var(--accent);padding:0 6px}
+  .tl-user.guest div{background:var(--panel);border:0.5px solid var(--accent-30);color:var(--text)}
   .tl-user{display:flex;justify-content:flex-end;margin:20px 0 14px;padding-left:15%}
   .tl-user div{min-width:0;padding:10px 14px;border-radius:20px 20px 6px 20px;background:var(--user);color:#fff;
     font-size:var(--fs-body);line-height:1.4;white-space:pre-wrap;word-break:break-word}
@@ -960,7 +966,10 @@ function openGatewaySocket(){
     // the gateway then sends this pane and nothing else.
     const usedShare = !!SHARE_TOKEN;
     const usedTelegram = !usedShare && !S.pendingCode && !S.authPass && !!TG_INIT_DATA;
-    if (usedShare) { params.share = SHARE_TOKEN; params.pane = SHARE_PANE; }
+    if (usedShare) {
+      params.share = SHARE_TOKEN; params.pane = SHARE_PANE;
+      if (shareName) params.name = shareName;
+    }
     else if (S.pendingCode) params.code = S.pendingCode;
     else if (S.authPass) { params.mac_id = S.mac; params.token = S.authPass; }
     else params.telegram_init_data = TG_INIT_DATA;
@@ -1366,8 +1375,14 @@ function messageRowHTML(m){
       return `<div class="tl-tool${m.is_error ? ' err' : ''}"><b>${esc(m.tool || '')}</b>`
         + `<span>${esc(detail)}</span>${count}</div>`;
     }
-    case 'user':
+    case 'user': {
+      const guest = /^\[from ([^\]\n]{1,40})\] /.exec(m.text || '');
+      if (guest) {
+        return `<div class="tl-user guest"><span class="tl-from">${esc(guest[1])}</span>`
+          + `<div>${esc(m.text.slice(guest[0].length))}</div></div>`;
+      }
       return `<div class="tl-user"><div>${esc(m.text || '')}</div></div>`;
+    }
     case 'assistant':
       return `<div class="tl-asst md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     case 'status': {
@@ -1873,6 +1888,12 @@ const SHARE_TOKEN = (() => {
   catch (e) { return null; }
 })();
 if (SHARE_PANE) document.body.dataset.share = 'pane';
+// Who is on this end of an open share link. The Mac signs every message sent
+// from here with it, so it is asked once and kept for the next link. A link
+// made for someone carries its own name and never asks.
+const SHARE_NAME_KEY = 'seahelm.shareName';
+let shareName = (() => { try { return localStorage.getItem(SHARE_NAME_KEY) || ''; } catch (e) { return ''; } })();
+let shareNeedsName = false;
 
 function applySessionSnapshot(result){
   const incoming = SeahelmPanePick.panesMatchingShare(result.panes || [], SHARE_PANE);
@@ -1985,7 +2006,12 @@ function clearPair(){
 
 /** Auth rejected: drop a dead token and put the code form back on screen. */
 function rejectAuth({ usedCode, usedTelegram, usedShare, rateLimited, detail }){
-  if (usedShare) {
+  if (usedShare && detail && detail.reason === 'name_required') {
+    // Not a failure: an open link, and the Mac wants to know who this is.
+    shareNeedsName = true;
+    gateErrorMsg = null;
+    setStatus(false, 'Name needed');
+  } else if (usedShare) {
     // The Mac says which: a link that ran out, or one revoked (or never real).
     gateErrorMsg = detail && detail.reason === 'expired'
       ? 'This share link has expired — ask for a new one'
@@ -2069,6 +2095,33 @@ function renderGate(){
     if (gateErrorMsg) $('gateError').textContent = gateErrorMsg;
     $('gateConnect').onclick = () => { gateErrorMsg = null; connect(); renderGate(); };
     $('gateUnpair').onclick = () => { clearPair(); };
+    return;
+  }
+
+  if (SHARE_TOKEN && shareNeedsName){    // an open link: say who you are
+    gate.innerHTML = `
+      <div class="gate-card">
+        <div class="gate-title">Seahelm</div>
+        <div class="gate-hint">Your name goes with every message you send, so the agent and its owner know who is talking</div>
+        <input class="gate-input gate-name" id="gateName" autocomplete="name" enterkeyhint="go"
+               maxlength="40" placeholder="Your name" />
+        <button class="gate-primary" id="gateJoin">Join</button>
+        <div class="gate-error" id="gateError" hidden></div>
+      </div>`;
+    const input = $('gateName'), err = $('gateError');
+    input.value = shareName;
+    const join = () => {
+      const name = input.value.trim();
+      if (!name) { err.textContent = 'Enter a name'; err.hidden = false; return; }
+      shareName = name;
+      try { localStorage.setItem(SHARE_NAME_KEY, name); } catch (e) {}
+      shareNeedsName = false;
+      connect();
+      renderGate();
+    };
+    $('gateJoin').onclick = join;
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); join(); } });
+    setTimeout(() => input.focus(), 30);
     return;
   }
 

@@ -45,11 +45,14 @@ struct ShareLink: Codable, Equatable {
     let tokenHash: String
     let createdAt: Date
     var expiresAt: Date?
+    /// Who the link was made for. Set, the gateway signs every message sent
+    /// through it with this name; nil, whoever opens it names themselves.
+    var recipient: String?
 
     func isLive(at now: Date) -> Bool { expiresAt.map { $0 > now } ?? true }
 
     enum CodingKeys: String, CodingKey {
-        case id, label
+        case id, label, recipient
         case paneSessionKey = "pane_session_key"
         case tokenHash = "token_hash"
         case createdAt = "created_at"
@@ -59,7 +62,8 @@ struct ShareLink: Codable, Equatable {
 
 /// Why a share token was turned away. The page words its message by it.
 enum ShareLinkCheck: Equatable {
-    case valid(id: String)
+    /// `recipient` is the name the link was made for, if any.
+    case valid(id: String, recipient: String?)
     case expired
     /// Never minted, revoked, or minted for another pane — the page cannot tell
     /// them apart and neither should it.
@@ -69,6 +73,8 @@ enum ShareLinkCheck: Equatable {
 protocol ShareLinkVerifying: AnyObject {
     func check(token: String, paneSessionKey: String, now: Date) -> ShareLinkCheck
     func isLive(id: String, now: Date) -> Bool
+    /// The name a link is bound to now: it can be set after the link is out.
+    func recipient(id: String) -> String?
 }
 
 /// Every share link this Mac has handed out and not yet revoked or outlived.
@@ -101,7 +107,7 @@ final class ShareLinkStore: ShareLinkVerifying {
     /// A new link for `paneSessionKey`. Returns the token, which exists nowhere
     /// else once the caller has put it in the URL.
     func mint(paneSessionKey: String, label: String, lifetime: ShareLinkLifetime,
-              now: Date = Date()) -> (link: ShareLink, token: String) {
+              recipient: String? = nil, now: Date = Date()) -> (link: ShareLink, token: String) {
         let token = PairingCrypto.base64url(Self.randomBytes(32))
         let link = ShareLink(
             id: PairingCrypto.base64url(Self.randomBytes(9)),
@@ -109,7 +115,8 @@ final class ShareLinkStore: ShareLinkVerifying {
             label: label,
             tokenHash: Self.hash(token),
             createdAt: now,
-            expiresAt: lifetime.seconds.map { now.addingTimeInterval($0) })
+            expiresAt: lifetime.seconds.map { now.addingTimeInterval($0) },
+            recipient: Self.senderName(recipient))
         mutate { $0.append(link) }
         return (link, token)
     }
@@ -121,6 +128,19 @@ final class ShareLinkStore: ShareLinkVerifying {
         mutate { links in
             guard let i = links.firstIndex(where: { $0.id == id }) else { return }
             links[i].expiresAt = lifetime.seconds.map { now.addingTimeInterval($0) }
+            updated = links[i]
+        }
+        return updated
+    }
+
+    /// Bind the link to one person, or with nil open it to anyone who names
+    /// themselves. Pages already open on it under another name are dropped.
+    @discardableResult
+    func setRecipient(id: String, _ recipient: String?) -> ShareLink? {
+        var updated: ShareLink?
+        mutate { links in
+            guard let i = links.firstIndex(where: { $0.id == id }) else { return }
+            links[i].recipient = Self.senderName(recipient)
             updated = links[i]
         }
         return updated
@@ -155,13 +175,34 @@ final class ShareLinkStore: ShareLinkVerifying {
         let link = links.first { Self.constantTimeEqual($0.tokenHash, hashed) }
         lock.unlock()
         guard let link, link.paneSessionKey == paneSessionKey else { return .invalid }
-        return link.isLive(at: now) ? .valid(id: link.id) : .expired
+        return link.isLive(at: now) ? .valid(id: link.id, recipient: link.recipient) : .expired
     }
 
     func isLive(id: String, now: Date = Date()) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         return links.first { $0.id == id }?.isLive(at: now) ?? false
+    }
+
+    func recipient(id: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return links.first { $0.id == id }?.recipient
+    }
+
+    /// A name fit to stand in a message prefix: one line, no brackets, short.
+    /// Nil when nothing is left.
+    static func senderName(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let cleaned = raw.unicodeScalars
+            .map { CharacterSet.newlines.contains($0) || CharacterSet.controlCharacters.contains($0) ? " " : String($0) }
+            .joined()
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "]", with: "")
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .joined(separator: " ")
+        let name = String(cleaned.prefix(40))
+        return name.isEmpty ? nil : name
     }
 
     // MARK: - Private
