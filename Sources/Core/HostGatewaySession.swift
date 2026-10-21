@@ -90,6 +90,9 @@ final class HostGatewaySession {
         /// this connection (`HostGatewayServer.enforceShareLinks`).
         let linkId: String
         var paneId: String?
+        /// Who is on the other end: the link's recipient, else the name the page
+        /// gave. Messages sent from here go to the agent signed with it.
+        let sender: String
 
         func names(_ ref: String) -> Bool {
             !ref.isEmpty && (ref == key || ref == paneId)
@@ -497,12 +500,17 @@ final class HostGatewaySession {
         if !share.isEmpty {
             let pane = params["pane"] as? String ?? ""
             let check = shareLinks?.check(token: share, paneSessionKey: pane, now: Date()) ?? .invalid
-            guard case .valid(let linkId) = check else {
+            guard case .valid(let linkId, let recipient) = check else {
                 return finishAuth(id: id, ok: false, params: params, issuedToken: nil,
                                   reason: check == .expired ? "expired" : "invalid")
             }
+            // A link made for someone speaks as them; an open one asks the page,
+            // which asks the person and comes back with `name`.
+            guard let sender = recipient ?? ShareLinkStore.senderName(params["name"] as? String) else {
+                return finishAuth(id: id, ok: false, params: params, issuedToken: nil, reason: "name_required")
+            }
             lock.lock()
-            sharedPane = SharedPane(key: pane, linkId: linkId, paneId: nil)
+            sharedPane = SharedPane(key: pane, linkId: linkId, paneId: nil, sender: sender)
             lock.unlock()
             return finishAuth(id: id, ok: true, params: params, issuedToken: nil)
         }
@@ -579,7 +587,10 @@ final class HostGatewaySession {
             if !reset.isEmpty { result["reset_panes"] = reset }
             result["mac_id"] = expectedMacId
             if let issuedToken { result["token"] = issuedToken }
-            if let shared = currentSharedPane() { result["share"] = shared.key }
+            if let shared = currentSharedPane() {
+                result["share"] = shared.key
+                result["share_sender"] = shared.sender
+            }
             // Fold the session snapshot into the reply. The client asked for it
             // unconditionally on the very next round trip, and a round trip is
             // the expensive unit here: ~240ms p50 from a phone over the tunnel,
@@ -721,6 +732,12 @@ final class HostGatewaySession {
 
     /// The share link this connection signed in with; nil for a paired client.
     var shareLinkId: String? { currentSharedPane()?.linkId }
+    /// The name this share connection speaks under; nil for a paired client.
+    var shareSender: String? { currentSharedPane()?.sender }
+
+    /// What a message sent through a share link is prefixed with, so the agent
+    /// can tell it from the owner's own.
+    static func sharePrefix(_ sender: String) -> String { "[from \(sender)] " }
 
     private func currentSharedPane() -> SharedPane? {
         lock.lock()
@@ -788,6 +805,16 @@ final class HostGatewaySession {
             // would let the other point somewhere else.
             let refs = ["pane_session_key", "pane_id"].compactMap { params[$0] as? String }
             guard !refs.isEmpty, refs.allSatisfy(shared.names) else { return refuse() }
+            // A message (text sent with Enter) carries who said it. Keystrokes
+            // typed into the terminal cannot be told apart and go as they are.
+            // `command` is the router's other name for `text`.
+            if method == "pane.send_text", params["enter"] as? Bool == true,
+               let text = (params["text"] as? String) ?? (params["command"] as? String), !text.isEmpty {
+                var signed = params
+                signed["command"] = nil
+                signed["text"] = Self.sharePrefix(shared.sender) + text
+                return handleAuthenticated(id: id, method: method, params: signed)
+            }
             return nil
         }
     }

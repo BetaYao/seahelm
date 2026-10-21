@@ -7,7 +7,7 @@ final class ShareLinkStoreTests: XCTestCase {
     func testAMintedTokenOpensItsPaneOnly() {
         let store = ShareLinkStore(fileURL: nil)
         let (link, token) = store.mint(paneSessionKey: "k1", label: "a", lifetime: .day, now: now)
-        XCTAssertEqual(store.check(token: token, paneSessionKey: "k1", now: now), .valid(id: link.id))
+        XCTAssertEqual(store.check(token: token, paneSessionKey: "k1", now: now), .valid(id: link.id, recipient: nil))
         XCTAssertEqual(store.check(token: token, paneSessionKey: "k2", now: now), .invalid)
         XCTAssertEqual(store.check(token: "nope", paneSessionKey: "k1", now: now), .invalid)
         XCTAssertEqual(store.check(token: "", paneSessionKey: "k1", now: now), .invalid)
@@ -44,7 +44,7 @@ final class ShareLinkStoreTests: XCTestCase {
         let updated = store.setLifetime(id: link.id, .hour, now: later)
         XCTAssertEqual(updated?.expiresAt, later.addingTimeInterval(3600))
         XCTAssertEqual(store.check(token: token, paneSessionKey: "k1", now: now.addingTimeInterval(4000)),
-                       .valid(id: link.id))
+                       .valid(id: link.id, recipient: nil))
     }
 
     func testRevokingOneLeavesTheOthers() {
@@ -53,7 +53,7 @@ final class ShareLinkStoreTests: XCTestCase {
         let b = store.mint(paneSessionKey: "k1", label: "", lifetime: .day, now: now)
         store.revoke(id: a.link.id)
         XCTAssertEqual(store.check(token: a.token, paneSessionKey: "k1", now: now), .invalid)
-        XCTAssertEqual(store.check(token: b.token, paneSessionKey: "k1", now: now), .valid(id: b.link.id))
+        XCTAssertEqual(store.check(token: b.token, paneSessionKey: "k1", now: now), .valid(id: b.link.id, recipient: nil))
     }
 
     func testRevokeAllForOnePane() {
@@ -95,8 +95,28 @@ final class ShareLinkStoreTests: XCTestCase {
         let text = try String(contentsOf: url, encoding: .utf8)
         XCTAssertFalse(text.contains(token))
         let reloaded = ShareLinkStore(fileURL: url)
-        XCTAssertEqual(reloaded.check(token: token, paneSessionKey: "k1", now: now), .valid(id: link.id))
+        XCTAssertEqual(reloaded.check(token: token, paneSessionKey: "k1", now: now), .valid(id: link.id, recipient: nil))
         let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o600)
+    }
+
+    func testARecipientIsKeptAndCanBeSetLater() {
+        let store = ShareLinkStore(fileURL: nil)
+        let now = Date()
+        let (link, token) = store.mint(paneSessionKey: "k1", label: "", lifetime: .day, now: now)
+        XCTAssertNil(store.recipient(id: link.id))
+        store.setRecipient(id: link.id, "  Wang\nMeng ")
+        XCTAssertEqual(store.check(token: token, paneSessionKey: "k1", now: now),
+                       .valid(id: link.id, recipient: "Wang Meng"))
+        store.setRecipient(id: link.id, "   ")
+        XCTAssertNil(store.recipient(id: link.id), "a blank name opens the link again")
+    }
+
+    /// The name stands inside `[from …]`, so it cannot close the bracket early.
+    func testSenderNamesAreOneShortLineWithoutBrackets() {
+        XCTAssertEqual(ShareLinkStore.senderName("[Matt] ok"), "Matt ok")
+        XCTAssertEqual(ShareLinkStore.senderName(String(repeating: "a", count: 99))?.count, 40)
+        XCTAssertNil(ShareLinkStore.senderName("\n\t"))
+        XCTAssertNil(ShareLinkStore.senderName(nil))
     }
 }

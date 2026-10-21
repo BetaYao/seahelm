@@ -2,12 +2,13 @@ import AppKit
 
 /// What the header's share button opens once the link is on the clipboard: the
 /// link, how long it lives, and the way to take it back.
-final class SharePopoverController: NSViewController {
+final class SharePopoverController: NSViewController, NSTextFieldDelegate {
     private var offer: PaneShareOffer
     private weak var sharing: PaneSharing?
     /// Closes the popover this controller sits in.
     var dismiss: (() -> Void)?
 
+    private let recipientField = NSTextField()
     private let expiryPopup = NSPopUpButton()
     private let expiryHint = NSTextField(labelWithString: "")
     private let revokeAllButton = NSButton()
@@ -59,6 +60,25 @@ final class SharePopoverController: NSViewController {
         linkRow.layer?.borderColor = NSColor.separatorColor.cgColor
         linkRow.layer?.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.4).cgColor
 
+        // Named, the link speaks as that person and nobody is asked; blank,
+        // whoever opens it gives a name first. Either way the agent sees it.
+        let recipientLabel = NSTextField(labelWithString: "For")
+        recipientLabel.font = .systemFont(ofSize: 12)
+        recipientField.stringValue = offer.recipient ?? ""
+        recipientField.placeholderString = "Anyone \u{2014} they enter a name"
+        recipientField.font = .systemFont(ofSize: 12)
+        recipientField.controlSize = .small
+        recipientField.delegate = self
+        recipientField.target = self
+        recipientField.action = #selector(recipientCommitted)
+        recipientField.setAccessibilityIdentifier("share.recipient")
+        recipientField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let recipientSpacer = NSView()
+        recipientSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        let recipientRow = NSStackView(views: [recipientLabel, recipientSpacer, recipientField])
+        recipientRow.spacing = 8
+        recipientRow.alignment = .firstBaseline
+
         let expiryLabel = NSTextField(labelWithString: "Expires after")
         expiryLabel.font = .systemFont(ofSize: 12)
         expiryPopup.controlSize = .small
@@ -100,14 +120,14 @@ final class SharePopoverController: NSViewController {
         let buttons = NSStackView(views: [revokeAllButton, gap, revoke])
         buttons.spacing = 8
 
-        let stack = NSStackView(views: [title, subtitle, linkRow, expiryRow, expiryHint, divider, buttons])
+        let stack = NSStackView(views: [title, subtitle, linkRow, recipientRow, expiryRow, expiryHint, divider, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.setCustomSpacing(2, after: title)
         stack.setCustomSpacing(2, after: expiryRow)
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 12, right: 14)
-        for row in [subtitle, linkRow, expiryRow, expiryHint, divider, buttons] as [NSView] {
+        for row in [subtitle, linkRow, recipientRow, expiryRow, expiryHint, divider, buttons] as [NSView] {
             row.widthAnchor.constraint(equalToConstant: Self.width).isActive = true
         }
         view = stack
@@ -129,6 +149,22 @@ final class SharePopoverController: NSViewController {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(offer.url, forType: .string)
         copyButton.title = "Copied"
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        // Clicking away closes the popover without ending the edit.
+        recipientCommitted()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) { recipientCommitted() }
+
+    @objc private func recipientCommitted() {
+        let name = ShareLinkStore.senderName(recipientField.stringValue)
+        guard name != offer.recipient,
+              let updated = sharing?.changeShare(offer, recipient: name) else { return }
+        offer = updated
+        render()
     }
 
     @objc private func expiryChanged() {
