@@ -58,6 +58,18 @@ final class SuggestionSeenSetTests: XCTestCase {
         XCTAssertTrue(seen.absorb([card], now: now.addingTimeInterval(2)).isEmpty)
     }
 
+    func testReAskedHookQuestionIsShownAgain() {
+        var seen = SuggestionSeenSet()
+        let action = FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: "/wt/x",
+                                     branch: "b", project: "p", terminalID: "t1", message: "Pick fruits",
+                                     payload: FirstMateAction.askUserQuestionPayload, options: ["Apple", "Banana"])
+        let card = PendingOrder(id: PendingOrdersQueue.key(action), action: action)
+        let now = Date()
+        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([], now: now.addingTimeInterval(5))
+        XCTAssertEqual(seen.absorb([card], now: now.addingTimeInterval(60)).count, 1)
+    }
+
     func testLongGoneCardCanBeRaisedAgain() {
         var seen = SuggestionSeenSet()
         let card = order(message: "shipped", options: ["test", "commit"])

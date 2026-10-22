@@ -392,7 +392,7 @@ class StatusPublisher {
                                       backgroundBusy: detection.backgroundBusy))
             AgentRegistry.shared.ingest(normalized)
 
-            if hasApproval {
+            if hasApproval, !ChoiceOptionParser.isAgentQuestionDialog(content) {
                 let question = NormalizedEvent(
                     terminalID: terminalID, source: .scan,
                     kind: .question(

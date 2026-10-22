@@ -483,6 +483,52 @@ class Station {
         return true
     }
 
+    /// Press named keys in order (`ControlKeys` names) as real key events. A
+    /// Return waits `enterSubmitDelay` after the keys before it, so the TUI has
+    /// taken them in first. Main thread; needs a live surface (`canDeliverInput`).
+    ///
+    /// Keys, not text: `sendText` is the paste path, and a choice dialog ignores
+    /// a pasted digit or arrow sequence — Claude's AskUserQuestion then took the
+    /// Return that followed as "pick the row under the cursor", whatever was tapped.
+    func pressKeysOnSurface(_ keys: [String]) {
+        var delay: TimeInterval = 0
+        for (index, key) in keys.enumerated() {
+            let isEnter = ControlKeys.isEnter(key)
+            if isEnter, index > 0 { delay += Self.enterSubmitDelay }
+            let send = { [weak self] in
+                guard let self else { return }
+                if isEnter {
+                    self.sendEnterKey()
+                } else if !self.sendKeyPress(key), let bytes = ControlKeys.bytes(for: key) {
+                    self.sendText(bytes)
+                }
+            }
+            if delay == 0 {
+                send()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: send)
+            }
+        }
+    }
+
+    /// `pressKeysOnSurface` for a pane with no surface, as raw bytes into its zmx
+    /// session. Blocks for the Return pauses — call it off the main thread.
+    static func pressKeys(_ keys: [String], viaSession sessionKey: String) -> Bool {
+        let channel = ZmxChannel(paneSessionKey: sessionKey)
+        var delivered = true
+        for (index, key) in keys.enumerated() {
+            if ControlKeys.isEnter(key) {
+                // The pause before a Return is what stops a TUI reading it
+                // as part of the paste it is still ingesting.
+                if index > 0 { Thread.sleep(forTimeInterval: enterSubmitDelay) }
+                delivered = channel.submit() && delivered
+            } else if let bytes = ControlKeys.bytes(for: key) {
+                delivered = channel.sendRaw(bytes) && delivered
+            }
+        }
+        return delivered
+    }
+
     /// Stop the agent's current turn without ending its session: Esc, which
     /// every agent TUI reads that way. A real key event when the pane has a live
     /// surface, else the raw byte through zmx. False when neither path reached it.

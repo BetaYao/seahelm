@@ -80,6 +80,18 @@ enum ChoiceOptionParser {
         return lastValid
     }
 
+    /// Whether the screen is Claude's AskUserQuestion dialog (a question, or its
+    /// "Review your answers" page) rather than a permission prompt. Its hook
+    /// already raised a card that knows the real options; a second card scraped
+    /// off the screen reads "[ ] Apple Apple", changes with every tick, and each
+    /// new one used to retire the hook card's buttons.
+    static func isAgentQuestionDialog(_ screen: String, bottomLines: Int = 25) -> Bool {
+        screen.split(separator: "\n", omittingEmptySubsequences: false).suffix(bottomLines).contains {
+            let line = $0.trimmingCharacters(in: .whitespaces)
+            return line.hasSuffix(". Chat about this") || line == "Ready to submit your answers?"
+        }
+    }
+
     /// Chrome that may sit below a live choice list without making it stale.
     ///
     /// Agent TUIs pin an input composer and a status line to the bottom of the

@@ -50,7 +50,11 @@ struct SuggestionSeenSet {
             if let current = seen[order.id] {
                 return Self.isFresh(order, seen: current)
             }
-            guard let absent = recentlyAbsent[order.id] else { return true }
+            // A hook question that comes back is a new AskUserQuestion call — the
+            // same question asked again — not a frame of flicker, so it is shown
+            // again even when its words match the last one.
+            guard order.action.payload != FirstMateAction.askUserQuestionPayload,
+                  let absent = recentlyAbsent[order.id] else { return true }
             return Self.isFresh(order, seen: absent.fingerprint)
         }
         seen = Dictionary(orders.map { ($0.id, Fingerprint($0)) }, uniquingKeysWith: { _, last in last })
@@ -145,7 +149,8 @@ final class PendingOrdersQueue {
                 worktreePath: action.worktreePath, branch: action.branch,
                 project: action.project, terminalID: action.terminalID,
                 message: summary, payload: action.payload,
-                options: action.options, followups: action.followups)
+                options: action.options, followups: action.followups,
+                questionFlags: action.questionFlags)
             orders[i] = PendingOrder(id: orders[i].id, action: updated)
             changed = true
         }
