@@ -141,6 +141,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // derive it from the live Metal contents (which forces offscreen passes).
         layer?.shadowPath = CGPath(rect: bounds, transform: nil)
         syncOverlayLayerFrames()
+        if !presenceEntries.isEmpty { rebuildPresence() }
         syncSurfaceSize()
     }
 
@@ -191,6 +192,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if let highlight = dropHighlightLayer {
             applyDropHighlightColors(highlight)
         }
+        if !presenceEntries.isEmpty { rebuildPresence() }
     }
 
     /// Dark themes are already near-black, so a black wash lands on black and two
@@ -242,6 +244,84 @@ class GhosttyNSView: NSView, NSTextInputClient {
         highlight.borderColor = accent
         highlight.backgroundColor = accent.copy(alpha: 0.12)
         CATransaction.commit()
+    }
+
+    // MARK: - Agent presence
+
+    /// Pills naming the panes that are acting on this one (`PanePresence`),
+    /// stacked at the bottom right, and an accent frame while any is up.
+    /// Sublayers for the same reason as the wash, above it and the drop highlight.
+    private var presenceLayer: CALayer?
+    private var presencePillFrames: [(frame: CGRect, originStationId: String)] = []
+    private(set) var presenceEntries: [PresenceEntry] = []
+    private static let maxPresencePills = 3
+
+    func setPresence(_ entries: [PresenceEntry]) {
+        guard entries != presenceEntries else { return }
+        presenceEntries = entries
+        rebuildPresence()
+    }
+
+    private func rebuildPresence() {
+        presenceLayer?.removeFromSuperlayer()
+        presenceLayer = nil
+        presencePillFrames = []
+        guard let layer, !presenceEntries.isEmpty else { return }
+
+        let accent = resolvedCGColor(SemanticColors.accent)
+        let container = CALayer()
+        container.frame = bounds
+        container.zPosition = 102
+        container.borderWidth = 1.5
+        container.borderColor = accent.copy(alpha: 0.75)
+
+        let scale = window?.backingScaleFactor ?? 2
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let textColor = resolvedCGColor(.labelColor)
+        let fill = resolvedCGColor(.windowBackgroundColor).copy(alpha: 0.92)
+        let inset: CGFloat = 12, height: CGFloat = 22, padding: CGFloat = 10, gap: CGFloat = 6
+
+        var labels = presenceEntries.prefix(Self.maxPresencePills).map { ($0.label, $0.originStationId as String?) }
+        if presenceEntries.count > Self.maxPresencePills {
+            labels.append(("+\(presenceEntries.count - Self.maxPresencePills)", nil))
+        }
+        var y = inset
+        for (text, origin) in labels {
+            let maxWidth = max(40, bounds.width - inset * 2)
+            let textWidth = min(ceil((text as NSString).size(withAttributes: [.font: font]).width), maxWidth - padding * 2)
+            let width = textWidth + padding * 2
+            let frame = CGRect(x: bounds.maxX - inset - width, y: y, width: width, height: height)
+
+            let pill = CALayer()
+            pill.frame = frame
+            pill.cornerRadius = height / 2
+            pill.backgroundColor = fill
+            pill.borderWidth = 1
+            pill.borderColor = accent
+            let label = CATextLayer()
+            label.string = text
+            label.font = font
+            label.fontSize = font.pointSize
+            label.foregroundColor = textColor
+            label.truncationMode = .end
+            label.contentsScale = scale
+            label.frame = CGRect(x: padding, y: (height - 14) / 2 - 1, width: textWidth, height: 14)
+            pill.addSublayer(label)
+            container.addSublayer(pill)
+
+            if let origin { presencePillFrames.append((frame, origin)) }
+            y += height + gap
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.addSublayer(container)
+        CATransaction.commit()
+        presenceLayer = container
+    }
+
+    /// The pane a click on a presence pill goes to, if the click hit one.
+    func presenceOrigin(at point: CGPoint) -> String? {
+        presencePillFrames.first { $0.frame.contains(point) }?.originStationId
     }
 
     override func removeFromSuperview() {
@@ -702,6 +782,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
     private var cachedSelectionText: String?
 
     override func mouseDown(with event: NSEvent) {
+        // A presence pill is a link to the pane that acted, not terminal content.
+        if let origin = presenceOrigin(at: convert(event.locationInWindow, from: nil)) {
+            PanePresence.shared.navigate(toOrigin: origin)
+            return
+        }
         if window?.firstResponder !== self {
             window?.makeFirstResponder(self)
         }

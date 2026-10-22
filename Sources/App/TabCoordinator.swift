@@ -898,6 +898,13 @@ class TabCoordinator {
                     controlDataSource.moveHandler = { [weak self] stationId, worktreePath in
                         self?.movePane(stationId: stationId, toWorktreePath: worktreePath) ?? false
                     }
+                    PanePresence.shared.onNavigate = { [weak self] stationId in
+                        guard let self, self.preparePaneControlTarget(stationId) else { return }
+                        // Selecting the worktree embeds its surface; focus after that.
+                        DispatchQueue.main.async {
+                            _ = self.terminalCoordinator.focusPane(targetStationId: stationId)
+                        }
+                    }
                     controlDataSource.forkHandler = { [weak self] stationId, worktreePath, done in
                         guard let self else { done(.failure(.unknownPane)); return }
                         self.forkPane(stationId: stationId, toWorktreePath: worktreePath, completion: done)

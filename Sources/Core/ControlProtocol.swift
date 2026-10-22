@@ -105,6 +105,9 @@ protocol ControlDataSource: AnyObject {
     /// agent went): the original turn is interrupted, a new pane in the target
     /// opens a copy of the conversation. Blocks — never call it on the main thread.
     func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError>
+    /// `callerPaneId` (the CLI's own pane) is acting on `targetPaneId`: show it
+    /// there (`PanePresence`). Display only — never changes the request.
+    func notePresence(callerPaneId: String, targetPaneId: String, note: String?)
     /// Explain how a pane's current status was decided (matched rule + evidence,
     /// authority, scan vs hook), or nil if the pane is unknown.
     func explainPane(paneId: String) -> [String: Any]?
@@ -159,6 +162,7 @@ extension ControlDataSource {
     func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
         .failure(.unknownPane)
     }
+    func notePresence(callerPaneId: String, targetPaneId: String, note: String?) {}
     func focusPane(paneId: String) -> Bool { false }
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
@@ -175,68 +179,21 @@ extension ControlDataSource {
     }
 }
 
-/// Pure mapping of named keys/combos to the raw bytes they deliver to the PTY.
-/// "enter"/"return" are excluded (callers send a real Return key event, which
-/// agent TUIs treat as submit rather than a literal newline).
+/// Named keys for `pane.send_keys` (grammar: `KeyChord`). A bare "enter" is
+/// left to the caller, which sends a real Return held back a beat so a TUI
+/// takes it as submit after whatever was typed before it.
 enum ControlKeys {
     static func isEnter(_ name: String) -> Bool {
         let k = name.lowercased(); return k == "enter" || k == "return"
     }
 
+    /// The bytes a key delivers to the PTY, for a pane with no surface. A lone
+    /// character with no key of its own (`é`) is sent as itself.
     static func bytes(for name: String) -> String? {
-        switch name.lowercased() {
-        case "enter", "return":   return nil
-        case "esc", "escape":     return "\u{1b}"
-        case "tab":               return "\t"
-        case "space":             return " "
-        case "backspace", "bs":   return "\u{7f}"
-        case "up":                return "\u{1b}[A"
-        case "down":              return "\u{1b}[B"
-        case "right":             return "\u{1b}[C"
-        case "left":              return "\u{1b}[D"
-        default:
-            let k = name.lowercased()
-            // ctrl+<letter> → the corresponding control byte (ctrl+c → 0x03).
-            if k.hasPrefix("ctrl+"), k.count == 6, let c = k.last,
-               let a = c.asciiValue, a >= 97, a <= 122 {
-                return String(UnicodeScalar(a - 96))
-            }
-            // A single literal character is sent verbatim.
-            return name.count == 1 ? name : nil
-        }
+        if isEnter(name) { return nil }
+        if let chord = KeyChord(name) { return chord.bytes }
+        return name.count == 1 ? name : nil
     }
-
-    /// A named key as a real key press: macOS virtual keycode, whether ctrl is
-    /// held, and the character the key makes with no modifiers. Nil for a key
-    /// that is typed as text — enter, space and single literal characters.
-    ///
-    /// A pane with a live surface must get these as key events. Typed, they go
-    /// through the terminal's paste path, which replaces ESC, ^C and DEL with a
-    /// space — so "esc" arrived as a space and an arrow as " [B".
-    static func keyPress(for name: String) -> (keycode: UInt32, ctrl: Bool, codepoint: UInt32)? {
-        switch name.lowercased() {
-        case "esc", "escape":     return (53, false, 0x1b)
-        case "tab":               return (48, false, 0x09)
-        case "backspace", "bs":   return (51, false, 0x7f)
-        // The private-use characters AppKit reports for the arrow keys.
-        case "up":                return (126, false, 0xF700)
-        case "down":              return (125, false, 0xF701)
-        case "left":              return (123, false, 0xF702)
-        case "right":             return (124, false, 0xF703)
-        default:
-            let k = name.lowercased()
-            guard k.hasPrefix("ctrl+"), k.count == 6, let c = k.last,
-                  let keycode = ansiLetterKeycodes[c] else { return nil }
-            return (keycode, true, UInt32(c.unicodeScalars.first!.value))
-        }
-    }
-
-    /// kVK_ANSI_A … kVK_ANSI_Z.
-    private static let ansiLetterKeycodes: [Character: UInt32] = [
-        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
-        "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
-        "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
-    ]
 
     /// Normalize a `keys` param that may arrive as a string or an array.
     static func parseKeys(_ raw: Any?) -> [String] {
@@ -291,7 +248,33 @@ final class ControlRouter {
         self.dataSource = dataSource
     }
 
+    /// Methods that act on the pane named by `pane_id`, and so show the caller
+    /// on it. `pane.split` shows on the pane it creates.
+    static let presenceMethods: Set<String> = [
+        "pane.read", "pane.send_text", "pane.run", "pane.send_keys", "pane.options",
+        "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
+    ]
+
+    /// `params._meta` carries who is calling (`caller`: the CLI's
+    /// `SEAHELM_PANE_ID`) and an optional `note`. Presence is noted on admission,
+    /// before the method runs, so a slow wait shows while it waits.
     func handle(method: String, params: [String: Any]) -> ControlResult {
+        let meta = params["_meta"] as? [String: Any]
+        let caller = (meta?["caller"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let note = meta?["note"] as? String
+        if let caller, Self.presenceMethods.contains(method),
+           let target = params["pane_id"] as? String, !target.isEmpty {
+            dataSource?.notePresence(callerPaneId: caller, targetPaneId: target, note: note)
+        }
+        let result = dispatch(method: method, params: params)
+        if let caller, method == "pane.split", case .ok(let created) = result,
+           let newPane = created["pane_id"] as? String {
+            dataSource?.notePresence(callerPaneId: caller, targetPaneId: newPane, note: note)
+        }
+        return result
+    }
+
+    private func dispatch(method: String, params: [String: Any]) -> ControlResult {
         switch method {
         case "ping":
             return .ok(["pong": true])
