@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v8 -->"
+    private static let versionMarker = "<!-- seahelm-skill v9 -->"
 
     static func skillContents() -> String {
         return """
@@ -52,7 +52,10 @@ enum SeahelmSkillInstaller {
         seahelm session snapshot                 # JSON: every pane + status
         seahelm pane list                        # JSON: same
         seahelm pane read <pane> [--source visible|recent|detection] [--lines N]
-        seahelm pane run <pane> <command...>     # type command + Enter
+        seahelm pane run <pane> <command...>     # type command + Enter (any program, agent TUIs too)
+        seahelm pane exec <pane> [--timeout MS] <command...>
+                                                 # run a shell command and wait: prints its output,
+                                                 # exits with its exit code (124 = still running)
         seahelm pane send-text <pane> <text...>  # type without Enter
         seahelm pane send-keys <pane> <key...>   # real key presses, see "Keys" below
         seahelm pane split [<pane>] [--direction right|left|down|up] [--no-focus]
@@ -108,6 +111,18 @@ enum SeahelmSkillInstaller {
         seahelm pane send-keys "$PANE" escape
         seahelm pane send-keys "$PANE" ctrl+c
         ```
+
+        ## Running shell commands
+
+        Prefer `pane exec` over `pane run` for a shell command whose result you
+        need. It only runs at an empty zsh prompt — never on top of something
+        the user is typing, never into a running program — and refuses with a
+        reason instead (exit 2). It returns once the command finishes, with the
+        exit code from the shell's own report rather than a guess from the
+        screen. The output is what the pane shows for that command (stdout and
+        stderr as rendered). A timeout stops the waiting, not the command.
+        It needs a zsh pane opened by this version of seahelm; use `pane run`
+        for anything else, and for typing into an agent.
 
         ## Keys
 

@@ -405,6 +405,97 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     /// Resolve a pane reference that may be a per-instance station id OR the
     /// stable zmx session name agents receive as SEAHELM_PANE_ID.
+    /// Offer the command to the pane's shell and wait for it (`ShellRunIntegration`):
+    /// check the shell is at its prompt, spool the command, press the widget's
+    /// key, see whether the shell took it or found a draft, then wait for the
+    /// prompt to come back. Everything goes through the session and the spool,
+    /// so a pane that is not on screen works the same.
+    func execInPane(paneId: String, command: String, timeout: TimeInterval) -> Result<[String: Any], PaneExecError> {
+        guard !Thread.isMainThread else { return .failure(.unavailable) }
+        guard let station = station(for: paneId) else { return .failure(.unknownPane) }
+        guard station.backend == "zmx", let session = station.paneSessionKey, !session.isEmpty else {
+            return .failure(.noSession)
+        }
+        let fm = FileManager.default
+        func spool(_ kind: ShellRunIntegration.Spool) -> URL {
+            ShellRunIntegration.spoolFile(kind, session: session)
+        }
+        func read(_ kind: ShellRunIntegration.Spool) -> String? {
+            try? String(contentsOf: spool(kind), encoding: .utf8)
+        }
+        guard fm.fileExists(atPath: spool(.ready).path) else { return .failure(.noIntegration) }
+        guard read(.prompt).flatMap(ShellRunIntegration.parsePrompt) != nil else { return .failure(.notAtPrompt) }
+        guard Self.execBusy.claim(session) else { return .failure(.busy) }
+        defer { Self.execBusy.release(session) }
+        func abandon(_ error: PaneExecError) -> Result<[String: Any], PaneExecError> {
+            for kind in [ShellRunIntegration.Spool.command, .claimed, .refused] { try? fm.removeItem(at: spool(kind)) }
+            return .failure(error)
+        }
+
+        try? fm.removeItem(at: spool(.claimed))
+        try? fm.removeItem(at: spool(.refused))
+        guard fm.createFile(atPath: spool(.command).path, contents: Data(command.utf8),
+                            attributes: [.posixPermissions: 0o600]),
+              ZmxChannel(paneSessionKey: session).sendRaw(ShellRunIntegration.triggerSequence) else {
+            return abandon(.notTaken)
+        }
+
+        // The widget answers within a keystroke; allow for a slow zle.
+        var claim: (sequence: Int, promptLines: Int)?
+        let answerBy = Date().addingTimeInterval(3)
+        while Date() < answerBy {
+            if let parsed = read(.claimed).flatMap(ShellRunIntegration.parseClaim) {
+                claim = parsed
+                try? fm.removeItem(at: spool(.claimed))
+                break
+            }
+            if fm.fileExists(atPath: spool(.refused).path) { return abandon(.unsentInput) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        guard let claim else { return abandon(.notTaken) }
+
+        // Done when the prompt comes back past the one the command was taken at.
+        let started = Date()
+        var status: Int?
+        while Date().timeIntervalSince(started) < timeout {
+            if let prompt = read(.prompt).flatMap(ShellRunIntegration.parsePrompt), prompt.sequence > claim.sequence {
+                status = prompt.status
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        guard let status else { return .failure(.timedOut(seconds: Int(timeout.rounded()))) }
+        let elapsed = Date().timeIntervalSince(started)
+
+        let history = ZmxChannel(paneSessionKey: session).readOutput(lines: Self.execHistoryLines) ?? ""
+        let output = PaneExecOutput.extract(history: history, command: command, promptLines: claim.promptLines)
+        return .success([
+            "pane_id": station.id,
+            "exit_code": status,
+            "duration_ms": Int(elapsed * 1000),
+            "output": output.text,
+            "truncated": output.truncated,
+        ])
+    }
+
+    /// Sessions with an exec in flight: one at a time per shell.
+    private static let execBusy = ExecBusySet()
+
+    private final class ExecBusySet {
+        private let lock = NSLock()
+        private var sessions: Set<String> = []
+        func claim(_ session: String) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return sessions.insert(session).inserted
+        }
+        func release(_ session: String) {
+            lock.lock(); sessions.remove(session); lock.unlock()
+        }
+    }
+
+    /// Enough scrollback for a test run's output; past this `truncated` says so.
+    private static let execHistoryLines = 2000
+
     func notePresence(callerPaneId: String, targetPaneId: String, note: String?) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let caller = self.station(for: callerPaneId),

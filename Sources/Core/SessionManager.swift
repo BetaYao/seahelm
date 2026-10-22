@@ -468,6 +468,7 @@ enum SessionManager {
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {
             ZmxSessionRecovery.forceKillSession(name)
+            ShellRunIntegration.removeSpool(session: name)
         }
     }
 
