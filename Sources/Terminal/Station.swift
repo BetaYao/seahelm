@@ -483,6 +483,17 @@ class Station {
         return true
     }
 
+    /// Stop the agent's current turn without ending its session: Esc, which
+    /// every agent TUI reads that way. A real key event when the pane has a live
+    /// surface, else the raw byte through zmx. False when neither path reached it.
+    @discardableResult
+    func interruptTurn() -> Bool {
+        if canDeliverInput && sendKeyPress("escape") { return true }
+        guard let sessionKey = paneSessionKey, !sessionKey.isEmpty,
+              let esc = ControlKeys.bytes(for: "escape") else { return false }
+        return ZmxChannel(paneSessionKey: sessionKey).sendRaw(esc)
+    }
+
     func readViewportText() -> String? {
         var contended = false
         return readViewportText(tryOnly: false, contended: &contended)

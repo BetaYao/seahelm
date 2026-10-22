@@ -1439,6 +1439,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             chrome.applyState(chromeState, animated: false)
             chrome.headerDelegate = self
             chrome.paneSharing = self
+            chrome.onForkPane = { [weak self] in self?.forkOfferedPane() }
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1559,6 +1560,47 @@ dashboard.stationManager = terminalCoordinator.stationManager
             pwd: station.pwd
         ) ?? ""
         windowChrome?.updateTerminalTitle(repo: "", pane: title + away)
+        updateForkOffer(station: station)
+    }
+
+    // MARK: - Pane fork offer
+
+    /// The pane the header's fork button would fork, while it is shown.
+    private var forkOfferStationId: String?
+    /// Worktree each pane was last forked into from the header, so a pane whose
+    /// agent is still away does not keep offering the fork it just did.
+    private var forkedInto: [String: String] = [:]
+
+    /// Show the fork button when the focused pane's agent is working in another
+    /// tracked worktree and its session can be forked.
+    private func updateForkOffer(station: Station?) {
+        guard let station, case .success(let plan) = tabCoordinator.forkPlan(stationId: station.id),
+              forkedInto[station.id] != plan.destination.path else {
+            forkOfferStationId = nil
+            windowChrome?.updateForkTarget(nil)
+            return
+        }
+        forkOfferStationId = station.id
+        let name = plan.destination.branch.isEmpty
+            ? URL(fileURLWithPath: plan.destination.path).lastPathComponent : plan.destination.branch
+        windowChrome?.updateForkTarget("@" + name)
+    }
+
+    private func forkOfferedPane() {
+        guard let stationId = forkOfferStationId,
+              case .success(let plan) = tabCoordinator.forkPlan(stationId: stationId) else {
+            NSSound.beep()
+            return
+        }
+        forkedInto[stationId] = plan.destination.path
+        windowChrome?.updateForkTarget(nil)
+        tabCoordinator.forkPane(stationId: stationId) { [weak self] result in
+            if case .failure(let error) = result {
+                NSLog("[Fork] pane \(stationId): \(error.message)")
+                self?.forkedInto.removeValue(forKey: stationId)
+                NSSound.beep()
+            }
+        }
     }
 
     /// Drive the terminal chrome header: `Repo · pane title`.
@@ -1607,6 +1649,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
         } ?? ""
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle + away)
+        updateForkOffer(station: focusedPane?.station)
         windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, pane: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }
@@ -3422,11 +3465,7 @@ extension MainWindowController {
                 content: "Nothing to stop — this chat isn't talking to a running pane.", format: .markdown))
             return
         }
-        var sent = station.canDeliverInput && station.sendKeyPress("escape")
-        if !sent, let sessionKey = station.paneSessionKey, !sessionKey.isEmpty,
-           let esc = ControlKeys.bytes(for: "escape") {
-            sent = ZmxChannel(paneSessionKey: sessionKey).sendRaw(esc)
-        }
+        let sent = station.interruptTurn()
         AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId,
             content: sent ? "Stopped **\(CommandFormatter.target(pane))** (sent Esc)."

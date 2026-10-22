@@ -192,6 +192,38 @@ class StationManager {
         return (destination, sourcePath, sourceEmptied)
     }
 
+    /// Put a Station that was just stood up on `paneSessionKey` into `path`'s
+    /// tree — as a split beside the existing panes, or as the whole tree when the
+    /// worktree has none. Registers the station. Not marked auto-created: the pane
+    /// arrives with work in it, so it is never a placeholder to discard.
+    @discardableResult
+    func insert(station: Station, paneSessionKey: String, intoPath path: String) -> SplitTree {
+        StationRegistry.shared.register(station)
+        let leaf = SplitNode.LeafInfo(id: UUID().uuidString, stationId: station.id,
+                                      paneSessionKey: paneSessionKey)
+        if let existing = trees[path] {
+            existing.adopt(leaf: leaf)
+            return existing
+        }
+        let tree = SplitTree.adopting(leaf: leaf, worktreePath: path)
+        trees[path] = tree
+        return tree
+    }
+
+    /// The first `<base>`, `<base>--pane-1`, … that no live tree claims and
+    /// `taken` does not contain.
+    func freeSessionName(for path: String, alsoTaken taken: (String) -> Bool = { _ in false }) -> String {
+        let base = SessionManager.persistentSessionName(for: path)
+        let claimed = claimedSessionNames
+        var name = base
+        var index = 1
+        while claimed.contains(name) || taken(name) {
+            name = SessionManager.indexedSessionName(base: base, index: index)
+            index += 1
+        }
+        return name
+    }
+
     // MARK: - Primary station accessor (for AgentRegistry / backward compat)
 
     /// Returns the primary (first) station for the given worktree path, if any.

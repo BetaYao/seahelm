@@ -20,6 +20,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// (stationId, worktreePath) -> moved. Re-files a live pane under another
     /// worktree without recreating it.
     var moveHandler: ((String, String) -> Bool)?
+    /// (stationId, worktreePath or nil, done) — fork a pane's session into another
+    /// worktree; `done` gets the new pane's station id. Called on main.
+    var forkHandler: ((String, String?, @escaping (Result<String, PaneForkError>) -> Void) -> Void)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
     var focusHandler: ((String) -> Bool)?
     /// Sleep/wake panes by station id (nil = all but the focused one), on the
@@ -203,6 +206,25 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard let splitHandler else { return nil }
         // right/left place panes side by side; down/up stack them.
         let axis: SplitAxis = (direction == "down" || direction == "up") ? .vertical : .horizontal
+    func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
+        // Waits for the fork's zmx session to come up, so a caller on main would wait on itself.
+        guard !Thread.isMainThread, let fork = forkHandler,
+              let sid = station(for: paneId)?.id else { return .failure(.unknownPane) }
+        let done = DispatchSemaphore(value: 0)
+        var outcome: Result<String, PaneForkError> = .failure(.launchFailed)
+        DispatchQueue.main.async {
+            fork(sid, worktreePath) { outcome = $0; done.signal() }
+        }
+        guard done.wait(timeout: .now() + 30) == .success else { return .failure(.launchFailed) }
+        return outcome.map { newId in
+            var result: [String: Any] = ["forked": true, "pane_id": newId]
+            if let key = StationRegistry.shared.station(forId: newId)?.paneSessionKey {
+                result["pane_session_key"] = key
+            }
+            return result
+        }
+    }
+
         // Resolve session-name references to the canonical station id the split
         // machinery keys on; nil = split the focused pane.
         let targetStationId = paneId.flatMap { station(for: $0)?.id }

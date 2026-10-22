@@ -158,6 +158,12 @@ enum SeahelmCliInstaller {
                 if sub == "move":
                     if len(rest) < 2: die("usage: seahelm pane move <pane> <worktree-path>")
                     print(json.dumps(call("pane.move", {"pane_id": rest[0], "worktree_path": rest[1]}))); return
+                if sub == "fork":
+                    # seahelm pane fork <pane> [worktree-path]
+                    if not rest: die("usage: seahelm pane fork <pane> [worktree-path]")
+                    p = {"pane_id": rest[0]}
+                    if len(rest) > 1: p["worktree_path"] = rest[1]
+                    print(json.dumps(call("pane.fork", p))); return
                 if sub in ("sleep", "wake"):
                     # seahelm pane sleep <pane> | seahelm pane sleep --all
                     pane = rest[0] if rest and not rest[0].startswith("--") else None

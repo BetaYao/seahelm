@@ -111,6 +111,16 @@ final class WindowChromeController: NSViewController {
         }
     }
 
+    /// Offer to fork the focused pane into `worktreeName`; nil hides the offer.
+    func updateForkTarget(_ worktreeName: String?) {
+        terminalHeader.setForkTarget(worktreeName)
+    }
+
+    var onForkPane: (() -> Void)? {
+        get { terminalHeader.onForkPane }
+        set { terminalHeader.onForkPane = newValue }
+    }
+
     /// Resident memory of the focused pane's session tree, or nil to clear.
     func updateTerminalMemory(_ bytes: UInt64?) {
         terminalHeader.setPaneMemory(bytes)

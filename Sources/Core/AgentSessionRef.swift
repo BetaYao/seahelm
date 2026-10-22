@@ -178,4 +178,24 @@ struct AgentSessionRef: Codable, Equatable {
         guard let argv = Self.resumeArgv(agent: agent, kind: kind, value: sessionId) else { return nil }
         return argv.map(ShellEscape.singleQuote).joined(separator: " ")
     }
+
+    /// The argv that opens a *copy* of the session under a new id, leaving the
+    /// original transcript untouched. Nil for agents with no fork. Claude finds
+    /// the session by id from any directory — verified from a sibling worktree
+    /// and from an unrelated directory — so the fork can start in its new home.
+    static func forkArgv(agent: String, kind: Kind, value: String) -> [String]? {
+        switch (agent, kind) {
+        case ("claude", .id): return ["claude", "--resume", value, "--fork-session"]
+        default: return nil
+        }
+    }
+
+    /// `forkArgv` as a shell command line, every token single-quoted, with
+    /// `extraArgs` (a yolo flag, say) appended.
+    func forkCommandLine(extraArgs: [String] = []) -> String? {
+        guard let argv = Self.forkArgv(agent: agent, kind: kind, value: sessionId) else { return nil }
+        return (argv + extraArgs).map(ShellEscape.singleQuote).joined(separator: " ")
+    }
+
+    var supportsFork: Bool { Self.forkArgv(agent: agent, kind: kind, value: sessionId) != nil }
 }

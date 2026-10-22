@@ -101,6 +101,10 @@ protocol ControlDataSource: AnyObject {
     /// Move a pane into an existing worktree, keeping its session and the agent
     /// inside it alive. False if either the pane or the worktree is unknown.
     func movePane(paneId: String, worktreePath: String) -> Bool
+    /// Fork a pane's agent session into another worktree (nil = wherever its
+    /// agent went): the original turn is interrupted, a new pane in the target
+    /// opens a copy of the conversation. Blocks — never call it on the main thread.
+    func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError>
     /// Explain how a pane's current status was decided (matched rule + evidence,
     /// authority, scan vs hook), or nil if the pane is unknown.
     func explainPane(paneId: String) -> [String: Any]?
@@ -152,6 +156,9 @@ extension ControlDataSource {
     func splitPane(paneId: String?, direction: String, focus: Bool) -> String? { nil }
     func closePane(paneId: String) -> Bool { false }
     func movePane(paneId: String, worktreePath: String) -> Bool { false }
+    func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
+        .failure(.unknownPane)
+    }
     func focusPane(paneId: String) -> Bool { false }
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
@@ -405,6 +412,16 @@ final class ControlRouter {
                               message: "could not move \(paneId) to \(worktree)")
             }
             return .ok(["moved": true, "worktree_path": worktree])
+
+        case "pane.fork":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            let worktree = (params["worktree_path"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            switch dataSource?.forkPane(paneId: paneId, worktreePath: worktree) ?? .failure(.unknownPane) {
+            case .success(let result): return .ok(result)
+            case .failure(let e): return .error(code: e.code, message: e.message)
+            }
 
         case "decision.dismiss":
             let paneRef = (params["pane_id"] as? String)

@@ -23,6 +23,14 @@ final class TerminalHeaderView: NSView {
     private let iconCluster = ChromeIconClusterView()
     private let expandButton = ChromeIconButton()
     private let editModeButton = ChromeIconButton()
+    /// Forks the focused pane's session into the worktree its agent went to.
+    /// Shown only while there is such a worktree; collapses to zero width
+    /// otherwise so the title keeps the room.
+    private let forkButton = ChromeIconButton()
+    private var forkButtonWidth: NSLayoutConstraint?
+    /// Display name of the worktree a fork would land in; nil hides the button.
+    private var forkTargetName: String?
+    var onForkPane: (() -> Void)?
     private let collapsedLeadingStack = NSStackView()
 
     /// Whether edit mode is currently on (drives the icon's active tint).
@@ -189,6 +197,9 @@ final class TerminalHeaderView: NSView {
         configureEditModeButton()
         addSubview(editModeButton)
 
+        configureForkButton()
+        addSubview(forkButton)
+
         for strip in [editTerminalStrip, editPreviewStrip] {
             strip.translatesAutoresizingMaskIntoConstraints = false
             strip.isHidden = true
@@ -207,6 +218,8 @@ final class TerminalHeaderView: NSView {
         // vertically once and swap only its trailing anchor per state.
         NSLayoutConstraint.activate([
             editModeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            forkButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            forkButton.trailingAnchor.constraint(equalTo: editModeButton.leadingAnchor, constant: -4),
         ])
 
         configureShareButton()
@@ -226,7 +239,7 @@ final class TerminalHeaderView: NSView {
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: memoryLabel.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editModeButton.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: forkButton.leadingAnchor, constant: -8),
             editModeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ]
 
@@ -244,7 +257,7 @@ final class TerminalHeaderView: NSView {
                 equalTo: collapsedLeadingStack.trailingAnchor, constant: 10),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: editModeButton.leadingAnchor, constant: -8),
+                lessThanOrEqualTo: forkButton.leadingAnchor, constant: -8),
 
             editModeButton.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor, constant: -4),
 
@@ -443,6 +456,52 @@ final class TerminalHeaderView: NSView {
         ])
     }
 
+    private func configureForkButton() {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        if let image = NSImage(systemSymbolName: "arrow.triangle.branch",
+                               accessibilityDescription: "Fork pane") {
+            forkButton.image = image.withSymbolConfiguration(config)
+        }
+        forkButton.bezelStyle = .recessed
+        forkButton.isBordered = false
+        forkButton.imagePosition = .imageOnly
+        forkButton.contentTintColor = NSColor(hex: 0x888888)
+        forkButton.target = self
+        forkButton.action = #selector(forkClicked)
+        forkButton.translatesAutoresizingMaskIntoConstraints = false
+        forkButton.setAccessibilityIdentifier("chrome.icon.forkPane")
+        forkButton.setAccessibilityLabel("Fork pane")
+        forkButton.wantsLayer = true
+        forkButton.layer?.cornerRadius = 7
+        let width = forkButton.widthAnchor.constraint(equalToConstant: 0)
+        forkButtonWidth = width
+        NSLayoutConstraint.activate([width, forkButton.heightAnchor.constraint(equalToConstant: 26)])
+        applyForkVisibility()
+    }
+
+    /// Offer the fork when the focused pane's agent is working in another
+    /// worktree. `worktreeName` is that worktree's display name; nil hides it.
+    func setForkTarget(_ worktreeName: String?) {
+        guard forkTargetName != worktreeName else { return }
+        forkTargetName = worktreeName
+        forkButton.toolTip = worktreeName.map { "Fork this conversation into \($0) and pause it here" }
+        applyForkVisibility()
+    }
+
+    var forkButtonIsVisibleForTesting: Bool { !forkButton.isHidden }
+
+    /// Edit mode's strips run up to the edit-mode button, so the fork button
+    /// steps aside while they are up.
+    private func applyForkVisibility() {
+        let visible = forkTargetName != nil && !hasHoistedStrips
+        forkButton.isHidden = !visible
+        forkButtonWidth?.constant = visible ? 26 : 0
+    }
+
+    @objc private func forkClicked() {
+        onForkPane?()
+    }
+
     /// Enable + light the edit-mode toggle. `available` gates it on there being
     /// at least one open preview (empty set → focus mode only).
     func setEditMode(available: Bool, isOn: Bool) {
@@ -523,6 +582,7 @@ final class TerminalHeaderView: NSView {
         // The strips occupy the whole row when hoisted; nothing else fits.
         titleLabel.isHidden = hasHoistedStrips
         applyShareVisibility()
+        applyForkVisibility()
         let text = editModeOn ? worktreeContext : paneTitle
         titleLabel.stringValue = text
         // A file path loses the part that identifies it — the filename — to tail

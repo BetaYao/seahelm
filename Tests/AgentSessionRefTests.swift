@@ -144,4 +144,19 @@ final class AgentSessionRefTests: XCTestCase {
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.agentSessions, [:])
     }
+
+    func testClaudeForkCommandQuotesEveryToken() {
+        let ref = AgentSessionRef(agent: "claude", sessionId: uuid)!
+        XCTAssertTrue(ref.supportsFork)
+        XCTAssertEqual(ref.forkCommandLine(),
+                       "'claude' '--resume' '\(uuid)' '--fork-session'")
+        XCTAssertEqual(ref.forkCommandLine(extraArgs: ["--dangerously-skip-permissions"]),
+                       "'claude' '--resume' '\(uuid)' '--fork-session' '--dangerously-skip-permissions'")
+    }
+
+    func testAgentsWithoutForkReturnNil() {
+        let codex = AgentSessionRef(agent: "codex", sessionId: "abc-123")!
+        XCTAssertFalse(codex.supportsFork)
+        XCTAssertNil(codex.forkCommandLine())
+    }
 }
