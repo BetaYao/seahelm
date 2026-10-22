@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v7 -->"
+    private static let versionMarker = "<!-- seahelm-skill v8 -->"
 
     static func skillContents() -> String {
         return """
@@ -54,7 +54,7 @@ enum SeahelmSkillInstaller {
         seahelm pane read <pane> [--source visible|recent|detection] [--lines N]
         seahelm pane run <pane> <command...>     # type command + Enter
         seahelm pane send-text <pane> <text...>  # type without Enter
-        seahelm pane send-keys <pane> <key...>   # keys: enter esc tab up down left right ctrl+c ...
+        seahelm pane send-keys <pane> <key...>   # real key presses, see "Keys" below
         seahelm pane split [<pane>] [--direction right|left|down|up] [--no-focus]
                                                  # prints the NEW pane id
         seahelm pane focus <pane>                # give it keyboard focus
@@ -108,6 +108,17 @@ enum SeahelmSkillInstaller {
         seahelm pane send-keys "$PANE" escape
         seahelm pane send-keys "$PANE" ctrl+c
         ```
+
+        ## Keys
+
+        `send-keys` presses keys — it does not paste text, so a TUI reads them as
+        keystrokes (a menu takes `down down enter`; a pasted digit it ignores).
+        A key is a letter, digit or punctuation character (`a`, `3`, `?`, `/`),
+        or `enter tab space escape backspace delete insert home end pageup
+        pagedown up down left right f1`–`f12`, or a punctuation name (`minus
+        equal left-bracket right-bracket semicolon quote backslash comma period
+        slash backtick plus`). Join modifiers with `+`: `ctrl+c`, `shift+tab`,
+        `alt+left`, `shift+enter` (a newline in Claude Code's input box).
 
         ## Notes
 

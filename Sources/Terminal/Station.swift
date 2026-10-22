@@ -465,22 +465,58 @@ class Station {
         _ = ghostty_surface_key(surface, release)
     }
 
-    /// Press a named key (`ControlKeys.keyPress`) as a real key event, the way
+    /// Press a named key (`KeyChord`) as a real key event, the way
     /// `sendImagePasteKey` presses ctrl+v, so Ghostty encodes it for the pane's
     /// keyboard protocol. False when there is no surface or the name is not a
-    /// key press, so the caller can type it instead.
+    /// key, so the caller can type it instead.
     func sendKeyPress(_ name: String) -> Bool {
-        guard let surface, let key = ControlKeys.keyPress(for: name) else { return false }
+        guard surface != nil, let chord = KeyChord(name) else { return false }
+        // Ghostty reads Option as a key that composes characters unless the
+        // user set `macos-option-as-alt`, so alt in the event comes out as a
+        // bare `b`. For a character, meta is ESC then the key — what xterm's
+        // meta-sends-escape writes — so press exactly that. A key with its own
+        // modified form (alt+left is ESC[1;3D, not ESC ESC[D) goes in as those
+        // bytes, straight into the pane's session.
+        if chord.alt, !chord.isCharacter,
+           let sessionKey = paneSessionKey, !sessionKey.isEmpty, let bytes = chord.bytes {
+            return ZmxChannel(paneSessionKey: sessionKey).sendRaw(bytes)
+        }
+        if chord.alt {
+            var plain = chord
+            plain.alt = false
+            press(KeyChord(key: .escape))
+            press(plain)
+        } else {
+            press(chord)
+        }
+        return true
+    }
+
+    /// One key event, without alt (`sendKeyPress` turns alt into ESC first).
+    private func press(_ chord: KeyChord) {
+        guard let surface else { return }
+        var mods: UInt32 = 0
+        if chord.shift { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+        if chord.ctrl { mods |= GHOSTTY_MODS_CTRL.rawValue }
         var press = ghostty_input_key_s()
         press.action = GHOSTTY_ACTION_PRESS
-        press.keycode = key.keycode
-        press.mods = key.ctrl ? GHOSTTY_MODS_CTRL : GHOSTTY_MODS_NONE
-        press.unshifted_codepoint = key.codepoint
-        _ = ghostty_surface_key(surface, press)
+        press.keycode = chord.keycode
+        press.mods = ghostty_input_mods_e(rawValue: mods)
+        // Shift that only picked the character (`?` from shift+/) is spent, as
+        // when GhosttyNSView forwards a real key.
+        press.consumed_mods = chord.consumesShift ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+        press.unshifted_codepoint = chord.unshiftedCodepoint
         var release = press
         release.action = GHOSTTY_ACTION_RELEASE
+        if let text = chord.text {
+            text.withCString { cString in
+                press.text = cString
+                _ = ghostty_surface_key(surface, press)
+            }
+        } else {
+            _ = ghostty_surface_key(surface, press)
+        }
         _ = ghostty_surface_key(surface, release)
-        return true
     }
 
     /// Press named keys in order (`ControlKeys` names) as real key events. A
