@@ -120,6 +120,18 @@ enum SeahelmSkillInstaller {
         slash backtick plus`). Join modifiers with `+`: `ctrl+c`, `shift+tab`,
         `alt+left`, `shift+enter` (a newline in Claude Code's input box).
 
+        ## Being seen
+
+        A pane you act on (`pane run/send-text/send-keys/read/options`, `wait`,
+        or one you `split` off) shows a pill naming you — your agent and pane
+        handle, e.g. "Claude Code #7" — so the user can tell who is typing into
+        it; a click on the pill comes back to your pane. Say what you are doing
+        with a global `--note` before the group:
+
+        ```sh
+        seahelm --note "running the integration tests" pane run "$HELP" make test
+        ```
+
         ## Notes
 
         - Pane ids from `pane list`/`snapshot` (`pane_id`) are per-session; your

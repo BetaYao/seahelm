@@ -405,6 +405,27 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     /// Resolve a pane reference that may be a per-instance station id OR the
     /// stable zmx session name agents receive as SEAHELM_PANE_ID.
+    func notePresence(callerPaneId: String, targetPaneId: String, note: String?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let caller = self.station(for: callerPaneId),
+                  let target = self.station(for: targetPaneId) else { return }
+            PanePresence.shared.note(target: target.id, entry: PresenceEntry(
+                originStationId: caller.id, actor: Self.presenceActor(caller),
+                note: PresenceLedger.cleanNote(note)))
+        }
+    }
+
+    /// "Claude Code #7": the agent in the calling pane and the pane's handle —
+    /// the same `#n` chat commands take. A pane with no agent is just its handle.
+    static func presenceActor(_ station: Station) -> String {
+        let key = PaneHandleRegistry.key(sessionKey: station.paneSessionKey ?? "", paneId: station.id)
+        let handle = "#\(PaneHandleRegistry.shared.handle(for: key))"
+        guard let agent = AgentRegistry.shared.pane(for: station.id)?.agentType, agent.isAIAgent else {
+            return "Pane \(handle)"
+        }
+        return "\(agent.displayName) \(handle)"
+    }
+
     private func station(for paneId: String) -> Station? {
         StationRegistry.shared.station(forId: paneId)
             ?? StationRegistry.shared.station(forSessionName: paneId)

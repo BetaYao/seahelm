@@ -105,6 +105,9 @@ protocol ControlDataSource: AnyObject {
     /// agent went): the original turn is interrupted, a new pane in the target
     /// opens a copy of the conversation. Blocks — never call it on the main thread.
     func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError>
+    /// `callerPaneId` (the CLI's own pane) is acting on `targetPaneId`: show it
+    /// there (`PanePresence`). Display only — never changes the request.
+    func notePresence(callerPaneId: String, targetPaneId: String, note: String?)
     /// Explain how a pane's current status was decided (matched rule + evidence,
     /// authority, scan vs hook), or nil if the pane is unknown.
     func explainPane(paneId: String) -> [String: Any]?
@@ -159,6 +162,7 @@ extension ControlDataSource {
     func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
         .failure(.unknownPane)
     }
+    func notePresence(callerPaneId: String, targetPaneId: String, note: String?) {}
     func focusPane(paneId: String) -> Bool { false }
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
@@ -244,7 +248,33 @@ final class ControlRouter {
         self.dataSource = dataSource
     }
 
+    /// Methods that act on the pane named by `pane_id`, and so show the caller
+    /// on it. `pane.split` shows on the pane it creates.
+    static let presenceMethods: Set<String> = [
+        "pane.read", "pane.send_text", "pane.run", "pane.send_keys", "pane.options",
+        "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
+    ]
+
+    /// `params._meta` carries who is calling (`caller`: the CLI's
+    /// `SEAHELM_PANE_ID`) and an optional `note`. Presence is noted on admission,
+    /// before the method runs, so a slow wait shows while it waits.
     func handle(method: String, params: [String: Any]) -> ControlResult {
+        let meta = params["_meta"] as? [String: Any]
+        let caller = (meta?["caller"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let note = meta?["note"] as? String
+        if let caller, Self.presenceMethods.contains(method),
+           let target = params["pane_id"] as? String, !target.isEmpty {
+            dataSource?.notePresence(callerPaneId: caller, targetPaneId: target, note: note)
+        }
+        let result = dispatch(method: method, params: params)
+        if let caller, method == "pane.split", case .ok(let created) = result,
+           let newPane = created["pane_id"] as? String {
+            dataSource?.notePresence(callerPaneId: caller, targetPaneId: newPane, note: note)
+        }
+        return result
+    }
+
+    private func dispatch(method: String, params: [String: Any]) -> ControlResult {
         switch method {
         case "ping":
             return .ok(["pong": true])

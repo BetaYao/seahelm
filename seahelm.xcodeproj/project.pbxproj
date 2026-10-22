@@ -55,6 +55,7 @@
 		132C344775FE1F50E1CD4C2B /* OpenedSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBEC0B8D9CEC4A93075C660 /* OpenedSurfaceView.swift */; };
 		13CBA3871CB3BCEC3F77646F /* PairingCodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A6FB3297AF50CA9C3A298D /* PairingCodeStore.swift */; };
 		15883F7CBE3B47E89DF0637E /* NormalizedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB9C63D8B4C22ACE7671274 /* NormalizedEvent.swift */; };
+		15CC5F4D5D0EF28C5580DC8B /* PanePresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A17CC72309F36241510A732 /* PanePresenceTests.swift */; };
 		161353FA0DCF4D6A3505490D /* GmailOutboundMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99782104F7A320C332326AC /* GmailOutboundMail.swift */; };
 		16F8BAF43220432D8AEC04BD /* Aptabase in Frameworks */ = {isa = PBXBuildFile; productRef = 7EA0376D0607F1CA3B3D97ED /* Aptabase */; };
 		17ADA7E8FA55FF54C6622F97 /* AgentRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9A024C6CD76762DD132684 /* AgentRegistry.swift */; };
@@ -101,6 +102,7 @@
 		321A7CB783FEBABFD944F744 /* SpinnerDotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */; };
 		3228A013E381D520EE386C05 /* UpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49AB93A5F8C2A6D49CA1AA79 /* UpdateCoordinator.swift */; };
 		324634C69DEFB146B6391532 /* UserPromptTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFB93EC09EA041951677CA7 /* UserPromptTextTests.swift */; };
+		3261B76D786D603AB655AFFC /* PanePresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933D58436C8512D6211FB7FA /* PanePresence.swift */; };
 		33513E7190811BE875658EC5 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75D8071B308F62A8D6D3379 /* AppDelegate.swift */; };
 		33C396FE204DA5CF4648543C /* SplitPanePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36A62BF0D9481F17D7071390 /* SplitPanePage.swift */; };
 		33FD30DC361BCDE94308706C /* TelegramRuleTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8152F9618985364E35ACB50 /* TelegramRuleTargetTests.swift */; };
@@ -789,6 +791,7 @@
 		6998FB62AF2E5F47766D9447 /* PaneFork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneFork.swift; sourceTree = "<group>"; };
 		69B9E6C47E654692C3AC6D42 /* StatusPublisherThreadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPublisherThreadTests.swift; sourceTree = "<group>"; };
 		6A141F8A22DEE7A3DDC6768A /* WorktreeTitleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleCache.swift; sourceTree = "<group>"; };
+		6A17CC72309F36241510A732 /* PanePresenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanePresenceTests.swift; sourceTree = "<group>"; };
 		6A912279D16E32ED9BADB27B /* UsageSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryStore.swift; sourceTree = "<group>"; };
 		6C1E76E23951B9F8DB873E3C /* WorktreePathIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePathIndexTests.swift; sourceTree = "<group>"; };
 		6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRefTests.swift; sourceTree = "<group>"; };
@@ -876,6 +879,7 @@
 		910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPort.swift; sourceTree = "<group>"; };
 		911314F4B91E512511E3FC21 /* EventHubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventHubTests.swift; sourceTree = "<group>"; };
 		927530C926CA58BD88B3AB91 /* VolumePresenceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumePresenceMonitor.swift; sourceTree = "<group>"; };
+		933D58436C8512D6211FB7FA /* PanePresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanePresence.swift; sourceTree = "<group>"; };
 		93D9EC8C1AFABFE4F82ECD43 /* MessageStreamHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageStreamHub.swift; sourceTree = "<group>"; };
 		93F4FC4D61D58DD56DB8E9FE /* MailPaneRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailPaneRouter.swift; sourceTree = "<group>"; };
 		95C6B4297D134649B185BC65 /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
@@ -1255,6 +1259,7 @@
 				A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */,
 				7C3D3984EB87D6ED65A3312A /* PaneInfo.swift */,
 				2B539381678923218614CD56 /* PaneMessageProjector.swift */,
+				933D58436C8512D6211FB7FA /* PanePresence.swift */,
 				280B84339A7AE83C77426D07 /* PaneReducer.swift */,
 				6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */,
 				CD6CAE97113B8F2314759D70 /* PendingOrdersQueue.swift */,
@@ -1697,6 +1702,7 @@
 				8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
 				3FFF19971E7C0F97298C6A8A /* PaneMessageProjectorTests.swift */,
+				6A17CC72309F36241510A732 /* PanePresenceTests.swift */,
 				73FDA109B06DD6B1F279D87A /* PaneReducerTests.swift */,
 				63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */,
 				49437644810F143C24E9273B /* PaneTitleResolverTests.swift */,
@@ -2298,6 +2304,7 @@
 				E8A576F6C89652A2B820E582 /* PaneForkTests.swift in Sources */,
 				A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */,
 				EEB54F868C350D31A1B89299 /* PaneMessageProjectorTests.swift in Sources */,
+				15CC5F4D5D0EF28C5580DC8B /* PanePresenceTests.swift in Sources */,
 				EA9AE25E1B7C668B9DEE38D4 /* PaneReducerTests.swift in Sources */,
 				371A789DDD991B083F733DB8 /* PaneStatusTests.swift in Sources */,
 				6AC11D3AF38BF0EEAD1C57F3 /* PaneTitleResolverTests.swift in Sources */,
@@ -2608,6 +2615,7 @@
 				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
 				73AD1B9CB4727CC7D40DB028 /* PaneInfo.swift in Sources */,
 				3654C80FCFF96F77D3828008 /* PaneMessageProjector.swift in Sources */,
+				3261B76D786D603AB655AFFC /* PanePresence.swift in Sources */,
 				40A381BEFFBC2C3848BF59F5 /* PaneProgressBar.swift in Sources */,
 				3D2531372E08D4B5475FF17A /* PaneReducer.swift in Sources */,
 				88159AB787745A8A302E0FB2 /* PaneStatus.swift in Sources */,

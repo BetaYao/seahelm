@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v9"
+    private static let versionMarker = "# seahelm-cli v10"
 
     static func scriptContents() -> String {
         return #"""
@@ -19,7 +19,13 @@ enum SeahelmCliInstaller {
         def die(msg, code=2):
             sys.stderr.write("seahelm: " + msg + "\n"); sys.exit(code)
 
+        NOTE = None
+
         def call(method, params, timeout=40.0):
+            # Who is calling, so the pane being acted on can show it. Display only.
+            me = os.environ.get("SEAHELM_PANE_ID")
+            if me:
+                params = dict(params, _meta={"caller": me, "note": NOTE} if NOTE else {"caller": me})
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 s.settimeout(timeout)
@@ -49,7 +55,13 @@ enum SeahelmCliInstaller {
             return name in a
 
         def main():
+            global NOTE
             argv = sys.argv[1:]
+            # seahelm --note "running the tests" pane run #12 make test
+            # Global, before the group, so it never mixes with a command's own args.
+            while argv[:1] == ["--note"]:
+                if len(argv) < 2: die("--note needs a value")
+                NOTE = argv[1]; argv = argv[2:]
             if not argv:
                 die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration> ...", 2)
             g = argv[0]; a = argv[1:]
