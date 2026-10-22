@@ -6,7 +6,7 @@ import Foundation
 /// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
 /// newline-delimited JSON protocol as ControlSocketServer.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v10"
+    private static let versionMarker = "# seahelm-cli v11"
 
     static func scriptContents() -> String {
         return #"""
@@ -21,7 +21,7 @@ enum SeahelmCliInstaller {
 
         NOTE = None
 
-        def call(method, params, timeout=40.0):
+        def call(method, params, timeout=40.0, exit_codes=None):
             # Who is calling, so the pane being acted on can show it. Display only.
             me = os.environ.get("SEAHELM_PANE_ID")
             if me:
@@ -45,7 +45,8 @@ enum SeahelmCliInstaller {
             except Exception:
                 die("bad response")
             if "error" in obj:
-                die(obj["error"].get("message", "error"))
+                err = obj["error"]
+                die(err.get("message", "error"), (exit_codes or {}).get(err.get("code"), 2))
             return obj.get("result", {})
 
         def opt(a, name, default=None):
@@ -155,6 +156,21 @@ enum SeahelmCliInstaller {
                 if sub == "run":
                     if len(rest) < 2: die("usage: seahelm pane run <pane> <command...>")
                     call("pane.run", {"pane_id": rest[0], "command": " ".join(rest[1:])}); return
+                if sub == "exec":
+                    # seahelm pane exec <pane> [--timeout MS] <command...>
+                    # Runs only at an empty zsh prompt; exits with the command's code.
+                    usage = "usage: seahelm pane exec <pane> [--timeout MS] <command...>"
+                    if len(rest) < 2: die(usage)
+                    pane, cmd, tmo = rest[0], rest[1:], 30000
+                    if cmd[:1] == ["--timeout"]:
+                        if len(cmd) < 3: die(usage)
+                        tmo, cmd = int(cmd[1]), cmd[2:]
+                    r = call("pane.exec", {"pane_id": pane, "command": " ".join(cmd), "timeout_ms": tmo},
+                             timeout=tmo / 1000 + 15, exit_codes={-32024: 124})
+                    out = r.get("output", "")
+                    if out: sys.stdout.write(out if out.endswith("\n") else out + "\n")
+                    code = r.get("exit_code")
+                    sys.exit(code if isinstance(code, int) else 1)
                 if sub == "send-text":
                     if len(rest) < 2: die("usage: seahelm pane send-text <pane> <text...>")
                     call("pane.send_text", {"pane_id": rest[0], "text": " ".join(rest[1:])}); return

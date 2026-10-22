@@ -108,6 +108,9 @@ protocol ControlDataSource: AnyObject {
     /// `callerPaneId` (the CLI's own pane) is acting on `targetPaneId`: show it
     /// there (`PanePresence`). Display only — never changes the request.
     func notePresence(callerPaneId: String, targetPaneId: String, note: String?)
+    /// Run a shell command in a pane at an empty zsh prompt and wait for it
+    /// (`ShellRunIntegration`). Blocks — never call it on the main thread.
+    func execInPane(paneId: String, command: String, timeout: TimeInterval) -> Result<[String: Any], PaneExecError>
     /// Explain how a pane's current status was decided (matched rule + evidence,
     /// authority, scan vs hook), or nil if the pane is unknown.
     func explainPane(paneId: String) -> [String: Any]?
@@ -163,6 +166,9 @@ extension ControlDataSource {
         .failure(.unknownPane)
     }
     func notePresence(callerPaneId: String, targetPaneId: String, note: String?) {}
+    func execInPane(paneId: String, command: String, timeout: TimeInterval) -> Result<[String: Any], PaneExecError> {
+        .failure(.unavailable)
+    }
     func focusPane(paneId: String) -> Bool { false }
     func explainPane(paneId: String) -> [String: Any]? { nil }
     func exportLayout() -> [String: Any]? { nil }
@@ -214,6 +220,8 @@ enum ControlError {
     static let methodNotFound = -32601
     static let invalidParams = -32602
     static let notFound = -32004
+    /// A deadline passed. Nothing was undone: the work may still be going.
+    static let timedOut = -32024
 }
 
 /// Why `worktree.create` did not produce a worktree.
@@ -251,7 +259,7 @@ final class ControlRouter {
     /// Methods that act on the pane named by `pane_id`, and so show the caller
     /// on it. `pane.split` shows on the pane it creates.
     static let presenceMethods: Set<String> = [
-        "pane.read", "pane.send_text", "pane.run", "pane.send_keys", "pane.options",
+        "pane.read", "pane.send_text", "pane.run", "pane.exec", "pane.send_keys", "pane.options",
         "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
     ]
 
@@ -518,6 +526,24 @@ final class ControlRouter {
         case "pane.wait_for_output", "wait.output":
             return waitForOutput(params: params)
 
+        case "pane.exec":
+            guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane_id required")
+            }
+            guard let command = params["command"] as? String,
+                  !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "command required")
+            }
+            guard command.utf8.count <= Self.maxExecCommandBytes, !command.contains("\0") else {
+                return .error(code: ControlError.invalidParams,
+                              message: "command must be at most \(Self.maxExecCommandBytes) bytes, without NUL")
+            }
+            switch dataSource?.execInPane(paneId: paneId, command: command, timeout: timeout(from: params))
+                ?? .failure(.unavailable) {
+            case .success(let result): return .ok(result)
+            case .failure(let e): return .error(code: e.code, message: e.message)
+            }
+
         case "pane.wait_agent_status", "wait.agent_status":
             return waitAgentStatus(params: params)
 
@@ -552,6 +578,7 @@ final class ControlRouter {
     // until the condition holds or the timeout elapses. Each socket connection
     // runs on its own thread, so blocking one wait does not stall others.
 
+    private static let maxExecCommandBytes = 16 * 1024
     private static let waitPollInterval: TimeInterval = 0.15
     private static let defaultWaitTimeoutMs = 30_000
     private static let maxWaitTimeoutMs = 600_000

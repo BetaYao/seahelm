@@ -326,16 +326,23 @@ class GhosttyBridge {
     /// non-destructive. Only affects zsh; bash/fish ignore `ZDOTDIR` (no-op).
     /// Existing persisted zmx sessions keep their already-running shell — the
     /// integration lands on newly created panes.
+    ///
+    /// Seahelm's own `.zshenv` (`ShellRunIntegration`) sits in front of Ghostty's:
+    /// it sources Ghostty's, then adds the prompt reporting and the widget
+    /// `pane.exec` runs commands through. If it cannot be written, Ghostty's
+    /// integration is used alone.
     private static func configureShellIntegrationEnvironment() {
         guard ProcessInfo.processInfo.environment["SEAHELM_DISABLE_SHELL_INTEGRATION"] == nil else { return }
-        guard let dir = bundledResourcesURL()?
+        guard let ghosttyDir = bundledResourcesURL()?
             .appendingPathComponent("shell-integration/zsh").path,
-              FileManager.default.fileExists(atPath: dir + "/.zshenv") else { return }
+              FileManager.default.fileExists(atPath: ghosttyDir + "/.zshenv") else { return }
+        let dir = ShellRunIntegration.ensureInstalled()?.path ?? ghosttyDir
+        setenv("SEAHELM_RUN_DIR", ShellRunIntegration.runDirectory.path, 1)
 
         let current = ProcessInfo.processInfo.environment["ZDOTDIR"]
         // Nesting guard: Seahelm launched from inside a Seahelm pane already has
         // our ZDOTDIR — don't re-wrap (would clobber the preserved real one).
-        if current == dir { return }
+        if current == dir || current == ghosttyDir { return }
 
         if let current, !current.isEmpty {
             setenv("GHOSTTY_ZSH_ZDOTDIR", current, 1)

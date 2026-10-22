@@ -267,6 +267,7 @@
 		7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */; };
 		7B9A75A898CF014C44B03E51 /* SharePopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E87485817A45D71BCA83E094 /* SharePopoverController.swift */; };
 		7BDCC195CBE9B564845BB8D3 /* CenterOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344C98CC0017F85B162D3CF /* CenterOverlayView.swift */; };
+		7C2EFCC49121B5925199A629 /* ShellRunIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB916D0EB73B7F23E1CB4C0 /* ShellRunIntegration.swift */; };
 		7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910A1A1AF1F5DDDA3A675836 /* ReturnToPort.swift */; };
 		7D04C2A61105F5AD7BD48E3F /* CommandSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7018E7ABB432ABCFCB9723F /* CommandSpec.swift */; };
 		7D09CC05B794C0D59CA4146B /* WindowChromeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */; };
@@ -390,6 +391,7 @@
 		B017FBA8417E6C64C7A4804B /* ActivityEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47B0201979B7976AC0A77D56 /* ActivityEvent.swift */; };
 		B0A155B245426D6B6CA2B29B /* WorktreeLabelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A006C6498F7AD6AC5AA0E6 /* WorktreeLabelStore.swift */; };
 		B0AF97B3F50FA1567DBD5CD9 /* WorktreeCreator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0479C060435CDD5ED956DFE /* WorktreeCreator.swift */; };
+		B0FF16A7747116AACB5FF049 /* PaneExecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29A4C276F3BE94AAAFAB8D11 /* PaneExecTests.swift */; };
 		B130550C82567EFD2850B8E9 /* FirstMateCoordinatorOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */; };
 		B150D677288316BF62475F22 /* NotificationPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560996BF676690E93A635546 /* NotificationPanelPage.swift */; };
 		B192412250A276B2421D9AEB /* PaneTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF8D45DC59BA85924DB8D9E /* PaneTransferTests.swift */; };
@@ -534,6 +536,7 @@
 		F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D716EF8AB2E7C89A0D9DBEB /* HookDecoder.swift */; };
 		F609F16851D769F1513883D2 /* zmx-attach.py in Resources */ = {isa = PBXBuildFile; fileRef = 091FF7815D565EA0D1CD27E4 /* zmx-attach.py */; };
 		F62D784C6BDA373D99051F3A /* MailBodyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B463225AE9F973C259F06772 /* MailBodyTests.swift */; };
+		F6B211711C66DAC87ED0FFBE /* PaneExecOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = B73CEC83DFFADA6867B5DFBD /* PaneExecOutput.swift */; };
 		F72F97A5DE0B316E3B90BDB5 /* TelegramPacketBookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 803B8F8E6947C76080BAE3C2 /* TelegramPacketBookTests.swift */; };
 		F7AE5D618DD874989BE4F93C /* SemanticColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15A95E0337AEDBCE9546B8F /* SemanticColors.swift */; };
 		F822A1F30137CB7940F82296 /* PRListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF331BF96A89F1DC3E9C1BD /* PRListView.swift */; };
@@ -653,6 +656,7 @@
 		28A21327F80611EDF5E558A2 /* WorkspaceManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManagerTests.swift; sourceTree = "<group>"; };
 		295944779C17E43F062F7829 /* MessageConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageConfig.swift; sourceTree = "<group>"; };
 		29A07652F0DCD0488FA748B2 /* UpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateBanner.swift; sourceTree = "<group>"; };
+		29A4C276F3BE94AAAFAB8D11 /* PaneExecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneExecTests.swift; sourceTree = "<group>"; };
 		2A6A5C9293E818E242111A82 /* MergedPRLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergedPRLookupTests.swift; sourceTree = "<group>"; };
 		2A7D0D0FB11B64D9267C857F /* MergedPRLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergedPRLookup.swift; sourceTree = "<group>"; };
 		2B539381678923218614CD56 /* PaneMessageProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneMessageProjector.swift; sourceTree = "<group>"; };
@@ -799,6 +803,7 @@
 		6D9670C14DA62CDEE9828F5C /* StationRegistryConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationRegistryConcurrencyTests.swift; sourceTree = "<group>"; };
 		6D98DA93A28B692784539710 /* seahelmTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seahelmTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E1906E0816DDA737033BBF1 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		6EB916D0EB73B7F23E1CB4C0 /* ShellRunIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRunIntegration.swift; sourceTree = "<group>"; };
 		70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolver.swift; sourceTree = "<group>"; };
 		72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstallerTests.swift; sourceTree = "<group>"; };
 		724E222E995FED6444915776 /* GitHubPRDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPRDecodingTests.swift; sourceTree = "<group>"; };
@@ -954,6 +959,7 @@
 		B64B6D9AE47DFBCFCF626885 /* SplitNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNodeTests.swift; sourceTree = "<group>"; };
 		B6B9FA9AD5143E5733D4C99B /* PairingCryptoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCryptoTests.swift; sourceTree = "<group>"; };
 		B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigTests.swift; sourceTree = "<group>"; };
+		B73CEC83DFFADA6867B5DFBD /* PaneExecOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneExecOutput.swift; sourceTree = "<group>"; };
 		B767FA4381095CD7B0F537CF /* ZmxSessionRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxSessionRecovery.swift; sourceTree = "<group>"; };
 		B7A33515B716406497BF7E74 /* ShortcutHintBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHintBarTests.swift; sourceTree = "<group>"; };
 		B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalDecoder.swift; sourceTree = "<group>"; };
@@ -1255,6 +1261,7 @@
 				C9DBCA7E5081CD673795866D /* PairingIdentity.swift */,
 				4C798752B1147F8BA20E3C29 /* PairRateLimiter.swift */,
 				9CBCE792D382F99F0D8104DE /* PaneAwayIndicator.swift */,
+				B73CEC83DFFADA6867B5DFBD /* PaneExecOutput.swift */,
 				6998FB62AF2E5F47766D9447 /* PaneFork.swift */,
 				A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */,
 				7C3D3984EB87D6ED65A3312A /* PaneInfo.swift */,
@@ -1277,6 +1284,7 @@
 				FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */,
 				F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */,
 				F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */,
+				6EB916D0EB73B7F23E1CB4C0 /* ShellRunIntegration.swift */,
 				30F9565C3156144526A74B08 /* StationManager.swift */,
 				532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */,
 				22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */,
@@ -1698,6 +1706,7 @@
 				B6B9FA9AD5143E5733D4C99B /* PairingCryptoTests.swift */,
 				1A9D36C4513804B095CBABA5 /* PairRateLimiterTests.swift */,
 				F83941DD060F1359E8CFF1B3 /* PaneAwayIndicatorTests.swift */,
+				29A4C276F3BE94AAAFAB8D11 /* PaneExecTests.swift */,
 				F32A89F16E29A9882A604539 /* PaneForkTests.swift */,
 				8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
@@ -2301,6 +2310,7 @@
 				707F6BEF7FED22391823BAAD /* PairingCodeStoreTests.swift in Sources */,
 				9F9A0DD53A64470D56318204 /* PairingCryptoTests.swift in Sources */,
 				D2CB73CC062391CB61498A1F /* PaneAwayIndicatorTests.swift in Sources */,
+				B0FF16A7747116AACB5FF049 /* PaneExecTests.swift in Sources */,
 				E8A576F6C89652A2B820E582 /* PaneForkTests.swift in Sources */,
 				A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */,
 				EEB54F868C350D31A1B89299 /* PaneMessageProjectorTests.swift in Sources */,
@@ -2610,6 +2620,7 @@
 				2B3B2AB7EE1A27C90CE93BBE /* PairingIdentity.swift in Sources */,
 				55C5B0B646137831DCA9D1E9 /* PairingWindowController.swift in Sources */,
 				755733276437DE72C0E582EB /* PaneAwayIndicator.swift in Sources */,
+				F6B211711C66DAC87ED0FFBE /* PaneExecOutput.swift in Sources */,
 				68D65BDE5D099778712E3917 /* PaneFork.swift in Sources */,
 				5B0C198C8A608E78B1CA0D9C /* PaneHandleRegistry.swift in Sources */,
 				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
@@ -2654,6 +2665,7 @@
 				9B5BC1B92D37B6DACA6F6ABE /* ShareLinksListView.swift in Sources */,
 				7B9A75A898CF014C44B03E51 /* SharePopoverController.swift in Sources */,
 				459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */,
+				7C2EFCC49121B5925199A629 /* ShellRunIntegration.swift in Sources */,
 				5FC647D840678AE10E2FF5BC /* ShortcutHintBar.swift in Sources */,
 				06CF922E9ABD675BEC1F7502 /* SidebarHeaderView.swift in Sources */,
 				64206379E233A088405B9EE9 /* SignalDecoder.swift in Sources */,
