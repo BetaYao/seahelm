@@ -129,4 +129,40 @@ final class ChoiceOptionParserTests: XCTestCase {
     func testEmptyScreen() {
         XCTAssertTrue(ChoiceOptionParser.parse("").isEmpty)
     }
+
+    func testRecognisesTheAskUserQuestionDialog() {
+        let question = """
+        ←  ☐ Fruits  ✔ Submit  →
+        Pick fruits
+        ❯ 1. [ ] Apple
+                 Apple
+          2. [ ] Banana
+          3. [ ] Type something
+             Submit
+        ────────────────────────────
+          4. Chat about this
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """
+        XCTAssertTrue(ChoiceOptionParser.isAgentQuestionDialog(question))
+        let review = """
+        Review your answers
+         ● Pick fruits
+           → Apple
+        Ready to submit your answers?
+        ❯ 1. Submit answers
+          2. Cancel
+        """
+        XCTAssertTrue(ChoiceOptionParser.isAgentQuestionDialog(review))
+    }
+
+    func testPermissionPromptIsNotTheQuestionDialog() {
+        let prompt = """
+        Do you want to proceed?
+        ❯ 1. Yes
+          2. Yes, and don't ask again for bash commands
+          3. No, and tell Claude what to do differently
+        Esc to cancel
+        """
+        XCTAssertFalse(ChoiceOptionParser.isAgentQuestionDialog(prompt))
+    }
 }

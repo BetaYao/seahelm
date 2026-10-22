@@ -461,7 +461,7 @@ class AgentRegistry {
             hookRunningSince[event.terminalID] = nil
             if hookWaitingSince[event.terminalID] == nil { hookWaitingSince[event.terminalID] = now }
             message = text
-        case .question(let prompt, _, _):
+        case .question(let prompt, _, _, _):
             // Hook-native questions own hook status. Viewport-discovered choices
             // own scan status so the next screen frame can clear them naturally.
             if case .scan = event.source {
@@ -593,7 +593,7 @@ class AgentRegistry {
         // (`pane/{slot}/event`). Remote clients publish these retained and clear
         // them when the pane leaves `.waiting`.
         switch o.event.kind {
-        case .question(let prompt, let options, _):
+        case .question(let prompt, let options, _, _):
             dict["question"] = ["prompt": prompt, "options": options]
         case .suggest(let options):
             var payload: [String: Any] = ["options": options]
@@ -906,32 +906,25 @@ class AgentRegistry {
     /// `selectedIndex` defaults to the first row for native question tools, while
     /// viewport-discovered prompts pass their currently highlighted row.
     func answerChoiceByArrows(to terminalID: String, index: Int, from selectedIndex: Int = 0) {
-        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
         let offset = index - selectedIndex
-        let arrow = offset >= 0 ? "\u{1b}[B" : "\u{1b}[A"
+        pressKeys(to: terminalID,
+                  keys: Array(repeating: offset >= 0 ? "down" : "up", count: abs(offset)) + ["enter"])
+    }
 
-        // Same surface-versus-session split as `sendCommand`: answering a prompt
-        // in a pane whose tab was never opened would otherwise move no
-        // selection and press nothing, while looking like it worked.
+    /// Press named keys in a pane (`Station.pressKeysOnSurface`). Same
+    /// surface-versus-session split as `sendCommand`: a pane whose tab was never
+    /// opened gets the bytes through zmx, or the keys would vanish while looking
+    /// like they were pressed.
+    func pressKeys(to terminalID: String, keys: [String]) {
+        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
         guard station.canDeliverInput else {
-            let sessionKey = station.paneSessionKey ?? ""
-            guard !sessionKey.isEmpty else { return }
+            guard let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return }
             DispatchQueue.global(qos: .userInitiated).async {
-                let channel = ZmxChannel(paneSessionKey: sessionKey)
-                guard channel.sendRaw(String(repeating: arrow, count: abs(offset))) else { return }
-                Thread.sleep(forTimeInterval: Station.enterSubmitDelay)
-                _ = channel.submit()
+                _ = Station.pressKeys(keys, viaSession: sessionKey)
             }
             return
         }
-
-        DispatchQueue.main.async {
-            for _ in 0..<abs(offset) { station.sendText(arrow) }
-            // Same beat as sendCommand: let the TUI ingest the arrows first.
-            DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
-                station.sendEnterKey()
-            }
-        }
+        DispatchQueue.main.async { station.pressKeysOnSurface(keys) }
     }
 
     /// Read recent output from a specific agent

@@ -78,7 +78,7 @@ struct HookDecoder: SignalDecoder {
                event.data?["tool_name"] as? String == "AskUserQuestion",
                let qs = questions(from: event), let first = qs.first {
                 return .question(prompt: first.prompt, options: first.options,
-                                 followups: Array(qs.dropFirst()))
+                                 followups: Array(qs.dropFirst()), flags: first.flags)
             }
             return .toolUse(ActivityEventExtractor.extract(from: event))
         case .prompt:
@@ -111,17 +111,25 @@ struct HookDecoder: SignalDecoder {
     static func questions(from event: WebhookEvent) -> [QuestionSpec]? {
         guard let input = event.data?["tool_input"] as? [String: Any],
               let raw = input["questions"] as? [[String: Any]] else { return nil }
+        let askId = event.data?["tool_use_id"] as? String ?? UUID().uuidString
         let parsed: [QuestionSpec] = raw.compactMap { q in
             guard let prompt = q["question"] as? String, !prompt.isEmpty,
                   let rawOptions = q["options"] as? [[String: Any]] else { return nil }
             let labels = rawOptions.compactMap { $0["label"] as? String }.filter { !$0.isEmpty }
             guard !labels.isEmpty else { return nil }
-            return QuestionSpec(prompt: prompt, options: labels)
+            let multi = q["multiSelect"] as? Bool ?? false
+            return QuestionSpec(prompt: prompt, options: labels,
+                                flags: QuestionFlags(multiSelect: multi, reviewAfter: multi, askId: askId))
         }
         guard !parsed.isEmpty else { return nil }
         guard parsed.count > 1 else { return parsed }
+        // Several questions: only the last one leads to the review page, and it
+        // does whether or not it is multi-select.
         return parsed.enumerated().map { index, q in
-            QuestionSpec(prompt: "\(q.prompt) (\(index + 1)/\(parsed.count))", options: q.options)
+            var flags = q.flags
+            flags.reviewAfter = index == parsed.count - 1
+            return QuestionSpec(prompt: "\(q.prompt) (\(index + 1)/\(parsed.count))", options: q.options,
+                                flags: flags)
         }
     }
 }

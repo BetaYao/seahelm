@@ -38,11 +38,13 @@ struct FirstMateAction: Equatable {
     /// Remaining AskUserQuestion questions after this card's — answering the
     /// card advances to the next instead of dropping the flow.
     let followups: [QuestionSpec]?
+    /// An AskUserQuestion card's answering mode and multi-select ticks.
+    let questionFlags: QuestionFlags
 
     init(kind: FirstMateActionKind, zone: FirstMateZone, worktreePath: String,
          branch: String, project: String, terminalID: String, message: String,
          payload: String? = nil, options: [String]? = nil,
-         followups: [QuestionSpec]? = nil) {
+         followups: [QuestionSpec]? = nil, questionFlags: QuestionFlags = QuestionFlags()) {
         self.kind = kind
         self.zone = zone
         self.worktreePath = worktreePath
@@ -53,6 +55,26 @@ struct FirstMateAction: Equatable {
         self.payload = payload
         self.options = options
         self.followups = followups
+        self.questionFlags = questionFlags
+    }
+
+    /// The extra button on a multi-select card that leaves the question.
+    static let questionDoneLabel = "✔ Done"
+
+    /// What a card offers to tap: its options — ticked on a multi-select card,
+    /// which then also offers Done. Taps are resolved against this list.
+    var answerLabels: [String] {
+        let labels = options ?? []
+        guard questionFlags.multiSelect else { return labels }
+        return labels.enumerated().map { (questionFlags.checked.contains($0) ? "☑ " : "☐ ") + $1 }
+            + [Self.questionDoneLabel]
+    }
+
+    /// The same card with only its question state changed.
+    func with(questionFlags flags: QuestionFlags) -> FirstMateAction {
+        FirstMateAction(kind: kind, zone: zone, worktreePath: worktreePath, branch: branch,
+                        project: project, terminalID: terminalID, message: message,
+                        payload: payload, options: options, followups: followups, questionFlags: flags)
     }
 }
 
@@ -77,7 +99,7 @@ enum FirstMate {
     static func evaluate(_ outcome: IngestOutcome, config: FirstMateConfig) -> [FirstMateAction] {
         guard config.enabled else { return [] }
 
-        if case .question(let prompt, let options, let followups) = outcome.event.kind {
+        if case .question(let prompt, let options, let followups, let flags) = outcome.event.kind {
             guard !options.isEmpty else { return [] }
             let i = outcome.info
             let payload: String
@@ -94,7 +116,8 @@ enum FirstMate {
                                     project: i.project, terminalID: i.id,
                                     message: String(prompt.prefix(200)),
                                     payload: payload, options: options,
-                                    followups: followups.isEmpty ? nil : followups)]
+                                    followups: followups.isEmpty ? nil : followups,
+                                    questionFlags: flags)]
         }
 
         if case .suggest(let options) = outcome.event.kind {

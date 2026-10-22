@@ -20,6 +20,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// (stationId, worktreePath) -> moved. Re-files a live pane under another
     /// worktree without recreating it.
     var moveHandler: ((String, String) -> Bool)?
+    /// (stationId, worktreePath or nil, done) — fork a pane's session into another
+    /// worktree; `done` gets the new pane's station id. Called on main.
+    var forkHandler: ((String, String?, @escaping (Result<String, PaneForkError>) -> Void) -> Void)?
     /// Focus a pane by station id (main thread). Returns whether it was focused.
     var focusHandler: ((String) -> Bool)?
     /// Sleep/wake panes by station id (nil = all but the focused one), on the
@@ -150,39 +153,9 @@ final class SeahelmControlDataSource: ControlDataSource {
         // claiming otherwise tells the caller a key was pressed that wasn't.
         guard station.canDeliverInput else {
             guard let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return false }
-            let channel = ZmxChannel(paneSessionKey: sessionKey)
-            var delivered = true
-            for (index, key) in keys.enumerated() {
-                if ControlKeys.isEnter(key) {
-                    // The pause before a Return is what stops a TUI reading it
-                    // as part of the paste it is still ingesting.
-                    if index > 0 { Thread.sleep(forTimeInterval: Station.enterSubmitDelay) }
-                    delivered = channel.submit() && delivered
-                } else if let bytes = ControlKeys.bytes(for: key) {
-                    delivered = channel.sendRaw(bytes) && delivered
-                }
-            }
-            return delivered
+            return Station.pressKeys(keys, viaSession: sessionKey)
         }
-        runOnMain {
-            var delay: TimeInterval = 0
-            for (index, key) in keys.enumerated() {
-                let isEnter = ControlKeys.isEnter(key)
-                if isEnter, index > 0 { delay += Station.enterSubmitDelay }
-                let send = {
-                    if isEnter {
-                        station.sendEnterKey()
-                    } else if !station.sendKeyPress(key), let bytes = ControlKeys.bytes(for: key) {
-                        station.sendText(bytes)
-                    }
-                }
-                if delay == 0 {
-                    send()
-                } else {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: send)
-                }
-            }
-        }
+        runOnMain { station.pressKeysOnSurface(keys) }
         return true
     }
 
@@ -231,6 +204,25 @@ final class SeahelmControlDataSource: ControlDataSource {
         var ok = false
         runOnMain { ok = moveHandler(sid, worktreePath) }
         return ok
+    }
+
+    func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
+        // Waits for the fork's zmx session to come up, so a caller on main would wait on itself.
+        guard !Thread.isMainThread, let fork = forkHandler,
+              let sid = station(for: paneId)?.id else { return .failure(.unknownPane) }
+        let done = DispatchSemaphore(value: 0)
+        var outcome: Result<String, PaneForkError> = .failure(.launchFailed)
+        DispatchQueue.main.async {
+            fork(sid, worktreePath) { outcome = $0; done.signal() }
+        }
+        guard done.wait(timeout: .now() + 30) == .success else { return .failure(.launchFailed) }
+        return outcome.map { newId in
+            var result: [String: Any] = ["forked": true, "pane_id": newId]
+            if let key = StationRegistry.shared.station(forId: newId)?.paneSessionKey {
+                result["pane_session_key"] = key
+            }
+            return result
+        }
     }
 
     func sleepPane(paneId: String?) -> [String]? {

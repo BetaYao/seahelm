@@ -898,6 +898,10 @@ class TabCoordinator {
                     controlDataSource.moveHandler = { [weak self] stationId, worktreePath in
                         self?.movePane(stationId: stationId, toWorktreePath: worktreePath) ?? false
                     }
+                    controlDataSource.forkHandler = { [weak self] stationId, worktreePath, done in
+                        guard let self else { done(.failure(.unknownPane)); return }
+                        self.forkPane(stationId: stationId, toWorktreePath: worktreePath, completion: done)
+                    }
                     controlDataSource.sleepHandler = { [weak self] stationId in
                         self?.terminalCoordinator.sleepPane(targetStationId: stationId) ?? []
                     }
@@ -1198,6 +1202,122 @@ class TabCoordinator {
         let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
             ?? URL(fileURLWithPath: repoRoot).lastPathComponent
         return rehomePane(stationId: stationId, into: entry.info, repoRoot: repoRoot, project: project)
+    }
+
+    // MARK: - Pane fork
+
+    /// What a fork of `stationId` would do: the session to copy and the worktree
+    /// to open it in. Main thread. Side-effect free, so the header can ask it on
+    /// every title refresh to decide whether to offer the button.
+    func forkPlan(stationId: String, toWorktreePath explicit: String? = nil)
+        -> Result<(ref: AgentSessionRef, destination: WorktreeInfo), PaneForkError> {
+        guard let station = StationRegistry.shared.station(forId: stationId),
+              let located = terminalCoordinator.stationManager.locate(stationId: stationId) else {
+            return .failure(.unknownPane)
+        }
+        guard runtimeBackend == "zmx", let key = station.paneSessionKey, !key.isEmpty else {
+            return .failure(.noPersistentBackend)
+        }
+        guard let ref = terminalCoordinator.config.agentSessions[key] else { return .failure(.noSession) }
+        guard ref.supportsFork else { return .failure(.unsupportedAgent) }
+        let filed = located.tree.worktreePath
+        guard let target = PaneFork.target(explicit: explicit, filedWorktree: filed,
+                                           hookWorktree: station.hookLocation?.worktreePath) else {
+            return .failure(.noTarget)
+        }
+        let canon = WorktreeDiscovery.canonicalPath(target)
+        guard let entry = allWorktrees.first(where: { WorktreeDiscovery.canonicalPath($0.info.path) == canon }) else {
+            return .failure(.unknownWorktree(target))
+        }
+        guard WorktreeDiscovery.canonicalPath(filed) != canon else { return .failure(.sameWorktree) }
+        return .success((ref, entry.info))
+    }
+
+    /// Fork a pane's conversation into another worktree: stop the original
+    /// turn (Esc — the pane, its process and its session all stay), start
+    /// `claude --resume <id> --fork-session` in a fresh zmx session in the
+    /// destination, and file a new pane on that session there. The fork waits
+    /// at its prompt; nothing is sent to it.
+    ///
+    /// Main thread; `completion` runs on main with the new pane's station id.
+    func forkPane(stationId: String, toWorktreePath explicit: String? = nil,
+                  completion: @escaping (Result<String, PaneForkError>) -> Void) {
+        let plan: (ref: AgentSessionRef, destination: WorktreeInfo)
+        switch forkPlan(stationId: stationId, toWorktreePath: explicit) {
+        case .failure(let error): completion(.failure(error)); return
+        case .success(let p): plan = p
+        }
+        let destination = plan.destination
+        let yolo = config.agentYolo ? AgentType.claudeCode.yoloFlag.map { [$0] } ?? [] : []
+        guard let commandLine = plan.ref.forkCommandLine(extraArgs: yolo) else {
+            completion(.failure(.unsupportedAgent)); return
+        }
+
+        StationRegistry.shared.station(forId: stationId)?.interruptTurn()
+
+        let manager = terminalCoordinator.stationManager
+        let backend = runtimeBackend
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            Thread.sleep(forTimeInterval: PaneFork.interruptSettleDelay)
+            // A name no live tree claims *and* no zmx session holds: a session left
+            // behind by a closed pane would otherwise be attached to as-is.
+            var name = ""
+            DispatchQueue.main.sync {
+                name = manager.freeSessionName(for: destination.path) {
+                    SessionManager.sessionExists(name: $0, backend: backend)
+                }
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                SessionManager.createDetachedSession(name: name, backend: backend,
+                                                     cwd: destination.path, agentCommandLine: commandLine)
+            }
+            let started = SessionManager.waitUntilSessionExists(name: name, backend: backend, timeoutSeconds: 5)
+            DispatchQueue.main.async {
+                guard let self, started else { completion(.failure(.launchFailed)); return }
+                NSLog("[TabCoordinator] Forked pane \(stationId) into \(destination.path) as \(name)")
+                completion(.success(self.installForkedPane(sessionName: name, in: destination)))
+            }
+        }
+    }
+
+    /// File a new pane on an already-running zmx session in `destination`, and
+    /// bring it on screen. A placeholder the worktree was standing on is retired
+    /// rather than split beside. Returns the new station id.
+    private func installForkedPane(sessionName: String, in destination: WorktreeInfo) -> String {
+        let manager = terminalCoordinator.stationManager
+        retirePlaceholderPane(at: destination.path)
+
+        let station = Station()
+        station.paneSessionKey = sessionName
+        station.backend = runtimeBackend
+        let tree = manager.insert(station: station, paneSessionKey: sessionName, intoPath: destination.path)
+
+        let repoRoot = worktreeRepoCache[destination.path] ?? ""
+        let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
+            ?? URL(fileURLWithPath: repoRoot).lastPathComponent
+        AgentRegistry.shared.register(station: station, worktreePath: destination.path,
+                                      branch: destination.branch, project: project, startedAt: Date(),
+                                      paneSessionKey: sessionName, backend: runtimeBackend)
+        if let idx = allWorktrees.firstIndex(where: { $0.info.path == destination.path }) {
+            allWorktrees[idx] = (info: destination, tree: tree)
+        } else {
+            allWorktrees.append((info: destination, tree: tree))
+        }
+        terminalCoordinator.saveSplitLayout(tree)
+        saveConfig()
+
+        dashboardVC?.invalidateSplitContainer(forPath: destination.path)
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
+        statusPublisher.updateSurfaces(manager.all)
+
+        // Selecting the worktree embeds its container, which creates the surface;
+        // focus has to wait for that.
+        if preparePaneControlTarget(station.id) {
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.terminalCoordinator.focusPane(targetStationId: station.id)
+            }
+        }
+        return station.id
     }
 
     /// Lift one pane out of its current worktree and into `destination`, keeping

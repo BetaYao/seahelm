@@ -215,6 +215,7 @@
 		6626F9EC5169BC7231EEA9BA /* ClaudeUsageSummaryProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED032A4F5701E6B65774EBAB /* ClaudeUsageSummaryProviderTests.swift */; };
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
 		68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */; };
+		68D65BDE5D099778712E3917 /* PaneFork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6998FB62AF2E5F47766D9447 /* PaneFork.swift */; };
 		69C021D47F0CD0650E986C43 /* HookEventMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
 		6A917794A3A0BEF0217579FA /* TelegramInitData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31C2470C1A80AF0E0B825BA /* TelegramInitData.swift */; };
@@ -499,6 +500,7 @@
 		E7AB85089D6CD9A1AF14B3CF /* OverviewFocusModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376AB999E829F6B1298D7B05 /* OverviewFocusModelTests.swift */; };
 		E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */; };
 		E898E9379622EC8D16777977 /* ChatCallbackRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01DB279E827314DBFA97331B /* ChatCallbackRegistryTests.swift */; };
+		E8A576F6C89652A2B820E582 /* PaneForkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F32A89F16E29A9882A604539 /* PaneForkTests.swift */; };
 		E8C1145BA4D57B8698F87941 /* ProjectColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BE2B74AFEED5F242C1B2763 /* ProjectColor.swift */; };
 		E8E41A017C3C9EAA42E5CB40 /* WorktreeReturnPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E48EF7634B86F69D2FCA6759 /* WorktreeReturnPlannerTests.swift */; };
 		E9339C5A896240727780948E /* ChromeLayoutState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */; };
@@ -780,6 +782,7 @@
 		6744CE68D17FF1ABD3F3DF63 /* ClosedPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClosedPillView.swift; sourceTree = "<group>"; };
 		68134AF6F747CFF2862FC31F /* PRReviewCoordinatorLifetimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewCoordinatorLifetimeTests.swift; sourceTree = "<group>"; };
 		693DBDBBFD25BEA5D9BE4E26 /* UsageSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummary.swift; sourceTree = "<group>"; };
+		6998FB62AF2E5F47766D9447 /* PaneFork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneFork.swift; sourceTree = "<group>"; };
 		69B9E6C47E654692C3AC6D42 /* StatusPublisherThreadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPublisherThreadTests.swift; sourceTree = "<group>"; };
 		6A141F8A22DEE7A3DDC6768A /* WorktreeTitleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleCache.swift; sourceTree = "<group>"; };
 		6A912279D16E32ED9BADB27B /* UsageSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryStore.swift; sourceTree = "<group>"; };
@@ -1092,6 +1095,7 @@
 		F19D791225D6733BC5B1FC8A /* GmailRESTMailClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailRESTMailClient.swift; sourceTree = "<group>"; };
 		F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscape.swift; sourceTree = "<group>"; };
 		F31C2470C1A80AF0E0B825BA /* TelegramInitData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramInitData.swift; sourceTree = "<group>"; };
+		F32A89F16E29A9882A604539 /* PaneForkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneForkTests.swift; sourceTree = "<group>"; };
 		F3811788C3A0B0FC8B1CD711 /* WorktreeLabelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeLabelStoreTests.swift; sourceTree = "<group>"; };
 		F46850D7037DB8C66886F9AF /* AgentRegistryExternalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryExternalTests.swift; sourceTree = "<group>"; };
 		F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareLinkStore.swift; sourceTree = "<group>"; };
@@ -1242,6 +1246,7 @@
 				C9DBCA7E5081CD673795866D /* PairingIdentity.swift */,
 				4C798752B1147F8BA20E3C29 /* PairRateLimiter.swift */,
 				9CBCE792D382F99F0D8104DE /* PaneAwayIndicator.swift */,
+				6998FB62AF2E5F47766D9447 /* PaneFork.swift */,
 				A07E3B53FF30705F3C18D603 /* PaneHistoryBuffer.swift */,
 				7C3D3984EB87D6ED65A3312A /* PaneInfo.swift */,
 				2B539381678923218614CD56 /* PaneMessageProjector.swift */,
@@ -1682,6 +1687,7 @@
 				B6B9FA9AD5143E5733D4C99B /* PairingCryptoTests.swift */,
 				1A9D36C4513804B095CBABA5 /* PairRateLimiterTests.swift */,
 				F83941DD060F1359E8CFF1B3 /* PaneAwayIndicatorTests.swift */,
+				F32A89F16E29A9882A604539 /* PaneForkTests.swift */,
 				8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */,
 				529E3EDAF8D57902FD901649 /* PanelCoordinatorTests.swift */,
 				3FFF19971E7C0F97298C6A8A /* PaneMessageProjectorTests.swift */,
@@ -2282,6 +2288,7 @@
 				707F6BEF7FED22391823BAAD /* PairingCodeStoreTests.swift in Sources */,
 				9F9A0DD53A64470D56318204 /* PairingCryptoTests.swift in Sources */,
 				D2CB73CC062391CB61498A1F /* PaneAwayIndicatorTests.swift in Sources */,
+				E8A576F6C89652A2B820E582 /* PaneForkTests.swift in Sources */,
 				A7FBE343E9691CDA24404E84 /* PaneInfoDisplayStatusTests.swift in Sources */,
 				EEB54F868C350D31A1B89299 /* PaneMessageProjectorTests.swift in Sources */,
 				EA9AE25E1B7C668B9DEE38D4 /* PaneReducerTests.swift in Sources */,
@@ -2588,6 +2595,7 @@
 				2B3B2AB7EE1A27C90CE93BBE /* PairingIdentity.swift in Sources */,
 				55C5B0B646137831DCA9D1E9 /* PairingWindowController.swift in Sources */,
 				755733276437DE72C0E582EB /* PaneAwayIndicator.swift in Sources */,
+				68D65BDE5D099778712E3917 /* PaneFork.swift in Sources */,
 				5B0C198C8A608E78B1CA0D9C /* PaneHandleRegistry.swift in Sources */,
 				A8E20664CBC80AC29F9ED31F /* PaneHistoryBuffer.swift in Sources */,
 				73AD1B9CB4727CC7D40DB028 /* PaneInfo.swift in Sources */,

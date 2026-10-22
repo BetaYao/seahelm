@@ -1439,6 +1439,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             chrome.applyState(chromeState, animated: false)
             chrome.headerDelegate = self
             chrome.paneSharing = self
+            chrome.onForkPane = { [weak self] in self?.forkOfferedPane() }
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1559,6 +1560,47 @@ dashboard.stationManager = terminalCoordinator.stationManager
             pwd: station.pwd
         ) ?? ""
         windowChrome?.updateTerminalTitle(repo: "", pane: title + away)
+        updateForkOffer(station: station)
+    }
+
+    // MARK: - Pane fork offer
+
+    /// The pane the header's fork button would fork, while it is shown.
+    private var forkOfferStationId: String?
+    /// Worktree each pane was last forked into from the header, so a pane whose
+    /// agent is still away does not keep offering the fork it just did.
+    private var forkedInto: [String: String] = [:]
+
+    /// Show the fork button when the focused pane's agent is working in another
+    /// tracked worktree and its session can be forked.
+    private func updateForkOffer(station: Station?) {
+        guard let station, case .success(let plan) = tabCoordinator.forkPlan(stationId: station.id),
+              forkedInto[station.id] != plan.destination.path else {
+            forkOfferStationId = nil
+            windowChrome?.updateForkTarget(nil)
+            return
+        }
+        forkOfferStationId = station.id
+        let name = plan.destination.branch.isEmpty
+            ? URL(fileURLWithPath: plan.destination.path).lastPathComponent : plan.destination.branch
+        windowChrome?.updateForkTarget("@" + name)
+    }
+
+    private func forkOfferedPane() {
+        guard let stationId = forkOfferStationId,
+              case .success(let plan) = tabCoordinator.forkPlan(stationId: stationId) else {
+            NSSound.beep()
+            return
+        }
+        forkedInto[stationId] = plan.destination.path
+        windowChrome?.updateForkTarget(nil)
+        tabCoordinator.forkPane(stationId: stationId) { [weak self] result in
+            if case .failure(let error) = result {
+                NSLog("[Fork] pane \(stationId): \(error.message)")
+                self?.forkedInto.removeValue(forKey: stationId)
+                NSSound.beep()
+            }
+        }
     }
 
     /// Drive the terminal chrome header: `Repo · pane title`.
@@ -1607,6 +1649,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             )
         } ?? ""
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle + away)
+        updateForkOffer(station: focusedPane?.station)
         windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, pane: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }
@@ -2812,34 +2855,95 @@ extension MainWindowController {
                     to: order.action.terminalID, index: idx, from: selectedIndex)
             }
         } else if order.action.payload == FirstMateAction.askUserQuestionPayload {
-            // AskUserQuestion TUI selects by digit; typing the label text would
-            // land in the free-form field instead. Send the option's number —
-            // sendCommand follows with a Return that confirms the selection.
-            // opencode's question TUI has no digit shortcuts (a digit would land
-            // in the custom-answer field), so drive it with arrow keys instead.
-            if let idx = order.action.options?.firstIndex(of: optionText) {
-                if AgentRegistry.shared.pane(for: order.action.terminalID)?.agentType == .openCode {
-                    AgentRegistry.shared.answerChoiceByArrows(to: order.action.terminalID, index: idx)
-                } else {
-                    AgentRegistry.shared.sendCommand(to: order.action.terminalID, command: "\(idx + 1)")
-                }
-            }
-            // Multi-question call: the TUI advances to the next question, so the
-            // card follows instead of vanishing with N-1 questions unanswered.
-            if let next = order.action.followups?.first {
-                let a = order.action
-                tabCoordinator.pendingOrders.resolve(id: order.id)
-                tabCoordinator.pendingOrders.enqueue(FirstMateAction(
-                    kind: a.kind, zone: a.zone, worktreePath: a.worktreePath,
-                    branch: a.branch, project: a.project, terminalID: a.terminalID,
-                    message: next.prompt, payload: a.payload, options: next.options,
-                    followups: (a.followups?.count ?? 0) > 1 ? Array(a.followups!.dropFirst()) : nil))
-                return
-            }
+            answerAgentQuestion(order: order, label: optionText)
+            return
         } else {
             AgentRegistry.shared.sendCommand(to: order.action.terminalID, command: optionText)
         }
         tabCoordinator.pendingOrders.resolve(id: order.id)
+    }
+
+    /// Answer an AskUserQuestion card in the agent's dialog. Arrow keys and
+    /// Return only (see `QuestionFlags`): a digit arrives as pasted text, which
+    /// the dialog ignores, so the Return after it picked whatever row the cursor
+    /// was on. opencode's question dialog takes the same keys.
+    ///
+    /// A multi-select tap toggles one row and leaves the card up, ticked, until
+    /// Done; anything else answers the question and moves the card on.
+    private func answerAgentQuestion(order: PendingOrder, label: String) {
+        let action = order.action
+        var flags = action.questionFlags
+        guard let tapped = action.answerLabels.firstIndex(of: label) else { return }
+        let optionCount = action.options?.count ?? 0
+
+        if flags.multiSelect, tapped == optionCount {
+            AgentRegistry.shared.pressKeys(to: action.terminalID, keys: ["right"])
+            advanceAgentQuestion(order)
+            return
+        }
+        guard tapped < optionCount else { return }
+        let from = currentChoiceRow(terminalID: action.terminalID) ?? flags.cursor
+        AgentRegistry.shared.answerChoiceByArrows(to: action.terminalID, index: tapped, from: from)
+        guard flags.multiSelect else {
+            advanceAgentQuestion(order)
+            return
+        }
+        if flags.checked.contains(tapped) { flags.checked.remove(tapped) } else { flags.checked.insert(tapped) }
+        flags.cursor = tapped
+        tabCoordinator.pendingOrders.upsert(action.with(questionFlags: flags))
+    }
+
+    /// The question was answered: show the next one of a multi-question ask,
+    /// or — on the last — retire the card and confirm the review page.
+    private func advanceAgentQuestion(_ order: PendingOrder) {
+        let a = order.action
+        tabCoordinator.pendingOrders.resolve(id: order.id)
+        if let next = a.followups?.first {
+            tabCoordinator.pendingOrders.enqueue(FirstMateAction(
+                kind: a.kind, zone: a.zone, worktreePath: a.worktreePath,
+                branch: a.branch, project: a.project, terminalID: a.terminalID,
+                message: next.prompt, payload: a.payload, options: next.options,
+                followups: (a.followups?.count ?? 0) > 1 ? Array(a.followups!.dropFirst()) : nil,
+                questionFlags: next.flags))
+            return
+        }
+        if a.questionFlags.reviewAfter {
+            confirmQuestionReview(terminalID: a.terminalID, attemptsLeft: 6)
+        }
+    }
+
+    /// Every answer is in; the dialog now shows "Review your answers" with its
+    /// cursor on Submit. Press Return once that page is actually up — never
+    /// blind, since a Return that lands early would toggle or pick a row.
+    private func confirmQuestionReview(terminalID: String, attemptsLeft: Int) {
+        guard attemptsLeft > 0 else {
+            NSLog("[Question] review page never appeared for \(terminalID); left for the user")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            let screen = self.paneScreen(terminalID: terminalID) ?? ""
+            if screen.contains("Ready to submit your answers?") {
+                AgentRegistry.shared.pressKeys(to: terminalID, keys: ["enter"])
+            } else {
+                self.confirmQuestionReview(terminalID: terminalID, attemptsLeft: attemptsLeft - 1)
+            }
+        }
+    }
+
+    /// The highlighted row of the choice list on screen, when one can be read.
+    private func currentChoiceRow(terminalID: String) -> Int? {
+        paneScreen(terminalID: terminalID)
+            .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) }
+    }
+
+    /// What the pane shows: the live surface's viewport, or for a pane whose tab
+    /// is not open, the tail of its zmx session.
+    private func paneScreen(terminalID: String) -> String? {
+        guard let station = StationRegistry.shared.station(forId: terminalID) else { return nil }
+        if station.canDeliverInput, let text = station.readViewportText() { return text }
+        guard let key = station.paneSessionKey, !key.isEmpty else { return nil }
+        return ZmxChannel(paneSessionKey: key).readOutput(lines: 40)
     }
 
 }
@@ -3315,7 +3419,7 @@ extension MainWindowController {
     private func optionButtons(for order: PendingOrder, dismissable: Bool = false) -> [MessageButton] {
         // Minted once and shared by every chat the card reaches: a token says
         // what the button means, not who tapped it.
-        var buttons = (order.action.options ?? []).enumerated().map { index, label in
+        var buttons = order.action.answerLabels.enumerated().map { index, label in
             MessageButton(label: label, token: ChatCallbackRegistry.shared.mint(
                 .suggestionOption(orderId: order.id, index: index)))
         }
@@ -3369,7 +3473,8 @@ extension MainWindowController {
     /// the same Telegram packet.
     static func questionCardPacketKey(_ order: PendingOrder) -> String {
         let action = order.action
-        return [order.id, action.message, (action.options ?? []).joined(separator: "\u{1E}")]
+        return [order.id, action.message, (action.options ?? []).joined(separator: "\u{1E}"),
+                action.questionFlags.askId]
             .joined(separator: "\u{1F}")
     }
 
@@ -3422,11 +3527,7 @@ extension MainWindowController {
                 content: "Nothing to stop — this chat isn't talking to a running pane.", format: .markdown))
             return
         }
-        var sent = station.canDeliverInput && station.sendKeyPress("escape")
-        if !sent, let sessionKey = station.paneSessionKey, !sessionKey.isEmpty,
-           let esc = ControlKeys.bytes(for: "escape") {
-            sent = ZmxChannel(paneSessionKey: sessionKey).sendRaw(esc)
-        }
+        let sent = station.interruptTurn()
         AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId,
             content: sent ? "Stopped **\(CommandFormatter.target(pane))** (sent Esc)."
@@ -3470,17 +3571,34 @@ extension MainWindowController {
             return
         case .suggestionOption(let orderId, let index):
             guard let order = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }),
-                  let options = order.action.options, index < options.count else {
+                  index < order.action.answerLabels.count else {
                 replyToChat(callback, "That card is gone — the agent moved on.")
                 return
             }
-            let option = options[index]
+            let option = order.action.answerLabels[index]
             // Retire first: answering the card re-enqueues the next question of
             // a multi-part ask under the same id, and its fresh tokens must not
             // be swept away by the resolve that follows.
             ChatCallbackRegistry.shared.retire(orderId: orderId)
             handleSuggestionTapped(order: order, optionText: option)
-            replyToChat(callback, "Picked **\(option)**.")
+            // A multi-select toggle leaves the same question up: redraw its ticks
+            // on every message that shows it, and say nothing — a reply per tick
+            // would bury the card.
+            if let live = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }),
+               live.action.questionFlags.multiSelect, live.action.message == order.action.message {
+                let tapped = ChatNoticeBook.Ref(chatId: callback.chatId, messageId: callback.messageId)
+                let known = cardButtonMessages[orderId]?.contains {
+                    $0.chatId == tapped.chatId && $0.messageId == tapped.messageId
+                } ?? false
+                if !known { cardButtonMessages[orderId, default: []].append(tapped) }
+                let buttons = optionButtons(for: live, dismissable: true)
+                for ref in cardButtonMessages[orderId] ?? [] {
+                    AgentRegistry.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
+                                                    messageId: ref.messageId, buttons: buttons)
+                }
+                return
+            }
+            replyToChat(callback, "Picked **\(Self.pickedSummary(order.action, tapped: option))**.")
         case .dismissSuggestion(let orderId):
             tabCoordinator.pendingOrders.resolve(id: orderId)
             replyToChat(callback, "Left it. The agent is still waiting — answer it on the Mac when you get there.")
@@ -3504,6 +3622,15 @@ extension MainWindowController {
             AgentRegistry.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
                                             messageId: callback.messageId, buttons: [])
         }
+    }
+
+    /// What a tap answered, for the chat's "Picked …" line: Done on a
+    /// multi-select card stands for the rows ticked before it.
+    static func pickedSummary(_ action: FirstMateAction, tapped: String) -> String {
+        guard action.questionFlags.multiSelect, tapped == FirstMateAction.questionDoneLabel else { return tapped }
+        let options = action.options ?? []
+        let picked = action.questionFlags.checked.sorted().compactMap { $0 < options.count ? options[$0] : nil }
+        return picked.isEmpty ? "nothing" : picked.joined(separator: ", ")
     }
 
     /// Which card a tap belongs to, when it belongs to one.

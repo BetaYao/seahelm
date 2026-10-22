@@ -50,7 +50,7 @@ final class HookDecoderTests: XCTestCase {
             ],
         ])
         let normalized = HookDecoder(terminalID: "t1", event: event).decode()
-        guard case .question(let prompt, let options, _)? = normalized?.kind else { return XCTFail("wrong kind") }
+        guard case .question(let prompt, let options, _, _)? = normalized?.kind else { return XCTFail("wrong kind") }
         XCTAssertEqual(prompt, "Where should daily check-in happen?")
         XCTAssertEqual(options, ["Gate face scan", "Front desk kiosk"])
     }
@@ -66,8 +66,62 @@ final class HookDecoderTests: XCTestCase {
             ],
         ])
         let normalized = HookDecoder(terminalID: "t1", event: event).decode()
-        guard case .question(let prompt, _, _)? = normalized?.kind else { return XCTFail("wrong kind") }
+        guard case .question(let prompt, _, _, _)? = normalized?.kind else { return XCTFail("wrong kind") }
         XCTAssertEqual(prompt, "Q1? (1/2)")
+    }
+
+    /// Which questions end on the review page decides whether the last answer
+    /// needs a confirming Return; a lone single-select question submits at once.
+    func testAskUserQuestionFlagsMultiSelectAndReviewPage() {
+        func flags(_ questions: [[String: Any]]) -> (QuestionFlags, [QuestionFlags])? {
+            let event = makeEvent(type: .toolUseStart, data: [
+                "tool_name": "AskUserQuestion", "tool_input": ["questions": questions],
+            ])
+            guard case .question(_, _, let followups, let first)? =
+                    HookDecoder(terminalID: "t1", event: event).decode()?.kind else { return nil }
+            // askId is per call; the shape is what's under test.
+            func shape(_ f: QuestionFlags) -> QuestionFlags {
+                QuestionFlags(multiSelect: f.multiSelect, reviewAfter: f.reviewAfter)
+            }
+            return (shape(first), followups.map { shape($0.flags) })
+        }
+        let single = flags([["question": "Q?", "options": [["label": "A"], ["label": "B"]]]])
+        XCTAssertEqual(single?.0, QuestionFlags(multiSelect: false, reviewAfter: false))
+
+        let multi = flags([["question": "Q?", "multiSelect": true, "options": [["label": "A"], ["label": "B"]]]])
+        XCTAssertEqual(multi?.0, QuestionFlags(multiSelect: true, reviewAfter: true))
+
+        let two = flags([
+            ["question": "Q1?", "multiSelect": true, "options": [["label": "A"], ["label": "B"]]],
+            ["question": "Q2?", "options": [["label": "C"], ["label": "D"]]],
+        ])
+        XCTAssertEqual(two?.0, QuestionFlags(multiSelect: true, reviewAfter: false))
+        XCTAssertEqual(two?.1, [QuestionFlags(multiSelect: false, reviewAfter: true)])
+    }
+
+    func testQuestionsOfOneAskShareItsToolUseId() {
+        let event = makeEvent(type: .toolUseStart, data: [
+            "tool_name": "AskUserQuestion", "tool_use_id": "toolu_1",
+            "tool_input": ["questions": [
+                ["question": "Q1?", "options": [["label": "A"], ["label": "B"]]],
+                ["question": "Q2?", "options": [["label": "C"], ["label": "D"]]],
+            ]],
+        ])
+        guard case .question(_, _, let followups, let flags)? =
+                HookDecoder(terminalID: "t1", event: event).decode()?.kind else { return XCTFail("wrong kind") }
+        XCTAssertEqual(flags.askId, "toolu_1")
+        XCTAssertEqual(followups.map(\.flags.askId), ["toolu_1"])
+    }
+
+    func testMultiSelectCardTicksItsOptionsAndOffersDone() {
+        var flags = QuestionFlags(multiSelect: true, reviewAfter: true)
+        flags.checked = [1]
+        let action = FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: "/wt", branch: "b",
+                                     project: "p", terminalID: "t1", message: "Pick fruits",
+                                     payload: FirstMateAction.askUserQuestionPayload,
+                                     options: ["Apple", "Banana"], questionFlags: flags)
+        XCTAssertEqual(action.answerLabels, ["☐ Apple", "☑ Banana", FirstMateAction.questionDoneLabel])
+        XCTAssertEqual(action.with(questionFlags: QuestionFlags()).answerLabels, ["Apple", "Banana"])
     }
 
     func testAskUserQuestionWithBadPayloadDegradesToToolUse() {

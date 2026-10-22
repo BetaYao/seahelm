@@ -455,7 +455,7 @@ private struct SuggestionCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Options keep their own taps so they don't bubble to onReveal.
-            OptionList(options: order.action.options ?? [], onTap: onOption)
+            OptionList(options: order.action.answerLabels, onTap: onOption)
         }
         .padding(12)
         .background(

@@ -83,7 +83,7 @@ enum PaneMessageProjector {
                 coal.lastIsError = act.isError
                 coal.lastCount = 1
             }
-        case .question(let prompt, let options, _):
+        case .question(let prompt, let options, _, _):
             appendDecision(prompt, signature: ["question", prompt] + options)
         case .suggest(let options):
             appendDecision(options.joined(separator: " · "), signature: ["suggest"] + options)
