@@ -142,6 +142,66 @@ final class ClaudeStatuslineBridgeInstallerTests: XCTestCase {
         XCTAssertEqual(preserved, "")
     }
 
+    /// Every Claude session shares one cache, so a payload without rate
+    /// limits (a fresh session, an API-key run) must not replace one with them.
+    func testPayloadWithoutRateLimitsKeepsCachedRateLimits() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let claudeDir = root.appendingPathComponent(".claude")
+        let supportDir = root.appendingPathComponent("Application Support/seahelm")
+        let cacheDir = root.appendingPathComponent("Caches/seahelm")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = claudeDir.appendingPathComponent("settings.json")
+        try #"{"model":"opus"}"#.write(to: settings, atomically: true, encoding: .utf8)
+        XCTAssertTrue(ClaudeStatuslineBridgeInstaller.ensureInstalledForTests(
+            settingsURL: settings, supportDirectory: supportDir, cacheDirectory: cacheDir))
+        let script = supportDir.appendingPathComponent("claude-statusline-bridge.sh")
+
+        let withLimits = Data(#"{"rate_limits":{"five_hour":{"used_percentage":15}}}"#.utf8)
+        try Self.runBridge(script, input: withLimits)
+        try Self.runBridge(script, input: Data(#"{"session_id":"fresh"}"#.utf8))
+
+        XCTAssertEqual(try Data(contentsOf: cacheDir.appendingPathComponent("claude-statusline.json")), withLimits)
+    }
+
+    /// An already-wrapped settings.json still gets the current bridge script,
+    /// without its saved original command being touched.
+    func testRefreshesOutdatedBridgeScript() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let claudeDir = root.appendingPathComponent(".claude")
+        let supportDir = root.appendingPathComponent("Application Support/seahelm")
+        let cacheDir = root.appendingPathComponent("Caches/seahelm")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = claudeDir.appendingPathComponent("settings.json")
+        try #"{"statusLine":{"type":"command","command":"claude-hud"}}"#.write(to: settings, atomically: true, encoding: .utf8)
+        XCTAssertTrue(ClaudeStatuslineBridgeInstaller.ensureInstalledForTests(
+            settingsURL: settings, supportDirectory: supportDir, cacheDirectory: cacheDir))
+        let script = supportDir.appendingPathComponent("claude-statusline-bridge.sh")
+        let current = try String(contentsOf: script, encoding: .utf8)
+        try "#!/bin/sh\ncat > /dev/null\n".write(to: script, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(ClaudeStatuslineBridgeInstaller.ensureInstalledForTests(
+            settingsURL: settings, supportDirectory: supportDir, cacheDirectory: cacheDir))
+
+        XCTAssertEqual(try String(contentsOf: script, encoding: .utf8), current)
+        let preserved = try String(contentsOf: supportDir.appendingPathComponent("claude-statusline-original-command"), encoding: .utf8)
+        XCTAssertEqual(preserved, "claude-hud")
+    }
+
+    private static func runBridge(_ script: URL, input: Data) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path]
+        let stdin = Pipe()
+        process.standardInput = stdin
+        try process.run()
+        stdin.fileHandleForWriting.write(input)
+        try stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
+
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
