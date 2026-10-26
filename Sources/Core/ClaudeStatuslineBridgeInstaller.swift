@@ -26,7 +26,23 @@ enum ClaudeStatuslineBridgeInstaller {
         let originalCommand = (statusLine?["type"] as? String == "command")
             ? (statusLine?["command"] as? String ?? "")
             : ""
-        guard !originalCommand.contains(scriptURL.path) else { return false }
+        let script = bridgeScript(
+            originalCommandURL: supportDirectory.appendingPathComponent("claude-statusline-original-command"),
+            cacheURL: cacheDirectory.appendingPathComponent("claude-statusline.json")
+        )
+        // Already wrapped: keep the saved original command, but refresh the
+        // script itself so an older bridge picks up fixes.
+        if originalCommand.contains(scriptURL.path) {
+            guard (try? String(contentsOf: scriptURL, encoding: .utf8)) != script else { return false }
+            do {
+                try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+                return true
+            } catch {
+                NSLog("[ClaudeStatuslineBridgeInstaller] Failed to refresh bridge: \(error)")
+                return false
+            }
+        }
 
         do {
             try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -34,8 +50,7 @@ enum ClaudeStatuslineBridgeInstaller {
             try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             let originalURL = supportDirectory.appendingPathComponent("claude-statusline-original-command")
             try originalCommand.write(to: originalURL, atomically: true, encoding: .utf8)
-            try bridgeScript(originalCommandURL: originalURL, cacheURL: cacheDirectory.appendingPathComponent("claude-statusline.json"))
-                .write(to: scriptURL, atomically: true, encoding: .utf8)
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
             var updatedStatusLine = statusLine ?? [:]
             updatedStatusLine["type"] = "command"
@@ -54,6 +69,10 @@ enum ClaudeStatuslineBridgeInstaller {
         let originalCommandPath = shellQuote(originalCommandURL.path)
         let cachePath = shellQuote(cacheURL.path)
         let cacheDirectoryPath = shellQuote(cacheURL.deletingLastPathComponent().path)
+        // The cache is last-writer-wins across every Claude session, and a
+        // payload carries rate_limits only once that session has had an API
+        // response on a subscription (not a fresh session, not an API-key or
+        // `-p` run). Caching those would blank the pill's 5h/7d readout.
         return """
         #!/bin/sh
         set -eu
@@ -61,9 +80,11 @@ enum ClaudeStatuslineBridgeInstaller {
         cache_tmp=$(mktemp "${TMPDIR:-/tmp}/claude-statusline-cache.XXXXXX")
         trap 'rm -f "$input_tmp" "$cache_tmp"' EXIT HUP INT TERM
         cat > "$input_tmp"
-        mkdir -p \(cacheDirectoryPath)
-        cp "$input_tmp" "$cache_tmp"
-        mv "$cache_tmp" \(cachePath)
+        if grep -Eq '"(five_hour|seven_day)"' "$input_tmp"; then
+          mkdir -p \(cacheDirectoryPath)
+          cp "$input_tmp" "$cache_tmp"
+          mv "$cache_tmp" \(cachePath)
+        fi
         if [ -f \(originalCommandPath) ]; then
           original=$(cat \(originalCommandPath))
           if [ -n "$original" ]; then
