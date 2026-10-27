@@ -154,6 +154,32 @@ final class AgentSessionRefTests: XCTestCase {
                        "'claude' '--resume' '\(uuid)' '--fork-session' '--dangerously-skip-permissions'")
     }
 
+    /// The prompt is read from a file, not spelled out: the command line is
+    /// typed into a tty that cuts input past 1024 bytes.
+    func testForkPromptIsReadFromItsFileAsOneArgument() throws {
+        let ref = AgentSessionRef(agent: "claude", sessionId: uuid)!
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prompt = String(repeating: "carry on, it's `here` $HOME. ", count: 60)
+        let file = try XCTUnwrap(PaneFork.writePromptFile(prompt, directory: dir))
+        let line = try XCTUnwrap(ref.forkCommandLine(promptFile: file))
+        XCTAssertLessThan(line.utf8.count, 150 + file.utf8.count)
+
+        // Swap the agent for printf to see the argv the shell hands it.
+        let probe = line.replacingOccurrences(of: "'claude' '--resume' '\(uuid)' '--fork-session'",
+                                              with: "printf '%s\\n'")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-c", probe]
+        let out = Pipe()
+        process.standardOutput = out
+        try process.run()
+        process.waitUntilExit()
+        let printed = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        XCTAssertEqual(printed, prompt + "\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file))
+    }
+
     func testAgentsWithoutForkReturnNil() {
         let codex = AgentSessionRef(agent: "codex", sessionId: "abc-123")!
         XCTAssertFalse(codex.supportsFork)

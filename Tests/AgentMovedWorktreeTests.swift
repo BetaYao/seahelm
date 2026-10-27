@@ -205,7 +205,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
         let resolved = expectation(description: "pane worktree reported")
         var reportedPane: String?
         var reportedPath: String?
-        provider.onPaneWorktreeResolved = { paneId, path, _ in
+        provider.onPaneWorktreeResolved = { paneId, path, _, _ in
             reportedPane = paneId
             reportedPath = path
             resolved.fulfill()
@@ -216,6 +216,76 @@ final class AgentMovedWorktreeTests: XCTestCase {
         wait(for: [resolved], timeout: 2)
         XCTAssertEqual(reportedPane, "seahelm-repo-main")
         XCTAssertEqual(reportedPath, canon(other))
+    }
+
+    /// Claude Code resets the shell to the project directory after a command
+    /// that leaves it, so an agent working in a sibling worktree keeps
+    /// reporting the main checkout as its cwd and says `cd <worktree> && …` in
+    /// every command instead. The move lives in the tool input, and it holds
+    /// across the events between tool calls, which still carry the old cwd.
+    func testLeadingCdInABashCallReportsTheWorktreeItWentTo() throws {
+        let repo = root.appendingPathComponent("repo")
+        let sibling = root.appendingPathComponent("repo-feature")
+        try makeDirectory(repo)
+        try makeWorktreeRoot(sibling)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path, sibling.path])
+
+        var reported: [String?] = []
+        let three = expectation(description: "three events reported")
+        three.expectedFulfillmentCount = 3
+        provider.onPaneWorktreeResolved = { _, path, _, _ in
+            reported.append(path)
+            three.fulfill()
+        }
+
+        provider.handleEvent(WebhookEvent(
+            source: "claude-code", sessionId: "s1", event: .toolUseStart, cwd: repo.path, timestamp: nil,
+            data: ["tool_name": "Bash", "tool_input": ["command": "cd \(sibling.path) && git status"]],
+            paneId: "seahelm-repo-main"))
+        provider.handleEvent(event(cwd: repo.path))
+        provider.handleEvent(WebhookEvent(
+            source: "claude-code", sessionId: "s1", event: .toolUseStart, cwd: repo.path, timestamp: nil,
+            data: ["tool_name": "Bash", "tool_input": ["command": "git log -1"]],
+            paneId: "seahelm-repo-main"))
+
+        wait(for: [three], timeout: 2)
+        XCTAssertEqual(reported, [canon(sibling), canon(sibling), canon(repo)])
+    }
+
+    /// Only a worktree the pane's own agent created reads as created by it:
+    /// working in a sibling someone else made is a visit.
+    func testAWorktreeThePanesAgentCreatedIsFlagged() throws {
+        let repo = root.appendingPathComponent("repo")
+        let made = root.appendingPathComponent("repo-made")
+        let other = root.appendingPathComponent("repo-other")
+        try makeDirectory(repo)
+        try makeWorktreeRoot(made)
+        try makeWorktreeRoot(other)
+
+        let provider = WebhookStatusProvider()
+        provider.updateWorktrees([repo.path, made.path, other.path])
+
+        var flags: [String: Bool] = [:]
+        let reported = expectation(description: "reported")
+        reported.expectedFulfillmentCount = 3
+        provider.onPaneWorktreeResolved = { _, path, _, created in
+            if let path { flags[path] = created }
+            reported.fulfill()
+        }
+        func bash(_ command: String) -> WebhookEvent {
+            WebhookEvent(source: "claude-code", sessionId: "s1", event: .toolUseStart, cwd: repo.path, timestamp: nil,
+                         data: ["tool_name": "Bash", "tool_input": ["command": command]], paneId: "seahelm-repo-main")
+        }
+
+        provider.handleEvent(bash("git worktree add -q -b feat/x ../repo-made origin/main"))
+        provider.handleEvent(bash("cd \(made.path) && git status"))
+        provider.handleEvent(bash("cd \(other.path) && git status"))
+
+        wait(for: [reported], timeout: 2)
+        XCTAssertEqual(flags[canon(made)], true)
+        XCTAssertEqual(flags[canon(other)], false)
     }
 
     /// A subagent's `agent_id` marks a nested context. One working in another
@@ -229,7 +299,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
 
         let notReported = expectation(description: "no move reported")
         notReported.isInverted = true
-        provider.onPaneWorktreeResolved = { _, _, _ in notReported.fulfill() }
+        provider.onPaneWorktreeResolved = { _, _, _, _ in notReported.fulfill() }
 
         provider.handleEvent(WebhookEvent(
             source: "claude-code", sessionId: "s1", event: .toolUseEnd,
@@ -251,7 +321,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
 
         let notReported = expectation(description: "no move reported")
         notReported.isInverted = true
-        provider.onPaneWorktreeResolved = { _, _, _ in notReported.fulfill() }
+        provider.onPaneWorktreeResolved = { _, _, _, _ in notReported.fulfill() }
 
         provider.handleEvent(event(cwd: repo.path, paneId: nil))
 
@@ -270,7 +340,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
         var calls = 0
         let twice = expectation(description: "reported for both events")
         twice.expectedFulfillmentCount = 2
-        provider.onPaneWorktreeResolved = { _, _, _ in
+        provider.onPaneWorktreeResolved = { _, _, _, _ in
             calls += 1
             twice.fulfill()
         }
@@ -294,7 +364,7 @@ final class AgentMovedWorktreeTests: XCTestCase {
         let resolved = expectation(description: "unmatched location reported")
         var reportedPath: String?
         var reportedCwd: String?
-        provider.onPaneWorktreeResolved = { _, path, cwd in
+        provider.onPaneWorktreeResolved = { _, path, cwd, _ in
             reportedPath = path
             reportedCwd = cwd
             resolved.fulfill()
