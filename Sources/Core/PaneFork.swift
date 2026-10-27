@@ -20,6 +20,43 @@ enum PaneFork {
         return hook
     }
 
+    /// Whether a pane is forked into `destination` without being asked: its
+    /// agent created that worktree itself (the caller only asks then) and is
+    /// working in it, it is not the pane's own worktree, and this pane has not
+    /// been forked there already. A `cd` into a worktree someone else made is a
+    /// visit and forks nothing.
+    static func shouldAutoFork(enabled: Bool, filedWorktree: String, destination: String,
+                               alreadyForked: Bool) -> Bool {
+        enabled && !alreadyForked
+            && PaneAwayIndicator.canonicalize(filedWorktree) != PaneAwayIndicator.canonicalize(destination)
+    }
+
+    /// What a fork that carries on (automatic, or `--continue`) is told. Its
+    /// transcript ends on the call that forked it, so it is told not to fork
+    /// or move again.
+    static func continuePrompt(destination: String) -> String {
+        "You have been forked into a new pane whose working directory is \(destination), "
+            + "the worktree you were working in. Continue the task from where you left off, here. "
+            + "The fork is done: do not run `seahelm pane fork` or `seahelm pane move` again."
+    }
+
+    /// Spool a fork's first message to a file the launch command reads and
+    /// removes (see `AgentSessionRef.forkCommandLine`). Nil when it cannot be
+    /// written; the fork then just waits at its prompt.
+    static func writePromptFile(_ prompt: String,
+                                directory: URL = FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("seahelm-fork-prompts")) -> String? {
+        let file = directory.appendingPathComponent(UUID().uuidString + ".txt")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try prompt.write(to: file, atomically: true, encoding: .utf8)
+            return file.path
+        } catch {
+            NSLog("[PaneFork] Could not write the fork prompt: \(error)")
+            return nil
+        }
+    }
+
     /// Wait between the Esc and reading the transcript, so the interrupted turn
     /// is on disk before the fork copies it.
     static let interruptSettleDelay: TimeInterval = 1.0

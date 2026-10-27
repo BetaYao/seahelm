@@ -9,17 +9,17 @@ final class PaneWorkingDirectoryTests: XCTestCase {
     /// and the worktree root is the floor, not the answer.
     func testTheLadderPrefersTheFreshestSource() {
         XCTAssertEqual(
-            PaneWorkingDirectory.choose(probed: "/probed", oscPwd: "/osc", initial: "/initial",
-                                        worktreePath: "/wt", exists: all),
-            "/probed")
+            PaneWorkingDirectory.choose(probed: "/wt/probed", oscPwd: "/wt/osc", initial: "/wt/initial",
+                                        worktreePath: "/wt", exists: all, canonical: { $0 }),
+            "/wt/probed")
         XCTAssertEqual(
-            PaneWorkingDirectory.choose(probed: nil, oscPwd: "/osc", initial: "/initial",
-                                        worktreePath: "/wt", exists: all),
-            "/osc")
+            PaneWorkingDirectory.choose(probed: nil, oscPwd: "/wt/osc", initial: "/wt/initial",
+                                        worktreePath: "/wt", exists: all, canonical: { $0 }),
+            "/wt/osc")
         XCTAssertEqual(
-            PaneWorkingDirectory.choose(probed: nil, oscPwd: nil, initial: "/initial",
-                                        worktreePath: "/wt", exists: all),
-            "/initial")
+            PaneWorkingDirectory.choose(probed: nil, oscPwd: nil, initial: "/wt/initial",
+                                        worktreePath: "/wt", exists: all, canonical: { $0 }),
+            "/wt/initial")
     }
 
     /// A pane that says nothing about itself behaves exactly as it did before
@@ -27,7 +27,7 @@ final class PaneWorkingDirectoryTests: XCTestCase {
     func testTheWorktreeRootIsTheFloor() {
         XCTAssertEqual(
             PaneWorkingDirectory.choose(probed: nil, oscPwd: "", initial: "   ",
-                                        worktreePath: "/wt", exists: all),
+                                        worktreePath: "/wt", exists: all, canonical: { $0 }),
             "/wt")
     }
 
@@ -35,12 +35,12 @@ final class PaneWorkingDirectoryTests: XCTestCase {
     /// surface creation — it takes the next candidate down instead.
     func testAVanishedDirectoryIsSkipped() {
         XCTAssertEqual(
-            PaneWorkingDirectory.choose(probed: "/gone", oscPwd: "/still-here", initial: nil,
-                                        worktreePath: "/wt", exists: { $0 != "/gone" }),
-            "/still-here")
+            PaneWorkingDirectory.choose(probed: "/wt/gone", oscPwd: "/wt/still-here", initial: nil,
+                                        worktreePath: "/wt", exists: { $0 != "/wt/gone" }, canonical: { $0 }),
+            "/wt/still-here")
         XCTAssertEqual(
-            PaneWorkingDirectory.choose(probed: "/gone", oscPwd: "/also-gone", initial: "/gone-too",
-                                        worktreePath: "/wt", exists: { _ in false }),
+            PaneWorkingDirectory.choose(probed: "/wt/gone", oscPwd: "/wt/also-gone", initial: "/wt/gone-too",
+                                        worktreePath: "/wt", exists: { _ in false }, canonical: { $0 }),
             "/wt")
     }
 
@@ -60,5 +60,24 @@ final class PaneWorkingDirectoryTests: XCTestCase {
 
     func testAPaneWithNoSessionIsNotProbed() {
         XCTAssertNil(PaneWorkingDirectory.probeSessionCwd(paneSessionKey: ""))
+    }
+
+    /// A pane moved to another worktree keeps its process, and so its old cwd.
+    /// A split must open in the worktree the pane is filed under, not back in
+    /// the one it left.
+    func testADirectoryOutsideTheWorktreeIsNotInherited() {
+        XCTAssertEqual(
+            PaneWorkingDirectory.choose(probed: "/old-wt/src", oscPwd: "/old-wt", initial: "/old-wt",
+                                        worktreePath: "/wt", exists: { _ in true }, canonical: { $0 }),
+            "/wt")
+        XCTAssertEqual(
+            PaneWorkingDirectory.choose(probed: "/old-wt", oscPwd: "/wt/sub", initial: nil,
+                                        worktreePath: "/wt", exists: { _ in true }, canonical: { $0 }),
+            "/wt/sub")
+        // A sibling whose name only starts with the worktree's is outside it.
+        XCTAssertEqual(
+            PaneWorkingDirectory.choose(probed: "/wt-other", oscPwd: nil, initial: nil,
+                                        worktreePath: "/wt", exists: { _ in true }, canonical: { $0 }),
+            "/wt")
     }
 }

@@ -786,8 +786,9 @@ class TabCoordinator {
                         // title shows when its agent is away from the filed worktree.
                         self?.handleNewWorktreeFromHook(worktreePath)
                     }
-                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath, cwd in
-                        self?.noteAgentLocation(paneId: paneId, worktreePath: worktreePath, cwd: cwd)
+                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath, cwd, createdByAgent in
+                        self?.noteAgentLocation(paneId: paneId, worktreePath: worktreePath, cwd: cwd,
+                                                createdByAgent: createdByAgent)
                     }
                     self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
                         self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
@@ -1182,7 +1183,7 @@ class TabCoordinator {
 
     /// Record where a pane's agent last reported itself. Does not move the pane;
     /// refresh the chrome title so a mismatch can show as an "away" suffix.
-    private func noteAgentLocation(paneId: String, worktreePath: String?, cwd: String) {
+    private func noteAgentLocation(paneId: String, worktreePath: String?, cwd: String, createdByAgent: Bool) {
         guard let station = StationRegistry.shared.station(forSessionName: paneId) else { return }
         let next = Station.HookLocation(worktreePath: worktreePath, cwd: cwd)
         let prev = station.hookLocation
@@ -1190,6 +1191,34 @@ class TabCoordinator {
         station.hookLocation = next
         if changed {
             delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        }
+        if let worktreePath, createdByAgent { autoForkIntoCreated(station: station, worktreePath: worktreePath) }
+    }
+
+    /// Pane + destination pairs already auto-forked, so the original pane's
+    /// later events (it is still filed where it was) do not fork it again.
+    private var autoForked: Set<String> = []
+
+    /// Fork the pane into `worktreePath`, a worktree its agent created itself and
+    /// is now working in (`PaneFork.shouldAutoFork`). The original pane stays,
+    /// its turn stopped; the fork is told to carry on, and the view stays where
+    /// the user has it.
+    private func autoForkIntoCreated(station: Station, worktreePath: String) {
+        guard let located = terminalCoordinator.stationManager.locate(stationId: station.id) else { return }
+        let canon = WorktreeDiscovery.canonicalPath(worktreePath)
+        let key = station.id + "\u{0}" + canon
+        guard PaneFork.shouldAutoFork(enabled: config.autoForkPanes,
+                                      filedWorktree: located.tree.worktreePath,
+                                      destination: canon,
+                                      alreadyForked: autoForked.contains(key)),
+              case .success = forkPlan(stationId: station.id, toWorktreePath: worktreePath) else { return }
+        autoForked.insert(key)
+        NSLog("[TabCoordinator] Auto-forking pane \(station.id) into the worktree its agent created: \(canon)")
+        forkPane(stationId: station.id, toWorktreePath: worktreePath,
+                 continueTask: true, reveal: false) { result in
+            if case .failure(let error) = result {
+                NSLog("[TabCoordinator] Auto-fork into \(canon) failed: \(error.message)")
+            }
         }
     }
 
@@ -1244,10 +1273,12 @@ class TabCoordinator {
     /// turn (Esc — the pane, its process and its session all stay), start
     /// `claude --resume <id> --fork-session` in a fresh zmx session in the
     /// destination, and file a new pane on that session there. The fork waits
-    /// at its prompt; nothing is sent to it.
+    /// at its prompt, unless `continueTask` gives it a first message to carry
+    /// on. `reveal` brings the fork on screen and focuses it.
     ///
     /// Main thread; `completion` runs on main with the new pane's station id.
     func forkPane(stationId: String, toWorktreePath explicit: String? = nil,
+                  continueTask: Bool = false, reveal: Bool = true,
                   completion: @escaping (Result<String, PaneForkError>) -> Void) {
         let plan: (ref: AgentSessionRef, destination: WorktreeInfo)
         switch forkPlan(stationId: stationId, toWorktreePath: explicit) {
@@ -1256,7 +1287,10 @@ class TabCoordinator {
         }
         let destination = plan.destination
         let yolo = config.agentYolo ? AgentType.claudeCode.yoloFlag.map { [$0] } ?? [] : []
-        guard let commandLine = plan.ref.forkCommandLine(extraArgs: yolo) else {
+        let promptFile = continueTask
+            ? PaneFork.writePromptFile(PaneFork.continuePrompt(destination: destination.path))
+            : nil
+        guard let commandLine = plan.ref.forkCommandLine(extraArgs: yolo, promptFile: promptFile) else {
             completion(.failure(.unsupportedAgent)); return
         }
 
@@ -1282,7 +1316,7 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, started else { completion(.failure(.launchFailed)); return }
                 NSLog("[TabCoordinator] Forked pane \(stationId) into \(destination.path) as \(name)")
-                completion(.success(self.installForkedPane(sessionName: name, in: destination)))
+                completion(.success(self.installForkedPane(sessionName: name, in: destination, reveal: reveal)))
             }
         }
     }
@@ -1290,7 +1324,7 @@ class TabCoordinator {
     /// File a new pane on an already-running zmx session in `destination`, and
     /// bring it on screen. A placeholder the worktree was standing on is retired
     /// rather than split beside. Returns the new station id.
-    private func installForkedPane(sessionName: String, in destination: WorktreeInfo) -> String {
+    private func installForkedPane(sessionName: String, in destination: WorktreeInfo, reveal: Bool) -> String {
         let manager = terminalCoordinator.stationManager
         retirePlaceholderPane(at: destination.path)
 
@@ -1319,7 +1353,7 @@ class TabCoordinator {
 
         // Selecting the worktree embeds its container, which creates the surface;
         // focus has to wait for that.
-        if preparePaneControlTarget(station.id) {
+        if reveal, preparePaneControlTarget(station.id) {
             DispatchQueue.main.async { [weak self] in
                 _ = self?.terminalCoordinator.focusPane(targetStationId: station.id)
             }

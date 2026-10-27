@@ -191,10 +191,18 @@ struct AgentSessionRef: Codable, Equatable {
     }
 
     /// `forkArgv` as a shell command line, every token single-quoted, with
-    /// `extraArgs` (a yolo flag, say) appended.
-    func forkCommandLine(extraArgs: [String] = []) -> String? {
+    /// `extraArgs` (a yolo flag, say) appended. `promptFile`, when given, holds
+    /// the fork's first message: it is read (and removed) by the shell rather
+    /// than spelled out, because `zmx run` types the command line into the
+    /// session's tty and the line discipline cuts input past 1024 bytes
+    /// (MAX_CANON) — the launch wrapper alone comes close.
+    func forkCommandLine(extraArgs: [String] = [], promptFile: String? = nil) -> String? {
         guard let argv = Self.forkArgv(agent: agent, kind: kind, value: sessionId) else { return nil }
-        return (argv + extraArgs).map(ShellEscape.singleQuote).joined(separator: " ")
+        var line = (argv + extraArgs).map(ShellEscape.singleQuote).joined(separator: " ")
+        if let promptFile {
+            line += " \"$(f=\(ShellEscape.singleQuote(promptFile)); cat \"$f\"; rm -f \"$f\")\""
+        }
+        return line
     }
 
     var supportsFork: Bool { Self.forkArgv(agent: agent, kind: kind, value: sessionId) != nil }

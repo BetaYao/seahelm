@@ -11,6 +11,9 @@ import Foundation
 ///
 /// The pane's own worktree is unchanged by any of this: a pane is filed under
 /// the worktree it was split from, wherever its shell happens to be standing.
+/// So only a directory *inside* that worktree is inherited. A pane moved to
+/// another worktree (`pane move`) keeps its process and so its old cwd, and
+/// splitting it would otherwise open the new pane back in the worktree it left.
 enum PaneWorkingDirectory {
     /// The ladder, most authoritative first. Pure — `exists` is injected so the
     /// order can be tested without a filesystem.
@@ -21,11 +24,16 @@ enum PaneWorkingDirectory {
     /// reports nothing at all. Both outrank the directory the pane was *created*
     /// in, which is the thing being fixed.
     static func choose(probed: String?, oscPwd: String?, initial: String?, worktreePath: String,
-                       exists: (String) -> Bool = Self.directoryExists) -> String {
+                       exists: (String) -> Bool = Self.directoryExists,
+                       canonical: (String) -> String = WorktreeDiscovery.canonicalPath) -> String {
+        let root = canonical(worktreePath)
         for candidate in [probed, oscPwd, initial] {
             guard let candidate else { continue }
             let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty, exists(trimmed) { return trimmed }
+            guard !trimmed.isEmpty else { continue }
+            let path = canonical(trimmed)
+            guard path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/") else { continue }
+            if exists(trimmed) { return trimmed }
         }
         return worktreePath
     }

@@ -62,6 +62,9 @@ struct Config: Codable {
     var defaultAgent: String
     /// When true, agent launch commands append skip-permission / yolo flags.
     var agentYolo: Bool
+    /// When true, a Claude pane whose agent starts working in a freshly created
+    /// worktree of its repo is forked there automatically (`PaneFork.shouldAutoFork`).
+    var autoForkPanes: Bool
     /// Agent manifest ids whose hooks were installed during onboarding.
     var enabledHookAgents: [String]
     /// Desktop notification sound: `default`, `defaultCritical`, or `none`.
@@ -104,6 +107,7 @@ struct Config: Codable {
         case onboardingCompleted = "onboarding_completed"
         case defaultAgent = "default_agent"
         case agentYolo = "agent_yolo"
+        case autoForkPanes = "auto_fork_panes"
         case enabledHookAgents = "enabled_hook_agents"
         case notificationSound = "notification_sound"
         case confirmBeforeQuit = "confirm_before_quit"
@@ -144,6 +148,7 @@ struct Config: Codable {
         onboardingCompleted = false
         defaultAgent = AgentType.claudeCode.rawValue
         agentYolo = false
+        autoForkPanes = true
         enabledHookAgents = []
         notificationSound = "default"
         confirmBeforeQuit = true
@@ -195,6 +200,7 @@ struct Config: Codable {
         defaultAgent = try container.decodeIfPresent(String.self, forKey: .defaultAgent)
             ?? AgentType.claudeCode.rawValue
         agentYolo = try container.decodeIfPresent(Bool.self, forKey: .agentYolo) ?? false
+        autoForkPanes = try container.decodeIfPresent(Bool.self, forKey: .autoForkPanes) ?? true
         enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
         confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true

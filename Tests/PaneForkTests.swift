@@ -22,6 +22,22 @@ final class PaneForkTests: XCTestCase {
         XCTAssertNil(PaneFork.target(explicit: "", filedWorktree: "/r/main", hookWorktree: ""))
     }
 
+    // MARK: - Auto-fork
+
+    func testAutoForksIntoAWorktreeElsewhere() {
+        XCTAssertTrue(PaneFork.shouldAutoFork(enabled: true, filedWorktree: "/r/repo",
+                                              destination: "/r/repo-feature", alreadyForked: false))
+    }
+
+    func testDoesNotAutoForkIntoItsOwnWorktreeTwiceOrWhenDisabled() {
+        XCTAssertFalse(PaneFork.shouldAutoFork(enabled: true, filedWorktree: "/r/repo-feature/",
+                                               destination: "/r/repo-feature", alreadyForked: false))
+        XCTAssertFalse(PaneFork.shouldAutoFork(enabled: true, filedWorktree: "/r/repo",
+                                               destination: "/r/repo-feature", alreadyForked: true))
+        XCTAssertFalse(PaneFork.shouldAutoFork(enabled: false, filedWorktree: "/r/repo",
+                                               destination: "/r/repo-feature", alreadyForked: false))
+    }
+
     func testRouterRequiresPaneId() {
         let router = ControlRouter(dataSource: nil)
         guard case .error(let code, _) = router.handle(method: "pane.fork", params: [:]) else {

@@ -17,9 +17,13 @@ class WebhookStatusProvider {
 
     /// Called (on main) with where a pane's agent is *currently* working, on
     /// every hook event that names a pane. `worktreePath` is the matched known
-    /// worktree, or nil when the cwd matched nothing. `cwd` is the raw path
-    /// from the hook. Used for the chrome "away" title — not for auto-rehome.
-    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String?, _ cwd: String) -> Void)?
+    /// worktree, or nil when the location matched nothing. `cwd` is that
+    /// location: the hook's cwd, or where the agent's latest tool call went
+    /// (`AgentWorkLocation`). `createdByAgent` is true when that worktree is
+    /// one this pane's agent created itself. Drives the chrome "away" title and
+    /// auto-fork.
+    var onPaneWorktreeResolved: ((_ paneId: String, _ worktreePath: String?, _ cwd: String,
+                                  _ createdByAgent: Bool) -> Void)?
 
     /// Called (on main) when an agent hook event resolves a persistable resume
     /// ref for a known worktree. `paneId` is the emitting pane's session name
@@ -36,6 +40,17 @@ class WebhookStatusProvider {
     /// runs on *every* hook event, so without this an agent sitting in a worktree
     /// we have not integrated yet would re-trigger discovery on every tool call.
     private var discoveryRequestedAt: [String: Date] = [:]
+
+    /// Per pane, where its agent's latest placed tool call went (`cd <dir> && …`,
+    /// an edit by absolute path). Cleared by a shell command that runs in the
+    /// cwd; left alone by events that name no place (Stop, prompts, reads),
+    /// which still carry the project cwd — reading those as a move back would
+    /// flip the pane's location on every turn.
+    private var lastToolTarget: [String: String] = [:]
+
+    /// Per pane, the worktrees its agent created (`git worktree add`,
+    /// EnterWorktree), as the tool call spelled them.
+    private var createdWorktrees: [String: Set<String>] = [:]
     private let discoveryRequestInterval: TimeInterval = 15
 
     struct SessionState {
@@ -65,30 +80,50 @@ class WebhookStatusProvider {
     func handleEvent(_ event: WebhookEvent) {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
+            let isSubagent = event.data?["agent_id"] != nil
+
+            // Where the agent is working: its cwd, unless its tool calls say
+            // otherwise. Subagents are excluded: their `agent_id` marks a
+            // nested context, which must not speak for the pane.
+            var location = event.cwd
+            if let paneId = event.paneId, !isSubagent {
+                switch AgentWorkLocation.signal(event: event.event, data: event.data, cwd: event.cwd) {
+                case .directory(let dir): lastToolTarget[paneId] = dir
+                case .cwd: lastToolTarget[paneId] = nil
+                case nil: break
+                }
+                if let created = AgentWorkLocation.createdWorktree(event: event.event, data: event.data, cwd: event.cwd) {
+                    createdWorktrees[paneId, default: []].insert(created)
+                }
+                location = lastToolTarget[paneId] ?? event.cwd
+            }
+            let canonLocation = canonicalize(location)
 
             // An agent that moved into a worktree we do not track yet. Two shapes:
-            // the cwd matches nothing at all, or — the case that used to be
+            // the location matches nothing at all, or — the case that used to be
             // invisible — it sits *inside* a known worktree while being a worktree
             // root itself, which is exactly where Claude Code's own EnterWorktree
             // puts one (`<repo>/.claude/worktrees/<name>`). Ask the owner to
             // discover it so the new card appears; the pane stays where it is.
-            let preMatch = matchWorktree(canonCwd)
-            if preMatch == nil || (preMatch != canonCwd && isWorktreeRoot(canonCwd)) {
-                requestDiscovery(of: canonCwd, rawCwd: event.cwd, paneId: event.paneId)
+            let preMatch = matchWorktree(canonLocation)
+            if preMatch == nil || (preMatch != canonLocation && isWorktreeRoot(canonLocation)) {
+                requestDiscovery(of: canonLocation, rawCwd: location, paneId: event.paneId)
             }
 
-            let matchedWorktree = matchWorktree(canonCwd)
-
             // Where this pane's agent is now — including "nowhere we track".
-            // Subagents are excluded: their `agent_id` marks a nested context.
-            if let paneId = event.paneId, event.data?["agent_id"] == nil {
-                let cwd = event.cwd
+            if let paneId = event.paneId, !isSubagent {
+                let locatedWorktree = matchWorktree(canonLocation)
+                let createdByAgent = locatedWorktree.map { located in
+                    createdWorktrees[paneId]?.contains { canonicalize($0) == located } ?? false
+                } ?? false
                 DispatchQueue.main.async { [weak self] in
-                    self?.onPaneWorktreeResolved?(paneId, matchedWorktree, cwd)
+                    self?.onPaneWorktreeResolved?(paneId, locatedWorktree, location, createdByAgent)
                 }
             }
 
-            guard let worktreePath = matchedWorktree else {
+            // Status stays filed by the hook cwd: it is the pane's worktree, not
+            // the one a single command visited, that the rollup belongs to.
+            guard let worktreePath = matchWorktree(canonCwd) else {
                 NSLog("[WebhookStatusProvider] No worktree match for cwd: \(event.cwd)")
                 return
             }
