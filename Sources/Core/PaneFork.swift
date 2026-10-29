@@ -40,6 +40,18 @@ enum PaneFork {
             + "The fork is done: do not run `seahelm pane fork` or `seahelm pane move` again."
     }
 
+    /// The fork's own session name (claude `--name`): the destination's branch,
+    /// else its directory. A fork copies the whole transcript, title included,
+    /// so without one the new pane read exactly like the pane it came from.
+    /// Claude records the name as the session's `custom-title`, which outranks
+    /// the inherited title in `SessionTitleLookup`, its own terminal title and
+    /// the resume picker. Capped, since the launch line is typed into a tty.
+    static func sessionName(branch: String, worktreePath: String) -> String {
+        let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? URL(fileURLWithPath: worktreePath).lastPathComponent : trimmed
+        return String(name.prefix(80))
+    }
+
     /// Spool a fork's first message to a file the launch command reads and
     /// removes (see `AgentSessionRef.forkCommandLine`). Nil when it cannot be
     /// written; the fork then just waits at its prompt.
