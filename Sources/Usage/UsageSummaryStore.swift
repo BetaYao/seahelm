@@ -26,11 +26,6 @@ final class UsageSummaryStore {
                 cacheReader: ClaudeStatuslineCacheReader(
                     cacheURL: home.appendingPathComponent("Library/Caches/seahelm/claude-statusline.json"),
                     staleInterval: 6 * 60 * 60
-                ),
-                transcriptAggregator: ClaudeTranscriptUsageAggregator(
-                    rootURL: home.appendingPathComponent(".claude/projects"),
-                    calendar: calendar,
-                    modificationGraceInterval: 24 * 60 * 60
                 )
             ),
             codexProvider: CodexUsageSummaryProvider(
