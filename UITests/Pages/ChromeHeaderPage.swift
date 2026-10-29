@@ -28,7 +28,7 @@ final class ChromeHeaderPage {
     var themeButton: XCUIElement { app.buttons["chrome.icon.theme"] }
     var firstMateButton: XCUIElement { app.buttons["chrome.icon.firstMate"] }
     var filesButton: XCUIElement { app.buttons["chrome.icon.files"] }
-    var changesButton: XCUIElement { app.buttons["chrome.icon.changes"] }
+    var issuesButton: XCUIElement { app.buttons["chrome.icon.issues"] }
     var sidebarToggle: XCUIElement { app.buttons["chrome.icon.sidebar"] }
 
     func worktreeRow(id: String) -> XCUIElement {
@@ -38,7 +38,7 @@ final class ChromeHeaderPage {
     func clickTheme() { themeButton.waitAndClick() }
     func clickFirstMate() { firstMateButton.waitAndClick() }
     func clickFiles() { filesButton.waitAndClick() }
-    func clickChanges() { changesButton.waitAndClick() }
+    func clickIssues() { issuesButton.waitAndClick() }
     func clickSidebarToggle() { sidebarToggle.waitAndClick() }
 
     /// True when the left chrome column is collapsed (sidebar header gone / hidden).

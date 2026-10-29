@@ -28,8 +28,8 @@ final class ChromeLayoutStateTests: XCTestCase {
 
     func testSelectDifferentPaneExpandsAndSwitches() {
         var s = ChromeLayoutState(width: 300, collapsed: false, activePane: .files)
-        s.selectPane(.changes)
+        s.selectPane(.issues)
         XCTAssertFalse(s.isCollapsed)
-        XCTAssertEqual(s.activePane, .changes)
+        XCTAssertEqual(s.activePane, .issues)
     }
 }

@@ -348,11 +348,11 @@ final class ConfigTests: XCTestCase {
     func testEncodeDecodeSidebarLayoutRoundtrip() throws {
         var original = Config()
         original.sidebarCollapsed = true
-        original.sidebarActivePane = ChromeLeftPane.changes.rawValue
+        original.sidebarActivePane = ChromeLeftPane.issues.rawValue
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Config.self, from: data)
         XCTAssertTrue(decoded.sidebarCollapsed)
-        XCTAssertEqual(decoded.sidebarActivePane, ChromeLeftPane.changes.rawValue)
+        XCTAssertEqual(decoded.sidebarActivePane, ChromeLeftPane.issues.rawValue)
     }
 
     func testDecodeMissingSidebarWidth_UsesDefault() throws {

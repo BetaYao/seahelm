@@ -1,14 +1,16 @@
 import Foundation
 import CoreGraphics
 
+/// A config written before Issues replaced Changes says `"changes"`; that no
+/// longer decodes and the launch falls back to First Mate.
 enum ChromeLeftPane: String, Equatable, Codable {
-    case firstMate, files, changes
+    case firstMate, files, issues
 }
 
-/// Legacy left-column pane tags used by dashboard keymap shortcuts (files / changes).
+/// Legacy left-column pane tags used by dashboard keymap shortcuts (files / issues).
 enum LeftPane: Int, CaseIterable {
     case file = 1
-    case change = 2
+    case issues = 2
 }
 
 struct ChromeLayoutState: Equatable {

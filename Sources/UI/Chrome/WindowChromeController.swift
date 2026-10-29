@@ -147,6 +147,11 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setWorktreeContextEnabled(enabled)
     }
 
+    func setIssuesAvailable(_ available: Bool) {
+        sidebarHeader.setIssuesAvailable(available)
+        terminalHeader.setIssuesAvailable(available)
+    }
+
     /// Drive the terminal header's edit-mode toggle (availability + on-state).
     func setEditMode(available: Bool, isOn: Bool) {
         terminalHeader.setEditMode(available: available, isOn: isOn)

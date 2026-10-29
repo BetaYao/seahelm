@@ -33,6 +33,8 @@ final class DashboardOverviewView: NSView {
 
     /// Resolves a worktree's current-pane title for order cards.
     var currentPaneTitleProvider: ((String) -> String?)?
+    /// Args: worktree path and branch. The issue badge for that row, if any.
+    var issueBadgeProvider: ((String, String) -> (text: String, toolTip: String)?)?
     var onSelectWorktree: ((String) -> Void)?
     /// A pane row was clicked in the expanded "Group by Pane" mode. Args:
     /// the pane's worktree path and its Station id.
@@ -535,6 +537,12 @@ final class DashboardOverviewView: NSView {
     /// unchanged by definition, and rewriting it was most of what pinned the
     /// main thread. Leave it nil to refresh all rows.
     func update(_ panes: [WorktreeRowInfo], changedWorktreePath: String? = nil) {
+        var panes = panes
+        if let issueBadgeProvider {
+            for i in panes.indices {
+                panes[i].issueBadge = issueBadgeProvider(panes[i].worktreePath, panes[i].thread)
+            }
+        }
         latestPanes = panes
         guard !isRenderPaused else { return }
         render(panes, revealSelection: false, changedWorktreePath: changedWorktreePath)
@@ -1235,6 +1243,8 @@ final class DashboardOverviewView: NSView {
         private let titleLabel: NSTextField
         private let timeLabel: NSTextField
         private let branchLabel: NSTextField
+        /// `#12` — the issue this worktree's branch or PR says it works on.
+        private let issueLabel: NSTextField
         private let gitLabel: NSTextField
         private let paneCountLabel: NSTextField
         private let repositoryLabel: NSTextField?
@@ -1304,6 +1314,7 @@ final class DashboardOverviewView: NSView {
             self.timeLabel = Self.label(pane.currentPaneRunTime, DashboardOverviewView.inkFaint, 10)
             let branch = pane.thread.isEmpty ? pane.name : pane.thread
             self.branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
+            self.issueLabel = Self.label("", DashboardOverviewView.sea, 10, weight: .semibold)
             self.gitLabel = NSTextField(labelWithString: "")
             self.paneCountLabel = Self.label(pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—",
                                              DashboardOverviewView.inkFaint, 10)
@@ -1373,7 +1384,12 @@ final class DashboardOverviewView: NSView {
                 repository.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 line2.addArrangedSubview(repository)
             }
+            issueLabel.setContentHuggingPriority(.required, for: .horizontal)
+            issueLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            issueLabel.setAccessibilityIdentifier("chrome.worktreeRow.issue")
+            issueLabel.isHidden = true
             line2.addArrangedSubview(branchLabel)
+            line2.addArrangedSubview(issueLabel)
             line2.addArrangedSubview(gitLabel)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(paneCountLabel)
@@ -1512,6 +1528,10 @@ final class DashboardOverviewView: NSView {
             if !nextBranch.isEmpty {
                 Self.setText(branchLabel, nextBranch)
             }
+            let badge = pane.issueBadge
+            Self.setText(issueLabel, badge?.text ?? "")
+            if issueLabel.toolTip != badge?.toolTip { issueLabel.toolTip = badge?.toolTip }
+            if issueLabel.isHidden != (badge == nil) { issueLabel.isHidden = badge == nil }
             if !hasRenderedGit || renderedGitStats != pane.gitStats {
                 hasRenderedGit = true
                 renderedGitStats = pane.gitStats
@@ -1564,7 +1584,7 @@ final class DashboardOverviewView: NSView {
             pending = isPending
             applyDotVisibility()
             let alpha: CGFloat = isPending ? 0.55 : 1
-            for view in [titleLabel, timeLabel, branchLabel, gitLabel, paneCountLabel, ribbon] as [NSView] {
+            for view in [titleLabel, timeLabel, branchLabel, issueLabel, gitLabel, paneCountLabel, ribbon] as [NSView] {
                 view.alphaValue = alpha
             }
             repositoryLabel?.alphaValue = alpha
