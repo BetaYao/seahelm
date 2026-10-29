@@ -1,6 +1,6 @@
 import AppKit
 
-/// Shared Theme · First Mate · Files · Changes icon strip used by both chrome headers.
+/// Shared Theme · First Mate · Files · Issues icon strip used by both chrome headers.
 final class ChromeIconClusterView: NSView {
     weak var delegate: ChromeHeaderDelegate?
 
@@ -8,10 +8,14 @@ final class ChromeIconClusterView: NSView {
     private let themeButton = ChromeIconButton()
     private let firstMateButton = ChromeIconButton()
     private let filesButton = ChromeIconButton()
-    private let changesButton = ChromeIconButton()
+    private let issuesButton = ChromeIconButton()
 
     private var activePane: ChromeLeftPane?
     private var worktreeContextEnabled = true
+    private var issuesAvailable = false
+
+    /// GitHub's issue glyph is a dot in a ring.
+    static let issuesSymbol = "smallcircle.filled.circle"
 
     private static let idleTint = NSColor(hex: 0x888888)
 
@@ -32,9 +36,17 @@ final class ChromeIconClusterView: NSView {
         applyActiveTint()
     }
 
-    /// When false, Files/Changes are dimmed and disabled; First Mate stays enabled.
+    /// When false, Files/Issues are dimmed and disabled; First Mate stays enabled.
     func setWorktreeContextEnabled(_ enabled: Bool) {
         worktreeContextEnabled = enabled
+        applyWorktreeContext()
+    }
+
+    /// Issues is offered only for a worktree whose GitHub issues could be read;
+    /// anywhere else it is hidden rather than dimmed, since nothing would bring
+    /// it back to life.
+    func setIssuesAvailable(_ available: Bool) {
+        issuesAvailable = available
         applyWorktreeContext()
     }
 
@@ -58,11 +70,11 @@ final class ChromeIconClusterView: NSView {
         configure(filesButton, symbol: "folder",
                   identifier: "chrome.icon.files", label: "Files",
                   action: #selector(filesClicked))
-        configure(changesButton, symbol: "plusminus",
-                  identifier: "chrome.icon.changes", label: "Changes",
-                  action: #selector(changesClicked))
+        configure(issuesButton, symbol: Self.issuesSymbol,
+                  identifier: "chrome.icon.issues", label: "Issues",
+                  action: #selector(issuesClicked))
 
-        [themeButton, firstMateButton, filesButton, changesButton].forEach {
+        [themeButton, firstMateButton, filesButton, issuesButton].forEach {
             stack.addArrangedSubview($0)
         }
 
@@ -103,16 +115,17 @@ final class ChromeIconClusterView: NSView {
     private func applyActiveTint() {
         firstMateButton.contentTintColor = activePane == .firstMate ? Theme.accent : Self.idleTint
         filesButton.contentTintColor = activePane == .files ? Theme.accent : Self.idleTint
-        changesButton.contentTintColor = activePane == .changes ? Theme.accent : Self.idleTint
+        issuesButton.contentTintColor = activePane == .issues ? Theme.accent : Self.idleTint
         // Theme is never a pane; keep idle tint.
         themeButton.contentTintColor = Self.idleTint
     }
 
     private func applyWorktreeContext() {
-        for button in [filesButton, changesButton] {
+        for button in [filesButton, issuesButton] {
             button.isEnabled = worktreeContextEnabled
             button.alphaValue = worktreeContextEnabled ? 1 : 0.3
         }
+        issuesButton.isHidden = !issuesAvailable
         firstMateButton.isEnabled = true
         firstMateButton.alphaValue = 1
         themeButton.isEnabled = true
@@ -133,7 +146,7 @@ final class ChromeIconClusterView: NSView {
         delegate?.chromeDidSelectPane(.files)
     }
 
-    @objc private func changesClicked() {
-        delegate?.chromeDidSelectPane(.changes)
+    @objc private func issuesClicked() {
+        delegate?.chromeDidSelectPane(.issues)
     }
 }

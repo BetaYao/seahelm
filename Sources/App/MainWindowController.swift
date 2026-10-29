@@ -405,8 +405,16 @@ class MainWindowController: NSWindowController {
         window.delegate = self
 
         setupMenuShortcuts()
-        // Before the layout: the Changes panel asks GitHub what has merged.
+        // Before the layout: worktree cleanup asks GitHub what has merged, and
+        // the Issues panel and fleet rows ask it for issues.
         MergedPRLookup.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
+        GitHubIssueStore.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
+        NotificationCenter.default.addObserver(
+            forName: GitHubIssueStore.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refreshChromeWorktreeContextEnabled()
+            self?.dashboardVC?.refreshIssueBadges()
+        }
         setupLayout()
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()
@@ -681,6 +689,12 @@ class MainWindowController: NSWindowController {
         let hasSelection = tabCoordinator.selectedPane != nil
             || !(dashboardVC?.selectedWorktreeId.isEmpty ?? true)
         windowChrome?.setWorktreeContextEnabled(hasSelection)
+        // Asking also starts the lookup; the answer comes back through
+        // `GitHubIssueStore.didChange`, which lands here again.
+        let selectedPath = dashboardVC?.selectedWorktreeId ?? ""
+        windowChrome?.setIssuesAvailable(
+            !selectedPath.isEmpty && GitHubIssueStore.shared.hasIssues(forWorktree: selectedPath)
+        )
     }
 
     // MARK: - Region focus (Tab cycle)
@@ -974,7 +988,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// thread with the new worktree's path on success, or nil on failure —
     /// lets the caller (e.g. the Helm cockpit) drop its loading state and
     /// dismiss once the new tab is ready.
-    private func performWorktreeCreate(task: String, repoPath: String, agentType: AgentType, reuseEnv: Bool,
+    /// `branchHint` names the branch when the task text is not a good name
+    /// (an issue brief is paragraphs; its branch should carry the number).
+    private func performWorktreeCreate(task: String, branchHint: String? = nil,
+                                       repoPath: String, agentType: AgentType, reuseEnv: Bool,
                                        onError: ((String) -> Void)? = nil,
                                        onComplete: ((String?) -> Void)? = nil) {
         let currentPath = tabCoordinator.selectedPane?.worktreePath
@@ -983,7 +1000,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
             let branches = WorktreeCreator.listBranches(repoPath: repoPath)
             let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
             do {
-                let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
+                let branchName = WorktreeCreator.branchName(fromTaskDescription: branchHint ?? task,
+                                                            existingBranches: branches)
                 let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
                 WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
@@ -1504,7 +1522,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         refreshIdleWorktreePaths()
         updateChromeTitle()
         updatePrimaryCapsuleNotification()
-        // Panes load / auto-select land here — keep Files/Changes enablement in sync.
+        // Panes load / auto-select land here — keep Files/Issues enablement in sync.
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
     }
@@ -2091,8 +2109,17 @@ extension MainWindowController: DashboardDelegate {
         selectChromePane(.files)
     }
 
-    func dashboardDidRequestShowChanges(worktreePath: String) {
-        selectChromePane(.changes)
+    func dashboardDidRequestStartIssue(_ issue: GitHubIssue, project: String) {
+        guard let repoPath = tabCoordinator.repoPath(forProject: project) else { NSSound.beep(); return }
+        let agentType = WorktreeAgentTypeStore.shared.lastChosen
+            ?? AgentType(rawValue: config.defaultAgent) ?? .claudeCode
+        performWorktreeCreate(
+            task: IssueStartBrief.task(for: issue), branchHint: IssueStartBrief.branchHint(for: issue),
+            repoPath: repoPath, agentType: agentType, reuseEnv: false
+        ) { [weak self] path in
+            guard let path else { return }
+            self?.dashboardVC?.commitWorktreeSelection(path: path)
+        }
     }
 
 }

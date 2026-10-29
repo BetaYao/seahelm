@@ -2,182 +2,12 @@ import AppKit
 
 enum SidePanelTab: Int {
     case files = 1
-    case changes = 2
-}
-
-enum ChangesListMode: Int {
-    case tree = 0
-    case flat = 1
-}
-
-final class ChangeTreeNode {
-    let name: String
-    let path: String
-    var entry: GitChangedFile?
-    var children: [ChangeTreeNode] = []
-    /// A section heading ("Uncommitted", "Not in main"), not a directory.
-    let isGroup: Bool
-
-    var isLeaf: Bool { entry != nil }
-
-    init(name: String, path: String, entry: GitChangedFile? = nil, isGroup: Bool = false) {
-        self.name = name
-        self.path = path
-        self.entry = entry
-        self.isGroup = isGroup
-    }
-}
-
-/// One titled group of the Changes list.
-struct ChangeSection {
-    let title: String
-    let files: [GitChangedFile]
-}
-
-/// The Changes tab answers "what here still has to go in a PR?". These turn a
-/// `GitBranchChanges` into that answer's words, kept apart from the view so they
-/// can be tested.
-enum ChangesSummary {
-    /// Uncommitted work first — it has to be committed before anything else —
-    /// then committed work the base does not have. Empty groups are left out.
-    static func sections(for branch: GitBranchChanges) -> [ChangeSection] {
-        var sections: [ChangeSection] = []
-        let uncommitted = branch.uncommittedFiles
-        if !uncommitted.isEmpty {
-            sections.append(ChangeSection(title: "Uncommitted · \(uncommitted.count)", files: uncommitted))
-        }
-        let committed = branch.committedFiles
-        if !committed.isEmpty {
-            let label: String
-            switch branch.basis {
-            case .sinceMergedPR(let pr, _): label = "After #\(pr.number)"
-            case .mergeResult: label = "Not in \(branch.baseDisplayName ?? "base")"
-            case .workingTree: label = "Committed"
-            }
-            sections.append(ChangeSection(title: "\(label) · \(committed.count)", files: committed))
-        }
-        return sections
-    }
-
-    /// Header subtitle: how many files, and against what. A remote base fetched
-    /// over an hour ago says so, since the answer is only as fresh as the fetch.
-    static func subtitle(for branch: GitBranchChanges, now: Date = Date()) -> String {
-        var parts: [String] = []
-        if branch.files.isEmpty {
-            switch branch.basis {
-            case .sinceMergedPR(let pr, _): parts.append("merged in #\(pr.number)")
-            case .mergeResult: parts.append("clean · vs \(branch.baseDisplayName ?? "base")")
-            case .workingTree: parts.append("clean")
-            }
-        } else {
-            parts.append(branch.isTruncated
-                ? "\(branch.files.count) of \(branch.totalCount)"
-                : branch.files.count == 1 ? "1 file" : "\(branch.files.count) files")
-            switch branch.basis {
-            case .sinceMergedPR(let pr, _): parts.append("since #\(pr.number)")
-            case .mergeResult: parts.append("vs \(branch.baseDisplayName ?? "base")")
-            case .workingTree: break
-            }
-        }
-        if let fetchedAt = branch.fetchedAt, now.timeIntervalSince(fetchedAt) >= 3600 {
-            parts.append("fetched \(age(since: fetchedAt, now: now)) ago")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    /// Tooltip on the subtitle: what the list was measured against.
-    static func explanation(for branch: GitBranchChanges) -> String {
-        switch branch.basis {
-        case .sinceMergedPR(let pr, let baseRef):
-            return "Not yet in a PR: uncommitted work, plus commits after #\(pr.number) "
-                + "(merged into \(baseRef) at \(pr.headSHA.prefix(9)))."
-        case .mergeResult(let baseRef):
-            var text = "Not yet in \(baseRef): uncommitted work, plus what merging this branch would change."
-            if !branch.conflictedPaths.isEmpty {
-                text += " ! marks a file that merge would conflict on — possibly work "
-                    + "already merged that \(baseRef) has since edited."
-            }
-            return text
-        case .workingTree:
-            return "No base branch found: uncommitted work only."
-        }
-    }
-
-    static func emptyMessage(for branch: GitBranchChanges) -> String {
-        if let pr = branch.mergedPR {
-            return "Nothing left to PR — everything here went in with #\(pr.number)"
-        }
-        return "No changes"
-    }
-
-    /// "45m", "3h", "2d".
-    static func age(since date: Date, now: Date) -> String {
-        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
-        if minutes < 60 { return "\(minutes)m" }
-        if minutes < 60 * 24 { return "\(minutes / 60)h" }
-        return "\(minutes / (60 * 24))d"
-    }
-}
-
-/// A row of the flat Changes list: a section heading or a file.
-enum ChangeRow {
-    case group(String)
-    case file(GitChangedFile)
-}
-
-enum ChangeTreeBuilder {
-    /// One heading node per section, each holding that section's directory tree.
-    static func build(sections: [ChangeSection]) -> [ChangeTreeNode] {
-        sections.map { section in
-            let group = ChangeTreeNode(name: section.title, path: "", isGroup: true)
-            group.children = build(from: section.files)
-            return group
-        }
-    }
-
-    static func build(from files: [GitChangedFile]) -> [ChangeTreeNode] {
-        let root = ChangeTreeNode(name: "", path: "")
-        var directoriesByPath: [String: ChangeTreeNode] = ["": root]
-
-        for entry in files {
-            let parts = entry.path.split(separator: "/").map(String.init)
-            guard !parts.isEmpty else { continue }
-            var parent = root
-            var prefixParts: [String] = []
-
-            for part in parts.dropLast() {
-                prefixParts.append(part)
-                let path = prefixParts.joined(separator: "/")
-                if let existing = directoriesByPath[path] {
-                    parent = existing
-                    continue
-                }
-                let node = ChangeTreeNode(name: part, path: path)
-                parent.children.append(node)
-                directoriesByPath[path] = node
-                parent = node
-            }
-
-            let leaf = ChangeTreeNode(name: parts.last ?? entry.path, path: entry.path, entry: entry)
-            parent.children.append(leaf)
-        }
-
-        sort(&root.children)
-        return root.children
-    }
-
-    private static func sort(_ nodes: inout [ChangeTreeNode]) {
-        for node in nodes { sort(&node.children) }
-        nodes.sort { lhs, rhs in
-            if lhs.isLeaf != rhs.isLeaf { return !lhs.isLeaf }
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-        }
-    }
+    case issues = 2
 }
 
 protocol WorktreeSidePanelDelegate: AnyObject {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String)
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String)
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectIssue issue: GitHubIssue)
 }
 
 final class WorktreeSidePanelViewController: NSViewController {
@@ -234,24 +64,18 @@ final class WorktreeSidePanelViewController: NSViewController {
     )
     private var filesBuildGeneration = 0
 
-    // Changes tab
-    private var changesTableView: NSTableView?
-    private var changesOutlineView: NSOutlineView?
-    private var changesScrollView: NSScrollView?
-    private var changedFiles: [GitChangedFile] = []
-    /// The flat list's rows: section headings with their files.
-    private var changeRows: [ChangeRow] = []
-    private var changeTreeRoots: [ChangeTreeNode] = []
-    private var changesListMode: ChangesListMode = .flat
-    private var currentBranchChanges: GitBranchChanges?
-    /// Bumped each time the changes tab starts a (background) reload; stale
-    /// completions from an earlier reload are discarded.
-    private var changesLoadGeneration = 0
+    // Issues tab
+    private var issueListView: IssueListView?
+    private var issuesHeader: NSView?
+    private var issuesPlaceholder: NSView?
+    private var issuesObserver: NSObjectProtocol?
+    /// Every worktree on screen with its branch, so the Issues list can say
+    /// which issues are already being worked on. Set by the dashboard.
+    var worktreeBranches: () -> [(path: String, branch: String)] = { [] }
 
     var selectedTabForTesting: SidePanelTab { selectedTab }
     var worktreePathForTesting: String? { worktreePath }
-    var changesListModeForTesting: ChangesListMode { changesListMode }
-    var changeTreeRootsForTesting: [ChangeTreeNode] { changeTreeRoots }
+    var issueRowsForTesting: [IssueRow] { issueListView?.rows ?? [] }
     /// Tabs whose content is currently mounted (built and still in the hierarchy).
     var mountedTabsForTesting: Set<SidePanelTab> { Set(tabContainers.keys) }
     /// Identity of a tab's container, so a test can prove it was reused not rebuilt.
@@ -276,6 +100,10 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    deinit {
+        if let issuesObserver { NotificationCenter.default.removeObserver(issuesObserver) }
+    }
+
     override func loadView() {
         let root = ThemedBackgroundView()
         // Clear — same glass as First Mate / Dashboard overview.
@@ -287,10 +115,10 @@ final class WorktreeSidePanelViewController: NSViewController {
         tabBar.distribution = .fillEqually
         tabBar.translatesAutoresizingMaskIntoConstraints = false
 
-        // Files + Changes only. Orders and the command line live in the Island.
+        // Files + Issues only. Orders and the command line live in the Island.
         let tabs: [(SidePanelTab, String, String)] = [
             (.files, "folder", "Files"),
-            (.changes, "list.bullet.rectangle", "Changes"),
+            (.issues, ChromeIconClusterView.issuesSymbol, "Issues"),
         ]
         for (tab, icon, tooltip) in tabs {
             let btn = NSButton()
@@ -436,9 +264,9 @@ final class WorktreeSidePanelViewController: NSViewController {
         fileTreeController = nil
         fileSearchField = nil
         hiddenToggleButton = nil
-        changesTableView = nil
-        changesOutlineView = nil
-        changesScrollView = nil
+        issueListView = nil
+        issuesHeader = nil
+        issuesPlaceholder = nil
     }
 
     /// Remember the current worktree's folder expansion before tearing the tree down.
@@ -456,8 +284,8 @@ final class WorktreeSidePanelViewController: NSViewController {
         delegate?.sidePanel(self, didSelectFile: path)
     }
 
-    func handleChangeSelection(_ path: String) {
-        delegate?.sidePanel(self, didSelectChange: path)
+    func handleIssueSelection(_ issue: GitHubIssue) {
+        delegate?.sidePanel(self, didSelectIssue: issue)
     }
 
     /// Switch the visible tab. Driven by the title-bar pane icons.
@@ -466,7 +294,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         captureExpansion()
         if tab != .files {
             // A pending Files build may finish after the user has moved to
-            // Changes. It can be restarted if Files is selected again.
+            // Issues. It can be restarted if Files is selected again.
             filesBuildGeneration &+= 1
         }
         selectedTab = tab
@@ -488,11 +316,9 @@ final class WorktreeSidePanelViewController: NSViewController {
             // selected again.
             showFilesLoadingState()
             scheduleFilesTabBuild(path)
-        } else if selectedTab == .changes, let path = worktreePath {
-            // Files self-refreshes through its FSEvents watcher, but branch diff
-            // has no such signal — re-scan on entry, restoring scroll so the
-            // refresh isn't felt as a reset.
-            showChangesTab(path)
+        } else if selectedTab == .issues {
+            // Entering the tab is the moment a stale list is worth refetching.
+            renderIssuesTab()
         }
         for (tab, view) in tabContainers { view.isHidden = tab != selectedTab }
     }
@@ -513,19 +339,16 @@ final class WorktreeSidePanelViewController: NSViewController {
             }
             showFilesLoadingState()
             scheduleFilesTabBuild(path)
-        case .changes:
-            guard let path = worktreePath else {
-                let header = makePaneHeader(title: "Changes")
-                contentView.addSubview(header)
-                NSLayoutConstraint.activate([
-                    header.topAnchor.constraint(equalTo: contentView.topAnchor),
-                    header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-                    header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-                ])
-                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder", below: header)
-                return
+        case .issues:
+            if issuesObserver == nil {
+                issuesObserver = NotificationCenter.default.addObserver(
+                    forName: GitHubIssueStore.didChange, object: nil, queue: .main
+                ) { [weak self] _ in
+                    guard let self, self.builtTabs.contains(.issues) else { return }
+                    self.renderIssuesTab()
+                }
             }
-            showChangesTab(path)
+            renderIssuesTab()
         }
     }
 
@@ -673,12 +496,24 @@ final class WorktreeSidePanelViewController: NSViewController {
         contentView.addSubview(searchRow)
         contentView.addSubview(scrollView)
 
+        // An integration checkout is several worktrees folded together, so the
+        // tree alone does not say whose work it is — or whose was left out.
+        let composition = integrationState(path).map(makeIntegrationComposition)
+        if let composition {
+            contentView.addSubview(composition)
+            NSLayoutConstraint.activate([
+                composition.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
+                composition.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+                composition.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -12),
+            ])
+        }
+
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: contentView.topAnchor),
             header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            searchRow.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            searchRow.topAnchor.constraint(equalTo: (composition ?? header).bottomAnchor, constant: 10),
             searchRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
             searchRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
             searchRow.heightAnchor.constraint(equalToConstant: 26),
@@ -711,117 +546,104 @@ final class WorktreeSidePanelViewController: NSViewController {
                                accessibilityDescription: "Toggle hidden files")
     }
 
-    private func showChangesTab(_ path: String) {
-        // Branch-relative `git diff` can take hundreds of ms on large repos —
-        // run it off the main thread. The generation counter drops stale results
-        // if the user switched tab/worktree (or re-entered) before the scan finished.
-        changesLoadGeneration += 1
-        let generation = changesLoadGeneration
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let branch = GitDiff.branchChangedFiles(worktreePath: path)
-            DispatchQueue.main.async {
-                guard let self, self.changesLoadGeneration == generation,
-                      self.selectedTab == .changes, self.worktreePath == path else { return }
-                self.presentChanges(branch)
-            }
+    // MARK: - Issues tab
+
+    /// Header + list for the selected worktree's repo, or a line saying why
+    /// there is none. Re-run on every store change; the list view is kept so
+    /// its filter text and scroll survive a refresh.
+    private func renderIssuesTab() {
+        let container = container(for: .issues)
+        let store = GitHubIssueStore.shared
+        let state = worktreePath.flatMap { store.state(forWorktree: $0) }
+        let repo = worktreePath.flatMap { store.repo(forWorktree: $0) }
+
+        issuesHeader?.removeFromSuperview()
+        issuesPlaceholder?.removeFromSuperview()
+        issuesPlaceholder = nil
+
+        let refresh = NSButton()
+        refresh.bezelStyle = .recessed
+        refresh.isBordered = false
+        refresh.imagePosition = .imageOnly
+        refresh.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh issues")
+        refresh.contentTintColor = Theme.textSecondary
+        refresh.target = self
+        refresh.action = #selector(refreshIssues)
+        refresh.toolTip = "Refresh"
+        refresh.setAccessibilityIdentifier("sidePanel.issuesRefresh")
+
+        var subtitle = repo?.fullName ?? ""
+        if let snapshot = state?.snapshot {
+            subtitle += " · \(snapshot.issues.count) open"
+            if snapshot.isAnonymous { subtitle += " · not signed in" }
         }
-    }
-
-    private func presentChanges(_ branch: GitBranchChanges) {
-        currentBranchChanges = branch
-        changedFiles = branch.files
-        let sections = ChangesSummary.sections(for: branch)
-        changeRows = sections.flatMap { [ChangeRow.group($0.title)] + $0.files.map(ChangeRow.file) }
-        changeTreeRoots = ChangeTreeBuilder.build(sections: sections)
-        rebuildChangesView(branch)
-    }
-
-    private func rebuildChangesView(_ branch: GitBranchChanges) {
-        // This rebuilds the tab's subtree, so carry the scroll offset across —
-        // re-entering Changes should not silently jump the list back to the top.
-        let restoredScrollOrigin = changesScrollView?.contentView.bounds.origin
-        contentView.subviews.forEach { $0.removeFromSuperview() }
-        changesTableView = nil
-        changesOutlineView = nil
-        changesScrollView = nil
-
-        let modeButton = NSButton()
-        modeButton.bezelStyle = .recessed
-        modeButton.isBordered = false
-        modeButton.imagePosition = .imageOnly
-        modeButton.image = NSImage(
-            systemSymbolName: "list.bullet.indent",
-            accessibilityDescription: "Toggle tree view"
-        )
-        modeButton.contentTintColor = changesListMode == .tree ? Theme.accent : Theme.textSecondary
-        modeButton.target = self
-        modeButton.action = #selector(toggleChangesListMode(_:))
-        modeButton.toolTip = changesListMode == .tree ? "Tree view" : "Flat list"
-        modeButton.setAccessibilityIdentifier("sidePanel.changesMode")
-
-        let header = makePaneHeader(
-            title: "Changes",
-            subtitle: ChangesSummary.subtitle(for: branch),
-            subtitleToolTip: ChangesSummary.explanation(for: branch),
-            trailingView: changedFiles.isEmpty ? nil : modeButton
-        )
-        contentView.addSubview(header)
+        let header = makePaneHeader(title: "Issues", subtitle: subtitle,
+                                    trailingView: repo == nil ? nil : refresh)
+        container.addSubview(header)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: contentView.topAnchor),
-            header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            header.topAnchor.constraint(equalTo: container.topAnchor),
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
+        issuesHeader = header
 
-        // An integration checkout's diff is the fold of several worktrees, so
-        // the file list alone does not say whose work it is — or whose was left
-        // out. That belongs here rather than behind a fourth chrome icon that
-        // would be dead for every other worktree.
-        let composition = worktreePath.flatMap(integrationState).map(makeIntegrationComposition)
-        if let composition {
-            contentView.addSubview(composition)
-            NSLayoutConstraint.activate([
-                composition.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
-                composition.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-                composition.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            ])
-        }
-        let listTop = composition ?? header
-
-        if changedFiles.isEmpty {
-            showPlaceholder(ChangesSummary.emptyMessage(for: branch), identifier: "sidePanel.changesEmpty", below: listTop)
+        guard let path = worktreePath, let snapshot = state?.snapshot else {
+            issueListView?.removeFromSuperview()
+            issueListView = nil
+            let message: String
+            switch state {
+            case .unavailable(let reason)?: message = reason
+            case .needsLogin(let reason)?: message = Self.needsLoginMessage(reason)
+            case .loading?: message = "Loading issues…"
+            case .loaded?: message = ""
+            case nil: message = worktreePath == nil ? "No worktree selected" : "Not a GitHub repo"
+            }
+            issuesPlaceholder = showPlaceholder(message, identifier: "sidePanel.issuesPlaceholder",
+                                                below: header, in: container)
             return
         }
 
-        let scrollView: NSScrollView
-        if changesListMode == .tree {
-            scrollView = makeChangesTreeScrollView()
+        let list: IssueListView
+        if let existing = issueListView {
+            list = existing
         } else {
-            scrollView = makeChangesFlatScrollView()
+            list = IssueListView()
+            list.onSelectIssue = { [weak self] issue in self?.handleIssueSelection(issue) }
+            container.addSubview(list)
+            NSLayoutConstraint.activate([
+                list.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                list.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                list.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            issueListView = list
         }
-        contentView.addSubview(scrollView)
+        // The header is rebuilt each time (its old top constraint went with
+        // it), so pin the list under the new one.
+        list.topAnchor.constraint(equalTo: header.bottomAnchor).isActive = true
+        let worktrees = worktreeBranches()
+        let current = worktrees.first { $0.path == path }?.branch
+        let others = worktrees
+            .filter { $0.path != path && store.repo(forWorktree: $0.path) == repo }
+            .map(\.branch)
+        list.show(snapshot, currentBranch: current, otherBranches: others)
+    }
 
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: listTop.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
-            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-
-        changesScrollView = scrollView
-
-        if changesListMode == .tree {
-            expandChangesTree()
+    static func needsLoginMessage(_ reason: GitHubIssueListState.LoginReason) -> String {
+        let why: String
+        switch reason {
+        case .privateRepo:
+            why = "This repo is private — sign in to GitHub to read its issues."
+        case .anonymousLimit:
+            why = "GitHub's limit for reading without signing in (60 an hour, "
+                + "shared by this network) is used up — sign in to read issues."
         }
+        return why + "\n\nRun `gh auth login` in a terminal, or put GITHUB_TOKEN=… "
+            + "in this project's .env, then press ↻ above."
+    }
 
-        // Restore after layout — the document view has no height until then, so
-        // scrolling now would be clamped to zero.
-        if let origin = restoredScrollOrigin, origin.y > 0 {
-            DispatchQueue.main.async { [weak scrollView] in
-                guard let scrollView else { return }
-                scrollView.contentView.scroll(to: origin)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-            }
-        }
+    @objc private func refreshIssues() {
+        guard let path = worktreePath else { return }
+        GitHubIssueStore.shared.refresh(worktreePath: path)
     }
 
     /// What the last round folded in, and what it could not.
@@ -888,108 +710,12 @@ final class WorktreeSidePanelViewController: NSViewController {
         return stack.arrangedSubviews.compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
-    private func makeChangesFlatScrollView() -> NSScrollView {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ChangeColumn"))
-        column.title = "Changed Files"
-
-        let tableView = NSTableView()
-        tableView.addTableColumn(column)
-        tableView.headerView = nil
-        tableView.rowHeight = 26
-        tableView.style = .sourceList
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.action = #selector(changeRowClicked)
-        tableView.setAccessibilityIdentifier("sidePanel.changesTable")
-        tableView.floatsGroupRows = false
-        tableView.backgroundColor = .clear
-        tableView.selectionHighlightStyle = .regular
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = tableView
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        changesTableView = tableView
-        return scrollView
-    }
-
-    private func makeChangesTreeScrollView() -> NSScrollView {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ChangeTreeColumn"))
-        column.title = "Changed Files"
-
-        let outlineView = NSOutlineView()
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
-        outlineView.headerView = nil
-        outlineView.rowHeight = 26
-        outlineView.style = .sourceList
-        outlineView.dataSource = self
-        outlineView.delegate = self
-        outlineView.target = self
-        outlineView.action = #selector(changeTreeRowClicked)
-        outlineView.setAccessibilityIdentifier("sidePanel.changesTree")
-        outlineView.floatsGroupRows = false
-        outlineView.backgroundColor = .clear
-        outlineView.selectionHighlightStyle = .regular
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = outlineView
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        changesOutlineView = outlineView
-        return scrollView
-    }
-
-    private func expandChangesTree() {
-        guard let outlineView = changesOutlineView else { return }
-        func expand(_ node: ChangeTreeNode) {
-            guard !node.isLeaf else { return }
-            outlineView.expandItem(node)
-            node.children.forEach(expand)
-        }
-        changeTreeRoots.forEach(expand)
-    }
-
-    @objc private func toggleChangesListMode(_ sender: NSButton) {
-        changesListMode = changesListMode == .tree ? .flat : .tree
-        if let currentBranchChanges {
-            rebuildChangesView(currentBranchChanges)
-        }
-    }
-
-    @objc private func changeRowClicked() {
-        guard let tableView = changesTableView else { return }
-        let row = tableView.clickedRow
-        guard row >= 0, row < changeRows.count, case .file(let entry) = changeRows[row] else { return }
-        handleChangeSelection(entry.path)
-    }
-
-    @objc private func changeTreeRowClicked() {
-        guard let outlineView = changesOutlineView else { return }
-        let row = outlineView.clickedRow
-        guard row >= 0,
-              let node = outlineView.item(atRow: row) as? ChangeTreeNode else { return }
-        guard let entry = node.entry else {
-            if outlineView.isItemExpanded(node) {
-                outlineView.collapseItem(node)
-            } else {
-                outlineView.expandItem(node)
-            }
-            return
-        }
-        handleChangeSelection(entry.path)
-    }
-
-    private func showPlaceholder(_ message: String, identifier: String, below header: NSView? = nil) {
+    /// `host` defaults to the selected tab's container; the Issues tab
+    /// re-renders while hidden, so it passes its own.
+    @discardableResult
+    private func showPlaceholder(_ message: String, identifier: String, below header: NSView? = nil,
+                                 in host: NSView? = nil) -> NSTextField {
+        let contentView = host ?? self.contentView
         let label = NSTextField(labelWithString: message)
         label.font = AppFont.mono(size: 12)
         label.textColor = Self.inkDim
@@ -1014,6 +740,7 @@ final class WorktreeSidePanelViewController: NSViewController {
                 label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
             ])
         }
+        return label
     }
 }
 
@@ -1023,259 +750,5 @@ extension WorktreeSidePanelViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, field === fileSearchField else { return }
         fileTreeController?.filterText = field.stringValue
-    }
-}
-
-// MARK: - NSTableViewDataSource / Delegate (Changes tab)
-
-extension WorktreeSidePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        changeRows.count
-    }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        switch changeRows[row] {
-        case .group(let title):
-            return makeChangeGroupCell(in: tableView, title: title)
-        case .file(let entry):
-            return makeChangeCell(in: tableView, text: entry.path, entry: entry, identifier: "ChangeCell")
-        }
-    }
-
-    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
-        if case .group = changeRows[row] { return true }
-        return false
-    }
-
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if case .file = changeRows[row] { return true }
-        return false
-    }
-}
-
-// MARK: - NSOutlineViewDataSource / Delegate (Changes tree)
-
-extension WorktreeSidePanelViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
-    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        if let node = item as? ChangeTreeNode { return node.children.count }
-        return changeTreeRoots.count
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        if let node = item as? ChangeTreeNode { return node.children[index] }
-        return changeTreeRoots[index]
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
-        (item as? ChangeTreeNode)?.isGroup == true
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        (item as? ChangeTreeNode)?.isGroup != true
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        guard let node = item as? ChangeTreeNode else { return false }
-        return !node.children.isEmpty
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        guard let node = item as? ChangeTreeNode else { return nil }
-        return makeChangeTreeCell(in: outlineView, node: node)
-    }
-}
-
-// MARK: - Changes cell helpers
-
-private extension WorktreeSidePanelViewController {
-    /// Section heading: "Uncommitted · 2", "Not in main · 5".
-    func makeChangeGroupCell(in view: NSTableView, title: String) -> NSTableCellView {
-        let id = NSUserInterfaceItemIdentifier("ChangeGroupCell")
-        let cellView: NSTableCellView
-        if let reused = view.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
-            cellView = reused
-        } else {
-            cellView = NSTableCellView()
-            cellView.identifier = id
-            // Not the cell's `textField`: AppKit restyles that on a group row
-            // in the system font, and this panel is mono throughout.
-            let label = NSTextField(labelWithString: "")
-            label.font = AppFont.mono(size: 10.5, weight: .semibold)
-            label.textColor = Self.inkDim
-            label.lineBreakMode = .byTruncatingTail
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.tag = 200
-            cellView.addSubview(label)
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 8),
-                label.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -8),
-                label.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-            ])
-        }
-        (cellView.viewWithTag(200) as? NSTextField)?.stringValue = title
-        return cellView
-    }
-
-    func makeChangeTreeCell(in outlineView: NSOutlineView, node: ChangeTreeNode) -> NSTableCellView {
-        if node.isGroup { return makeChangeGroupCell(in: outlineView, title: node.name) }
-        let id = NSUserInterfaceItemIdentifier("ChangeTreeCell")
-        let cellView: NSTableCellView
-        if let reused = outlineView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
-            cellView = reused
-        } else {
-            cellView = NSTableCellView()
-            cellView.identifier = id
-
-            let badgeLabel = NSTextField(labelWithString: "")
-            badgeLabel.font = AppFont.mono(size: 11, weight: .semibold)
-            badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-            badgeLabel.tag = 100
-
-            let imageView = NSImageView()
-            imageView.translatesAutoresizingMaskIntoConstraints = false
-            imageView.imageScaling = .scaleProportionallyDown
-            imageView.tag = 101
-            cellView.imageView = imageView
-
-            let pathLabel = NSTextField(labelWithString: "")
-            pathLabel.font = AppFont.mono(size: 12)
-            pathLabel.lineBreakMode = .byTruncatingTail
-            pathLabel.translatesAutoresizingMaskIntoConstraints = false
-            cellView.textField = pathLabel
-
-            cellView.addSubview(badgeLabel)
-            cellView.addSubview(imageView)
-            cellView.addSubview(pathLabel)
-
-            NSLayoutConstraint.activate([
-                badgeLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 2),
-                badgeLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                badgeLabel.widthAnchor.constraint(equalToConstant: 14),
-
-                imageView.leadingAnchor.constraint(equalTo: badgeLabel.trailingAnchor, constant: 4),
-                imageView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                imageView.widthAnchor.constraint(equalToConstant: 14),
-                imageView.heightAnchor.constraint(equalToConstant: 14),
-
-                pathLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 4),
-                pathLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -2),
-                pathLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-            ])
-        }
-
-        if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
-            if let entry = node.entry {
-                let badge = statusBadge(for: entry)
-                badgeLabel.stringValue = badge.text
-                badgeLabel.textColor = badge.color
-                badgeLabel.toolTip = badge.toolTip
-            } else {
-                badgeLabel.stringValue = ""
-                badgeLabel.textColor = Self.inkDim
-                badgeLabel.toolTip = nil
-            }
-        }
-        let icon = changeTreeIcon(for: node)
-        cellView.imageView?.image = NSImage(systemSymbolName: icon.symbol, accessibilityDescription: nil)
-        cellView.imageView?.contentTintColor = icon.tint
-        cellView.textField?.stringValue = node.name
-        cellView.textField?.font = AppFont.mono(size: 12)
-        cellView.textField?.textColor = node.isLeaf ? Self.ink : Self.inkDim
-        return cellView
-    }
-
-    func makeChangeCell(in tableView: NSTableView, text: String, entry: GitChangedFile?,
-                        identifier: String) -> NSTableCellView {
-        let id = NSUserInterfaceItemIdentifier(identifier)
-        let cellView: NSTableCellView
-        if let reused = tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
-            cellView = reused
-        } else {
-            cellView = NSTableCellView()
-            cellView.identifier = id
-
-            let badgeLabel = NSTextField(labelWithString: "")
-            badgeLabel.font = AppFont.mono(size: 11, weight: .semibold)
-            badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-            badgeLabel.tag = 100
-
-            let pathLabel = NSTextField(labelWithString: "")
-            pathLabel.font = AppFont.mono(size: 12)
-            pathLabel.textColor = Self.ink
-            pathLabel.lineBreakMode = .byTruncatingMiddle
-            pathLabel.translatesAutoresizingMaskIntoConstraints = false
-            cellView.textField = pathLabel
-
-            cellView.addSubview(badgeLabel)
-            cellView.addSubview(pathLabel)
-
-            NSLayoutConstraint.activate([
-                badgeLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 8),
-                badgeLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                badgeLabel.widthAnchor.constraint(equalToConstant: 14),
-
-                pathLabel.leadingAnchor.constraint(equalTo: badgeLabel.trailingAnchor, constant: 8),
-                pathLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -8),
-                pathLabel.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-            ])
-        }
-
-        if let badgeLabel = cellView.viewWithTag(100) as? NSTextField {
-            if let entry {
-                let badge = statusBadge(for: entry)
-                badgeLabel.stringValue = badge.text
-                badgeLabel.textColor = badge.color
-                badgeLabel.toolTip = badge.toolTip
-            } else {
-                badgeLabel.stringValue = ""
-                badgeLabel.textColor = Self.inkDim
-                badgeLabel.toolTip = nil
-            }
-        }
-        cellView.textField?.stringValue = text
-        cellView.textField?.textColor = entry == nil ? Self.inkDim : Self.ink
-        cellView.textField?.font = AppFont.mono(size: 12)
-        return cellView
-    }
-
-    func changeTreeIcon(for node: ChangeTreeNode) -> (symbol: String, tint: NSColor) {
-        if !node.isLeaf { return ("folder.fill", .systemBlue) }
-        let fileNode = FileTreeNode(url: URL(fileURLWithPath: node.path), isDirectory: false)
-        let icon = FileTreeOutlineController.icon(for: fileNode)
-        return (icon.0, icon.1)
-    }
-
-    /// A file the merge into the base would conflict on shows `!` rather than
-    /// its status letter.
-    func statusBadge(for entry: GitChangedFile) -> (text: String, color: NSColor, toolTip: String?) {
-        if entry.stage == .committed, currentBranchChanges?.conflictedPaths.contains(entry.path) == true {
-            let base = currentBranchChanges?.baseDisplayName ?? "the base"
-            return ("!", .systemOrange, "Merging into \(base) conflicts here")
-        }
-        let badge = statusBadge(for: entry.status)
-        return (badge.text, badge.color, nil)
-    }
-
-    func statusBadge(for status: DiffFile.FileStatus) -> (text: String, color: NSColor) {
-        let badge: String
-        let badgeColor: NSColor
-        switch status {
-        case .added:
-            badge = "A"
-            badgeColor = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
-        case .modified:
-            badge = "M"
-            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0xa4/255, blue: 0x58/255, alpha: 1)
-        case .deleted:
-            badge = "D"
-            badgeColor = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
-        case .renamed:
-            badge = "R"
-            badgeColor = NSColor(srgbRed: 0x5b/255, green: 0x93/255, blue: 0xf0/255, alpha: 1)
-        case .unknown:
-            badge = "?"
-            badgeColor = Self.inkDim
-        }
-        return (badge, badgeColor)
     }
 }

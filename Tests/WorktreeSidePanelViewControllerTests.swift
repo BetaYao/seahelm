@@ -34,10 +34,10 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         let filesContainer = vc.containerForTesting(.files)
         XCTAssertNotNil(filesContainer)
 
-        vc.selectTab(.changes)
+        vc.selectTab(.issues)
         XCTAssertTrue(vc.mountedTabsForTesting.contains(.files), "files must stay mounted")
         XCTAssertTrue(filesContainer?.isHidden == true, "…but hidden")
-        XCTAssertTrue(vc.containerForTesting(.changes)?.isHidden == false)
+        XCTAssertTrue(vc.containerForTesting(.issues)?.isHidden == false)
     }
 
     func testReturningToATabReusesTheSameContainer() {
@@ -45,7 +45,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         vc.loadViewIfNeeded()
         vc.selectTab(.files)
         let first = vc.containerForTesting(.files)
-        vc.selectTab(.changes)
+        vc.selectTab(.issues)
         vc.selectTab(.files)
         XCTAssertTrue(first === vc.containerForTesting(.files),
                       "returning to a tab must reuse its view, not rebuild it")
@@ -58,97 +58,12 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         let vc = makeVC(worktreePath: "/tmp/wt-a")
         vc.loadViewIfNeeded()
         vc.selectTab(.files)
-        vc.selectTab(.changes)
+        vc.selectTab(.issues)
         XCTAssertEqual(vc.mountedTabsForTesting.count, 2)
 
         vc.setWorktree("/tmp/wt-b")
-        XCTAssertEqual(vc.mountedTabsForTesting, [.changes],
+        XCTAssertEqual(vc.mountedTabsForTesting, [.issues],
                        "only the freshly shown tab should be mounted after a worktree switch")
-    }
-
-    // MARK: - Changes: what is still to PR
-
-    func testSectionsPutUncommittedFirstAndNameTheBase() {
-        let branch = GitBranchChanges(
-            basis: .mergeResult(baseRef: "origin/main"),
-            files: [file("b.txt", .committed), file("a.txt", .unstaged), file("c.txt", .committed)],
-            totalCount: 3
-        )
-
-        let sections = ChangesSummary.sections(for: branch)
-
-        XCTAssertEqual(sections.map(\.title), ["Uncommitted · 1", "Not in main · 2"])
-        XCTAssertEqual(sections.map { $0.files.map(\.path) }, [["a.txt"], ["b.txt", "c.txt"]])
-    }
-
-    func testSectionsAfterAMergedPRNameThePR() {
-        let branch = GitBranchChanges(
-            basis: .sinceMergedPR(MergedPRHead(number: 1487, headSHA: "7b4c04a8b"), baseRef: "origin/main"),
-            files: [file("after.txt", .committed)],
-            totalCount: 1
-        )
-
-        XCTAssertEqual(ChangesSummary.sections(for: branch).map(\.title), ["After #1487 · 1"])
-        XCTAssertEqual(ChangesSummary.subtitle(for: branch), "1 file · since #1487")
-    }
-
-    func testAMergedBranchWithNothingLeftSaysSo() {
-        let branch = GitBranchChanges(
-            basis: .sinceMergedPR(MergedPRHead(number: 1487, headSHA: "7b4c04a8b"), baseRef: "origin/main"),
-            files: [],
-            totalCount: 0
-        )
-
-        XCTAssertEqual(ChangesSummary.subtitle(for: branch), "merged in #1487")
-        XCTAssertEqual(ChangesSummary.emptyMessage(for: branch), "Nothing left to PR — everything here went in with #1487")
-        XCTAssertTrue(ChangesSummary.sections(for: branch).isEmpty)
-    }
-
-    /// The answer is only as fresh as the last fetch, so a stale one is named.
-    func testSubtitleNamesAStaleFetchOnly() {
-        let now = Date()
-        func branch(fetchedAgo: TimeInterval) -> GitBranchChanges {
-            GitBranchChanges(
-                basis: .mergeResult(baseRef: "origin/main"),
-                files: [file("a.txt", .committed)],
-                totalCount: 1,
-                fetchedAt: now.addingTimeInterval(-fetchedAgo)
-            )
-        }
-
-        XCTAssertEqual(ChangesSummary.subtitle(for: branch(fetchedAgo: 20 * 60), now: now), "1 file · vs main")
-        XCTAssertEqual(ChangesSummary.subtitle(for: branch(fetchedAgo: 3 * 3600), now: now),
-                       "1 file · vs main · fetched 3h ago")
-    }
-
-    func testTreeGroupsHoldEachSectionsDirectories() {
-        let roots = ChangeTreeBuilder.build(sections: [
-            ChangeSection(title: "Uncommitted · 1", files: [file("src/a.swift", .unstaged)]),
-            ChangeSection(title: "Not in main · 1", files: [file("b.txt", .committed)]),
-        ])
-
-        XCTAssertEqual(roots.map(\.name), ["Uncommitted · 1", "Not in main · 1"])
-        XCTAssertEqual(roots.map(\.isGroup), [true, true])
-        XCTAssertEqual(roots[0].children.map(\.name), ["src"])
-        XCTAssertEqual(roots[1].children.map(\.name), ["b.txt"])
-    }
-
-    private func file(_ path: String, _ stage: GitChangeStage) -> GitChangedFile {
-        GitChangedFile(path: path, oldPath: nil, status: .modified, stage: stage)
-    }
-
-    func testChangeTreeBuilderGroupsFilesByDirectory() {
-        let files = [
-            GitChangedFile(path: "Sources/App/Main.swift", oldPath: nil, status: .modified, stage: .unstaged),
-            GitChangedFile(path: "Sources/Core/Config.swift", oldPath: nil, status: .added, stage: .unstaged),
-            GitChangedFile(path: "README.md", oldPath: nil, status: .modified, stage: .unstaged),
-        ]
-
-        let roots = ChangeTreeBuilder.build(from: files)
-        XCTAssertEqual(roots.map(\.name), ["Sources", "README.md"])
-        XCTAssertEqual(roots.first?.children.map(\.name), ["App", "Core"])
-        XCTAssertEqual(roots.first?.children.first?.children.map(\.name), ["Main.swift"])
-        XCTAssertEqual(roots.last?.entry?.path, "README.md")
     }
 
     // MARK: - Integration composition
@@ -156,13 +71,13 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
     private func makeIntegrationVC(_ state: IntegrationPanelState?) -> WorktreeSidePanelViewController {
         WorktreeSidePanelViewController(
             worktreePath: "/repo-worktrees/integration",
-            initialTab: .changes,
+            initialTab: .files,
             integrationState: { _ in state }
         )
     }
 
-    /// The Changes tab runs its `git diff` off the main thread, so the strip
-    /// only exists once that lands.
+    /// The Files tab enumerates the directory off the main thread, so the
+    /// strip only exists once that lands.
     private func compositionLines(_ vc: WorktreeSidePanelViewController) -> [String] {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
@@ -183,7 +98,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
             isHeld: false
         ))
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
 
         XCTAssertEqual(compositionLines(vc), [
             "in: agentA, agentB",
@@ -201,7 +116,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
             isHeld: true
         ))
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
 
         XCTAssertEqual(compositionLines(vc), [
             "in: agentA",
@@ -218,17 +133,17 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
             isHeld: false
         ))
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
 
         let lines = compositionLines(vc)
         XCTAssertTrue(lines.contains("conflict markers: shared.txt"), "\(lines)")
     }
 
-    /// Every other worktree's Changes tab is untouched.
+    /// Every other worktree's Files tab is untouched.
     func testOrdinaryWorktreeShowsNoComposition() {
         let vc = makeIntegrationVC(nil)
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
         XCTAssertEqual(compositionLines(vc), [])
     }
 
@@ -257,7 +172,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
             heldPaths: ["package.json", "pnpm-lock.yaml"]
         ))
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
 
         XCTAssertEqual(compositionLines(vc), [
             "in: agentA",
@@ -277,7 +192,7 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
             heldHead: "545c39d127ca11aa97d1ade5f298a0d5baf9dbc5"
         ))
         vc.loadViewIfNeeded()
-        vc.selectTab(.changes)
+        vc.selectTab(.files)
 
         XCTAssertEqual(compositionLines(vc).last,
                        "not checked out — commits made here (545c39d12) · /integrate force drops them")

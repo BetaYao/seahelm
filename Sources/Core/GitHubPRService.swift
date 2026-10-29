@@ -124,6 +124,27 @@ final class GitHubPRService {
         return try await post(url, body: payload)
     }
 
+    // MARK: - Issues
+
+    /// Open issues, most recently updated first. The endpoint lists PRs too;
+    /// those are dropped, so a page can come back shorter than `perPage`.
+    func listIssues(state: String = "open", perPage: Int = 100) async throws -> [GitHubIssue] {
+        var components = URLComponents(string: "\(baseURL)/repos/\(owner)/\(repo)/issues")!
+        components.queryItems = [
+            URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "sort", value: "updated"),
+            URLQueryItem(name: "direction", value: "desc"),
+            URLQueryItem(name: "per_page", value: String(perPage)),
+        ]
+        let items: [GitHubIssue] = try await get(components.url!)
+        return items.filter { !$0.isPullRequest }
+    }
+
+    /// Whoever the token belongs to, for "created by me" / "assigned to me".
+    func currentUser() async throws -> GitHubUser {
+        try await get(URL(string: "\(baseURL)/user")!)
+    }
+
     // MARK: - Opening PRs
 
     /// The open PR whose head is `head` (`owner:branch`), if there is one.
@@ -150,8 +171,10 @@ final class GitHubPRService {
 
     // MARK: - Private networking
 
-    private var authHeader: String {
-        "Bearer \(token)"
+    /// None without a token: a public repo answers anonymous requests, while
+    /// an empty `Bearer` is refused outright.
+    private var authHeader: String? {
+        token.isEmpty ? nil : "Bearer \(token)"
     }
 
     private func get<T: Decodable>(_ url: URL) async throws -> T {
@@ -199,9 +222,10 @@ final class GitHubPRService {
             throw GitHubAPIError.unauthorized
         case 403:
             // 检查 rate limit
-            if let remaining = http.allHeaderFields["X-RateLimit-Remaining"] as? String,
-               remaining == "0" {
-                let reset = http.allHeaderFields["X-RateLimit-Reset"] as? String ?? ""
+            // `value(forHTTPHeaderField:)` ignores case; over HTTP/2 the
+            // names arrive lower-cased and a dictionary lookup misses them.
+            if http.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" {
+                let reset = http.value(forHTTPHeaderField: "X-RateLimit-Reset") ?? ""
                 throw GitHubAPIError.rateLimitExceeded(resetAt: reset)
             }
             throw GitHubAPIError.forbidden

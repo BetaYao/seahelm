@@ -282,7 +282,6 @@ private class DashboardDelegateSpy: DashboardDelegate {
     var lastProject: String?
     var lastThread: String?
     var browsePath: String?
-    var changesPath: String?
 
     func dashboardDidSelectProject(_ project: String, thread: String) {
         didSelectProjectCalled = true
@@ -299,5 +298,5 @@ private class DashboardDelegateSpy: DashboardDelegate {
         didChangeSelectionCalled = true
     }
     func dashboardDidRequestBrowseFiles(worktreePath: String) { browsePath = worktreePath }
-    func dashboardDidRequestShowChanges(worktreePath: String) { changesPath = worktreePath }
+    func dashboardDidRequestStartIssue(_ issue: GitHubIssue, project: String) {}
 }
