@@ -54,4 +54,13 @@ final class PaneForkTests: XCTestCase {
         header.setForkTarget(nil)
         XCTAssertFalse(header.forkButtonIsVisibleForTesting)
     }
+
+    func testForkIsNamedAfterItsDestination() {
+        XCTAssertEqual(PaneFork.sessionName(branch: "task/issue-12-fix", worktreePath: "/r/wt2"),
+                       "task/issue-12-fix")
+        // Detached HEAD: no branch, so the directory names it.
+        XCTAssertEqual(PaneFork.sessionName(branch: " ", worktreePath: "/r/wt2"), "wt2")
+        XCTAssertEqual(PaneFork.sessionName(branch: String(repeating: "x", count: 200),
+                                            worktreePath: "/r/wt2").count, 80)
+    }
 }

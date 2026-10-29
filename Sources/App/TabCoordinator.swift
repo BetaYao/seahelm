@@ -1287,10 +1287,11 @@ class TabCoordinator {
         }
         let destination = plan.destination
         let yolo = config.agentYolo ? AgentType.claudeCode.yoloFlag.map { [$0] } ?? [] : []
+        let name = ["--name", PaneFork.sessionName(branch: destination.branch, worktreePath: destination.path)]
         let promptFile = continueTask
             ? PaneFork.writePromptFile(PaneFork.continuePrompt(destination: destination.path))
             : nil
-        guard let commandLine = plan.ref.forkCommandLine(extraArgs: yolo, promptFile: promptFile) else {
+        guard let commandLine = plan.ref.forkCommandLine(extraArgs: name + yolo, promptFile: promptFile) else {
             completion(.failure(.unsupportedAgent)); return
         }
 
