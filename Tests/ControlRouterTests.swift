@@ -145,6 +145,19 @@ final class ControlRouterTests: XCTestCase {
         XCTAssertEqual(panes.count, 1)
         XCTAssertEqual(panes[0]["pane_id"] as? String, "t1")
         XCTAssertEqual(panes[0]["status"] as? String, "Running")
+        XCTAssertNil(panes[0]["display_title"], "no title yet: the client falls back to the agent's name")
+    }
+
+    func testSnapshotCarriesDisplayTitle() {
+        let (r, ds) = router()
+        ds.panes = [PaneSnapshot(paneId: "t1", worktreePath: "/wt", branch: "main",
+                                 project: "proj", agentType: "Claude Code", status: "Running",
+                                 lastMessage: "hi", title: "✳ Fix pane tabs",
+                                 displayTitle: "Fix pane tabs")]
+        guard case .ok(let d) = r.handle(method: "session.snapshot", params: [:]),
+              let panes = d["panes"] as? [[String: Any]] else { return XCTFail() }
+        XCTAssertEqual(panes[0]["title"] as? String, "✳ Fix pane tabs")
+        XCTAssertEqual(panes[0]["display_title"] as? String, "Fix pane tabs")
     }
 
     func testReadPaneOk() {

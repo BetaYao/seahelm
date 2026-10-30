@@ -2408,12 +2408,13 @@ function groupsToRender(rows){
     .map(([title, list]) => ({ title, status:null, isRepo:true, rows:list }));
 }
 
-/** What a pane is called in its tab: the agent, or `>_` and where the shell
- *  is. A shell's title is whatever its prompt set — `user@host:/a/long/path`,
+/** What a pane is called in its tab: the agent's title as the Mac's pane
+ *  header shows it (the agent's name until it has one), or `>_` and where the
+ *  shell is. A shell's title is whatever its prompt set — `user@host:/a/long/path`,
  *  `…/workspace/seahelm` — so only the last directory is kept. */
 function paneLabel(pane){
   const k = paneKindOf(pane);
-  if (k.kind === 'agent') return { text: k.label, shell: false };
+  if (k.kind === 'agent') return { text: String(pane.display_title || '').trim() || k.label, shell: false };
   const title = String(pane && pane.title || '').trim().replace(/^[^\s@:]+@[^\s:]+:/, '');
   const leaf = title.includes('/') ? title.replace(/\/+$/, '').split('/').pop() : title;
   return { text: '>_ ' + (leaf || 'Terminal'), shell: true };
@@ -2622,7 +2623,10 @@ function renderDetailChrome(){
     b.innerHTML = `<i aria-hidden="true" style="background:${color}"></i>`
       + `<span class="pt-name${name.shell ? ' shell' : ''}">${esc(name.text)}</span>`
       + (stText ? `<span class="pt-st" style="color:${color}">${esc(stText)}</span>` : '');
-    b.title = [name.text, stText || SeahelmPanePick.statusLabel(st), (p.title || '').trim()].filter(Boolean).join(' — ');
+    const kind = paneKindOf(p);
+    b.title = [name.text, stText || SeahelmPanePick.statusLabel(st),
+      kind.kind === 'agent' && kind.label !== name.text ? kind.label : (p.title || '').trim()]
+      .filter(Boolean).join(' — ');
     b.onclick = () => { if (key !== S.selPane) selectWorktree(row, key, { navigate: false }); };
     tabs.appendChild(b);
   }
@@ -3852,7 +3856,8 @@ $('splitBtn').onclick = () => paneAction('pane.split', { direction: 'right', foc
 $('closePaneBtn').onclick = () => {
   const key = S.vt.focus || S.selPane;
   const pane = S.panes.get(key) || {};
-  const name = paneLabel(pane).text + ((pane.title || '').trim() ? ` (${pane.title.trim()})` : '');
+  const label = paneLabel(pane).text, raw = (pane.title || '').trim();
+  const name = label + (raw && !raw.includes(label) ? ` (${raw})` : '');
   // Closing takes a running agent with it.
   if (!confirm(`Close ${name}? Anything running in it is killed.`)) return;
   paneAction('pane.close', {});
