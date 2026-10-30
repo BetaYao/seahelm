@@ -21,6 +21,10 @@ struct PaneSnapshot {
     let lastMessage: String
     var paneSessionKey: String = ""  // stable id agents get as SEAHELM_PANE_ID
     var title: String = ""        // stable pane title (OSC / persisted), for lists
+    /// What the pane's header calls it: the OSC title without the agent's
+    /// spinner frame or a bare directory name, else the persisted title.
+    /// Empty when there is none, so a client falls back to the agent's name.
+    var displayTitle: String = ""
 
     /// Resident bytes for the pane's whole session tree, and for the agent
     /// subtree within it. Only populated when the caller asks for memory —
@@ -36,6 +40,7 @@ struct PaneSnapshot {
             "branch": branch, "project": project, "agent_type": agentType,
             "status": status, "last_message": lastMessage, "title": title,
         ]
+        if !displayTitle.isEmpty { d["display_title"] = displayTitle }
         // Omitted rather than zero-filled when unprobed, so a caller can tell
         // "not measured" from "measured as nothing".
         if let memoryBytes {

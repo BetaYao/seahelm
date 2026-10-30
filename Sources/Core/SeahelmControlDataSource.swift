@@ -65,6 +65,13 @@ final class SeahelmControlDataSource: ControlDataSource {
             let station = StationRegistry.shared.station(forId: s.id)
             let osc = station?.oscTitle ?? ""
             let title = osc.isEmpty ? (station?.persistedTitle ?? "") : osc
+            // The header's own fast path (MainWindowController.handlePaneDidAcquireFocus),
+            // not PaneTitleResolver.title: that one reads transcripts and writes
+            // back to the station, and this runs off the main thread.
+            let persisted = station?.persistedTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let displayTitle = PaneTitleResolver.singleLine(
+                PaneTitleResolver.displayOscTitle(osc, worktreePath: s.worktreePath,
+                                                  pwd: station?.pwd ?? "") ?? persisted)
             let sessionKey = station?.paneSessionKey ?? ""
             let memory = memoryBySessionKey[sessionKey]
             return PaneSnapshot(
@@ -77,6 +84,7 @@ final class SeahelmControlDataSource: ControlDataSource {
                 lastMessage: s.lastMessage,
                 paneSessionKey: sessionKey,
                 title: title,
+                displayTitle: displayTitle,
                 memoryBytes: memory?.totalBytes,
                 agentMemoryBytes: memory?.agentBytes,
                 processName: memory?.processName
