@@ -219,6 +219,21 @@ class NotificationManager: NSObject {
         latestStatus == targetStatus
     }
 
+    /// Whether a notification waits out `stabilityDelay` before going out.
+    ///
+    /// The gate is there for the screen scan, which reads a thinking pause as a
+    /// finished turn and has to be given a moment to take it back. An agent that
+    /// reported the end of its turn itself (its Stop) has nothing to take back:
+    /// a status that is `running` again a moment later is the *next* turn, not
+    /// this one resuming. Holding it anyway lost the answer whenever the next
+    /// turn came quickly — a scheduled task or a queued prompt starts within the
+    /// second, the pending fire saw `running`, and the reply never reached the
+    /// chat that asked for it.
+    static func usesStabilityGate(stabilityDelay: TimeInterval, terminalID: String,
+                                  agentReportedEnd: Bool) -> Bool {
+        stabilityDelay > 0 && !terminalID.isEmpty && !agentReportedEnd
+    }
+
     /// Prefer a stable per-pane key (terminalID) when we have one, otherwise fall
     /// back to the worktree. Namespaced so the two never alias.
     private static func cooldownKey(terminalID: String, worktreePath: String) -> String {
@@ -541,6 +556,8 @@ class NotificationManager: NSObject {
     ///   - source: who reported the change — the agent's own hook, or the screen
     ///     scan inferring it. Only the former may correct a banner already sent
     ///     inside the cooldown window.
+    ///   - agentReportedEnd: the agent itself said this turn is over (its Stop),
+    ///     so the stability gate is skipped — see `usesStabilityGate`.
     func notify(
         worktreePath: String,
         workspaceName: String,
@@ -556,7 +573,8 @@ class NotificationManager: NSObject {
         lastAssistantMessageAt: Date? = nil,
         lastUserPromptAt: Date? = nil,
         isTargetVisible: Bool = false,
-        source: NotificationSource = .scan
+        source: NotificationSource = .scan,
+        agentReportedEnd: Bool = false
     ) {
         let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
 
@@ -597,13 +615,16 @@ class NotificationManager: NSObject {
         // The stability gate only applies to the pane path, which has a live
         // status stream to cancel against. First Mate / inspection callers pass
         // terminalID == "" and never update `latestStatus`, so a timer there would
-        // just add latency and always fire — deliver those immediately.
-        guard stabilityDelay > 0, !terminalID.isEmpty else {
+        // just add latency and always fire — deliver those immediately. So is an
+        // agent-reported end of turn, which no later status can take back.
+        pendingFires[key]?.invalidate()
+        pendingFires[key] = nil
+        guard Self.usesStabilityGate(stabilityDelay: stabilityDelay, terminalID: terminalID,
+                                     agentReportedEnd: agentReportedEnd) else {
             deliver()
             return
         }
 
-        pendingFires[key]?.invalidate()
         let targetStatus = newStatus
         let timer = Timer.scheduledTimer(withTimeInterval: stabilityDelay, repeats: false) { [weak self] _ in
             guard let self else { return }

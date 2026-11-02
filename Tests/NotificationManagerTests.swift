@@ -377,4 +377,17 @@ final class NotificationManagerTests: XCTestCase {
         XCTAssertTrue(answers(assistant: nil, prompt: 30))
         XCTAssertTrue(answers(assistant: 3, prompt: nil))
     }
+
+    /// A Stop followed at once by the next turn (a scheduled task, a queued
+    /// prompt) must still announce the turn that ended: only scan edges wait.
+    func testAgentReportedEndSkipsTheStabilityGate() {
+        XCTAssertTrue(NotificationManager.usesStabilityGate(stabilityDelay: 1, terminalID: "t",
+                                                            agentReportedEnd: false))
+        XCTAssertFalse(NotificationManager.usesStabilityGate(stabilityDelay: 1, terminalID: "t",
+                                                             agentReportedEnd: true))
+        XCTAssertFalse(NotificationManager.usesStabilityGate(stabilityDelay: 1, terminalID: "",
+                                                             agentReportedEnd: false))
+        XCTAssertFalse(NotificationManager.usesStabilityGate(stabilityDelay: 0, terminalID: "t",
+                                                             agentReportedEnd: false))
+    }
 }

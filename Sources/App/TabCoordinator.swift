@@ -1907,7 +1907,8 @@ class TabCoordinator {
                                 // is the transition — whatever the rollup thinks.
                                 oldStatus: .running, newStatus: .idle,
                                 lastMessage: outcome.info.lastMessage,
-                                repoPath: worktreeRepoCache[path] ?? path)
+                                repoPath: worktreeRepoCache[path] ?? path,
+                                agentReportedEnd: true)
     }
     /// Whether a completion is worth holding because the agent has not said it
     /// is finished.
@@ -1952,7 +1953,8 @@ class TabCoordinator {
 
     private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus,
                                          newStatus: AgentStatus, lastMessage: String, repoPath: String,
-                                         attemptsLeft: Int = TabCoordinator.proseAttempts) {
+                                         attemptsLeft: Int = TabCoordinator.proseAttempts,
+                                         agentReportedEnd: Bool = false) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
             ?? URL(fileURLWithPath: repoPath).lastPathComponent
@@ -1977,7 +1979,8 @@ class TabCoordinator {
         // — two files that only happen to line up. The inputs are cheap to say.
         NSLog("[notify] pane=\(terminalID.suffix(8)) \(oldStatus.rawValue)→\(newStatus.rawValue) " +
               "hook=\(pane?.hookStatus.rawValue ?? "no-pane") prose=\(lastAssistantMessage.count) " +
-              "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft)")
+              "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft) " +
+              "reportedEnd=\(agentReportedEnd)")
 
         if Self.programSaysAtRest(newStatus: newStatus, programState: pane?.programState) { return }
 
@@ -2025,7 +2028,8 @@ class TabCoordinator {
             lastAssistantMessageAt: pane?.lastAssistantMessageAt,
             lastUserPromptAt: pane?.lastUserPromptAt,
             isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID),
-            source: source
+            source: source,
+            agentReportedEnd: agentReportedEnd
         )
     }
 
