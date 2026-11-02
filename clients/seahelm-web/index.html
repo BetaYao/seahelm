@@ -249,6 +249,7 @@
   .sheet-head{flex:none;height:52px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 8px}
   .sheet-head h2{font-size:17px;font-weight:600}
   .sheet-head button{height:44px;padding:0 8px;border:0;background:none;color:var(--accent);font-size:17px;cursor:pointer}
+  .sheet-head button:first-child{justify-self:start}
   .sheet-head button:last-child{justify-self:end;font-weight:600}
   .sheet-head button:disabled{color:var(--faint);cursor:default}
   .sheet-body{flex:1;min-height:0;overflow-y:auto;padding:8px 16px 0;display:flex;flex-direction:column;gap:6px}
@@ -485,6 +486,15 @@
     color:var(--text);font-size:var(--fs-body);line-height:1.3;cursor:pointer;text-align:center;word-break:break-word}
   .rb-opts button:first-child{background:var(--accent);color:var(--accent-ink);font-weight:600}
   .rb-opts button:hover{filter:brightness(1.1)}
+  /* Multi-select: rows tick on and off, and Done answers. */
+  .rb-opts.multi button:first-child{background:var(--panel2);color:var(--text);font-weight:400}
+  .rb-opts.multi .rb-tick{display:flex;align-items:center;gap:12px;text-align:left}
+  .rb-opts.multi .rb-tick::before{content:'';flex:none;width:20px;height:20px;border-radius:6px;
+    border:1.5px solid var(--muted);box-sizing:border-box;display:flex;align-items:center;justify-content:center;
+    font-size:14px;font-weight:700;line-height:1}
+  .rb-opts.multi .rb-tick.on{box-shadow:inset 0 0 0 1.5px var(--accent)}
+  .rb-opts.multi .rb-tick.on::before{content:'✓';background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .rb-opts.multi .rb-done{background:var(--accent);color:var(--accent-ink);font-weight:600}
   @media (min-width:761px){
     .rb-opts{flex-direction:row;flex-wrap:wrap}
     .rb-opts button{min-height:40px;border-radius:12px;text-align:left}
@@ -2242,26 +2252,52 @@ function renderReplyBar(){
   card.appendChild(head);
   bar.appendChild(card);
   const opts = document.createElement('div');
-  opts.className = 'rb-opts';
-  (e.options || []).forEach((opt, i) => {
+  const multi = question && !!e.multi_select;
+  opts.className = 'rb-opts' + (multi ? ' multi' : '');
+  const options = e.options || [];
+  const checked = new Set(e.checked || []);
+  // A multi-select row only toggles: the card stays up, ticked, and Done —
+  // index options.length, as on the desktop card — is what answers it.
+  const answer = (i, toggle) => {
+    // Optimistic, like dismissing: the Mac pushes the card it now holds (new
+    // ticks, the next question, or none) to every client once the answer
+    // lands, and puts nothing back if it does not.
+    if (toggle) {
+      const next = new Set(checked);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      S.events.set(pid, Object.assign({}, e, { checked: [...next].sort((a, b) => a - b) }));
+    } else {
+      S.events.delete(pid);
+    }
+    renderSuggestions();
+    sendCommand(question ? 'question.answer' : 'suggest.pick', { pane_session_key: pid, index: i }, (r) => {
+      if (r && r.ok === false) {
+        S.events.set(pid, e);
+        renderSuggestions();
+        showActionToast((r.error && r.error.message) || 'Not sent', true);
+      }
+    });
+  };
+  options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = opt;
-    b.onclick = () => {
-      // Optimistic, like dismissing: the Mac clears it for every client once
-      // the answer lands, and puts nothing back if it does not.
-      S.events.delete(pid);
-      renderSuggestions();
-      sendCommand(question ? 'question.answer' : 'suggest.pick', { pane_session_key: pid, index: i }, (r) => {
-        if (r && r.ok === false) {
-          S.events.set(pid, e);
-          renderSuggestions();
-          showActionToast((r.error && r.error.message) || 'Not sent', true);
-        }
-      });
-    };
+    if (multi) {
+      b.className = 'rb-tick' + (checked.has(i) ? ' on' : '');
+      b.setAttribute('role', 'checkbox');
+      b.setAttribute('aria-checked', checked.has(i) ? 'true' : 'false');
+    }
+    b.onclick = () => answer(i, multi);
     opts.appendChild(b);
   });
+  if (multi) {
+    const done = document.createElement('button');
+    done.type = 'button';
+    done.className = 'rb-done';
+    done.textContent = checked.size ? `Done · ${checked.size} selected` : 'Done';
+    done.onclick = () => answer(options.length, false);
+    opts.appendChild(done);
+  }
   card.appendChild(opts);
 }
 

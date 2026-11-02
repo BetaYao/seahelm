@@ -429,6 +429,9 @@ class MainWindowController: NSWindowController {
             [self?.config.telegram?.resolvedDefaultChatId].compactMap { $0 }
         }
         tabCoordinator.telegramConfigProvider = { [weak self] in self?.config.telegram }
+        tabCoordinator.questionAnswerer = { [weak self] order, label in
+            self?.handleSuggestionTapped(order: order, optionText: label)
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleNavigateToWorktree(_:)),

@@ -6,8 +6,16 @@ private final class SessionFakeDataSource: ControlDataSource {
     var knownPanes: Set<String> = []
     var sentKeys: [(pane: String, keys: [String])] = []
     var sentTexts: [(pane: String, text: String, enter: Bool)] = []
+    /// What `answerQuestion` reports; nil = the Mac holds no card for the pane.
+    var answerResult: [String: Any]?
+    var answered: [(pane: String, index: Int)] = []
 
     func snapshotPanes() -> [PaneSnapshot] { panes }
+    func answerQuestion(paneId: String, index: Int) -> [String: Any]? {
+        guard let answerResult else { return nil }
+        answered.append((paneId, index))
+        return answerResult
+    }
     func sendText(paneId: String, text: String, enter: Bool) -> Bool {
         guard knownPanes.contains(paneId) else { return false }
         sentTexts.append((paneId, text, enter))
@@ -777,5 +785,49 @@ final class HostGatewayShareSessionTests: XCTestCase {
         let panes = (call(s, "session.snapshot")["result"] as? [String: Any])?["panes"] as? [[String: Any]]
         XCTAssertEqual(panes?.count, 2)
         XCTAssertNil(errorCode(call(s, "pane.send_keys", #"{"pane_id":"k2","keys":["enter"]}"#)))
+    }
+}
+
+extension HostGatewaySessionTests {
+    private func paneEvents(_ s: HostGatewaySession) -> [[String: Any]] {
+        s.drainNotifications().map(decodeResponse)
+            .filter { $0["method"] as? String == "pane.event" }
+            .compactMap { $0["params"] as? [String: Any] }
+    }
+
+    /// A multi-select row is a toggle, not an answer: it goes to the Mac's card
+    /// (which drives the dialog), and the client is shown the card with its tick.
+    func testQuestionAnswerTicksAMultiSelectCard() {
+        let (s, ds, _) = session()
+        _ = s.handle(text: authFrame())
+        _ = s.drainNotifications()
+        ds.answerResult = ["answered": true,
+                           "card": ["prompt": "Which?", "options": ["A", "B"],
+                                    "multi_select": true, "checked": [1]]]
+        _ = s.handle(text: #"{"id":"q1","method":"question.answer","params":{"pane_session_key":"k1","index":1}}"#)
+        XCTAssertEqual(ds.answered.map(\.index), [1])
+        XCTAssertTrue(ds.sentKeys.isEmpty, "the card answers it; no blind down+Return")
+        let card = paneEvents(s).last
+        XCTAssertEqual(card?["type"] as? String, "question")
+        XCTAssertEqual(card?["multi_select"] as? Bool, true)
+        XCTAssertEqual(card?["checked"] as? [Int], [1])
+    }
+
+    func testQuestionAnswerThatEndsTheAskClearsTheCard() {
+        let (s, ds, _) = session()
+        _ = s.handle(text: authFrame())
+        _ = s.drainNotifications()
+        ds.answerResult = ["answered": true]
+        _ = s.handle(text: #"{"id":"q1","method":"question.answer","params":{"pane_session_key":"k1","index":2}}"#)
+        XCTAssertEqual(paneEvents(s).last?["cleared"] as? Bool, true)
+    }
+
+    /// No card on the Mac (First Mate off): the prompt is still navigated.
+    func testQuestionAnswerWithoutACardFallsBackToKeys() {
+        let (s, ds, _) = session()
+        ds.knownPanes = ["k1"]
+        _ = s.handle(text: authFrame())
+        _ = s.handle(text: #"{"id":"q1","method":"question.answer","params":{"pane_session_key":"k1","index":2}}"#)
+        XCTAssertEqual(ds.sentKeys.first?.keys, ["down", "down", "enter"])
     }
 }

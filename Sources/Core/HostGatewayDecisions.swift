@@ -19,6 +19,10 @@ final class HostGatewayDecisions {
         let prompt: String
         let options: [String]
         let seq: Int
+        /// A multi-select question: a tap toggles a row (ticked rows in
+        /// `checked`, 0-based), and index `options.count` is Done.
+        var multiSelect = false
+        var checked: [Int] = []
     }
 
     private var open: [String: Decision] = [:]
@@ -50,9 +54,7 @@ final class HostGatewayDecisions {
         let seq = event["seq"] as? Int ?? 0
 
         if let q = event["question"] as? [String: Any] {
-            let d = Decision(paneSessionKey: key, paneId: paneId, kind: "question",
-                             prompt: q["prompt"] as? String ?? "",
-                             options: q["options"] as? [String] ?? [], seq: seq)
+            let d = Self.question(q, paneSessionKey: key, paneId: paneId, seq: seq)
             lock.lock(); open[key] = d; lock.unlock()
             return .opened(d)
         }
@@ -94,6 +96,29 @@ final class HostGatewayDecisions {
         return expired ? .cleared(paneSessionKey: key) : .none
     }
 
+    /// A remote answer moved the question on: `card` is what the pane now asks
+    /// (new ticks, or the next question of the ask), nil when it asks nothing.
+    func replaceQuestion(paneSessionKey key: String, card: [String: Any]?) -> Change {
+        lock.lock(); defer { lock.unlock() }
+        guard let card else {
+            open.removeValue(forKey: key)
+            return .cleared(paneSessionKey: key)
+        }
+        let old = open[key]
+        let d = Self.question(card, paneSessionKey: key, paneId: old?.paneId ?? "", seq: old?.seq ?? 0)
+        open[key] = d
+        return .opened(d)
+    }
+
+    private static func question(_ q: [String: Any], paneSessionKey key: String,
+                                 paneId: String, seq: Int) -> Decision {
+        Decision(paneSessionKey: key, paneId: paneId, kind: "question",
+                 prompt: q["prompt"] as? String ?? "",
+                 options: q["options"] as? [String] ?? [], seq: seq,
+                 multiSelect: q["multi_select"] as? Bool ?? false,
+                 checked: q["checked"] as? [Int] ?? [])
+    }
+
     func options(forPaneSessionKey key: String) -> [String] {
         lock.lock(); defer { lock.unlock() }
         return open[key]?.options ?? []
@@ -122,6 +147,10 @@ final class HostGatewayDecisions {
         if d.kind == "question" {
             p["prompt"] = d.prompt
             p["danger"] = isDanger(d.prompt)
+            if d.multiSelect {
+                p["multi_select"] = true
+                p["checked"] = d.checked
+            }
         } else if !d.prompt.isEmpty {
             // `message` rather than `prompt`: a suggestion is not asking, it is
             // reporting — and the client renders the two the same way anyway.

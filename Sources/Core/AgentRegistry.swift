@@ -593,8 +593,10 @@ class AgentRegistry {
         // (`pane/{slot}/event`). Remote clients publish these retained and clear
         // them when the pane leaves `.waiting`.
         switch o.event.kind {
-        case .question(let prompt, let options, _, _):
-            dict["question"] = ["prompt": prompt, "options": options]
+        case .question(let prompt, let options, _, let flags):
+            var question: [String: Any] = ["prompt": prompt, "options": options]
+            if flags.multiSelect { question["multi_select"] = true }
+            dict["question"] = question
         case .suggest(let options):
             var payload: [String: Any] = ["options": options]
             // The completion gate above exists to stop unrelated events resending
