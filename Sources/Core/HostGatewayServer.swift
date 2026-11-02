@@ -658,10 +658,10 @@ final class HostGatewayServer {
             }
         }
         // Runs inside `session.handle`, which is already on `queue`.
-        session.setDecisionClearedHandler { [weak self] origin, key in
+        session.setDecisionChangedHandler { [weak self] origin, change in
             guard let self else { return }
             for state in self.connections.values where state.session !== origin {
-                state.session.pushDecision(.cleared(paneSessionKey: key))
+                state.session.pushDecision(change)
             }
         }
 

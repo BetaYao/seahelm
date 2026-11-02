@@ -40,6 +40,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     var createWorktreeHandler: ((String, AgentType, String, @escaping (String?) -> Void) -> Void)?
     /// Decline a pane's pending suggestion (main thread — it is UI state).
     var dismissDecisionHandler: ((String) -> Bool)?
+    /// Answer a pane's open question card (main thread — it is UI state).
+    var answerQuestionHandler: ((String, Int) -> [String: Any]?)?
 
     init(hookSink: @escaping (WebhookEvent) -> Void = { _ in }) {
         self.hookSink = hookSink
@@ -598,5 +600,12 @@ extension SeahelmControlDataSource {
         var ok = false
         runOnMain { ok = h(paneId) }
         return ok
+    }
+
+    func answerQuestion(paneId: String, index: Int) -> [String: Any]? {
+        guard let h = answerQuestionHandler else { return nil }
+        var result: [String: Any]?
+        runOnMain { result = h(paneId, index) }
+        return result
     }
 }

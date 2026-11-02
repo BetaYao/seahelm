@@ -77,7 +77,7 @@ final class HostGatewaySession {
     private var vtDeflate = false
     private var keysBinary = false
     private var pendingOutbound: ((HostGatewaySession) -> Void)?
-    private var decisionCleared: ((HostGatewaySession, String) -> Void)?
+    private var decisionChanged: ((HostGatewaySession, HostGatewayDecisions.Change) -> Void)?
     /// Set when the client signed in with a share link: the one pane this
     /// connection may see and act on. Nil is a paired client, who gets the fleet.
     private var sharedPane: SharedPane?
@@ -165,9 +165,11 @@ final class HostGatewaySession {
     /// server can tell every other client. The decision store is shared: once
     /// one browser cleared it, the prompt that follows finds nothing to expire,
     /// and a second browser — or the phone — kept the card until it reconnected.
-    func setDecisionClearedHandler(_ handler: @escaping (HostGatewaySession, String) -> Void) {
+    func setDecisionChangedHandler(
+        _ handler: @escaping (HostGatewaySession, HostGatewayDecisions.Change) -> Void
+    ) {
         lock.lock()
-        decisionCleared = handler
+        decisionChanged = handler
         lock.unlock()
     }
 
@@ -407,13 +409,17 @@ final class HostGatewaySession {
 
     /// Answering locally clears it for everyone; other clients must be told.
     private func queueDecisionCleared(_ key: String) {
-        enqueue(.text(HostGatewayFrame.encode(
-            .notify(method: "pane.event",
-                    params: HostGatewayDecisions.clearedParams(paneSessionKey: key)))))
+        queueDecisionChange(.cleared(paneSessionKey: key))
+    }
+
+    /// This client changed a decision (cleared it, or ticked a row of it): show
+    /// this client and every other one the same card.
+    private func queueDecisionChange(_ change: HostGatewayDecisions.Change) {
+        pushDecision(change)
         lock.lock()
-        let tellOthers = decisionCleared
+        let tellOthers = decisionChanged
         lock.unlock()
-        tellOthers?(self, key)
+        tellOthers?(self, change)
     }
 
     func drainNotifications() -> [HostGatewayWireFrame] {
@@ -666,10 +672,21 @@ final class HostGatewaySession {
             vt.keepalive(paneSessionKey: key)
             return HostGatewayFrame.encode(.response(id: id, result: ["ok": true], error: nil))
         case "question.answer":
-            // The on-screen prompt is navigated, not addressed: move down `index`
-            // times, then Return.
             let qKey = paneSessionKey(from: params)
             let qIndex = max(0, params["index"] as? Int ?? 0)
+            // Answered as a tap on the desktop card is: a multi-select row
+            // toggles and the card stays up with its ticks, Done leaves it, and
+            // a multi-question ask moves on to its next question.
+            if case .ok(let result) = router.handle(method: "question.answer",
+                                                    params: ["pane_id": qKey, "index": qIndex]) {
+                if result["answered"] as? Bool == true {
+                    queueDecisionChange(decisions.replaceQuestion(
+                        paneSessionKey: qKey, card: result["card"] as? [String: Any]))
+                }
+                return HostGatewayFrame.encode(.response(id: id, result: result, error: nil))
+            }
+            // No card on the Mac (First Mate off): the on-screen prompt is
+            // navigated, not addressed — move down `index` times, then Return.
             var keys = Array(repeating: "down", count: qIndex)
             keys.append("enter")
             let answered = router.handle(method: "pane.send_keys",

@@ -122,6 +122,10 @@ class TabCoordinator {
     /// desktop does, calling back with its path or nil. Lets the control API —
     /// the web client's composer — start work too.
     var worktreeCreator: ((String, String, AgentType, @escaping (String?) -> Void) -> Void)?
+    /// Answers a question card as a tap on it would (owner-set: the window
+    /// controller drives the dialog). Remote clients answer through this so a
+    /// multi-select or multi-question ask behaves as it does on the desktop.
+    var questionAnswerer: ((PendingOrder, String) -> Void)?
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
     let watchFeed = WatchFeed()
@@ -922,6 +926,19 @@ class TabCoordinator {
                         guard let self else { return false }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
                         return self.pendingOrders.dismissSuggestion(terminalID: stationId)
+                    }
+                    controlDataSource.answerQuestionHandler = { [weak self] paneId, index in
+                        guard let self, let answer = self.questionAnswerer else { return nil }
+                        let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
+                        guard let order = self.questionOrder(terminalID: stationId) else { return nil }
+                        let labels = order.action.answerLabels
+                        guard index < labels.count else { return ["answered": false] }
+                        answer(order, labels[index])
+                        var result: [String: Any] = ["answered": true]
+                        if let still = self.questionOrder(terminalID: stationId) {
+                            result["card"] = Self.questionCard(still.action)
+                        }
+                        return result
                     }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]
@@ -2039,6 +2056,23 @@ class TabCoordinator {
     /// First Mate reveal to decide which of the two surfaces a suggestion belongs on.
     func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
+    }
+
+    /// The question card a pane is waiting on, if any.
+    private func questionOrder(terminalID: String) -> PendingOrder? {
+        pendingOrders.all().first {
+            FirstMateAction.isQuestionPayload($0.action.payload) && $0.action.terminalID == terminalID
+        }
+    }
+
+    /// A question card in the remote clients' shape (`HostGatewayDecisions`).
+    static func questionCard(_ action: FirstMateAction) -> [String: Any] {
+        var card: [String: Any] = ["prompt": action.message, "options": action.options ?? []]
+        if action.questionFlags.multiSelect {
+            card["multi_select"] = true
+            card["checked"] = action.questionFlags.checked.sorted()
+        }
+        return card
     }
 
     /// Register every pane of a worktree's tree with AgentRegistry — not just the first.

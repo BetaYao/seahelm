@@ -77,6 +77,12 @@ protocol ControlDataSource: AnyObject {
     func worktreeGroups(mode: String) -> [[String: Any]]?
     /// Decline a pane's open suggestion. False if there was nothing to decline.
     func dismissDecision(paneId: String) -> Bool
+    /// Answer row `index` of a pane's open question card, the way a tap on the
+    /// card answers it. nil when the pane has no card to answer; otherwise
+    /// `card` is the question still standing afterwards (a multi-select one
+    /// with its new ticks, or the next of a multi-question ask), absent when
+    /// the ask is done.
+    func answerQuestion(paneId: String, index: Int) -> [String: Any]?
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
@@ -427,6 +433,17 @@ final class ControlRouter {
             }
             return .ok(["dismissed": dataSource?.dismissDecision(paneId: paneRef) ?? false])
 
+        case "question.answer":
+            let paneRef = (params["pane_id"] as? String)
+                ?? (params["pane_session_key"] as? String) ?? ""
+            guard !paneRef.isEmpty, let index = params["index"] as? Int, index >= 0 else {
+                return .error(code: ControlError.invalidParams, message: "pane and index required")
+            }
+            guard let result = dataSource?.answerQuestion(paneId: paneRef, index: index) else {
+                return .error(code: ControlError.notFound, message: "no open question")
+            }
+            return .ok(result)
+
         case "layout.live":
             guard let layouts = dataSource?.liveLayouts() else {
                 return .error(code: ControlError.notFound, message: "no live layout")
@@ -719,6 +736,7 @@ final class ControlRouter {
 /// source with no window to mirror simply reports nothing to mirror.
 extension ControlDataSource {
     func dismissDecision(paneId: String) -> Bool { false }
+    func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
     func liveLayouts() -> [String: [String: Any]]? { nil }
     func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
 }

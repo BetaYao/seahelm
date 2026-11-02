@@ -173,3 +173,33 @@ final class PendingOrdersDismissTests: XCTestCase {
         XCTAssertFalse(PendingOrdersQueue().dismissSuggestion(terminalID: "t1"))
     }
 }
+
+extension HostGatewayDecisionsTests {
+    func testMultiSelectQuestionCarriesItsTicksToTheWire() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: ["pane_session_key": "k1", "pane_id": "p1", "seq": 1,
+                            "question": ["prompt": "Which?", "options": ["A", "B"], "multi_select": true]])
+        guard case .opened(let ticked) = d.replaceQuestion(
+            paneSessionKey: "k1",
+            card: ["prompt": "Which?", "options": ["A", "B"], "multi_select": true, "checked": [0]])
+        else { return XCTFail() }
+        XCTAssertEqual(ticked.paneId, "p1", "the pane is kept from the card it replaces")
+        let p = HostGatewayDecisions.notifyParams(for: ticked)
+        XCTAssertEqual(p["multi_select"] as? Bool, true)
+        XCTAssertEqual(p["checked"] as? [Int], [0])
+    }
+
+    func testSingleSelectWireShapeHasNoTicks() {
+        let d = HostGatewayDecisions()
+        guard case .opened(let open) = d.apply(event: questionEvent()) else { return XCTFail() }
+        XCTAssertNil(HostGatewayDecisions.notifyParams(for: open)["multi_select"])
+    }
+
+    func testReplacingWithNoCardClearsIt() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: questionEvent())
+        XCTAssertEqual(d.replaceQuestion(paneSessionKey: "k1", card: nil), .cleared(paneSessionKey: "k1"))
+        XCTAssertTrue(d.pending().isEmpty)
+    }
+}
+
