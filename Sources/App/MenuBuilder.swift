@@ -98,7 +98,8 @@ enum MenuBuilder {
         toggleSidebarItem.target = target
         viewMenu.addItem(toggleSidebarItem)
 
-        // Window-level ⌘J (GlobalKeymap) reaches it first; the item is for finding it.
+        // Window-level ⌘J (GlobalKeymap) reaches it first, and a double Control
+        // (SeahelmWindow) does the same; the item is for finding it.
         let firstMateItem = NSMenuItem(
             title: "First Mate",
             action: #selector(MainWindowController.toggleFirstMate),
