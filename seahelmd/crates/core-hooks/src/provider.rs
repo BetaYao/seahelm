@@ -827,7 +827,9 @@ mod tests {
 
     /// The normalization the provider applies to both sides.
     fn canon(p: &str) -> String {
-        std::fs::canonicalize(p).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string())
+        let s = std::fs::canonicalize(p).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string());
+        // Windows answers with a verbatim path; the provider drops the prefix.
+        s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
     }
 
     fn moved_event(cwd: &str, pane: Option<&str>) -> WebhookEvent {

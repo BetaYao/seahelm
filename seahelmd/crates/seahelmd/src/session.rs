@@ -1,13 +1,14 @@
 //! A session: one program on one PTY, plus the screen it has drawn.
 //!
 //! Adapted from keep's `keepd/src/tab.rs` (MIT, Copyright (c) the Keep
-//! authors — see crates/keep-vt/LICENSE-keep). What changed: unix only for
-//! now; the stream is also read for OSC 7501 / 133 / 9;4, which a status
+//! authors — see crates/keep-vt/LICENSE-keep). What changed: the platform
+//! specifics live in `platform`; the stream is also read for OSC 7501 / 133 / 9;4, which a status
 //! reader gets from `snapshot`; and the grid answers the program's questions whenever nobody is
 //! attached, with the colours seahelm gives it (`Facts`) — a session
 //! started detached that swallowed OSC 10/11 would leave an agent that asked
 //! then painting without colours for the rest of its life.
 
+use std::borrow::Cow;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
@@ -17,6 +18,7 @@ use anyhow::{Context, Result};
 use keep_vt::osc_scan::{Osc, Scanner};
 use keep_vt::program_status::{self, Command, Store};
 use keep_vt::{Facts, Format, Terminal};
+use crate::platform;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 /// How much we read from the PTY per syscall.
@@ -115,7 +117,8 @@ impl Signals {
 pub struct Session {
     inner: Arc<Mutex<Inner>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    /// Taken (closed) on Windows once the program exits: see `spawn`.
+    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     finished: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
@@ -182,6 +185,21 @@ impl Session {
             signals: Signals::default(),
         }));
         let finished = Arc::new(AtomicBool::new(false));
+        let master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>> = Arc::new(Mutex::new(Some(pair.master)));
+
+        // A pseudoconsole outlives the program it was made for: its output
+        // stays open until it is closed, so the reader below would wait for
+        // an end that never comes. The program exiting is what closes it, as
+        // the last process leaving a Unix PTY does there (where this is a
+        // no-op). Out of the lock before it is dropped: closing waits for the
+        // console host to finish.
+        if let Some(pid) = pid {
+            let slot = Arc::clone(&master);
+            platform::on_exit(pid, move || {
+                let closed = slot.lock().ok().and_then(|mut m| m.take());
+                drop(closed);
+            });
+        }
 
         // Reader thread. The lock is held for the parse and fan-out only,
         // never across the read syscall.
@@ -223,10 +241,24 @@ impl Session {
                     // in the output below and answers it itself, and two
                     // answers are one too many. Taken every time either way,
                     // so they never pile up.
-                    let unanswered = (guard.subscribers.is_empty() && !replies.is_empty()).then_some(replies);
+                    //
+                    // Except under ConPTY, where the grid always answers where
+                    // the cursor is and the question goes no further: ConPTY
+                    // asks it as it opens and holds the program's output back
+                    // until it hears — from whoever is watching, which may be
+                    // a client that does not answer, or nobody yet. The grid
+                    // is drawn from the same stream as every client's screen,
+                    // so its answer is theirs.
+                    let attached = !guard.subscribers.is_empty();
+                    let unanswered = match (attached, CONPTY) {
+                        (false, _) => (!replies.is_empty()).then_some(replies),
+                        (true, true) => Some(cursor_reports(&replies)).filter(|r| !r.is_empty()),
+                        (true, false) => None,
+                    };
 
                     // One allocation for the whole fan-out.
-                    let chunk: Arc<[u8]> = Arc::from(&buf[..n]);
+                    let forward = if CONPTY { without_cursor_queries(&buf[..n]) } else { Cow::Borrowed(&buf[..n]) };
+                    let chunk: Arc<[u8]> = Arc::from(&forward[..]);
                     guard.subscribers.retain(|s| match s.tx.try_send(Arc::clone(&chunk)) {
                         Ok(()) => true,
                         // Too far behind: keep the slot, repaint it later.
@@ -258,7 +290,7 @@ impl Session {
         Ok(Self {
             inner,
             writer,
-            master: Mutex::new(pair.master),
+            master,
             child: Mutex::new(child),
             finished,
             size: Mutex::new((cols, rows)),
@@ -418,11 +450,9 @@ impl Session {
             let mut guard = self.inner.lock().map_err(|_| anyhow::anyhow!("session poisoned"))?;
             guard.terminal.resize(cols, rows).map_err(|e| anyhow::anyhow!("resize grid: {e}"))?;
         }
-        self.master
-            .lock()
-            .map_err(|_| anyhow::anyhow!("master poisoned"))?
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .context("resize pty")?;
+        if let Some(m) = self.master.lock().map_err(|_| anyhow::anyhow!("master poisoned"))?.as_ref() {
+            m.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).context("resize pty")?;
+        }
         if let Ok(mut s) = self.size.lock() {
             *s = (cols, rows);
         }
@@ -442,16 +472,17 @@ impl Session {
     }
 
     /// Whoever holds the terminal: the running command, or the shell waiting.
-    fn foreground_pid(&self) -> Option<i32> {
-        self.master.lock().ok()?.process_group_leader()
+    fn foreground_pid(&self) -> Option<u32> {
+        let master = self.master.lock().ok()?;
+        platform::foreground_pid(&**master.as_ref()?, self.pid)
     }
 
     /// Where the session is working: the foreground process's directory,
     /// then the program's, then what the shell said over OSC 7.
     pub fn cwd(&self) -> String {
         self.foreground_pid()
-            .and_then(process_cwd)
-            .or_else(|| self.pid.and_then(|p| process_cwd(p as i32)))
+            .and_then(platform::process_cwd)
+            .or_else(|| self.pid.and_then(platform::process_cwd))
             .or_else(|| {
                 let pwd = self.inner.lock().ok().map(|g| g.terminal.pwd())?;
                 (!pwd.is_empty()).then_some(pwd)
@@ -462,8 +493,8 @@ impl Session {
     /// What holds the terminal, by name: `claude`, `zsh`.
     pub fn command(&self) -> String {
         self.foreground_pid()
-            .and_then(process_name)
-            .or_else(|| self.pid.and_then(|p| process_name(p as i32)))
+            .and_then(platform::process_name)
+            .or_else(|| self.pid.and_then(platform::process_name))
             .unwrap_or_default()
     }
 
@@ -475,7 +506,7 @@ impl Session {
         // The whole process group, as closing a terminal would: an agent's
         // children must not outlive the pane.
         if let Some(pid) = self.pid {
-            unsafe { libc::killpg(pid as i32, libc::SIGHUP) };
+            platform::kill_tree(pid);
         }
         let mut c = self.child.lock().map_err(|_| anyhow::anyhow!("child poisoned"))?;
         let _ = c.kill();
@@ -499,54 +530,50 @@ fn new_terminal(cols: u16, rows: u16, facts: Option<&Facts>) -> Result<Terminal>
     Ok(terminal)
 }
 
-#[cfg(target_os = "macos")]
-fn process_cwd(pid: i32) -> Option<String> {
-    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
-    let read = unsafe {
-        libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, &mut info as *mut _ as *mut libc::c_void, size)
-    };
-    // A short reply is a failed one: the pid is gone, or not ours to ask about.
-    if read < size {
-        return None;
+/// Whether the PTY is a Windows pseudoconsole, with its cursor-position
+/// handshake (see the reader in `Session::spawn`).
+const CONPTY: bool = cfg!(windows);
+
+/// The bytes with every cursor position query (`CSI 6 n`) taken out.
+fn without_cursor_queries(bytes: &[u8]) -> Cow<'_, [u8]> {
+    const QUERY: &[u8] = b"\x1b[6n";
+    if !bytes.windows(QUERY.len()).any(|w| w == QUERY) {
+        return Cow::Borrowed(bytes);
     }
-    let path = unsafe {
-        std::slice::from_raw_parts(
-            info.pvi_cdir.vip_path.as_ptr() as *const u8,
-            std::mem::size_of_val(&info.pvi_cdir.vip_path),
-        )
-    };
-    let end = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-    String::from_utf8(path[..end].to_vec()).ok().filter(|p| !p.is_empty())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn process_cwd(pid: i32) -> Option<String> {
-    std::fs::read_link(format!("/proc/{pid}/cwd"))
-        .ok()
-        .and_then(|p| p.into_os_string().into_string().ok())
-        .filter(|p| !p.is_empty())
-}
-
-#[cfg(target_os = "macos")]
-fn process_name(pid: i32) -> Option<String> {
-    const MAX_PATH: usize = 4 * 1024;
-    let mut buf = vec![0u8; MAX_PATH];
-    let written = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, MAX_PATH as u32) };
-    if written <= 0 {
-        return None;
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at..].starts_with(QUERY) {
+            at += QUERY.len();
+        } else {
+            out.push(bytes[at]);
+            at += 1;
+        }
     }
-    buf.truncate(written as usize);
-    let path = String::from_utf8(buf).ok()?;
-    let name = path.rsplit('/').next()?.to_owned();
-    (!name.is_empty()).then_some(name)
+    Cow::Owned(out)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn process_name(pid: i32) -> Option<String> {
-    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
-    let name = comm.trim().to_owned();
-    (!name.is_empty()).then_some(name)
+/// The cursor position reports (`CSI row ; col R`) among a run of replies.
+fn cursor_reports(replies: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < replies.len() {
+        if replies[at] == 0x1b && replies.get(at + 1) == Some(&b'[') {
+            let mut end = at + 2;
+            while end < replies.len() && (replies[end].is_ascii_digit() || replies[end] == b';') {
+                end += 1;
+            }
+            if end < replies.len() {
+                if replies[end] == b'R' {
+                    out.extend_from_slice(&replies[at..=end]);
+                }
+                at = end + 1;
+                continue;
+            }
+        }
+        at += 1;
+    }
+    out
 }
 
 /// Just enough JSON to write a snapshot without a dependency.
@@ -622,6 +649,16 @@ fn escape(s: &str, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_queries_are_cut_and_cursor_reports_picked_out() {
+        assert_eq!(&*without_cursor_queries(b"a\x1b[6nb\x1b[6n"), b"ab");
+        assert!(matches!(without_cursor_queries(b"plain"), Cow::Borrowed(_)));
+        // A DA1 answer and a palette answer around a cursor report.
+        let replies = b"\x1b[?62;22c\x1b[12;40R\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\";
+        assert_eq!(cursor_reports(replies), b"\x1b[12;40R");
+        assert!(cursor_reports(b"\x1b[?62;22c").is_empty());
+    }
 
     #[test]
     fn json_strings_are_escaped() {

@@ -1,4 +1,5 @@
-//! The wire: newline-delimited JSON-RPC 2.0 over a local socket, the same
+//! The wire: newline-delimited JSON-RPC 2.0 over a local socket (a named
+//! pipe on Windows, through seahelmd's `platform`), the same
 //! shape the macOS app's control socket speaks (`ControlProtocol.swift`), so a
 //! client that talks to one talks to the other.
 //!
@@ -7,11 +8,11 @@
 //! connection into a stream of notifications until the client goes away.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use seahelmd::platform::{Listener, Stream};
 use serde_json::{json, Value};
 
 /// A JSON-RPC error: code and message, as the app uses them.
@@ -52,20 +53,40 @@ pub fn config_dir() -> PathBuf {
     PathBuf::from(home).join(".config/seahelm")
 }
 
-/// `$SEAHELM_CORE_SOCKET`, else `~/.config/seahelm/core.sock`.
-pub fn core_socket() -> PathBuf {
-    std::env::var_os("SEAHELM_CORE_SOCKET").map(PathBuf::from).unwrap_or_else(|| config_dir().join("core.sock"))
+/// The current user, for pipe names: pipes are machine-wide.
+#[cfg(windows)]
+fn user() -> String {
+    std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into())
 }
 
-/// The macOS app's control socket (`$SEAHELM_SOCKET_PATH`, else
-/// `~/.config/seahelm/seahelm.sock`).
+/// `$SEAHELM_CORE_SOCKET`, else `~/.config/seahelm/core.sock` (on Windows
+/// the pipe `\\.\pipe\seahelm-core-<user>`).
+pub fn core_socket() -> PathBuf {
+    if let Some(p) = std::env::var_os("SEAHELM_CORE_SOCKET") {
+        return PathBuf::from(p);
+    }
+    #[cfg(windows)]
+    return PathBuf::from(format!(r"\\.\pipe\seahelm-core-{}", user()));
+    #[cfg(not(windows))]
+    config_dir().join("core.sock")
+}
+
+/// The app's control socket (`$SEAHELM_SOCKET_PATH`, else
+/// `~/.config/seahelm/seahelm.sock`; on Windows `\\.\pipe\seahelm-<user>`,
+/// where the hook shim sends too).
 pub fn app_socket() -> PathBuf {
-    std::env::var_os("SEAHELM_SOCKET_PATH").map(PathBuf::from).unwrap_or_else(|| config_dir().join("seahelm.sock"))
+    if let Some(p) = std::env::var_os("SEAHELM_SOCKET_PATH") {
+        return PathBuf::from(p);
+    }
+    #[cfg(windows)]
+    return PathBuf::from(format!(r"\\.\pipe\seahelm-{}", user()));
+    #[cfg(not(windows))]
+    config_dir().join("seahelm.sock")
 }
 
 /// Serve until the listener fails. Binding is the caller's (`bind`), so it
 /// can tell "already running" apart from "cannot listen".
-pub fn serve(listener: UnixListener, dispatch: std::sync::Arc<dyn Dispatch>) -> Result<()> {
+pub fn serve(listener: Listener, dispatch: std::sync::Arc<dyn Dispatch>) -> Result<()> {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let dispatch = std::sync::Arc::clone(&dispatch);
@@ -74,7 +95,7 @@ pub fn serve(listener: UnixListener, dispatch: std::sync::Arc<dyn Dispatch>) -> 
     Ok(())
 }
 
-fn connection(stream: UnixStream, dispatch: std::sync::Arc<dyn Dispatch>) {
+fn connection(stream: Stream, dispatch: std::sync::Arc<dyn Dispatch>) {
     let Ok(read_half) = stream.try_clone() else { return };
     let mut writer = stream;
     let reader = BufReader::new(read_half);
@@ -120,23 +141,28 @@ pub fn write_line(w: &mut dyn Write, v: &Value) -> std::io::Result<()> {
 /// Bind the socket, owner-only. Refuses when a live server already answers
 /// there, so two cores never split the panes between them; a socket nobody
 /// answers on is left over from a core that died, and is replaced.
-pub fn bind(path: &Path) -> Result<UnixListener> {
-    if UnixStream::connect(path).is_ok() {
+pub fn bind(path: &Path) -> Result<Listener> {
+    if Stream::connect(path).is_ok() {
         bail!("seahelm-core is already running at {}", path.display());
     }
+    #[cfg(unix)]
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     }
-    let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path).with_context(|| format!("bind {}", path.display()))?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    seahelmd::platform::remove_stale(path);
+    let listener = Listener::bind(path).with_context(|| format!("bind {}", path.display()))?;
+    // A pipe is owner-only by its DACL; a socket by its mode.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(listener)
 }
 
 /// One call to a JSON-RPC socket (ours or the app's), with a timeout.
 pub fn call(socket: &Path, method: &str, params: Value) -> Result<Value> {
-    let mut stream = UnixStream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;
+    let mut stream = Stream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     write_line(&mut stream, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))?;
     let mut line = String::new();
@@ -178,7 +204,7 @@ mod tests {
         assert!(call(&sock, "nope", json!({})).unwrap_err().to_string().contains("-32601"));
         assert!(bind(&sock).is_err(), "a live server is not replaced");
 
-        let mut s = UnixStream::connect(&sock).unwrap();
+        let mut s = Stream::connect(&sock).unwrap();
         write_line(&mut s, &json!({"jsonrpc": "2.0", "id": 1, "method": "count"})).unwrap();
         let lines: Vec<String> = BufReader::new(s).lines().map_while(|l| l.ok()).collect();
         assert_eq!(lines.len(), 3);

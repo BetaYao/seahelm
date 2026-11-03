@@ -53,20 +53,15 @@ fn run() -> Result<()> {
             client::attach(name)?;
         }
         "list" | "ls" => {
-            let dir = client::socket_dir();
-            let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(()) };
-            let mut names: Vec<String> = entries
-                .flatten()
-                .filter(|e| e.file_type().map(|t| !t.is_file() && !t.is_dir()).unwrap_or(false))
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect();
-            names.sort();
+            let names = seahelmd::platform::session_names();
             for name in names {
                 match client::request(&name, &Msg::Info) {
                     Ok(Msg::Text(line)) => println!("{line}"),
                     // Nobody listening: a daemon that died without cleaning up.
                     Err(e) if client::is_gone(&e) => {
-                        let _ = std::fs::remove_file(dir.join(&name));
+                        if let Ok(path) = client::socket_path(&name) {
+                            seahelmd::platform::remove_stale(&path);
+                        }
                     }
                     // Listening but not answering is a busy or wedged daemon.
                     // Its socket stays — removing it would orphan a session

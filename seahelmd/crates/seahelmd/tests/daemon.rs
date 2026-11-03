@@ -1,3 +1,7 @@
+// These drive real daemons over Unix sockets and pause clients with
+// SIGSTOP; on Windows they wait for the named-pipe transport.
+#![cfg(unix)]
+
 //! The daemon end to end, through the real binary and its socket.
 
 use std::os::unix::net::UnixStream;

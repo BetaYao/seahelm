@@ -1,0 +1,4 @@
+# The Rust workspace embeds text files byte for byte (include_str!: the
+# OpenCode/Pi plugins it installs, agent manifests) and compares them with
+# what the Swift app writes; a Windows checkout must not turn them to CRLF.
+seahelmd/** text=auto eol=lf

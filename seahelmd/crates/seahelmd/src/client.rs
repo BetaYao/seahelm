@@ -2,51 +2,34 @@
 //! turns the terminal it runs in into a window on the session.
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
+use crate::platform::{self, RawTty, Stream};
 use crate::proto::{self, Msg};
 
 /// Ctrl-\ detaches.
 const DETACH_KEY: u8 = 0x1c;
 
-/// Where the sockets live: `$SEAHELMD_DIR`, else `/tmp/seahelmd-<uid>`.
-/// Short on purpose — a unix socket path has about 104 bytes, and session
-/// names run long.
-pub fn socket_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("SEAHELMD_DIR") {
-        return PathBuf::from(dir);
-    }
-    PathBuf::from(format!("/tmp/seahelmd-{}", unsafe { libc::getuid() }))
-}
-
+/// Where a session listens (see `platform::address`).
 pub fn socket_path(name: &str) -> Result<PathBuf> {
-    if name.is_empty() || name.contains('/') || name.starts_with('.') {
-        bail!("bad session name {name:?}");
-    }
-    let path = socket_dir().join(name);
-    if path.as_os_str().len() > 100 {
-        bail!("session name too long for a socket path: {name}");
-    }
-    Ok(path)
+    platform::address(name)
 }
 
-/// Whether a failed request means the daemon is gone (nothing listening on
-/// its socket), as opposed to there but not answering.
+/// Whether a failed request means the daemon is gone (nothing listening
+/// where it should be), as opposed to there but not answering.
 pub fn is_gone(e: &anyhow::Error) -> bool {
     e.chain().filter_map(|c| c.downcast_ref::<std::io::Error>()).any(|io| {
         matches!(io.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound)
     })
 }
 
-pub fn connect(name: &str) -> Result<UnixStream> {
+pub fn connect(name: &str) -> Result<Stream> {
     let path = socket_path(name)?;
-    UnixStream::connect(&path).with_context(|| format!("no session {name}"))
+    Stream::connect(&path).with_context(|| format!("no session {name}"))
 }
 
 /// One request, one answer.
@@ -70,37 +53,25 @@ pub fn ensure(name: &str, argv: &[String]) -> Result<bool> {
 /// `ensure`, with the program held until the first attach (see `daemon::Lazy`).
 pub fn ensure_held(name: &str, argv: &[String], hold: Option<std::time::Duration>) -> Result<bool> {
     let path = socket_path(name)?;
-    if UnixStream::connect(&path).is_ok() {
+    if Stream::connect(&path).is_ok() {
         return Ok(false);
     }
-    let dir = socket_dir();
-    std::fs::create_dir_all(&dir)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    }
-    // A socket nobody answers on is a daemon that died without cleaning up.
-    let _ = std::fs::remove_file(&path);
-    spawn_daemon(&path, name, argv, hold)?;
+    platform::prepare()?;
+    platform::remove_stale(&path);
+    spawn_daemon(name, argv, hold)?;
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if UnixStream::connect(&path).is_ok() {
+        if Stream::connect(&path).is_ok() {
             return Ok(true);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    bail!("session {name} did not start; see {}", log_path(&path).display())
+    bail!("session {name} did not start; see {}", platform::log_path(name).display())
 }
 
-fn log_path(socket: &Path) -> PathBuf {
-    socket.with_extension("log")
-}
-
-fn spawn_daemon(socket: &Path, name: &str, argv: &[String], hold: Option<std::time::Duration>) -> Result<()> {
-    use std::os::unix::process::CommandExt;
+fn spawn_daemon(name: &str, argv: &[String], hold: Option<std::time::Duration>) -> Result<()> {
     let exe = std::env::current_exe()?;
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path(socket))?;
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(platform::log_path(name))?;
     let mut cmd = Command::new(exe);
     cmd.arg("__serve");
     if let Some(hold) = hold {
@@ -108,47 +79,8 @@ fn spawn_daemon(socket: &Path, name: &str, argv: &[String], hold: Option<std::ti
     }
     cmd.arg(name).arg("--").args(argv);
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(log);
-    // Its own session, so closing the terminal that started it — the very
-    // thing it exists to survive — sends it nothing.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    cmd.spawn().context("spawn daemon")?;
+    platform::spawn_detached(&mut cmd).context("spawn daemon")?;
     Ok(())
-}
-
-static SAVED: OnceLock<libc::termios> = OnceLock::new();
-
-fn restore_tty() {
-    if let Some(t) = SAVED.get() {
-        unsafe { libc::tcsetattr(0, libc::TCSANOW, t) };
-    }
-}
-
-fn raw_tty() {
-    unsafe {
-        let mut t: libc::termios = std::mem::zeroed();
-        if libc::tcgetattr(0, &mut t) != 0 {
-            return;
-        }
-        let _ = SAVED.set(t);
-        libc::cfmakeraw(&mut t);
-        libc::tcsetattr(0, libc::TCSANOW, &t);
-    }
-}
-
-fn tty_size() -> (u16, u16) {
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
-            (ws.ws_col, ws.ws_row)
-        } else {
-            (80, 24)
-        }
-    }
 }
 
 /// Attach this terminal to the session until it ends or Ctrl-\ is pressed.
@@ -156,13 +88,13 @@ pub fn attach(name: &str) -> Result<()> {
     let stream = connect(name)?;
     let mut sock_in = stream.try_clone()?;
     let mut sock_out = stream.try_clone()?;
-    let (cols, rows) = tty_size();
+    let (cols, rows) = platform::tty_size();
     proto::write(&mut sock_out, &Msg::Attach { cols, rows })?;
-    raw_tty();
+    let _raw = RawTty::enter();
 
     // Session → screen. The end of the session ends the client.
     std::thread::spawn(move || {
-        let mut out = std::io::stdout().lock();
+        let mut out = platform::stdout_bytes();
         loop {
             match proto::read(&mut sock_in) {
                 Ok(Some(Msg::Repaint(data))) => {
@@ -177,13 +109,13 @@ pub fn attach(name: &str) -> Result<()> {
                     let _ = out.flush();
                 }
                 Ok(Some(Msg::Error(e))) => {
-                    restore_tty();
+                    RawTty::restore();
                     eprintln!("seahelmd: {e}");
                     std::process::exit(1);
                 }
                 Ok(Some(_)) => {}
                 Ok(None) | Err(_) => {
-                    restore_tty();
+                    RawTty::restore();
                     std::process::exit(0);
                 }
             }
@@ -198,7 +130,7 @@ pub fn attach(name: &str) -> Result<()> {
             let mut last = (cols, rows);
             loop {
                 std::thread::sleep(Duration::from_millis(100));
-                let now = tty_size();
+                let now = platform::tty_size();
                 if now != last {
                     last = now;
                     if proto::write(&mut sock, &Msg::Resize { cols: now.0, rows: now.1 }).is_err() {
@@ -210,7 +142,7 @@ pub fn attach(name: &str) -> Result<()> {
     }
 
     // Keyboard → session.
-    let mut stdin = std::io::stdin().lock();
+    let mut stdin = platform::stdin_bytes();
     let mut buf = [0u8; 4096];
     loop {
         let n = match stdin.read(&mut buf) {
@@ -227,6 +159,6 @@ pub fn attach(name: &str) -> Result<()> {
             break;
         }
     }
-    restore_tty();
+    RawTty::restore();
     Ok(())
 }
