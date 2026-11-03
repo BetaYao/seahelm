@@ -49,6 +49,10 @@ struct Config: Codable {
     var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
+    /// First Mate (docs/first-mate-autopilot.md): off until the user turns it on.
+    var autopilotEnabled: Bool
+    /// Turned on but holding: events are recorded, nothing is handed over.
+    var autopilotPaused: Bool
     var sidebarWidth: CGFloat
     /// Whether the chrome left column is collapsed. Survives relaunch with
     /// `sidebarActivePane` so First Mate / files / changes layout is restored.
@@ -101,6 +105,8 @@ struct Config: Codable {
         case firstMate
         case notifications
         case islandEnabled = "island_enabled"
+        case autopilotEnabled = "autopilot_enabled"
+        case autopilotPaused = "autopilot_paused"
         case sidebarWidth = "sidebar_width"
         case sidebarCollapsed = "sidebar_collapsed"
         case sidebarActivePane = "sidebar_active_pane"
@@ -142,6 +148,8 @@ struct Config: Codable {
         firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
+        autopilotEnabled = false
+        autopilotPaused = false
         sidebarWidth = 300
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
@@ -186,6 +194,8 @@ struct Config: Codable {
         firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
+        autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
+        autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
         sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)

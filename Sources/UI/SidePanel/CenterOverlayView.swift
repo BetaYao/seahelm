@@ -17,6 +17,10 @@ final class CenterOverlayView: NSView {
     private let onClose: () -> Void
     private let onSave: (() -> Void)?
     private let onPreview: (() -> Void)?
+    /// No toolbar, terminal-coloured, and Esc left alone: for content that is a
+    /// terminal itself (First Mate), which should read like any selected pane and
+    /// whose Esc belongs to the program inside it.
+    private let chromeless: Bool
     private var colorSchemeObserver: NSObjectProtocol?
 
     // MARK: Init
@@ -25,8 +29,10 @@ final class CenterOverlayView: NSView {
         content: NSView,
         onSave: (() -> Void)? = nil,
         onPreview: (() -> Void)? = nil,
+        chromeless: Bool = false,
         onClose: @escaping () -> Void
     ) {
+        self.chromeless = chromeless
         self.onClose = onClose
         self.onSave = onSave
         self.onPreview = onPreview
@@ -77,7 +83,7 @@ final class CenterOverlayView: NSView {
                 ?? NSColor.windowBackgroundColor
         }
         contentContainer.wantsLayer = true
-        contentContainer.layer?.backgroundColor = contentBG.cgColor
+        contentContainer.layer?.backgroundColor = (chromeless ? chromeBG : contentBG).cgColor
 
         let tint = chromeFG.withAlphaComponent(0.85)
         closeButton.contentTintColor = tint
@@ -116,12 +122,13 @@ final class CenterOverlayView: NSView {
         closeButton.action = #selector(closeButtonTapped)
         closeButton.setAccessibilityIdentifier("centerOverlay.closeButton")
         toolbar.addSubview(closeButton)
+        toolbar.isHidden = chromeless
 
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 32),
+            toolbar.heightAnchor.constraint(equalToConstant: chromeless ? 0 : 32),
 
             closeButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -12),
             closeButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -196,7 +203,7 @@ final class CenterOverlayView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { // Esc
+        if event.keyCode == 53, !chromeless { // Esc
             onClose()
         } else {
             super.keyDown(with: event)
@@ -204,7 +211,7 @@ final class CenterOverlayView: NSView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.keyCode == 53 {
+        if event.keyCode == 53, !chromeless {
             onClose()
             return true
         }

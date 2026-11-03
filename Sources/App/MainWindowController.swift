@@ -70,6 +70,10 @@ class MainWindowController: NSWindowController {
     )
 
     private var dashboardVC: DashboardViewController?
+    /// First Mate's view while it is the center overlay; nil otherwise.
+    private weak var firstMateView: FirstMateView?
+    /// First Mate's history while its popover is open; nil otherwise.
+    private weak var firstMateHistory: FirstMateLogView?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
@@ -860,6 +864,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
+        setupFirstMate(dashboard)
 
         // Every command entry point in the dashboard (n, `/ @ #`, Cmd+N) opens the
         // island's command bar — the fleet column has no composer of its own.
@@ -2356,7 +2361,7 @@ extension MainWindowController {
         // it is a "what's happening now" surface, not the full fleet list.
         let activityCutoff = Date().addingTimeInterval(-24 * 60 * 60)
         var byWorktree: [String: IslandAgentRow] = [:]
-        for pane in AgentRegistry.shared.allPanes() {
+        for pane in AgentRegistry.shared.allPanes() where !FirstMatePane.isFirstMate(worktreePath: pane.worktreePath) {
             let lastActivity = statusAggregator.lastActivity(for: pane.worktreePath) ?? pane.startedAt
             guard let lastActivity, lastActivity >= activityCutoff else { continue }
             // Same resolver as the dashboard cards, but via the shared TTL
@@ -2988,7 +2993,9 @@ extension MainWindowController: CommandHost {
     /// handle minted on sight.
     func fleetIndex() -> FleetIndex {
         let registry = PaneHandleRegistry.shared
-        let panes = AgentRegistry.shared.allPanes().map { pane -> PaneRef in
+        let panes = AgentRegistry.shared.allPanes()
+            .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
+            .map { pane -> PaneRef in
             let sessionKey = pane.station?.paneSessionKey ?? ""
             let key = PaneHandleRegistry.key(sessionKey: sessionKey, paneId: pane.id)
             return PaneRef(handle: registry.handle(for: key), handleKey: key, id: pane.id, sessionKey: sessionKey,
@@ -3728,3 +3735,86 @@ extension MainWindowController: PaneSharing {
         tabCoordinator.shareLinks.revokeAll(paneSessionKey: paneSessionKey)
     }
 }
+
+// MARK: - First Mate
+
+extension MainWindowController {
+    fileprivate func setupFirstMate(_ dashboard: DashboardViewController) {
+        let autopilot = tabCoordinator.autopilot
+        dashboard.firstMateDock.apply(autopilot.state)
+        dashboard.firstMateDock.onOpen = { [weak self] in self?.toggleFirstMate() }
+        // Picking a worktree is leaving First Mate: the row's terminal takes the
+        // right side back, the same row that was already selected included.
+        dashboard.onFleetRowClick = { [weak self] in
+            guard let self, self.firstMateView?.superview != nil else { return }
+            self.dashboardVC?.dismissCenterOverlay()
+        }
+        dashboard.firstMateDock.onTogglePause = { [weak self] in
+            guard let self else { return }
+            self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
+        }
+        dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
+        autopilot.onStateChange = { [weak self] state in
+            guard let self else { return }
+            self.dashboardVC?.firstMateDock.apply(state)
+            self.firstMateHistory?.show(autopilot.audit.recent())
+        }
+    }
+
+    /// The dock is a switch: First Mate over the terminal side, or back to the
+    /// worktree that was there.
+    func toggleFirstMate() {
+        guard let dashboardVC else { return }
+        if firstMateView?.superview != nil {
+            dashboardVC.dismissCenterOverlay()
+            return
+        }
+        let view = FirstMateView()
+        view.onTurnOn = { [weak self] in
+            guard let self else { return }
+            self.setAutopilot(enabled: true, paused: false)
+            self.tabCoordinator.autopilot.ensureSession { [weak self] in
+                self?.firstMateView?.embed(self?.tabCoordinator.autopilot.station)
+            }
+        }
+        // Chromeless: First Mate should read like a selected pane — no toolbar,
+        // terminal colours — and Esc must reach Claude, not close the overlay.
+        dashboardVC.showCenterOverlay(view, title: "First Mate", chromeless: true)
+        firstMateView = view
+        guard tabCoordinator.autopilot.station != nil else {
+            view.embed(nil)
+            return
+        }
+        // Attach only once the session is known to hold the agent: attaching to a
+        // missing session would make zmx start an empty shell under that name.
+        tabCoordinator.autopilot.ensureSession { [weak self, weak view] in
+            guard let self, let view, view.superview != nil else { return }
+            view.embed(self.tabCoordinator.autopilot.station)
+            view.focusTerminal(self.tabCoordinator.autopilot.station)
+        }
+    }
+
+    /// The audit log in a popover off the dock's history button.
+    fileprivate func showFirstMateHistory(from anchor: NSView) {
+        let log = FirstMateLogView(frame: NSRect(x: 0, y: 0, width: 460, height: 360))
+        log.show(tabCoordinator.autopilot.audit.recent())
+        let controller = NSViewController()
+        controller.view = log
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.contentSize = log.frame.size
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        firstMateHistory = log
+    }
+
+    fileprivate func setAutopilot(enabled: Bool, paused: Bool) {
+        config.autopilotEnabled = enabled
+        config.autopilotPaused = paused
+        tabCoordinator.config.autopilotEnabled = enabled
+        tabCoordinator.config.autopilotPaused = paused
+        saveConfig()
+        tabCoordinator.applyAutopilotConfig()
+    }
+}
+

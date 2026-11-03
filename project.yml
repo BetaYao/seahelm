@@ -55,6 +55,11 @@ packages:
   Aptabase:
     url: https://github.com/aptabase/aptabase-swift
     from: 0.3.4
+  # `.seahelm/automations.yml` (First Mate rules). A real YAML parser rather
+  # than a hand-rolled subset: users write these files by hand.
+  Yams:
+    url: https://github.com/jpsim/Yams
+    from: 6.2.0
 
 targets:
   seahelm:
@@ -102,6 +107,8 @@ targets:
         product: Sparkle
       - package: Aptabase
         product: Aptabase
+      - package: Yams
+        product: Yams
       # Media preview backends. AVKit auto-links SwiftUICore, which can only be
       # linked through SwiftUI — so SwiftUI must be explicit here or the link
       # fails with "not an allowed client of it".
