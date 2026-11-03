@@ -324,8 +324,9 @@ def analyse(rows):
         "swapouts_per_hour": swap_rate,
         "swap_used_mb_last": dig(rows[-1], "sys", "swap_used_mb"),
         "free_mb_last": dig(rows[-1], "sys", "free_mb"),
-        "zmx_procs_last": dig(rows[-1], "zmx", "procs"),
-        "zmx_rss_mb_last": dig(rows[-1], "zmx", "rss_mb"),
+        # Samples from before seahelmd recorded the zmx daemons under "zmx".
+        "daemon_procs_last": dig(rows[-1], "seahelmd", "procs", default=dig(rows[-1], "zmx", "procs")),
+        "daemon_rss_mb_last": dig(rows[-1], "seahelmd", "rss_mb", default=dig(rows[-1], "zmx", "rss_mb")),
     }
     report["fsevents"] = fsevents_analysis(rows)
 
@@ -469,8 +470,8 @@ def render_text(report, rows):
     out.append("  panes %s–%s (avg %s, peak running %s)   %s MB per awake pane"
                % (panes.get("min"), panes.get("max"), panes.get("avg"), panes.get("running_max"),
                   panes.get("mb_per_pane_last")))
-    out.append("  zmx %s procs / %s MB   swap used %s MB   swapouts %s/h"
-               % (system.get("zmx_procs_last"), system.get("zmx_rss_mb_last"),
+    out.append("  session daemons %s procs / %s MB   swap used %s MB   swapouts %s/h"
+               % (system.get("daemon_procs_last"), system.get("daemon_rss_mb_last"),
                   system.get("swap_used_mb_last"), system.get("swapouts_per_hour")))
     out.append("")
 

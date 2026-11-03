@@ -112,7 +112,7 @@ A narrow window is forced to single anyway (a mirror preference is ignored when 
 
 ## VT terminal
 
-The Mac serves a faithful PTY stream through **`zmx attach`**; the browser renders it with xterm.js.
+The Mac serves a faithful PTY stream through **`seahelmd attach`**; the browser renders it with xterm.js.
 Gateway notifies carry `{b64, cols?, rows?}`, decoded by `handleVT()`.
 
 Commands (Gateway JSON-RPC):
