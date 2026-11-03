@@ -32,6 +32,19 @@ enum AutopilotPolicy {
         }
     }
 
+    /// Where the router puts a worktree's measured facts for the card to show.
+    static let factsKey = "_facts"
+
+    /// Measured facts for the worktree a deleting call names — what a card that
+    /// would remove it has to show. Blocking (git): the router calls it on its
+    /// own thread, before the policy hops to main.
+    static func facts(forDeleting params: [String: Any]) -> String? {
+        guard let path = params["worktree_path"] as? String, !path.isEmpty else { return nil }
+        var facts = WorktreeFacts.probe(worktreePath: path)
+        facts.busyPanes = WorktreeFacts.busyPanes(worktreePath: path)
+        return facts.summary
+    }
+
     /// Whether a control call comes from First Mate (its CLI exports its own
     /// session name as `SEAHELM_PANE_ID`, which arrives as `_meta.caller`).
     static func isFirstMate(caller: String?) -> Bool { caller == FirstMatePane.sessionName }
@@ -45,7 +58,8 @@ enum AutopilotPolicy {
             return "Start an agent in \(repo): \(task.prefix(160))"
         case "worktree.delete":
             let wt = URL(fileURLWithPath: params["worktree_path"] as? String ?? "").lastPathComponent
-            return "Delete worktree \(wt)"
+            let facts = (params[factsKey] as? String).map { " — \($0)" } ?? ""
+            return "Delete worktree \(wt)\(facts)"
         default:
             let pane = params["pane_id"] as? String ?? "?"
             let text = (params["command"] as? String) ?? (params["text"] as? String)

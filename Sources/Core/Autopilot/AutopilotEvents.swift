@@ -8,6 +8,8 @@ struct AutopilotEvent: Equatable {
     let worktreePath: String
     let branch: String
     let pr: WorktreePRStatus?
+    /// The worktree as seahelm measured it when the event fired.
+    var facts: WorktreeFacts? = nil
 }
 
 /// A worktree's branch and PR, as one look at the fleet found them.
@@ -153,6 +155,9 @@ enum AutopilotEngine {
                      "repo: \(event.repoPath)",
                      "worktree: \(event.worktreePath) (branch \(event.branch))"]
         if let pr = event.pr { lines.append("PR: #\(pr.number) \(pr.url) — \(pr.summary)") }
+        if let facts = event.facts {
+            lines.append("facts (measured by seahelm; trust these over your own summary): \(facts.summary)")
+        }
         let autonomy = AutopilotAction.allCases
             .map { "\($0.rawValue)=\(config.autonomy(for: $0, rule: rule).rawValue)" }
             .joined(separator: ", ")
