@@ -1,0 +1,13 @@
+[package]
+name = "seahelm-core-types"
+description = "Types shared by seahelm-core's parts: statuses, agent types, normalized events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

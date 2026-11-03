@@ -1,0 +1,53 @@
+{
+  "id": "pi",
+  "version": "2026.07.22.1",
+  "min_engine_version": 1,
+  "aliases": ["pi-coding-agent"],
+  "default_status": "idle",
+  "message_skip_patterns": ["to cancel", "navigate", "↑↓"],
+  "process": {
+    "exec_names": ["pi"],
+    "argv_contains": ["pi-coding-agent", "coding-agent"],
+    "generic_runtimes": ["node", "bun", "deno"],
+    "env_hint": "SEAHELM_AGENT"
+  },
+  "authority": "session_only",
+  "rules": [
+    {
+      "id": "osc_title_working",
+      "state": "running",
+      "priority": 1100,
+      "region": "osc_title",
+      "regex": ["^[\\x{2800}-\\x{28FF}] "],
+      "visible_working": true
+    },
+    {
+      "id": "project_trust",
+      "state": "waiting",
+      "priority": 850,
+      "region": "bottom_lines:16",
+      "any": [{ "contains": ["project trust"] }],
+      "visible_blocker": true
+    },
+    {
+      "id": "error_line",
+      "state": "error",
+      "priority": 700,
+      "region": "bottom_lines:10",
+      "any": [{ "contains": ["error:"] }, { "line_regex": ["(?i)^\\s*error\\b"] }]
+    },
+    {
+      "id": "working_indicator",
+      "state": "running",
+      "priority": 400,
+      "region": "bottom_lines:10",
+      "any": [
+        { "contains": ["to cancel"] },
+        { "contains": ["auto-compacting"] },
+        { "contains": ["summarizing branch"] },
+        { "contains": ["retrying ("] }
+      ],
+      "visible_working": true
+    }
+  ]
+}

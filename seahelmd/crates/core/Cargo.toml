@@ -1,0 +1,21 @@
+[package]
+name = "seahelm-core"
+description = "seahelm's agent-status service: hooks and screens in, pane and worktree state out, over JSON-RPC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+seahelmd = { path = "../seahelmd" }
+seahelm-core-types = { path = "../core-types" }
+seahelm-core-hooks = { path = "../core-hooks" }
+seahelm-core-scan = { path = "../core-scan" }
+seahelm-core-registry = { path = "../core-registry" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,12 @@
+[package]
+name = "seahelm-core-registry"
+description = "The agent state model for seahelm-core: panes, arbitration between hooks and screen, rollups, events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seahelm-core-types = { path = "../core-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
