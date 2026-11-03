@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use gpui::{
     div, fill, outline, point, prelude::*, px, size, App, BorderStyle, Bounds, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
+    Element, ElementId, ElementInputHandler, EntityInputHandler, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
     Hsla, InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window,
+    Pixels, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
 use keep_vt::render::{Cell, CursorShape, Frame, Row, View, Width};
 use keep_vt::selection::{Autoscroll, Geometry, Pointer, Scroll, Scrollbar};
@@ -50,6 +50,11 @@ pub struct TerminalView {
     rectangle: bool,
     autoscrolling: bool,
     scrollbar: Scrollbar,
+    /// What an input method is composing, not yet the terminal's: drawn at
+    /// the cursor, underlined, until committed or cancelled.
+    marked: Option<String>,
+    /// The cursor's cell last frame, where the IME's candidate window goes.
+    ime_anchor: Option<Bounds<Pixels>>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +102,8 @@ impl TerminalView {
             rectangle: false,
             autoscrolling: false,
             scrollbar: Scrollbar::default(),
+            marked: None,
+            ime_anchor: None,
         }
     }
 
@@ -171,6 +178,10 @@ impl TerminalView {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session.clone() else { return };
+        // Typed text is the input method's to deliver (`replace_text_in_range`).
+        if keys::is_text(&event.keystroke) {
+            return;
+        }
         let app_cursor = session.grid.lock().map(|g| g.terminal.dec_mode(1)).unwrap_or(false);
         if crate::platform::is_app_shortcut(&event.keystroke.modifiers) {
             match event.keystroke.key.as_str() {
@@ -406,6 +417,85 @@ impl Render for TerminalView {
     }
 }
 
+/// The platform's input method talks to the terminal through this: it
+/// composes in `marked` and commits text, which is typed into the session.
+/// The terminal has no editable buffer of its own, so ranges are the
+/// composition's.
+impl EntityInputHandler for TerminalView {
+    fn text_for_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        adjusted: &mut Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let marked = self.marked.as_deref().unwrap_or("");
+        let utf16: Vec<u16> = marked.encode_utf16().collect();
+        let range = range.start.min(utf16.len())..range.end.min(utf16.len());
+        *adjusted = Some(range.clone());
+        Some(String::from_utf16_lossy(&utf16[range]))
+    }
+
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        let end = self.marked.as_deref().map_or(0, |m| m.encode_utf16().count());
+        Some(UTF16Selection { range: end..end, reversed: false })
+    }
+
+    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<std::ops::Range<usize>> {
+        self.marked.as_deref().map(|m| 0..m.encode_utf16().count())
+    }
+
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked = None;
+        cx.notify();
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        _range: Option<std::ops::Range<usize>>,
+        text: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked = None;
+        if !text.is_empty() {
+            self.to_live_screen();
+            if let Some(session) = &self.session {
+                session.send(text.replace('\n', "\r").as_bytes());
+            }
+        }
+        cx.notify();
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        _selected: Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked = (!new_text.is_empty()).then(|| new_text.to_string());
+        cx.notify();
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        _element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        let anchor = self.ime_anchor?;
+        let cell_w = self.geom.map(|g| g.cell.width).unwrap_or(anchor.size.width);
+        Some(Bounds::new(point(anchor.origin.x + cell_w * range.start as f32, anchor.origin.y), anchor.size))
+    }
+
+    fn character_index_for_point(&mut self, _: gpui::Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        None
+    }
+}
+
 struct TerminalElement {
     view: gpui::Entity<TerminalView>,
 }
@@ -422,6 +512,11 @@ pub struct Layout {
     cursor: Option<gpui::PaintQuad>,
     /// Shown while the viewport is back in history: where it is.
     thumb: Option<gpui::PaintQuad>,
+    /// The IME's composition: a background over the cells it covers, and
+    /// the text, underlined.
+    preedit: Option<(gpui::PaintQuad, Segment)>,
+    ime_anchor: Option<Bounds<Pixels>>,
+    bounds: Bounds<Pixels>,
     hitbox: Option<Hitbox>,
     started: Instant,
 }
@@ -502,6 +597,9 @@ impl Element for TerminalElement {
             segments: Vec::new(),
             cursor: None,
             thumb: scroll_thumb(v.scrollbar, bounds),
+            preedit: None,
+            ime_anchor: None,
+            bounds,
             hitbox: Some(hitbox),
             started,
         };
@@ -591,7 +689,25 @@ impl Element for TerminalElement {
             }
         }
 
-        if let Some((cx_, cy)) = cursor_cell {
+        if let Some((cx_, cy)) = frame.cursor.at {
+            let at = point(origin.x + cell_w * cx_ as f32, origin.y + cell_h * cy as f32);
+            layout.ime_anchor = Some(Bounds::new(at, cell));
+            if let Some(marked) = v.marked.as_ref().filter(|m| !m.is_empty()) {
+                let fg = Hsla::from(theme::rgb(default_fg));
+                let runs = [TextRun {
+                    len: marked.len(),
+                    font: gpui::font(family.clone()),
+                    color: fg,
+                    background_color: None,
+                    underline: Some(UnderlineStyle { color: Some(fg), thickness: px(1.), wavy: false }),
+                    strikethrough: None,
+                }];
+                let line = text_system.shape_line(SharedString::from(marked.clone()), font_size, &runs, None);
+                let bg = fill(Bounds::new(at, size(line.width, cell_h)), theme::rgb(default_bg));
+                layout.preedit = Some((bg, Segment { origin: at, line }));
+            }
+        }
+        if let Some((cx_, cy)) = cursor_cell.filter(|_| v.marked.is_none()) {
             let wide = v.rows.get(cy as usize).and_then(|r| r.cells.get(cx_ as usize)).is_some_and(|c| c.width == Width::Wide);
             let w = if wide { cell_w * 2. } else { cell_w };
             let at = point(origin.x + cell_w * cx_ as f32, origin.y + cell_h * cy as f32);
@@ -660,9 +776,19 @@ impl Element for TerminalElement {
         if let Some(c) = layout.cursor.take() {
             window.paint_quad(c);
         }
+        if let Some((bg, seg)) = layout.preedit.take() {
+            window.paint_quad(bg);
+            let _ = seg.line.paint(seg.origin, layout.cell.height, window, cx);
+        }
         if let Some(t) = layout.thumb.take() {
             window.paint_quad(t);
         }
+        let anchor = layout.ime_anchor;
+        let focus = self.view.update(cx, |v, _| {
+            v.ime_anchor = anchor;
+            v.focus.clone()
+        });
+        window.handle_input(&focus, ElementInputHandler::new(layout.bounds, self.view.clone()), cx);
         let spent = layout.started.elapsed();
         self.view.update(cx, |v, _| v.record(spent));
     }

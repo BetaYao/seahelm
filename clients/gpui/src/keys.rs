@@ -108,9 +108,22 @@ pub fn encode(key: &Keystroke, app_cursor: bool) -> Option<Vec<u8>> {
     }
 }
 
+/// Whether the key types text: a printable character with no modifier
+/// but shift. Those go to the platform's input method (`EntityInputHandler`
+/// on the terminal view) rather than straight to the terminal, so an IME
+/// can compose with them; what it commits arrives as text.
+pub fn is_text(key: &Keystroke) -> bool {
+    let m = &key.modifiers;
+    !m.control
+        && !m.alt
+        && !m.platform
+        && !m.function
+        && key.key_char.as_deref().is_some_and(|c| !c.is_empty() && !c.chars().any(char::is_control))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::encode;
+    use super::{encode, is_text};
     use gpui::Keystroke;
 
     fn k(s: &str) -> Option<Vec<u8>> {
@@ -128,5 +141,17 @@ mod tests {
         assert_eq!(k("cmd-c"), None);
         assert_eq!(k("shift-tab"), Some(b"\x1b[Z".to_vec()));
         assert_eq!(encode(&Keystroke::parse("up").unwrap(), true), Some(b"\x1bOA".to_vec()));
+    }
+
+    #[test]
+    fn printable_keys_go_to_the_input_method() {
+        let t = |s: &str| is_text(&Keystroke::parse(s).unwrap());
+        assert!(t("a->a"));
+        assert!(t("shift-a->A"));
+        assert!(t("space-> "));
+        assert!(!t("ctrl-a"));
+        assert!(!t("alt-b"));
+        assert!(!t("enter"));
+        assert!(!t("up"));
     }
 }
