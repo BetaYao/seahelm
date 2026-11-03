@@ -49,7 +49,7 @@ final class VolumeDropRecoveryTests: XCTestCase {
 
     // MARK: - Wedged attach clients (live parent)
 
-    private static let zmxPath = "/App/Contents/Resources/bin/zmx"
+    private static let zmxPath = "/App/Contents/Resources/bin/seahelmd"
 
     private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String) -> SessionManager.ZmxProcess {
         SessionManager.ZmxProcess(pid: pid, ppid: ppid, command: cmd)

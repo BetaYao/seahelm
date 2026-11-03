@@ -84,7 +84,7 @@ final class ZmxVTAttachManagerTests: XCTestCase {
     ) -> ZmxVTAttachManager {
         let mgr = ZmxVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { "/fake/zmx" },
+            zmxPath: { _ in "/fake/zmx" },
             attachScriptPath: { "/fake/zmx-attach.py" },
             sessionSize: sessionSize,
             now: { [unowned self] in self.fakeClock },

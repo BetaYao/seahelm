@@ -11,7 +11,8 @@ Seahelm's own source is licensed separately under the MIT License; see [`LICENSE
 | Component | Version | License |
 |---|---|---|
 | [Ghostty (libghostty)](https://github.com/ghostty-org/ghostty) | v1.3.1-1826-g12967b68f | MIT |
-| [zmx](https://zmx.sh) | 0.7.1 | MIT |
+| [Keep](https://github.com/ttwwnn/keep) (keep-vt, in seahelmd) | e944802 | MIT |
+| Rust crates in seahelmd (listed below) | — | MIT, BSD-2-Clause |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.9.4 | MIT (+ external licenses) |
 | [CodeEditSourceEditor](https://github.com/CodeEditApp/CodeEditSourceEditor) | 0.15.2 | MIT |
 | [CodeEditTextView](https://github.com/BetaYao/CodeEditTextView) | 0.12.2 | MIT |
@@ -66,20 +67,67 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### zmx
+### Keep (keep-vt, keepd)
 
-https://zmx.sh — MIT
+https://github.com/ttwwnn/keep — MIT
 
-Pinned binary shipped at Contents/Resources/bin/zmx.
+seahelmd (Contents/Resources/bin/seahelmd, source in `seahelmd/`) includes the
+`keep-vt` crate unmodified and a session module adapted from `keepd`.
 
 ```
-Copyright (c) 2025 Eric Bower
+Copyright (c) 2026 luhw-dev
+Copyright (c) 2026 ttwwnn
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Rust crates linked into seahelmd
+
+Where a crate is offered under a choice of licenses, Seahelm uses it under the
+MIT License (serial2: the BSD 2-Clause License). libghostty-vt, which seahelmd
+also links, is part of Ghostty (above).
+
+| Crate | Version | Copyright |
+|---|---|---|
+| anyhow | 1.0.104 | David Tolnay |
+| bitflags | 2.13.2 | Copyright (c) 2014 The Rust Project Developers |
+| cfg-if | 1.0.5 | Copyright (c) 2014 Alex Crichton |
+| downcast-rs | 1.2.1 | Copyright (c) 2020 Ashish Myles and contributors |
+| filedescriptor | 0.8.3 | Copyright (c) 2018 Wez Furlong |
+| lazy_static | 1.5.1 | Marvin Löbel |
+| libc | 0.2.191 | Copyright (c) The Rust Project Developers |
+| log | 0.4.35 | Copyright (c) 2014 The Rust Project Developers |
+| nix | 0.28.0 | Copyright (c) 2015 Carl Lerche + nix-rust Authors |
+| portable-pty | 0.9.0 | Copyright (c) 2018 Wez Furlong |
+| shell-words | 1.1.1 | Copyright (c) 2016 Tomasz Miąsko |
+| thiserror | 1.0.69 | David Tolnay |
+
+Each of the crates above is licensed as follows, with its own copyright line:
+
+```
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+serial2 0.2.39:
+
+```
+Copyright (c) 2021, Maarten de Vries <maarten@de-vri.es>
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### Sparkle

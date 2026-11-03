@@ -1,73 +1,77 @@
 import Foundation
 
-/// Single source of truth for the zmx executable location. The bundled copy
-/// (shipped in Contents/Resources/bin/zmx) always wins; $PATH is consulted only
-/// in dev builds that never fetched/embedded the binary.
+/// Single source of truth for the session daemon: seahelmd, built from
+/// `seahelmd/` and shipped in Contents/Resources/bin/seahelmd. $PATH is
+/// consulted only in dev builds that never embedded it.
 ///
-/// This is also the seam a future in-house persistence daemon would replace:
-/// it is the one place that knows *which* executable provides session persistence.
+/// One daemon per pane session owns the PTY and keeps its screen in
+/// libghostty-vt, so the app can quit and come back without taking the agents
+/// with it. It speaks the verbs zmx did — `attach`, `run`, `send`, `history`,
+/// `kill`, `list` — which is why most callers still read as zmx's (the type
+/// names predate it). See seahelmd/README.md.
 enum ZmxLocator {
     /// Pure resolution: bundled path if present, else whatever the PATH lookup finds.
     static func resolve(bundledPath: String?, pathLookup: () -> String?) -> String? {
         bundledPath ?? pathLookup()
     }
 
-    /// Absolute path to the zmx binary, or nil if genuinely absent.
+    /// Absolute path to seahelmd, or nil if genuinely absent.
     static func path() -> String? {
         resolve(bundledPath: bundledResourcePath(),
-                pathLookup: { ProcessRunner.commandPath("zmx") })
+                pathLookup: { ProcessRunner.commandPath("seahelmd") })
     }
 
     /// A token safe to hand to `/usr/bin/env` or a shell: the absolute bundled
-    /// path when available, otherwise the literal "zmx" (PATH-resolved downstream).
-    static func executable() -> String { path() ?? "zmx" }
+    /// path when available, otherwise the literal "seahelmd" (PATH-resolved downstream).
+    static func executable() -> String { path() ?? "seahelmd" }
 
     static var isAvailable: Bool { path() != nil }
 
-    /// Runtime backend resolution. zmx is the only persistent backend; fall back
-    /// to a plain local shell when zmx is absent or reports an unexpectedly
-    /// unsupported version. `warning` is non-nil only in that last (rare) case,
+    /// Runtime backend resolution. The daemon is the only persistent backend;
+    /// fall back to a plain local shell when it is absent or answers `version`
+    /// with something else. `warning` is non-nil only in that last (rare) case,
     /// so the UI can surface why persistence was disabled.
     static func resolveBackend() -> (backend: String, warning: String?) {
         guard isAvailable else { return ("local", nil) }
         let version = ProcessRunner.output([executable(), "version"]) ?? ""
         if isSupportedVersion(version) { return ("zmx", nil) }
-        return ("local", "Bundled zmx version is unexpectedly unsupported (\(version)).")
+        return ("local", "Bundled seahelmd answered an unexpected version (\(version)).")
     }
 
-    /// zmx must be at least 0.4.2 for the `zmx run` session semantics seahelm
-    /// relies on. Accepts a raw `zmx version` line and extracts the first semver.
+    /// `seahelmd version` prints `seahelmd <semver>`. Every release so far
+    /// speaks the verbs the app uses.
     static func isSupportedVersion(_ rawVersion: String) -> Bool {
         let trimmed = rawVersion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        return trimmed.hasPrefix("seahelmd ")
+            && trimmed.range(of: #"^seahelmd v?\d+\.\d+\.\d+"#, options: .regularExpression) != nil
+    }
 
-        let semver = trimmed
-            .components(separatedBy: CharacterSet.whitespacesAndNewlines)
-            .first { token in
-                token.contains(".") && token.range(of: #"^v?\d+\.\d+\.\d+"#, options: .regularExpression) != nil
-            }
-            ?? trimmed
+    /// Where seahelmd keeps one socket per session. Short on purpose: a unix
+    /// socket path holds ~104 bytes and session names run long.
+    static func socketDir(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        environment["SEAHELMD_DIR"] ?? "/tmp/seahelmd-\(getuid())"
+    }
 
-        let normalized = semver.hasPrefix("v") ? String(semver.dropFirst()) : semver
-        let parts = normalized
-            .split(separator: ".")
-            .prefix(3)
-            .compactMap { Int($0.filter(\.isNumber)) }
+    /// Every session's `list` row, or nil when the daemon could not be asked.
+    static func listOutput() -> String? {
+        ProcessRunner.output([executable(), "list"])
+    }
 
-        guard parts.count == 3 else { return false }
-        let major = parts[0]
-        let minor = parts[1]
-        let patch = parts[2]
+    /// Environment a session is started with: the palette this run latched,
+    /// which the daemon answers OSC 10/11/12 with while no pane is attached —
+    /// so an agent started before its pane still reads the real colours.
+    static func sessionEnvironment() -> [String] {
+        ["SEAHELMD_FACTS=\(facts(dark: GhosttyBridge.terminalIsDark))"]
+    }
 
-        if major > 0 { return true }
-        if minor > 4 { return true }
-        if minor < 4 { return false }
-        return patch >= 2
+    /// The bundled Catppuccin Mocha / Latte the surfaces are themed with.
+    static func facts(dark: Bool) -> String {
+        dark ? "fg=cdd6f4 bg=1e1e2e cursor=f5e0dc dark=1" : "fg=4c4f69 bg=eff1f5 cursor=dc8a78 dark=0"
     }
 
     /// Path to the embedded binary if it exists and is executable.
     private static func bundledResourcePath() -> String? {
-        guard let url = Bundle.main.url(forResource: "zmx", withExtension: nil, subdirectory: "bin"),
+        guard let url = Bundle.main.url(forResource: "seahelmd", withExtension: nil, subdirectory: "bin"),
               FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
         return url.path
     }

@@ -29,7 +29,7 @@ pane 会迁移到新 worktree 的卡片上，而不是在旁边多出一个空�
 携带的 cwd，配合同仓库判定和冷却时间，这样 agent 执行 `cd x && ...` 这类单次调用不会
 把 pane 来回拖动。
 
-除此之外：基于 Ghostty 引擎的原生渲染而非 Electron、通过 zmx 让会话在重启后依然存活、
+除此之外：基于 Ghostty 引擎的原生渲染而非 Electron、会话在 app 退出后继续运行(重启机器后 agent 自动续上对话)、
 开箱支持 12 种 agent 的状态识别。
 
 ## 它是怎么写出来的
@@ -102,7 +102,7 @@ seahelm layout export
 
 **Token 用量** — Claude 和 Codex 的 token/额度用量在 app 内汇总展示。
 
-**会话持久化** — 由 [zmx](https://zmx.sh) 持久化:关掉 app、重启机器,agent 还在原地。zmx 不可用时降级为普通进程。
+**会话持久化** — 每个 pane 跑在自己的 seahelmd 进程里(随 app 打包,源码在 `seahelmd/`),它持有终端并用 libghostty-vt 保存屏幕。关掉 app,agent 照常工作;重新打开,pane 原样回来。重启机器后 agent 会续上之前的对话。
 
 ## 适合的人
 
@@ -165,8 +165,8 @@ Swift + AppKit,macOS 14.0+,四层结构:
 Seahelm 以 [MIT License](LICENSE) 发布。
 
 本项目建立在他人的工作之上 —— 主要是 [Ghostty](https://github.com/ghostty-org/ghostty)
-终端引擎(MIT)和负责会话持久化的 [zmx](https://zmx.sh)。捆绑的 Swift 包分别采用
+终端引擎(MIT)和负责会话持久化的 [Keep](https://github.com/ttwwnn/keep) libghostty-vt 绑定(MIT)。捆绑的 Swift 包分别采用
 MIT、BSD-3-Clause 或 Apache-2.0 协议,各自保留其版权与许可。
 
-随 app 分发的第三方组件 —— Ghostty、zmx、Sparkle 及各 Swift 包 —— 及其完整协议原文
+随 app 分发的第三方组件 —— Ghostty、Keep、seahelmd 中的 Rust crate、Sparkle 及各 Swift 包 —— 及其完整协议原文
 见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。

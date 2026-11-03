@@ -121,7 +121,7 @@ class SettingsViewController: NSViewController {
               keywords: ["qr", "remote", "browser", "gateway", "pair",
                          "port", "tunnel", "wss", "cloudflare", "web"]),
         .init(id: "sessions", title: "Sessions", symbol: "rectangle.stack",
-              keywords: ["zmx", "cleanup", "kill", "detached", "orphan"]),
+              keywords: ["session", "seahelmd", "zmx", "cleanup", "kill", "detached", "orphan"]),
     ])
     private let contentScroll = NSScrollView()
     var pages: [String: NSView] = [:]
@@ -808,7 +808,7 @@ class SettingsViewController: NSViewController {
                                  control: memoryKillField,
                                  accessibilityId: "settings.memoryGuard.kill"),
             ]),
-            SettingsGroupView(title: "zmx sessions", rows: [
+            SettingsGroupView(title: "Sessions", rows: [
                 SettingsRow.stacked(nil,
                                     subtitle: "Sessions outlive the app, so panes you closed can leave daemons behind. Detached rows (0 clients) are the ones nothing is watching. Killing a session ends whatever runs inside it.",
                                     content: sessionMonitor),

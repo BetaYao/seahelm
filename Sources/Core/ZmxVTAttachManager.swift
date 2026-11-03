@@ -155,7 +155,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     }
 
     private let processSpawner: VTProcessSpawning
-    private let zmxPath: () -> String
+    private let zmxPath: (String) -> String
     private let attachScriptPath: () -> String?
     private let sessionSize: (String) -> (rows: Int, cols: Int)?
     private let now: () -> Date
@@ -171,7 +171,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
 
     init(
         processSpawner: VTProcessSpawning = DefaultVTProcessSpawner(),
-        zmxPath: @escaping () -> String = { ZmxLocator.executable() },
+        zmxPath: @escaping (String) -> String = { _ in ZmxLocator.executable() },
         attachScriptPath: @escaping () -> String? = { ZmxVTAttachManager.bundledAttachScriptPath() },
         sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { ZmxVTAttachManager.defaultSessionSize(for: $0) },
         now: @escaping () -> Date = Date.init,
@@ -295,7 +295,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     }
 
     static func defaultSessionSize(for paneSessionKey: String) -> (rows: Int, cols: Int)? {
-        guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return nil }
+        guard let listOutput = ZmxLocator.listOutput() else { return nil }
         guard let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: listOutput) else {
             return nil
         }
@@ -337,7 +337,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
                 sessionKey: paneSessionKey,
                 rows: geometry.rows,
                 cols: geometry.cols,
-                zmxPath: zmxPath())
+                zmxPath: zmxPath(paneSessionKey))
         } catch {
             return ["ok": false, "error": error.localizedDescription]
         }

@@ -55,7 +55,7 @@ enum PaneWorkingDirectory {
     /// at.
     static func probeSessionCwd(paneSessionKey: String) -> String? {
         guard !paneSessionKey.isEmpty,
-              let listing = ProcessRunner.output([ZmxLocator.executable(), "list"]),
+              let listing = ZmxLocator.listOutput(),
               let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey,
                                                 zmxListOutput: listing) else { return nil }
         return cwd(ofPid: pid)

@@ -1,21 +1,20 @@
 #!/bin/bash
 # disk-drop-recover.sh — Recover seahelm after the workspace volume dropped out.
 #
-# When the external volume holding the repo (and the zmx binary inside the app
-# bundle) disappears, every zmx session daemon is wedged for good: its cwd and
-# open fds point at a vnode that no longer exists. Remounting does not heal
-# them — `zmx list` answers `err=Timeout status=unreachable` forever and seahelm
-# cannot reattach. The only way out is to kill the daemons and relaunch the app,
-# which re-issues each pane's `claude --resume <id>` from config.json.
+# When the external volume holding the repo (and the seahelmd binary inside the
+# app bundle) disappears, the session daemons can be wedged for good: their cwd
+# and open fds point at a vnode that no longer exists, and remounting does not
+# heal them — `seahelmd list` answers `status=unreachable` and seahelm cannot
+# reattach. The way out is to kill the daemons and relaunch the app, which
+# re-issues each pane's `claude --resume <id>` from config.json.
 #
-# The daemons do NOT reliably burn CPU (they have been seen both spinning at
-# ~55% and blocked at 0%), so CPU is not the tell. The tell is `unreachable`
-# sessions plus every ~/.local/state/zmx/logs/*.log stopping at the same second.
+# The daemons do NOT reliably burn CPU, so CPU is not the tell; `unreachable`
+# sessions are.
 #
 # Usage: scripts/disk-drop-recover.sh [options]
 #   --check         Diagnose only; change nothing.
 #   --yes           Do not ask for confirmation.
-#   --kill-strays   Also kill non-zmx processes left spinning on a dead cwd
+#   --kill-strays   Also kill other processes left spinning on a dead cwd
 #                   (Android emulator's netsimd, dev servers, …).
 #   --no-launch     Kill and clean, but do not relaunch the app.
 #   --volume PATH   Volume to check (default: the one holding this repo).
@@ -65,20 +64,19 @@ with_timeout() {
   return "$rc"
 }
 
-# All zmx processes: the `run` session daemons and the `attach` clients. Matching
-# on the subcommand keeps this from ever selecting the script itself. zmx is
-# normally invoked by its full path inside the bundle, so accept a leading slash
-# as well as a space (a bare `zmx run` typed by hand).
-zmx_pids() { ps -axo pid=,command= | awk '$0 ~ /[ \/]zmx (run|attach)( |$)/ {print $1}'; }
+# All seahelmd processes: the session daemons (`__serve`) and the `attach`
+# clients. Matching on the subcommand keeps this from ever selecting the script
+# itself; a leading slash or space covers the bundled path and a bare name.
+daemon_pids() { ps -axo pid=,command= | awk '$0 ~ /[ \/]seahelmd (__serve|attach)( |$)/ {print $1}'; }
 
 seahelm_pids() { ps -axo pid=,command= | awk '$0 ~ /MacOS\/[S]eahelm( |$)/ {print $1}'; }
 
 # ---------------------------------------------------------------- preflight
 
-# Killing the zmx daemons takes down the pane this script runs in, so a run from
+# Killing the session daemons takes down the pane this script runs in, so a run from
 # inside seahelm never reaches the relaunch. Re-exec detached (nohup survives
 # the pane's SIGHUP and launchd adopts it) or refuse.
-if [ -n "${SEAHELM_PANE_ID:-}${ZMX_SESSION:-}" ] && [ "$DETACHED" -eq 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then
+if [ -n "${SEAHELM_PANE_ID:-}${SEAHELMD_SESSION:-}${ZMX_SESSION:-}" ] && [ "$DETACHED" -eq 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then
   if [ "$DETACH" -eq 1 ]; then
     LOG="${TMPDIR:-/tmp/}seahelm-disk-drop-recover.log"
     args=(--detached)
@@ -104,53 +102,33 @@ if [ ! -d "$VOLUME" ] || ! mount | grep -q " on $VOLUME "; then
   exit 1
 fi
 
-# Prefer the zmx inside the app bundle that is actually running: on a machine
-# with several checkouts, the one on PATH may belong to a different build.
-# $SEAHELM_ZMX overrides, for pointing at another bundle (or a test stub).
-ZMX="${SEAHELM_ZMX:-}"
-if [ -z "$ZMX" ]; then
+# Prefer the seahelmd inside the app bundle that is actually running: on a
+# machine with several checkouts, the one on PATH may belong to a different
+# build. $SEAHELM_DAEMON overrides, for pointing at another bundle (or a stub).
+DAEMON="${SEAHELM_DAEMON:-}"
+if [ -z "$DAEMON" ]; then
   for pid in $(seahelm_pids); do
     app="$(ps -o command= -p "$pid" | sed -n 's|\(.*\.app\)/Contents/MacOS/.*|\1|p')"
-    [ -n "$app" ] && [ -x "$app/Contents/Resources/bin/zmx" ] && ZMX="$app/Contents/Resources/bin/zmx" && break
+    [ -n "$app" ] && [ -x "$app/Contents/Resources/bin/seahelmd" ] && DAEMON="$app/Contents/Resources/bin/seahelmd" && break
   done
 fi
-[ -z "$ZMX" ] && [ -x "$ROOT/.build/Build/Products/Debug/Seahelm.app/Contents/Resources/bin/zmx" ] \
-  && ZMX="$ROOT/.build/Build/Products/Debug/Seahelm.app/Contents/Resources/bin/zmx"
-[ -z "$ZMX" ] && ZMX="$(command -v zmx || true)"
-if [ -z "$ZMX" ]; then
-  warn "No zmx binary found (looked in the running app, $ROOT/.build, and PATH)."
+[ -z "$DAEMON" ] && [ -x "$ROOT/.build/Build/Products/Debug/Seahelm.app/Contents/Resources/bin/seahelmd" ] \
+  && DAEMON="$ROOT/.build/Build/Products/Debug/Seahelm.app/Contents/Resources/bin/seahelmd"
+[ -z "$DAEMON" ] && DAEMON="$(command -v seahelmd || true)"
+if [ -z "$DAEMON" ]; then
+  warn "No seahelmd binary found (looked in the running app, $ROOT/.build, and PATH)."
   exit 1
 fi
 
 # ---------------------------------------------------------------- diagnose
 
 say "Volume:  $VOLUME"
-say "zmx:     $ZMX"
+say "daemon:  $DAEMON"
 
-LIST="$(with_timeout 30 "$ZMX" list 2>&1 || true)"
+LIST="$(with_timeout 30 "$DAEMON" list 2>&1 || true)"
 TOTAL="$(printf '%s\n' "$LIST" | grep -c 'name=' || true)"
 UNREACHABLE="$(printf '%s\n' "$LIST" | grep -c 'status=unreachable' || true)"
 say "Sessions: $TOTAL total, $UNREACHABLE unreachable"
-
-# The fingerprint: several session logs stop at the same second AND that second
-# is in the past. Sharing a timestamp proves nothing on its own — a healthy app
-# writes every session in the same poll — so the age is what tells them apart.
-# Only the newest timestamp is considered; retired sessions keep stale mtimes.
-LOGDIR="$HOME/.local/state/zmx/logs"
-if [ -d "$LOGDIR" ]; then
-  EPOCHS="$(stat -f '%m' "$LOGDIR"/*.log 2>/dev/null || true)"
-  NEWEST="$(printf '%s\n' "$EPOCHS" | sort -n | tail -1)"
-  if [ -n "$NEWEST" ]; then
-    SHARED="$(printf '%s\n' "$EPOCHS" | grep -c "^$NEWEST$" || true)"
-    AGE=$(( $(date +%s) - NEWEST ))
-    WHEN="$(date -r "$NEWEST" '+%Y-%m-%d %H:%M:%S')"
-    if [ "$SHARED" -gt 1 ] && [ "$AGE" -gt 60 ]; then
-      say "$SHARED session logs all stop at $WHEN, ${AGE}s ago — the disk-drop fingerprint."
-    else
-      say "Session logs current as of $WHEN (${AGE}s ago)"
-    fi
-  fi
-fi
 
 # Processes still running with a cwd that no longer resolves: same casualty
 # class as the daemons (the emulator's netsimd, dev servers, build watchers).
@@ -198,7 +176,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 SAVE="$HOME/.local/state/seahelm/disk-drop-recovery/$STAMP"
 mkdir -p "$SAVE"
 cp "$HOME/.config/seahelm/config.json" "$SAVE/config.json" 2>/dev/null || warn "no config.json to back up"
-printf '%s\n' "$LIST" > "$SAVE/zmx-list.txt"
+printf '%s\n' "$LIST" > "$SAVE/session-list.txt"
 ps -axo pid=,ppid=,stat=,%cpu=,etime=,command= > "$SAVE/ps.txt"
 
 {
@@ -227,10 +205,10 @@ for pid in $(seahelm_pids); do
 done
 [ -z "$APP" ] && APP="$ROOT/.build/Build/Products/Debug/Seahelm.app"
 
-ZMX_COUNT="$(zmx_pids | grep -c . || true)"
+DAEMON_COUNT="$(daemon_pids | grep -c . || true)"
 AGENTS="$(pgrep -x claude | grep -c . || true)"
 echo
-say "About to kill: seahelm app, $ZMX_COUNT zmx processes, $AGENTS agent process(es)."
+say "About to kill: seahelm app, $DAEMON_COUNT session process(es), $AGENTS agent process(es)."
 say "Agents resume from config.json; in-flight tool runs (builds, tests) are lost."
 [ "$NO_LAUNCH" -eq 0 ] && say "Then relaunch: $APP"
 
@@ -254,16 +232,15 @@ pkill -f "MacOS/Seahelm" 2>/dev/null || true
 sleep 2
 for pid in $(seahelm_pids); do kill -9 "$pid" 2>/dev/null || true; done
 
-say "Killing zmx daemons and clients…"
-# SIGKILL, not `zmx kill`: a wedged daemon never answers, so the graceful path
-# just burns its timeout. The claude processes inside exit on their own SIGHUP.
-for pid in $(zmx_pids); do kill -9 "$pid" 2>/dev/null || true; done
+say "Killing session daemons and clients…"
+# SIGKILL, not `seahelmd kill`: a wedged daemon never answers, so the graceful
+# path just burns its timeout. The claude processes inside exit on their own SIGHUP.
+for pid in $(daemon_pids); do kill -9 "$pid" 2>/dev/null || true; done
 sleep 1
 
-SOCKET_DIR="${TMPDIR:-/tmp/}zmx-$(id -u)"
-SOCKET_DIR="${SOCKET_DIR%//}"
+SOCKET_DIR="${SEAHELMD_DIR:-/tmp/seahelmd-$(id -u)}"
 if [ -d "$SOCKET_DIR" ]; then
-  rm -f "$SOCKET_DIR"/* 2>/dev/null || true
+  find "$SOCKET_DIR" -maxdepth 1 -type s -delete 2>/dev/null || true
   say "Cleared stale sockets in $SOCKET_DIR"
 fi
 
@@ -295,7 +272,7 @@ if [ -z "$(seahelm_pids)" ]; then
   exit 1
 fi
 
-FINAL="$(with_timeout 30 "$ZMX" list 2>&1 || true)"
+FINAL="$(with_timeout 30 "$DAEMON" list 2>&1 || true)"
 STILL="$(printf '%s\n' "$FINAL" | grep -c 'status=unreachable' || true)"
 LIVE="$(printf '%s\n' "$FINAL" | grep -c 'name=' || true)"
 if [ "$STILL" -gt 0 ]; then
@@ -303,7 +280,7 @@ if [ "$STILL" -gt 0 ]; then
   exit 1
 fi
 
-# Panes build their zmx session lazily, so a low count right after launch is
+# Panes build their session lazily, so a low count right after launch is
 # normal: only the visible ones are up until you open the others.
 say "Recovered. $LIVE session(s) up, none unreachable."
 if [ -x "$HOME/.local/bin/seahelm" ]; then

@@ -81,6 +81,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         GhosttyBridge.shared.initialize()
 
+        // Before any pane restores: an agent still running in a zmx session
+        // from before seahelmd would otherwise run beside its resumed self.
+        // Never from a UI-test app, which shares the machine's real sessions.
+        if !ProcessInfo.processInfo.arguments.contains("-SeahelmUITesting") {
+            LegacyZmxSessions.endAll()
+        }
+
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
         mainWindowController?.startGmailMailChannel(config: config.gmailMail)
@@ -105,27 +112,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // it here (both callers are already on main) and send only the zmx
         // probing to the background queue.
         guard let controller = mainWindowController else {
-            NSLog("[App] Skipping orphan zmx cleanup — main window not ready")
+            NSLog("[App] Skipping orphan session cleanup — main window not ready")
             return
         }
         let activeSessionNames = controller.activePaneSessionNamesForCleanup()
         guard !activeSessionNames.isEmpty else {
             // During startup/teardown there may be no attached panes yet; an
             // empty set would match everything and is too risky to sweep.
-            NSLog("[App] Skipping orphan zmx cleanup — no live pane sessions")
+            NSLog("[App] Skipping orphan session cleanup — no live pane sessions")
             return
         }
         DispatchQueue.global(qos: .utility).async {
             guard ZmxLocator.isAvailable else { return }
             let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
             if !cleaned.isEmpty {
-                NSLog("[App] Cleaned %d orphan zmx session(s)", cleaned.count)
+                NSLog("[App] Cleaned %d orphan session(s)", cleaned.count)
             }
             // Volume-drop corpses: unreachable daemons whose start_dir is gone
             // or wedged, plus attach clients still spinning under a live parent.
             let wedged = SessionManager.cleanupWedgedVolumeSessions()
             if !wedged.isEmpty {
-                NSLog("[App] Cleaned %d volume-wedged zmx session(s)", wedged.count)
+                NSLog("[App] Cleaned %d volume-wedged session(s)", wedged.count)
             }
             // Separate from the session sweep above: these are client processes,
             // not sessions. They survive the app that spawned them and spin at
@@ -134,7 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // pass catches ppid==1 orphans from prior app instances.
             let clients = SessionManager.cleanupOrphanZmxClients()
             if !clients.isEmpty {
-                NSLog("[App] Killed %d orphan zmx client process(es)", clients.count)
+                NSLog("[App] Killed %d orphan attach client process(es)", clients.count)
             }
         }
     }

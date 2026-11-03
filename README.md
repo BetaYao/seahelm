@@ -34,7 +34,7 @@ beside it. Keyed on the cwd every hook payload carries, with a same-repo gate an
 cooldown so a `cd x && ...` tool call doesn't walk the pane back and forth.
 
 Beyond that: native rendering on the Ghostty engine rather than Electron, sessions
-that survive a reboot via zmx, and status detection for 12 agents out of the box.
+that outlive the app (and resume their agents after a reboot), and status detection for 12 agents out of the box.
 
 ## How It Was Built
 
@@ -109,7 +109,7 @@ Every pane gets `SEAHELM_PANE_ID` for self-reference. Full surface: `seahelm <pi
 
 **Token usage** — Claude and Codex token/quota usage summarized in-app.
 
-**Sessions** — Persisted by [zmx](https://zmx.sh). Quit the app or reboot, and the agent is still where you left it. Falls back to plain processes when zmx is unavailable.
+**Sessions** — Each pane runs in its own seahelmd daemon (bundled, built from `seahelmd/`), which owns the terminal and keeps its screen in libghostty-vt. Quit the app and the agent keeps working; reopen it and the pane comes back exactly as it was. After a reboot the agent resumes its conversation.
 
 ## Who It's For
 
@@ -172,9 +172,9 @@ With repository secrets configured (`APPLE_CERTIFICATE_P12`, `APPLE_DEVELOPER_ID
 Seahelm is released under the [MIT License](LICENSE).
 
 It builds on other people's work — notably the [Ghostty](https://github.com/ghostty-org/ghostty)
-terminal engine (MIT) and [zmx](https://zmx.sh) for session persistence. Bundled Swift packages
+terminal engine (MIT) and [Keep](https://github.com/ttwwnn/keep)'s libghostty-vt bindings (MIT) for session persistence. Bundled Swift packages
 are MIT, BSD-3-Clause, or Apache-2.0; each retains its own copyright and license.
 
-Third-party components bundled in the app — Ghostty, zmx, Sparkle and the Swift
-packages — are listed with their full license texts in
+Third-party components bundled in the app — Ghostty, Keep, the Rust crates in seahelmd,
+Sparkle and the Swift packages — are listed with their full license texts in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
