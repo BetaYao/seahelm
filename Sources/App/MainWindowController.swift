@@ -996,7 +996,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 // --append-system-prompt) on the zmx-typed command line. That
                 // truncates mid-quote and leaves bash stuck; Claude never starts.
                 // Suggest guidance is already in CLAUDE.md via WorktreeCreator.
-                if let agentCommandLine = agentType.bareLaunchCommand() {
+                // The repo's `.seahelm/setup.sh`, if it has one, runs first in
+                // the same pane and gates the agent on its success.
+                let setup = WorktreeSetupHook.setupCommand(worktreePath: info.path, repoPath: repoPath)
+                if let agentCommandLine = WorktreeSetupHook.launchLine(
+                    setup: setup, agent: agentType.bareLaunchCommand()) {
                     let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
                     let backend = self.runtimeBackend
                     // `zmx run` blocks until the (long-lived) agent exits, so spawn the
@@ -1017,8 +1021,16 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 let launchedAgent = agentType
                 DispatchQueue.main.async {
                     self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
-                    InitialAgentTaskDelivery.schedule(
-                        task: brief, worktreePath: path, expectedAgent: launchedAgent)
+                    if setup != nil {
+                        // The agent starts only after the setup, which can take minutes.
+                        InitialAgentTaskDelivery.schedule(
+                            task: brief, worktreePath: path, expectedAgent: launchedAgent,
+                            retryInterval: WorktreeSetupHook.briefRetryInterval,
+                            maxAttempts: Int(WorktreeSetupHook.briefWait / WorktreeSetupHook.briefRetryInterval))
+                    } else {
+                        InitialAgentTaskDelivery.schedule(
+                            task: brief, worktreePath: path, expectedAgent: launchedAgent)
+                    }
                     onComplete?(path)
                 }
             } catch {
@@ -2186,7 +2198,22 @@ extension MainWindowController: PanelCoordinatorDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
+        // No agent here, but the repo's setup still runs in the new pane.
+        guard let setup = WorktreeSetupHook.setupCommand(worktreePath: info.path, repoPath: repoPath) else {
+            tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
+            return
+        }
+        let name = SessionManager.persistentSessionName(for: info.path)
+        let backend = runtimeBackend
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // `zmx run` blocks while the setup runs; wait only for the session.
+            DispatchQueue.global(qos: .userInitiated).async {
+                SessionManager.createDetachedSession(name: name, backend: backend, cwd: info.path,
+                                                     agentCommandLine: setup)
+            }
+            _ = SessionManager.waitUntilSessionExists(name: name, backend: backend, timeoutSeconds: 5.0)
+            DispatchQueue.main.async { self?.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath) }
+        }
     }
 }
 
