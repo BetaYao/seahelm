@@ -1,0 +1,8 @@
+[package]
+name = "keep-vt"
+description = "Safe Rust bindings for libghostty-vt (terminal state, no rendering)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+links = "ghostty-vt"
