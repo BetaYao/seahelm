@@ -517,6 +517,12 @@ class MainWindowController: NSWindowController {
     /// Held strongly so the window survives this call, and reused so ⌘, twice
     /// raises the existing one instead of stacking a second copy with stale
     /// config.
+    /// Settings, opened on one page.
+    func showSettingsPage(_ page: String) {
+        showSettings()
+        settingsWindowController?.showPage(page)
+    }
+
     @objc func showSettings() {
         if let existing = settingsWindowController {
             // Reused windows still hold the SettingsVC's private Config copy from
@@ -2669,6 +2675,7 @@ extension MainWindowController: SettingsDelegate {
         self.config = merged
         tabCoordinator.config = merged
         terminalCoordinator.config = merged
+        tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
         dashboardVC?.integrationEnabled = merged.integrationEnabled
         normalizeBackendAvailabilityIfNeeded()
@@ -3770,6 +3777,7 @@ extension MainWindowController {
             self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
         }
         dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
+        dashboard.firstMateDock.onShowSettings = { [weak self] in self?.showSettingsPage("firstMate") }
         autopilot.onStateChange = { [weak self] state in
             guard let self else { return }
             self.dashboardVC?.firstMateDock.apply(state)
@@ -3831,6 +3839,11 @@ extension MainWindowController {
         popover.behavior = .transient
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         firstMateHistory = log
+    }
+
+    func settingsOpenFirstMate(_ settings: SettingsViewController) {
+        window?.makeKeyAndOrderFront(nil)
+        if firstMateView?.superview == nil { toggleFirstMate() }
     }
 
     fileprivate func setAutopilot(enabled: Bool, paused: Bool) {

@@ -8,6 +8,8 @@ final class FirstMateDockView: NSView {
     var onOpen: (() -> Void)?
     var onTogglePause: (() -> Void)?
     var onShowAllShortcuts: (() -> Void)?
+    /// Settings ▸ First Mate, from the dock's context menu.
+    var onShowSettings: (() -> Void)?
     /// The history button: anchor view to show the log from.
     var onShowHistory: ((NSView) -> Void)?
 
@@ -140,6 +142,16 @@ final class FirstMateDockView: NSView {
     /// Not a gesture recognizer: one on the dock would also fire for clicks on
     /// its buttons. A button handles its own mouseDown, so this only sees the rest.
     override func mouseDown(with event: NSEvent) { onOpen?() }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let settings = NSMenuItem(title: "First Mate Settings…", action: #selector(settingsClicked), keyEquivalent: "")
+        settings.target = self
+        menu.addItem(settings)
+        return menu
+    }
+
+    @objc private func settingsClicked() { onShowSettings?() }
     @objc private func pauseClicked() { onTogglePause?() }
     @objc private func historyClicked() { onShowHistory?(historyButton) }
     @objc private func helpClicked() { onShowAllShortcuts?() }

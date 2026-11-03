@@ -53,6 +53,9 @@ struct Config: Codable {
     var autopilotEnabled: Bool
     /// Turned on but holding: events are recorded, nothing is handed over.
     var autopilotPaused: Bool
+    /// The user's default level per First Mate action (`AutopilotAction` raw
+    /// value → `AutonomyLevel` raw value). Rules in a repo's yml override it.
+    var autopilotAutonomy: [String: String]
     var sidebarWidth: CGFloat
     /// Whether the chrome left column is collapsed. Survives relaunch with
     /// `sidebarActivePane` so First Mate / files / changes layout is restored.
@@ -107,6 +110,7 @@ struct Config: Codable {
         case islandEnabled = "island_enabled"
         case autopilotEnabled = "autopilot_enabled"
         case autopilotPaused = "autopilot_paused"
+        case autopilotAutonomy = "autopilot_autonomy"
         case sidebarWidth = "sidebar_width"
         case sidebarCollapsed = "sidebar_collapsed"
         case sidebarActivePane = "sidebar_active_pane"
@@ -150,6 +154,7 @@ struct Config: Codable {
         islandEnabled = true
         autopilotEnabled = false
         autopilotPaused = false
+        autopilotAutonomy = [:]
         sidebarWidth = 300
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
@@ -196,6 +201,7 @@ struct Config: Codable {
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
         autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
+        autopilotAutonomy = try container.decodeIfPresent([String: String].self, forKey: .autopilotAutonomy) ?? [:]
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
         sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)
