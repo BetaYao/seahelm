@@ -365,6 +365,10 @@ final class HostGatewaySession {
             sentAgentTypes[paneKey] = agentType
             method = "pane.status"
             keys = Self.paneStatusKeys
+        case "pane.unseen_changed":
+            // A finished turn read (or newly unread): only the flag moves.
+            method = "pane.status"
+            keys = ["pane_id", "pane_session_key", "worktree_path", "unseen"]
         case "pane.closed":
             method = "pane.closed"
             keys = ["pane_id", "pane_session_key", "worktree_path"]
@@ -744,7 +748,7 @@ final class HostGatewaySession {
     static let shareMethods: Set<String> = [
         "ping", "session.snapshot", "pane.list", "fleet.groups", "layout.live",
         "pane.vt_open", "pane.vt_close", "pane.vt_keepalive", "pane.send_keys", "pane.send_text",
-        "message.history", "question.answer", "suggest.pick", "decision.dismiss",
+        "message.history", "question.answer", "suggest.pick", "decision.dismiss", "pane.seen",
     ]
 
     /// The share link this connection signed in with; nil for a paired client.

@@ -792,6 +792,8 @@ const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
 const STC = {
   running:'#30d158', waiting:'#ffb340', done:'#8e8e93',
   failed:'#ff6961', idle:'#8e8e93', unknown:'#636366',
+  // Idle with a finished turn nobody has looked at: the "unread" blue.
+  unread:'#0a84ff',
 };
 // The halo a live dot wears in the list.
 const STGLOW = { running:'rgba(48,209,88,.18)', waiting:'rgba(255,179,64,.2)' };
@@ -817,9 +819,16 @@ function normStatus(s){
     case 'exited':
     case 'done':    return 'done';
     case 'idle':    return 'idle';
+    case 'unread':  return 'unread';
     default:        return 'unknown';
   }
 }
+/** A status as the list draws it: idle with an unread finish is its own state
+ *  there, though to everything else it is still idle. */
+const shownStatus = (status, unseen) => {
+  const st = normStatus(status);
+  return st === 'idle' && unseen ? 'unread' : st;
+};
 const stColor = s => STC[normStatus(s)] || STC.unknown;
 // pane_id is a UUID (station id); show a short, stable prefix.
 const shortId = id => String(id||'').split('-')[0].slice(0,8) || '—';
@@ -1117,6 +1126,7 @@ function dropDeadSocket(gw){
 setInterval(() => { if (isLinked()) probeLink(HEARTBEAT_TIMEOUT_MS); }, HEARTBEAT_MS);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && isLinked()) probeLink(WAKE_PROBE_TIMEOUT_MS);
+  if (document.visibilityState === 'visible') markShownPaneSeen();
 });
 
 /** Put back the worktree that was on screen before the drop. */
@@ -1251,8 +1261,22 @@ function onPaneStatus(p){
   if (p.status) pane.status = p.status;
   if (p.agent_type) pane.agent_type = p.agent_type;
   if (typeof p.last_message === 'string') pane.last_message = p.last_message;
+  if (typeof p.unseen === 'boolean') pane.unseen = p.unseen;
   refreshFleetSoon(false);
-  if (key === S.selPane) renderSendButton();
+  if (key === S.selPane) { renderSendButton(); markShownPaneSeen(); }
+}
+
+/** The pane on screen has been looked at: tell the Mac, which clears its
+ *  unread finish for every client. Only while the page is in front and, on a
+ *  phone, the detail is the screen showing — not the list behind it. */
+function markShownPaneSeen(){
+  const key = S.selPane;
+  const pane = key && S.panes.get(key);
+  if (!pane || !pane.unseen || document.hidden) return;
+  if (NARROW.matches && document.body.dataset.screen !== 'detail') return;
+  pane.unseen = false;
+  refreshFleetSoon(false);
+  sendCommand('pane.seen', { pane_session_key: key });
 }
 
 function onPaneClosed(p){
@@ -2426,6 +2450,7 @@ function buildFleet(){
       title: macRow.title || w.title || dir,
       subtitle: macRow.subtitle || dir,
       status: mac || w.status || (statuses.length ? highestStatus(statuses) : 'unknown'),
+      unseen: !!macRow.unseen || entry.panes.some(([, p]) => p.unseen),
       runningSince: (S.rowTimes.get(entry.path) || {}).running_since || null,
       lastActivityAt: (S.rowTimes.get(entry.path) || {}).last_activity_at || w.started_at || null,
       git: w.git || null,
@@ -2450,7 +2475,7 @@ function groupsToRender(rows){
   if (server && server.length){
     return server.map(g => ({
       title: g.title,
-      status: g.status || null,
+      status: g.unseen ? 'unread' : (g.status || null),
       isRepo: String(g.id || '').startsWith('repository:'),
       rows: (g.items || []).map(i => byPath.get(i.worktree_path)).filter(Boolean),
     })).filter(g => g.rows.length);
@@ -2478,7 +2503,7 @@ function paneLabel(pane){
 }
 
 /** Panes with normalised statuses, as pane-pick.js reads them. */
-const pickablePanes = (row) => row.panes.map(([key, p]) => [key, { status: normStatus(p.status), decision: S.events.has(key) }]);
+const pickablePanes = (row) => row.panes.map(([key, p]) => [key, { status: shownStatus(p.status, p.unseen), decision: S.events.has(key) }]);
 
 /** One line for a row: the question, or what a suggestion offers. */
 function decisionSummary(e){
@@ -2558,7 +2583,7 @@ function renderTree(){
         row.dataset.path = r.path;
         treeRowEls.set(r.path, row);
       }
-      const st = normStatus(r.status);
+      const st = shownStatus(r.status, r.unseen);
       const sel = S.sel === r.path;
       row.className = 'fm-row' + (sel ? ' sel' : '');
       if (sel) row.setAttribute('aria-current', 'true'); else row.removeAttribute('aria-current');
@@ -2580,7 +2605,7 @@ function renderTree(){
       // The clock goes in after, as text: it moves every second, and inside the
       // HTML it would make every row look changed on every paint.
       setHTML(row,
-        statusDotHTML(r.status, 'fm-dot') +
+        statusDotHTML(st, 'fm-dot') +
         `<span class="fm-txt">
            <span class="fm-l1">
              <span class="fm-name">${esc(r.title)}</span>
@@ -2650,7 +2675,7 @@ function renderDetailChrome(){
     sub.textContent = [row.subtitle !== row.title ? row.subtitle : '', row.project,
       `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
   } else {
-    const st = normStatus(pane.status);
+    const st = shownStatus(pane.status, pane.unseen);
     const since = st === 'running' ? (S.rowTimes.get(row.path) || {}).running_since : 0;
     const label = SeahelmPanePick.statusLabel(st);
     sub.innerHTML = [
@@ -2663,7 +2688,7 @@ function renderDetailChrome(){
   if (tabs.hidden) { tabs.innerHTML = ''; return; }
   tabs.innerHTML = '';
   for (const [key, p] of row.panes){
-    const st = normStatus(p.status);
+    const st = shownStatus(p.status, p.unseen);
     const on = key === S.selPane;
     const name = paneLabel(p);
     const b = document.createElement('button');
@@ -2676,7 +2701,7 @@ function renderDetailChrome(){
     const stText = decision ? SeahelmPanePick.decisionLabel(decision.type)
       : st === 'running'
       ? compactDuration((S.rowTimes.get(row.path) || {}).running_since) || 'Running'
-      : (st === 'waiting' || st === 'failed') ? SeahelmPanePick.statusLabel(st) : '';
+      : (st === 'waiting' || st === 'failed' || st === 'unread') ? SeahelmPanePick.statusLabel(st) : '';
     const color = decision ? STC.waiting : (STC[st] || STC.unknown);
     b.innerHTML = `<i aria-hidden="true" style="background:${color}"></i>`
       + `<span class="pt-name${name.shell ? ' shell' : ''}">${esc(name.text)}</span>`
@@ -2705,6 +2730,7 @@ function showScreen(screen){
     history.pushState({ seahelmScreen: 'detail' }, '');
   }
   if (screen === 'detail' && was !== 'detail') {
+    markShownPaneSeen();
     // The detail was display:none, which drops its scroll position and its
     // size: open at the latest, and refit any terminal to the width it now has.
     tl.follow = true;
@@ -3236,6 +3262,7 @@ function renderDetail(){
   const head = $('detailHead'), wrap = $('termWrap');
   applySurfaceMode();
   renderDetailChrome();
+  markShownPaneSeen();
   if (!S.sel){
     unmountPanes();
     head.textContent = loadSurfaceMode() === 'text' ? 'Timeline' : 'Terminal';

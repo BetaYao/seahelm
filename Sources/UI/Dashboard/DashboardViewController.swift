@@ -29,6 +29,8 @@ struct PaneDisplayInfo {
     let title: String       // per-pane title (PaneTitleResolver)
     let status: AgentStatus
     let isFocused: Bool      // the worktree's last-focused pane
+    /// Finished a turn nobody has looked at (`PaneInfo.unseenCompletion`).
+    var unseenCompletion = false
 }
 
 // MARK: - WorktreeRowInfo
@@ -81,6 +83,8 @@ struct WorktreeRowInfo {
     var isCleanupCandidate = false
     /// The branch's newest PR on GitHub, with its CI and review (`WorktreePRStore`).
     var prStatus: WorktreePRStatus?
+    /// A pane here finished a turn nobody has looked at yet.
+    var hasUnseenCompletion = false
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
     /// the pane that changed status most recently — and carried here rather than

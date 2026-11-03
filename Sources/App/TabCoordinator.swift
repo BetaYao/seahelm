@@ -245,6 +245,10 @@ class TabCoordinator {
             case .hook, .mcp, .shell, .osc7501:
                 self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
             }
+            if outcome.info.unseenCompletion,
+               UnseenCompletion.clears(newStatus: outcome.newStatus) {
+                self.setUnseenCompletion(false, terminalID: outcome.info.id)
+            }
             self.firstMate?.handle(outcome)
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
@@ -267,6 +271,11 @@ class TabCoordinator {
             // Aggregator ignores commandLine-only changes; chrome pane title
             // still needs a refresh when the foreground shell job updates.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        }
+        // Coming back to the app is looking at whatever it shows.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.markVisiblePanesSeen()
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
@@ -600,7 +609,8 @@ class TabCoordinator {
                     title: panePane.map { PaneTitleResolver.title(for: $0) }
                         ?? PaneTitleResolver.shortenPath(agent.worktreePath),
                     status: panePane?.status ?? .unknown,
-                    isFocused: paneStation.id == focusedStationId
+                    isFocused: paneStation.id == focusedStationId,
+                    unseenCompletion: panePane?.unseenCompletion ?? false
                 )
             }
 
@@ -644,7 +654,8 @@ class TabCoordinator {
                 panes: panes,
                 label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath),
                 isCleanupCandidate: isCleanupCandidate,
-                prStatus: prStatus
+                prStatus: prStatus,
+                hasUnseenCompletion: worktreePanes.contains(where: \.unseenCompletion)
             ))
         }
 
@@ -937,6 +948,9 @@ class TabCoordinator {
                         guard let self else { return false }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
                         return self.pendingOrders.dismissSuggestion(terminalID: stationId)
+                    }
+                    controlDataSource.paneSeenHandler = { [weak self] paneId in
+                        self?.markPaneSeen(paneId: paneId) ?? false
                     }
                     controlDataSource.answerQuestionHandler = { [weak self] paneId, index in
                         guard let self, let answer = self.questionAnswerer else { return nil }
@@ -2041,6 +2055,11 @@ class TabCoordinator {
             return
         }
 
+        if UnseenCompletion.marks(oldStatus: oldStatus, newStatus: newStatus),
+           !terminalID.isEmpty, !isWorktreeOnScreen(worktreePath) {
+            setUnseenCompletion(true, terminalID: terminalID)
+        }
+
         NotificationManager.shared.notify(
             worktreePath: worktreePath,
             workspaceName: workspaceName,
@@ -2067,6 +2086,36 @@ class TabCoordinator {
     /// First Mate reveal to decide which of the two surfaces a suggestion belongs on.
     func isWorktreeVisible(_ worktreePath: String) -> Bool {
         dashboardVC?.activeSplitContainer?.tree?.worktreePath == worktreePath
+    }
+
+    /// Visible *and* in front of the user: what it takes for a finished turn to
+    /// count as seen.
+    private func isWorktreeOnScreen(_ worktreePath: String) -> Bool {
+        NSApp.isActive && isWorktreeVisible(worktreePath)
+    }
+
+    /// Set a pane's unseen completion and redraw the fleet if it changed.
+    func setUnseenCompletion(_ unseen: Bool, terminalID: String) {
+        guard AgentRegistry.shared.setUnseenCompletion(unseen, terminalID: terminalID) else { return }
+        dashboardVC?.updatePanes(buildWorktreeRowInfos())
+    }
+
+    /// The worktree on screen has been looked at: every pane of it is on show.
+    /// Called when the selection changes and when the app comes to the front.
+    func markVisiblePanesSeen() {
+        guard NSApp.isActive, let path = dashboardVC?.activeSplitContainer?.tree?.worktreePath else { return }
+        for pane in AgentRegistry.shared.allPanes() where pane.worktreePath == path && pane.unseenCompletion {
+            setUnseenCompletion(false, terminalID: pane.id)
+        }
+    }
+
+    /// A remote client opened a pane: its finished turn has been seen there.
+    /// Station id or the stable session key, as remote callers hold either.
+    func markPaneSeen(paneId: String) -> Bool {
+        let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
+        guard AgentRegistry.shared.pane(for: stationId)?.unseenCompletion == true else { return false }
+        setUnseenCompletion(false, terminalID: stationId)
+        return true
     }
 
     /// The question card a pane is waiting on, if any.

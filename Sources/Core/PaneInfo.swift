@@ -41,6 +41,13 @@ struct PaneInfo {
     /// pinned such a pane on `running` for the life of the monitor, which cost it
     /// every completion edge (and so every notification) it would have produced.
     var backgroundBusy: Bool = false
+    /// The agent finished a turn while nobody was looking at this pane, and
+    /// nobody has looked since. Cleared by looking (the pane on screen, or opened
+    /// in a remote client) or by the agent starting again. Not a status of its
+    /// own: an unseen completion is still `.idle` to everything that reasons
+    /// about what the agent is doing — only the fleet's ordering and its dot
+    /// tell "finished, unread" from "at rest".
+    var unseenCompletion: Bool = false
 
     /// What the dashboard draws. Background work still reads as busy — a worktree
     /// watching CI is not "done" — while `status` stays the honest answer to
@@ -91,6 +98,7 @@ extension PaneInfo {
         copy.programStatus = programStatus
         copy.programState = programState
         copy.backgroundBusy = backgroundBusy
+        copy.unseenCompletion = unseenCompletion
         return copy
     }
 }

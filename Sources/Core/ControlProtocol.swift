@@ -33,6 +33,8 @@ struct PaneSnapshot {
     var agentMemoryBytes: UInt64?
     /// Foreground command under the session shell, when memory was probed.
     var processName: String?
+    /// The pane finished a turn nobody has looked at (`PaneInfo.unseenCompletion`).
+    var unseen = false
 
     var dict: [String: Any] {
         var d: [String: Any] = [
@@ -41,6 +43,7 @@ struct PaneSnapshot {
             "status": status, "last_message": lastMessage, "title": title,
         ]
         if !displayTitle.isEmpty { d["display_title"] = displayTitle }
+        if unseen { d["unseen"] = true }
         // Omitted rather than zero-filled when unprobed, so a caller can tell
         // "not measured" from "measured as nothing".
         if let memoryBytes {
@@ -83,6 +86,9 @@ protocol ControlDataSource: AnyObject {
     /// with its new ticks, or the next of a multi-question ask), absent when
     /// the ask is done.
     func answerQuestion(paneId: String, index: Int) -> [String: Any]?
+    /// A client has shown this pane to its user: a finished turn it held is
+    /// now seen. False when there was nothing unseen.
+    func markPaneSeen(paneId: String) -> Bool
     /// Read a pane's terminal text. `source`: visible | recent | detection.
     func readPane(paneId: String, source: String, lines: Int) -> String?
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
@@ -433,6 +439,14 @@ final class ControlRouter {
             }
             return .ok(["dismissed": dataSource?.dismissDecision(paneId: paneRef) ?? false])
 
+        case "pane.seen":
+            let paneRef = (params["pane_id"] as? String)
+                ?? (params["pane_session_key"] as? String) ?? ""
+            guard !paneRef.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "pane required")
+            }
+            return .ok(["seen": dataSource?.markPaneSeen(paneId: paneRef) ?? false])
+
         case "question.answer":
             let paneRef = (params["pane_id"] as? String)
                 ?? (params["pane_session_key"] as? String) ?? ""
@@ -737,6 +751,7 @@ final class ControlRouter {
 extension ControlDataSource {
     func dismissDecision(paneId: String) -> Bool { false }
     func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
+    func markPaneSeen(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }
     func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
 }
