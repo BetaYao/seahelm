@@ -2089,6 +2089,8 @@ extension MainWindowController: DashboardDelegate {
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         saveConfig()
         refreshChromeWorktreeContextEnabled()
+        // After the selection's terminal is embedded, which is what "on screen" reads.
+        DispatchQueue.main.async { [weak self] in self?.tabCoordinator.markVisiblePanesSeen() }
     }
 
     func dashboardDidRequestBrowseFiles(worktreePath: String) {

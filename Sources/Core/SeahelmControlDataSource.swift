@@ -42,6 +42,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     var dismissDecisionHandler: ((String) -> Bool)?
     /// Answer a pane's open question card (main thread — it is UI state).
     var answerQuestionHandler: ((String, Int) -> [String: Any]?)?
+    /// A remote client showed a pane (main thread — it redraws the fleet).
+    var paneSeenHandler: ((String) -> Bool)?
 
     init(hookSink: @escaping (WebhookEvent) -> Void = { _ in }) {
         self.hookSink = hookSink
@@ -89,7 +91,8 @@ final class SeahelmControlDataSource: ControlDataSource {
                 displayTitle: displayTitle,
                 memoryBytes: memory?.totalBytes,
                 agentMemoryBytes: memory?.agentBytes,
-                processName: memory?.processName
+                processName: memory?.processName,
+                unseen: s.unseenCompletion
             )
         }
     }
@@ -597,6 +600,13 @@ extension SeahelmControlDataSource {
 
     func dismissDecision(paneId: String) -> Bool {
         guard let h = dismissDecisionHandler else { return false }
+        var ok = false
+        runOnMain { ok = h(paneId) }
+        return ok
+    }
+
+    func markPaneSeen(paneId: String) -> Bool {
+        guard let h = paneSeenHandler else { return false }
         var ok = false
         runOnMain { ok = h(paneId) }
         return ok

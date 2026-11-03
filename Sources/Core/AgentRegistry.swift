@@ -1154,6 +1154,34 @@ class AgentRegistry {
         return orderedIDs.compactMap { agents[$0] }
     }
 
+    /// Mark or clear a pane's unseen completion (`PaneInfo.unseenCompletion`).
+    /// Returns whether it changed. A change goes out as `pane.unseen_changed`,
+    /// so remote lists can move the row without waiting for a status edge.
+    @discardableResult
+    func setUnseenCompletion(_ unseen: Bool, terminalID: String) -> Bool {
+        lock.lock()
+        guard var info = agents[terminalID], info.unseenCompletion != unseen else {
+            lock.unlock()
+            return false
+        }
+        info.unseenCompletion = unseen
+        agents[terminalID] = info
+        globalSeq += 1
+        let seq = globalSeq
+        lock.unlock()
+
+        let event: [String: Any] = [
+            "type": "pane.unseen_changed",
+            "seq": seq,
+            "pane_id": terminalID,
+            "pane_session_key": info.station?.paneSessionKey ?? "",
+            "worktree_path": info.worktreePath,
+            "unseen": unseen,
+        ]
+        DispatchQueue.main.async { EventHub.shared.publish(seq: seq, event: event) }
+        return true
+    }
+
     /// Look up pane by terminal ID
     func pane(for terminalID: String) -> PaneInfo? {
         lock.lock()

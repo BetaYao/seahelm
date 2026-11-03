@@ -8,7 +8,8 @@
 // would make you hunt for it.
 //
 // Order: an open decision (a question to answer, or suggested next steps to
-// pick from), then waiting on you, then failed, then running, then the pane you
+// pick from), then waiting on you, then failed, then finished but unread, then
+// running, then the pane you
 // last looked at here, then whatever comes first. A decision outranks every
 // status because a suggestion arrives as the agent finishes — its pane reads
 // idle, and ranking by status alone opened the worktree on a busy neighbour
@@ -23,7 +24,9 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const RANK = { waiting: 1, failed: 2, running: 3 };
+  // `unread` is idle with a finished turn nobody has looked at: something to
+  // read, so above the work still in flight.
+  const RANK = { waiting: 1, failed: 2, unread: 3, running: 4 };
 
   /**
    * @param {Array<[string, {status:string, decision?:boolean}]>} panes  [key, pane] in display order
@@ -45,7 +48,7 @@
   // What the row spells out beside its dot, so the state is never colour alone.
   const STATUS_LABEL = {
     running: 'Running', waiting: 'Needs you', failed: 'Error',
-    done: 'Exited', idle: 'Idle', unknown: '',
+    done: 'Exited', idle: 'Idle', unread: 'Finished', unknown: '',
   };
 
   function statusLabel(status) {

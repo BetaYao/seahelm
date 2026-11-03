@@ -26,6 +26,10 @@ check(pickPane(panes('idle', 'running'), 'p0') === 'p1', 'but a live pane outran
 check(pickPane(panes('idle', 'idle'), 'gone') === 'p0', 'a remembered pane that closed is ignored');
 check(pickPane(panes('idle', 'unknown'), null) === 'p0', 'otherwise the first pane');
 
+check(pickPane(panes('running', 'unread'), null) === 'p1', 'an unread finish wins over a running pane');
+check(pickPane(panes('unread', 'failed'), null) === 'p1', 'a failed pane outranks an unread finish');
+check(statusLabel('unread') === 'Finished', 'an unread finish is spelled out');
+
 // A suggestion arrives as the agent finishes, so its pane reads idle.
 const withDecision = panes('running', 'idle', 'waiting');
 withDecision[1][1].decision = true;

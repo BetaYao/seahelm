@@ -976,18 +976,20 @@ final class DashboardOverviewView: NSView {
     private func makeGroupHeader(group: WorktreeGroup, topGap: CGFloat) -> NSView {
         var views: [NSView] = []
         if let status = group.status {
+            let unseen = group.id == .unseen
+            let color = unseen ? UnseenCompletion.color : status.color
             if status == .running {
                 views.append(SpinnerDotView(color: status.color))
             } else {
-                let glyph = NSTextField(labelWithString: status.glyph)
+                let glyph = NSTextField(labelWithString: unseen ? UnseenCompletion.glyph : status.glyph)
                 glyph.font = AppFont.mono(size: 8)
-                glyph.textColor = status.color
+                glyph.textColor = color
                 views.append(glyph)
             }
 
-            let title = NSTextField(labelWithString: status.groupLabel)
+            let title = NSTextField(labelWithString: unseen ? UnseenCompletion.groupTitle : status.groupLabel)
             title.font = AppFont.mono(size: 11)
-            title.textColor = status.color
+            title.textColor = color
             title.lineBreakMode = .byTruncatingTail
             views.append(title)
 
@@ -1585,9 +1587,13 @@ final class DashboardOverviewView: NSView {
                 if repositoryLabel.textColor != color { repositoryLabel.textColor = color }
             }
             // The checkout's dot says what the last round did; every other row's
-            // says what its agent is doing.
-            let glyph = integration?.glyph ?? status.glyph
-            let color = integration?.color ?? status.color
+            // says what its agent is doing — or, at rest, that it finished
+            // something nobody has read yet.
+            let unseen = integration == nil && status == .idle && pane.hasUnseenCompletion
+            let glyph = integration?.glyph ?? (unseen ? UnseenCompletion.glyph : status.glyph)
+            let color = integration?.color ?? (unseen ? UnseenCompletion.color : status.color)
+            let dotTip = unseen ? UnseenCompletion.toolTip : nil
+            if staticDot.toolTip != dotTip { staticDot.toolTip = dotTip }
             Self.setText(staticDot, glyph)
             if staticDot.textColor != color { staticDot.textColor = color }
             lastStatus = status
@@ -1938,7 +1944,8 @@ final class DashboardOverviewView: NSView {
         func update(pane: PaneDisplayInfo, worktreePath: String) {
             self.worktreePath = worktreePath
             setAccessibilityLabel(pane.title)
-            dotLabel.textColor = pane.status.color
+            let unseen = pane.status == .idle && pane.unseenCompletion
+            dotLabel.textColor = unseen ? UnseenCompletion.color : pane.status.color
             handleLabel.stringValue = "#\(pane.handle)"
             titleLabel.stringValue = pane.title
             titleLabel.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
@@ -1964,3 +1971,12 @@ final class DashboardOverviewView: NSView {
     }
 
 }
+
+extension UnseenCompletion {
+    /// Filled, in the "unread" blue: an idle dot is hollow and grey, and this is
+    /// an idle pane with news — the Mail-style mark reads that at a glance.
+    static let glyph = "●"
+    static var color: NSColor { SemanticColors.waiting }
+    static let toolTip = "Finished — not looked at yet"
+}
+

@@ -21,6 +21,8 @@ enum WorktreeActivityBucket: String, CaseIterable {
 enum WorktreeGroupID: Hashable {
     case repository(String)
     case status(AgentStatus)
+    /// Idle rows with a finished turn nobody has looked at yet.
+    case unseen
     case activity(WorktreeActivityBucket)
 }
 
@@ -39,6 +41,8 @@ struct WorktreeGroupingItem: Equatable {
     /// When the row's focused pane started its current round, while it runs.
     /// Not used for grouping — carried so a remote list can show the same timer.
     let runningSince: Date?
+    /// A pane here finished a turn nobody has looked at — `PaneInfo.unseenCompletion`.
+    let hasUnseenCompletion: Bool
 
     init(
         id: String,
@@ -49,7 +53,8 @@ struct WorktreeGroupingItem: Equatable {
         isMainWorktree: Bool,
         creationDate: Date,
         isIntegration: Bool = false,
-        runningSince: Date? = nil
+        runningSince: Date? = nil,
+        hasUnseenCompletion: Bool = false
     ) {
         self.id = id
         self.path = path
@@ -60,7 +65,11 @@ struct WorktreeGroupingItem: Equatable {
         self.creationDate = creationDate
         self.isIntegration = isIntegration
         self.runningSince = runningSince
+        self.hasUnseenCompletion = hasUnseenCompletion
     }
+
+    /// Filed under "Finished" rather than its status: idle, with something to read.
+    var isUnseenFinish: Bool { hasUnseenCompletion && status == .idle }
 }
 
 extension WorktreeRowInfo {
@@ -87,7 +96,8 @@ extension WorktreeRowInfo {
             isMainWorktree: isMainWorktree,
             creationDate: creationDate,
             isIntegration: isIntegration,
-            runningSince: currentPaneRunningSince
+            runningSince: currentPaneRunningSince,
+            hasUnseenCompletion: hasUnseenCompletion
         )
     }
 }
@@ -155,8 +165,8 @@ enum WorktreeGrouping {
             (.unknown, "Unknown"),
         ]
 
-        return statuses.compactMap { status, title in
-            let matchingItems = items.filter { $0.status == status }
+        var groups: [WorktreeGroup] = statuses.compactMap { status, title in
+            let matchingItems = items.filter { $0.status == status && !$0.isUnseenFinish }
             guard !matchingItems.isEmpty else { return nil }
             return WorktreeGroup(
                 id: .status(status),
@@ -165,6 +175,15 @@ enum WorktreeGrouping {
                 items: matchingItems.sorted(by: activityRowComesFirst)
             )
         }
+        // Finished and unread: what wants you after a question does, so it sits
+        // right under "Needs input" — above the work still in flight.
+        let finished = items.filter(\.isUnseenFinish)
+        if !finished.isEmpty {
+            let at = groups.first?.id == .status(.waiting) ? 1 : 0
+            groups.insert(WorktreeGroup(id: .unseen, title: UnseenCompletion.groupTitle, status: .idle,
+                                        items: finished.sorted(by: activityRowComesFirst)), at: at)
+        }
+        return groups
     }
 
     private static func activityGroups(
@@ -298,6 +317,7 @@ extension WorktreeGroupID {
         switch self {
         case let .repository(name): return "repository:\(name)"
         case let .status(status): return "status:\(status.rawValue)"
+        case .unseen: return "status:unseen"
         case let .activity(bucket): return "activity:\(bucket.rawValue)"
         }
     }
@@ -318,6 +338,7 @@ extension WorktreeGroupingItem {
         if let runningSince {
             d["running_since"] = runningSince.timeIntervalSince1970
         }
+        if hasUnseenCompletion { d["unseen"] = true }
         return d
     }
 }
@@ -330,6 +351,7 @@ extension WorktreeGroup {
             "items": items.map(\.dict),
         ]
         if let status { d["status"] = status.rawValue }
+        if case .unseen = id { d["unseen"] = true }
         return d
     }
 }
