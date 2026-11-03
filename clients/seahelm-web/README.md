@@ -73,7 +73,9 @@ Dark and iOS-native on a phone (17px body, 44pt targets, the system font for pro
 - **Timeline** has its own composer; an open question is a card above it with full-width answers.
 - **Terminal** has no composer of ours: tap the screen and type, keys go straight to the pane. A bar carries the keys a phone keyboard lacks — keyboard show/hide, esc, tab, ⇧tab, a sticky **ctrl** (applies to the next key), ^C, ^D and the arrows — and sits above the soft keyboard (`visualViewport`).
 - **⋯ menus** — the page's (message log, disconnect) and the pane's (Timeline / Terminal, terminal layout, renderer, copy, split, close).
-- **New work** — "Start new work…" at the foot of the list opens a sheet: prompt, project, agent.
+- **New work** — the **+** in the list's title bar opens a sheet: prompt, project, agent.
+- **First Mate** — the ⎈ beside it (amber with a count when cards wait) opens First Mate's pane; its cards are answered above the composer.
+- **PRs** — a worktree with a PR shows `#12 ✓ approved` on its row and, as a link to GitHub, in the detail header.
 - **Message log** — a developer column, off by default, toggled from the page menu.
 
 ### Responsive
