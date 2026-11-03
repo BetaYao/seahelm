@@ -56,6 +56,8 @@ struct Config: Codable {
     /// The user's default level per First Mate action (`AutopilotAction` raw
     /// value → `AutonomyLevel` raw value). Rules in a repo's yml override it.
     var autopilotAutonomy: [String: String]
+    /// Which agent First Mate runs as (`AgentType` raw value; see `FirstMatePane.agents`).
+    var autopilotAgent: String
     var sidebarWidth: CGFloat
     /// Whether the chrome left column is collapsed. Survives relaunch with
     /// `sidebarActivePane` so First Mate / files / changes layout is restored.
@@ -111,6 +113,7 @@ struct Config: Codable {
         case autopilotEnabled = "autopilot_enabled"
         case autopilotPaused = "autopilot_paused"
         case autopilotAutonomy = "autopilot_autonomy"
+        case autopilotAgent = "autopilot_agent"
         case sidebarWidth = "sidebar_width"
         case sidebarCollapsed = "sidebar_collapsed"
         case sidebarActivePane = "sidebar_active_pane"
@@ -155,6 +158,7 @@ struct Config: Codable {
         autopilotEnabled = false
         autopilotPaused = false
         autopilotAutonomy = [:]
+        autopilotAgent = AgentType.claudeCode.rawValue
         sidebarWidth = 300
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
@@ -202,6 +206,7 @@ struct Config: Codable {
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
         autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
         autopilotAutonomy = try container.decodeIfPresent([String: String].self, forKey: .autopilotAutonomy) ?? [:]
+        autopilotAgent = try container.decodeIfPresent(String.self, forKey: .autopilotAgent) ?? AgentType.claudeCode.rawValue
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
         sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)

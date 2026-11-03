@@ -3860,8 +3860,11 @@ extension MainWindowController {
             return
         }
         let view = FirstMateView()
-        view.onTurnOn = { [weak self] in
+        view.selectAgent(AgentType(rawValue: config.autopilotAgent) ?? .claudeCode)
+        view.onTurnOn = { [weak self] agent in
             guard let self else { return }
+            self.config.autopilotAgent = agent.rawValue
+            self.tabCoordinator.config.autopilotAgent = agent.rawValue
             self.setAutopilot(enabled: true, paused: false)
             self.tabCoordinator.autopilot.ensureSession { [weak self] in
                 self?.firstMateView?.embed(self?.tabCoordinator.autopilot.station)

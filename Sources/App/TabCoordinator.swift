@@ -2182,6 +2182,7 @@ class TabCoordinator {
     func applyAutopilotConfig() {
         autopilot.apply(enabled: config.autopilotEnabled, paused: config.autopilotPaused,
                         backend: runtimeBackend,
+                        agent: AgentType(rawValue: config.autopilotAgent) ?? .claudeCode,
                         defaults: AutomationConfig.defaults(overriding: config.autopilotAutonomy))
         if let station = autopilot.station {
             statusPublisher.pin(station, worktreePath: FirstMatePane.directory)
