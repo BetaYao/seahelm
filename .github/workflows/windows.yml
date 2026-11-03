@@ -60,6 +60,8 @@ jobs:
         with:
           workspaces: seahelmd
 
+      # A hung daemon test should fail the job, not hold the runner for an hour.
       - name: Test
+        timeout-minutes: 15
         working-directory: seahelmd
         run: cargo test --locked --workspace --no-fail-fast

@@ -90,6 +90,21 @@ pub fn session_names() -> Vec<String> {
 /// refuses the first attempt; the daemon then starts inside it.
 pub fn spawn_detached(cmd: &mut Command) -> io::Result<Child> {
     use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    // CreateProcess hands a child every inheritable handle, not only the
+    // ones given as its stdio. Ours are the starter's pipes when it reads our
+    // output (a test's `Command::output`, a client running `seahelmd new`),
+    // and a daemon holding them keeps that reader waiting for EOF until the
+    // session ends. The CLI is about to exit, so they stop being inheritable.
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        unsafe {
+            let h = GetStdHandle(which);
+            if !h.is_null() {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
     cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB);
     match cmd.spawn() {
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
