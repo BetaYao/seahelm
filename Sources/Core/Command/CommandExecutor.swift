@@ -73,10 +73,21 @@ struct CommandReply: Equatable {
     }
 }
 
+/// First Mate is optional to a host: one without it (headless, tests) says no.
+extension CommandHost {
+    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool { false }
+    var firstMateAvailable: Bool { false }
+}
+
 /// The side effects a command can have. Implemented by the app layer; a test
 /// implements it with a fake. Everything is called on the main thread.
 protocol CommandHost: AnyObject {
     func fleetIndex() -> FleetIndex
+    /// Hand `text` to First Mate on behalf of `surface`, whose chat gets its
+    /// answer. False when First Mate is off.
+    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool
+    /// Whether First Mate is on to be talked to.
+    var firstMateAvailable: Bool { get }
     /// The desktop's own binding: the selected worktree's pane. Nil headless.
     var desktopBoundPaneKey: String? { get }
     var integrationEnabled: Bool { get }
@@ -336,6 +347,18 @@ final class CommandExecutor {
             }
 
 
+        case .mate(let text):
+            guard host.firstMateAvailable else {
+                reply(.error("First Mate is off. Turn it on in Settings ▸ First Mate on the Mac."))
+                return
+            }
+            if !surface.isDesktop { sessions.unbind(surface.sessionKey) }
+            if let text, host.sayToFirstMate(text, from: surface) {
+                reply(CommandReply("→ First Mate — talking to it from now on."))
+            } else {
+                reply(CommandReply("Talking to First Mate. Say anything; `/go #n` talks to a pane."))
+            }
+
         case .idea(let text):
             let stored = host.addIdea(text: text, source: surface.sessionKey)
             reply(CommandReply("Idea added: \(stored)"))
@@ -420,6 +443,11 @@ final class CommandExecutor {
         if !surface.isDesktop, sessions.session(for: surface.sessionKey).boundPaneKey != nil {
             reply(.error("The pane this chat was talking to isn't running — nothing sent. "
                        + "`/status` lists what is, `/go #n` picks one."))
+            return
+        }
+        // Nothing bound: First Mate, when it is on, is who a chat talks to.
+        if !surface.isDesktop, host?.sayToFirstMate(text, from: surface) == true {
+            reply(CommandReply("→ First Mate"))
             return
         }
         // One pane is no choice at all; bind it and say so once.

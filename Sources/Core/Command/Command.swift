@@ -57,6 +57,9 @@ enum Command: Equatable {
     case yes
     /// `/add` — desktop only; opens the repo picker.
     case add
+    /// `/mate [text]` — talk to First Mate from now on (unbinds the pane), and
+    /// say `text` to it if given.
+    case mate(String?)
 }
 
 /// One parsed line: the command plus the `force` tail that skips confirmation.

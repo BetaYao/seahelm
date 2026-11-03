@@ -31,6 +31,13 @@ final class FakeCommandHost: CommandHost {
     var ideas: [String] = []
     var issues: [String] = []
     var addRepoCalls = 0
+    var firstMateAvailable = false
+    var toFirstMate: [(text: String, from: String)] = []
+    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
+        guard firstMateAvailable else { return false }
+        toFirstMate.append((text, surface.sessionKey))
+        return true
+    }
 
     func fleetIndex() -> FleetIndex { index }
     func createWorktree(task: String, repoPath: String, completion: @escaping (String?) -> Void) {
@@ -149,6 +156,49 @@ final class CommandExecutorTests: XCTestCase {
         XCTAssertEqual(host.sent.map(\.text), ["hello"])
         XCTAssertEqual(sessions.session(for: "telegram:42").boundPaneKey, "k12")
         XCTAssertTrue(reply.text.contains("from now on"), reply.text)
+    }
+
+    // MARK: - First Mate
+
+    func testAnUnboundChatTalksToFirstMateWhenItIsOn() {
+        host.firstMateAvailable = true
+        XCTAssertEqual(last("how is CI?").text, "→ First Mate")
+        XCTAssertEqual(host.toFirstMate.map(\.text), ["how is CI?"])
+        XCTAssertEqual(host.toFirstMate.first?.from, "telegram:42", "the answer goes back to this chat")
+        XCTAssertTrue(host.sent.isEmpty)
+    }
+
+    /// Even with one pane: with First Mate on, prose is not an order to that pane.
+    func testFirstMateComesBeforeTheOnePaneShortcut() {
+        host.firstMateAvailable = true
+        host.index = FleetIndex(panes: [CommandFixture.paneC], worktrees: [], repos: [])
+        last("hello")
+        XCTAssertEqual(host.toFirstMate.count, 1)
+        XCTAssertNil(sessions.session(for: "telegram:42").boundPaneKey)
+    }
+
+    func testABoundChatStillTalksToItsPane() {
+        host.firstMateAvailable = true
+        last("/go #7")
+        last("run the tests")
+        XCTAssertEqual(host.sent.map(\.text), ["run the tests"])
+        XCTAssertTrue(host.toFirstMate.isEmpty)
+    }
+
+    func testMateLeavesThePaneForFirstMate() {
+        host.firstMateAvailable = true
+        last("/go #7")
+        XCTAssertEqual(last("/mate what failed?").text, "→ First Mate — talking to it from now on.")
+        XCTAssertNil(sessions.session(for: "telegram:42").boundPaneKey)
+        XCTAssertEqual(host.toFirstMate.map(\.text), ["what failed?"])
+        last("and now?")
+        XCTAssertEqual(host.toFirstMate.count, 2)
+    }
+
+    func testMateWhenOffSaysHowToTurnItOn() {
+        let reply = last("/mate")
+        XCTAssertTrue(reply.isError)
+        XCTAssertTrue(reply.text.contains("Settings"), reply.text)
     }
 
     func testGoBindsThisConversationOnly() {
