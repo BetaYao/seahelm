@@ -130,7 +130,7 @@
   body[data-share="pane"] #rightcol,
   body[data-share="pane"] #drawerBtn,
   body[data-share="pane"] .pane-tabs,
-  body[data-share="pane"] .nw-bar{display:none}
+  body[data-share="pane"] #nwOpenBtn{display:none}
   body[data-share="pane"] #midcol{display:flex}
   /* With one pane there is nothing else in the head, so Timeline / Terminal
      comes out of the ⋯ menu and sits beside it, where a visitor sees it. */
@@ -169,6 +169,8 @@
     padding:0 4px;border-radius:9px;background:var(--attention);color:#1c1300;font-size:11px;font-weight:700;
     display:flex;align-items:center;justify-content:center;box-sizing:border-box}
   /* Its detail reads as First Mate's, not a task's: an accent title strip. */
+  .dh-pr{color:inherit;text-decoration:none;display:inline-flex;gap:3px;align-items:baseline}
+  .dh-pr:hover .fm-pr{text-decoration:underline}
   .detail-head.mate{background:color-mix(in srgb, var(--accent) 14%, var(--bg))}
   .detail-head.mate #detailHead{color:var(--accent);display:flex;align-items:center;gap:6px}
   .detail-head.mate #detailHead svg{width:18px;height:18px}
@@ -242,14 +244,7 @@
   .fm-empty{padding:48px 16px;text-align:center;color:var(--muted)}
 
   /* New work: a pill at the foot of the list that opens a sheet. */
-  .nw-bar{flex:none;padding:12px 16px max(16px, calc(8px + var(--inset-bottom)))}
-  .nw-open{width:100%;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;
-    border-radius:26px;border:0.5px solid var(--sep);background:var(--panel);color:var(--muted);
-    font-size:var(--fs-body);cursor:pointer;text-align:left}
-  .nw-open svg{stroke:var(--accent)}
-  .nw-open kbd{margin-left:auto;font:inherit;font-size:var(--fs-cap);color:var(--faint)}
-  @media (max-width:760px){ .nw-open kbd{display:none} }
-  @media (min-width:761px){ .nw-open{height:44px;border-radius:22px} }
+  #nwOpenBtn{color:var(--accent)}
 
   /* Sized to the visible viewport, not the layout one: iOS lays the keyboard
      over the page, and a sheet pinned to the layout bottom sits under it. */
@@ -593,6 +588,9 @@
       <div class="fm-top">
         <h1 class="fm-title">Seahelm</h1>
         <div class="fm-top-actions">
+          <button class="icon-btn" id="nwOpenBtn" type="button" aria-label="Start new work" title="Start new work">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
           <button class="icon-btn" id="mateBtn" type="button" aria-label="First Mate" hidden>
             <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/><path d="M12 4v5.8M12 14.2V20M4 12h5.8M14.2 12H20"/></svg>
             <i class="mate-dot" aria-hidden="true"></i>
@@ -604,12 +602,6 @@
       </div>
       <div class="fm-scroll">
         <div id="tree"></div>
-      </div>
-      <div class="nw-bar">
-        <button class="nw-open" id="nwOpenBtn" type="button">
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span>Start new work…</span>
-        </button>
       </div>
     </div>
     <div class="col" id="midcol">
@@ -2793,9 +2785,13 @@ function renderDetailChrome(){
   detailHead && detailHead.classList.remove('mate');
   head.textContent = row.title || row.branch || row.path;
   const pane = S.selPane && S.panes.get(S.selPane);
+  // The branch's PR, as the row draws it, and a tap away on GitHub.
+  const prLink = row.pr && row.pr.url
+    ? `<a class="dh-pr" href="${esc(row.pr.url)}" target="_blank" rel="noopener">${prBadgeHTML(row.pr)}<span aria-hidden="true">↗</span></a>`
+    : '';
   if (row.panes.length > 1 || !pane) {
-    sub.textContent = [row.subtitle !== row.title ? row.subtitle : '', row.project,
-      `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+    sub.innerHTML = [row.subtitle !== row.title ? esc(row.subtitle) : '', esc(row.project),
+      `${row.panes.length} pane${row.panes.length === 1 ? '' : 's'}`, prLink].filter(Boolean).join(' · ');
   } else {
     const st = shownStatus(pane.status, pane.unseen);
     const since = st === 'running' ? (S.rowTimes.get(row.path) || {}).running_since : 0;
@@ -2803,7 +2799,7 @@ function renderDetailChrome(){
     sub.innerHTML = [
       label ? `<span style="color:${STC[st]}">${esc(label)}${since ? ' ' + esc(compactDuration(since)) : ''}</span>` : '',
       // Not the agent: the composer is labelled with it right below.
-      row.subtitle !== row.title ? esc(row.subtitle) : '', esc(row.project),
+      row.subtitle !== row.title ? esc(row.subtitle) : '', esc(row.project), prLink,
     ].filter(Boolean).join(' · ');
   }
   tabs.hidden = row.panes.length < 2;
@@ -2885,7 +2881,7 @@ function selectWorktree(row, paneKey, { navigate = true } = {}){
   renderDetail();
 }
 // ── new work ─────────────────────────────────────────────────────────────
-// A sheet opened from the foot of the list: write the prompt, pick a project
+// A sheet opened from the + in the list's title bar: write the prompt, pick a project
 // and an agent, and the Mac starts a worktree the way its own helm does — the
 // prompt names the branch and becomes the agent's first message. The page goes
 // straight to it rather than leaving the reader to find it in the list.
