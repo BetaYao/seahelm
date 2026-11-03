@@ -1,7 +1,7 @@
 import Foundation
 
-/// PATH detection for AI agents shown in the first-launch onboarding wizard.
-enum OnboardingAgentDetector {
+/// PATH detection for AI agents (the first-launch default agent, `worktree.create` options).
+enum AgentDetector {
     struct AgentInfo: Equatable {
         let type: AgentType
         let command: String

@@ -64,17 +64,18 @@ struct Config: Codable {
     var sidebarCollapsed: Bool
     /// Last chrome left pane (`ChromeLeftPane.rawValue`). Default First Mate.
     var sidebarActivePane: String
-    /// First-launch wizard gate. New installs start `false`; legacy configs that
-    /// omit the key decode as `true` so existing users never see the wizard.
+    /// First-launch marker. New installs start `false`; the first launch picks
+    /// `defaultAgent` from PATH and sets it. (It once gated a setup wizard, which
+    /// is gone; legacy configs that omit the key decode as `true`.)
     var onboardingCompleted: Bool
-    /// Primary AI agent chosen during onboarding (`AgentType.rawValue`).
+    /// Primary AI agent new worktrees start (`AgentType.rawValue`).
     var defaultAgent: String
     /// When true, agent launch commands append skip-permission / yolo flags.
     var agentYolo: Bool
     /// When true, a Claude pane whose agent starts working in a freshly created
     /// worktree of its repo is forked there automatically (`PaneFork.shouldAutoFork`).
     var autoForkPanes: Bool
-    /// Agent manifest ids whose hooks were installed during onboarding.
+    /// Agent manifest ids whose hooks to install at launch; empty installs all.
     var enabledHookAgents: [String]
     /// Desktop notification sound: `default`, `defaultCritical`, or `none`.
     var notificationSound: String
@@ -212,7 +213,7 @@ struct Config: Codable {
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)
         sidebarActivePane = ChromeLeftPane(rawValue: pane ?? "")?.rawValue
             ?? ChromeLeftPane.firstMate.rawValue
-        // Missing key = legacy install → skip wizard. Explicit false = unfinished.
+        // Missing key = legacy install → already launched. Explicit false = fresh.
         if container.contains(.onboardingCompleted) {
             onboardingCompleted = try container.decode(Bool.self, forKey: .onboardingCompleted)
         } else {
@@ -284,7 +285,7 @@ struct Config: Codable {
         } catch {
             NSLog("Failed to load config: \(error)")
             // A corrupt/undecodable config is NOT a fresh install — falling back
-            // to defaults here would re-run the onboarding wizard on every launch.
+            // to defaults here would re-run first-launch setup over it.
             var fallback = Config()
             fallback.onboardingCompleted = true
             return fallback

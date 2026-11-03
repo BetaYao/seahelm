@@ -14,7 +14,6 @@ protocol DashboardDelegate: AnyObject {
     /// The row's Return: the same thing as `/return @worktree`.
     func dashboardDidRequestReturnWorktree(path: String)
     func dashboardDidRequestCloseRepo(_ project: String)
-    func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
     func dashboardDidRequestBrowseFiles(worktreePath: String)
     func dashboardDidRequestShowChanges(worktreePath: String)
@@ -321,14 +320,6 @@ class DashboardViewController: NSViewController {
 
     // Empty state
     private let emptyStateView = NSView()
-    /// First-run guide under the empty state's folder button. Only step 1 is
-    /// actionable without a repo, so the rest render dimmed until one exists.
-    private let emptyStateGuide = NSStackView()
-    private var emptyStateGuideRows: [EmptyStateGuideRow] = []
-    /// Whether any repo is configured. The empty state shows whenever there are
-    /// no agents — which is also true after the last worktree goes away — so the
-    /// guide asks this to tell a first launch from a merely empty workspace.
-    var hasWorkspaces: () -> Bool = { false }
 
     // MARK: - First responder
 
@@ -490,7 +481,6 @@ class DashboardViewController: NSViewController {
 
         // Show empty state when no agents
         if agents.isEmpty || DebugFlags.forceEmptyState {
-            refreshEmptyStateGuide()
             emptyStateView.isHidden = false
             terminalHostView.addSubview(emptyStateView) // keep above focus panel
             leftRightContainer.isHidden = true
@@ -798,134 +788,21 @@ class DashboardViewController: NSViewController {
 
     // MARK: - Setup: Empty State
 
+    /// With no worktrees the terminal side shows nothing at all — the fleet's
+    /// "Add project" row is the whole first-run UI. This blank view covers the
+    /// focus panel's slot so nothing stale shows through.
     private func setupEmptyState() {
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.isHidden = true
+        emptyStateView.setAccessibilityIdentifier("dashboard.emptyState")
         // Hosted in the terminal slot so it remains visible after chrome reparents hosts.
         terminalHostView.addSubview(emptyStateView)
-
-        // Folder icon button
-        let button = NSButton()
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.bezelStyle = .regularSquare
-        button.isBordered = false
-        button.title = ""
-        if let folderImage = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "Open Folder") {
-            let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .light)
-            button.image = folderImage.withSymbolConfiguration(config)
-        }
-        button.contentTintColor = .secondaryLabelColor
-        button.imagePosition = .imageOnly
-        button.target = self
-        button.action = #selector(emptyStateAddProjectClicked)
-        button.setAccessibilityIdentifier("dashboard.emptyState.addButton")
-        emptyStateView.addSubview(button)
-
-        // Subtitle label
-        let label = NSTextField(labelWithString: "Add a project to get started")
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 14)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-        emptyStateView.addSubview(label)
-
-        emptyStateGuideRows = [
-            EmptyStateGuideRow(marker: "1.", command: "Add a project", detail: "pick a folder above"),
-            EmptyStateGuideRow(marker: "2.", command: "/new <task>", detail: "start a project"),
-            EmptyStateGuideRow(marker: "3.", command: "/order @branch", detail: "give the agent an order"),
-            EmptyStateGuideRow(marker: "4.", command: "/remove", detail: "clean up finished work"),
-        ]
-        emptyStateGuide.translatesAutoresizingMaskIntoConstraints = false
-        emptyStateGuide.orientation = .vertical
-        emptyStateGuide.alignment = .leading
-        emptyStateGuide.spacing = 6
-        emptyStateGuide.setViews(emptyStateGuideRows, in: .leading)
-        emptyStateView.addSubview(emptyStateGuide)
-        refreshEmptyStateGuide()
-
         NSLayoutConstraint.activate([
             emptyStateView.topAnchor.constraint(equalTo: terminalHostView.topAnchor),
             emptyStateView.leadingAnchor.constraint(equalTo: terminalHostView.leadingAnchor),
             emptyStateView.trailingAnchor.constraint(equalTo: terminalHostView.trailingAnchor),
             emptyStateView.bottomAnchor.constraint(equalTo: terminalHostView.bottomAnchor),
-
-            button.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: emptyStateView.centerYAnchor, constant: -64),
-
-            label.topAnchor.constraint(equalTo: button.bottomAnchor, constant: 12),
-            label.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
-
-            emptyStateGuide.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 28),
-            emptyStateGuide.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
         ])
-    }
-
-    /// Point the guide at the step the user can actually take: with no repo only
-    /// step 1 is live, and once one exists step 1 is done and the commands are.
-    private func refreshEmptyStateGuide() {
-        // The forced state is a stand-in for a first launch, so show it as one.
-        let hasRepo = DebugFlags.forceEmptyState ? false : hasWorkspaces()
-        for (index, row) in emptyStateGuideRows.enumerated() {
-            let isAddRepo = index == 0
-            row.setActive(hasRepo ? !isAddRepo : isAddRepo)
-            row.setCurrent(hasRepo ? index == 1 : isAddRepo)
-        }
-    }
-
-    @objc private func emptyStateAddProjectClicked() {
-        dashboardDelegate?.dashboardDidRequestAddProject()
-    }
-
-    /// One line of the first-run guide: `1.  /new <task>   start a worktree`.
-    /// Mono throughout so the three columns line up without a grid.
-    final class EmptyStateGuideRow: NSView {
-        private let markerLabel: NSTextField
-        private let commandLabel: NSTextField
-        private let detailLabel: NSTextField
-        private let arrowLabel = NSTextField(labelWithString: "← you are here")
-
-        init(marker: String, command: String, detail: String) {
-            markerLabel = NSTextField(labelWithString: marker)
-            commandLabel = NSTextField(labelWithString: command)
-            detailLabel = NSTextField(labelWithString: detail)
-            super.init(frame: .zero)
-
-            markerLabel.font = AppFont.mono(size: 12)
-            commandLabel.font = AppFont.mono(size: 12, weight: .medium)
-            detailLabel.font = AppFont.mono(size: 12)
-            arrowLabel.font = AppFont.mono(size: 12)
-
-            let stack = NSStackView(views: [markerLabel, commandLabel, detailLabel, arrowLabel])
-            stack.orientation = .horizontal
-            stack.alignment = .firstBaseline
-            stack.spacing = 10
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(stack)
-
-            NSLayoutConstraint.activate([
-                stack.topAnchor.constraint(equalTo: topAnchor),
-                stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-                // Fixed columns keep every row's detail text aligned.
-                commandLabel.widthAnchor.constraint(equalToConstant: 132),
-            ])
-        }
-
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-        /// Dim the steps whose command cannot work yet.
-        func setActive(_ active: Bool) {
-            markerLabel.textColor = active ? .secondaryLabelColor : .tertiaryLabelColor
-            commandLabel.textColor = active ? .labelColor : .tertiaryLabelColor
-            detailLabel.textColor = active ? .secondaryLabelColor : .tertiaryLabelColor
-        }
-
-        /// Mark the one step to do next.
-        func setCurrent(_ current: Bool) {
-            arrowLabel.isHidden = !current
-            arrowLabel.textColor = .tertiaryLabelColor
-        }
     }
 
     // MARK: - Setup: Left-Right

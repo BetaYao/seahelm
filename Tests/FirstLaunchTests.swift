@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-final class OnboardingConfigTests: XCTestCase {
+final class FirstLaunchConfigTests: XCTestCase {
     func testFreshConfigStartsOnboardingIncomplete() {
         let config = Config()
         XCTAssertFalse(config.onboardingCompleted)
@@ -58,9 +58,9 @@ final class OnboardingConfigTests: XCTestCase {
     }
 }
 
-final class OnboardingAgentDetectorTests: XCTestCase {
+final class AgentDetectorTests: XCTestCase {
     func testScanMarksDetectedFromCommandExists() {
-        let agents = OnboardingAgentDetector.scan { cmd in
+        let agents = AgentDetector.scan { cmd in
             cmd == "claude" || cmd == "codex"
         }
         let claude = agents.first { $0.type == .claudeCode }
@@ -70,13 +70,13 @@ final class OnboardingAgentDetectorTests: XCTestCase {
     }
 
     func testPreferredDefaultPrefersClaudeWhenDetected() {
-        let agents = OnboardingAgentDetector.scan { $0 == "claude" || $0 == "codex" }
-        XCTAssertEqual(OnboardingAgentDetector.preferredDefault(from: agents), .claudeCode)
+        let agents = AgentDetector.scan { $0 == "claude" || $0 == "codex" }
+        XCTAssertEqual(AgentDetector.preferredDefault(from: agents), .claudeCode)
     }
 
     func testPreferredDefaultFallsBackToFirstDetected() {
-        let agents = OnboardingAgentDetector.scan { $0 == "codex" }
-        XCTAssertEqual(OnboardingAgentDetector.preferredDefault(from: agents), .codex)
+        let agents = AgentDetector.scan { $0 == "codex" }
+        XCTAssertEqual(AgentDetector.preferredDefault(from: agents), .codex)
     }
 }
 

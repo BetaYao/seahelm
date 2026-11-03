@@ -22,10 +22,9 @@ enum CodexHooksSetup {
     }
 
     /// What reconciling one file did. Separating these two matters because
-    /// `OnboardingHookInstaller` renders this function's result as the wizard's
-    /// `ok:` tick: returning "changed" meant a machine that was *already*
-    /// configured showed Codex hooks as **failed**, which is a good way to make
-    /// a customer chase a working integration.
+    /// `AgentHookInstaller` reports this function's result as the step's `ok`:
+    /// returning "changed" meant a machine that was *already* configured showed
+    /// Codex hooks as **failed**.
     private enum Reconciled {
         case unchanged
         case written

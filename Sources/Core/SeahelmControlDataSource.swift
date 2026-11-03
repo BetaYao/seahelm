@@ -580,7 +580,7 @@ extension SeahelmControlDataSource {
             .sorted { ($0["name"] ?? "").localizedCaseInsensitiveCompare($1["name"] ?? "") == .orderedAscending }
         // Installed ones only: offering an agent the Mac cannot run would make
         // a worktree whose pane just says "command not found".
-        let installed = OnboardingAgentDetector.scan().filter(\.detected).map(\.type)
+        let installed = AgentDetector.scan().filter(\.detected).map(\.type)
         let agents = WorktreeAgentTypeStore.lastChosenFirst(installed,
                                                             lastChosen: WorktreeAgentTypeStore.shared.lastChosen)
             .map { ["id": $0.rawValue, "label": $0.displayName] }

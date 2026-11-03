@@ -25,10 +25,6 @@ enum Analytics {
         }
     }
 
-    static func trackOnboardingCompleted() {
-        Aptabase.shared.trackEvent("onboarding_completed")
-    }
-
     /// Called when Seahelm itself creates a worktree (not mere git discovery).
     static func trackWorktreeCreated(totalCount: Int) {
         if !UserDefaults.standard.bool(forKey: firstWorktreeKey) {

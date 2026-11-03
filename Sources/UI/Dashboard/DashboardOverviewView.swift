@@ -693,6 +693,18 @@ final class DashboardOverviewView: NSView {
             pin(rowsBox)
         }
 
+        // An empty fleet is a first launch (or the last project closed): the one
+        // thing to do is add a project, so the list says exactly that.
+        if groups.isEmpty {
+            let addRow = AddProjectRowView()
+            addRow.onTap = { [weak self] in self?.onAddRepo?() }
+            addRow.onHoverChanged = { [weak self] row, entered in
+                self?.rowHoverChanged(row, entered: entered)
+            }
+            stack.addArrangedSubview(addRow)
+            pin(addRow)
+        }
+
         if revealSelection, let selectedRow = rowViewsByID[selectedId] {
             layoutSubtreeIfNeeded()
             selectedRow.scrollToVisible(selectedRow.bounds)
@@ -1970,6 +1982,76 @@ final class DashboardOverviewView: NSView {
         var isHoveredForTesting: Bool { hovered }
     }
 
+}
+
+extension DashboardOverviewView {
+    /// The fleet's only row while it has no projects: `+ Add project`.
+    fileprivate final class AddProjectRowView: NSView, FleetHoverRow {
+        var onTap: (() -> Void)?
+        var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
+        private var hovered = false
+
+        private static let hoverFill = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.05)
+                : NSColor.black.withAlphaComponent(0.04)
+        }
+
+        init() {
+            super.init(frame: .zero)
+            wantsLayer = true
+            layer?.cornerRadius = 8
+            layer?.masksToBounds = true
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            setAccessibilityLabel("Add project")
+            setAccessibilityIdentifier("dashboard.addProjectRow")
+            toolTip = "Add a project folder"
+
+            let icon = NSImageView()
+            icon.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+            icon.contentTintColor = DashboardOverviewView.inkDim
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+
+            let title = NSTextField(labelWithString: "Add project")
+            title.font = AppFont.mono(size: 12)
+            title.textColor = DashboardOverviewView.inkDim
+            title.translatesAutoresizingMaskIntoConstraints = false
+
+            addSubview(icon)
+            addSubview(title)
+            NSLayoutConstraint.activate([
+                icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                icon.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+                title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+                title.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                title.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            ])
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func mouseDown(with event: NSEvent) { onTap?() }
+        override func accessibilityPerformPress() -> Bool { onTap?(); return true }
+
+        private var tracking: NSTrackingArea?
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+            addTrackingArea(t); tracking = t
+        }
+        override func mouseEntered(with event: NSEvent) { onHoverChanged?(self, true) }
+        override func mouseExited(with event: NSEvent) { onHoverChanged?(self, false) }
+
+        func setHovered(_ hovered: Bool) {
+            guard self.hovered != hovered else { return }
+            self.hovered = hovered
+            layer?.backgroundColor = hovered ? resolvedCGColor(Self.hoverFill) : NSColor.clear.cgColor
+        }
+    }
 }
 
 extension UnseenCompletion {

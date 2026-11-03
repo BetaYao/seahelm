@@ -294,7 +294,6 @@ private class DashboardDelegateSpy: DashboardDelegate {
     func dashboardDidRequestDeleteWorktree(path: String) {}
     func dashboardDidRequestReturnWorktree(path: String) {}
     func dashboardDidRequestCloseRepo(_ project: String) {}
-    func dashboardDidRequestAddProject() {}
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {
         didChangeSelectionCalled = true
     }
