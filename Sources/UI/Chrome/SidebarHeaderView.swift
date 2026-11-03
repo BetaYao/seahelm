@@ -35,10 +35,6 @@ final class SidebarHeaderView: NSView {
         iconCluster.setWorktreeContextEnabled(enabled)
     }
 
-    func setIssuesAvailable(_ available: Bool) {
-        iconCluster.setIssuesAvailable(available)
-    }
-
     // MARK: - Setup
 
     private func setup() {
