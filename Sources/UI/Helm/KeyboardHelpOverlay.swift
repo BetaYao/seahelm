@@ -28,7 +28,7 @@ final class KeyboardHelpOverlay: NSView {
         ("⌘⌥ ← → ↑ ↓", "Move split focus"),
         ("⌘⌃ ← → ↑ ↓", "Resize split"),
         ("⌘P", "Open the island command bar"),
-        ("⌘J", "First Mate — open / back to the worktree"),
+        ("⌘J / ⌃⌃", "First Mate — open / back to the worktree"),
         ("/ @ #", "Command / repo / agent completion"),
         ("↑ ↓ / ⇥", "Select / accept completion"),
         ("esc", "Close menu → close the island"),

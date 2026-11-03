@@ -76,7 +76,23 @@ class SeahelmWindow: NSWindow {
         }
     }
 
+    private var controlTaps = DoubleTapDetector()
+
     override func sendEvent(_ event: NSEvent) {
+        // Double Control → First Mate. Watched, never swallowed: the terminal
+        // still sees every Control press.
+        switch event.type {
+        case .flagsChanged:
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if controlTaps.feed(.flags(flags), at: event.timestamp),
+               let mwc = windowController as? MainWindowController {
+                mwc.toggleFirstMate()
+            }
+        case .keyDown:
+            _ = controlTaps.feed(.key, at: event.timestamp)
+        default:
+            break
+        }
         if event.type == .keyDown {
             // Escape: exit spotlight (existing)
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
