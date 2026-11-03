@@ -10,11 +10,10 @@ class GhosttyBridge {
     private var config: ghostty_config_t?
     private var isInitialized = false
 
-    /// The palette every pane in this run uses, resolved once. There is
-    /// deliberately **no** `NSApp.effectiveAppearance` observer: re-resolving it
-    /// live is precisely the bug `TerminalThemeMode` documents. A palette change
-    /// lands on the next launch.
-    private static var latchedIsDark: Bool?
+    /// The palette panes currently render with. Resolved at first use and again
+    /// on every app appearance change (`refreshColorScheme`); `nil` until then.
+    private static var resolvedIsDark: Bool?
+    private var appearanceObservation: NSKeyValueObservation?
 
     /// Nested live-resize sessions (chrome divider / window resize). While > 0,
     /// GhosttyNSView defers `ghostty_surface_set_size` so the PTY isn't flooded
@@ -168,7 +167,7 @@ class GhosttyBridge {
         }
 
         // Keep config for soft reload of keys the user can edit live (font size,
-        // copy-on-select). The palette is not among them — see `syncColorScheme`.
+        // copy-on-select); a palette change rebuilds it (`refreshColorScheme`).
         self.config = config
         self.app = ghosttyApp
         self.isInitialized = true
@@ -176,25 +175,33 @@ class GhosttyBridge {
         // Tell libghostty which scheme we render, so what it reports to apps
         // (DEC mode 2031) matches the palette they can actually see.
         syncColorScheme()
+        // `theme_mode = system` follows macOS's own light/dark switch, which
+        // goes through no Seahelm toggle — watch the app's appearance for it.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.refreshColorScheme() }
+        }
     }
 
-    /// The scheme every pane renders with, for this whole run.
+    /// The scheme every pane renders with right now.
     var currentColorScheme: ghostty_color_scheme_e {
         Self.terminalIsDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
     }
 
-    /// Resolve `terminal_theme_mode` once and hold it — the whole point of
-    /// `TerminalThemeMode`. First read happens in `initialize()`, before any
-    /// surface exists and after `main.swift` has already forced the app
-    /// appearance, so `app` sees a settled value. Main thread only.
+    /// Whether panes render dark: `terminal_theme_mode` resolved against the
+    /// app appearance. Cached between appearance changes so chrome restyles do
+    /// not re-read config; `refreshColorScheme` re-resolves it. Main thread only.
     static var terminalIsDark: Bool {
-        if let latchedIsDark { return latchedIsDark }
+        if let resolvedIsDark { return resolvedIsDark }
+        let resolved = resolveIsDark()
+        resolvedIsDark = resolved
+        return resolved
+    }
+
+    private static func resolveIsDark() -> Bool {
         let appIsDark = NSApp.effectiveAppearance
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let resolved = TerminalThemeMode.parse(Config.load().terminalThemeMode)
+        return TerminalThemeMode.parse(Config.load().terminalThemeMode)
             .isDark(appAppearanceIsDark: appIsDark)
-        latchedIsDark = resolved
-        return resolved
     }
 
     /// Matches bundled Catppuccin Mocha / Latte `background` — used for immersive
@@ -217,12 +224,21 @@ class GhosttyBridge {
         }
     }
 
-    /// Re-assert the run's scheme and let terminal chrome restyle.
+    /// Follow an app appearance change: re-resolve the palette and, if it moved,
+    /// repaint every live pane and let terminal chrome restyle.
     ///
-    /// Called after an app theme toggle, which no longer moves the terminal
-    /// palette — chrome re-reads `terminalChromeBackground` and so stays matched
-    /// to the surface it frames rather than to the app around it.
+    /// The cost is known (`TerminalThemeMode`): an agent that cached the
+    /// terminal's colours at startup — Codex — keeps painting from that reading
+    /// until it is restarted. Dark-everywhere / light-everywhere was chosen over
+    /// a pane that disagrees with the window around it.
     func refreshColorScheme() {
+        let isDark = Self.resolveIsDark()
+        if isDark != Self.resolvedIsDark {
+            Self.resolvedIsDark = isDark
+            // The palette is one resolved `theme`, so a change is a config
+            // rebuild (rewriting the override), fanned out to every surface.
+            reloadUserConfig()
+        }
         syncColorScheme()
         NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
     }
@@ -236,27 +252,23 @@ class GhosttyBridge {
         reloadConfig(target: target, soft: false)
     }
 
-    /// Tell libghostty which scheme this run renders.
-    ///
-    /// App level only, and idempotent: `latchedIsDark` never changes, so this
-    /// reports the same answer every time it is called. It exists so the scheme
-    /// libghostty *reports* to a TUI (DEC mode 2031, `ghostty_surface_read_text`
-    /// colors, OSC 10/11) is the one on screen.
-    ///
-    /// It deliberately does not walk `StationRegistry` calling
-    /// `ghostty_surface_set_color_scheme`. That loop is what used to repaint
-    /// live panes on an appearance flip, and a pane is the one place a palette
-    /// must not move: the agent inside it read those colors once, at startup,
-    /// and has no way to learn they changed (`TerminalThemeMode`). New surfaces
-    /// inherit the app's conditional state at creation, so they come up correct
-    /// without it.
+    /// Tell libghostty, and every live surface, which scheme panes render, so
+    /// what it reports to a TUI (DEC mode 2031, OSC 10/11) is the one on
+    /// screen — a TUI that listens for 2031 can restyle itself on a flip.
     private func syncColorScheme() {
         guard let app else { return }
-        ghostty_app_set_color_scheme(app, currentColorScheme)
+        let scheme = currentColorScheme
+        for station in StationRegistry.shared.allStations() {
+            guard let surface = station.surface else { continue }
+            station.ghosttyLock.lock()
+            ghostty_surface_set_color_scheme(surface, scheme)
+            station.ghosttyLock.unlock()
+        }
+        ghostty_app_set_color_scheme(app, scheme)
     }
 
-    /// Soft-reload config. The palette is a single resolved `theme`, so this
-    /// only moves keys the user can edit live (font size, copy-on-select).
+    /// Reload config: soft re-applies the kept config, hard rebuilds it from
+    /// disk (which re-resolves the palette's `theme` override).
     private func reloadConfig(target: ghostty_target_s, soft: Bool) {
         guard let config else { return }
         switch target.tag {
@@ -354,14 +366,10 @@ class GhosttyBridge {
         Bundle.main.resourceURL?.appendingPathComponent("ghostty")
     }
 
-    /// Writes a tiny conf pinning the run's single theme to an absolute bundle
-    /// path.
-    ///
-    /// One theme, not `light:…,dark:…`: a dual pair leaves the palette on
-    /// Ghostty's conditional state, where any later `set_color_scheme` re-resolves
-    /// it — which is the flip that strands a running agent on stale colors
-    /// (`TerminalThemeMode`). Resolving here instead means there is nothing left
-    /// to flip.
+    /// Writes a tiny conf pinning the current single theme to an absolute
+    /// bundle path. One resolved theme rather than `light:…,dark:…`, so
+    /// `terminal_theme_mode = dark|light` can pin it regardless of appearance;
+    /// a change of palette rewrites this and rebuilds the config.
     private static func writeTerminalThemeOverride() -> String? {
         guard let themes = bundledResourcesURL()?.appendingPathComponent("themes") else { return nil }
         let name = terminalIsDark ? "Catppuccin Mocha" : "Catppuccin Latte"

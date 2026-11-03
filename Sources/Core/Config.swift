@@ -10,9 +10,8 @@ struct Config: Codable {
     var autoUpdate: UpdateConfig
     var cardOrder: [String]
     var themeMode: String
-    /// Palette for the terminal surfaces, independent of `themeMode` — see
-    /// `TerminalThemeMode` for why a pane's palette must not follow the app's
-    /// live appearance. `"app"` (default) matches the appearance at launch.
+    /// Palette for the terminal surfaces — see `TerminalThemeMode`. `"app"`
+    /// (default) follows the app appearance live; `"dark"`/`"light"` pin it.
     var terminalThemeMode: String
     var worktreeStartedAt: [String: String]
     /// Per-worktree last real-activity timestamp (ISO8601). Persisted so the
