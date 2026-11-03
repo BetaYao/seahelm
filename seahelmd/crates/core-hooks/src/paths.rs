@@ -14,9 +14,12 @@ fn is_sep(c: char) -> bool {
     c == '/' || (cfg!(windows) && c == '\\')
 }
 
-/// The separator to put between components: the one the path already uses.
-fn sep_for(p: &str) -> char {
-    if cfg!(windows) && p.contains('\\') && !p.contains('/') {
+/// The separator to put between components. On Windows always `\`: paths
+/// reach the provider spelled both ways (`git worktree list` writes
+/// `C:/repo`, a hook's cwd is `C:\repo`, `fs::canonicalize` answers with
+/// backslashes), and they have to compare equal as strings.
+fn sep_for(_p: &str) -> char {
+    if cfg!(windows) {
         '\\'
     } else {
         '/'
@@ -98,6 +101,8 @@ pub(crate) fn standardize(p: &str) -> String {
         }
     }
     let body = parts.join(&sep.to_string());
+    // On Windows the root is spelled with the separator too (`C:/` → `C:\`).
+    let root = if cfg!(windows) { root.replace('/', "\\") } else { root.to_string() };
     if root.is_empty() {
         body
     } else {

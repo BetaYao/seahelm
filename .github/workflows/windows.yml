@@ -62,4 +62,4 @@ jobs:
 
       - name: Test
         working-directory: seahelmd
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --no-fail-fast
