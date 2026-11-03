@@ -97,7 +97,7 @@ First Mate 调用 CLI 时，请求带着 `_meta.caller = 它自己的 pane id`�
 | `message_pane` | `seahelm pane run/send …`（发给别的 pane） | auto |
 | `start_agent` | `seahelm worktree create --repo … --task …` | ask |
 | `delete_worktree` | `seahelm worktree delete <wt>` | ask |
-| `propose` | `seahelm propose "<说明>" --option "<标签>=<命令>"` | 永远是卡片 |
+| `propose` | `seahelm propose …`（第二阶段，见 §4） | 永远是卡片 |
 
 - `auto`：执行，写审计。
 - `ask`：不执行，生成一张审批卡片（桌面 / Island / Telegram / web 都能批），返回 `{"queued": "approval", "card": id}`；你批了，seahelm 以 First Mate 的名义执行，并把结果作为一条消息告诉它。
@@ -127,9 +127,9 @@ First Mate 调用 CLI 时，请求带着 `_meta.caller = 它自己的 pane id`�
 **第一阶段**（打通"CI 失败自动修"和"合并后清理"）
 - 1a 规则与事件：yml 解析、`ci.failed`/`pr.merged` 跳变检测、规则匹配与 brief 渲染、`max_attempts` 与已触发记录的持久化、审计日志。纯逻辑，全部单测。
 - 1b First Mate pane：会话与工作目录、`CLAUDE.md`、注册但不进 fleet、事件队列与投递、左下角常驻条、右侧视图（先放真实终端 + 审计时间线）。
-- 1c 策略把关：控制路由按调用方分类、`auto/ask/deny`、审批卡片、`worktree create/delete` 与 `propose` 的 CLI、批准后执行并回告 First Mate。
+- 1c 策略把关：控制路由按调用方分类（只读方法放行；`pane.run/send_text/send_keys` = `message_pane`，`worktree.create` = `start_agent`，`worktree.delete` = `delete_worktree`；其余一律拒绝）、`auto/ask/deny`、预算（`max_concurrent_agents`、`pause_above_usage`）、审批卡片（Island 与 Telegram，划掉卡片 = 拒绝）、`seahelm worktree create/delete` CLI、批准后在后台执行并回告 First Mate。
 
-**第二阶段**：`schedule` 触发与"高优 issue 推荐"；设置界面编辑规则；Telegram 审批与默认对话对象改为 First Mate；右侧视图换成结构化时间线 + 输入框；角标浮层。
+**第二阶段**：`schedule` 触发与"高优 issue 推荐"，以及它需要的 `seahelm propose`（带结构化选项的推荐卡片：选中一项即视为批准该项对应的动作，不再二次询问）；设置界面编辑规则；Telegram 审批与默认对话对象改为 First Mate；右侧视图换成结构化时间线 + 输入框；角标浮层。
 
 **第三阶段**：更多触发源（agent 跑完、review 评论、issue 标签）；每日总结。
 

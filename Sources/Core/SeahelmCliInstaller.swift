@@ -143,6 +143,26 @@ enum SeahelmCliInstaller {
                     die("unknown wait: %s" % sub)
                 sys.exit(0 if r.get("matched") else 1)
 
+            if g == "worktree":
+                # seahelm worktree create --repo <path> --task <text> [--agent claudeCode]
+                # seahelm worktree delete <worktree-path>
+                # From First Mate these may come back {"queued": "approval"}: the
+                # user decides, and First Mate is told the outcome.
+                if not a: die("usage: seahelm worktree <create|delete> ...")
+                sub = a[0]; rest = a[1:]
+                if sub == "create":
+                    repo = opt(rest, "--repo"); task = opt(rest, "--task")
+                    if not repo or not task:
+                        die("usage: seahelm worktree create --repo <path> --task <text> [--agent claudeCode]")
+                    p = {"repo_path": os.path.abspath(os.path.expanduser(repo)), "prompt": task,
+                         "agent_type": opt(rest, "--agent", "claudeCode")}
+                    print(json.dumps(call("worktree.create", p, timeout=120), indent=2)); return
+                if sub == "delete":
+                    if not rest: die("usage: seahelm worktree delete <worktree-path>")
+                    p = {"worktree_path": os.path.abspath(os.path.expanduser(rest[0]))}
+                    print(json.dumps(call("worktree.delete", p), indent=2)); return
+                die("unknown worktree subcommand: %s" % sub)
+
             if g == "pane":
                 if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|move|explain|zoom|options|sleep|wake> ...")
                 sub = a[0]; rest = a[1:]

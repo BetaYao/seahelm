@@ -80,6 +80,13 @@ protocol ControlDataSource: AnyObject {
     func worktreeGroups(mode: String) -> [[String: Any]]?
     /// Decline a pane's open suggestion. False if there was nothing to decline.
     func dismissDecision(paneId: String) -> Bool
+    /// First Mate wants to do something gated (`AutopilotPolicy`). Decides
+    /// whether it runs now, waits for the user, or is refused.
+    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate
+    /// Remove a worktree the way its row's Delete does (with that path's checks).
+    func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError>
+    /// A gated call from First Mate went through; what it returned.
+    func autopilotDidRun(method: String, result: ControlResult)
     /// Answer row `index` of a pane's open question card, the way a tap on the
     /// card answers it. nil when the pane has no card to answer; otherwise
     /// `card` is the question still standing afterwards (a multi-select one
@@ -239,6 +246,8 @@ enum ControlError {
     static let notFound = -32004
     /// A deadline passed. Nothing was undone: the work may still be going.
     static let timedOut = -32024
+    /// First Mate asked for something its policy does not allow.
+    static let autopilotRefused = -32040
 }
 
 /// Why `worktree.create` did not produce a worktree.
@@ -287,11 +296,32 @@ final class ControlRouter {
         let meta = params["_meta"] as? [String: Any]
         let caller = (meta?["caller"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let note = meta?["note"] as? String
+        var gatedForFirstMate = false
+        if AutopilotPolicy.isFirstMate(caller: caller) {
+            switch AutopilotPolicy.classify(method: method) {
+            case .open:
+                break
+            case .forbidden:
+                return .error(code: ControlError.autopilotRefused, message: "\(method) is not available to First Mate")
+            case .gated(let action):
+                switch dataSource?.autopilotGate(action: action, method: method, params: params)
+                    ?? .deny("First Mate is not running") {
+                case .allow:
+                    gatedForFirstMate = true
+                case .queued(let card):
+                    return .ok(["queued": "approval", "card": card,
+                                "message": "Queued for the user's approval; nothing ran yet."])
+                case .deny(let reason):
+                    return .error(code: ControlError.autopilotRefused, message: reason)
+                }
+            }
+        }
         if let caller, Self.presenceMethods.contains(method),
            let target = params["pane_id"] as? String, !target.isEmpty {
             dataSource?.notePresence(callerPaneId: caller, targetPaneId: target, note: note)
         }
         let result = dispatch(method: method, params: params)
+        if gatedForFirstMate { dataSource?.autopilotDidRun(method: method, result: result) }
         if let caller, method == "pane.split", case .ok(let created) = result,
            let newPane = created["pane_id"] as? String {
             dataSource?.notePresence(callerPaneId: caller, targetPaneId: newPane, note: note)
@@ -488,6 +518,16 @@ final class ControlRouter {
             }
             switch dataSource?.createWorktree(repoPath: repoPath, agentType: agent, prompt: prompt)
                 ?? .failure(.unavailable) {
+            case .success(let result): return .ok(result)
+            case .failure(let e): return .error(code: e.code, message: e.message)
+            }
+
+        case "worktree.delete":
+            let path = (params["worktree_path"] as? String) ?? ""
+            guard !path.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "worktree_path is required")
+            }
+            switch dataSource?.deleteWorktree(path: path) ?? .failure(.unavailable) {
             case .success(let result): return .ok(result)
             case .failure(let e): return .error(code: e.code, message: e.message)
             }
@@ -750,6 +790,11 @@ final class ControlRouter {
 /// source with no window to mirror simply reports nothing to mirror.
 extension ControlDataSource {
     func dismissDecision(paneId: String) -> Bool { false }
+    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate {
+        .deny("First Mate is not running")
+    }
+    func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
+    func autopilotDidRun(method: String, result: ControlResult) {}
     func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
     func markPaneSeen(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }

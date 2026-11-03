@@ -455,6 +455,8 @@ class MainWindowController: NSWindowController {
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
         }
         usageSummaryStore.onUpdate = { [weak self] claude, codex in
+            let used = [claude.rateLimit?.usedPercent, codex.rateLimit?.usedPercent].compactMap { $0 }.max()
+            self?.tabCoordinator.autopilot.usagePercent = used
             self?.islandController.model.setUsageReadouts(
                 UsageSummaryFormatter.readouts(claude: claude, codex: codex)
             )
@@ -2255,7 +2257,7 @@ extension MainWindowController {
             self?.revealSuggestionPane(order)
         }
         model.onDismissOrder = { [weak self] order in
-            self?.tabCoordinator.pendingOrders.resolve(id: order.id)
+            self?.dismissOrder(order)
         }
         model.onSubmitCommand = { [weak self] text in
             _ = self?.submitBridgeCommand(text)
@@ -2868,6 +2870,14 @@ extension MainWindowController {
     /// Routes a suggestion chip tap. `integrationReport` chips run or decline the
     /// discard; all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
+        if order.action.kind == .autopilotApproval {
+            // The card goes as soon as it is answered; the coordinator runs the
+            // call (off main) and tells First Mate how it went.
+            if let id = order.action.payload {
+                tabCoordinator.autopilot.resolveApproval(id, approved: optionText == AutopilotCoordinator.approveLabel)
+            }
+            return
+        }
         if order.action.kind == .integrationReport {
             // The card is the only place the discard is offered, and it is the
             // one irreversible step in the feature — so the option that takes
@@ -3407,10 +3417,12 @@ extension MainWindowController {
         let attachable = orders.filter { order in
             guard !(order.action.options ?? []).isEmpty else { return false }
             return FirstMateAction.isQuestionPayload(order.action.payload)
+                || order.action.kind == .autopilotApproval
                 || !noticeBook.recent(pane: order.action.terminalID).isEmpty
         }
         for order in chatSeenCards.absorb(attachable) {
-            if FirstMateAction.isQuestionPayload(order.action.payload) {
+            // An approval is a stop like a question: First Mate waits on it.
+            if FirstMateAction.isQuestionPayload(order.action.payload) || order.action.kind == .autopilotApproval {
                 sendCardToChat(order)
             } else {
                 attachOptionsToNotice(order)
@@ -3640,7 +3652,11 @@ extension MainWindowController {
             }
             replyToChat(callback, "Picked **\(Self.pickedSummary(order.action, tapped: option))**.")
         case .dismissSuggestion(let orderId):
-            tabCoordinator.pendingOrders.resolve(id: orderId)
+            if let order = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }) {
+                dismissOrder(order)
+            } else {
+                tabCoordinator.pendingOrders.resolve(id: orderId)
+            }
             replyToChat(callback, "Left it. The agent is still waiting — answer it on the Mac when you get there.")
         }
         // The card has been dealt with; its buttons must stop offering options
@@ -3759,6 +3775,15 @@ extension MainWindowController {
             self.dashboardVC?.firstMateDock.apply(state)
             self.firstMateHistory?.show(autopilot.audit.recent())
         }
+    }
+
+    /// Waving a card away. For a First Mate approval that is a "no", and First
+    /// Mate has to hear it — it is waiting on the answer.
+    func dismissOrder(_ order: PendingOrder) {
+        if order.action.kind == .autopilotApproval, let id = order.action.payload {
+            tabCoordinator.autopilot.resolveApproval(id, approved: false)
+        }
+        tabCoordinator.pendingOrders.resolve(id: order.id)
     }
 
     /// The dock is a switch: First Mate over the terminal side, or back to the

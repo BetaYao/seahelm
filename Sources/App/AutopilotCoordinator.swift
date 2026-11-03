@@ -20,8 +20,8 @@ final class AutopilotCoordinator {
     }
     var onStateChange: ((State) -> Void)?
 
-    let audit = AutopilotAudit(path: FirstMatePane.auditPath)
-    private let ledger = AutopilotLedger(path: FirstMatePane.ledgerPath)
+    let audit: AutopilotAudit
+    private let ledger: AutopilotLedger
     private var detector = PREventDetector()
     private(set) var station: Station?
     private var queue: [AutopilotDispatch] = []
@@ -35,7 +35,36 @@ final class AutopilotCoordinator {
 
     var stationId: String? { station?.id }
 
-    init() {
+    // MARK: Policy (phase 1c)
+
+    /// A gated call waiting on the user.
+    struct Approval {
+        let id: String
+        let action: AutopilotAction
+        let method: String
+        let params: [String: Any]
+        let summary: String
+    }
+    private var approvals: [String: Approval] = [:]
+    /// Raise / retire the card for an approval (owner: the pending-orders queue).
+    var onRequestApproval: ((_ id: String, _ summary: String) -> Void)?
+    var onApprovalClosed: ((_ id: String) -> Void)?
+    /// Run a control call as the user, past the policy. Called off the main thread.
+    var execute: ((_ method: String, _ params: [String: Any]) -> ControlResult)?
+    /// The higher of Claude's and Codex's 5h usage, from the usage store.
+    var usagePercent: Int?
+    /// The rules of the events First Mate is working on, and whether the user
+    /// has spoken since it last finished a turn. Together they pick the level.
+    private var activeRules: [(rule: AutomationRule, config: AutomationConfig)] = []
+    private var userSpoke = false
+    /// Worktrees First Mate started agents in, for `max_concurrent_agents`.
+    private(set) var startedWorktrees: Set<String> = []
+    /// Which of those still exist; set by the owner from the fleet.
+    var liveWorktrees: () -> Set<String> = { [] }
+
+    init(auditPath: String = FirstMatePane.auditPath, ledgerPath: String = FirstMatePane.ledgerPath) {
+        audit = AutopilotAudit(path: auditPath)
+        ledger = AutopilotLedger(path: ledgerPath)
         audit.onAppend = { [weak self] entry in
             DispatchQueue.main.async { self?.noteAudit(entry) }
         }
@@ -43,6 +72,18 @@ final class AutopilotCoordinator {
     }
 
     // MARK: - Lifecycle
+
+    /// Tests: decide gates as a running First Mate would, without a session.
+    func activateForTesting(paused: Bool = false) {
+        enabled = true
+        self.paused = paused
+    }
+
+    /// Tests: First Mate is working on these rules.
+    func setActiveRulesForTesting(_ rules: [(AutomationRule, AutomationConfig)], userSpoke: Bool = false) {
+        activeRules = rules.map { (rule: $0.0, config: $0.1) }
+        self.userSpoke = userSpoke
+    }
 
     func apply(enabled: Bool, paused: Bool, backend: String) {
         self.paused = paused
@@ -128,6 +169,10 @@ final class AutopilotCoordinator {
     }
 
     private func stop() {
+        for id in approvals.keys { onApprovalClosed?(id) }
+        approvals.removeAll()
+        state.pendingApprovals = 0
+        activeRules = []
         if let station {
             AgentRegistry.shared.unregister(terminalID: station.id)
             StationRegistry.shared.unregister(station.id)
@@ -180,6 +225,11 @@ final class AutopilotCoordinator {
     /// First Mate's outcomes, from `AgentRegistry.onOutcome`.
     func firstMateOutcome(_ outcome: IngestOutcome) {
         if outcome.newStatus == .running { awaitingTurn = false }
+        // A finished turn closes the events it was about.
+        if outcome.newStatus == .idle, outcome.oldStatus == .running, !awaitingTurn {
+            activeRules = []
+            userSpoke = false
+        }
         refreshActivity()
         deliverIfReady()
     }
@@ -196,6 +246,9 @@ final class AutopilotCoordinator {
         queue.removeAll { d in ready.contains(d) }
         state.queued = queue.count
         let text = ready.map(\.prompt).joined(separator: "\n\n---\n\n")
+        activeRules += ready.compactMap { d in
+            config(forRepo: d.event.repoPath).config.map { (d.rule, $0) }
+        }
         send(text, to: id)
         for d in ready {
             audit.append(.init(at: now, kind: .delivered, rule: d.rule.name, worktreePath: d.event.worktreePath,
@@ -208,6 +261,7 @@ final class AutopilotCoordinator {
     func sendUserMessage(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let id = station?.id else { return }
+        userSpoke = true
         send(trimmed, to: id)
         audit.append(.init(at: Date(), kind: .message, text: trimmed))
     }
@@ -216,6 +270,116 @@ final class AutopilotCoordinator {
         awaitingTurn = true
         AgentRegistry.shared.sendCommand(to: id, command: text, submitWithAttachments: true,
                                          agentType: .claudeCode)
+    }
+
+    // MARK: - Gate
+
+    /// The level an action runs at now: the strictest of the rules First Mate
+    /// is working on, and the defaults while the user is talking to it (or when
+    /// it is acting on nothing in particular). Talking cannot loosen a rule.
+    func level(for action: AutopilotAction) -> AutonomyLevel {
+        var levels = activeRules.map { $0.config.autonomy(for: action, rule: $0.rule) }
+        if userSpoke || levels.isEmpty {
+            levels.append(AutomationConfig.defaultAutonomy[action] ?? .ask)
+        }
+        return levels.max(by: { Self.strictness($0) < Self.strictness($1) }) ?? .ask
+    }
+
+    private static func strictness(_ level: AutonomyLevel) -> Int {
+        switch level { case .auto: return 0; case .ask: return 1; case .deny: return 2 }
+    }
+
+    /// Decide one gated call from First Mate. Main thread.
+    func gate(action: AutopilotAction, method: String, params: [String: Any], now: Date = Date()) -> AutopilotGate {
+        guard enabled else { return .deny("First Mate is off") }
+        guard !paused else { return .deny("First Mate is paused") }
+        let summary = AutopilotPolicy.describe(method: method, params: params)
+        if action == .startAgent, let refusal = budgetRefusal(params: params) {
+            audit.append(.init(at: now, kind: .denied, action: action.rawValue, text: "\(summary) — \(refusal)"))
+            return .deny(refusal)
+        }
+        switch level(for: action) {
+        case .auto:
+            audit.append(.init(at: now, kind: .action, action: action.rawValue, level: "auto", text: summary))
+            return .allow
+        case .deny:
+            audit.append(.init(at: now, kind: .denied, action: action.rawValue, level: "deny", text: summary))
+            return .deny("\(action.rawValue) is set to deny")
+        case .ask:
+            let id = "autopilot-" + UUID().uuidString.prefix(8)
+            approvals[id] = Approval(id: id, action: action, method: method, params: params, summary: summary)
+            state.pendingApprovals = approvals.count
+            audit.append(.init(at: now, kind: .approval, action: action.rawValue, level: "ask", text: summary))
+            onRequestApproval?(id, summary)
+            return .queued(id)
+        }
+    }
+
+    /// Why a new agent may not start now, or nil when it may.
+    private func budgetRefusal(params: [String: Any]) -> String? {
+        let repo = params["repo_path"] as? String ?? ""
+        let settings = config(forRepo: repo).config?.settings ?? AutomationSettings()
+        if let cap = settings.maxConcurrentAgents {
+            let live = startedWorktrees.intersection(liveWorktrees()).count
+            if live >= cap { return "max_concurrent_agents (\(cap)) reached" }
+        }
+        if let limit = settings.pauseAboveUsage, let used = usagePercent, Double(used) >= limit {
+            return "usage at \(used)% is above pause_above_usage (\(Int(limit))%)"
+        }
+        return nil
+    }
+
+    /// A gated call went through (auto, or approved): remember what it made.
+    func didRun(method: String, result: ControlResult) {
+        if method == "worktree.create", case .ok(let r) = result, let path = r["worktree_path"] as? String {
+            startedWorktrees.insert(path)
+        }
+    }
+
+    /// The user answered an approval card.
+    func resolveApproval(_ id: String, approved: Bool) {
+        guard let approval = approvals.removeValue(forKey: id) else { return }
+        state.pendingApprovals = approvals.count
+        onApprovalClosed?(id)
+        guard approved else {
+            audit.append(.init(at: Date(), kind: .denied, action: approval.action.rawValue,
+                               text: "rejected: \(approval.summary)"))
+            tell("[seahelm] The user rejected: \(approval.summary)")
+            return
+        }
+        let execute = self.execute
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = execute?(approval.method, approval.params) ?? .error(code: 0, message: "unavailable")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.didRun(method: approval.method, result: result)
+                let outcome: String
+                switch result {
+                case .ok(let r): outcome = Self.compact(r)
+                case .error(_, let message): outcome = "failed: \(message)"
+                }
+                self.audit.append(.init(at: Date(), kind: .action, action: approval.action.rawValue,
+                                        level: "approved", text: "\(approval.summary) — \(outcome)"))
+                self.tell("[seahelm] The user approved: \(approval.summary)\nResult: \(outcome)")
+            }
+        }
+    }
+
+    var pendingApprovalIds: [String] { Array(approvals.keys) }
+    static let approveLabel = "Approve"
+    static let rejectLabel = "Reject"
+
+    /// A note from seahelm itself. Sent like the user's words: First Mate must
+    /// hear the answer to what it asked, whatever it is doing.
+    private func tell(_ text: String) {
+        guard let id = station?.id else { return }
+        send(text, to: id)
+    }
+
+    private static func compact(_ dict: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "ok" }
+        return text
     }
 
     // MARK: - State

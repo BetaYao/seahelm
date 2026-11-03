@@ -12,6 +12,9 @@ enum FirstMateActionKind: Equatable {
     /// An integration round that needs looking at — conflicts, or a checkout
     /// held back. A round that published cleanly says nothing.
     case integrationReport
+    /// First Mate wants to do something its policy says to ask about
+    /// (`AutopilotCoordinator.gate`). `payload` is the approval id.
+    case autopilotApproval
 }
 
 struct FirstMateAction: Equatable {
