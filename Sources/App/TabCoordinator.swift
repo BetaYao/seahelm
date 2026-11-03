@@ -2168,7 +2168,8 @@ class TabCoordinator {
     /// Start, stop, pause or resume First Mate from config. Safe to call again.
     func applyAutopilotConfig() {
         autopilot.apply(enabled: config.autopilotEnabled, paused: config.autopilotPaused,
-                        backend: runtimeBackend)
+                        backend: runtimeBackend,
+                        defaults: AutomationConfig.defaults(overriding: config.autopilotAutonomy))
         if let station = autopilot.station {
             statusPublisher.pin(station, worktreePath: FirstMatePane.directory)
         } else {

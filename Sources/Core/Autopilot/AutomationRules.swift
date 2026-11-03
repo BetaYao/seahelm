@@ -47,19 +47,36 @@ struct BranchFilter: Equatable {
 }
 
 struct AutomationRule: Equatable {
-    let name: String
-    let trigger: AutomationTrigger
+    var name: String
+    var trigger: AutomationTrigger
+    /// `enabled: false` keeps a rule written down without it firing.
     var branch: BranchFilter?
     /// Per PR per day. Nil = unlimited.
     var maxAttempts: Int?
     var autonomy: AutonomyMap = [:]
-    let brief: String
+    var brief: String
+    var enabled = true
+
+    init(name: String, trigger: AutomationTrigger, branch: BranchFilter? = nil, maxAttempts: Int? = nil,
+         autonomy: AutonomyMap = [:], brief: String, enabled: Bool = true) {
+        self.name = name
+        self.trigger = trigger
+        self.branch = branch
+        self.maxAttempts = maxAttempts
+        self.autonomy = autonomy
+        self.brief = brief
+        self.enabled = enabled
+    }
 }
 
 /// `"23:00-08:00"`: may wrap midnight.
 struct QuietHours: Equatable {
     let startMinute: Int
     let endMinute: Int
+
+    var text: String {
+        String(format: "%02d:%02d-%02d:%02d", startMinute / 60, startMinute % 60, endMinute / 60, endMinute % 60)
+    }
 
     init?(_ text: String) {
         let parts = text.split(separator: "-").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -98,8 +115,11 @@ struct AutomationConfig: Equatable {
 
     var settings = AutomationSettings()
     var rules: [AutomationRule]
+    /// What an action does when its rule says nothing: the user's global
+    /// defaults (Settings ▸ First Mate), set by whoever loads the config.
+    var defaults: AutonomyMap = defaultAutonomy
 
-    /// What an action does when no rule says otherwise.
+    /// What an action does when neither a rule nor the user says otherwise.
     static let defaultAutonomy: AutonomyMap = [
         .messagePane: .auto,
         .startAgent: .ask,
@@ -127,11 +147,12 @@ struct AutomationConfig: Equatable {
 
     /// The level for `action` under `rule` (nil = a conversation, not a rule).
     func autonomy(for action: AutopilotAction, rule: AutomationRule?) -> AutonomyLevel {
-        rule?.autonomy[action] ?? Self.defaultAutonomy[action] ?? .ask
+        rule?.autonomy[action] ?? defaults[action] ?? Self.defaultAutonomy[action] ?? .ask
     }
 
     func rules(for trigger: AutomationTrigger) -> [AutomationRule] {
         rules.filter { rule in
+            guard rule.enabled else { return false }
             switch (rule.trigger, trigger) {
             case (.ciFailed, .ciFailed), (.prMerged, .prMerged): return true
             case let (.schedule(a), .schedule(b)): return a == b
@@ -198,6 +219,7 @@ struct AutomationConfig: Equatable {
                 rule.branch = BranchFilter(pattern: branch)
             }
             rule.maxAttempts = r["max_attempts"] as? Int
+            rule.enabled = r["enabled"] as? Bool ?? true
             if let autonomy = r["autonomy"] as? [String: Any] {
                 for (key, value) in autonomy {
                     guard let action = AutopilotAction(rawValue: key) else {
@@ -212,6 +234,62 @@ struct AutomationConfig: Equatable {
             rules.append(rule)
         }
         return AutomationConfig(settings: settings, rules: rules)
+    }
+
+    // MARK: - Writing
+
+    /// The file's text for this config. Written by Settings; a hand-written
+    /// file's comments do not survive it, which the editor says before saving.
+    func yaml() -> String {
+        var root: [String: Any] = [:]
+        var fm: [String: Any] = [:]
+        var budget: [String: Any] = [:]
+        if let n = settings.maxConcurrentAgents { budget["max_concurrent_agents"] = n }
+        if let p = settings.pauseAboveUsage { budget["pause_above_usage"] = Int(p) }
+        if !budget.isEmpty { fm["budget"] = budget }
+        if let q = settings.quietHours { fm["quiet_hours"] = q.text }
+        if !fm.isEmpty { root["first_mate"] = fm }
+        root["rules"] = rules.map { rule -> [String: Any] in
+            var r: [String: Any] = ["name": rule.name, "brief": rule.brief]
+            switch rule.trigger {
+            case .ciFailed: r["on"] = "ci.failed"
+            case .prMerged: r["on"] = "pr.merged"
+            case .schedule(let cron): r["on"] = ["schedule": cron]
+            }
+            if let branch = rule.branch { r["when"] = ["branch": branch.pattern] }
+            if let max = rule.maxAttempts { r["max_attempts"] = max }
+            if !rule.autonomy.isEmpty {
+                r["autonomy"] = Dictionary(uniqueKeysWithValues: rule.autonomy.map { ($0.key.rawValue, $0.value.rawValue) })
+            }
+            if !rule.enabled { r["enabled"] = false }
+            return r
+        }
+        let body = (try? Yams.dump(object: root, sortKeys: true)) ?? ""
+        return "# First Mate rules — docs/first-mate-autopilot.md\n" + body
+    }
+
+    /// Write this config as the repo's file.
+    func write(repoPath: String) throws {
+        let path = (repoPath as NSString).appendingPathComponent(Self.relativePath)
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                withIntermediateDirectories: true)
+        try yaml().write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// The defaults with the user's choices (Config's raw strings) laid over them.
+    static func defaults(overriding raw: [String: String]) -> AutonomyMap {
+        var map = defaultAutonomy
+        for (key, value) in raw {
+            if let action = AutopilotAction(rawValue: key), let level = AutonomyLevel(rawValue: value) {
+                map[action] = level
+            }
+        }
+        return map
+    }
+
+    /// Whether the repo has a file of its own (as opposed to the built-in rules).
+    static func hasFile(repoPath: String) -> Bool {
+        FileManager.default.fileExists(atPath: (repoPath as NSString).appendingPathComponent(relativePath))
     }
 
     /// The repo's own file, else the built-in rules. A file that does not parse

@@ -53,6 +53,9 @@ protocol SettingsDelegate: AnyObject {
     /// Drop the pairing bridge and put back whatever the saved config asks for.
     /// Safe to call when no pairing is running.
     func settingsEndTelegramPairing(_ settings: SettingsViewController)
+
+    /// Show First Mate in the main window.
+    func settingsOpenFirstMate(_ settings: SettingsViewController)
 }
 
 /// Optional halves of the protocol: only the main window can answer them, and
@@ -84,6 +87,7 @@ extension SettingsDelegate {
                   session: TelegramPairingSession,
                   onPaired: @escaping (TelegramPairingResult) -> Void) {}
     func settingsEndTelegramPairing(_ settings: SettingsViewController) {}
+    func settingsOpenFirstMate(_ settings: SettingsViewController) {}
 }
 
 /// Settings, as a sidebar of pages built from `SettingsChrome` groups.
@@ -94,7 +98,9 @@ extension SettingsDelegate {
 class SettingsViewController: NSViewController {
     weak var settingsDelegate: SettingsDelegate?
 
-    private var config: Config
+    var config: Config
+    /// Settings ▸ First Mate's controls (SettingsViewController+FirstMate).
+    let fm = FirstMateSettingsControls()
 
     // Sidebar / page host
     private let sidebar = SettingsSidebarView(items: [
@@ -103,6 +109,9 @@ class SettingsViewController: NSViewController {
                          "copy", "select", "clipboard", "ghostty"]),
         .init(id: "agents", title: "Agents", symbol: "bolt.horizontal",
               keywords: ["detection", "rules", "status", "claude", "codex", "json"]),
+        .init(id: "firstMate", title: "First Mate", symbol: "steeringwheel",
+              keywords: ["autopilot", "rules", "automation", "ci", "approval", "autonomy",
+                         "standing orders", "yml"]),
         .init(id: "telegram", title: "Telegram", symbol: "paperplane",
               keywords: ["bot", "botfather", "token", "phone", "chat", "remote",
                          "bridge", "rules", "trigger"]),
@@ -115,7 +124,7 @@ class SettingsViewController: NSViewController {
               keywords: ["zmx", "cleanup", "kill", "detached", "orphan"]),
     ])
     private let contentScroll = NSScrollView()
-    private var pages: [String: NSView] = [:]
+    var pages: [String: NSView] = [:]
     private lazy var sessionMonitor = SessionMonitorView()
     private let memoryWarnField = SettingsTextField()
     private let memoryStopField = SettingsTextField()
@@ -227,6 +236,8 @@ class SettingsViewController: NSViewController {
 
     // MARK: - Page host
 
+    func selectPage(_ id: String) { sidebar.select(id) }
+
     private func showPage(_ id: String) {
         let page: NSView
         if let cached = pages[id] {
@@ -263,6 +274,7 @@ class SettingsViewController: NSViewController {
         case "gmail":    return makePage(buildGmailGroups())
         case "pairing":  return makePage(buildPairingGroups())
         case "sessions": return makePage(buildSessionGroups())
+        case "firstMate": return makePage(buildFirstMateGroups())
         default:         return makePage(buildGeneralGroups())
         }
     }
@@ -978,7 +990,8 @@ class SettingsViewController: NSViewController {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    private func applyChanges() {
+    func applyChanges() {
+        applyFirstMateGlobal()
         // Update config from UI
         config.workspacePaths = workspacePaths
         config.integrationEnabled = integrationEnabledToggle.state == .on

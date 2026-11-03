@@ -43,6 +43,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Open on a given page (`"firstMate"`, `"telegram"`…).
+    func showPage(_ id: String) { settingsViewController.selectPage(id) }
+
     /// Replace the editable config when the window is reused (⌘, again).
     func reload(config: Config) {
         settingsViewController.reload(config: config)

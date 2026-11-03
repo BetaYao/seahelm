@@ -85,8 +85,16 @@ final class AutopilotCoordinator {
         self.userSpoke = userSpoke
     }
 
-    func apply(enabled: Bool, paused: Bool, backend: String) {
+    /// The user's defaults per action (Settings ▸ First Mate).
+    private(set) var defaults: AutonomyMap = AutomationConfig.defaultAutonomy
+
+    func apply(enabled: Bool, paused: Bool, backend: String,
+               defaults: AutonomyMap = AutomationConfig.defaultAutonomy) {
         self.paused = paused
+        if defaults != self.defaults {
+            self.defaults = defaults
+            configs.removeAll()
+        }
         if enabled, !self.enabled {
             self.enabled = true
             start(backend: backend)
@@ -280,7 +288,7 @@ final class AutopilotCoordinator {
     func level(for action: AutopilotAction) -> AutonomyLevel {
         var levels = activeRules.map { $0.config.autonomy(for: action, rule: $0.rule) }
         if userSpoke || levels.isEmpty {
-            levels.append(AutomationConfig.defaultAutonomy[action] ?? .ask)
+            levels.append(defaults[action] ?? .ask)
         }
         return levels.max(by: { Self.strictness($0) < Self.strictness($1) }) ?? .ask
     }
@@ -418,7 +426,8 @@ final class AutopilotCoordinator {
         let path = (repoPath as NSString).appendingPathComponent(AutomationConfig.relativePath)
         let mtime = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
         if let cached = configs[repoPath], cached.mtime == mtime { return (cached.config, cached.error) }
-        let loaded = AutomationConfig.load(repoPath: repoPath)
+        var loaded = AutomationConfig.load(repoPath: repoPath)
+        loaded.config?.defaults = defaults
         configs[repoPath] = (loaded.config, loaded.error, mtime)
         return loaded
     }
