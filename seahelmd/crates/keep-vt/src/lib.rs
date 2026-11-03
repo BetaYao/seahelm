@@ -12,6 +12,7 @@ use std::os::raw::c_int;
 
 mod effects;
 mod handover;
+pub mod input;
 pub mod osc_scan;
 pub mod program_status;
 pub mod render;
