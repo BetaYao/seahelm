@@ -77,6 +77,8 @@ class MainWindowController: NSWindowController {
     /// The approvals popover's content while it is open; nil otherwise.
     private weak var firstMateApprovals: FirstMateApprovalsView?
     private weak var firstMateApprovalsPopover: NSPopover?
+    /// Re-reads First Mate's memory for the header while it is shown.
+    private var firstMateMemoryTimer: Timer?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
@@ -903,7 +905,21 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         // File / changelog overlays reuse the chrome terminal title (no second header).
         dashboard.onCenterOverlayTitleChange = { [weak self] title in
-            self?.windowChrome?.setOverlayTitle(title)
+            guard let self else { return }
+            let firstMate = title == FirstMateView.overlayTitle
+            self.windowChrome?.setFirstMateMode(firstMate)
+            self.windowChrome?.setOverlayTitle(title)
+            self.firstMateMemoryTimer?.invalidate()
+            self.firstMateMemoryTimer = nil
+            if firstMate {
+                self.refreshFirstMateMemory()
+                self.firstMateMemoryTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+                    self?.refreshFirstMateMemory()
+                }
+            } else {
+                // The live pane's figure, not First Mate's, now that it is back.
+                self.updateTitleBar()
+            }
         }
         // Edit-mode toggle availability + on-state drive the chrome header icon.
         dashboard.onEditModeStateChange = { [weak self] available, isOn in
@@ -3853,7 +3869,7 @@ extension MainWindowController {
         }
         // Chromeless: First Mate should read like a selected pane — no toolbar,
         // terminal colours — and Esc must reach Claude, not close the overlay.
-        dashboardVC.showCenterOverlay(view, title: "First Mate", chromeless: true)
+        dashboardVC.showCenterOverlay(view, title: FirstMateView.overlayTitle, chromeless: true)
         firstMateView = view
         guard tabCoordinator.autopilot.station != nil else {
             view.embed(nil)
@@ -3865,6 +3881,17 @@ extension MainWindowController {
             guard let self, let view, view.superview != nil else { return }
             view.embed(self.tabCoordinator.autopilot.station)
             view.focusTerminal(self.tabCoordinator.autopilot.station)
+        }
+    }
+
+    /// First Mate's session memory, for the header while it is shown. Probed off
+    /// main: `zmx list` and `ps` are forks.
+    fileprivate func refreshFirstMateMemory() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let bytes = ProcessRunner.output([ZmxLocator.executable(), "list"]).flatMap {
+                ProcessProbe.sessionResidentBytes(paneSessionKey: FirstMatePane.sessionName, zmxListOutput: $0)
+            }
+            DispatchQueue.main.async { self?.windowChrome?.updateFirstMateMemory(bytes) }
         }
     }
 

@@ -42,6 +42,11 @@ final class TerminalHeaderView: NSView {
     /// Kept rather than read back off the label, so collapse/expand can re-render
     /// it without the caller having to push the value again.
     private var paneMemoryBytes: UInt64?
+    /// First Mate is over the terminal side: the whole header is its — its name,
+    /// its memory, an accent tint — and the focused pane's share and fork step
+    /// aside, since they would act on a pane that is not on screen.
+    private var firstMateMode = false
+    private var firstMateMemoryBytes: UInt64?
 
     /// Edit mode's two column tab strips live here permanently rather than being
     /// moved up from the columns: reparenting a strip left its clip view seated at a
@@ -107,6 +112,21 @@ final class TerminalHeaderView: NSView {
         applyMemoryText()
     }
 
+    func setFirstMateMode(_ on: Bool) {
+        guard firstMateMode != on else { return }
+        firstMateMode = on
+        applyTitleText()
+        applyMemoryText()
+        refreshImmersion()
+    }
+
+    func setFirstMateMemory(_ bytes: UInt64?) {
+        firstMateMemoryBytes = bytes
+        applyMemoryText()
+    }
+
+    var isFirstMateModeForTesting: Bool { firstMateMode }
+
     /// Short by design — this shares a row with a centred title, so it trades
     /// precision for a width that does not move as the number changes.
     static func formatMemory(bytes: UInt64) -> String {
@@ -122,7 +142,7 @@ final class TerminalHeaderView: NSView {
     private func applyMemoryText() {
         // Collapsed puts traffic lights, icons and the title on this row already;
         // there is no leading space left to hold a number steady.
-        guard !isCollapsed, let bytes = paneMemoryBytes, bytes > 0 else {
+        guard !isCollapsed, let bytes = firstMateMode ? firstMateMemoryBytes : paneMemoryBytes, bytes > 0 else {
             memoryLabel.isHidden = true
             return
         }
@@ -325,7 +345,7 @@ final class TerminalHeaderView: NSView {
     /// stays in the constraint graph either way; hiding it is enough because
     /// those rows deactivate the expanded anchors or cover them with strips.
     private func applyShareVisibility() {
-        shareButton.isHidden = isCollapsed || hasHoistedStrips
+        shareButton.isHidden = isCollapsed || hasHoistedStrips || firstMateMode
     }
 
     @objc private func shareClicked() {
@@ -493,7 +513,7 @@ final class TerminalHeaderView: NSView {
     /// Edit mode's strips run up to the edit-mode button, so the fork button
     /// steps aside while they are up.
     private func applyForkVisibility() {
-        let visible = forkTargetName != nil && !hasHoistedStrips
+        let visible = forkTargetName != nil && !hasHoistedStrips && !firstMateMode
         forkButton.isHidden = !visible
         forkButtonWidth?.constant = visible ? 26 : 0
     }
@@ -583,6 +603,11 @@ final class TerminalHeaderView: NSView {
         titleLabel.isHidden = hasHoistedStrips
         applyShareVisibility()
         applyForkVisibility()
+        if firstMateMode {
+            titleLabel.attributedStringValue = Self.firstMateTitle
+            titleLabel.toolTip = "First Mate — ⌘J or ⌃⌃ to go back"
+            return
+        }
         let text = editModeOn ? worktreeContext : paneTitle
         titleLabel.stringValue = text
         // A file path loses the part that identifies it — the filename — to tail
@@ -654,13 +679,39 @@ final class TerminalHeaderView: NSView {
         refreshImmersion()
     }
 
-    /// Match Ghostty surface colors so the title strip disappears into the terminal.
+    /// "⎈ First Mate" in the accent, with the symbol drawn rather than typed:
+    /// the mono fonts have no glyph for it.
+    private static var firstMateTitle: NSAttributedString {
+        let out = NSMutableAttributedString()
+        if let symbol = NSImage(systemSymbolName: "steeringwheel", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold)) {
+            let attachment = NSTextAttachment()
+            attachment.image = symbol
+            out.append(NSAttributedString(attachment: attachment))
+            out.append(NSAttributedString(string: " "))
+        }
+        out.append(NSAttributedString(string: "First Mate"))
+        out.addAttributes([.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                           .foregroundColor: SemanticColors.accent],
+                          range: NSRange(location: 0, length: out.length))
+        return out
+    }
+
+    /// Match Ghostty surface colors so the title strip disappears into the terminal —
+    /// except for First Mate, whose strip takes an accent tint so it is never
+    /// mistaken for a task pane.
     func refreshImmersion() {
         let bridge = GhosttyBridge.shared
-        layer?.backgroundColor = bridge.terminalChromeBackground.cgColor
-        titleLabel.textColor = editModeOn
-            ? bridge.terminalChromeForeground.withAlphaComponent(0.55)
-            : bridge.terminalChromeForeground
+        let chrome = bridge.terminalChromeBackground
+        layer?.backgroundColor = firstMateMode
+            ? (chrome.blended(withFraction: 0.16, of: SemanticColors.accent) ?? chrome).cgColor
+            : chrome.cgColor
+        // First Mate's title carries its own colour in its attributed string.
+        if !firstMateMode {
+            titleLabel.textColor = editModeOn
+                ? bridge.terminalChromeForeground.withAlphaComponent(0.55)
+                : bridge.terminalChromeForeground
+        }
         expandButton.contentTintColor = bridge.terminalChromeForeground.withAlphaComponent(0.55)
         let editTint = editModeButton.isEnabled
             ? (editModeOn
