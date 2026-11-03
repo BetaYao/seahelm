@@ -87,6 +87,8 @@ protocol ControlDataSource: AnyObject {
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError>
     /// A gated call from First Mate went through; what it returned.
     func autopilotDidRun(method: String, result: ControlResult)
+    /// First Mate offers the user a choice; each option is an action to run if picked.
+    func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult
     /// Answer row `index` of a pane's open question card, the way a tap on the
     /// card answers it. nil when the pane has no card to answer; otherwise
     /// `card` is the question still standing afterwards (a multi-select one
@@ -297,6 +299,9 @@ final class ControlRouter {
         let caller = (meta?["caller"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let note = meta?["note"] as? String
         var gatedForFirstMate = false
+        if method == "autopilot.propose", !AutopilotPolicy.isFirstMate(caller: caller) {
+            return .error(code: ControlError.autopilotRefused, message: "only First Mate proposes")
+        }
         if AutopilotPolicy.isFirstMate(caller: caller) {
             switch AutopilotPolicy.classify(method: method) {
             case .open:
@@ -521,6 +526,15 @@ final class ControlRouter {
             case .success(let result): return .ok(result)
             case .failure(let e): return .error(code: e.code, message: e.message)
             }
+
+        case "autopilot.propose":
+            let summary = (params["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let options = params["options"] as? [[String: Any]] ?? []
+            guard !summary.isEmpty, !options.isEmpty else {
+                return .error(code: ControlError.invalidParams, message: "summary and options are required")
+            }
+            return dataSource?.autopilotPropose(summary: summary, options: options)
+                ?? .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
 
         case "worktree.delete":
             let path = (params["worktree_path"] as? String) ?? ""
@@ -795,6 +809,9 @@ extension ControlDataSource {
     }
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
     func autopilotDidRun(method: String, result: ControlResult) {}
+    func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult {
+        .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
+    }
     func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
     func markPaneSeen(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }

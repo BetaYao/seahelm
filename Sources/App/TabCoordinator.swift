@@ -976,6 +976,7 @@ class TabCoordinator {
                     let autopilotRouter = ControlRouter(dataSource: controlDataSource)
                     self.autopilot.execute = { method, params in autopilotRouter.handle(method: method, params: params) }
                     self.autopilot.liveWorktrees = { [weak self] in Set(self?.allWorktrees.map(\.info.path) ?? []) }
+                    self.autopilot.repoPaths = { [weak self] in self?.config.workspacePaths ?? [] }
                     self.autopilot.onRequestApproval = { [weak self] id, summary in
                         guard let self else { return }
                         self.pendingOrders.enqueue(FirstMateAction(
@@ -983,6 +984,18 @@ class TabCoordinator {
                             branch: "", project: FirstMatePane.project,
                             terminalID: self.autopilot.stationId ?? "", message: "First Mate asks: \(summary)",
                             payload: id, options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
+                    }
+                    controlDataSource.autopilotProposeHandler = { [weak self] summary, options in
+                        self?.autopilot.propose(summary: summary, options: options)
+                            ?? .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
+                    }
+                    self.autopilot.onRequestProposal = { [weak self] id, summary, labels in
+                        guard let self else { return }
+                        self.pendingOrders.enqueue(FirstMateAction(
+                            kind: .autopilotProposal, zone: .red, worktreePath: FirstMatePane.directory,
+                            branch: "", project: FirstMatePane.project,
+                            terminalID: self.autopilot.stationId ?? "", message: "First Mate suggests: \(summary)",
+                            payload: id, options: labels))
                     }
                     self.autopilot.onApprovalClosed = { [weak self] id in
                         self?.pendingOrders.resolveAutopilotApproval(id)

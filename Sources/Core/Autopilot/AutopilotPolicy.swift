@@ -14,6 +14,8 @@ enum AutopilotPolicy {
     }
 
     static let openMethods: Set<String> = [
+        // A card, not an action: nothing runs until the user picks an option.
+        "autopilot.propose",
         "ping", "session.snapshot", "pane.list", "pane.read", "fleet.groups", "layout.live",
         "message.snapshot", "message.history", "pane.explain", "agent.explain", "pane.options",
         "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",

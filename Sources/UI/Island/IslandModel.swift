@@ -91,7 +91,7 @@ final class IslandModel {
         Array(orders.lazy
             .filter {
                 switch $0.action.kind {
-                case .suggestNextOrder, .autopilotApproval:
+                case .suggestNextOrder, .autopilotApproval, .autopilotProposal:
                     return true
                 case .integrationReport:
                     return !($0.action.options ?? []).isEmpty

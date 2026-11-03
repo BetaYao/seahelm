@@ -186,7 +186,10 @@ final class PendingOrdersQueue {
 
     /// Drop the card for a First Mate approval (answered, or First Mate stopped).
     func resolveAutopilotApproval(_ approvalId: String) {
-        remove { $0.action.kind == .autopilotApproval && $0.action.payload == approvalId }
+        remove {
+            ($0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal)
+                && $0.action.payload == approvalId
+        }
     }
 
     func resolve(id: String) {

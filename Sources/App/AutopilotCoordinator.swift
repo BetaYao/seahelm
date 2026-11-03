@@ -46,6 +46,16 @@ final class AutopilotCoordinator {
         let summary: String
     }
     private var approvals: [String: Approval] = [:]
+    /// A recommendation waiting on the user: its options, each an action.
+    struct Proposal {
+        let id: String
+        let summary: String
+        let options: [(label: String, action: AutopilotAction, method: String, params: [String: Any])]
+    }
+    private var proposals: [String: Proposal] = [:]
+    static let dismissLabel = "Not now"
+    /// Raise the card for a proposal (owner: the pending-orders queue).
+    var onRequestProposal: ((_ id: String, _ summary: String, _ labels: [String]) -> Void)?
     /// Raise / retire the card for an approval (owner: the pending-orders queue).
     var onRequestApproval: ((_ id: String, _ summary: String) -> Void)?
     var onApprovalClosed: ((_ id: String) -> Void)?
@@ -61,6 +71,10 @@ final class AutopilotCoordinator {
     private(set) var startedWorktrees: Set<String> = []
     /// Which of those still exist; set by the owner from the fleet.
     var liveWorktrees: () -> Set<String> = { [] }
+    /// The projects whose rules are consulted for schedules.
+    var repoPaths: () -> [String] = { [] }
+    private var scheduleTimer: Timer?
+    private var lastScheduleMinute: Int?
 
     init(auditPath: String = FirstMatePane.auditPath, ledgerPath: String = FirstMatePane.ledgerPath) {
         audit = AutopilotAudit(path: auditPath)
@@ -119,6 +133,32 @@ final class AutopilotCoordinator {
                                       paneSessionKey: FirstMatePane.sessionName, backend: backend)
         self.backend = backend
         ensureSession()
+        scheduleTimer?.invalidate()
+        scheduleTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            self?.checkSchedules()
+        }
+    }
+
+    /// Fire the schedule rules whose cron matches this minute, once per minute.
+    /// Missed minutes (the app closed, the Mac asleep) are not caught up: a
+    /// morning triage at noon is not what anyone asked for.
+    func checkSchedules(now: Date = Date()) {
+        let minute = Int(now.timeIntervalSince1970 / 60)
+        guard minute != lastScheduleMinute else { return }
+        lastScheduleMinute = minute
+        for repo in repoPaths() {
+            guard let config = config(forRepo: repo).config else { continue }
+            var crons = Set<String>()
+            for rule in config.rules where rule.enabled {
+                if case .schedule(let cron) = rule.trigger, CronSchedule(cron)?.matches(now) == true {
+                    crons.insert(cron)
+                }
+            }
+            for cron in crons.sorted() {
+                handle(AutopilotEvent(trigger: .schedule(cron), repoPath: repo, worktreePath: repo,
+                                      branch: "", pr: nil), now: now)
+            }
+        }
     }
 
     private var backend = "zmx"
@@ -177,8 +217,11 @@ final class AutopilotCoordinator {
     }
 
     private func stop() {
-        for id in approvals.keys { onApprovalClosed?(id) }
+        scheduleTimer?.invalidate()
+        scheduleTimer = nil
+        for id in Array(approvals.keys) + Array(proposals.keys) { onApprovalClosed?(id) }
         approvals.removeAll()
+        proposals.removeAll()
         state.pendingApprovals = 0
         activeRules = []
         if let station {
@@ -316,7 +359,7 @@ final class AutopilotCoordinator {
         case .ask:
             let id = "autopilot-" + UUID().uuidString.prefix(8)
             approvals[id] = Approval(id: id, action: action, method: method, params: params, summary: summary)
-            state.pendingApprovals = approvals.count
+            state.pendingApprovals = approvals.count + proposals.count
             audit.append(.init(at: now, kind: .approval, action: action.rawValue, level: "ask", text: summary))
             onRequestApproval?(id, summary)
             return .queued(id)
@@ -347,7 +390,7 @@ final class AutopilotCoordinator {
     /// The user answered an approval card.
     func resolveApproval(_ id: String, approved: Bool) {
         guard let approval = approvals.removeValue(forKey: id) else { return }
-        state.pendingApprovals = approvals.count
+        state.pendingApprovals = approvals.count + proposals.count
         onApprovalClosed?(id)
         guard approved else {
             audit.append(.init(at: Date(), kind: .denied, action: approval.action.rawValue,
@@ -374,6 +417,74 @@ final class AutopilotCoordinator {
     }
 
     var pendingApprovalIds: [String] { Array(approvals.keys) }
+
+    // MARK: - Proposals
+
+    /// `seahelm propose`: a card whose options are actions. Each option must be
+    /// one First Mate could ask for (`AutopilotPolicy` gated) and not set to
+    /// deny; picking it is the user's approval of exactly that action.
+    func propose(summary: String, options raw: [[String: Any]], now: Date = Date()) -> ControlResult {
+        guard enabled else { return .error(code: ControlError.autopilotRefused, message: "First Mate is off") }
+        var options: [(label: String, action: AutopilotAction, method: String, params: [String: Any])] = []
+        for (i, option) in raw.enumerated() {
+            guard let label = (option["label"] as? String)?.trimmingCharacters(in: .whitespaces), !label.isEmpty,
+                  let method = option["action"] as? String else {
+                return .error(code: ControlError.invalidParams, message: "option \(i + 1) needs a label and an action")
+            }
+            guard case .gated(let action) = AutopilotPolicy.classify(method: method) else {
+                return .error(code: ControlError.autopilotRefused, message: "option \(i + 1): \(method) cannot be proposed")
+            }
+            if level(for: action) == .deny {
+                return .error(code: ControlError.autopilotRefused, message: "option \(i + 1): \(action.rawValue) is set to deny")
+            }
+            options.append((label, action, method, option["params"] as? [String: Any] ?? [:]))
+        }
+        guard !options.isEmpty, options.count <= 5 else {
+            return .error(code: ControlError.invalidParams, message: "between one and five options")
+        }
+        let id = "proposal-" + UUID().uuidString.prefix(8)
+        proposals[id] = Proposal(id: id, summary: summary, options: options)
+        state.pendingApprovals = approvals.count + proposals.count
+        audit.append(.init(at: now, kind: .approval, text: "proposed: \(summary)"))
+        onRequestProposal?(id, summary, options.map(\.label) + [Self.dismissLabel])
+        return .ok(["queued": "proposal", "card": id,
+                    "message": "Shown to the user; you will be told what they picked."])
+    }
+
+    /// The user picked an option on a proposal card (or dismissed it).
+    func resolveProposal(_ id: String, picked label: String) {
+        guard let proposal = proposals.removeValue(forKey: id) else { return }
+        state.pendingApprovals = approvals.count + proposals.count
+        onApprovalClosed?(id)
+        guard let option = proposal.options.first(where: { $0.label == label }) else {
+            audit.append(.init(at: Date(), kind: .denied, text: "not now: \(proposal.summary)"))
+            tell("[seahelm] The user passed on your proposal: \(proposal.summary)")
+            return
+        }
+        // The level may have changed since the card went up.
+        if level(for: option.action) == .deny {
+            audit.append(.init(at: Date(), kind: .denied, action: option.action.rawValue,
+                               text: "\(option.label) — \(option.action.rawValue) is set to deny"))
+            tell("[seahelm] The user picked \"\(option.label)\" but \(option.action.rawValue) is set to deny; nothing ran.")
+            return
+        }
+        let execute = self.execute
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = execute?(option.method, option.params) ?? .error(code: 0, message: "unavailable")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.didRun(method: option.method, result: result)
+                let outcome: String
+                switch result {
+                case .ok(let r): outcome = Self.compact(r)
+                case .error(_, let message): outcome = "failed: \(message)"
+                }
+                self.audit.append(.init(at: Date(), kind: .action, action: option.action.rawValue, level: "picked",
+                                        text: "\(option.label) — \(outcome)"))
+                self.tell("[seahelm] The user picked \"\(option.label)\".\nResult: \(outcome)")
+            }
+        }
+    }
     static let approveLabel = "Approve"
     static let rejectLabel = "Reject"
 

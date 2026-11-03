@@ -129,7 +129,7 @@ First Mate 调用 CLI 时，请求带着 `_meta.caller = 它自己的 pane id`�
 - 1b First Mate pane：会话与工作目录、`CLAUDE.md`、注册但不进 fleet、事件队列与投递、左下角常驻条、右侧视图（先放真实终端 + 审计时间线）。
 - 1c 策略把关：控制路由按调用方分类（只读方法放行；`pane.run/send_text/send_keys` = `message_pane`，`worktree.create` = `start_agent`，`worktree.delete` = `delete_worktree`；其余一律拒绝）、`auto/ask/deny`、预算（`max_concurrent_agents`、`pause_above_usage`）、审批卡片（Island 与 Telegram，划掉卡片 = 拒绝）、`seahelm worktree create/delete` CLI、批准后在后台执行并回告 First Mate。
 
-**第二阶段**：`schedule` 触发与"高优 issue 推荐"，以及它需要的 `seahelm propose`（带结构化选项的推荐卡片：选中一项即视为批准该项对应的动作，不再二次询问）；设置界面编辑规则；Telegram 审批与默认对话对象改为 First Mate；右侧视图换成结构化时间线 + 输入框；角标浮层。
+**第二阶段**：~~`schedule` 触发与"高优 issue 推荐"~~（已做：五段 cron，每分钟检查一次、错过的不补；内置 `triage-issues` 规则默认关闭），~~`seahelm propose`~~（已做：每个选项带一个动作，只能是 First Mate 自己能请求的类别，且不是 deny；点选即批准该动作，不再二次询问；只有 First Mate 能发起）；~~设置界面编辑规则~~（已做）；Telegram 默认对话对象改为 First Mate；角标浮层。右侧结构化时间线不做了：试用后的结论是终端本身就是对话界面，审计改成从常驻条按需弹出。
 
 **第三阶段**：更多触发源（agent 跑完、review 评论、issue 标签）；每日总结。
 
