@@ -11,7 +11,9 @@ import AppKit
 /// to answer it. Everything else — what it is doing, what it last handled — is
 /// the tooltip; history, pause and the `?` cheat-sheet show on hover.
 ///
-/// Clicking it opens First Mate over the terminal side.
+/// It still has to look clickable: a `›` at the end of the rule says it opens
+/// something, and on hover the row lifts like a fleet row does. Clicking it
+/// opens First Mate over the terminal side.
 final class FirstMateDockView: NSView {
     var onOpen: (() -> Void)?
     var onTogglePause: (() -> Void)?
@@ -33,8 +35,15 @@ final class FirstMateDockView: NSView {
     private let historyButton = NSButton()
     private let helpButton = NSButton()
     private let tools = NSStackView()
+    private let chevron = NSImageView()
+    private let hoverFill = NSView()
     private var clock: Timer?
-    private var hovered = false { didSet { tools.isHidden = !hovered } }
+    private var hovered = false {
+        didSet {
+            tools.isHidden = !hovered
+            apply(state)
+        }
+    }
     private(set) var state = AutopilotCoordinator.State()
 
     /// What the status word's colour says.
@@ -90,8 +99,14 @@ final class FirstMateDockView: NSView {
         }
         tools.spacing = 6
         tools.isHidden = true
+        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Open First Mate")?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        hoverFill.wantsLayer = true
+        hoverFill.layer?.cornerRadius = 8
+        hoverFill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hoverFill)
 
-        let line1 = NSStackView(views: [leftRule, mark, spinner, label, rightRule, tools])
+        let line1 = NSStackView(views: [leftRule, mark, spinner, label, rightRule, tools, chevron])
         line1.orientation = .horizontal
         line1.spacing = 6
         line1.alignment = .centerY
@@ -103,6 +118,10 @@ final class FirstMateDockView: NSView {
         addSubview(column)
 
         NSLayoutConstraint.activate([
+            hoverFill.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            hoverFill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            hoverFill.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            hoverFill.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
             column.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
@@ -124,7 +143,8 @@ final class FirstMateDockView: NSView {
         self.state = state
         let (word, color) = Self.describe(state.activity)
         let text = NSMutableAttributedString(string: "First Mate", attributes: [
-            .font: AppFont.mono(size: 11, weight: .semibold), .foregroundColor: SemanticColors.muted,
+            .font: AppFont.mono(size: 11, weight: .semibold),
+            .foregroundColor: hovered ? SemanticColors.text : SemanticColors.muted,
         ])
         text.append(NSAttributedString(string: " · ", attributes: [
             .font: AppFont.mono(size: 11), .foregroundColor: SemanticColors.subtle,
@@ -245,6 +265,12 @@ final class FirstMateDockView: NSView {
                 .withAlphaComponent(hovered ? 0.45 : 0.22).cgColor
             leftRule.layer?.backgroundColor = rule
             rightRule.layer?.backgroundColor = rule
+            // The fleet rows' own hover fill, so it lifts the way a row does.
+            hoverFill.layer?.backgroundColor = hovered
+                ? (effectiveAppearance.isDark ? NSColor.white.withAlphaComponent(0.06)
+                                              : NSColor.black.withAlphaComponent(0.05)).cgColor
+                : NSColor.clear.cgColor
+            chevron.contentTintColor = hovered ? SemanticColors.text : SemanticColors.subtle
         }
     }
 }
