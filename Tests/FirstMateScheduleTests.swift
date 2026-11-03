@@ -140,3 +140,27 @@ final class FirstMateScheduleTests: XCTestCase {
         else { return XCTFail("First Mate could not propose") }
     }
 }
+
+final class FirstMateApprovalsViewTests: XCTestCase {
+    func testCardsOfferTheirOptionsAndReportTheAnswer() {
+        let order = PendingOrder(id: "o1", action: FirstMateAction(
+            kind: .autopilotApproval, zone: .red, worktreePath: "/fm", branch: "", project: "First Mate",
+            terminalID: "t", message: "First Mate asks: Delete worktree x", payload: "a1",
+            options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
+        let view = FirstMateApprovalsView()
+        var answers: [(String, String)] = []
+        view.onAnswer = { answers.append(($0.id, $1)) }
+        view.show([order])
+        let buttons = view.descendants(of: NSButton.self)
+        XCTAssertEqual(buttons.map(\.title), ["Approve", "Reject"])
+        buttons[1].performClick(nil)
+        XCTAssertEqual(answers.first?.0, "o1")
+        XCTAssertEqual(answers.first?.1, "Reject")
+    }
+}
+
+private extension NSView {
+    func descendants<T: NSView>(of type: T.Type) -> [T] {
+        subviews.flatMap { ($0 as? T).map { [$0] } ?? [] + $0.descendants(of: type) }
+    }
+}

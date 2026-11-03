@@ -142,3 +142,77 @@ final class FirstMateLogView: NSView {
         return out
     }
 }
+
+/// What First Mate is waiting on you for — its approval and proposal cards —
+/// answerable right here, off the dock's badge. The same cards are in the
+/// island and on Telegram; whichever answers first wins.
+final class FirstMateApprovalsView: NSView {
+    var onAnswer: ((PendingOrder, String) -> Void)?
+    private let stack = NSStackView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    func show(_ orders: [PendingOrder]) {
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if orders.isEmpty {
+            stack.addArrangedSubview(Self.text("Nothing waiting on you.", SemanticColors.subtle))
+            return
+        }
+        for order in orders {
+            let card = NSStackView()
+            card.orientation = .vertical
+            card.alignment = .leading
+            card.spacing = 6
+            card.addArrangedSubview(Self.text(order.action.message, SemanticColors.text))
+            let buttons = NSStackView()
+            buttons.spacing = 6
+            var labels = order.action.options ?? []
+            if order.action.kind == .autopilotApproval, labels.isEmpty {
+                labels = [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]
+            }
+            for label in labels {
+                let button = NSButton(title: label, target: nil, action: nil)
+                button.bezelStyle = .rounded
+                button.controlSize = .small
+                if label == AutopilotCoordinator.approveLabel { button.keyEquivalent = "\r" }
+                button.target = self
+                button.action = #selector(tapped(_:))
+                button.identifier = NSUserInterfaceItemIdentifier(order.id)
+                buttons.addArrangedSubview(button)
+            }
+            card.addArrangedSubview(buttons)
+            stack.addArrangedSubview(card)
+        }
+        orders.forEach { byId[$0.id] = $0 }
+    }
+
+    private var byId: [String: PendingOrder] = [:]
+
+    @objc private func tapped(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue, let order = byId[id] else { return }
+        onAnswer?(order, sender.title)
+    }
+
+    private static func text(_ s: String, _ color: NSColor) -> NSTextField {
+        let l = NSTextField(wrappingLabelWithString: s)
+        l.font = AppFont.mono(size: 11)
+        l.textColor = color
+        l.preferredMaxLayoutWidth = 400
+        return l
+    }
+}
