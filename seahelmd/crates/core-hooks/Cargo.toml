@@ -1,0 +1,22 @@
+[package]
+name = "seahelm-core-hooks"
+description = "Agent lifecycle hooks for seahelm-core: the payloads agents send, what they mean, and the shims that send them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seahelm-core-types = { path = "../core-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+md-5 = "0.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "seahelm-hook"
+path = "src/bin/seahelm-hook.rs"
