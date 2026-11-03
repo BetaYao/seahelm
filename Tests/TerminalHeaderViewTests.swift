@@ -173,4 +173,24 @@ final class TerminalHeaderViewTests: XCTestCase {
         XCTAssertFalse(header.memoryLabelIsHiddenForTesting)
         XCTAssertEqual(header.memoryTextForTesting, "340 MB")
     }
+
+    /// With First Mate over the terminal side the header is its: its memory, its
+    /// name, and none of the focused pane's own controls.
+    func testFirstMateTakesTheWholeHeader() {
+        let header = makeHeader()
+        header.setPaneTitle("Fix the login")
+        header.setPaneMemory(516 * 1_048_576)
+        header.setForkTarget("@other")
+        header.setFirstMateMode(true)
+        XCTAssertTrue(header.memoryLabelIsHiddenForTesting, "not the pane's figure while First Mate's is unknown")
+        header.setFirstMateMemory(169 * 1_048_576)
+        XCTAssertEqual(header.memoryTextForTesting, "169 MB")
+        XCTAssertFalse(header.forkButtonIsVisibleForTesting)
+        header.setPaneMemory(600 * 1_048_576)
+        XCTAssertEqual(header.memoryTextForTesting, "169 MB", "the pane's refresh does not leak through")
+
+        header.setFirstMateMode(false)
+        XCTAssertEqual(header.memoryTextForTesting, "600 MB")
+        XCTAssertTrue(header.forkButtonIsVisibleForTesting)
+    }
 }

@@ -126,6 +126,16 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setPaneMemory(bytes)
     }
 
+    /// First Mate is over the terminal side: the header becomes its (see
+    /// `TerminalHeaderView.setFirstMateMode`).
+    func setFirstMateMode(_ on: Bool) {
+        terminalHeader.setFirstMateMode(on)
+    }
+
+    func updateFirstMateMemory(_ bytes: UInt64?) {
+        terminalHeader.setFirstMateMemory(bytes)
+    }
+
     /// Drive the chrome title from a center overlay (file / changelog). Pass
     /// `nil` to restore the live pane title.
     func setOverlayTitle(_ title: String?) {

@@ -5,9 +5,16 @@ import AppKit
 /// terminal is where you talk to it. What it has done is a click away in the
 /// dock's history (`FirstMateLogView`), not a column taking a third of the width.
 final class FirstMateView: NSView {
+    /// The center overlay's title while First Mate is shown — also how the
+    /// window recognises that the overlay is First Mate's.
+    static let overlayTitle = "First Mate"
+
     var onTurnOn: (() -> Void)?
 
     private let terminalContainer = NSView()
+    /// An accent ring around the terminal: First Mate's terminal looks like a
+    /// terminal, so the frame is what says whose it is.
+    private let ring = NSView()
     private let offPanel = NSStackView()
 
     override init(frame frameRect: NSRect) {
@@ -43,13 +50,22 @@ final class FirstMateView: NSView {
         offPanel.translatesAutoresizingMaskIntoConstraints = false
         offPanel.isHidden = true
 
+        ring.wantsLayer = true
+        ring.layer?.cornerRadius = 8
+        ring.layer?.borderWidth = 1.5
+        ring.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(ring)
         addSubview(terminalContainer)
         addSubview(offPanel)
         NSLayoutConstraint.activate([
-            terminalContainer.topAnchor.constraint(equalTo: topAnchor),
-            terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            terminalContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            terminalContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ring.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            ring.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            ring.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            ring.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            terminalContainer.topAnchor.constraint(equalTo: ring.topAnchor, constant: 6),
+            terminalContainer.leadingAnchor.constraint(equalTo: ring.leadingAnchor, constant: 6),
+            terminalContainer.trailingAnchor.constraint(equalTo: ring.trailingAnchor, constant: -6),
+            terminalContainer.bottomAnchor.constraint(equalTo: ring.bottomAnchor, constant: -6),
             offPanel.centerXAnchor.constraint(equalTo: centerXAnchor),
             offPanel.centerYAnchor.constraint(equalTo: centerYAnchor),
             offPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
@@ -61,6 +77,7 @@ final class FirstMateView: NSView {
     func embed(_ station: Station?) {
         offPanel.isHidden = station != nil
         terminalContainer.isHidden = station == nil
+        ring.isHidden = station == nil
         guard let station else { return }
         if station.view == nil {
             _ = station.create(in: terminalContainer, workingDirectory: FirstMatePane.directory,
@@ -77,6 +94,23 @@ final class FirstMateView: NSView {
     }
 
     @objc private func turnOnClicked() { onTurnOn?() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshRing()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshRing()
+    }
+
+    private func refreshRing() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            ring.layer?.borderColor = SemanticColors.accent.withAlphaComponent(0.55).cgColor
+            ring.layer?.backgroundColor = SemanticColors.accent.withAlphaComponent(0.04).cgColor
+        }
+    }
 }
 
 /// What First Mate has done, newest last: the audit log as a list, shown from
