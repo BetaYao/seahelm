@@ -122,7 +122,7 @@ final class SessionMonitorView: NSView {
         guard ZmxLocator.isAvailable else {
             sessions = []
             tableView.reloadData()
-            summaryLabel.stringValue = "zmx not found — no persistent sessions."
+            summaryLabel.stringValue = "seahelmd not found — no persistent sessions."
             killDetachedButton.isEnabled = false
             return
         }
@@ -130,7 +130,7 @@ final class SessionMonitorView: NSView {
         // `zmx list` talks to every daemon's control socket, so it can block for
         // a beat when one is busy. Off the main thread; the window stays live.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+            let output = ZmxLocator.listOutput() ?? ""
             let parsed = SessionManager.parseZmxSessionsWithProcessMemory(listOutput: output)
             DispatchQueue.main.async {
                 guard let self else { return }

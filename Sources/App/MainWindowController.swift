@@ -798,8 +798,8 @@ class MainWindowController: NSWindowController {
             guard ZmxLocator.isAvailable else {
                 DispatchQueue.main.async {
                     let alert = NSAlert()
-                    alert.messageText = "zmx is not available"
-                    alert.informativeText = "Install zmx first to clean orphan sessions."
+                    alert.messageText = "seahelmd is not available"
+                    alert.informativeText = "The session daemon is missing from this build, so there are no sessions to clean."
                     alert.runModal()
                 }
                 return
@@ -815,7 +815,7 @@ class MainWindowController: NSWindowController {
                     ? "No orphan sessions found"
                     : "Cleaned \(cleaned.count) orphan session(s)"
                 if cleaned.isEmpty {
-                    alert.informativeText = "All seahelm zmx sessions are attached to currently open panes."
+                    alert.informativeText = "All seahelm sessions are attached to currently open panes."
                 } else {
                     alert.informativeText = cleaned.joined(separator: "\n")
                 }
@@ -1744,7 +1744,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         headerMemoryProbedAt[sessionKey] = Date()
 
         headerMemoryQueue.async { [weak self] in
-            let bytes = ProcessRunner.output([ZmxLocator.executable(), "list"]).flatMap {
+            let bytes = ZmxLocator.listOutput().flatMap {
                 ProcessProbe.sessionResidentBytes(paneSessionKey: sessionKey, zmxListOutput: $0)
             }
             DispatchQueue.main.async {
@@ -3887,7 +3887,7 @@ extension MainWindowController {
     /// main: `zmx list` and `ps` are forks.
     fileprivate func refreshFirstMateMemory() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let bytes = ProcessRunner.output([ZmxLocator.executable(), "list"]).flatMap {
+            let bytes = ZmxLocator.listOutput().flatMap {
                 ProcessProbe.sessionResidentBytes(paneSessionKey: FirstMatePane.sessionName, zmxListOutput: $0)
             }
             DispatchQueue.main.async { self?.windowChrome?.updateFirstMateMemory(bytes) }

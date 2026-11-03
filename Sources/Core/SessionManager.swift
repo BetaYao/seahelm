@@ -216,7 +216,7 @@ enum SessionManager {
         }
     }
 
-    // MARK: - Orphan zmx client processes
+    // MARK: - Orphan attach clients
 
     /// One process row as the client sweep sees it.
     struct ZmxProcess: Equatable {
@@ -224,66 +224,29 @@ enum SessionManager {
         let ppid: Int32
         let command: String
 
-        /// The vendored binary's path, not a bare "zmx": an agent's own command
-        /// line can mention zmx without being one.
-        var isZmxBinary: Bool {
-            command.contains("/bin/zmx ") || command.hasSuffix("/bin/zmx")
+        /// A pane's attach client: the bundled daemon binary run as `attach`.
+        /// Matched on the path and the verb, not a bare "seahelmd": an agent's
+        /// own command line can mention it without being one, and the session
+        /// daemons (`seahelmd __serve`) must never match.
+        var isAttachClient: Bool {
+            command.contains("/bin/seahelmd attach ")
         }
     }
 
-    /// `zmx attach`/`run` clients that no longer have anyone to serve.
+    /// Attach clients that no longer have anyone to serve: re-parented to
+    /// launchd because the pane that ran them is gone.
     ///
-    /// These do not exit when Seahelm dies — they spin at 20-70% CPU forever,
-    /// and every restart leaves a few more (20 were found holding 4.3 cores
-    /// after a day of restarts). The test is deliberately *not* "does the target
-    /// session still exist": the two worst offenders found were spinning against
-    /// sessions that were perfectly alive, and `zmx list` showed `clients=1`,
-    /// i.e. they had never attached at all. What identifies them is having no
-    /// live parent while not being a session daemon themselves.
-    ///
-    /// Which makes telling a daemon from a client the whole job, and it cannot be
-    /// done from `zmx list` pids alone: `pid=` names the *process inside* the
-    /// session (the shell, or the agent), never the zmx process hosting it. A
-    /// set of those pids therefore never intersects the zmx processes being
-    /// swept, so excluding it protected nothing and this sweep reaped every
-    /// surviving daemon of the previous instance — killing all 8 live sessions
-    /// about five minutes after each restart. The daemon is found by walking up
-    /// from the reported pid to the nearest zmx-binary ancestor instead; the walk
-    /// starts at the pid itself so a future zmx that does report the daemon pid
-    /// stays correct. Any session whose daemon cannot be resolved that way
-    /// abandons the whole sweep — reaping nothing costs CPU, guessing costs
-    /// agents.
-    static func orphanZmxClientPids(processes: [ZmxProcess], sessionPids: Set<Int32>) -> [Int32] {
-        // Without session pids every daemon looks like an orphan. Refuse to guess.
-        guard !sessionPids.isEmpty else { return [] }
-        let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
-        var daemonPids: Set<Int32> = []
-        for sessionPid in sessionPids {
-            guard let daemon = zmxDaemonPid(hosting: sessionPid, byPid: byPid) else { return [] }
-            daemonPids.insert(daemon)
-        }
-        return processes.compactMap { proc in
-            guard proc.isZmxBinary else { return nil }
-            guard !daemonPids.contains(proc.pid) else { return nil }   // session daemon
-            guard proc.ppid == 1 else { return nil }                   // has a live parent
+    /// A client exits on its own when its terminal closes; this is the net for
+    /// one that did not (zmx's never did, and every restart left a few spinning
+    /// at 20-70% CPU). seahelmd names its roles in argv — `__serve` for a
+    /// session's daemon, `attach` for a pane's client — so telling them apart
+    /// needs no walk from session pids, which a session still held for its pane
+    /// does not even have yet.
+    static func orphanZmxClientPids(processes: [ZmxProcess]) -> [Int32] {
+        processes.compactMap { proc in
+            guard proc.isAttachClient, proc.ppid == 1 else { return nil }
             return proc.pid
         }
-    }
-
-    /// The zmx process hosting `sessionPid`: itself if it is one, else its
-    /// nearest zmx-binary ancestor. Note the client that *created* a session is
-    /// also an ancestor of it (`login` → client → daemon → shell), so only the
-    /// nearest one may be treated as the daemon — stopping at the first hit is
-    /// what keeps the outer client reapable.
-    private static func zmxDaemonPid(hosting sessionPid: Int32, byPid: [Int32: ZmxProcess]) -> Int32? {
-        var current: Int32? = sessionPid
-        // Bounded: a ps snapshot can disagree with itself about parentage.
-        for _ in 0..<16 {
-            guard let pid = current, pid > 1, let proc = byPid[pid] else { return nil }
-            if proc.isZmxBinary { return proc.pid }
-            current = proc.ppid
-        }
-        return nil
     }
 
     /// Parse `ps -axo pid=,ppid=,command=`. Every row is kept, not just the zmx
@@ -302,20 +265,15 @@ enum SessionManager {
     /// Kill orphaned zmx clients. Returns the pids reaped. Safe to call at
     /// startup: sessions and their daemons are left alone.
     @discardableResult
-    static func cleanupOrphanZmxClients(listOutput: String? = nil, psOutput: String? = nil) -> [Int32] {
-        let list = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
-        let sessionPids = Set(list.components(separatedBy: .newlines).compactMap { line -> Int32? in
-            guard let value = zmxListField(line, "pid=") else { return nil }
-            return Int32(value)
-        })
+    static func cleanupOrphanZmxClients(psOutput: String? = nil) -> [Int32] {
         let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
         let processes = parseZmxProcesses(psOutput: ps)
-        let orphans = orphanZmxClientPids(processes: processes, sessionPids: sessionPids)
+        let orphans = orphanZmxClientPids(processes: processes)
         let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         for pid in orphans {
             // Log the command line before killing: the one bug this sweep has had
             // was invisible in a bare pid count.
-            NSLog("[SessionManager] Reaping orphan zmx client %d: %@", pid, byPid[pid]?.command ?? "?")
+            NSLog("[SessionManager] Reaping orphan attach client %d: %@", pid, byPid[pid]?.command ?? "?")
             // SIGKILL, not SIGTERM: the spin loop never reaches a signal handler,
             // so a terminate is simply ignored.
             kill(pid, SIGKILL)
@@ -351,7 +309,7 @@ enum SessionManager {
             }
         }
         return processes.compactMap { proc in
-            guard proc.isZmxBinary else { return nil }
+            guard proc.isAttachClient else { return nil }
             guard let session = attachSessionName(fromCommand: proc.command) else { return nil }
             let status = reachabilityByName[session] ?? .missing
             switch status {
@@ -363,9 +321,9 @@ enum SessionManager {
         }
     }
 
-    /// Session name targeted by a `zmx attach <name>` command line, if any.
+    /// Session name targeted by a `seahelmd attach <name>` command line, if any.
     static func attachSessionName(fromCommand command: String) -> String? {
-        guard let range = command.range(of: "/bin/zmx attach ") else { return nil }
+        guard let range = command.range(of: "/bin/seahelmd attach ") else { return nil }
         let rest = command[range.upperBound...]
         guard let token = rest.split(whereSeparator: \.isWhitespace).first else { return nil }
         let name = String(token)
@@ -409,7 +367,7 @@ enum SessionManager {
         psOutput: String? = nil,
         startDirReachable: ((String) -> Bool)? = nil
     ) -> [String] {
-        let list = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        let list = listOutput ?? ZmxLocator.listOutput() ?? ""
         let reachable = startDirReachable ?? { path in
             // nil (probe timed out) and false (gone) both mean "not usable".
             FileSystemProbe.existsIfKnown(path, timeout: 0.5) == true
@@ -456,7 +414,7 @@ enum SessionManager {
         activeSessionNames: Set<String>,
         listOutput: String? = nil
     ) -> [String] {
-        let output = listOutput ?? ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        let output = listOutput ?? ZmxLocator.listOutput() ?? ""
         let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
         for paneSessionKey in orphaned {
             ZmxSessionRecovery.forceKillSession(paneSessionKey)
@@ -482,86 +440,52 @@ enum SessionManager {
 
     // MARK: - Detached agent launch
 
-    /// Build the backend CLI invocation(s) that create a persistent session
-    /// detached, with `agentCommandLine` running in `cwd` and a shell kept alive
-    /// afterward. Returns an empty array for backends without persistent
-    /// sessions. Pure (no process spawning) — unit-tested.
+    /// Build the daemon invocation(s) that create a persistent session with
+    /// `agentCommandLine` running in `cwd`, a shell kept alive afterward.
+    /// Returns an empty array for backends without persistent sessions. Pure
+    /// (no process spawning) — unit-tested.
+    ///
+    /// The agent is the session's own program — `shell -lic` running it, then
+    /// `exec`-ing an interactive login shell so the pane is left at a prompt
+    /// when the agent exits — and seahelmd holds it until the pane attaches
+    /// (`new --hold`). An agent asks its terminal what it is once, at startup
+    /// (OSC 7501 program status, OSC 10/11 colours), and a pane attached then
+    /// answers as the app will keep answering; it also draws its first frame at
+    /// the pane's size. Nothing is typed into a shell, so the launch line never
+    /// shows in the pane.
+    ///
+    /// The control-socket context is exported first so the agent (and any tool
+    /// it spawns, e.g. seahelm-suggest) can reach the multiplexer socket and
+    /// knows it is running inside a seahelm pane. SEAHELM_PANE_ID is the stable
+    /// session name so an agent can reference its own pane across app restarts.
+    /// The terminal environment rides along as `env` assignments so the session
+    /// PTY carries the same terminal a pane opened through Ghostty would have:
+    /// `runSync` execs through /usr/bin/env, so they are plain argv.
     static func detachedLaunchCommands(
         backend: String,
         name: String,
         cwd: String,
         agentCommandLine: String,
         shell: String,
-        terminfoPath: String? = TerminalEnvironment.bundledTerminfoPath()
+        terminfoPath: String? = TerminalEnvironment.bundledTerminfoPath(),
+        daemon: String = ZmxLocator.executable(),
+        facts: [String] = ZmxLocator.sessionEnvironment()
     ) -> [[String]] {
-        switch backend {
-        case "zmx":
-            // `zmx run` types the command into its own persistent interactive
-            // shell (and appends a ZMX_TASK_COMPLETED marker), so the session
-            // survives the agent exiting on its own — no `exec "$0"` trick
-            // needed. Wrap in a login shell that cd's and clears the screen
-            // before the agent renders — `zmx run` *types* this whole command
-            // line into the session's interactive shell, so without the clear
-            // the agent's TUI comes up underneath the echoed command plus the
-            // login shell's own startup noise. That inner `cd` only affects the
-            // nested shell; the outer session shell's cwd is set separately by
-            // spawning `zmx` with `Process.currentDirectoryURL = cwd` (see
-            // `createDetachedSession`), so exiting the agent lands you back in
-            // the worktree — not in whatever directory Seahelm was launched from.
-            //
-            // Export the control-socket context first so the agent (and any tool
-            // it spawns, e.g. seahelm-suggest) can reach the multiplexer socket
-            // and knows it is running inside a seahelm pane.
-            let socketPath = ControlSocketServer.defaultSocketPath()
-            // SEAHELM_PANE_ID is the stable session name so an agent can reference
-            // its own pane across app restarts (the control API resolves it).
-            let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
-                + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
-            let inner = "\(exports) && cd \(ShellEscape.singleQuote(cwd))"
-                + " && \(waitForClientCommand(zmx: ZmxLocator.executable(), name: name))"
-                + " && \(TerminalEnvironment.clearScreenCommand) && \(agentCommandLine)"
-            // Prefixed as `env` assignments rather than exported inside `inner`
-            // so the *session* PTY carries them: the shell zmx spawns, the rc
-            // files it sources, and the agent all see the same terminal a pane
-            // opened through Ghostty would have had. `runSync` execs through
-            // /usr/bin/env, so these ride along as plain argv.
-            let termEnv = TerminalEnvironment.envAssignments(terminfoPath: terminfoPath)
-            return [termEnv + [ZmxLocator.executable(), "run", name, shell, "-lic", inner]]
-        default:
-            return []
-        }
+        guard backend == "zmx" else { return [] }
+        let socketPath = ControlSocketServer.defaultSocketPath()
+        let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
+            + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
+        let inner = "{ \(exports) && cd \(ShellEscape.singleQuote(cwd))"
+            + " && \(TerminalEnvironment.clearScreenCommand) && \(agentCommandLine); }"
+            + "; exec \(ShellEscape.singleQuote(shell)) -l"
+        let env = TerminalEnvironment.envAssignments(terminfoPath: terminfoPath) + facts
+        return [env + [daemon, "new", "--hold", String(clientWaitSeconds), name, "--", shell, "-lic", inner]]
     }
 
-    /// How long a detached launch holds the agent for a client (see
-    /// `waitForClientCommand`) before starting it anyway.
+    /// How long a detached launch holds the agent for its pane before starting
+    /// it anyway. Measured on zmx: an attach 0.2s after creation caught Claude's
+    /// startup probe and one at 1s missed it; the hold makes that moot.
     static let clientWaitSeconds = 10
-
-    /// Shell that waits until a client attaches to session `name`, or
-    /// `clientWaitSeconds` pass. Always succeeds, so it can sit in an `&&` chain.
-    ///
-    /// An agent's terminal queries are answered by whoever is attached when it
-    /// asks, and it asks once, at startup. A detached session has nobody but the
-    /// zmx daemon, which answers DA1 and swallows the rest — so an agent started
-    /// there concludes, for its whole life, that the terminal supports nothing:
-    /// Claude Code never reports OSC 7501 program status, and nobody answers OSC
-    /// 10/11 color queries. Seahelm attaches its pane a beat after creating the
-    /// session, but that beat is too long: measured, an attach 0.2s after `zmx
-    /// run` caught Claude's probe and one at 1s missed it. Holding the agent
-    /// until the pane is there costs that beat and nothing else.
-    ///
-    /// It waits for the client count to *rise*, not to be nonzero: the `zmx run`
-    /// that typed this line is itself a client for as long as the agent runs, so
-    /// a detached session already reads `clients=1`.
-    static func waitForClientCommand(zmx: String, name: String) -> String {
-        let pattern = "s/.*name=\(NSRegularExpression.escapedPattern(for: name))[[:space:]].*clients=([0-9]+).*/\\1/p"
-        let polls = clientWaitSeconds * 5
-        // A brace group, so the `;`s inside cannot break the caller's `&&` chain,
-        // and a function name no rc file aliases (`-lic` loads them all).
-        return "{ __seahelm_clients() { \(ShellEscape.singleQuote(zmx)) list 2>/dev/null"
-            + " | sed -En \(ShellEscape.singleQuote(pattern)); }; c0=$(__seahelm_clients)"
-            + "; for _ in $(seq \(polls)); do [ \"$(__seahelm_clients)\" -gt \"${c0:-0}\" ] 2>/dev/null"
-            + " && break; sleep 0.2; done; }"
-    }
 
     /// Whether a persistent session with `name` already exists for `backend`.
     ///
@@ -609,7 +533,7 @@ enum SessionManager {
             agentCommandLine: agentCommandLine, shell: shell
         )
         guard !commands.isEmpty else { return false }
-        // zmx's session shell inherits this process's cwd. Without it, exiting
+        // The session daemon starts where it is spawned. Without this, exiting
         // the agent drops you in Seahelm's launch directory (often the seahelm
         // checkout itself) instead of the worktree.
         for argv in commands {
@@ -621,8 +545,8 @@ enum SessionManager {
     /// Block until a session named `name` exists, or `timeoutSeconds` elapses.
     /// Returns whether the session exists at the end. Call off the main thread.
     /// Used to decouple "the agent session is up" from "the agent has exited":
-    /// `zmx run` blocks for the agent's whole lifetime, so the session is spawned
-    /// on a detached thread and the caller waits only for it to come up.
+    /// the session is spawned on a detached thread and the caller waits only for
+    /// it to come up.
     static func waitUntilSessionExists(name: String, backend: String, timeoutSeconds: Double) -> Bool {
         guard backend == "zmx" else { return true }
         let deadline = Date().addingTimeInterval(timeoutSeconds)

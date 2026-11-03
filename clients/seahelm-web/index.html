@@ -787,7 +787,7 @@ const S = {
   // the time on the right of each fleet row counts from.
   rowTimes:new Map(),
 };
-// Opening size only. zmx reports no geometry and has no resize verb, so the
+// Opening size only. The relay reports no geometry and has no resize verb, so the
 // bridge reads the session's real grid from outside (pid → tty → `stty size`)
 // and ships it with the snapshot; we resize to that before replaying. These
 // numbers just give the terminal a sane box for the moment before it lands.
@@ -3556,7 +3556,7 @@ function openMountedPanes(){
  * One pane, full width; the tabs in the head move between them.
  *
  * Only the visible pane is attached. That is not just tidiness: each attach is a
- * real client of the zmx session (#44), and the layouts that trigger this mode
+ * real client of the session (#44), and the layouts that trigger this mode
  * are the ones on the weakest devices.
  */
 function mountSinglePane(key){
@@ -3881,7 +3881,7 @@ function updateToBottom(){
   btn.style.bottom = ($('keyBar').offsetHeight + 12) + 'px';
 }
 
-// An attach client is a real client of the zmx session, so leaving one behind is
+// An attach client is a real client of the session, so leaving one behind is
 // not harmless — and mirroring a layout opens one per pane, which multiplies the
 // cost of getting this wrong. vt_close covers the tidy exits; pagehide covers
 // closing the tab; the bridge's lease sweep covers a crash, where neither runs.

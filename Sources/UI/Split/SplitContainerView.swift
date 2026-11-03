@@ -622,8 +622,8 @@ private final class AsleepPaneView: NSView {
     func configure(title: String, detail: String) {
         titleLabel.stringValue = title.isEmpty ? "Sleeping pane" : title
         detailLabel.stringValue = detail.isEmpty
-            ? "The zmx session is still running."
-            : "\(detail) · zmx session still running"
+            ? "The session is still running."
+            : "\(detail) · session still running"
     }
 
     private func build() {

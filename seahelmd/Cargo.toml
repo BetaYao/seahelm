@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/keep-vt", "crates/seahelmd"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/BetaYao/seahelm"
+
+[profile.release]
+panic = "abort"

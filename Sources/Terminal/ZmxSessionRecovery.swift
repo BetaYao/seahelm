@@ -85,7 +85,7 @@ enum ZmxSessionRecovery {
         NSLog("ZmxSessionRecovery: zmx session '%@' still alive after kill — force cleaning", paneSessionKey)
 
         // Find and kill the processes holding the session's socket
-        if let socketDir = socketDir() {
+        if let socketDir = socketDir(forSession: paneSessionKey) {
             let socketPath = (socketDir as NSString).appendingPathComponent(paneSessionKey)
             // Every pid, not just a lone one: `lsof -t` prints one per line, and a
             // wedged session has the daemon *and* the clients stuck against it on
@@ -112,16 +112,8 @@ enum ZmxSessionRecovery {
     /// Deadline for the graceful `zmx kill` attempt before falling back to SIGKILL.
     private static let gracefulKillTimeout: TimeInterval = 5
 
-    /// Parse the zmx socket directory from `zmx version` output.
-    private static func socketDir() -> String? {
-        guard let versionOutput = ProcessRunner.output([ZmxLocator.executable(), "version"]) else { return nil }
-        for line in versionOutput.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("socket_dir") {
-                let parts = trimmed.components(separatedBy: CharacterSet.whitespaces)
-                return parts.last
-            }
-        }
-        return nil
+    /// The directory holding `paneSessionKey`'s socket.
+    private static func socketDir(forSession paneSessionKey: String) -> String? {
+        ZmxLocator.socketDir()
     }
 }

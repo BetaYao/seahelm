@@ -213,7 +213,8 @@ class Station {
     /// command to run — `zmx attach seahelm-me-My Project` means session
     /// `seahelm-me-My`, command `Project` — so the pane dies on launch.
     static func zmxAttachCommand(paneSessionKey: String) -> String {
-        "/usr/bin/env -u ZMX_SESSION \(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
+        let env = ZmxLocator.sessionEnvironment().map { ShellEscape.singleQuote($0) + " " }.joined()
+        return "/usr/bin/env -u ZMX_SESSION \(env)\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
     }
 
     private func attachZmx(
@@ -807,7 +808,7 @@ class Station {
                 return
             }
             NSLog(
-                "Station: zmx session '%@' unhealthy — exited=%@ reachability=%@ plan=%@",
+                "Station: session '%@' unhealthy — exited=%@ reachability=%@ plan=%@",
                 paneSessionKey,
                 processExited ? "yes" : "no",
                 String(describing: reachability),
@@ -832,7 +833,7 @@ class Station {
     ) {
         guard zmxRecoveryAttempts < Self.maxZmxRecoveryAttempts else {
             NSLog(
-                "Station: giving up on zmx session '%@' after %d recovery attempts",
+                "Station: giving up on session '%@' after %d recovery attempts",
                 paneSessionKey, zmxRecoveryAttempts
             )
             return

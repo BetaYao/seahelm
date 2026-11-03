@@ -119,18 +119,29 @@ def thread_count(pid):
     return int(match.group(1)) if match else None
 
 
-def zmx_metrics():
-    out = run(["ps", "-axo", "pid=,rss=,comm="], timeout=15)
-    procs, rss_kb = 0, 0
+def seahelmd_metrics():
+    """The session daemons (`seahelmd __serve`, one per pane session) and the
+    panes' attach clients (`seahelmd attach`). Their own memory only: the shells
+    and agents under a daemon are counted elsewhere."""
+    out = run(["ps", "-axo", "pid=,rss=,command="], timeout=15)
+    daemons, clients, rss_kb = 0, 0, 0
     for line in out.splitlines():
-        if "zmx" not in line:
-            continue
         parts = line.split(None, 2)
         if len(parts) < 3:
             continue
-        procs += 1
+        argv = parts[2].split()
+        if not argv or not argv[0].endswith("/seahelmd") and argv[0] != "seahelmd":
+            continue
+        verb = argv[1] if len(argv) > 1 else ""
+        if verb == "__serve":
+            daemons += 1
+        elif verb == "attach":
+            clients += 1
+        else:
+            continue
         rss_kb += int(parts[1])
-    return {"procs": procs, "rss_mb": round(rss_kb / 1024.0, 1)}
+    return {"procs": daemons + clients, "daemons": daemons, "clients": clients,
+            "rss_mb": round(rss_kb / 1024.0, 1)}
 
 
 def _top_mem_mb(value):
@@ -417,7 +428,7 @@ def sample_once():
             row.update(probe())
             row["render"] = render_metrics(interval + 20, pid)
 
-    row["zmx"] = zmx_metrics()
+    row["seahelmd"] = seahelmd_metrics()
     row["fsevents"] = fseventsd_metrics()
     row["sys"] = system_metrics()
 

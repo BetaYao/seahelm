@@ -128,7 +128,7 @@ final class VTPipelineBenchmarks: XCTestCase {
         // the measurement does not move with how fast the machine runs the loop.
         let manager = ZmxVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { "/usr/bin/true" },
+            zmxPath: { _ in "/usr/bin/true" },
             attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             flushInterval: 3600,
@@ -340,7 +340,7 @@ final class VTPipelineBenchmarks: XCTestCase {
         let spawner = EchoVTProcessSpawner()
         let manager = ZmxVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { "/usr/bin/true" },
+            zmxPath: { _ in "/usr/bin/true" },
             attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             // Real flush interval: it is the thing under measurement. Snapshot

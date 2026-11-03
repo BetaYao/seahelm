@@ -120,19 +120,21 @@ targets:
       # The Telegram bridge's transport (`CurlClient`).
       - sdk: libcurl.tbd
     preBuildScripts:
-      - name: "Embed and sign bundled zmx"
+      - name: "Embed and sign seahelmd"
         basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
           RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin"
-          "${SRCROOT}/scripts/fetch-zmx.sh" "${RES}/zmx"
+          # zmx shipped here before seahelmd; an incremental build keeps it.
+          rm -f "${RES}/zmx" "${RES}/zmx.pin-sha"
+          "${SRCROOT}/scripts/build-seahelmd.sh" "${RES}/seahelmd"
           if [ "${CODE_SIGNING_ALLOWED:-YES}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
             # Release builds need a secure timestamp for notarization; skip it in
             # Debug so local builds don't pay a network round-trip per sign.
             TS="--timestamp"
             [ "${CONFIGURATION:-Debug}" = "Debug" ] && TS="--timestamp=none"
             codesign --force --options runtime $TS \
-              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/zmx"
+              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/seahelmd"
           fi
     postBuildScripts:
       # libghostty derives TERMINFO as a SIBLING of GHOSTTY_RESOURCES_DIR

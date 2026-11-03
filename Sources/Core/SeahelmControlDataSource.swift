@@ -112,7 +112,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// `paneSessionKey`). Empty when zmx isn't the backend or the probe fails —
     /// memory is best-effort detail and must never break `pane.list`.
     private func sessionMemoryBySessionKey() -> [String: ProcessProbe.SessionMemory] {
-        guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else {
+        guard let listOutput = ZmxLocator.listOutput() else {
             return [:]
         }
         let sessions = SessionManager.parseZmxSessions(listOutput: listOutput)

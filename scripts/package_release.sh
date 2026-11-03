@@ -78,10 +78,10 @@ sign_app() {
 
   # Sign inside-out. `--deep` does NOT cover standalone executables under
   # Resources/ (Apple treats that directory as data, not code), and the
-  # build-phase signing of zmx is skipped here because we build with
-  # CODE_SIGNING_ALLOWED=NO. That left zmx unsigned inside an otherwise signed
-  # bundle, which notarization rejects as Invalid.
-  local nested=("$APP_PATH/Contents/Resources/bin/zmx")
+  # build-phase signing of seahelmd is skipped here because we build with
+  # CODE_SIGNING_ALLOWED=NO. Left unsigned inside an otherwise signed bundle,
+  # notarization rejects it as Invalid.
+  local nested=("$APP_PATH/Contents/Resources/bin/seahelmd")
   for binary in "${nested[@]}"; do
     if [[ -f "$binary" ]]; then
       echo "==> Signing nested binary: ${binary#"$APP_PATH/"}"

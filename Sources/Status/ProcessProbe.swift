@@ -94,7 +94,7 @@ enum ProcessProbe {
         let table: [Proc]
 
         static func capture() -> ProbeContext? {
-            guard let out = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return nil }
+            guard let out = ZmxLocator.listOutput() else { return nil }
             return ProbeContext(zmxListOutput: out, table: processTable())
         }
     }
