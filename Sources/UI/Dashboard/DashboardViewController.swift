@@ -1498,12 +1498,13 @@ extension DashboardViewController {
         _ content: NSView,
         title: String,
         onSave: (() -> Void)? = nil,
-        onPreview: (() -> Void)? = nil
+        onPreview: (() -> Void)? = nil,
+        chromeless: Bool = false
     ) -> CenterOverlayView {
         dismissCenterOverlay()
 
         let overlay = CenterOverlayView(
-            content: content, onSave: onSave, onPreview: onPreview
+            content: content, onSave: onSave, onPreview: onPreview, chromeless: chromeless
         ) { [weak self] in
             self?.dismissCenterOverlay()
         }

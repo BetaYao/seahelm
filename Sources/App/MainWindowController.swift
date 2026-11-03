@@ -72,6 +72,8 @@ class MainWindowController: NSWindowController {
     private var dashboardVC: DashboardViewController?
     /// First Mate's view while it is the center overlay; nil otherwise.
     private weak var firstMateView: FirstMateView?
+    /// First Mate's history while its popover is open; nil otherwise.
+    private weak var firstMateHistory: FirstMateLogView?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
@@ -3751,10 +3753,11 @@ extension MainWindowController {
             guard let self else { return }
             self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
         }
+        dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
         autopilot.onStateChange = { [weak self] state in
             guard let self else { return }
             self.dashboardVC?.firstMateDock.apply(state)
-            self.firstMateView?.showLog(autopilot.audit.recent())
+            self.firstMateHistory?.show(autopilot.audit.recent())
         }
     }
 
@@ -3774,9 +3777,10 @@ extension MainWindowController {
                 self?.firstMateView?.embed(self?.tabCoordinator.autopilot.station)
             }
         }
-        dashboardVC.showCenterOverlay(view, title: "First Mate")
+        // Chromeless: First Mate should read like a selected pane — no toolbar,
+        // terminal colours — and Esc must reach Claude, not close the overlay.
+        dashboardVC.showCenterOverlay(view, title: "First Mate", chromeless: true)
         firstMateView = view
-        view.showLog(tabCoordinator.autopilot.audit.recent())
         guard tabCoordinator.autopilot.station != nil else {
             view.embed(nil)
             return
@@ -3788,6 +3792,20 @@ extension MainWindowController {
             view.embed(self.tabCoordinator.autopilot.station)
             view.focusTerminal(self.tabCoordinator.autopilot.station)
         }
+    }
+
+    /// The audit log in a popover off the dock's history button.
+    fileprivate func showFirstMateHistory(from anchor: NSView) {
+        let log = FirstMateLogView(frame: NSRect(x: 0, y: 0, width: 460, height: 360))
+        log.show(tabCoordinator.autopilot.audit.recent())
+        let controller = NSViewController()
+        controller.view = log
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.contentSize = log.frame.size
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        firstMateHistory = log
     }
 
     fileprivate func setAutopilot(enabled: Bool, paused: Bool) {

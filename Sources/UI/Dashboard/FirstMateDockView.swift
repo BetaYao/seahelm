@@ -8,6 +8,8 @@ final class FirstMateDockView: NSView {
     var onOpen: (() -> Void)?
     var onTogglePause: (() -> Void)?
     var onShowAllShortcuts: (() -> Void)?
+    /// The history button: anchor view to show the log from.
+    var onShowHistory: ((NSView) -> Void)?
 
     private let rule = NSView()
     private let mark = NSImageView()
@@ -16,6 +18,7 @@ final class FirstMateDockView: NSView {
     private let latest = NSTextField(labelWithString: "")
     private let badge = NSTextField(labelWithString: "")
     private let pauseButton = NSButton()
+    private let historyButton = NSButton()
     private let helpButton = NSButton()
     private(set) var state = AutopilotCoordinator.State()
 
@@ -56,6 +59,7 @@ final class FirstMateDockView: NSView {
         badge.isHidden = true
 
         for (button, symbol, tip, action) in [
+            (historyButton, "clock.arrow.circlepath", "What First Mate has done", #selector(historyClicked)),
             (pauseButton, "pause.fill", "Pause First Mate", #selector(pauseClicked)),
             (helpButton, "questionmark.circle", "Keyboard shortcuts (?)", #selector(helpClicked)),
         ] {
@@ -71,7 +75,7 @@ final class FirstMateDockView: NSView {
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let line1 = NSStackView(views: [mark, title, activity, spacer, badge, pauseButton, helpButton])
+        let line1 = NSStackView(views: [mark, title, activity, spacer, badge, historyButton, pauseButton, helpButton])
         line1.orientation = .horizontal
         line1.spacing = 6
         line1.alignment = .centerY
@@ -137,6 +141,7 @@ final class FirstMateDockView: NSView {
     /// its buttons. A button handles its own mouseDown, so this only sees the rest.
     override func mouseDown(with event: NSEvent) { onOpen?() }
     @objc private func pauseClicked() { onTogglePause?() }
+    @objc private func historyClicked() { onShowHistory?(historyButton) }
     @objc private func helpClicked() { onShowAllShortcuts?() }
 
     override func viewDidChangeEffectiveAppearance() {

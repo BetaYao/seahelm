@@ -1,16 +1,14 @@
 import AppKit
 
 /// First Mate over the terminal side (docs/first-mate-autopilot.md §3): its own
-/// terminal — which is where you talk to it — and the audit timeline beside it.
-/// Shown in the dashboard's center overlay, so the fleet stays in view on the left.
+/// terminal, nothing else — it should read like any selected pane, and the
+/// terminal is where you talk to it. What it has done is a click away in the
+/// dock's history (`FirstMateLogView`), not a column taking a third of the width.
 final class FirstMateView: NSView {
     var onTurnOn: (() -> Void)?
 
     private let terminalContainer = NSView()
-    private let logView = NSTextView()
-    private let logScroll = NSScrollView()
     private let offPanel = NSStackView()
-    private let divider = NSView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -23,20 +21,6 @@ final class FirstMateView: NSView {
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
 
-        logView.isEditable = false
-        logView.drawsBackground = false
-        logView.textContainerInset = NSSize(width: 10, height: 10)
-        logView.isVerticallyResizable = true
-        logView.autoresizingMask = [.width]
-        logScroll.documentView = logView
-        logScroll.hasVerticalScroller = true
-        logScroll.drawsBackground = false
-        logScroll.borderType = .noBorder
-        logScroll.translatesAutoresizingMaskIntoConstraints = false
-
-        divider.wantsLayer = true
-        divider.translatesAutoresizingMaskIntoConstraints = false
-
         let headline = NSTextField(wrappingLabelWithString: """
         First Mate is off.
 
@@ -46,7 +30,7 @@ final class FirstMateView: NSView {
         worktree. Starting agents and deleting worktrees wait for your approval.
         """)
         headline.font = AppFont.mono(size: 12)
-        headline.textColor = SemanticColors.muted
+        headline.textColor = GhosttyBridge.shared.terminalChromeForeground.withAlphaComponent(0.7)
         headline.preferredMaxLayoutWidth = 460
         let turnOn = NSButton(title: "Turn on First Mate", target: self, action: #selector(turnOnClicked))
         turnOn.bezelStyle = .rounded
@@ -59,33 +43,24 @@ final class FirstMateView: NSView {
         offPanel.translatesAutoresizingMaskIntoConstraints = false
         offPanel.isHidden = true
 
-        for v in [terminalContainer, divider, logScroll, offPanel] as [NSView] { addSubview(v) }
+        addSubview(terminalContainer)
+        addSubview(offPanel)
         NSLayoutConstraint.activate([
             terminalContainer.topAnchor.constraint(equalTo: topAnchor),
             terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            terminalContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
-            divider.topAnchor.constraint(equalTo: topAnchor),
-            divider.bottomAnchor.constraint(equalTo: terminalContainer.bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: terminalContainer.trailingAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 1),
-            logScroll.topAnchor.constraint(equalTo: topAnchor),
-            logScroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            logScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            logScroll.bottomAnchor.constraint(equalTo: terminalContainer.bottomAnchor),
-            logScroll.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.34),
             offPanel.centerXAnchor.constraint(equalTo: centerXAnchor),
             offPanel.centerYAnchor.constraint(equalTo: centerYAnchor),
             offPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
         ])
-        refreshColors()
     }
 
     /// Put First Mate's terminal in. The first time creates its surface on the
     /// session the coordinator started; later times move the same surface here.
     func embed(_ station: Station?) {
-        let on = station != nil
-        offPanel.isHidden = on
-        for v in [terminalContainer, divider, logScroll] as [NSView] { v.isHidden = !on }
+        offPanel.isHidden = station != nil
+        terminalContainer.isHidden = station == nil
         guard let station else { return }
         if station.view == nil {
             _ = station.create(in: terminalContainer, workingDirectory: FirstMatePane.directory,
@@ -95,11 +70,54 @@ final class FirstMateView: NSView {
         }
     }
 
-    func showLog(_ entries: [AutopilotAudit.Entry]) {
+    /// Keyboard to First Mate's terminal, as selecting a worktree does for its pane.
+    func focusTerminal(_ station: Station?) {
+        guard let view = station?.view else { return }
+        DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(view) }
+    }
+
+    @objc private func turnOnClicked() { onTurnOn?() }
+}
+
+/// What First Mate has done, newest last: the audit log as a list, shown from
+/// the dock's history button.
+final class FirstMateLogView: NSView {
+    private let textView = NSTextView()
+    private let scroll = NSScrollView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        textView.isEditable = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    func show(_ entries: [AutopilotAudit.Entry]) {
+        textView.textStorage?.setAttributedString(Self.render(entries))
+        textView.scrollToEndOfDocument(nil)
+    }
+
+    static func render(_ entries: [AutopilotAudit.Entry]) -> NSAttributedString {
         let out = NSMutableAttributedString()
         let time = DateFormatter()
-        time.dateFormat = "HH:mm"
-        for entry in entries where entry.kind != .delivered {
+        time.dateFormat = "MM-dd HH:mm"
+        let shown = entries.filter { $0.kind != .delivered }
+        for entry in shown {
             out.append(NSAttributedString(string: time.string(from: entry.at) + "  ", attributes: [
                 .font: AppFont.mono(size: 10), .foregroundColor: SemanticColors.subtle,
             ]))
@@ -116,31 +134,11 @@ final class FirstMateView: NSView {
                 .font: AppFont.mono(size: 11), .foregroundColor: color,
             ]))
         }
-        if entries.isEmpty {
-            out.append(NSAttributedString(string: "Nothing yet. Events and actions show up here.", attributes: [
+        if shown.isEmpty {
+            out.append(NSAttributedString(string: "Nothing yet. Events First Mate was woken by, and what it did about them, show up here.", attributes: [
                 .font: AppFont.mono(size: 11), .foregroundColor: SemanticColors.subtle,
             ]))
         }
-        logView.textStorage?.setAttributedString(out)
-        logView.scrollToEndOfDocument(nil)
-    }
-
-    /// Keyboard to First Mate's terminal, as selecting a worktree does for its pane.
-    func focusTerminal(_ station: Station?) {
-        guard let view = station?.view else { return }
-        DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(view) }
-    }
-
-    @objc private func turnOnClicked() { onTurnOn?() }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        refreshColors()
-    }
-
-    private func refreshColors() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            divider.layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.2).cgColor
-        }
+        return out
     }
 }
