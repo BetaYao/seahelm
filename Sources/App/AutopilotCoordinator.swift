@@ -552,6 +552,7 @@ final class AutopilotCoordinator {
     /// not the JSON the control socket answered with.
     static func compact(_ dict: [String: Any]) -> String {
         let name = (dict["worktree_path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }
+        if dict["deleted"] as? Bool == true { return "deleted \(name ?? "the worktree")" }
         if dict["deleting"] as? Bool == true { return "deleting \(name ?? "the worktree")" }
         if dict["pane_session_key"] != nil, let name { return "started in \(name)" }
         if dict["sent"] as? Bool == true || dict["ok"] as? Bool == true { return "sent" }

@@ -43,7 +43,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// First Mate's gated calls (main thread — the policy reads UI state).
     var autopilotGateHandler: ((AutopilotAction, String, [String: Any]) -> AutopilotGate)?
     /// A worktree's Delete, by path (main thread).
-    var deleteWorktreeHandler: ((String) -> Result<[String: Any], ControlCreateError>)?
+    /// Delete a worktree with no one at the Mac; calls back with what happened.
+    var deleteWorktreeHandler: ((String, @escaping (Result<[String: Any], ControlCreateError>) -> Void) -> Void)?
     var autopilotDidRunHandler: ((String, ControlResult) -> Void)?
     var autopilotProposeHandler: ((String, [[String: Any]]) -> ControlResult)?
     var firstMateStateHandler: (() -> [String: Any]?)?
@@ -643,10 +644,17 @@ extension SeahelmControlDataSource {
         runOnMain { h(method, result) }
     }
 
+    /// Waits for the delete to finish (git can take a while on a big checkout),
+    /// so the caller hears whether the worktree is gone rather than that it
+    /// was asked for. Blocks — never on main.
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> {
-        guard let h = deleteWorktreeHandler else { return .failure(.unavailable) }
-        var result: Result<[String: Any], ControlCreateError> = .failure(.unavailable)
-        runOnMain { result = h(path) }
+        guard !Thread.isMainThread, let h = deleteWorktreeHandler else { return .failure(.unavailable) }
+        let done = DispatchSemaphore(value: 0)
+        var result: Result<[String: Any], ControlCreateError> = .failure(.timedOut)
+        DispatchQueue.main.async {
+            h(path) { outcome in result = outcome; done.signal() }
+        }
+        guard done.wait(timeout: .now() + 180) == .success else { return .failure(.timedOut) }
         return result
     }
 

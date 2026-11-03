@@ -42,6 +42,20 @@ struct WorktreeDeleteAssessment: Equatable {
     var deletesBranch: Bool
 
     var isSafe: Bool { losses.isEmpty }
+
+    /// The loss line for uncommitted changes — the one loss an approval that
+    /// showed the user the uncommitted files can stand for.
+    static let uncommittedLoss = "It has uncommitted changes that will be lost."
+
+    /// Whether a delete nobody is at the Mac to confirm may go ahead (First Mate,
+    /// approved on a card that listed the uncommitted files): yes when nothing
+    /// would be lost, or only uncommitted changes would; never over commits.
+    var unattendedVerdict: (allowed: Bool, force: Bool, refusal: String?) {
+        if isSafe { return (true, false, nil) }
+        let other = losses.filter { $0 != Self.uncommittedLoss }
+        if other.isEmpty { return (true, true, nil) }
+        return (false, false, other.joined(separator: " ") + " Delete it from the Mac if that is meant.")
+    }
 }
 
 struct WorktreeCleanupSummary: Equatable {
@@ -161,7 +175,7 @@ enum WorktreeDeleter {
     ) -> WorktreeDeleteAssessment {
         var losses: [String] = []
         if hasUncommittedChanges(worktreePath: worktreePath) {
-            losses.append("It has uncommitted changes that will be lost.")
+            losses.append(WorktreeDeleteAssessment.uncommittedLoss)
         }
 
         var trunk = GitDiff.resolveBaseRef(worktreePath: worktreePath, recordedBase: recordedBase)
