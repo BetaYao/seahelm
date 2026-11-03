@@ -87,6 +87,11 @@ protocol ControlDataSource: AnyObject {
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError>
     /// A gated call from First Mate went through; what it returned.
     func autopilotDidRun(method: String, result: ControlResult)
+    /// First Mate as a remote client draws it: on or off, what it is doing, its
+    /// pane, and the cards waiting on the user. Nil when there is no First Mate.
+    func firstMateState() -> [String: Any]?
+    /// The user answered one of First Mate's cards from a remote client.
+    func answerFirstMateCard(card: String, option: String) -> Bool
     /// First Mate offers the user a choice; each option is an action to run if picked.
     func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult
     /// Answer row `index` of a pane's open question card, the way a tap on the
@@ -532,6 +537,21 @@ final class ControlRouter {
             case .failure(let e): return .error(code: e.code, message: e.message)
             }
 
+        case "autopilot.state":
+            guard let state = dataSource?.firstMateState() else {
+                return .error(code: ControlError.notFound, message: "no First Mate here")
+            }
+            return .ok(state)
+
+        case "autopilot.answer":
+            guard let card = params["card"] as? String, let option = params["option"] as? String else {
+                return .error(code: ControlError.invalidParams, message: "card and option are required")
+            }
+            guard dataSource?.answerFirstMateCard(card: card, option: option) == true else {
+                return .error(code: ControlError.notFound, message: "that card is gone")
+            }
+            return .ok(["answered": true])
+
         case "autopilot.propose":
             var summary = (params["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let options = params["options"] as? [[String: Any]] ?? []
@@ -820,6 +840,8 @@ extension ControlDataSource {
     }
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
     func autopilotDidRun(method: String, result: ControlResult) {}
+    func firstMateState() -> [String: Any]? { nil }
+    func answerFirstMateCard(card: String, option: String) -> Bool { false }
     func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult {
         .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
     }

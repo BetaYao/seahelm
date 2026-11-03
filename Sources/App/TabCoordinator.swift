@@ -128,6 +128,8 @@ class TabCoordinator {
     /// controller drives the dialog). Remote clients answer through this so a
     /// multi-select or multi-question ask behaves as it does on the desktop.
     var questionAnswerer: ((PendingOrder, String) -> Void)?
+    /// Answers one of First Mate's cards as a tap on it would (owner-set).
+    var firstMateCardAnswerer: ((PendingOrder, String) -> Void)?
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
     let watchFeed = WatchFeed()
@@ -984,6 +986,13 @@ class TabCoordinator {
                             branch: "", project: FirstMatePane.project,
                             terminalID: self.autopilot.stationId ?? "", message: "First Mate asks: \(summary)",
                             payload: id, options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
+                    }
+                    controlDataSource.firstMateStateHandler = { [weak self] in self?.firstMateRemoteState() }
+                    controlDataSource.firstMateAnswerHandler = { [weak self] card, option in
+                        guard let self, let order = self.firstMateCards().first(where: { $0.action.payload == card }),
+                              (order.action.options ?? []).contains(option) else { return false }
+                        self.firstMateCardAnswerer?(order, option)
+                        return true
                     }
                     controlDataSource.autopilotProposeHandler = { [weak self] summary, options in
                         self?.autopilot.propose(summary: summary, options: options)
@@ -2177,6 +2186,50 @@ class TabCoordinator {
     }
 
     // MARK: - First Mate
+
+    /// The approval and proposal cards First Mate is waiting on, oldest first.
+    func firstMateCards() -> [PendingOrder] {
+        pendingOrders.all().filter { $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal }
+    }
+
+    /// First Mate as a remote client draws it (`autopilot.state`).
+    func firstMateRemoteState(now: Date = Date()) -> [String: Any] {
+        let state = autopilot.state
+        let (word, _) = FirstMateDockView.describe(state.activity)
+        let tone: String
+        switch FirstMateDockView.tone(state) {
+        case .quiet: tone = "quiet"
+        case .watching: tone = "watching"
+        case .working: tone = "working"
+        case .wantsYou: tone = "wants_you"
+        }
+        var out: [String: Any] = [
+            "enabled": autopilot.isRunning,
+            "activity": word,
+            "tone": tone,
+            "detail": FirstMateDockView.detailLine(state, now: now),
+            "pending": state.pendingApprovals,
+            "agent": autopilot.agent.rawValue,
+        ]
+        if let station = autopilot.station, let pane = AgentRegistry.shared.pane(for: station.id) {
+            out["pane"] = [
+                "pane_id": station.id, "pane_session_key": FirstMatePane.sessionName,
+                "worktree_path": FirstMatePane.directory, "project": FirstMatePane.project, "branch": "",
+                "agent_type": pane.agentType.rawValue, "status": pane.status.rawValue,
+                "last_message": pane.lastMessage, "title": FirstMatePane.project,
+                "display_title": FirstMatePane.project, "first_mate": true,
+            ] as [String: Any]
+        }
+        out["cards"] = firstMateCards().map { order -> [String: Any] in
+            [
+                "card": order.action.payload ?? "",
+                "kind": order.action.kind == .autopilotProposal ? "proposal" : "approval",
+                "message": order.action.message,
+                "options": order.action.options ?? [],
+            ]
+        }
+        return out
+    }
 
     /// Start, stop, pause or resume First Mate from config. Safe to call again.
     func applyAutopilotConfig() {

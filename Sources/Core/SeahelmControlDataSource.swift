@@ -46,6 +46,8 @@ final class SeahelmControlDataSource: ControlDataSource {
     var deleteWorktreeHandler: ((String) -> Result<[String: Any], ControlCreateError>)?
     var autopilotDidRunHandler: ((String, ControlResult) -> Void)?
     var autopilotProposeHandler: ((String, [[String: Any]]) -> ControlResult)?
+    var firstMateStateHandler: (() -> [String: Any]?)?
+    var firstMateAnswerHandler: ((String, String) -> Bool)?
     /// Answer a pane's open question card (main thread — it is UI state).
     var answerQuestionHandler: ((String, Int) -> [String: Any]?)?
     /// A remote client showed a pane (main thread — it redraws the fleet).
@@ -611,6 +613,20 @@ extension SeahelmControlDataSource {
         var gate = AutopilotGate.deny("First Mate is not running")
         runOnMain { gate = h(action, method, params) }
         return gate
+    }
+
+    func firstMateState() -> [String: Any]? {
+        guard let h = firstMateStateHandler else { return nil }
+        var state: [String: Any]?
+        runOnMain { state = h() }
+        return state
+    }
+
+    func answerFirstMateCard(card: String, option: String) -> Bool {
+        guard let h = firstMateAnswerHandler else { return false }
+        var ok = false
+        runOnMain { ok = h(card, option) }
+        return ok
     }
 
     func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult {

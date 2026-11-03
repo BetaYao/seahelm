@@ -83,6 +83,22 @@ final class AutopilotPolicyTests: XCTestCase {
         XCTAssertEqual(ds.sent, ["go", "go"])
     }
 
+    /// First Mate must not approve its own cards, nor read the state built for the user.
+    func testFirstMateCannotAnswerItsOwnCards() {
+        XCTAssertEqual(AutopilotPolicy.classify(method: "autopilot.answer"), .forbidden)
+        let router = ControlRouter(dataSource: GateFakeDataSource())
+        guard case .error(let code, _) = call(router, "autopilot.answer", caller: FirstMatePane.sessionName,
+                                              ["card": "c", "option": "Approve"]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.autopilotRefused)
+    }
+
+    func testResultsReadAsWords() {
+        XCTAssertEqual(AutopilotCoordinator.compact(["deleting": true, "worktree_path": "/wt/feat-x"]), "deleting feat-x")
+        XCTAssertEqual(AutopilotCoordinator.compact(["worktree_path": "/wt/fix-ci", "pane_session_key": "k"]), "started in fix-ci")
+        XCTAssertEqual(AutopilotCoordinator.compact(["sent": true]), "sent")
+        XCTAssertEqual(AutopilotCoordinator.compact([:]), "done")
+    }
+
     func testClassification() {
         XCTAssertEqual(AutopilotPolicy.classify(method: "pane.read"), .open)
         XCTAssertEqual(AutopilotPolicy.classify(method: "pane.send_keys"), .gated(.messagePane))

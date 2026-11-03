@@ -3828,9 +3828,15 @@ extension MainWindowController {
                 self.pushFirstMateLine(AutopilotCoordinator.headline(entry), chatId: chat)
             }
         }
+        tabCoordinator.firstMateCardAnswerer = { [weak self] order, option in
+            self?.handleSuggestionTapped(order: order, optionText: option)
+        }
         autopilot.onStateChange = { [weak self] state in
             guard let self else { return }
             self.dashboardVC?.firstMateDock.apply(state)
+            // Remote clients (seahelm-web) draw the same First Mate.
+            NotificationCenter.default.post(name: .firstMateStateChanged, object: nil,
+                                            userInfo: self.tabCoordinator.firstMateRemoteState())
             if let approvals = self.firstMateApprovals {
                 let waiting = self.firstMateCards()
                 if waiting.isEmpty { self.firstMateApprovalsPopover?.close() } else { approvals.show(waiting) }

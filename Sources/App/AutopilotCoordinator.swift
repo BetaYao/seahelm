@@ -548,10 +548,14 @@ final class AutopilotCoordinator {
         send(text, to: id)
     }
 
-    private static func compact(_ dict: [String: Any]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else { return "ok" }
-        return text
+    /// A call's result in words, for the audit line, the dock and the phone —
+    /// not the JSON the control socket answered with.
+    static func compact(_ dict: [String: Any]) -> String {
+        let name = (dict["worktree_path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }
+        if dict["deleting"] as? Bool == true { return "deleting \(name ?? "the worktree")" }
+        if dict["pane_session_key"] != nil, let name { return "started in \(name)" }
+        if dict["sent"] as? Bool == true || dict["ok"] as? Bool == true { return "sent" }
+        return "done"
     }
 
     // MARK: - State
