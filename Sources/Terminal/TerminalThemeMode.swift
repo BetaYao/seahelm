@@ -1,27 +1,23 @@
 import Foundation
 
-/// Which palette a pane's terminal renders with — deliberately **not** the
-/// app's live light/dark appearance.
+/// Which palette a pane's terminal renders with.
 ///
-/// A pane hosts long-running TUIs, and a TUI reads the terminal's colors once.
-/// Codex asks over `OSC 10;?` / `OSC 11;?` at startup and caches the answer for
-/// the life of the process — it does not enable DEC mode 2031, so Ghostty's
-/// color-scheme-change report (`Surface.colorSchemeCallback`) never reaches it.
-/// Flip the palette under a running one and it keeps painting from the stale
-/// reading, because it only ever sets a *background* and leaves the text at
-/// SGR 39 (the terminal's real default foreground). A stale Latte reading fills
-/// the user-message pill with `blend(black, #eff1f5, 0.04)` = `#e5e7eb` while
-/// the text stays Mocha's `#cdd6f4`: near-white on near-white, unreadable, for
-/// the rest of that session. Its own re-styled chrome meanwhile picks up the new
-/// reading, which is how a single frame ends up carrying both palettes.
+/// `app` (default) follows the app's light/dark appearance live: a theme toggle,
+/// or macOS switching on its own under `theme_mode = system`, repaints every
+/// pane (`GhosttyBridge.refreshColorScheme`). `dark`/`light` pin the palette
+/// whatever the appearance is.
 ///
-/// So a run's palette is fixed for the whole run. `app` reads the appearance
-/// once at launch and holds it; `dark`/`light` ignore the appearance entirely.
-/// Toggling the app theme restyles Seahelm's own UI — panes keep their palette
-/// until the next launch, which is the only honest contract we can offer a
-/// process that latched the answer before we could tell it otherwise.
+/// The known cost of following live: a TUI that reads the terminal's colours
+/// once and caches them does not see the flip. Codex asks over `OSC 10;?` /
+/// `OSC 11;?` at startup, caches the answer for the life of the process and does
+/// not enable DEC mode 2031, so it keeps painting from the stale reading — it
+/// only sets a *background* and leaves text at SGR 39, so a stale Latte reading
+/// fills the user-message pill with `#e5e7eb` while the text stays Mocha's
+/// `#cdd6f4`. Restarting the agent fixes it; pinning `dark`/`light` avoids it.
+/// (From b28f441 until this change the palette was latched per run instead;
+/// the window disagreeing with its own panes was judged the worse trade.)
 enum TerminalThemeMode: String, CaseIterable {
-    /// Match the app appearance as it stood at launch, then hold it.
+    /// Follow the app appearance, live.
     case app
     /// Always Catppuccin Mocha, whatever the app appearance is.
     case dark
