@@ -8,8 +8,15 @@ final class AutopilotCoordinator {
     struct State: Equatable {
         enum Activity: Equatable { case off, starting, idle, thinking, needsYou, paused }
         var activity: Activity = .off
-        /// The newest audit line worth showing ("→ told #3 to fix CI").
+        /// The newest thing First Mate was woken by or did ("→ told #3 to fix
+        /// CI"), and when. Not the user's own messages: echoing those back
+        /// tells them nothing.
         var latest: String = ""
+        var latestAt: Date?
+        /// While it works: what it is doing right now (its pane's last activity).
+        var doing: String = ""
+        /// Projects whose rules it watches.
+        var watching: Int = 0
         var queued: Int = 0
         /// Approvals waiting on the user (phase 1c).
         var pendingApprovals: Int = 0
@@ -82,7 +89,10 @@ final class AutopilotCoordinator {
         audit.onAppend = { [weak self] entry in
             DispatchQueue.main.async { self?.noteAudit(entry) }
         }
-        if let last = audit.recent(limit: 1).last { state.latest = Self.headline(last) }
+        if let last = audit.recent(limit: 50).last(where: { Self.isNotable($0) }) {
+            state.latest = Self.headline(last)
+            state.latestAt = last.at
+        }
     }
 
     // MARK: - Lifecycle
@@ -520,8 +530,11 @@ final class AutopilotCoordinator {
 
     private func refreshActivity() {
         guard enabled, let id = station?.id else { state.activity = .off; return }
+        state.watching = repoPaths().count
         if paused { state.activity = .paused; return }
-        switch AgentRegistry.shared.pane(for: id)?.status {
+        let pane = AgentRegistry.shared.pane(for: id)
+        state.doing = pane?.status == .running ? (pane?.lastMessage ?? "") : ""
+        switch pane?.status {
         case .running?: state.activity = .thinking
         case .waiting?, .error?: state.activity = .needsYou
         case .idle?: state.activity = .idle
@@ -530,8 +543,17 @@ final class AutopilotCoordinator {
     }
 
     private func noteAudit(_ entry: AutopilotAudit.Entry) {
-        guard entry.kind != .delivered else { return }
+        guard Self.isNotable(entry) else { return }
         state.latest = Self.headline(entry)
+        state.latestAt = entry.at
+    }
+
+    /// What the dock reports as "the last thing that happened".
+    static func isNotable(_ entry: AutopilotAudit.Entry) -> Bool {
+        switch entry.kind {
+        case .event, .action, .approval, .denied: return true
+        case .delivered, .queued, .skipped, .message: return false
+        }
     }
 
     static func headline(_ entry: AutopilotAudit.Entry) -> String {

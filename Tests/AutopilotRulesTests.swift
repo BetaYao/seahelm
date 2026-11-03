@@ -198,16 +198,40 @@ final class FirstMatePaneTests: XCTestCase {
         XCTAssertTrue(FirstMatePane.sessionIsCurrent(at: dir))
     }
 
-    func testDockSaysWhatFirstMateIsDoing() {
-        let dock = FirstMateDockView()
+    func testDockSaysWhatIsTrueNow() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
         var state = AutopilotCoordinator.State()
-        dock.apply(state)
-        XCTAssertEqual(dock.latestTextForTesting, "Off — click to set up")
-        state.activity = .thinking
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "Off — click to set it up")
+
+        state.activity = .idle
+        state.watching = 3
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "3 projects · CI & merges")
         state.latest = "ci.failed · wt-a · PR #7"
+        state.latestAt = now.addingTimeInterval(-12 * 60)
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "12m ago · ci.failed · wt-a · PR #7")
+        state.latestAt = now.addingTimeInterval(-7 * 3600)
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "3 projects · CI & merges",
+                       "an old event is not news")
+
+        state.activity = .thinking
+        state.doing = "gh run view 123 --log-failed"
         state.queued = 2
-        dock.apply(state)
-        XCTAssertEqual(dock.activityTextForTesting, "thinking…")
-        XCTAssertEqual(dock.latestTextForTesting, "2 queued · ci.failed · wt-a · PR #7")
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "2 queued · gh run view 123 --log-failed")
+        XCTAssertEqual(FirstMateDockView.tone(state), .working)
+
+        state.activity = .idle
+        state.queued = 0
+        state.pendingApprovals = 1
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "1 waiting for your approval")
+        XCTAssertEqual(FirstMateDockView.tone(state), .wantsYou)
+        state.activity = .needsYou
+        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "Waiting for your answer in its terminal")
+    }
+
+    /// What the user said is not news to them.
+    func testTheUsersOwnWordsAreNotTheHeadline() {
+        XCTAssertFalse(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .message, text: "hi")))
+        XCTAssertFalse(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .delivered, text: "x")))
+        XCTAssertTrue(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .action, text: "x")))
     }
 }
