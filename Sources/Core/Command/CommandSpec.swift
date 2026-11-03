@@ -89,6 +89,10 @@ enum CommandSpecs {
             summary: "Go ahead with the action that just asked",
             detail: "Confirms the pending action in this conversation. It expires after 60 seconds, and any other message cancels it. Appending `force` to a command skips the question — for scripts and mail, where a round trip is slow."),
         CommandSpec(
+            verb: "mate", usage: "/mate [text]",
+            summary: "Talk to First Mate",
+            detail: "Leaves the pane this chat was talking to; from now on anything you say without a command goes to First Mate, the agent that watches the fleet. With text, says it straight away. `/go #n` talks to a pane again."),
+        CommandSpec(
             verb: "add", usage: "/add",
             summary: "Add a repo (desktop only)",
             detail: "Opens the file picker. There is no chat equivalent.",

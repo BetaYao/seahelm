@@ -3012,6 +3012,12 @@ extension MainWindowController {
 // MARK: - CommandHost
 
 extension MainWindowController: CommandHost {
+    var firstMateAvailable: Bool { tabCoordinator.autopilot.isRunning }
+
+    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
+        tabCoordinator.autopilot.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
+    }
+
     /// The fleet as the command language sees it, with every pane's stable
     /// handle minted on sight.
     func fleetIndex() -> FleetIndex {
@@ -3785,6 +3791,23 @@ extension MainWindowController {
         }
         dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
         dashboard.firstMateDock.onShowSettings = { [weak self] in self?.showSettingsPage("firstMate") }
+        // First Mate's answer to a chat goes back to that chat.
+        autopilot.onReply = { [weak self] targets, text in
+            for key in targets where key.hasPrefix("telegram:") {
+                self?.pushFirstMateLine(text, chatId: String(key.dropFirst("telegram:".count)))
+            }
+        }
+        // What it did on its own is worth a line on the phone; reads and
+        // deliveries are not.
+        let auditHook = autopilot.audit.onAppend
+        autopilot.audit.onAppend = { [weak self] entry in
+            auditHook?(entry)
+            guard entry.kind == .action else { return }
+            DispatchQueue.main.async {
+                guard let self, let chat = self.config.telegram?.resolvedDefaultChatId else { return }
+                self.pushFirstMateLine(AutopilotCoordinator.headline(entry), chatId: chat)
+            }
+        }
         autopilot.onStateChange = { [weak self] state in
             guard let self else { return }
             self.dashboardVC?.firstMateDock.apply(state)
@@ -3835,6 +3858,11 @@ extension MainWindowController {
             view.embed(self.tabCoordinator.autopilot.station)
             view.focusTerminal(self.tabCoordinator.autopilot.station)
         }
+    }
+
+    fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
+        AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            channelId: "telegram", targetChatId: chatId, content: "⎈ First Mate\n\(text)", format: .markdown))
     }
 
     /// The audit log in a popover off the dock's history button.

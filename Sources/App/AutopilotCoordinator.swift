@@ -276,10 +276,15 @@ final class AutopilotCoordinator {
     /// First Mate's outcomes, from `AgentRegistry.onOutcome`.
     func firstMateOutcome(_ outcome: IngestOutcome) {
         if outcome.newStatus == .running { awaitingTurn = false }
-        // A finished turn closes the events it was about.
+        // A finished turn closes the events it was about, and answers whoever asked.
         if outcome.newStatus == .idle, outcome.oldStatus == .running, !awaitingTurn {
             activeRules = []
             userSpoke = false
+            let answer = outcome.info.lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !replyTargets.isEmpty, !answer.isEmpty {
+                onReply?(replyTargets, answer)
+                replyTargets = []
+            }
         }
         refreshActivity()
         deliverIfReady()
@@ -308,14 +313,24 @@ final class AutopilotCoordinator {
     }
 
     /// The user's own words. Not queued: they go in now, whatever First Mate is
-    /// doing — the agent's composer takes a message mid-turn.
-    func sendUserMessage(_ text: String) {
+    /// doing — the agent's composer takes a message mid-turn. `replyTo` is a
+    /// chat (a `CommandSession` key) that gets First Mate's answer when its
+    /// turn ends. False when First Mate is not running.
+    @discardableResult
+    func sendUserMessage(_ text: String, replyTo: String? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let id = station?.id else { return }
+        guard enabled, !trimmed.isEmpty, let id = station?.id else { return false }
         userSpoke = true
+        if let replyTo, !replyTargets.contains(replyTo) { replyTargets.append(replyTo) }
         send(trimmed, to: id)
         audit.append(.init(at: Date(), kind: .message, text: trimmed))
+        return true
     }
+
+    /// Chats waiting on First Mate's answer, and where it is sent.
+    private var replyTargets: [String] = []
+    var onReply: ((_ targets: [String], _ text: String) -> Void)?
+    var isRunning: Bool { enabled && station != nil }
 
     private func send(_ text: String, to id: String) {
         awaitingTurn = true

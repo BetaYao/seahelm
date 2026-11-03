@@ -123,6 +123,9 @@ enum CommandParser {
         case "add":
             return .success(.add)
 
+        case "mate":
+            return .success(.mate(rest.isEmpty ? nil : rest))
+
         // MARK: Legacy spellings — one release, then gone.
 
         case "worktree":
