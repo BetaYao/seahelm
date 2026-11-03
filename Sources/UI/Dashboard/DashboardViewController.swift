@@ -287,6 +287,9 @@ class DashboardViewController: NSViewController {
 
     // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
     // open as a 392pt left side panel over the terminal in .worktree mode.
+    /// A fleet row or pane row was clicked — before the selection moves.
+    var onFleetRowClick: (() -> Void)?
+
     /// First Mate's place at the foot of the fleet column.
     var firstMateDock: FirstMateDockView { overviewView.firstMateDock }
 
@@ -349,11 +352,13 @@ class DashboardViewController: NSViewController {
         // worktree it docks into the left column (same region as files/changes,
         // pushing the terminal right — not a floating overlay).
         overviewView.onSelectWorktree = { [weak self] path in
+            self?.onFleetRowClick?()
             self?.handleWorktreeRowClick(path: path)
         }
         // Pane row (expanded "Group by Pane"): enter the worktree, then focus
         // the specific pane once its split container is embedded.
         overviewView.onSelectPane = { [weak self] path, stationId in
+            self?.onFleetRowClick?()
             self?.handlePaneRowClick(path: path, stationId: stationId)
         }
         // Row context menu → the delegate's assess-then-tear-down path.

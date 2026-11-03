@@ -3741,6 +3741,12 @@ extension MainWindowController {
         let autopilot = tabCoordinator.autopilot
         dashboard.firstMateDock.apply(autopilot.state)
         dashboard.firstMateDock.onOpen = { [weak self] in self?.toggleFirstMate() }
+        // Picking a worktree is leaving First Mate: the row's terminal takes the
+        // right side back, the same row that was already selected included.
+        dashboard.onFleetRowClick = { [weak self] in
+            guard let self, self.firstMateView?.superview != nil else { return }
+            self.dashboardVC?.dismissCenterOverlay()
+        }
         dashboard.firstMateDock.onTogglePause = { [weak self] in
             guard let self else { return }
             self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
