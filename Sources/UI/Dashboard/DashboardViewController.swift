@@ -17,8 +17,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
     func dashboardDidRequestBrowseFiles(worktreePath: String)
-    /// A new worktree of `project` with an agent briefed on `issue`.
-    func dashboardDidRequestStartIssue(_ issue: GitHubIssue, project: String)
+    func dashboardDidRequestShowChanges(worktreePath: String)
 }
 
 // MARK: - PaneDisplayInfo
@@ -80,9 +79,6 @@ struct WorktreeRowInfo {
     var label: SessionLabel?
     /// Quiet for a day with nothing left to PR — see `WorktreeCleanupPolicy`.
     var isCleanupCandidate = false
-    /// The open issue(s) this worktree works on (`#12`, `#12 +1`) and their
-    /// titles. Filled in by the overview from `GitHubIssueStore`; nil = none known.
-    var issueBadge: (text: String, toolTip: String)?
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
     /// the pane that changed status most recently — and carried here rather than
@@ -213,9 +209,6 @@ class DashboardViewController: NSViewController {
     private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
         let vc = WorktreeSidePanelViewController(worktreePath: nil, initialTab: .files)
         vc.delegate = self
-        vc.worktreeBranches = { [weak self] in
-            self?.agents.map { (path: $0.worktreePath, branch: $0.thread) } ?? []
-        }
         return vc
     }()
 
@@ -293,17 +286,11 @@ class DashboardViewController: NSViewController {
         view.currentPaneTitleProvider = { [weak self] path in
             self?.currentPaneTitle(forWorktree: path)
         }
-        view.issueBadgeProvider = { path, branch in
-            let issues = GitHubIssueStore.shared.linkedIssues(worktreePath: path, branch: branch)
-            guard let first = issues.first else { return nil }
-            let text = issues.count > 1 ? "#\(first.number) +\(issues.count - 1)" : "#\(first.number)"
-            return (text, issues.map { "#\($0.number) \($0.title)" }.joined(separator: "\n"))
-        }
         return view
     }()
     private var firstMateSideOpen = false
     /// Which content the left side column currently shows (.none = collapsed).
-    private enum SidePane { case none, firstMate, files, issues }
+    private enum SidePane { case none, firstMate, files, changes }
     private var currentSide: SidePane = .none
     /// The row the user has explicitly clicked in the overview. Empty until the
     /// first click, so nothing is pre-selected (no stale default highlight).
@@ -520,12 +507,6 @@ class DashboardViewController: NSViewController {
         refreshEditModeTabsIfActive()
     }
 
-    /// A repo's issue list arrived or changed: rows re-ask for their badge.
-    func refreshIssueBadges() {
-        guard !agents.isEmpty else { return }
-        overviewView.update(agents)
-    }
-
     private func syncSidePanelToSelection() {
         let path = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath
         sidePanelVC.setWorktree(path)
@@ -615,9 +596,9 @@ class DashboardViewController: NSViewController {
             case .files:
                 openFilesColumn(.files)
                 currentSide = .files
-            case .issues:
-                openFilesColumn(.issues)
-                currentSide = .issues
+            case .changes:
+                openFilesColumn(.changes)
+                currentSide = .changes
             case .firstMate, .none:
                 openFirstMateColumn()
                 currentSide = .firstMate
@@ -646,7 +627,7 @@ class DashboardViewController: NSViewController {
             switch currentSide {
             case .firstMate: pane = .firstMate
             case .files:     pane = .files
-            case .issues:    pane = .issues
+            case .changes:   pane = .changes
             case .none:      pane = nil
             }
         }
@@ -775,7 +756,7 @@ class DashboardViewController: NSViewController {
     /// Switch the left column's active pane via chrome `selectPane`.
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
-        onRequestSelectChromePane?(pane == .issues ? .issues : .files)
+        onRequestSelectChromePane?(pane == .change ? .changes : .files)
     }
 
     /// Expand via chrome SSOT if currently collapsed.
@@ -1943,19 +1924,13 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
         }
     }
 
-    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectIssue issue: GitHubIssue) {
-        let detail = IssueDetailView(issue: issue)
-        detail.onStart = { [weak self] in self?.startIssue(issue) }
-        showCenterOverlay(detail, title: "#\(issue.number) \(issue.title)")
-    }
-
-    /// Issues are listed for the selected worktree's repo, so that is where
-    /// the new worktree goes.
-    private func startIssue(_ issue: GitHubIssue) {
-        guard let project = agents.first(where: { $0.id == selectedWorktreeId })?.project else {
-            NSSound.beep()
-            return
-        }
-        dashboardDelegate?.dashboardDidRequestStartIssue(issue, project: project)
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
+        let worktreePath = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath ?? ""
+        let fileName = URL(fileURLWithPath: path).lastPathComponent
+        let title = fileName.isEmpty ? "Changes" : fileName
+        showCenterOverlay(
+            DiffReviewView(worktreePath: worktreePath, selectedPath: path),
+            title: title
+        )
     }
 }
