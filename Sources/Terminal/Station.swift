@@ -72,7 +72,7 @@ class Station {
     var hookLocation: HookLocation?
     /// Directory the pane's surface was created in (worktree root, typically).
     /// Used as a fallback base for resolving relative paths when the live OSC 7
-    /// `pwd` hasn't been reported — which is the common case inside zmx sessions.
+    /// `pwd` hasn't been reported — which is the common case inside seahelmd sessions.
     private(set) var initialWorkingDirectory: String?
 
     /// Whether typing into this pane can actually reach it.
@@ -96,9 +96,9 @@ class Station {
     /// (e.g. after `/clear` or an agent restart), which read as a duplicate title.
     var titleBridgeActive: Bool = false
     /// Persistence backend for the paneSessionKey above.
-    var backend: String = "zmx"
+    var backend: String = "seahelmd"
     /// Agent resume ref, if this pane runs a recognized agent. When a *fresh*
-    /// backend session must be created (restore into a missing session, or zmx
+    /// backend session must be created (restore into a missing session, or seahelmd
     /// recovery), the session is seeded with the agent's resume command instead
     /// of a plain shell. Populated from Config on restore and from live hook
     /// events mid-session.
@@ -109,7 +109,7 @@ class Station {
     private var recoveryTimer: DispatchWorkItem?
     private static let recoveryDelay: TimeInterval = 3.0
     /// Gap before a second probe is allowed to confirm an unreachable session.
-    /// A daemon busy enough to miss one `zmx list` probe is indistinguishable
+    /// A daemon busy enough to miss one `seahelmd list` probe is indistinguishable
     /// from a wedged one in that instant; only the wedged one is still
     /// unreachable a beat later.
     private static let unreachableConfirmDelay: TimeInterval = 5.0
@@ -119,17 +119,17 @@ class Station {
     /// pane stays blank and the spin loop keeps a core forever.
     private static let healthRecheckInterval: TimeInterval = 60.0
     /// Recoveries attempted since this pane was last seen healthy. A backend
-    /// broken for reasons recovery cannot touch — the volume holding the zmx
+    /// broken for reasons recovery cannot touch — the volume holding the seahelmd
     /// binary is gone — would otherwise thrash forever, because every recovery
     /// re-attaches and schedules the next health check.
-    private var zmxRecoveryAttempts = 0
-    private static let maxZmxRecoveryAttempts = 3
+    private var seahelmdRecoveryAttempts = 0
+    private static let maxSeahelmdRecoveryAttempts = 3
 
     /// Owned C strings passed into `ghostty_surface_config_s`. libghostty's
     /// embedded path copies `working_directory` into its arena but assigns
     /// `command` as a borrowed slice — if we only use `String.withCString`,
     /// the pointer dies when the closure returns and the PTY starts a plain
-    /// login shell instead of `zmx attach` (sessions look "brand new" every launch).
+    /// login shell instead of `seahelmd attach` (sessions look "brand new" every launch).
     private var ownedCommand: UnsafeMutablePointer<CChar>?
     private var ownedWorkingDirectory: UnsafeMutablePointer<CChar>?
 
@@ -156,19 +156,19 @@ class Station {
         }
 
         if let paneSessionKey {
-            if backend == "zmx" {
+            if backend == "seahelmd" {
                 // If this pane runs an agent and the backend session no longer
-                // exists (e.g. reboot lost the zmx daemon), seed a fresh session
+                // exists (e.g. reboot lost the seahelmd daemon), seed a fresh session
                 // running the agent's resume command before attaching, instead
                 // of attaching into an empty shell. Seeding needs blocking
                 // process calls, so defer to a background thread and attach on
                 // main.
                 if let resumeCmd = agentSessionRef?.resumeCommandLine(), let cwd = workingDirectory {
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                        ZmxSessionRecovery.seedSessionIfMissing(name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
+                        SeahelmdSessionRecovery.seedSessionIfMissing(name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
                         DispatchQueue.main.async {
                             guard let self else { return }
-                            self.attachZmx(
+                            self.attachSeahelmd(
                                 app: app,
                                 container: container,
                                 workingDirectory: workingDirectory,
@@ -180,7 +180,7 @@ class Station {
                     }
                     return true  // Surface creation is deferred
                 }
-                attachZmx(
+                attachSeahelmd(
                     app: app,
                     container: container,
                     workingDirectory: workingDirectory,
@@ -201,39 +201,36 @@ class Station {
         return surface != nil
     }
 
-    /// Attach to a zmx session and schedule the post-attach health check.
-    /// Build the pane command for attaching to a zmx session. `env -u` guards
-    /// against a leaked ZMX_SESSION (e.g. app relaunched from inside a pane):
-    /// zmx attach prefers $ZMX_SESSION over its argument, which would silently
-    /// attach every pane to the wrong session.
+    /// Attach to a seahelmd session and schedule the post-attach health check.
+    /// Build the pane command for attaching to a seahelmd session.
     ///
     /// The session key is single-quoted: this string is handed to a shell, and a
     /// workspace directory with a space in it (`~/My Project`) yields a key with a
-    /// space in it. Unquoted, the shell splits it and zmx reads the tail as the
-    /// command to run — `zmx attach seahelm-me-My Project` means session
+    /// space in it. Unquoted, the shell splits it and seahelmd reads the tail as the
+    /// command to run — `seahelmd attach seahelm-me-My Project` means session
     /// `seahelm-me-My`, command `Project` — so the pane dies on launch.
-    static func zmxAttachCommand(paneSessionKey: String) -> String {
-        let env = ZmxLocator.sessionEnvironment().map { ShellEscape.singleQuote($0) + " " }.joined()
-        return "/usr/bin/env -u ZMX_SESSION \(env)\(ShellEscape.singleQuote(ZmxLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
+    static func seahelmdAttachCommand(paneSessionKey: String) -> String {
+        let env = SeahelmdLocator.sessionEnvironment().map { ShellEscape.singleQuote($0) + " " }.joined()
+        return "/usr/bin/env \(env)\(ShellEscape.singleQuote(SeahelmdLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
     }
 
-    private func attachZmx(
+    private func attachSeahelmd(
         app: ghostty_app_t,
         container: NSView,
         workingDirectory: String?,
         paneSessionKey: String,
         initialFrame: CGRect? = nil
     ) {
-        let zmxCommand = Self.zmxAttachCommand(paneSessionKey: paneSessionKey)
+        let seahelmdCommand = Self.seahelmdAttachCommand(paneSessionKey: paneSessionKey)
         _createWithCommand(
             app: app,
             container: container,
             workingDirectory: workingDirectory,
-            command: zmxCommand,
+            command: seahelmdCommand,
             initialFrame: initialFrame
         )
         if surface != nil {
-            scheduleZmxHealthCheck(paneSessionKey: paneSessionKey, container: container, workingDirectory: workingDirectory)
+            scheduleSeahelmdHealthCheck(paneSessionKey: paneSessionKey, container: container, workingDirectory: workingDirectory)
         }
     }
 
@@ -480,7 +477,7 @@ class Station {
         // bytes, straight into the pane's session.
         if chord.alt, !chord.isCharacter,
            let sessionKey = paneSessionKey, !sessionKey.isEmpty, let bytes = chord.bytes {
-            return ZmxChannel(paneSessionKey: sessionKey).sendRaw(bytes)
+            return SeahelmdChannel(paneSessionKey: sessionKey).sendRaw(bytes)
         }
         if chord.alt {
             var plain = chord
@@ -548,10 +545,10 @@ class Station {
         }
     }
 
-    /// `pressKeysOnSurface` for a pane with no surface, as raw bytes into its zmx
+    /// `pressKeysOnSurface` for a pane with no surface, as raw bytes into its seahelmd
     /// session. Blocks for the Return pauses — call it off the main thread.
     static func pressKeys(_ keys: [String], viaSession sessionKey: String) -> Bool {
-        let channel = ZmxChannel(paneSessionKey: sessionKey)
+        let channel = SeahelmdChannel(paneSessionKey: sessionKey)
         var delivered = true
         for (index, key) in keys.enumerated() {
             if ControlKeys.isEnter(key) {
@@ -568,13 +565,13 @@ class Station {
 
     /// Stop the agent's current turn without ending its session: Esc, which
     /// every agent TUI reads that way. A real key event when the pane has a live
-    /// surface, else the raw byte through zmx. False when neither path reached it.
+    /// surface, else the raw byte through seahelmd. False when neither path reached it.
     @discardableResult
     func interruptTurn() -> Bool {
         if canDeliverInput && sendKeyPress("escape") { return true }
         guard let sessionKey = paneSessionKey, !sessionKey.isEmpty,
               let esc = ControlKeys.bytes(for: "escape") else { return false }
-        return ZmxChannel(paneSessionKey: sessionKey).sendRaw(esc)
+        return SeahelmdChannel(paneSessionKey: sessionKey).sendRaw(esc)
     }
 
     func readViewportText() -> String? {
@@ -585,7 +582,7 @@ class Station {
     /// Whether this pane still shows nothing but the shell's first prompt — the
     /// state a pane seahelm stands up for a worktree sits in until someone uses it.
     ///
-    /// `nil` means *unknowable*, not "no". An asleep pane's content lives in a zmx
+    /// `nil` means *unknowable*, not "no". An asleep pane's content lives in a seahelmd
     /// session this cannot read, and a failed read is not evidence of emptiness;
     /// a caller deciding whether to discard a pane must treat nil as "used".
     var showsOnlyPrompt: Bool? {
@@ -680,7 +677,7 @@ class Station {
     var hasLiveSurface: Bool { surface != nil }
 
     /// Capture the current backend session frame for status scanning when there
-    /// is no live surface to read (e.g. an overview card never selected). zmx
+    /// is no live surface to read (e.g. an overview card never selected). seahelmd
     /// `history` includes the live rendered frame — alt-screen TUIs like Claude
     /// Code included — so the agent's status line ("esc to interrupt", prompts)
     /// is present. Returns the last `lines` rows to approximate a viewport (keeps
@@ -688,8 +685,8 @@ class Station {
     /// Runs a subprocess — call off the main thread only. Returns nil when there
     /// is a live surface (use `readViewportText()` instead) or no backend session.
     func readBackendText(lines: Int = 60) -> String? {
-        guard surface == nil, backend == "zmx", let paneSessionKey else { return nil }
-        return ZmxChannel(paneSessionKey: paneSessionKey).readOutput(lines: lines)
+        guard surface == nil, backend == "seahelmd", let paneSessionKey else { return nil }
+        return SeahelmdChannel(paneSessionKey: paneSessionKey).readOutput(lines: lines)
     }
 
     /// Get the process status for status detection
@@ -704,14 +701,14 @@ class Station {
         return .running
     }
 
-    // MARK: - Zmx Session Recovery
+    // MARK: - Seahelmd Session Recovery
 
-    /// Schedule a health check after zmx attach. If the attach client has
+    /// Schedule a health check after seahelmd attach. If the attach client has
     /// exited, re-attach (and only recreate the daemon when it is truly gone).
-    private func scheduleZmxHealthCheck(paneSessionKey: String, container: NSView, workingDirectory: String?) {
+    private func scheduleSeahelmdHealthCheck(paneSessionKey: String, container: NSView, workingDirectory: String?) {
         recoveryTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.checkZmxHealth(
+            self?.checkSeahelmdHealth(
                 paneSessionKey: paneSessionKey,
                 container: container,
                 workingDirectory: workingDirectory,
@@ -722,7 +719,7 @@ class Station {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.recoveryDelay, execute: work)
     }
 
-    private func checkZmxHealth(
+    private func checkSeahelmdHealth(
         paneSessionKey: String,
         container: NSView,
         workingDirectory: String?,
@@ -731,7 +728,7 @@ class Station {
         // If the surface was already destroyed, nothing to do.
         guard surface != nil else { return }
         if reschedule {
-            schedulePeriodicZmxHealthCheck(
+            schedulePeriodicSeahelmdHealthCheck(
                 paneSessionKey: paneSessionKey,
                 container: container,
                 workingDirectory: workingDirectory
@@ -741,7 +738,7 @@ class Station {
         // wedged by its volume disappearing leaves the client hanging rather than
         // exiting, so gating on exit meant the one failure that never recovers on
         // its own was also the one this check never looked at.
-        probeZmxSession(
+        probeSeahelmdSession(
             paneSessionKey: paneSessionKey,
             container: container,
             workingDirectory: workingDirectory,
@@ -750,14 +747,14 @@ class Station {
         )
     }
 
-    private func schedulePeriodicZmxHealthCheck(
+    private func schedulePeriodicSeahelmdHealthCheck(
         paneSessionKey: String,
         container: NSView,
         workingDirectory: String?
     ) {
         recoveryTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.checkZmxHealth(
+            self?.checkSeahelmdHealth(
                 paneSessionKey: paneSessionKey,
                 container: container,
                 workingDirectory: workingDirectory,
@@ -771,25 +768,25 @@ class Station {
     /// Probe the session's reachability off the main thread and act on the plan.
     ///
     /// `confirmUnreachable` spends one delayed re-probe before an unreachable
-    /// reading is allowed to mean "dead" — see `ZmxSessionRecovery.plan`.
-    private func probeZmxSession(
+    /// reading is allowed to mean "dead" — see `SeahelmdSessionRecovery.plan`.
+    private func probeSeahelmdSession(
         paneSessionKey: String,
         container: NSView,
         workingDirectory: String?,
         processExited: Bool,
         confirmUnreachable: Bool
     ) {
-        // Reachability is a blocking `zmx list`, and a slow one exactly when
+        // Reachability is a blocking `seahelmd list`, and a slow one exactly when
         // sessions are wedged — never on the main thread.
         let queue = DispatchQueue.global(qos: .utility)
         queue.async { [weak self] in
             guard self != nil else { return }
-            let reachability = SessionManager.sessionReachability(name: paneSessionKey, backend: "zmx")
+            let reachability = SessionManager.sessionReachability(name: paneSessionKey, backend: "seahelmd")
             if reachability == .unreachable, confirmUnreachable {
                 // asyncAfter, not sleep: with a dozen panes probing at once,
                 // parking a pool thread each is how the dispatch pool starves.
                 queue.asyncAfter(deadline: .now() + Self.unreachableConfirmDelay) { [weak self] in
-                    self?.probeZmxSession(
+                    self?.probeSeahelmdSession(
                         paneSessionKey: paneSessionKey,
                         container: container,
                         workingDirectory: workingDirectory,
@@ -799,11 +796,11 @@ class Station {
                 }
                 return
             }
-            let plan = ZmxSessionRecovery.plan(processExited: processExited, reachability: reachability)
+            let plan = SeahelmdSessionRecovery.plan(processExited: processExited, reachability: reachability)
             guard plan != .none else {
                 // A pane confirmed healthy gets its recovery budget back.
                 if reachability == .reachable {
-                    DispatchQueue.main.async { self?.zmxRecoveryAttempts = 0 }
+                    DispatchQueue.main.async { self?.seahelmdRecoveryAttempts = 0 }
                 }
                 return
             }
@@ -815,7 +812,7 @@ class Station {
                 String(describing: plan)
             )
             DispatchQueue.main.async {
-                self?.recoverZmxSession(
+                self?.recoverSeahelmdSession(
                     paneSessionKey: paneSessionKey,
                     container: container,
                     workingDirectory: workingDirectory,
@@ -825,20 +822,20 @@ class Station {
         }
     }
 
-    private func recoverZmxSession(
+    private func recoverSeahelmdSession(
         paneSessionKey: String,
         container: NSView,
         workingDirectory: String?,
-        plan: ZmxSessionRecovery.Plan
+        plan: SeahelmdSessionRecovery.Plan
     ) {
-        guard zmxRecoveryAttempts < Self.maxZmxRecoveryAttempts else {
+        guard seahelmdRecoveryAttempts < Self.maxSeahelmdRecoveryAttempts else {
             NSLog(
                 "Station: giving up on session '%@' after %d recovery attempts",
-                paneSessionKey, zmxRecoveryAttempts
+                paneSessionKey, seahelmdRecoveryAttempts
             )
             return
         }
-        zmxRecoveryAttempts += 1
+        seahelmdRecoveryAttempts += 1
         let resumeCmd = agentSessionRef?.resumeCommandLine()
         DispatchQueue.global(qos: .utility).async {
             switch plan {
@@ -850,9 +847,9 @@ class Station {
             case .recreate:
                 // Session is gone. Clear any stale socket, then optionally seed
                 // an agent resume so we don't land in an empty shell.
-                ZmxSessionRecovery.forceKillSession(paneSessionKey)
+                SeahelmdSessionRecovery.forceKillSession(paneSessionKey)
                 if let resumeCmd, let cwd = workingDirectory {
-                    ZmxSessionRecovery.seedSessionIfMissing(
+                    SeahelmdSessionRecovery.seedSessionIfMissing(
                         name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
                 }
             }
@@ -863,12 +860,12 @@ class Station {
 
                 self.destroy()
 
-                let zmxCommand = Self.zmxAttachCommand(paneSessionKey: paneSessionKey)
+                let seahelmdCommand = Self.seahelmdAttachCommand(paneSessionKey: paneSessionKey)
                 self._createWithCommand(
                     app: app,
                     container: container,
                     workingDirectory: workingDirectory,
-                    command: zmxCommand
+                    command: seahelmdCommand
                 )
                 self.delegate?.stationDidRecover(self)
             }
@@ -878,7 +875,7 @@ class Station {
     // MARK: - Sleep / Wake
 
     /// True while this pane's ghostty surface is torn down to reclaim memory.
-    /// Only the surface goes away — the zmx session (and the agent inside it)
+    /// Only the surface goes away — the seahelmd session (and the agent inside it)
     /// keeps running, and status detection falls back to `readBackendText()`,
     /// the same path already used for dashboard cards that were never opened.
     private(set) var isAsleep = false
@@ -890,7 +887,7 @@ class Station {
     /// has nowhere to keep its process, so sleeping it would silently kill the
     /// work — `local` panes are never eligible.
     var canSleep: Bool {
-        surface != nil && !isAsleep && backend == "zmx" && !(paneSessionKey ?? "").isEmpty
+        surface != nil && !isAsleep && backend == "seahelmd" && !(paneSessionKey ?? "").isEmpty
     }
 
     /// Pins the post-`sleep()` flag without a live Ghostty surface, so layout /
@@ -939,7 +936,7 @@ class Station {
     }
 
     /// Re-create the surface and re-attach to the backend session, then hand the
-    /// new view back to the container through the same re-embed path zmx recovery
+    /// new view back to the container through the same re-embed path seahelmd recovery
     /// uses. Main thread. Returns false if the station wasn't asleep.
     @discardableResult
     func wake() -> Bool {
@@ -966,7 +963,7 @@ class Station {
                 app: app,
                 container: container,
                 workingDirectory: initialWorkingDirectory,
-                command: paneSessionKey.map { Self.zmxAttachCommand(paneSessionKey: $0) },
+                command: paneSessionKey.map { Self.seahelmdAttachCommand(paneSessionKey: $0) },
                 // The captured frame only means anything inside the container it was
                 // captured from; a substitute container lays out from its own bounds.
                 initialFrame: originalContainer != nil ? sleepFrame : nil

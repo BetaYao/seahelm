@@ -1,6 +1,6 @@
 import AppKit
 
-/// First Mate over the terminal side (docs/first-mate-autopilot.md §3): its own
+/// First Mate over the terminal side: its own
 /// terminal, nothing else — it should read like any selected pane, and the
 /// terminal is where you talk to it.
 final class FirstMateView: NSView {

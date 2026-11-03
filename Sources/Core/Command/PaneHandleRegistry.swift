@@ -9,7 +9,7 @@ import Foundation
 /// a listing's "2." was a different pane on the desktop than in chat.
 ///
 /// Keyed by the pane's persistent session name (`SEAHELM_PANE_ID`), which is
-/// what survives a relaunch. A local (non-zmx) pane has none and is keyed by
+/// what survives a relaunch. A local (non-seahelmd) pane has none and is keyed by
 /// its station id instead — stable within one run, which is all such a pane
 /// lives for anyway.
 final class PaneHandleRegistry {

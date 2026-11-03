@@ -56,7 +56,7 @@ final class PaneTransferTests: XCTestCase {
 
     func testMoveLeafFromSinglePaneWorktreeEmptiesTheSource() {
         let manager = StationManager()
-        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let tree = manager.tree(for: info("/repo"), backend: "seahelmd")
         let stationId = tree.allLeaves[0].stationId
 
         let move = manager.moveLeaf(stationId: stationId, toPath: "/repo-worktrees/feature")
@@ -70,10 +70,10 @@ final class PaneTransferTests: XCTestCase {
     }
 
     func testMovedLeafKeepsItsSessionName() {
-        // zmx cannot rename a session, so the live pane stays addressable only by
+        // seahelmd cannot rename a session, so the live pane stays addressable only by
         // the name it was created with.
         let manager = StationManager()
-        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let tree = manager.tree(for: info("/repo"), backend: "seahelmd")
         let original = tree.allLeaves[0].paneSessionKey
         let stationId = tree.allLeaves[0].stationId
 
@@ -85,7 +85,7 @@ final class PaneTransferTests: XCTestCase {
     func testDestinationTreeNamesLaterPanesAfterItsOwnWorktree() {
         // The adopted leaf keeps its old name; panes split off afterwards must not.
         let manager = StationManager()
-        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let tree = manager.tree(for: info("/repo"), backend: "seahelmd")
         let stationId = tree.allLeaves[0].stationId
 
         let move = manager.moveLeaf(stationId: stationId, toPath: "/repo-worktrees/feature")
@@ -96,7 +96,7 @@ final class PaneTransferTests: XCTestCase {
 
     func testMoveLeafTakesOnlyTheNamedPane() {
         let manager = StationManager()
-        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let tree = manager.tree(for: info("/repo"), backend: "seahelmd")
         let siblingStation = Station()
         StationRegistry.shared.register(siblingStation)
         tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "leaf-2",
@@ -113,8 +113,8 @@ final class PaneTransferTests: XCTestCase {
 
     func testMoveIntoOccupiedWorktreeJoinsItInsteadOfReplacing() {
         let manager = StationManager()
-        let source = manager.tree(for: info("/repo"), backend: "zmx")
-        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "zmx")
+        let source = manager.tree(for: info("/repo"), backend: "seahelmd")
+        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "seahelmd")
         let residentStationId = destination.allLeaves[0].stationId
         let movingStationId = source.allLeaves[0].stationId
 
@@ -124,13 +124,13 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertTrue(move?.tree.allLeaves.contains { $0.stationId == movingStationId } == true)
     }
 
-    /// The pane that leaves keeps the worktree's canonical zmx session name —
-    /// zmx has no rename — so a replacement pane must claim a different one or
+    /// The pane that leaves keeps the worktree's canonical seahelmd session name —
+    /// seahelmd has no rename — so a replacement pane must claim a different one or
     /// both panes drive the same live session.
     func testReplacementPaneDoesNotReuseTheDepartedPanesSessionName() {
         let manager = StationManager()
         let source = info("/repo")
-        let tree = manager.tree(for: source, backend: "zmx")
+        let tree = manager.tree(for: source, backend: "seahelmd")
         let departedName = tree.allLeaves[0].paneSessionKey
         XCTAssertEqual(departedName, SessionManager.persistentSessionName(for: "/repo"))
 
@@ -138,7 +138,7 @@ final class PaneTransferTests: XCTestCase {
                                     toPath: "/repo-worktrees/feature")
         XCTAssertEqual(move?.sourceEmptied, true)
 
-        let replacement = manager.replacementTree(for: source, backend: "zmx")
+        let replacement = manager.replacementTree(for: source, backend: "seahelmd")
         XCTAssertNotEqual(replacement.allLeaves[0].paneSessionKey, departedName)
         XCTAssertFalse(replacement.allLeaves[0].paneSessionKey.isEmpty)
     }
@@ -146,7 +146,7 @@ final class PaneTransferTests: XCTestCase {
     func testReplacementPaneTakesTheCanonicalNameWhenItIsFree() {
         let manager = StationManager()
         let source = info("/repo")
-        let replacement = manager.replacementTree(for: source, backend: "zmx")
+        let replacement = manager.replacementTree(for: source, backend: "seahelmd")
         XCTAssertEqual(replacement.allLeaves[0].paneSessionKey,
                        SessionManager.persistentSessionName(for: "/repo"))
     }
@@ -157,11 +157,11 @@ final class PaneTransferTests: XCTestCase {
     /// earlier form replaced `root` outright and orphaned every Station in it.
     func testAdoptIntoTreeWithStaleFocusKeepsExistingPanes() {
         let manager = StationManager()
-        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "zmx")
+        let destination = manager.tree(for: info("/repo-worktrees/feature"), backend: "seahelmd")
         let residentStationId = destination.allLeaves[0].stationId
         destination.focusedId = "no-such-leaf"
 
-        let source = manager.tree(for: info("/repo"), backend: "zmx")
+        let source = manager.tree(for: info("/repo"), backend: "seahelmd")
         let movingStationId = source.allLeaves[0].stationId
 
         let move = manager.moveLeaf(stationId: movingStationId, toPath: "/repo-worktrees/feature")
@@ -178,7 +178,7 @@ final class PaneTransferTests: XCTestCase {
 
     func testMoveLeafToItsOwnWorktreeIsANoOp() {
         let manager = StationManager()
-        let tree = manager.tree(for: info("/repo"), backend: "zmx")
+        let tree = manager.tree(for: info("/repo"), backend: "seahelmd")
         XCTAssertNil(manager.moveLeaf(stationId: tree.allLeaves[0].stationId, toPath: "/repo"))
         XCTAssertNotNil(manager.tree(forPath: "/repo"))
     }
@@ -234,10 +234,10 @@ final class PaneTransferTests: XCTestCase {
         for station in [first, second] {
             AgentRegistry.shared.register(station: station, worktreePath: "/wt-multi", branch: "main",
                                           project: "proj", startedAt: nil,
-                                          paneSessionKey: "seahelm-wt-multi", backend: "zmx")
+                                          paneSessionKey: "seahelm-wt-multi", backend: "seahelmd")
         }
         AgentRegistry.shared.unregister(terminalID: first.id)
-        XCTAssertEqual(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"), "zmx")
+        XCTAssertEqual(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"), "seahelmd")
 
         AgentRegistry.shared.unregister(terminalID: second.id)
         XCTAssertNil(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"),

@@ -114,7 +114,7 @@ class AgentRegistry {
 
     func register(station: Station, worktreePath: String, branch: String,
                   project: String, startedAt: Date?,
-                  paneSessionKey: String? = nil, backend: String = "zmx") {
+                  paneSessionKey: String? = nil, backend: String = "seahelmd") {
         lock.lock()
         defer { lock.unlock() }
 
@@ -123,7 +123,7 @@ class AgentRegistry {
         // Create a default channel if we have a session name
         var channel: AgentChannel?
         if let paneSessionKey = paneSessionKey {
-            channel = ZmxChannel(paneSessionKey: paneSessionKey)
+            channel = SeahelmdChannel(paneSessionKey: paneSessionKey)
             channels[terminalID] = channel
         }
         backendsByPath[worktreePath] = backend
@@ -695,9 +695,9 @@ class AgentRegistry {
 
         // Upgrade channel for supported hook-based agents.
         if agentType == .claudeCode || agentType == .codex {
-            let backend = backendsByPath[worktreePath] ?? "zmx"
-            if let zmx = channels[terminalID] as? ZmxChannel {
-                let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey, backend: backend)
+            let backend = backendsByPath[worktreePath] ?? "seahelmd"
+            if let seahelmd = channels[terminalID] as? SeahelmdChannel {
+                let hooks = HooksChannel(paneSessionKey: seahelmd.paneSessionKey, backend: backend)
                 channels[terminalID] = hooks
                 info.channel = hooks
             }
@@ -731,8 +731,8 @@ class AgentRegistry {
 
                 // Upgrade channel for supported hook-based agents.
                 if (agentType == .claudeCode || agentType == .codex),
-                   let zmx = channels[terminalID] as? ZmxChannel {
-                    let hooks = HooksChannel(paneSessionKey: zmx.paneSessionKey)
+                   let seahelmd = channels[terminalID] as? SeahelmdChannel {
+                    let hooks = HooksChannel(paneSessionKey: seahelmd.paneSessionKey)
                     channels[terminalID] = hooks
                     info.channel = hooks
                 }
@@ -815,8 +815,7 @@ class AgentRegistry {
 
     /// Send a command to a specific agent.
     /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
-    /// artifacts leak into the command line — e.g. `zmx run` appends a `ZMX_TASK_COMPLETED` marker,
-    /// which showed up verbatim when a suggestion chip was clicked. Fall back to the control channel
+    /// artifacts leak into the command line. Fall back to the control channel
     /// only when the surface isn't available (e.g. pane not currently rendered).
     /// Send a command to a specific agent.
     /// - Parameter submitWithAttachments: When the command peels to images,
@@ -882,13 +881,11 @@ class AgentRegistry {
         lock.lock()
         let channel = channels[terminalID]
         lock.unlock()
-        // Channel sends spawn a subprocess (zmx/tmux) and wait for it — callers
+        // Channel sends spawn a subprocess (seahelmd/tmux) and wait for it — callers
         // are mostly main-thread interaction sites, so keep it off-thread.
         DispatchQueue.global(qos: .userInitiated).async {
-            // `zmx send` in preference to the registered channel's `zmx run`,
-            // which appends a ZMX_TASK_COMPLETED marker that ends up typed into
-            // the command line verbatim.
-            if !sessionKey.isEmpty, ZmxChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
+            // `seahelmd send` in preference to the registered channel's `seahelmd run`.
+            if !sessionKey.isEmpty, SeahelmdChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
             channel?.sendCommand(command)
         }
     }
@@ -915,7 +912,7 @@ class AgentRegistry {
 
     /// Press named keys in a pane (`Station.pressKeysOnSurface`). Same
     /// surface-versus-session split as `sendCommand`: a pane whose tab was never
-    /// opened gets the bytes through zmx, or the keys would vanish while looking
+    /// opened gets the bytes through seahelmd, or the keys would vanish while looking
     /// like they were pressed.
     func pressKeys(to terminalID: String, keys: [String]) {
         guard let station = StationRegistry.shared.station(forId: terminalID) else { return }

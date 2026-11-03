@@ -1,8 +1,8 @@
 import Foundation
 
-// MARK: - Timing constants (ported from zmx-vt.js)
+// MARK: - Timing constants
 
-enum ZmxVTTiming {
+enum SeahelmdVTTiming {
     static let snapshotIdleMs: Int = 160
     /// Measured from the open: the attach may take this long to say anything.
     static let snapshotMaxMs: Int = 2500
@@ -35,7 +35,7 @@ protocol VTProcessSpawning {
         sessionKey: String,
         rows: Int,
         cols: Int,
-        zmxPath: String
+        seahelmdPath: String
     ) throws -> VTAttachedProcess
 }
 
@@ -45,7 +45,7 @@ struct VTProcessSpawnRequest: Equatable {
     let sessionKey: String
     let rows: Int
     let cols: Int
-    let zmxPath: String
+    let seahelmdPath: String
 }
 
 final class LiveVTAttachedProcess: VTAttachedProcess {
@@ -99,15 +99,14 @@ final class DefaultVTProcessSpawner: VTProcessSpawning {
         sessionKey: String,
         rows: Int,
         cols: Int,
-        zmxPath: String
+        seahelmdPath: String
     ) throws -> VTAttachedProcess {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: python3)
         process.arguments = [scriptPath, sessionKey, String(rows), String(cols)]
 
         var env = ProcessInfo.processInfo.environment
-        env["ZMX"] = zmxPath
-        env.removeValue(forKey: "ZMX_SESSION")
+        env["SEAHELMD"] = seahelmdPath
         process.environment = env
 
         let outPipe = Pipe()
@@ -123,7 +122,7 @@ final class DefaultVTProcessSpawner: VTProcessSpawning {
 
 // MARK: - Manager
 
-final class ZmxVTAttachManager: HostGatewayVTAttaching {
+final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
     /// Observers, not one closure. A single slot meant every new browser session
     /// overwrote the previous one's callback on this shared manager, so opening a
     /// second tab silently killed the first tab's terminal.
@@ -155,7 +154,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     }
 
     private let processSpawner: VTProcessSpawning
-    private let zmxPath: (String) -> String
+    private let seahelmdPath: (String) -> String
     private let attachScriptPath: () -> String?
     private let sessionSize: (String) -> (rows: Int, cols: Int)?
     private let now: () -> Date
@@ -171,19 +170,19 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
 
     init(
         processSpawner: VTProcessSpawning = DefaultVTProcessSpawner(),
-        zmxPath: @escaping (String) -> String = { _ in ZmxLocator.executable() },
-        attachScriptPath: @escaping () -> String? = { ZmxVTAttachManager.bundledAttachScriptPath() },
-        sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { ZmxVTAttachManager.defaultSessionSize(for: $0) },
+        seahelmdPath: @escaping (String) -> String = { _ in SeahelmdLocator.executable() },
+        attachScriptPath: @escaping () -> String? = { SeahelmdVTAttachManager.bundledAttachScriptPath() },
+        sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { SeahelmdVTAttachManager.defaultSessionSize(for: $0) },
         now: @escaping () -> Date = Date.init,
-        leaseTTL: TimeInterval = TimeInterval(ZmxVTTiming.leaseTTLMs) / 1000,
-        snapshotIdle: TimeInterval = TimeInterval(ZmxVTTiming.snapshotIdleMs) / 1000,
-        snapshotMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotMaxMs) / 1000,
-        snapshotSettleMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotSettleMaxMs) / 1000,
-        flushInterval: TimeInterval = TimeInterval(ZmxVTTiming.flushMs) / 1000,
-        queue: DispatchQueue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager")
+        leaseTTL: TimeInterval = TimeInterval(SeahelmdVTTiming.leaseTTLMs) / 1000,
+        snapshotIdle: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotIdleMs) / 1000,
+        snapshotMax: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotMaxMs) / 1000,
+        snapshotSettleMax: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotSettleMaxMs) / 1000,
+        flushInterval: TimeInterval = TimeInterval(SeahelmdVTTiming.flushMs) / 1000,
+        queue: DispatchQueue = DispatchQueue(label: "com.seahelm.SeahelmdVTAttachManager")
     ) {
         self.processSpawner = processSpawner
-        self.zmxPath = zmxPath
+        self.seahelmdPath = seahelmdPath
         self.attachScriptPath = attachScriptPath
         self.sessionSize = sessionSize
         self.now = now
@@ -291,12 +290,12 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
     // MARK: Geometry
 
     static func bundledAttachScriptPath() -> String? {
-        Bundle.main.url(forResource: "zmx-attach", withExtension: "py")?.path
+        Bundle.main.url(forResource: "seahelmd-attach", withExtension: "py")?.path
     }
 
     static func defaultSessionSize(for paneSessionKey: String) -> (rows: Int, cols: Int)? {
-        guard let listOutput = ZmxLocator.listOutput() else { return nil }
-        guard let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: listOutput) else {
+        guard let listOutput = SeahelmdLocator.listOutput() else { return nil }
+        guard let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey, seahelmdListOutput: listOutput) else {
             return nil
         }
         guard let ttyOut = ProcessRunner.output(["ps", "-o", "tty=", "-p", String(pid)]) else { return nil }
@@ -313,7 +312,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
 
     static func resolvedGeometry(for paneSessionKey: String,
                                  lookup: (String) -> (rows: Int, cols: Int)?) -> (rows: Int, cols: Int) {
-        lookup(paneSessionKey) ?? (rows: ZmxVTTiming.defaultRows, cols: ZmxVTTiming.defaultCols)
+        lookup(paneSessionKey) ?? (rows: SeahelmdVTTiming.defaultRows, cols: SeahelmdVTTiming.defaultCols)
     }
 
     // MARK: Private
@@ -326,7 +325,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
 
         let geometry = Self.resolvedGeometry(for: paneSessionKey, lookup: sessionSize)
         guard let scriptPath = attachScriptPath() else {
-            return ["ok": false, "error": "zmx-attach.py not bundled"]
+            return ["ok": false, "error": "seahelmd-attach.py not bundled"]
         }
 
         let proc: VTAttachedProcess
@@ -337,7 +336,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
                 sessionKey: paneSessionKey,
                 rows: geometry.rows,
                 cols: geometry.cols,
-                zmxPath: zmxPath(paneSessionKey))
+                seahelmdPath: seahelmdPath(paneSessionKey))
         } catch {
             return ["ok": false, "error": error.localizedDescription]
         }
@@ -400,7 +399,7 @@ final class ZmxVTAttachManager: HostGatewayVTAttaching {
             // set and did nothing, so the pane emitted nothing at all until it
             // hit the 48KB cap. An interactive shell just froze.
             let sinceLastFlush = max(0, now().timeIntervalSince(st.lastFlush))
-            if st.buffer.count >= ZmxVTTiming.maxChunkBytes || sinceLastFlush >= flushInterval {
+            if st.buffer.count >= SeahelmdVTTiming.maxChunkBytes || sinceLastFlush >= flushInterval {
                 flushLive(key: key)
             } else if st.flushWorkItem == nil {
                 let work = DispatchWorkItem { [weak self] in

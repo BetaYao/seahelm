@@ -21,7 +21,7 @@ class StatusPublisher {
     private let pollInterval: TimeInterval = 2.0
     private let pollQueue = DispatchQueue(label: "com.seahelm.status-poll", qos: .utility)
     private let nonPreferredPollStride: Int = 3
-    /// Backend-capture (zmx history) cadence for surface-less panes, in poll
+    /// Backend-capture (seahelmd history) cadence for surface-less panes, in poll
     /// cycles. Each such capture forks a subprocess, so we sample every Nth cycle
     /// (~6s at a 2s interval) rather than every cycle, and stagger panes by an
     /// id-derived offset so they don't all fork on the same tick.
@@ -263,9 +263,9 @@ class StatusPublisher {
     }
 
     private func pollAll(_ surfaceSnapshot: [String: Station], preferredPaths: Set<String>, pollCycle: Int, paths: [String: String]) {
-        // One `zmx list` fork and one process-table walk for the whole cycle,
+        // One `seahelmd list` fork and one process-table walk for the whole cycle,
         // captured on first use so a cycle where every pane's probe is still
-        // fresh pays nothing at all. The failure is memoised too — a missing zmx
+        // fresh pays nothing at all. The failure is memoised too — a missing seahelmd
         // must not have each pane retry the fork.
         var captured: ProcessProbe.ProbeContext?
         var didCapture = false
@@ -292,7 +292,7 @@ class StatusPublisher {
 
             // No live surface: this is a dashboard overview card that was never
             // opened, so there is nothing to screen-scrape. Fall back to a
-            // throttled backend capture (zmx history) so its agent status still
+            // throttled backend capture (seahelmd history) so its agent status still
             // advances instead of freezing until a hook fires. The capture spawns
             // a subprocess, so it runs on a stride (not every cycle) and is
             // staggered per pane to avoid a subprocess burst on a single cycle.
@@ -468,7 +468,7 @@ class StatusPublisher {
                 return (cachedType ?? .unknown, cachedCmd, cachedNoAgent ? .cached : .none)
             }
         }
-        // No context means `zmx list` failed this cycle — the same miss the probe
+        // No context means `seahelmd list` failed this cycle — the same miss the probe
         // itself used to report, so fall through with the same bookkeeping.
         let probe = context().map { ProcessProbe.probeSession(paneSessionKey: paneSessionKey, context: $0) }
             ?? .miss

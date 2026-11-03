@@ -1,7 +1,7 @@
 import XCTest
 @testable import seahelm
 
-/// Regression tests for zmx session-recovery re-embed. The bug: `Station.delegate`
+/// Regression tests for seahelmd session-recovery re-embed. The bug: `Station.delegate`
 /// was never assigned, so `stationDidRecover` was dead code and a recovered
 /// (recreated) surface was orphaned — a dead pane until Cmd+W. `layoutTree()` now
 /// wires the delegate to the displaying container, and `stationDidRecover`

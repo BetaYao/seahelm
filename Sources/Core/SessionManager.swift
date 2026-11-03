@@ -1,21 +1,21 @@
 import Foundation
 import CommonCrypto
 
-/// One live zmx session as reported by `zmx list`.
+/// One live seahelmd session as reported by `seahelmd list`.
 ///
 /// The daemon outlives the app, so this is also the only place stray sessions
 /// become visible: a pane closed while its session survived shows up here with
 /// `clients == 0` and nothing pointing at it.
-struct ZmxSessionInfo: Equatable {
+struct SeahelmdSessionInfo: Equatable {
     let name: String
     let pid: Int?
     /// Attached clients. 0 means the session is running with nobody watching —
-    /// the shape an orphan takes. Nil means `zmx` didn't report the field, which
+    /// the shape an orphan takes. Nil means `seahelmd` didn't report the field, which
     /// is not the same as zero and must never be treated as reapable.
     let clients: Int?
     let created: Date?
     let startDir: String?
-    /// RSS sum for the zmx session root process and descendants.
+    /// RSS sum for the seahelmd session root process and descendants.
     var processMemoryBytes: UInt64?
     /// RSS sum for the recognized agent process and descendants, if any.
     var agentMemoryBytes: UInt64?
@@ -77,7 +77,7 @@ enum SessionManager {
         return "\(prefix)-\(hash)"
     }
 
-    static func parseZmxSessionNames(listOutput: String) -> [String] {
+    static func parseSeahelmdSessionNames(listOutput: String) -> [String] {
         listOutput
             .components(separatedBy: .newlines)
             .compactMap { line in
@@ -98,7 +98,7 @@ enum SessionManager {
             }
     }
 
-    /// What `zmx list` says about one session's control socket.
+    /// What `seahelmd list` says about one session's control socket.
     enum SessionReachability: Equatable {
         /// Not listed at all — the daemon is gone.
         case missing
@@ -109,11 +109,11 @@ enum SessionManager {
         case unreachable
     }
 
-    /// Reachability of `name` within an already-captured `zmx list` output.
+    /// Reachability of `name` within an already-captured `seahelmd list` output.
     ///
     /// Deliberately a different question from `sessionExists`, which only asks
     /// whether the name appears. A daemon wedged by its volume dropping out keeps
-    /// its socket file and its `zmx list` row — it just stops answering — so
+    /// its socket file and its `seahelmd list` row — it just stops answering — so
     /// "listed" and "usable" part company exactly when it matters most, and
     /// answering the first when the caller meant the second is what left panes
     /// re-attaching to a corpse forever.
@@ -121,33 +121,33 @@ enum SessionManager {
         for line in listOutput.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let rowName = zmxListField(trimmed, "name=")
+            let rowName = seahelmdListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
             // Exact match, never a prefix: `seahelm-foo` and `seahelm-foo-1` are
             // separate panes and routinely have opposite health.
             guard rowName == name else { continue }
-            if zmxListField(trimmed, "err=") != nil { return .unreachable }
-            if let status = zmxListField(trimmed, "status="), status != "reachable" { return .unreachable }
+            if seahelmdListField(trimmed, "err=") != nil { return .unreachable }
+            if let status = seahelmdListField(trimmed, "status="), status != "reachable" { return .unreachable }
             return .reachable
         }
         return .missing
     }
 
-    /// Full `zmx list` rows, for the session monitor in Settings.
+    /// Full `seahelmd list` rows, for the session monitor in Settings.
     ///
-    /// Deliberately separate from `orphanZmxSessionNames`: that one answers "may
+    /// Deliberately separate from `orphanSeahelmdSessionNames`: that one answers "may
     /// I kill this unattended?" and fails closed on anything ambiguous, while
     /// this one has to show everything, including the ambiguous rows, because
     /// hiding a session from a cleanup screen is the one thing it must not do.
-    static func parseZmxSessions(listOutput: String) -> [ZmxSessionInfo] {
-        listOutput.components(separatedBy: .newlines).compactMap { line -> ZmxSessionInfo? in
+    static func parseSeahelmdSessions(listOutput: String) -> [SeahelmdSessionInfo] {
+        listOutput.components(separatedBy: .newlines).compactMap { line -> SeahelmdSessionInfo? in
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            let name = zmxListField(trimmed, "name=")
+            let name = seahelmdListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
             guard !name.isEmpty else { return nil }
 
-            let created = zmxListField(trimmed, "created=")
+            let created = seahelmdListField(trimmed, "created=")
                 .flatMap(TimeInterval.init)
                 .map(Date.init(timeIntervalSince1970:))
             // start_dir is last on the line and paths contain spaces, so it runs
@@ -158,10 +158,10 @@ enum SessionManager {
                 startDir = value.isEmpty ? nil : value
             }
 
-            return ZmxSessionInfo(
+            return SeahelmdSessionInfo(
                 name: name,
-                pid: zmxListField(trimmed, "pid=").flatMap(Int.init),
-                clients: zmxListField(trimmed, "clients=").flatMap(Int.init),
+                pid: seahelmdListField(trimmed, "pid=").flatMap(Int.init),
+                clients: seahelmdListField(trimmed, "clients=").flatMap(Int.init),
                 created: created,
                 startDir: startDir,
                 processMemoryBytes: nil,
@@ -172,11 +172,11 @@ enum SessionManager {
         }
     }
 
-    /// Parse `zmx list` rows and attach process-tree RSS data. This is used by
+    /// Parse `seahelmd list` rows and attach process-tree RSS data. This is used by
     /// the Settings monitor, not the orphan sweeper: memory probing is best-
     /// effort UI detail and must never affect cleanup decisions.
-    static func parseZmxSessionsWithProcessMemory(listOutput: String) -> [ZmxSessionInfo] {
-        let sessions = parseZmxSessions(listOutput: listOutput)
+    static func parseSeahelmdSessionsWithProcessMemory(listOutput: String) -> [SeahelmdSessionInfo] {
+        let sessions = parseSeahelmdSessions(listOutput: listOutput)
         guard sessions.contains(where: { $0.pid != nil }) else { return sessions }
         let procs = ProcessProbe.allProcesses()
         guard !procs.isEmpty else { return sessions }
@@ -193,24 +193,24 @@ enum SessionManager {
         }
     }
 
-    static func orphanZmxSessionNames(activeSessionNames: Set<String>, listOutput: String) -> [String] {
+    static func orphanSeahelmdSessionNames(activeSessionNames: Set<String>, listOutput: String) -> [String] {
         listOutput.components(separatedBy: .newlines).compactMap { line -> String? in
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            let name = zmxListField(trimmed, "name=")
+            let name = seahelmdListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
             guard isManagedSessionPrefix(name), !activeSessionNames.contains(name) else { return nil }
             // Only reap a session we can *positively* confirm is idle. A busy
-            // daemon that misses the `zmx list` control-socket probe reports
+            // daemon that misses the `seahelmd list` control-socket probe reports
             // `status=unreachable`/`err=…` with no `clients=` field — but a pane
             // may still be attached to it. Failing open there would end the
             // user's session mid-use ("Process exited. Press any key to close
             // the terminal."). So: skip anything unreachable/errored, skip when
             // the clients count is absent (unknown), and reap only when we can
             // read clients=0 from a reachable session.
-            if let status = zmxListField(trimmed, "status="), status != "reachable" { return nil }
-            if zmxListField(trimmed, "err=") != nil { return nil }
-            guard let clientsField = zmxListField(trimmed, "clients="),
+            if let status = seahelmdListField(trimmed, "status="), status != "reachable" { return nil }
+            if seahelmdListField(trimmed, "err=") != nil { return nil }
+            guard let clientsField = seahelmdListField(trimmed, "clients="),
                   let clients = Int(clientsField) else { return nil }
             return clients >= 1 ? nil : name
         }
@@ -219,7 +219,7 @@ enum SessionManager {
     // MARK: - Orphan attach clients
 
     /// One process row as the client sweep sees it.
-    struct ZmxProcess: Equatable {
+    struct SeahelmdProcess: Equatable {
         let pid: Int32
         let ppid: Int32
         let command: String
@@ -237,38 +237,38 @@ enum SessionManager {
     /// launchd because the pane that ran them is gone.
     ///
     /// A client exits on its own when its terminal closes; this is the net for
-    /// one that did not (zmx's never did, and every restart left a few spinning
-    /// at 20-70% CPU). seahelmd names its roles in argv — `__serve` for a
+    /// one that did not (one spinning at 20-70% CPU would otherwise outlive
+    /// every restart). seahelmd names its roles in argv — `__serve` for a
     /// session's daemon, `attach` for a pane's client — so telling them apart
     /// needs no walk from session pids, which a session still held for its pane
     /// does not even have yet.
-    static func orphanZmxClientPids(processes: [ZmxProcess]) -> [Int32] {
+    static func orphanSeahelmdClientPids(processes: [SeahelmdProcess]) -> [Int32] {
         processes.compactMap { proc in
             guard proc.isAttachClient, proc.ppid == 1 else { return nil }
             return proc.pid
         }
     }
 
-    /// Parse `ps -axo pid=,ppid=,command=`. Every row is kept, not just the zmx
+    /// Parse `ps -axo pid=,ppid=,command=`. Every row is kept, not just the seahelmd
     /// ones: resolving a session's daemon means walking parents through the
-    /// non-zmx processes (`login`, the session's own shell) in between.
-    static func parseZmxProcesses(psOutput: String) -> [ZmxProcess] {
+    /// non-seahelmd processes (`login`, the session's own shell) in between.
+    static func parseSeahelmdProcesses(psOutput: String) -> [SeahelmdProcess] {
         psOutput.components(separatedBy: .newlines).compactMap { line in
             let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
             guard parts.count == 3,
                   let pid = Int32(parts[0]),
                   let ppid = Int32(parts[1]) else { return nil }
-            return ZmxProcess(pid: pid, ppid: ppid, command: String(parts[2]))
+            return SeahelmdProcess(pid: pid, ppid: ppid, command: String(parts[2]))
         }
     }
 
-    /// Kill orphaned zmx clients. Returns the pids reaped. Safe to call at
+    /// Kill orphaned seahelmd clients. Returns the pids reaped. Safe to call at
     /// startup: sessions and their daemons are left alone.
     @discardableResult
-    static func cleanupOrphanZmxClients(psOutput: String? = nil) -> [Int32] {
+    static func cleanupOrphanSeahelmdClients(psOutput: String? = nil) -> [Int32] {
         let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
-        let processes = parseZmxProcesses(psOutput: ps)
-        let orphans = orphanZmxClientPids(processes: processes)
+        let processes = parseSeahelmdProcesses(psOutput: ps)
+        let orphans = orphanSeahelmdClientPids(processes: processes)
         let byPid = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         for pid in orphans {
             // Log the command line before killing: the one bug this sweep has had
@@ -281,28 +281,28 @@ enum SessionManager {
         return orphans
     }
 
-    /// `zmx attach` clients whose target session is missing or unreachable.
+    /// `seahelmd attach` clients whose target session is missing or unreachable.
     ///
-    /// Distinct from `orphanZmxClientPids`: those only reap `ppid == 1` clients
+    /// Distinct from `orphanSeahelmdClientPids`: those only reap `ppid == 1` clients
     /// left behind after Seahelm itself died. After a volume drop the attach
     /// client hangs rather than exiting, so it still has a live Seahelm parent
     /// and the orphan sweep leaves it spinning at ~100% CPU forever. The
     /// one-shot Station health check has already run by then, so nothing else
     /// looks at these corpses unless we do.
     ///
-    /// Only `attach` is targeted. `zmx run` hosts the session and must go
+    /// Only `attach` is targeted. `seahelmd run` hosts the session and must go
     /// through `forceKillSession`.
-    static func wedgedAttachClientPids(processes: [ZmxProcess], listOutput: String) -> [Int32] {
+    static func wedgedAttachClientPids(processes: [SeahelmdProcess], listOutput: String) -> [Int32] {
         var reachabilityByName: [String: SessionReachability] = [:]
         for line in listOutput.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let name = zmxListField(trimmed, "name=")
+            let name = seahelmdListField(trimmed, "name=")
                 ?? String(trimmed.split(whereSeparator: \.isWhitespace).first ?? "")
             guard !name.isEmpty else { continue }
-            if zmxListField(trimmed, "err=") != nil {
+            if seahelmdListField(trimmed, "err=") != nil {
                 reachabilityByName[name] = .unreachable
-            } else if let status = zmxListField(trimmed, "status="), status != "reachable" {
+            } else if let status = seahelmdListField(trimmed, "status="), status != "reachable" {
                 reachabilityByName[name] = .unreachable
             } else {
                 reachabilityByName[name] = .reachable
@@ -339,7 +339,7 @@ enum SessionManager {
         listOutput: String,
         startDirReachable: (String) -> Bool
     ) -> [String] {
-        parseZmxSessions(listOutput: listOutput).compactMap { session in
+        parseSeahelmdSessions(listOutput: listOutput).compactMap { session in
             guard isManagedSessionPrefix(session.name) else { return nil }
             guard reachability(of: session.name, listOutput: listOutput) == .unreachable else {
                 return nil
@@ -367,18 +367,18 @@ enum SessionManager {
         psOutput: String? = nil,
         startDirReachable: ((String) -> Bool)? = nil
     ) -> [String] {
-        let list = listOutput ?? ZmxLocator.listOutput() ?? ""
+        let list = listOutput ?? SeahelmdLocator.listOutput() ?? ""
         let reachable = startDirReachable ?? { path in
             // nil (probe timed out) and false (gone) both mean "not usable".
             FileSystemProbe.existsIfKnown(path, timeout: 0.5) == true
         }
         let names = unreachableSessionNames(listOutput: list, startDirReachable: reachable)
         for name in names {
-            NSLog("[SessionManager] Force-killing volume-wedged zmx session '%@'", name)
-            ZmxSessionRecovery.forceKillSession(name)
+            NSLog("[SessionManager] Force-killing volume-wedged seahelmd session '%@'", name)
+            SeahelmdSessionRecovery.forceKillSession(name)
         }
         let ps = psOutput ?? ProcessRunner.output(["ps", "-axo", "pid=,ppid=,command="]) ?? ""
-        let processes = parseZmxProcesses(psOutput: ps)
+        let processes = parseSeahelmdProcesses(psOutput: ps)
         // After force-kill the rows are often already gone; classify against the
         // pre-kill list so we still catch attaches whose session name we just
         // tore down, plus any attach whose session is simply missing.
@@ -393,15 +393,15 @@ enum SessionManager {
             // only reaped when we already confirmed the start_dir is dead.
             let shouldKill = status == .missing || confirmed.contains(session)
             guard shouldKill else { continue }
-            NSLog("[SessionManager] Reaping volume-wedged zmx attach %d: %@", pid, command)
+            NSLog("[SessionManager] Reaping volume-wedged seahelmd attach %d: %@", pid, command)
             kill(pid, SIGKILL)
         }
         return names
     }
 
     /// Extract a `key=value` field (value runs up to the next whitespace) from a
-    /// `zmx list` line, or nil if absent.
-    private static func zmxListField(_ line: String, _ key: String) -> String? {
+    /// `seahelmd list` line, or nil if absent.
+    private static func seahelmdListField(_ line: String, _ key: String) -> String? {
         guard let range = line.range(of: key) else { return nil }
         let suffix = line[range.upperBound...]
         let end = suffix.firstIndex(where: \.isWhitespace) ?? suffix.endIndex
@@ -410,22 +410,22 @@ enum SessionManager {
     }
 
     @discardableResult
-    static func cleanupOrphanZmxSessions(
+    static func cleanupOrphanSeahelmdSessions(
         activeSessionNames: Set<String>,
         listOutput: String? = nil
     ) -> [String] {
-        let output = listOutput ?? ZmxLocator.listOutput() ?? ""
-        let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
+        let output = listOutput ?? SeahelmdLocator.listOutput() ?? ""
+        let orphaned = orphanSeahelmdSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
         for paneSessionKey in orphaned {
-            ZmxSessionRecovery.forceKillSession(paneSessionKey)
+            SeahelmdSessionRecovery.forceKillSession(paneSessionKey)
         }
         return orphaned
     }
 
-    /// Kill a persistent zmx session.
+    /// Kill a persistent seahelmd session.
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {
-            ZmxSessionRecovery.forceKillSession(name)
+            SeahelmdSessionRecovery.forceKillSession(name)
             ShellRunIntegration.removeSpool(session: name)
         }
     }
@@ -468,10 +468,10 @@ enum SessionManager {
         agentCommandLine: String,
         shell: String,
         terminfoPath: String? = TerminalEnvironment.bundledTerminfoPath(),
-        daemon: String = ZmxLocator.executable(),
-        facts: [String] = ZmxLocator.sessionEnvironment()
+        daemon: String = SeahelmdLocator.executable(),
+        facts: [String] = SeahelmdLocator.sessionEnvironment()
     ) -> [[String]] {
-        guard backend == "zmx" else { return [] }
+        guard backend == "seahelmd" else { return [] }
         let socketPath = ControlSocketServer.defaultSocketPath()
         let exports = "export SEAHELM_ENV=1 SEAHELM_SOCKET_PATH=\(ShellEscape.singleQuote(socketPath))"
             + " SEAHELM_PANE_ID=\(ShellEscape.singleQuote(name))"
@@ -483,7 +483,7 @@ enum SessionManager {
     }
 
     /// How long a detached launch holds the agent for its pane before starting
-    /// it anyway. Measured on zmx: an attach 0.2s after creation caught Claude's
+    /// it anyway. Measured on seahelmd: an attach 0.2s after creation caught Claude's
     /// startup probe and one at 1s missed it; the hold makes that moot.
     static let clientWaitSeconds = 10
 
@@ -496,22 +496,22 @@ enum SessionManager {
     /// it. Callers asking "can I still use it?" want `sessionReachability`.
     static func sessionExists(name: String, backend: String) -> Bool {
         switch backend {
-        case "zmx":
-            let list = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
-            return parseZmxSessionNames(listOutput: list).contains(name)
+        case "seahelmd":
+            let list = ProcessRunner.output([SeahelmdLocator.executable(), "list"]) ?? ""
+            return parseSeahelmdSessionNames(listOutput: list).contains(name)
         default:
             return false
         }
     }
 
-    /// Live reachability of `name`. Spawns `zmx list`, which is slow precisely
+    /// Live reachability of `name`. Spawns `seahelmd list`, which is slow precisely
     /// when sessions are wedged — call off the main thread.
     ///
-    /// A `zmx list` that fails outright reads as `.missing`, which on its own
-    /// never triggers a teardown (see `ZmxSessionRecovery.plan`).
+    /// A `seahelmd list` that fails outright reads as `.missing`, which on its own
+    /// never triggers a teardown (see `SeahelmdSessionRecovery.plan`).
     static func sessionReachability(name: String, backend: String) -> SessionReachability {
-        guard backend == "zmx" else { return .missing }
-        let list = ProcessRunner.output([ZmxLocator.executable(), "list"]) ?? ""
+        guard backend == "seahelmd" else { return .missing }
+        let list = ProcessRunner.output([SeahelmdLocator.executable(), "list"]) ?? ""
         return reachability(of: name, listOutput: list)
     }
 
@@ -525,7 +525,7 @@ enum SessionManager {
         cwd: String,
         agentCommandLine: String
     ) -> Bool {
-        guard backend == "zmx" else { return false }
+        guard backend == "seahelmd" else { return false }
         if sessionExists(name: name, backend: backend) { return false }
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let commands = detachedLaunchCommands(
@@ -548,7 +548,7 @@ enum SessionManager {
     /// the session is spawned on a detached thread and the caller waits only for
     /// it to come up.
     static func waitUntilSessionExists(name: String, backend: String, timeoutSeconds: Double) -> Bool {
-        guard backend == "zmx" else { return true }
+        guard backend == "seahelmd" else { return true }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
             if sessionExists(name: name, backend: backend) { return true }

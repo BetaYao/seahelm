@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::proto::{self, Msg};
 
-/// Ctrl-\ detaches, as in zmx.
+/// Ctrl-\ detaches.
 const DETACH_KEY: u8 = 0x1c;
 
 /// Where the sockets live: `$SEAHELMD_DIR`, else `/tmp/seahelmd-<uid>`.

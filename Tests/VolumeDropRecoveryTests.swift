@@ -49,14 +49,14 @@ final class VolumeDropRecoveryTests: XCTestCase {
 
     // MARK: - Wedged attach clients (live parent)
 
-    private static let zmxPath = "/App/Contents/Resources/bin/seahelmd"
+    private static let seahelmdPath = "/App/Contents/Resources/bin/seahelmd"
 
-    private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String) -> SessionManager.ZmxProcess {
-        SessionManager.ZmxProcess(pid: pid, ppid: ppid, command: cmd)
+    private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String) -> SessionManager.SeahelmdProcess {
+        SessionManager.SeahelmdProcess(pid: pid, ppid: ppid, command: cmd)
     }
 
-    private func attach(_ pid: Int32, _ ppid: Int32, _ session: String) -> SessionManager.ZmxProcess {
-        proc(pid, ppid, "\(Self.zmxPath) attach \(session)")
+    private func attach(_ pid: Int32, _ ppid: Int32, _ session: String) -> SessionManager.SeahelmdProcess {
+        proc(pid, ppid, "\(Self.seahelmdPath) attach \(session)")
     }
 
     /// After a volume drop the attach client hangs instead of exiting, so it
@@ -89,11 +89,11 @@ final class VolumeDropRecoveryTests: XCTestCase {
         XCTAssertEqual(SessionManager.wedgedAttachClientPids(processes: processes, listOutput: list), [])
     }
 
-    /// `zmx run` hosts the session; only `forceKillSession` may tear it down.
-    func testZmxRunIsNeverClassifiedAsWedgedAttach() {
+    /// `seahelmd run` hosts the session; only `forceKillSession` may tear it down.
+    func testSeahelmdRunIsNeverClassifiedAsWedgedAttach() {
         let list = "  name=seahelm-a\terr=Timeout\tstatus=unreachable"
         let processes = [
-            proc(301, 1, "\(Self.zmxPath) run seahelm-a /bin/zsh -lic true"),
+            proc(301, 1, "\(Self.seahelmdPath) run seahelm-a /bin/zsh -lic true"),
         ]
         XCTAssertEqual(SessionManager.wedgedAttachClientPids(processes: processes, listOutput: list), [])
     }

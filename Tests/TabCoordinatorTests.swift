@@ -127,7 +127,7 @@ final class TabCoordinatorTests: XCTestCase {
             hasActivity: false, showsOnlyPrompt: true))
     }
 
-    /// A pane restored from a saved layout is attached to a zmx session that may
+    /// A pane restored from a saved layout is attached to a seahelmd session that may
     /// still hold work, and an attach that has not painted yet looks exactly like
     /// an empty one — so provenance, not appearance, is what clears it.
     func testRestoredPaneIsNeverAPlaceholder() {
@@ -275,7 +275,7 @@ final class TabCoordinatorTests: XCTestCase {
         config.workspacePaths = ["/tmp/repo-a", "/tmp/repo-b"]
         let coordinator = TabCoordinator(config: config)
         coordinator.terminalCoordinator = TerminalCoordinator(config: config, activeSplitContainer: { nil })
-        coordinator.runtimeBackend = "zmx"
+        coordinator.runtimeBackend = "seahelmd"
 
         let info = WorktreeInfo(path: "/tmp/repo-a", branch: "main", commitHash: "", isMainWorktree: true)
         let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-a",

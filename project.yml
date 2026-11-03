@@ -125,8 +125,6 @@ targets:
         script: |
           set -euo pipefail
           RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin"
-          # zmx shipped here before seahelmd; an incremental build keeps it.
-          rm -f "${RES}/zmx" "${RES}/zmx.pin-sha"
           "${SRCROOT}/scripts/build-seahelmd.sh" "${RES}/seahelmd"
           if [ "${CODE_SIGNING_ALLOWED:-YES}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
             # Release builds need a secure timestamp for notarization; skip it in
@@ -169,7 +167,7 @@ targets:
         type: group
       - path: Resources/Fonts
       - path: Resources/ghostty.conf
-      - path: Resources/zmx-attach.py
+      - path: Resources/seahelmd-attach.py
       - path: Assets.xcassets
       - path: Resources/licenses
         type: folder

@@ -5,7 +5,7 @@ import Foundation
 /// and the title says so.
 enum PaneAwayIndicator {
     /// ` · ~/path` when away, else nil. Hook location (when present) outranks
-    /// OSC pwd: agents inside zmx often never report OSC 7.
+    /// OSC pwd: agents inside seahelmd often never report OSC 7.
     static func titleSuffix(
         filedWorktree: String,
         hookWorktree: String?,

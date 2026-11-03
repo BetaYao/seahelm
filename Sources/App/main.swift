@@ -1,11 +1,10 @@
 import AppKit
 
 // The app may be (re)launched from a shell that lives inside a seahelm pane
-// (dev rebuilds, agents relaunching the app). That shell runs inside a zmx
-// session, so ZMX_SESSION / SEAHELM_* leak into our environment — and every
-// Ghostty surface inherits it. `zmx attach <name>` silently prefers
-// $ZMX_SESSION over its argument, so a leaked value makes every pane attach
-// to the wrong (often dead) session: layout restores, content doesn't.
+// (dev rebuilds, agents relaunching the app). That shell runs inside a seahelmd
+// session, so SEAHELMD_SESSION / SEAHELM_* leak into our environment — and
+// every Ghostty surface inherits it, so a pane's hooks would report under the
+// relaunching pane's id.
 //
 // The same shell is usually an agent's, which leaks that agent's session
 // identity the same way — and an agent inheriting it disables its own
@@ -18,7 +17,7 @@ import AppKit
 //
 // NO_COLOR is not a session identity, but it leaks by the same route and does
 // more damage, because it outlives the launch that carried it: a pane's
-// environment is fixed when its zmx session is created, and re-attaching never
+// environment is fixed when its seahelmd session is created, and re-attaching never
 // re-execs the agent. So one relaunch from a shell that happened to have
 // NO_COLOR set leaves those panes rendering monochrome forever, surviving every
 // later app restart. A pane is always a real terminal, so the launching shell's
@@ -26,7 +25,7 @@ import AppKit
 //
 // Scrub before anything can spawn a child.
 let leakedEnv = [
-    "ZMX_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID",
+    "SEAHELMD_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID",
     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
     "NO_COLOR",

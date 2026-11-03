@@ -96,7 +96,7 @@ enum PaneForkError: Error, Equatable {
         case .noTarget: return "the agent hasn't moved to another worktree — name one"
         case .unknownWorktree(let path): return "not a worktree seahelm tracks: \(path)"
         case .sameWorktree: return "the pane is already in that worktree"
-        case .noPersistentBackend: return "forking needs the zmx backend"
+        case .noPersistentBackend: return "forking needs the seahelmd backend"
         case .launchFailed: return "the forked session didn't start"
         }
     }

@@ -2,7 +2,7 @@ import Foundation
 
 /// OSC 7501 (Program Status Protocol): a program telling the terminal what it is
 /// doing. Spec: https://www.superlogical.com/rex/docs/build/program-status (rev
-/// 0.4); design and probe results: docs/osc7501.md.
+/// 0.4).
 ///
 /// libghostty (our patched GhosttyKit) parses and validates each report and hands
 /// it over as `GHOSTTY_ACTION_PROGRAM_STATUS`; it keeps no records. Keeping them —

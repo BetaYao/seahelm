@@ -32,9 +32,9 @@ enum PiExtensionInstaller {
 
         const HOME = process.env.HOME || ""
         const SOCK = process.env.SEAHELM_SOCKET_PATH || `${HOME}/.config/seahelm/seahelm.sock`
-        // SEAHELM_PANE_ID is seahelm's stable pane id; ZMX_SESSION carries the same
+        // SEAHELM_PANE_ID is seahelm's stable pane id; SEAHELMD_SESSION carries the same
         // value for panes created before that export existed.
-        const PANE = process.env.SEAHELM_PANE_ID || process.env.ZMX_SESSION || ""
+        const PANE = process.env.SEAHELM_PANE_ID || process.env.SEAHELMD_SESSION || ""
 
         // `ctx` is Pi's per-event SessionManager handle. Its own session id/file are
         // Pi's real resume handle (`pi --session <id>`) — PANE is only seahelm's pane

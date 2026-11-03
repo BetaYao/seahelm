@@ -15,13 +15,13 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
     }
 
     /// Panes created before SessionManager exported SEAHELM_PANE_ID still carry
-    /// ZMX_SESSION (the same backend session name). Without this fallback such a
+    /// SEAHELMD_SESSION (the same backend session name). Without this fallback such a
     /// pane reports no pane id, the turn correlation keys off the literal "cli"
     /// while the Stop hook keys off Claude's session UUID, and every Stop blocks
     /// for a suggestion that already arrived.
-    func testScriptFallsBackToZmxSessionForPaneId() {
+    func testScriptFallsBackToSeahelmdSessionForPaneId() {
         let script = SeahelmSuggestInstaller.scriptContents()
-        XCTAssertTrue(script.contains("pane=\"${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}\""))
+        XCTAssertTrue(script.contains("pane=\"${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}\""))
     }
 
     /// The suggest and Stop-hook sides must resolve the pane id the SAME way —
@@ -30,7 +30,7 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
     func testPaneIdFallbackMatchesHookInstaller() {
         let suggest = SeahelmSuggestInstaller.scriptContents()
         let hook = SeahelmHookInstaller.scriptContents()
-        let fallback = "${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
+        let fallback = "${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}"
         XCTAssertTrue(suggest.contains(fallback))
         XCTAssertTrue(hook.contains(fallback))
     }

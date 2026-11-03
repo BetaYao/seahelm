@@ -1,7 +1,7 @@
 //! One session's daemon: the process that owns its PTY.
 //!
-//! One daemon per session, as zmx does it and keep does not: a daemon that
-//! dies takes one pane with it, not every agent at once. It listens on
+//! One daemon per session, unlike keep: a daemon that dies takes one pane
+//! with it, not every agent at once. It listens on
 //! `<dir>/<name>`, takes one thread per connection, and exits — removing its
 //! socket — when the program it runs exits.
 
@@ -67,13 +67,12 @@ pub fn serve(socket: &Path, name: &str, argv: &[String], hold: Option<Duration>)
         None => CommandBuilder::new_default_prog(),
     };
     // portable-pty starts in $HOME unless told; the session belongs where it
-    // was asked for, as zmx's do.
+    // was asked for.
     let start_dir = std::env::current_dir().context("cwd")?;
     command.cwd(&start_dir);
+    // Also what seahelm's hook bridge reads to find the pane when nothing
+    // better is set.
     command.env("SEAHELMD_SESSION", name);
-    // What seahelm's hook bridge reads to find the pane when nothing better
-    // is set; a seahelmd session is a zmx session as far as it is concerned.
-    command.env("ZMX_SESSION", name);
 
     let facts = facts_from_env();
     let lazy = Arc::new(Lazy {
@@ -146,7 +145,7 @@ fn handle(stream: UnixStream, lazy: &Arc<Lazy>, name: &str, created: u64, start_
             Ok(session) => return attached(reader, writer, &session, cols, rows),
             Err(e) => Msg::Error(e.to_string()),
         },
-        // zmx's row, field for field where seahelm reads one. start_dir is
+        // The row seahelm parses (`SessionManager.parseSeahelmdSessions`). start_dir is
         // last because a path may hold spaces and it runs to the end of line.
         Msg::Info => {
             let session = lazy.get();

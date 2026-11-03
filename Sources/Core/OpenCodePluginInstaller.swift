@@ -32,7 +32,7 @@ enum OpenCodePluginInstaller {
         // mirrors opencode's native `question` tool into a seahelm question card.
         // Also reports session lifecycle (real opencode `sessionID`, not just
         // seahelm's pane id) so seahelm can resume this exact opencode session
-        // (`opencode resume <id>`) if its zmx session is ever lost and recreated.
+        // (`opencode resume <id>`) if its seahelmd session is ever lost and recreated.
         //
         // The @opencode-ai/plugin import needs no setup: opencode writes its own
         // ~/.config/opencode/package.json pinning the package to its version and
@@ -43,8 +43,8 @@ enum OpenCodePluginInstaller {
         const SCRIPT = `${process.env.HOME}/.local/bin/seahelm-suggest`
         const SOCK = process.env.SEAHELM_SOCKET_PATH ?? `${process.env.HOME}/.config/seahelm/seahelm.sock`
         // Same fallback chain as the suggest script: panes created before
-        // SEAHELM_PANE_ID was exported still carry ZMX_SESSION.
-        const PANE = process.env.SEAHELM_PANE_ID ?? process.env.ZMX_SESSION ?? ""
+        // SEAHELM_PANE_ID was exported still carry SEAHELMD_SESSION.
+        const PANE = process.env.SEAHELM_PANE_ID ?? process.env.SEAHELMD_SESSION ?? ""
 
         export const SeahelmSuggest = async ({ $, directory }) => {
           // Sessions opencode has told us are subagents (Task-tool children), via

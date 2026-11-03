@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
-"""Relay a zmx session's *raw* VT stream on stdout, by being a real attach client.
+"""Relay a seahelmd session's *raw* VT stream on stdout, by being a real attach client.
 
-Why this exists: `zmx tail` and `zmx history --vt` are linearized. They keep SGR
-colour but drop every cursor-motion sequence, so a TUI that repaints in place
-(Codex, Claude Code) arrives as N stacked copies of its frame instead of one
-frame redrawn N times. `zmx attach` is the client path Seahelm itself renders
-through, and it preserves the motion — measured side by side on the same
-workload: attach 5 cursor-ups, tail 0.
+Why this exists: `seahelmd history` is plain text, and a TUI that repaints in
+place (Codex, Claude Code) needs every cursor-motion sequence to arrive as one
+frame redrawn rather than N stacked copies. `seahelmd attach` is the client path
+Seahelm itself renders through, and it preserves the motion.
 
 Node has no built-in pty and attach needs a controlling terminal, so this stands
 in as the pty. stdout carries PTY output; stdin is written back into the PTY, so
 the same channel can carry keystrokes.
 
-    zmx-attach.py <session> <rows> <cols>
+    seahelmd-attach.py <session> <rows> <cols>
 
-Two things here are load-bearing rather than incidental:
-  * ZMX_SESSION is scrubbed from the child. Inherited from a Seahelm pane it
-    hijacks attach onto *that* session and the stream comes back silently empty.
-  * The window size is set on the slave fd before exec. Attaching is not
-    read-only — a client whose size differs can resize the session and reflow
-    what the Mac is showing. We pass the session's own measured size in.
+The window size is set on the slave fd before exec, and that is load-bearing:
+attaching is not read-only — a client whose size differs can resize the session
+and reflow what the Mac is showing. We pass the session's own measured size in.
 """
 import errno
 import fcntl
@@ -31,12 +26,12 @@ import struct
 import sys
 import termios
 
-ZMX = os.environ.get('ZMX') or 'zmx'
+SEAHELMD = os.environ.get('SEAHELMD') or 'seahelmd'
 
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print('usage: zmx-attach.py <session> [rows] [cols]', file=sys.stderr)
+        print('usage: seahelmd-attach.py <session> [rows] [cols]', file=sys.stderr)
         return 2
     session = sys.argv[1]
     rows = int(sys.argv[2]) if len(sys.argv) > 2 else 24
@@ -62,10 +57,9 @@ def main() -> int:
         if slave > 2:
             os.close(slave)
         env = dict(os.environ)
-        env.pop('ZMX_SESSION', None)          # see module docstring
         env['TERM'] = env.get('TERM') or 'xterm-256color'
         try:
-            os.execvpe(ZMX, [ZMX, 'attach', session], env)
+            os.execvpe(SEAHELMD, [SEAHELMD, 'attach', session], env)
         except OSError:
             os._exit(127)
     os.close(slave)

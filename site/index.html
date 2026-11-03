@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Seahelm &mdash; a native macOS workspace for coding agents</title>
-<meta name="description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
+<meta name="description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by seahelmd.">
 <link rel="canonical" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="en" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="zh-Hans" href="https://www.seahelm.dev/zh/">
@@ -17,7 +17,7 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:locale:alternate" content="zh_CN">
 <meta property="og:title" content="Seahelm &mdash; your agents run, you steer">
-<meta property="og:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
+<meta property="og:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by seahelmd.">
 <meta property="og:image" content="https://www.seahelm.dev/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -25,7 +25,7 @@
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Seahelm &mdash; your agents run, you steer">
-<meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by zmx.">
+<meta name="twitter:description" content="Seahelm is a native macOS workspace for coding agents, git worktrees and parallel development. A row per worktree, an agent per split pane — rendered on Ghostty, persisted by seahelmd.">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.png">
 
 <meta name="theme-color" content="#f4f9fb">
@@ -264,7 +264,7 @@
           <text x="550" y="198" class="svg-t2">feat/x</text>
           <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
           <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
-          <text x="914" y="231" class="svg-note" text-anchor="end">Station + zmx session kept</text>
+          <text x="914" y="231" class="svg-note" text-anchor="end">Station + seahelmd session kept</text>
           <text x="914" y="250" class="svg-lbl" text-anchor="end">placeholder destroyed</text>
 
           <defs>
@@ -277,7 +277,7 @@
       <figcaption>
         The pane follows its agent. Claude Code makes a worktree and works in it; every hook payload carries
         <code>cwd</code>, so Seahelm matches the <em>longest</em> worktree prefix and moves that one pane &mdash;
-        keeping its Ghostty surface and its zmx session &mdash; instead of standing up a stranger beside it.
+        keeping its Ghostty surface and its seahelmd session &mdash; instead of standing up a stranger beside it.
         Two gates keep it honest: the destination must belong to the same repo, and after any move auto-follow
         holds for ten minutes, because an agent's <code>cwd</code> bounces while it works.
       </figcaption>
@@ -548,7 +548,7 @@
     <div class="pair">
       <figure>
         <div class="fig-frame">
-          <svg viewBox="0 0 640 300" role="img" aria-label="Persistence boundary: the app's windows and Metal surfaces are discarded on quit, while the zmx session holding the PTY and the agent process, and the git worktree on disk, both survive and are re-attached by name on relaunch">
+          <svg viewBox="0 0 640 300" role="img" aria-label="Persistence boundary: the app's windows and Metal surfaces are discarded on quit, while the seahelmd session holding the PTY and the agent process, and the git worktree on disk, both survive and are re-attached by name on relaunch">
             <rect x="20" y="28" width="600" height="76" rx="7" class="svg-box"/>
             <text x="34" y="54" class="svg-t">seahelm.app</text>
             <text x="34" y="80" class="svg-t2">window &middot; SplitTree &middot; Station &middot; Metal surface</text>
@@ -558,7 +558,7 @@
             <text x="606" y="130" class="svg-note" text-anchor="end">you quit the app &middot; the machine reboots</text>
 
             <rect x="20" y="148" width="600" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-            <text x="34" y="174" class="svg-t">zmx session &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
+            <text x="34" y="174" class="svg-t">seahelmd session &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
             <text x="34" y="200" class="svg-t2">PTY &middot; shell &middot; the agent process, still thinking</text>
             <text x="606" y="174" class="svg-lbl" text-anchor="end" fill="var(--run)">SURVIVES</text>
 
@@ -577,7 +577,7 @@
           </svg>
         </div>
         <figcaption>
-          Sessions outlive the app. Each split leaf claims a zmx session named for its worktree; a health
+          Sessions outlive the app. Each split leaf claims a seahelmd session named for its worktree; a health
           check three seconds after creation catches a stale one and rebuilds it. Quit, reboot, reopen &mdash;
           the agent is where you left it, mid-thought.
         </figcaption>
@@ -591,7 +591,7 @@
         every third, so a fleet of twenty panes costs about what three do.</p>
         <h3>Built on</h3>
         <p><a class="linkout" href="https://ghostty.org">Ghostty</a> for the terminal engine, linked as a
-        C xcframework &mdash; <a class="linkout" href="https://zmx.sh">zmx</a> for session persistence &mdash;
+        C xcframework &mdash; its own <code>seahelmd</code> daemon for session persistence &mdash;
         Sparkle&nbsp;2 for updates, rendered into an inline banner instead of its own modals.</p>
       </div>
     </div>
@@ -628,7 +628,7 @@
           <text x="222" y="104" class="svg-t2">mid-turn</text>
 
           <rect x="392" y="48" width="170" height="86" rx="7" class="svg-box"/>
-          <text x="408" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  fix/zmx</text>
+          <text x="408" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  fix/seahelmd</text>
           <text x="408" y="104" class="svg-t2">HEAD + edits</text>
 
           <rect x="1000" y="48" width="300" height="86" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
@@ -776,7 +776,7 @@
       </div>
       <p class="foot-meta">
         Seahelm &mdash; sea + helm. macOS 14.0 Sonoma or later, Apple silicon and Intel.<br>
-        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; zmx &middot; 247 Swift files in four layers.
+        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; seahelmd &middot; 247 Swift files in four layers.
       </p>
     </footer>
   </div>

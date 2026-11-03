@@ -141,7 +141,7 @@ final class ManifestEngineTests: XCTestCase {
               context ██░░░░ 38% │ usage █░░░░░ 11% (resets in 3h 51m)
               ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 3 agents
             """
-        // Captured verbatim from live panes (zmx history), lowercased as the
+        // Captured verbatim from live panes (seahelmd history), lowercased as the
         // publisher does before evaluating.
         let working = [
             "· sprouting… (3m 55s · ↓ 11.1k tokens)",
@@ -221,7 +221,7 @@ final class ManifestEngineTests: XCTestCase {
         guard let cm = ManifestStore.shared.manifest(for: "cursor") else {
             return XCTFail("missing cursor manifest")
         }
-        // Captured from live zmx history (lowercased as StatusPublisher does).
+        // Captured from live seahelmd history (lowercased as StatusPublisher does).
         let workingScreens = [
             """
             ✶ grepping  83.03k tokens

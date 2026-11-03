@@ -7,7 +7,7 @@ final class SessionLaunchCommandTests: XCTestCase {
     private func launch(name: String = "seahelm-repo-feat", cwd: String = "/work/repo/feat",
                         agent: String = "claude 'fix bug'", terminfoPath: String? = "/res/terminfo") -> [String] {
         let cmds = SessionManager.detachedLaunchCommands(
-            backend: "zmx", name: name, cwd: cwd, agentCommandLine: agent,
+            backend: "seahelmd", name: name, cwd: cwd, agentCommandLine: agent,
             shell: "/bin/zsh", terminfoPath: terminfoPath, daemon: "/opt/seahelmd", facts: facts)
         XCTAssertEqual(cmds.count, 1)
         return cmds.first ?? []
@@ -67,17 +67,17 @@ final class SessionLaunchCommandTests: XCTestCase {
     /// without starting the agent, an attach starts it at the pane's size, and
     /// a shell is left when it exits.
     func testLaunchAgainstTheBundledDaemon() throws {
-        guard ZmxLocator.isAvailable else { throw XCTSkip("no seahelmd in this build") }
+        guard SeahelmdLocator.isAvailable else { throw XCTSkip("no seahelmd in this build") }
         let dir = "/tmp/shd-xc-\(getpid())"
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let name = "seahelm-launch-test"
         var argv = SessionManager.detachedLaunchCommands(
-            backend: "zmx", name: name, cwd: NSTemporaryDirectory(),
+            backend: "seahelmd", name: name, cwd: NSTemporaryDirectory(),
             agentCommandLine: "echo agent-at-$(stty size); sleep 1",
-            shell: "/bin/zsh", terminfoPath: nil, daemon: ZmxLocator.executable(), facts: facts)[0]
+            shell: "/bin/zsh", terminfoPath: nil, daemon: SeahelmdLocator.executable(), facts: facts)[0]
         argv.insert("SEAHELMD_DIR=\(dir)", at: 0)
         ProcessRunner.runSync(argv, currentDirectory: NSTemporaryDirectory())
-        let env = ["/usr/bin/env", "SEAHELMD_DIR=\(dir)", ZmxLocator.executable()]
+        let env = ["/usr/bin/env", "SEAHELMD_DIR=\(dir)", SeahelmdLocator.executable()]
         let held = ProcessRunner.output(env + ["list"]) ?? ""
         XCTAssertTrue(held.contains("name=\(name)\tpid=\t"), "the agent started before its pane: \(held)")
 
@@ -95,7 +95,7 @@ final class SessionLaunchCommandTests: XCTestCase {
             + "os.write(fd,b'\\x1c'); os.waitpid(pid,0)\n"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        p.arguments = ["-c", script, ZmxLocator.executable(), name]
+        p.arguments = ["-c", script, SeahelmdLocator.executable(), name]
         p.environment = ["SEAHELMD_DIR": dir]
         try p.run()
         p.waitUntilExit()

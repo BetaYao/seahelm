@@ -6,10 +6,9 @@ import Foundation
 ///
 /// One daemon per pane session owns the PTY and keeps its screen in
 /// libghostty-vt, so the app can quit and come back without taking the agents
-/// with it. It speaks the verbs zmx did — `attach`, `run`, `send`, `history`,
-/// `kill`, `list` — which is why most callers still read as zmx's (the type
-/// names predate it). See seahelmd/README.md.
-enum ZmxLocator {
+/// with it. Its verbs are `attach`, `new`, `run`, `send`, `history`, `kill`
+/// and `list`. See seahelmd/README.md.
+enum SeahelmdLocator {
     /// Pure resolution: bundled path if present, else whatever the PATH lookup finds.
     static func resolve(bundledPath: String?, pathLookup: () -> String?) -> String? {
         bundledPath ?? pathLookup()
@@ -34,7 +33,7 @@ enum ZmxLocator {
     static func resolveBackend() -> (backend: String, warning: String?) {
         guard isAvailable else { return ("local", nil) }
         let version = ProcessRunner.output([executable(), "version"]) ?? ""
-        if isSupportedVersion(version) { return ("zmx", nil) }
+        if isSupportedVersion(version) { return ("seahelmd", nil) }
         return ("local", "Bundled seahelmd answered an unexpected version (\(version)).")
     }
 

@@ -125,7 +125,7 @@ sign_app() {
 
   # Catch anything still unsigned or missing the hardened runtime before we pay
   # for a notarization round-trip.
-  codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/zmx" 2>&1 | sed 's/^/    /'
+  codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/seahelmd" 2>&1 | sed 's/^/    /'
 }
 
 notarize_artifact() {

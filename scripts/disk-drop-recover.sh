@@ -76,7 +76,7 @@ seahelm_pids() { ps -axo pid=,command= | awk '$0 ~ /MacOS\/[S]eahelm( |$)/ {prin
 # Killing the session daemons takes down the pane this script runs in, so a run from
 # inside seahelm never reaches the relaunch. Re-exec detached (nohup survives
 # the pane's SIGHUP and launchd adopts it) or refuse.
-if [ -n "${SEAHELM_PANE_ID:-}${SEAHELMD_SESSION:-}${ZMX_SESSION:-}" ] && [ "$DETACHED" -eq 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then
+if [ -n "${SEAHELM_PANE_ID:-}${SEAHELMD_SESSION:-}" ] && [ "$DETACHED" -eq 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then
   if [ "$DETACH" -eq 1 ]; then
     LOG="${TMPDIR:-/tmp/}seahelm-disk-drop-recover.log"
     args=(--detached)

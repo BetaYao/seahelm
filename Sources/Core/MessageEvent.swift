@@ -39,7 +39,7 @@ struct MessageEvent: Equatable {
         return d
     }
 
-    /// The pane this event belongs to across restarts. The zmx session name
+    /// The pane this event belongs to across restarts. The seahelmd session name
     /// survives a relaunch; the station id is only a fallback for panes without one.
     var ringKey: String { paneSessionKey.isEmpty ? paneId : paneSessionKey }
 }

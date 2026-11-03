@@ -67,7 +67,7 @@ class GhosttyBridge {
 
         // Point libghostty at bundled themes before config load / finalize.
         Self.configureResourcesEnvironment()
-        // Route zmx-spawned shells through Ghostty's OSC 133 shell integration.
+        // Route seahelmd-spawned shells through Ghostty's OSC 133 shell integration.
         Self.configureShellIntegrationEnvironment()
 
         // Initialize Ghostty runtime
@@ -325,18 +325,18 @@ class GhosttyBridge {
         setenv("GHOSTTY_RESOURCES_DIR", dir, 1)
     }
 
-    /// Inject Ghostty's OSC 133 shell integration into the shells zmx spawns, so
+    /// Inject Ghostty's OSC 133 shell integration into the shells seahelmd spawns, so
     /// command boundaries emit `COMMAND_FINISHED` (real exit code + duration).
     ///
-    /// The pane process is `zmx attach`, not a shell, so libghostty's own shell
+    /// The pane process is `seahelmd attach`, not a shell, so libghostty's own shell
     /// integration never runs (it only wraps a shell it exec's directly). But
-    /// zmx's daemon `forkpty`'s the login shell inheriting *this* process's
+    /// the session daemon starts the login shell inheriting *this* process's
     /// environment, so setting `ZDOTDIR` here reaches the zsh it starts — the
     /// same ZDOTDIR trick Ghostty uses (termio/shell_integration.zig `setupZsh`).
     /// The bundled `.zshenv` restores the user's real `ZDOTDIR` from
     /// `GHOSTTY_ZSH_ZDOTDIR` and chains to their config, so this is
     /// non-destructive. Only affects zsh; bash/fish ignore `ZDOTDIR` (no-op).
-    /// Existing persisted zmx sessions keep their already-running shell — the
+    /// Existing persisted seahelmd sessions keep their already-running shell — the
     /// integration lands on newly created panes.
     ///
     /// Seahelm's own `.zshenv` (`ShellRunIntegration`) sits in front of Ghostty's:

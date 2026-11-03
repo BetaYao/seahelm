@@ -3,9 +3,9 @@
 //! Adapted from keep's `keepd/src/tab.rs` (MIT, Copyright (c) the Keep
 //! authors — see crates/keep-vt/LICENSE-keep). What changed: unix only for
 //! now, and the grid answers the program's questions whenever nobody is
-//! attached, with the colours seahelm latched for the run (`Facts`) — a zmx
-//! session started detached swallows OSC 10/11, and an agent that asked then
-//! paints without colours for the rest of its life.
+//! attached, with the colours seahelm gives it (`Facts`) — a session
+//! started detached that swallowed OSC 10/11 would leave an agent that asked
+//! then painting without colours for the rest of its life.
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -270,7 +270,7 @@ impl Session {
         Ok(())
     }
 
-    /// Screen and scrollback as plain text — what `zmx history` answers.
+    /// Screen and scrollback as plain text — what `seahelmd history` answers.
     pub fn history(&self) -> Result<String> {
         let guard = self.inner.lock().map_err(|_| anyhow::anyhow!("session poisoned"))?;
         let bytes = guard.terminal.snapshot(Format::Plain).map_err(|e| anyhow::anyhow!("snapshot: {e}"))?;

@@ -324,9 +324,8 @@ def analyse(rows):
         "swapouts_per_hour": swap_rate,
         "swap_used_mb_last": dig(rows[-1], "sys", "swap_used_mb"),
         "free_mb_last": dig(rows[-1], "sys", "free_mb"),
-        # Samples from before seahelmd recorded the zmx daemons under "zmx".
-        "daemon_procs_last": dig(rows[-1], "seahelmd", "procs", default=dig(rows[-1], "zmx", "procs")),
-        "daemon_rss_mb_last": dig(rows[-1], "seahelmd", "rss_mb", default=dig(rows[-1], "zmx", "rss_mb")),
+        "daemon_procs_last": dig(rows[-1], "seahelmd", "procs"),
+        "daemon_rss_mb_last": dig(rows[-1], "seahelmd", "rss_mb"),
     }
     report["fsevents"] = fsevents_analysis(rows)
 

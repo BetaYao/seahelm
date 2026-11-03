@@ -66,7 +66,7 @@ final class AgentRegistryTests: XCTestCase {
         AgentRegistry.shared.register(
             station: surface, worktreePath: "/tmp/test-repo/main",
             branch: "main", project: "test", startedAt: nil,
-            paneSessionKey: "seahelm-test-main", backend: "zmx"
+            paneSessionKey: "seahelm-test-main", backend: "seahelmd"
         )
 
         AgentRegistry.shared.unregister(terminalID: surface.id)

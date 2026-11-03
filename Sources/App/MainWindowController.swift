@@ -99,7 +99,7 @@ class MainWindowController: NSWindowController {
     private var gmailMailPoller: GmailMailPoller?
     /// Suppresses repeat alerts while the same failure persists.
     private var lastTelegramError: String?
-    private var runtimeBackend: String = "zmx"
+    private var runtimeBackend: String = "seahelmd"
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
     private var primaryCapsuleDismissWorkItem: DispatchWorkItem?
@@ -493,14 +493,14 @@ class MainWindowController: NSWindowController {
         NSApp.mainMenu = MenuBuilder.buildMainMenu(target: self)
     }
 
-    /// Resolve the runtime backend (zmx, else local fallback) off the main thread
+    /// Resolve the runtime backend (seahelmd, else local fallback) off the main thread
     /// — the version probe spawns a process — then push it to the coordinators.
-    /// `runtimeBackend` starts optimistically at "zmx" so any restore that races
+    /// `runtimeBackend` starts optimistically at "seahelmd" so any restore that races
     /// this resolution attaches persistent sessions; the async pass only ever
-    /// downgrades to "local" when zmx is genuinely unavailable/unsupported.
+    /// downgrades to "local" when seahelmd is genuinely unavailable/unsupported.
     private func normalizeBackendAvailabilityIfNeeded() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let resolution = ZmxLocator.resolveBackend()
+            let resolution = SeahelmdLocator.resolveBackend()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.runtimeBackend = resolution.backend
@@ -795,7 +795,7 @@ class MainWindowController: NSWindowController {
 
     @objc func cleanOrphanSessions() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard ZmxLocator.isAvailable else {
+            guard SeahelmdLocator.isAvailable else {
                 DispatchQueue.main.async {
                     let alert = NSAlert()
                     alert.messageText = "seahelmd is not available"
@@ -807,7 +807,7 @@ class MainWindowController: NSWindowController {
 
             guard let self else { return }
             let activeSessionNames = self.activePaneSessionNamesForCleanup()
-            let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
+            let cleaned = SessionManager.cleanupOrphanSeahelmdSessions(activeSessionNames: activeSessionNames)
 
             DispatchQueue.main.async {
                 let alert = NSAlert()
@@ -1021,7 +1021,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                 // Bare launch only — never put the task (or Claude's long
-                // --append-system-prompt) on the zmx-typed command line. That
+                // --append-system-prompt) on the seahelmd-typed command line. That
                 // truncates mid-quote and leaves bash stuck; Claude never starts.
                 // Suggest guidance is already in CLAUDE.md via WorktreeCreator.
                 // The repo's `.seahelm/setup.sh`, if it has one, runs first in
@@ -1031,7 +1031,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     setup: setup, agent: agentType.bareLaunchCommand()) {
                     let paneSessionKey = SessionManager.persistentSessionName(for: info.path)
                     let backend = self.runtimeBackend
-                    // `zmx run` blocks until the (long-lived) agent exits, so spawn the
+                    // `seahelmd run` blocks until the (long-lived) agent exits, so spawn the
                     // session on a detached thread and wait only until it exists —
                     // otherwise handleNewBranch + onComplete below would never run and
                     // the cockpit would spin forever.
@@ -1727,7 +1727,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     /// Paint the cached figure at once, then re-probe at most every
-    /// `headerMemoryTTL` seconds. The probe forks `zmx list` and `ps`, so it runs
+    /// `headerMemoryTTL` seconds. The probe forks `seahelmd list` and `ps`, so it runs
     /// off the main thread and is rate-limited — this is called on every title
     /// refresh, which includes the 5s chrome tick and every focus change.
     private func refreshHeaderMemory(sessionKey: String?) {
@@ -1744,8 +1744,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         headerMemoryProbedAt[sessionKey] = Date()
 
         headerMemoryQueue.async { [weak self] in
-            let bytes = ZmxLocator.listOutput().flatMap {
-                ProcessProbe.sessionResidentBytes(paneSessionKey: sessionKey, zmxListOutput: $0)
+            let bytes = SeahelmdLocator.listOutput().flatMap {
+                ProcessProbe.sessionResidentBytes(paneSessionKey: sessionKey, seahelmdListOutput: $0)
             }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2230,7 +2230,7 @@ extension MainWindowController: NewBranchDialogDelegate {
         let name = SessionManager.persistentSessionName(for: info.path)
         let backend = runtimeBackend
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // `zmx run` blocks while the setup runs; wait only for the session.
+            // `seahelmd run` blocks while the setup runs; wait only for the session.
             DispatchQueue.global(qos: .userInitiated).async {
                 SessionManager.createDetachedSession(name: name, backend: backend, cwd: info.path,
                                                      agentCommandLine: setup)
@@ -3010,12 +3010,12 @@ extension MainWindowController {
     }
 
     /// What the pane shows: the live surface's viewport, or for a pane whose tab
-    /// is not open, the tail of its zmx session.
+    /// is not open, the tail of its seahelmd session.
     private func paneScreen(terminalID: String) -> String? {
         guard let station = StationRegistry.shared.station(forId: terminalID) else { return nil }
         if station.canDeliverInput, let text = station.readViewportText() { return text }
         guard let key = station.paneSessionKey, !key.isEmpty else { return nil }
-        return ZmxChannel(paneSessionKey: key).readOutput(lines: 40)
+        return SeahelmdChannel(paneSessionKey: key).readOutput(lines: 40)
     }
 
 }
@@ -3088,7 +3088,7 @@ extension MainWindowController: CommandHost {
     }
 
     func transcript(paneSessionKey: String) -> String? {
-        ZmxChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
+        SeahelmdChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
     }
 
     func messages(paneSessionKey: String) -> [MessageEvent] {
@@ -3875,7 +3875,7 @@ extension MainWindowController {
             return
         }
         // Attach only once the session is known to hold the agent: attaching to a
-        // missing session would make zmx start an empty shell under that name.
+        // missing session would make seahelmd start an empty shell under that name.
         tabCoordinator.autopilot.ensureSession { [weak self, weak view] in
             guard let self, let view, view.superview != nil else { return }
             view.embed(self.tabCoordinator.autopilot.station)
@@ -3884,11 +3884,11 @@ extension MainWindowController {
     }
 
     /// First Mate's session memory, for the header while it is shown. Probed off
-    /// main: `zmx list` and `ps` are forks.
+    /// main: `seahelmd list` and `ps` are forks.
     fileprivate func refreshFirstMateMemory() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let bytes = ZmxLocator.listOutput().flatMap {
-                ProcessProbe.sessionResidentBytes(paneSessionKey: FirstMatePane.sessionName, zmxListOutput: $0)
+            let bytes = SeahelmdLocator.listOutput().flatMap {
+                ProcessProbe.sessionResidentBytes(paneSessionKey: FirstMatePane.sessionName, seahelmdListOutput: $0)
             }
             DispatchQueue.main.async { self?.windowChrome?.updateFirstMateMemory(bytes) }
         }
