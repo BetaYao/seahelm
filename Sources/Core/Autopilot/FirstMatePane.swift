@@ -17,13 +17,32 @@ enum FirstMatePane {
     /// app, so a fix to how First Mate is started only reaches it by replacing it.
     static var sessionVersionPath: String { directory + "/.session-version" }
 
-    static func sessionIsCurrent(at dir: String = directory) -> Bool {
+    /// Version and agent: switching agent replaces the session as surely as a
+    /// new version does.
+    static func sessionStamp(agent: AgentType) -> String { "\(version):\(agent.rawValue)" }
+
+    static func sessionIsCurrent(agent: AgentType = .claudeCode, at dir: String = directory) -> Bool {
         (try? String(contentsOfFile: dir + "/.session-version", encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) == String(version)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == sessionStamp(agent: agent)
     }
 
-    static func markSessionCurrent(at dir: String = directory) {
-        try? String(version).write(toFile: dir + "/.session-version", atomically: true, encoding: .utf8)
+    static func markSessionCurrent(agent: AgentType = .claudeCode, at dir: String = directory) {
+        try? sessionStamp(agent: agent).write(toFile: dir + "/.session-version", atomically: true, encoding: .utf8)
+    }
+
+    /// The agents First Mate can be. Each needs a way to be held to read-mostly
+    /// work that does not depend on it behaving: Claude Code's permission rules,
+    /// Codex's sandbox. Agents without one are not offered.
+    static let agents: [AgentType] = [.claudeCode, .codex]
+
+    /// What keeps it in bounds, for Settings to say.
+    static func guardDescription(_ agent: AgentType) -> String {
+        switch agent {
+        case .codex:
+            return "Codex runs in its workspace-write sandbox: it can write only its own folder and asks before anything else. Network is on so gh and seahelm work — which also means gh commands that only touch GitHub (gh pr merge) are held back by its instructions, not by the sandbox."
+        default:
+            return "Claude Code runs with a permission allowlist: reads, read-only gh/git and seahelm run unasked; git push, gh pr merge, git worktree remove and rm are refused; anything else asks you."
+        }
     }
 
     /// Whether a pane is First Mate rather than a member of the fleet.
@@ -32,16 +51,19 @@ enum FirstMatePane {
     /// Bumped whenever `instructions` or `permissions` change, so an existing
     /// directory picks the new ones up. The files are seahelm's, not the user's:
     /// what the user says to keep goes in `standing-orders.md`, never touched.
-    static let version = 3
+    static let version = 4
 
     /// Write the managed files (when stale) and the standing orders (when absent).
     static func provision(at dir: String = directory) {
         let fm = FileManager.default
         try? fm.createDirectory(atPath: dir + "/.claude", withIntermediateDirectories: true)
         let marker = "<!-- seahelm-first-mate v\(version) -->"
-        let claudeMD = dir + "/CLAUDE.md"
-        if (try? String(contentsOfFile: claudeMD, encoding: .utf8))?.contains(marker) != true {
-            try? (marker + "\n" + instructions).write(toFile: claudeMD, atomically: true, encoding: .utf8)
+        // Both names: Claude Code reads CLAUDE.md, Codex reads AGENTS.md.
+        for name in ["CLAUDE.md", "AGENTS.md"] {
+            let path = dir + "/" + name
+            if (try? String(contentsOfFile: path, encoding: .utf8))?.contains(marker) != true {
+                try? (marker + "\n" + instructions).write(toFile: path, atomically: true, encoding: .utf8)
+            }
         }
         let settings = dir + "/.claude/settings.json"
         if let data = try? JSONSerialization.data(withJSONObject: permissions, options: [.prettyPrinted, .sortedKeys]),
@@ -60,6 +82,16 @@ enum FirstMatePane {
     /// would otherwise switch the gate below off; a CLI flag outranks every
     /// settings file.
     static let launchCommand = "claude --permission-mode default"
+
+    /// Codex in its workspace-write sandbox (writes only here), asking before it
+    /// steps out, with network on — without it neither `gh` nor the seahelm
+    /// socket is reachable from inside the sandbox. Never the bypass flag.
+    static let codexLaunchCommand =
+        "codex --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true"
+
+    static func launchCommand(for agent: AgentType) -> String {
+        agent == .codex ? codexLaunchCommand : launchCommand
+    }
 
     /// Claude Code's own permission gate for this directory. seahelm enforces the
     /// autonomy policy on its CLI, but an agent free to run any shell command

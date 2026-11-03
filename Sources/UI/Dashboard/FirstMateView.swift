@@ -9,7 +9,10 @@ final class FirstMateView: NSView {
     /// window recognises that the overlay is First Mate's.
     static let overlayTitle = "First Mate"
 
-    var onTurnOn: (() -> Void)?
+    /// Turn it on as the agent picked on the off page.
+    var onTurnOn: ((AgentType) -> Void)?
+    private let agentPopup = NSPopUpButton()
+    private let agentGuard = NSTextField(wrappingLabelWithString: "")
 
     private let terminalContainer = NSView()
     private let offPanel = NSStackView()
@@ -28,7 +31,7 @@ final class FirstMateView: NSView {
         let headline = NSTextField(wrappingLabelWithString: """
         First Mate is off.
 
-        Turned on, it runs as a Claude Code session of its own and is woken by your repos' \
+        Turned on, it runs as an agent session of its own and is woken by your repos' \
         rules (.seahelm/automations.yml, or the built-in ones): when a PR's CI goes red it \
         reads why and tells that worktree's agent; when a PR merges it offers to clean up the \
         worktree. Starting agents and deleting worktrees wait for your approval.
@@ -39,10 +42,29 @@ final class FirstMateView: NSView {
         let turnOn = NSButton(title: "Turn on First Mate", target: self, action: #selector(turnOnClicked))
         turnOn.bezelStyle = .rounded
         turnOn.keyEquivalent = "\r"
+        // First run: which agent it is, and what keeps that agent in bounds.
+        for agent in FirstMatePane.agents {
+            agentPopup.addItem(withTitle: agent.displayName)
+            agentPopup.lastItem?.representedObject = agent.rawValue
+        }
+        agentPopup.target = self
+        agentPopup.action = #selector(agentChanged)
+        let agentLabel = NSTextField(labelWithString: "Run it as")
+        agentLabel.font = AppFont.mono(size: 12)
+        agentLabel.textColor = headline.textColor
+        let agentRow = NSStackView(views: [agentLabel, agentPopup])
+        agentRow.spacing = 8
+        agentRow.alignment = .centerY
+        agentGuard.font = AppFont.mono(size: 11)
+        agentGuard.textColor = GhosttyBridge.shared.terminalChromeForeground.withAlphaComponent(0.5)
+        agentGuard.preferredMaxLayoutWidth = 460
+        agentGuard.stringValue = FirstMatePane.guardDescription(FirstMatePane.agents[0])
         offPanel.orientation = .vertical
         offPanel.alignment = .leading
         offPanel.spacing = 16
         offPanel.addArrangedSubview(headline)
+        offPanel.addArrangedSubview(agentRow)
+        offPanel.addArrangedSubview(agentGuard)
         offPanel.addArrangedSubview(turnOn)
         offPanel.translatesAutoresizingMaskIntoConstraints = false
         offPanel.isHidden = true
@@ -80,7 +102,19 @@ final class FirstMateView: NSView {
         DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(view) }
     }
 
-    @objc private func turnOnClicked() { onTurnOn?() }
+    /// Preselect the agent First Mate was last set to.
+    func selectAgent(_ agent: AgentType) {
+        guard let i = FirstMatePane.agents.firstIndex(of: agent) else { return }
+        agentPopup.selectItem(at: i)
+        agentGuard.stringValue = FirstMatePane.guardDescription(agent)
+    }
+
+    private var pickedAgent: AgentType {
+        (agentPopup.selectedItem?.representedObject as? String).flatMap(AgentType.init(rawValue:)) ?? .claudeCode
+    }
+
+    @objc private func agentChanged() { agentGuard.stringValue = FirstMatePane.guardDescription(pickedAgent) }
+    @objc private func turnOnClicked() { onTurnOn?(pickedAgent) }
 
 }
 

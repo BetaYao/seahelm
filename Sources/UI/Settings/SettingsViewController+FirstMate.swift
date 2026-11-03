@@ -25,6 +25,18 @@ extension SettingsViewController {
             autonomyRows.append(SettingsRow.make(FirstMateRulesView.actionTitle(action),
                                                  subtitle: Self.autonomyHint(action), control: popup))
         }
+        fm.agent.removeAllItems()
+        for agent in FirstMatePane.agents {
+            fm.agent.addItem(withTitle: agent.displayName)
+            fm.agent.lastItem?.representedObject = agent.rawValue
+        }
+        let chosen = AgentType(rawValue: config.autopilotAgent) ?? .claudeCode
+        fm.agent.selectItem(at: FirstMatePane.agents.firstIndex(of: chosen) ?? 0)
+        fm.agent.target = self
+        fm.agent.action = #selector(firstMateAgentChanged)
+        fm.agentGuard.stringValue = FirstMatePane.guardDescription(chosen)
+        fm.agentGuard.font = NSFont.systemFont(ofSize: 11)
+        fm.agentGuard.textColor = SettingsPalette.secondary
         let open = SettingsControls.button("Open First Mate", target: self, action: #selector(openFirstMateClicked))
         let orders = SettingsControls.button("Edit standing orders…", target: self, action: #selector(editStandingOrdersClicked))
 
@@ -56,8 +68,10 @@ extension SettingsViewController {
 
         return [
             SettingsGroupView(title: "First Mate", rows: [
-                SettingsRow.make("Enabled", subtitle: "A Claude Code session of its own, woken by your repos' rules: CI going red, PRs merging.", control: fm.enabled),
+                SettingsRow.make("Enabled", subtitle: "An agent session of its own, woken by your repos' rules: CI going red, PRs merging.", control: fm.enabled),
                 SettingsRow.make("Paused", subtitle: "Events are still recorded; nothing is handed to First Mate until you resume.", control: fm.paused),
+                SettingsRow.make("Agent", subtitle: "Changing it restarts First Mate's session as the new agent.", control: fm.agent),
+                SettingsRow.stacked(nil, content: fm.agentGuard),
                 SettingsRow.actions([open, orders]),
             ]),
             SettingsGroupView(title: "What it may do on its own", rows: autonomyRows + [
@@ -100,6 +114,14 @@ extension SettingsViewController {
             }
         }
         config.autopilotAutonomy = raw
+        if let raw = fm.agent.selectedItem?.representedObject as? String { config.autopilotAgent = raw }
+    }
+
+    @objc private func firstMateAgentChanged() {
+        if let raw = fm.agent.selectedItem?.representedObject as? String, let agent = AgentType(rawValue: raw) {
+            fm.agentGuard.stringValue = FirstMatePane.guardDescription(agent)
+        }
+        applyChanges()
     }
 
     @objc private func firstMateGlobalChanged() { applyChanges() }
@@ -209,6 +231,8 @@ extension SettingsViewController {
 final class FirstMateSettingsControls {
     let enabled = NSSwitch()
     let paused = NSSwitch()
+    let agent = NSPopUpButton()
+    let agentGuard = NSTextField(wrappingLabelWithString: "")
     var autonomy: [AutopilotAction: NSPopUpButton] = [:]
     let repoPopup = NSPopUpButton()
     let source = NSTextField(wrappingLabelWithString: "")

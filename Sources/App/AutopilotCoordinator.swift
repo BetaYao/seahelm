@@ -112,12 +112,21 @@ final class AutopilotCoordinator {
     /// The user's defaults per action (Settings ▸ First Mate).
     private(set) var defaults: AutonomyMap = AutomationConfig.defaultAutonomy
 
-    func apply(enabled: Bool, paused: Bool, backend: String,
+    /// Which agent First Mate is (Settings ▸ First Mate).
+    private(set) var agent: AgentType = .claudeCode
+
+    func apply(enabled: Bool, paused: Bool, backend: String, agent: AgentType = .claudeCode,
                defaults: AutonomyMap = AutomationConfig.defaultAutonomy) {
         self.paused = paused
         if defaults != self.defaults {
             self.defaults = defaults
             configs.removeAll()
+        }
+        let switchedAgent = agent != self.agent
+        self.agent = agent
+        if enabled, self.enabled, switchedAgent {
+            // A session stamped with the other agent is replaced by ensureSession.
+            ensureSession()
         }
         if enabled, !self.enabled {
             self.enabled = true
@@ -187,12 +196,13 @@ final class AutopilotCoordinator {
         // The agent is started with its own permission gate (`.claude/settings.json`
         // in its directory), never with the yolo flag: seahelm's policy covers its
         // CLI, Claude's covers the rest of the shell.
-        let command = FirstMatePane.launchCommand
+        let agent = FirstMatePane.agents.contains(self.agent) ? self.agent : .claudeCode
+        let command = FirstMatePane.launchCommand(for: agent)
         let young = launchedAt.map { Date().timeIntervalSince($0) < 60 } ?? false
         DispatchQueue.global(qos: .userInitiated).async {
             let name = FirstMatePane.sessionName
             var exists = SessionManager.sessionExists(name: name, backend: backend)
-            if exists, !FirstMatePane.sessionIsCurrent() || (!young && !Self.agentIsRunning()) {
+            if exists, !FirstMatePane.sessionIsCurrent(agent: agent) || (!young && !Self.agentIsRunning()) {
                 SessionManager.killSession(name, backend: backend)
                 // The kill lands asynchronously, and createDetachedSession
                 // declines a name that still lists — leaving no session at all.
@@ -203,7 +213,7 @@ final class AutopilotCoordinator {
                 exists = false
             }
             if !exists {
-                FirstMatePane.markSessionCurrent()
+                FirstMatePane.markSessionCurrent(agent: agent)
                 DispatchQueue.main.async { [weak self] in self?.launchedAt = Date() }
                 DispatchQueue.global(qos: .userInitiated).async {
                     SessionManager.createDetachedSession(name: name, backend: backend,
@@ -363,7 +373,7 @@ final class AutopilotCoordinator {
     private func send(_ text: String, to id: String) {
         awaitingTurn = true
         AgentRegistry.shared.sendCommand(to: id, command: text, submitWithAttachments: true,
-                                         agentType: .claudeCode)
+                                         agentType: agent)
     }
 
     // MARK: - Gate

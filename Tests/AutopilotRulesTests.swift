@@ -293,3 +293,35 @@ final class WorktreeFactsTests: XCTestCase {
         XCTAssertEqual(text, "Delete worktree x — nothing uncommitted")
     }
 }
+
+final class FirstMateAgentTests: XCTestCase {
+    /// Neither agent may start without its bounds.
+    func testEachAgentStartsHeld() {
+        XCTAssertEqual(FirstMatePane.launchCommand(for: .claudeCode), "claude --permission-mode default")
+        let codex = FirstMatePane.launchCommand(for: .codex)
+        XCTAssertTrue(codex.contains("--sandbox workspace-write"), codex)
+        XCTAssertTrue(codex.contains("--ask-for-approval on-request"), codex)
+        XCTAssertTrue(codex.contains("network_access=true"), "gh and the seahelm socket need it")
+        for agent in FirstMatePane.agents {
+            XCTAssertFalse(FirstMatePane.launchCommand(for: agent).contains("dangerously"), "\(agent)")
+        }
+    }
+
+    func testSwitchingAgentMakesTheSessionStale() {
+        let dir = NSTemporaryDirectory() + "fma-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        FirstMatePane.markSessionCurrent(agent: .claudeCode, at: dir)
+        XCTAssertTrue(FirstMatePane.sessionIsCurrent(agent: .claudeCode, at: dir))
+        XCTAssertFalse(FirstMatePane.sessionIsCurrent(agent: .codex, at: dir))
+    }
+
+    func testBothAgentsFindTheInstructions() throws {
+        let dir = NSTemporaryDirectory() + "fmi-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        FirstMatePane.provision(at: dir)
+        for name in ["CLAUDE.md", "AGENTS.md"] {
+            XCTAssertTrue(try String(contentsOfFile: dir + "/" + name, encoding: .utf8).contains("You are First Mate"), name)
+        }
+    }
+}
