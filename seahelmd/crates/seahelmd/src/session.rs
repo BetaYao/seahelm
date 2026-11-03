@@ -2,7 +2,8 @@
 //!
 //! Adapted from keep's `keepd/src/tab.rs` (MIT, Copyright (c) the Keep
 //! authors — see crates/keep-vt/LICENSE-keep). What changed: unix only for
-//! now, and the grid answers the program's questions whenever nobody is
+//! now; the stream is also read for OSC 7501 / 133 / 9;4, which a status
+//! reader gets from `snapshot`; and the grid answers the program's questions whenever nobody is
 //! attached, with the colours seahelm gives it (`Facts`) — a session
 //! started detached that swallowed OSC 10/11 would leave an agent that asked
 //! then painting without colours for the rest of its life.
@@ -13,6 +14,8 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use keep_vt::osc_scan::{Osc, Scanner};
+use keep_vt::program_status::{self, Command, Store};
 use keep_vt::{Facts, Format, Terminal};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
@@ -44,6 +47,69 @@ struct Inner {
     terminal: Terminal,
     subscribers: Vec<Subscriber>,
     next_id: u64,
+    /// What the program has said beside the screen, read off the stream by
+    /// `Scanner` (see `Session::snapshot`).
+    signals: Signals,
+}
+
+/// The OSC traffic a status reader wants and the grid does not keep.
+#[derive(Default)]
+struct Signals {
+    /// Bumped on every write the grid parses, so a reader can tell an
+    /// unchanged screen without reading it.
+    generation: u64,
+    /// OSC 7501 records (program status).
+    program: Store,
+    /// Bumped whenever the live root record changes, so a reader polling
+    /// every few seconds still sees each change of it.
+    program_seq: u64,
+    /// OSC 9;4: (state, percent); None once cleared.
+    progress: Option<(u8, Option<u8>)>,
+}
+
+impl Signals {
+    /// The live root record as a reader sees it: what it says, not when.
+    fn root_seen(&self) -> Option<(program_status::Report, String)> {
+        self.program.live_root().map(|r| (r.report.clone(), r.app.clone()))
+    }
+
+    /// Take in what the scanner found. Returns what the terminal answers to
+    /// it (the 7501 support query), for the caller to send or not.
+    fn take(&mut self, found: Vec<Osc>) -> Vec<u8> {
+        let mut replies = Vec::new();
+        for osc in found {
+            match osc {
+                Osc::ProgramStatus { body, bel } => match program_status::parse(&body) {
+                    Some(Command::Query) => {
+                        replies.extend_from_slice(b"\x1b]7501;");
+                        replies.extend_from_slice(program_status::QUERY_REPLY.as_bytes());
+                        replies.extend_from_slice(if bel { b"\x07" } else { b"\x1b\\" });
+                    }
+                    Some(Command::Report(report)) => {
+                        let before = self.root_seen();
+                        self.program.apply(report);
+                        if self.root_seen() != before {
+                            self.program_seq += 1;
+                        }
+                    }
+                    None => {}
+                },
+                // The shell has the terminal back: the program's records end.
+                Osc::Shell { mark: b'D', .. } => {
+                    let before = self.root_seen();
+                    self.program.prompt_returned();
+                    if self.root_seen() != before {
+                        self.program_seq += 1;
+                    }
+                }
+                Osc::Shell { .. } => {}
+                Osc::Progress { state, percent } => {
+                    self.progress = (state != 0).then_some((state, percent));
+                }
+            }
+        }
+        replies
+    }
 }
 
 pub struct Session {
@@ -109,7 +175,12 @@ impl Session {
         let mut reader = pair.master.try_clone_reader().context("pty reader")?;
 
         let terminal = new_terminal(cols, rows, facts.as_ref())?;
-        let inner = Arc::new(Mutex::new(Inner { terminal, subscribers: Vec::new(), next_id: 0 }));
+        let inner = Arc::new(Mutex::new(Inner {
+            terminal,
+            subscribers: Vec::new(),
+            next_id: 0,
+            signals: Signals::default(),
+        }));
         let finished = Arc::new(AtomicBool::new(false));
 
         // Reader thread. The lock is held for the parse and fan-out only,
@@ -121,21 +192,38 @@ impl Session {
             .name("seahelmd-pty-reader".into())
             .spawn(move || {
                 let mut buf = vec![0u8; READ_CHUNK];
+                let mut scanner = Scanner::new();
                 loop {
                     let n = match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => n,
                     };
                     let Ok(mut guard) = sink.lock() else { break };
-                    guard.terminal.write(&buf[..n]);
+                    // The grid does not know OSC 7501, so its support query
+                    // is answered here, in its place among the grid's
+                    // answers: the chunk goes in up to each query, so that
+                    // what came before it is answered first. Claude Code
+                    // sends it beside DA1 and reads DA1's answer as "none of
+                    // the rest are coming"; a 7501 answer after it is ignored.
+                    let mut replies = Vec::new();
+                    let mut at = 0;
+                    for (end, osc) in scanner.feed(&buf[..n]) {
+                        if matches!(&osc, Osc::ProgramStatus { body, .. } if body.as_slice() == b"?") {
+                            guard.terminal.write(&buf[at..end]);
+                            replies.append(&mut guard.terminal.take_events().replies);
+                            at = end;
+                        }
+                        replies.append(&mut guard.signals.take(vec![osc]));
+                    }
+                    guard.terminal.write(&buf[at..n]);
+                    guard.signals.generation += 1;
+                    replies.append(&mut guard.terminal.take_events().replies);
                     // The grid's answers go to the program only while nobody
                     // is attached: an attached client is handed the question
                     // in the output below and answers it itself, and two
                     // answers are one too many. Taken every time either way,
                     // so they never pile up.
-                    let events = guard.terminal.take_events();
-                    let unanswered = (guard.subscribers.is_empty() && !events.replies.is_empty())
-                        .then_some(events.replies);
+                    let unanswered = (guard.subscribers.is_empty() && !replies.is_empty()).then_some(replies);
 
                     // One allocation for the whole fan-out.
                     let chunk: Arc<[u8]> = Arc::from(&buf[..n]);
@@ -268,6 +356,49 @@ impl Session {
         w.write_all(bytes)?;
         w.flush()?;
         Ok(())
+    }
+
+    /// What a status reader polls (`seahelmd snapshot`): the visible screen,
+    /// and what the program has said beside it. JSON, one object.
+    pub fn snapshot(&self) -> Result<String> {
+        let guard = self.inner.lock().map_err(|_| anyhow::anyhow!("session poisoned"))?;
+        let t = &guard.terminal;
+        let (cols, rows) = t.size();
+        let viewport = t.viewport_text().map_err(|e| anyhow::anyhow!("viewport: {e}"))?;
+        let sig = &guard.signals;
+        let mut j = Json::object();
+        j.num("generation", sig.generation as i64);
+        j.num("cols", cols as i64);
+        j.num("rows", rows as i64);
+        j.boolean("alt_screen", t.alternate_screen().is_some());
+        j.string("title", &t.title());
+        j.string("pwd", &t.pwd());
+        match sig.progress {
+            Some((state, percent)) => {
+                let mut p = Json::object();
+                p.num("state", state as i64);
+                p.opt_num("percent", percent.map(|v| v as i64));
+                j.raw("progress", &p.finish());
+            }
+            None => j.raw("progress", "null"),
+        }
+        j.num("program_seq", sig.program_seq as i64);
+        match sig.program.live_root() {
+            Some(rec) => {
+                let r = &rec.report;
+                let mut p = Json::object();
+                p.string("state", r.state.name());
+                p.opt_string("kind", r.kind.map(|k| k.name()));
+                p.opt_num("progress", r.progress.map(|v| v as i64));
+                p.string("app", &rec.app);
+                p.string("title", &r.title);
+                p.string("msg", &r.msg);
+                j.raw("program", &p.finish());
+            }
+            None => j.raw("program", "null"),
+        }
+        j.string("viewport", &viewport);
+        Ok(j.finish())
     }
 
     /// Screen and scrollback as plain text — what `seahelmd history` answers.
@@ -416,4 +547,103 @@ fn process_name(pid: i32) -> Option<String> {
     let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     let name = comm.trim().to_owned();
     (!name.is_empty()).then_some(name)
+}
+
+/// Just enough JSON to write a snapshot without a dependency.
+struct Json(String);
+
+impl Json {
+    fn object() -> Self {
+        Json(String::from("{"))
+    }
+
+    fn key(&mut self, k: &str) {
+        if self.0.len() > 1 {
+            self.0.push(',');
+        }
+        escape(k, &mut self.0);
+        self.0.push(':');
+    }
+
+    fn raw(&mut self, k: &str, v: &str) {
+        self.key(k);
+        self.0.push_str(v);
+    }
+
+    fn num(&mut self, k: &str, v: i64) {
+        self.raw(k, &v.to_string());
+    }
+
+    fn opt_num(&mut self, k: &str, v: Option<i64>) {
+        match v {
+            Some(v) => self.num(k, v),
+            None => self.raw(k, "null"),
+        }
+    }
+
+    fn boolean(&mut self, k: &str, v: bool) {
+        self.raw(k, if v { "true" } else { "false" });
+    }
+
+    fn string(&mut self, k: &str, v: &str) {
+        self.key(k);
+        escape(v, &mut self.0);
+    }
+
+    fn opt_string(&mut self, k: &str, v: Option<&str>) {
+        match v {
+            Some(v) => self.string(k, v),
+            None => self.raw(k, "null"),
+        }
+    }
+
+    fn finish(mut self) -> String {
+        self.0.push('}');
+        self.0
+    }
+}
+
+fn escape(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_strings_are_escaped() {
+        let mut j = Json::object();
+        j.string("a", "q\"b\\s\nl\u{1}");
+        j.num("n", 3);
+        assert_eq!(j.finish(), r#"{"a":"q\"b\\s\nl\u0001","n":3}"#);
+    }
+
+    #[test]
+    fn a_query_is_answered_and_reports_are_kept() {
+        let mut sig = Signals::default();
+        let r = sig.take(vec![Osc::ProgramStatus { body: b"?".to_vec(), bel: true }]);
+        assert_eq!(r, format!("\x1b]7501;{}\x07", program_status::QUERY_REPLY).into_bytes());
+        assert!(sig.take(vec![Osc::ProgramStatus { body: b"state=working:app=claude-code".to_vec(), bel: false }]).is_empty());
+        assert_eq!(sig.program_seq, 1);
+        assert_eq!(sig.program.live_root().unwrap().report.state, program_status::State::Working);
+        // The same report again changes nothing a reader sees.
+        sig.take(vec![Osc::ProgramStatus { body: b"state=working:app=claude-code".to_vec(), bel: false }]);
+        assert_eq!(sig.program_seq, 1);
+        sig.take(vec![Osc::Shell { mark: b'D', exit: Some(0) }]);
+        assert!(sig.program.live_root().is_none());
+        assert_eq!(sig.program_seq, 2);
+    }
 }

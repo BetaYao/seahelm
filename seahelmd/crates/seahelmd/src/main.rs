@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use seahelmd::client;
 use seahelmd::proto::Msg;
 
-const USAGE: &str = "usage: seahelmd <run|attach> <name> [cmd...] | new [--hold SECS] <name> [--] cmd... | list | send <name> <text> | history <name> | kill <name> | version";
+const USAGE: &str = "usage: seahelmd <run|attach> <name> [cmd...] | new [--hold SECS] <name> [--] cmd... | list | send <name> <text> | history <name> | snapshot <name> | kill <name> | version";
 
 fn main() {
     if let Err(e) = run() {
@@ -83,6 +83,12 @@ fn run() -> Result<()> {
             let name = rest.first().ok_or_else(|| anyhow::anyhow!(USAGE))?;
             if let Msg::Text(text) = client::request(name, &Msg::History)? {
                 print!("{text}");
+            }
+        }
+        "snapshot" => {
+            let name = rest.first().ok_or_else(|| anyhow::anyhow!(USAGE))?;
+            if let Msg::Text(json) = client::request(name, &Msg::Snapshot)? {
+                println!("{json}");
             }
         }
         "kill" => {
