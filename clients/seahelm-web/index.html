@@ -78,6 +78,10 @@
   .icon-btn{flex:none;width:44px;height:44px;border:0;border-radius:22px;background:transparent;
     color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer}
   .icon-btn:hover{background:rgba(255,255,255,.06)}
+  /* No browser ring: a sheet that closes hands focus back to its button, and
+     after typing in the sheet the browser would draw its blue ring for that. */
+  .icon-btn:focus{outline:none}
+  .icon-btn:focus-visible{outline:2px solid var(--accent-30);outline-offset:-2px}
 
   /* ── connection gate ────────────────────────────────────── */
   .gate{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
@@ -2928,7 +2932,7 @@ function nwHideSheet(){
   if (nw.busy) return;
   $('nwSheet').hidden = true;
   $('nwPrompt').blur();
-  $('nwOpenBtn').focus({ preventScroll: true });
+  $('nwOpenBtn').focus({ preventScroll: true, focusVisible: false });
 }
 
 function nwRenderChips(){
