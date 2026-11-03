@@ -24,6 +24,7 @@ KEEP_GHOSTTY_VT_DIR=~/.cache/seahelm/libghostty-vt/a53771af0165-aarch64-macos ca
 | `list` | one line per session: `name= pid= clients= cwd= cmd=` |
 | `send <name> <text>` | write bytes to the session's input |
 | `history <name>` | screen and scrollback as plain text |
+| `snapshot <name>` | what a status reader polls, as JSON: the visible screen (`viewport`), `title`, `pwd`, `alt_screen`, OSC 9;4 `progress`, the live OSC 7501 root record (`program`) and its change counter `program_seq`, and `generation`, which moves on every write |
 | `kill <name>` | end the session |
 
 What it does:
@@ -33,4 +34,10 @@ What it does:
   (`fg=cdd6f4 bg=1e1e2e cursor=f5e0dc dark=1`) is what OSC 10/11/12 and the
   colour-scheme query get back from a session with no client, so an agent
   started detached reads the real palette instead of caching "no colours".
-- **A slow client is repainted, not queued forever** (keep's resync).
+- **A slow client is repainted, not queued forever** (keep's resync). What
+  is already queued goes out as one frame, so a client that keeps up is not
+  sent a frame per PTY read.
+- **Program status (OSC 7501) is kept by the daemon.** It reads the stream
+  for 7501 reports, OSC 133 `D` (which ends a program's records) and OSC
+  9;4 progress, and answers the 7501 support query while nobody is attached:
+  Claude Code only reports to a terminal that has answered it.

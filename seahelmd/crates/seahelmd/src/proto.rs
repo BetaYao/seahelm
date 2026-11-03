@@ -27,6 +27,9 @@ pub enum Msg {
     Send(Vec<u8>),
     /// End the session.
     Kill,
+    /// What a status reader polls: answered with `Text`, a JSON object (see
+    /// `Session::snapshot`).
+    Snapshot,
 
     // Daemon → client.
     Repaint(Vec<u8>),
@@ -53,6 +56,7 @@ impl Msg {
             Msg::History => (5, vec![]),
             Msg::Send(b) => (6, b.clone()),
             Msg::Kill => (7, vec![]),
+            Msg::Snapshot => (8, vec![]),
             Msg::Repaint(b) => (64, b.clone()),
             Msg::Output(b) => (65, b.clone()),
             Msg::Text(s) => (66, s.as_bytes().to_vec()),
@@ -84,6 +88,7 @@ impl Msg {
             5 => Msg::History,
             6 => Msg::Send(payload),
             7 => Msg::Kill,
+            8 => Msg::Snapshot,
             64 => Msg::Repaint(payload),
             65 => Msg::Output(payload),
             66 => Msg::Text(text(payload)),
@@ -136,6 +141,7 @@ mod tests {
             Msg::History,
             Msg::Send(b"\x1b[A".to_vec()),
             Msg::Kill,
+            Msg::Snapshot,
             Msg::Repaint(b"\x1b[2J".to_vec()),
             Msg::Output(vec![0, 255, 7]),
             Msg::Text("name=x".into()),

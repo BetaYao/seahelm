@@ -340,3 +340,109 @@ fn killing_a_held_session_leaves_nothing() {
     assert!(!list.contains("name=never"), "{list}");
     assert!(!dir.0.join("never").exists());
 }
+
+impl Dir {
+    fn snapshot(&self, name: &str) -> String {
+        String::from_utf8_lossy(&self.cli(&["snapshot", name], &[]).stdout).into_owned()
+    }
+
+    fn wait_for_snapshot(&self, name: &str, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let s = self.snapshot(name);
+            if s.contains(needle) {
+                return s;
+            }
+            assert!(Instant::now() < deadline, "snapshot never had {needle:?}:\n{s}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+/// The number after `"key":` in a snapshot.
+fn snapshot_num(json: &str, key: &str) -> i64 {
+    let at = json.find(&format!("\"{key}\":")).unwrap_or_else(|| panic!("no {key} in {json}"));
+    json[at + key.len() + 3..].chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect::<String>().parse().unwrap()
+}
+
+#[test]
+fn a_snapshot_is_the_visible_screen_and_what_the_program_said_beside_it() {
+    let dir = Dir::new();
+    let script = "printf '\\033]2;my-title\\a'; for i in $(seq 1 80); do echo scrolled-$i; done; \
+                  printf '\\033]9;4;1;40\\a'; echo visible-marker; sleep 30";
+    dir.cli(&["new", "snap", "bash", "--norc", "-c", script], &[]);
+    let s = dir.wait_for_snapshot("snap", "visible-marker");
+    assert!(s.contains(r#""title":"my-title""#), "{s}");
+    assert!(s.contains(r#""progress":{"state":1,"percent":40}"#), "{s}");
+    assert!(s.contains(r#""alt_screen":false"#), "{s}");
+    assert!(s.contains(r#""rows":24"#) && s.contains(r#""cols":80"#), "{s}");
+    assert!(!s.contains("scrolled-1\\n"), "history is not the viewport: {s}");
+    assert!(s.contains("scrolled-80"), "{s}");
+    // Nothing new was drawn, so a poller can skip the screen.
+    let g = snapshot_num(&s, "generation");
+    assert!(g > 0, "{s}");
+    assert_eq!(snapshot_num(&dir.snapshot("snap"), "generation"), g, "generation moves only with output");
+}
+
+#[test]
+fn a_held_session_snapshots_as_not_started() {
+    let dir = Dir::new();
+    dir.cli(&["new", "--hold", "20", "held", "--", "bash", "--norc", "-c", "echo hi; sleep 30"], &[]);
+    assert_eq!(dir.snapshot("held").trim(), r#"{"started":false}"#);
+}
+
+/// Ask for OSC 7501 support, print the answer, then report working; later
+/// hand the terminal back (OSC 133 D).
+const PROGRAM_STATUS: &str = r#"
+sleep 0.3
+printf '\033]7501;?\a'
+IFS= read -r -s -t 2 -d $'\a' reply
+printf '\nREPLY[%s]\n' "${reply#$'\033'}"
+printf '\033]7501;state=working:app=claude-code:msg=UGxhbg\033\\'
+printf 'reported\n'
+sleep 1.5
+printf '\033]133;D;0\a'
+printf 'returned\n'
+sleep 30
+"#;
+
+#[test]
+fn program_status_is_answered_kept_and_ended_by_the_shell_returning() {
+    let dir = Dir::new();
+    dir.cli(&["new", "ps", "bash", "--norc", "-c", PROGRAM_STATUS], &[]);
+    let h = dir.wait_for("ps", "REPLY[");
+    assert!(h.contains("REPLY[]7501;?:states=idle,working,done,blocked,error"), "the daemon answers while nobody is attached:\n{h}");
+    let s = dir.wait_for_snapshot("ps", r#""state":"working""#);
+    assert!(s.contains(r#""app":"claude-code""#) && s.contains(r#""msg":"Plan""#), "{s}");
+    let seq = snapshot_num(&s, "program_seq");
+    let s = dir.wait_for_snapshot("ps", r#""program":null"#);
+    assert!(snapshot_num(&s, "program_seq") > seq, "the end of the record is a change a poller sees: {s}");
+}
+
+#[test]
+fn with_a_client_attached_the_daemon_leaves_the_7501_query_to_it() {
+    let dir = Dir::new();
+    dir.cli(&["new", "ps2", "bash", "--norc", "-c", PROGRAM_STATUS], &[]);
+    let mut client = Mirror::attach(&dir, "ps2", 80, 24);
+    let h = dir.wait_for("ps2", "REPLY[");
+    client.pump_until_quiet();
+    assert!(h.contains("REPLY[]"), "the daemon answered over an attached client:\n{h}");
+}
+
+/// Ask for 7501 support and DA1 in one write, as Claude Code does, and print
+/// how the first answer starts.
+const ASK_7501_AND_DA1: &str = r#"
+sleep 0.3
+printf '\033]7501;?\033\\\033[c'
+IFS= read -r -s -n 3 first
+printf '\nFIRST[%s]\n' "${first#$'\033'}"
+sleep 30
+"#;
+
+#[test]
+fn the_7501_answer_comes_before_da1_as_its_query_did() {
+    let dir = Dir::new();
+    dir.cli(&["new", "order", "bash", "--norc", "-c", ASK_7501_AND_DA1], &[]);
+    let h = dir.wait_for("order", "FIRST[");
+    assert!(h.contains("FIRST[]7]"), "DA1 was answered first, so the program gives up on 7501:\n{h}");
+}

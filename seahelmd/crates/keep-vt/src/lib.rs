@@ -12,6 +12,9 @@ use std::os::raw::c_int;
 
 mod effects;
 mod handover;
+pub mod osc_scan;
+pub mod program_status;
+pub mod render;
 
 pub use effects::{ClipboardAnswer, ClipboardReader, Device, Events, Facts};
 pub use handover::{CursorStyle, Keyboard};
@@ -548,7 +551,7 @@ impl std::error::Error for Error {}
 
 /// A headless terminal: feed it PTY bytes, ask it for the screen.
 pub struct Terminal {
-    raw: ffi::Terminal,
+    pub(crate) raw: ffi::Terminal,
     /// What the terminal does with what a program says to it beyond the
     /// screen: the answers it writes back ([`Terminal::answer_queries`]),
     /// and, standing in for a terminal somebody is using
@@ -1047,6 +1050,50 @@ impl Terminal {
         self.format_with(options)
     }
 
+    /// The visible screen as plain text, the way a terminal reads its
+    /// viewport for status detection (Ghostty's `ghostty_surface_read_text`
+    /// over the viewport): rows joined by line feeds, soft-wrapped rows
+    /// joined back into one line, trailing blanks kept as the formatter
+    /// leaves them. History is not included.
+    pub fn viewport_text(&self) -> Result<String, Error> {
+        let (cols, rows) = self.size();
+        if cols == 0 || rows == 0 {
+            return Ok(String::new());
+        }
+        let (Some(start), Some(end)) = (self.cell(0, 0), self.cell(cols - 1, rows - 1)) else {
+            return Ok(String::new());
+        };
+        let selection = ffi::Selection { size: std::mem::size_of::<ffi::Selection>(), start, end, rectangle: false };
+        let none = ffi::ScreenExtra {
+            size: std::mem::size_of::<ffi::ScreenExtra>(),
+            cursor: false,
+            style: false,
+            hyperlink: false,
+            protection: false,
+            kitty_keyboard: false,
+            charsets: false,
+        };
+        let options = ffi::FormatterOptions {
+            size: std::mem::size_of::<ffi::FormatterOptions>(),
+            emit: ffi::FORMAT_PLAIN,
+            unwrap: true,
+            trim: false,
+            extra: ffi::TerminalExtra {
+                size: std::mem::size_of::<ffi::TerminalExtra>(),
+                palette: false,
+                modes: false,
+                scrolling_region: false,
+                tabstops: false,
+                pwd: false,
+                keyboard: false,
+                screen: none,
+            },
+            selection: &selection as *const ffi::Selection as *const c_void,
+        };
+        let bytes = self.format_with(options)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     /// DEC modes that decide what a key press or a mouse movement writes:
     /// application cursor keys, mouse reporting in all its encodings, focus
     /// reports, bracketed paste.
@@ -1362,6 +1409,29 @@ mod abi {
         assert_eq!(std::mem::size_of::<ffi::Style>(), 72, "Style");
         assert_eq!(std::mem::size_of::<ffi::ClipboardReadReply>(), 56, "ClipboardReadReply");
         assert_eq!(std::mem::size_of::<ffi::ClipboardWriteReply>(), 16, "ClipboardWriteReply");
+    }
+}
+
+#[cfg(test)]
+mod viewport {
+    use super::*;
+
+    #[test]
+    fn only_the_visible_rows_soft_wraps_joined() {
+        let mut t = Terminal::new(10, 3).unwrap();
+        t.write(b"old-1\r\nold-2\r\nold-3\r\n");
+        t.write(b"0123456789abc\r\nlast");
+        let text = t.viewport_text().unwrap();
+        assert!(!text.contains("old-1"), "history is not the viewport: {text:?}");
+        assert!(text.contains("0123456789abc"), "a soft wrap is one line: {text:?}");
+        assert!(text.contains("last"), "{text:?}");
+    }
+
+    #[test]
+    fn wide_characters_read_once() {
+        let mut t = Terminal::new(10, 2).unwrap();
+        t.write("中文 ok".as_bytes());
+        assert!(t.viewport_text().unwrap().contains("中文 ok"));
     }
 }
 

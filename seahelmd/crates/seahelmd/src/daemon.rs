@@ -20,6 +20,9 @@ use portable_pty::CommandBuilder;
 use crate::proto::{self, Msg};
 use crate::session::Session;
 
+/// How much queued output one frame to a client may carry.
+const COALESCE_BYTES: usize = 256 * 1024;
+
 /// The size a session starts at, before anybody attaches and says otherwise.
 const START_SIZE: (u16, u16) = (80, 24);
 
@@ -157,6 +160,12 @@ fn handle(stream: UnixStream, lazy: &Arc<Lazy>, name: &str, created: u64, start_
                 session.as_ref().map(|s| s.cwd()).unwrap_or_else(|| start_dir.to_string()),
             ))
         }
+        // A held session has drawn nothing and said nothing yet.
+        Msg::Snapshot => match lazy.get().map(|s| s.snapshot()) {
+            Some(Ok(json)) => Msg::Text(json),
+            Some(Err(e)) => Msg::Error(e.to_string()),
+            None => Msg::Text(r#"{"started":false}"#.to_string()),
+        },
         Msg::History => match lazy.get().map(|s| s.history()) {
             Some(Ok(text)) => Msg::Text(text),
             Some(Err(e)) => Msg::Error(e.to_string()),
@@ -211,7 +220,29 @@ fn attached(mut reader: UnixStream, mut writer: UnixStream, session: &Arc<Sessio
                             Err(_) => break,
                         }
                     }
-                    Ok(chunk) => Msg::Output(chunk.to_vec()),
+                    // Everything already queued goes in the same frame. A PTY
+                    // read is small (about 1 KiB on macOS), and a frame per
+                    // read left the pump a write and a wakeup behind the
+                    // reader on every chunk, so a chatty program filled the
+                    // backlog and was repaid in repaints, hundreds a second.
+                    Ok(chunk) => {
+                        let mut out = chunk.to_vec();
+                        while out.len() < COALESCE_BYTES {
+                            match attachment.output.try_recv() {
+                                Ok(more) => out.extend_from_slice(&more),
+                                Err(_) => break,
+                            }
+                        }
+                        // Dropped while we drained: the screen, not the tail.
+                        if attachment.overflowed() {
+                            match attachment.resync() {
+                                Ok(screen) => Msg::Repaint(screen),
+                                Err(_) => break,
+                            }
+                        } else {
+                            Msg::Output(out)
+                        }
+                    }
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => {
                         let _ = proto::write(&mut writer, &Msg::Ended);
