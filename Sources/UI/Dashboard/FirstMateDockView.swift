@@ -9,7 +9,7 @@ import AppKit
 /// colour (accent while it watches, green while it works, amber when it wants
 /// you). A second line appears only when it is waiting on you, and is the way
 /// to answer it. Everything else — what it is doing, what it last handled — is
-/// the tooltip; history, pause and the `?` cheat-sheet show on hover.
+/// the tooltip; pause shows on hover.
 ///
 /// It still has to look clickable: a `›` at the end of the rule says it opens
 /// something, and on hover the row lifts like a fleet row does. Clicking it
@@ -17,13 +17,10 @@ import AppKit
 final class FirstMateDockView: NSView {
     var onOpen: (() -> Void)?
     var onTogglePause: (() -> Void)?
-    var onShowAllShortcuts: (() -> Void)?
     /// Settings ▸ First Mate, from the dock's context menu.
     var onShowSettings: (() -> Void)?
     /// The waiting-on-you line: anchor view to show the cards from.
     var onShowApprovals: ((NSView) -> Void)?
-    /// The history button: anchor view to show the log from.
-    var onShowHistory: ((NSView) -> Void)?
 
     private let leftRule = NSView()
     private let rightRule = NSView()
@@ -32,8 +29,6 @@ final class FirstMateDockView: NSView {
     private let spinner = SpinnerDotView(color: SemanticColors.running)
     private let attention = NSButton()
     private let pauseButton = NSButton()
-    private let historyButton = NSButton()
-    private let helpButton = NSButton()
     private let tools = NSStackView()
     private let chevron = NSImageView()
     private let hoverFill = NSView()
@@ -83,9 +78,7 @@ final class FirstMateDockView: NSView {
         attention.isHidden = true
 
         for (button, symbol, tip, action) in [
-            (historyButton, "clock.arrow.circlepath", "What First Mate has done", #selector(historyClicked)),
             (pauseButton, "pause.fill", "Pause First Mate", #selector(pauseClicked)),
-            (helpButton, "questionmark.circle", "Keyboard shortcuts (?)", #selector(helpClicked)),
         ] {
             button.isBordered = false
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
@@ -251,8 +244,6 @@ final class FirstMateDockView: NSView {
     }
     @objc private func settingsClicked() { onShowSettings?() }
     @objc private func pauseClicked() { onTogglePause?() }
-    @objc private func historyClicked() { onShowHistory?(historyButton) }
-    @objc private func helpClicked() { onShowAllShortcuts?() }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

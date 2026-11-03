@@ -453,7 +453,7 @@ final class AutopilotCoordinator {
         }
         let execute = self.execute
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = execute?(approval.method, approval.params) ?? .error(code: 0, message: "unavailable")
+            let result = execute?(approval.method, Self.asUser(approval.params)) ?? .error(code: 0, message: "unavailable")
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.didRun(method: approval.method, result: result)
@@ -470,6 +470,16 @@ final class AutopilotCoordinator {
     }
 
     var pendingApprovalIds: [String] { Array(approvals.keys) }
+
+    /// The call as the user's, for running once they have said yes. The params
+    /// First Mate sent still name it in `_meta.caller`, and the router gates on
+    /// that alone: left in, an approved call was gated again — a fresh card went
+    /// up, nothing ran, and the `{"queued": …}` answer read as "done".
+    static func asUser(_ params: [String: Any]) -> [String: Any] {
+        var params = params
+        params.removeValue(forKey: "_meta")
+        return params
+    }
 
     // MARK: - Proposals
 
@@ -523,7 +533,7 @@ final class AutopilotCoordinator {
         }
         let execute = self.execute
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = execute?(option.method, option.params) ?? .error(code: 0, message: "unavailable")
+            let result = execute?(option.method, Self.asUser(option.params)) ?? .error(code: 0, message: "unavailable")
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.didRun(method: option.method, result: result)

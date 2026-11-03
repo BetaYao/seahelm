@@ -63,8 +63,6 @@ final class DashboardOverviewView: NSView {
     var onIntegrate: ((String) -> Void)?
     /// The header "+" was clicked: add a repo via the folder picker.
     var onAddRepo: (() -> Void)?
-    /// The bottom shortcut strip was clicked — show the full `?` cheat-sheet.
-    var onShowAllShortcuts: (() -> Void)?
 
     // Palette — accent hues stay fixed; text/line/panel adapt to light/dark so
     // the navigator stays readable on the glass sidebar in both appearances.
@@ -292,7 +290,6 @@ final class DashboardOverviewView: NSView {
         addSubview(integrationBanner)
 
         // --- Bottom shortcut strip ---
-        firstMateDock.onShowAllShortcuts = { [weak self] in self?.onShowAllShortcuts?() }
         addSubview(firstMateDock)
 
         NSLayoutConstraint.activate([

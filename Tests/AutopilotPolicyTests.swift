@@ -158,6 +158,29 @@ final class AutopilotPolicyTests: XCTestCase {
         XCTAssertEqual(c.audit.recent().last?.text, "rejected: Delete worktree a")
     }
 
+    /// An approved card runs the call, once: it must not reach the gate again
+    /// (which raised a second card, ran nothing, and reported "done").
+    func testAnApprovedCallRunsPastTheGate() {
+        let ds = GateFakeDataSource()
+        ds.gate = .queued("autopilot-again")
+        let router = ControlRouter(dataSource: ds)
+        let c = coordinator()
+        c.activateForTesting()
+        let ran = expectation(description: "ran")
+        c.execute = { method, params in
+            let result = router.handle(method: method, params: params)
+            ran.fulfill()
+            return result
+        }
+        let params: [String: Any] = ["_meta": ["caller": FirstMatePane.sessionName], "worktree_path": "/wt/a"]
+        let gate = c.gate(action: .deleteWorktree, method: "worktree.delete", params: params)
+        guard case .queued(let id) = gate else { return XCTFail("\(gate)") }
+        c.resolveApproval(id, approved: true)
+        wait(for: [ran], timeout: 2)
+        XCTAssertTrue(ds.gated.isEmpty, "the approved call was gated a second time")
+        XCTAssertEqual(c.state.pendingApprovals, 0, "a second card went up")
+    }
+
     func testPausedOrOffRefuses() {
         let off = coordinator()
         XCTAssertEqual(off.gate(action: .messagePane, method: "pane.run", params: [:]), .deny("First Mate is off"))

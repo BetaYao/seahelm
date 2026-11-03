@@ -73,7 +73,6 @@ class MainWindowController: NSWindowController {
     /// First Mate's view while it is the center overlay; nil otherwise.
     private weak var firstMateView: FirstMateView?
     /// First Mate's history while its popover is open; nil otherwise.
-    private weak var firstMateHistory: FirstMateLogView?
     /// The approvals popover's content while it is open; nil otherwise.
     private weak var firstMateApprovals: FirstMateApprovalsView?
     private weak var firstMateApprovalsPopover: NSPopover?
@@ -3808,7 +3807,6 @@ extension MainWindowController {
             guard let self else { return }
             self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
         }
-        dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
         dashboard.firstMateDock.onShowSettings = { [weak self] in self?.showSettingsPage("firstMate") }
         dashboard.firstMateDock.onShowApprovals = { [weak self] anchor in self?.showFirstMateApprovals(from: anchor) }
         // First Mate's answer to a chat goes back to that chat.
@@ -3841,7 +3839,6 @@ extension MainWindowController {
                 let waiting = self.firstMateCards()
                 if waiting.isEmpty { self.firstMateApprovalsPopover?.close() } else { approvals.show(waiting) }
             }
-            self.firstMateHistory?.show(autopilot.audit.recent())
         }
     }
 
@@ -3930,20 +3927,6 @@ extension MainWindowController {
     fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
         AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId, content: "⎈ First Mate\n\(text)", format: .markdown))
-    }
-
-    /// The audit log in a popover off the dock's history button.
-    fileprivate func showFirstMateHistory(from anchor: NSView) {
-        let log = FirstMateLogView(frame: NSRect(x: 0, y: 0, width: 460, height: 360))
-        log.show(tabCoordinator.autopilot.audit.recent())
-        let controller = NSViewController()
-        controller.view = log
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.contentSize = log.frame.size
-        popover.behavior = .transient
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-        firstMateHistory = log
     }
 
     func settingsOpenFirstMate(_ settings: SettingsViewController) {
