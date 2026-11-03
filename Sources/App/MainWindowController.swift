@@ -3837,7 +3837,7 @@ extension MainWindowController {
 
     /// The dock is a switch: First Mate over the terminal side, or back to the
     /// worktree that was there.
-    func toggleFirstMate() {
+    @objc func toggleFirstMate() {
         guard let dashboardVC else { return }
         if firstMateView?.superview != nil {
             dashboardVC.dismissCenterOverlay()

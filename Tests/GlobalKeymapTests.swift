@@ -9,6 +9,12 @@ final class GlobalKeymapTests: XCTestCase {
         GlobalKeymap.resolve(chars: chars, keyCode: keyCode, flags: flags, hasSplitContext: split)
     }
 
+    func testCmdJTogglesFirstMateAnywhere() {
+        XCTAssertEqual(r("j", 38, .command), .firstMate)
+        XCTAssertEqual(r("j", 38, .command, split: false), .firstMate)
+        XCTAssertNil(r("j", 38, [.command, .shift]))
+    }
+
     // MARK: - Split shortcuts (gated on split context)
 
     func testCmdDSplitsHorizontal() {

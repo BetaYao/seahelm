@@ -14,6 +14,7 @@ enum GlobalShortcut: Equatable {
     case nextWorktree          // Ctrl+Tab
     case prevWorktree          // Ctrl+Shift+Tab
     case commandPalette        // Cmd+P: open the island's command bar, focused
+    case firstMate             // Cmd+J: First Mate over the terminal side, or back
 }
 
 enum GlobalKeymap {
@@ -68,6 +69,8 @@ enum GlobalKeymap {
         if flags == .command && chars == "b" { return .toggleSidebar }
 
         if flags == .command && lower == "p" { return .commandPalette }
+
+        if flags == .command && lower == "j" { return .firstMate }
 
         return nil
     }
