@@ -2,8 +2,7 @@ import AppKit
 
 /// First Mate over the terminal side (docs/first-mate-autopilot.md §3): its own
 /// terminal, nothing else — it should read like any selected pane, and the
-/// terminal is where you talk to it. What it has done is a click away in the
-/// dock's history (`FirstMateLogView`), not a column taking a third of the width.
+/// terminal is where you talk to it.
 final class FirstMateView: NSView {
     /// The center overlay's title while First Mate is shown — also how the
     /// window recognises that the overlay is First Mate's.
@@ -116,70 +115,6 @@ final class FirstMateView: NSView {
     @objc private func agentChanged() { agentGuard.stringValue = FirstMatePane.guardDescription(pickedAgent) }
     @objc private func turnOnClicked() { onTurnOn?(pickedAgent) }
 
-}
-
-/// What First Mate has done, newest last: the audit log as a list, shown from
-/// the dock's history button.
-final class FirstMateLogView: NSView {
-    private let textView = NSTextView()
-    private let scroll = NSScrollView()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        textView.isEditable = false
-        textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 12, height: 12)
-        textView.isVerticallyResizable = true
-        textView.autoresizingMask = [.width]
-        scroll.documentView = textView
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scroll)
-        NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: topAnchor),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
-
-    func show(_ entries: [AutopilotAudit.Entry]) {
-        textView.textStorage?.setAttributedString(Self.render(entries))
-        textView.scrollToEndOfDocument(nil)
-    }
-
-    static func render(_ entries: [AutopilotAudit.Entry]) -> NSAttributedString {
-        let out = NSMutableAttributedString()
-        let time = DateFormatter()
-        time.dateFormat = "MM-dd HH:mm"
-        let shown = entries.filter { $0.kind != .delivered }
-        for entry in shown {
-            out.append(NSAttributedString(string: time.string(from: entry.at) + "  ", attributes: [
-                .font: AppFont.mono(size: 10), .foregroundColor: SemanticColors.subtle,
-            ]))
-            let color: NSColor = switch entry.kind {
-            case .event: SemanticColors.text
-            case .action: SemanticColors.running
-            case .approval: SemanticColors.attention
-            case .denied, .skipped: SemanticColors.danger
-            case .message: SemanticColors.accent
-            default: SemanticColors.muted
-            }
-            let rule = entry.rule.map { "[\($0)] " } ?? ""
-            out.append(NSAttributedString(string: rule + AutopilotCoordinator.headline(entry) + "\n", attributes: [
-                .font: AppFont.mono(size: 11), .foregroundColor: color,
-            ]))
-        }
-        if shown.isEmpty {
-            out.append(NSAttributedString(string: "Nothing yet. Events First Mate was woken by, and what it did about them, show up here.", attributes: [
-                .font: AppFont.mono(size: 11), .foregroundColor: SemanticColors.subtle,
-            ]))
-        }
-        return out
-    }
 }
 
 /// What First Mate is waiting on you for — its approval and proposal cards —

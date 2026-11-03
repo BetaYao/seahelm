@@ -377,10 +377,6 @@ class DashboardViewController: NSViewController {
         overviewView.onCloseProject = { [weak self] project in
             self?.dashboardDelegate?.dashboardDidRequestCloseRepo(project)
         }
-        // The `?` in the First Mate dock opens the full cheat-sheet.
-        overviewView.onShowAllShortcuts = { [weak self] in
-            self?.toggleHelp()
-        }
         overviewView.onGroupingChanged = { [weak self] in
             guard let self else { return }
             overviewSelectedId = overviewView.selectedId
