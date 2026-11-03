@@ -6,16 +6,19 @@
 //! cells. GPUI caches a shaped line by its text and runs, so an unchanged row
 //! costs a cache hit, not a shape.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use gpui::{
-    div, fill, outline, point, prelude::*, px, size, App, BorderStyle, Bounds, Context, Element, ElementId,
-    FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hsla, InspectorElementId, KeyDownEvent,
-    LayoutId, Pixels, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window,
+    div, fill, outline, point, prelude::*, px, size, App, BorderStyle, Bounds, Context, CursorStyle, DispatchPhase,
+    Element, ElementId, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
+    Hsla, InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window,
 };
 use keep_vt::render::{Cell, CursorShape, Frame, Row, View, Width};
+use keep_vt::selection::{Autoscroll, Geometry, Pointer, Scroll, Scrollbar};
+use keep_vt::Terminal;
 
 use crate::keys;
 use crate::session::Session;
@@ -36,6 +39,31 @@ pub struct TerminalView {
     pub font_family: SharedString,
     pub font_size: Pixels,
     stats: Stats,
+    /// Where the grid was laid out last frame, for turning the pointer into
+    /// cells.
+    geom: Option<Geom>,
+    /// Wheel travel not yet a whole row (trackpads send fractions).
+    scroll_rows: f32,
+    /// A left-button selection in progress: the last pointer, for
+    /// autoscroll ticks.
+    selecting: Option<Pointer>,
+    rectangle: bool,
+    autoscrolling: bool,
+    scrollbar: Scrollbar,
+}
+
+#[derive(Clone, Copy)]
+struct Geom {
+    bounds: Bounds<Pixels>,
+    cell: gpui::Size<Pixels>,
+    cols: u16,
+    rows: u16,
+}
+
+/// A monotonic clock for the gesture's double-click timing.
+fn now_ns() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
 
 #[derive(Default)]
@@ -63,6 +91,12 @@ impl TerminalView {
             font_family: crate::fonts::terminal_family().into(),
             font_size: px(13.0),
             stats: Stats { enabled: std::env::var_os("SEAHELM_GPUI_STATS").is_some(), ..Stats::default() },
+            geom: None,
+            scroll_rows: 0.0,
+            selecting: None,
+            rectangle: false,
+            autoscrolling: false,
+            scrollbar: Scrollbar::default(),
         }
     }
 
@@ -113,6 +147,7 @@ impl TerminalView {
                 self.rows.clear();
                 self.generation = grid.generation;
             }
+            self.scrollbar = grid.terminal.scrollbar();
             let Some(view) = self.view.as_mut() else { return };
             if view.begin(&grid.terminal).is_err() {
                 return;
@@ -127,23 +162,59 @@ impl TerminalView {
         }
     }
 
+    /// Run `f` on the grid's terminal, under its lock.
+    fn with_terminal<R>(&self, f: impl FnOnce(&mut Terminal) -> R) -> Option<R> {
+        let session = self.session.as_ref()?;
+        let mut grid = session.grid.lock().ok()?;
+        Some(f(&mut grid.terminal))
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = &self.session else { return };
+        let Some(session) = self.session.clone() else { return };
         let app_cursor = session.grid.lock().map(|g| g.terminal.dec_mode(1)).unwrap_or(false);
-        if crate::platform::is_app_shortcut(&event.keystroke.modifiers) && event.keystroke.key == "v" {
-            if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                self.paste(&text);
+        if crate::platform::is_app_shortcut(&event.keystroke.modifiers) {
+            match event.keystroke.key.as_str() {
+                "v" => {
+                    if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                        self.paste(&text);
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
+                "c" => {
+                    if let Some(text) = self.with_terminal(|t| t.selection_text()).flatten().filter(|t| !t.is_empty()) {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
+                _ => {}
             }
-            cx.stop_propagation();
-            return;
         }
         if let Some(bytes) = keys::encode(&event.keystroke, app_cursor) {
+            self.to_live_screen();
             session.send(&bytes);
             cx.stop_propagation();
+            cx.notify();
         }
     }
 
-    fn paste(&self, text: &str) {
+    /// What typing does first, as in Ghostty: back to the live screen, and
+    /// the selection gone.
+    fn to_live_screen(&mut self) {
+        self.selecting = None;
+        self.with_terminal(|t| {
+            if t.has_selection() {
+                t.clear_selection();
+            }
+            if !t.scrollbar().at_bottom() {
+                t.scroll_viewport(Scroll::Bottom);
+            }
+        });
+    }
+
+    fn paste(&mut self, text: &str) {
+        self.to_live_screen();
         let Some(session) = &self.session else { return };
         let bracketed = session.grid.lock().map(|g| g.terminal.dec_mode(2004)).unwrap_or(false);
         let body = text.replace("\r\n", "\r").replace('\n', "\r");
@@ -158,20 +229,126 @@ impl TerminalView {
         session.send(&out);
     }
 
-    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, _cx: &mut Context<Self>) {
-        // Until scrollback is drawn: in a full-screen program the wheel is
-        // arrow keys, as most terminals do on the alternate screen.
-        let Some(session) = &self.session else { return };
-        let alt = session.grid.lock().map(|g| g.terminal.alternate_screen().is_some()).unwrap_or(false);
-        if !alt {
+    /// The wheel: history on the primary screen; arrow keys in a
+    /// full-screen program (the alternate screen has no history), as most
+    /// terminals do.
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.session.clone() else { return };
+        let row_h = self.geom.map(|g| g.cell.height).unwrap_or(window.line_height());
+        let dy = event.delta.pixel_delta(row_h).y;
+        self.scroll_rows += f32::from(dy) / f32::from(row_h).max(1.0);
+        let rows = self.scroll_rows.trunc() as i32;
+        if rows == 0 {
             return;
         }
-        let dy = event.delta.pixel_delta(window.line_height()).y;
-        let lines = (f32::from(dy) / 16.0).round() as i32;
-        let key: &[u8] = if lines > 0 { b"\x1b[A" } else { b"\x1b[B" };
-        for _ in 0..lines.unsigned_abs().min(10) {
-            session.send(key);
+        self.scroll_rows -= rows as f32;
+        let alt = session.grid.lock().map(|g| g.terminal.alternate_screen().is_some()).unwrap_or(false);
+        if alt {
+            let key: &[u8] = if rows > 0 { b"\x1b[A" } else { b"\x1b[B" };
+            for _ in 0..rows.unsigned_abs().min(10) {
+                session.send(key);
+            }
+            return;
         }
+        // Positive is towards the top of the content: up into history.
+        self.with_terminal(|t| t.scroll_viewport(Scroll::Delta(-(rows as isize))));
+        cx.notify();
+    }
+
+    /// The pointer as the gesture wants it: the cell under it, clamped to
+    /// the grid, and its position in the pane.
+    fn pointer(&self, position: gpui::Point<Pixels>) -> Option<Pointer> {
+        let g = self.geom?;
+        let x = f32::from(position.x - g.bounds.origin.x);
+        let y = f32::from(position.y - g.bounds.origin.y);
+        let cell = |v: f32, size: Pixels, n: u16| (((v - PADDING) / f32::from(size)).floor().max(0.0) as u16).min(n.saturating_sub(1));
+        Some(Pointer { col: cell(x, g.cell.width, g.cols), row: cell(y, g.cell.height, g.rows), x: x as f64, y: y as f64 })
+    }
+
+    fn geometry(&self) -> Option<Geometry> {
+        let g = self.geom?;
+        Some(Geometry {
+            columns: g.cols as u32,
+            cell_width: f32::from(g.cell.width).round() as u32,
+            padding_left: PADDING as u32,
+            screen_height: f32::from(g.bounds.size.height) as u32,
+        })
+    }
+
+    /// A program that asked for the mouse gets it; shift selects anyway.
+    /// (Reporting the mouse to it is not done yet: the click is dropped.)
+    fn program_has_mouse(&self) -> bool {
+        self.with_terminal(|t| [1000, 1002, 1003].iter().any(|&m| t.dec_mode(m))).unwrap_or(false)
+    }
+
+    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus);
+        if !event.modifiers.shift && self.program_has_mouse() {
+            return;
+        }
+        let Some(at) = self.pointer(event.position) else { return };
+        self.rectangle = event.modifiers.alt;
+        self.with_terminal(|t| t.select_press(at, now_ns()));
+        self.selecting = Some(at);
+        cx.notify();
+    }
+
+    fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.selecting.is_none() || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        let (Some(at), Some(geometry)) = (self.pointer(event.position), self.geometry()) else { return };
+        self.selecting = Some(at);
+        let rectangle = self.rectangle || event.modifiers.alt;
+        let autoscroll = self
+            .with_terminal(|t| {
+                let _ = t.select_drag(at, geometry, rectangle);
+                t.select_autoscroll()
+            })
+            .unwrap_or(Autoscroll::None);
+        if autoscroll != Autoscroll::None {
+            self.start_autoscroll(cx);
+        }
+        cx.notify();
+    }
+
+    fn mouse_up(&mut self, _event: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(at) = self.selecting.take() else { return };
+        self.with_terminal(|t| t.select_release(Some((at.col, at.row))));
+        cx.notify();
+    }
+
+    /// While a drag is held past the top or bottom edge, scroll and extend
+    /// the selection every 50ms, as Ghostty does.
+    fn start_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self.autoscrolling {
+            return;
+        }
+        self.autoscrolling = true;
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_millis(50)).await;
+            let more = this
+                .update(cx, |v, cx| {
+                    let (Some(at), Some(geometry)) = (v.selecting, v.geometry()) else { return false };
+                    let go = v
+                        .with_terminal(|t| {
+                            if t.select_autoscroll() == Autoscroll::None {
+                                return false;
+                            }
+                            let _ = t.select_autoscroll_tick(at, geometry);
+                            true
+                        })
+                        .unwrap_or(false);
+                    cx.notify();
+                    go
+                })
+                .unwrap_or(false);
+            if !more {
+                let _ = this.update(cx, |v, _| v.autoscrolling = false);
+                break;
+            }
+        })
+        .detach();
     }
 
     fn record(&mut self, spent: Duration) {
@@ -243,6 +420,9 @@ pub struct Layout {
     backgrounds: Vec<gpui::PaintQuad>,
     segments: Vec<Segment>,
     cursor: Option<gpui::PaintQuad>,
+    /// Shown while the viewport is back in history: where it is.
+    thumb: Option<gpui::PaintQuad>,
+    hitbox: Option<Hitbox>,
     started: Instant,
 }
 
@@ -307,19 +487,30 @@ impl Element for TerminalElement {
         let rows = ((f32::from(inner_h) / f32::from(cell_h)).floor() as u16).max(1);
 
         let focused = self.view.update(cx, |v, cx| {
+            v.geom = Some(Geom { bounds, cell, cols, rows });
             v.ensure_attached(cols, rows, cx);
             v.sync();
             v.focus.is_focused(window)
         });
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
         let origin = point(bounds.origin.x + px(PADDING), bounds.origin.y + px(PADDING));
         let v = self.view.read(cx);
-        let mut layout = Layout { cell, backgrounds: Vec::new(), segments: Vec::new(), cursor: None, started };
+        let mut layout = Layout {
+            cell,
+            backgrounds: Vec::new(),
+            segments: Vec::new(),
+            cursor: None,
+            thumb: scroll_thumb(v.scrollbar, bounds),
+            hitbox: Some(hitbox),
+            started,
+        };
         let Some(frame) = v.frame.clone() else { return layout };
         let default_fg = frame.foreground;
         let default_bg = frame.background;
 
-        let cursor_cell = frame.cursor.at.filter(|_| frame.cursor.visible);
+        // Scrolled back, the cursor is not where it is drawn.
+        let cursor_cell = frame.cursor.at.filter(|_| frame.cursor.visible && v.scrollbar.at_bottom());
         let cursor_colour = frame.cursor_colour.unwrap_or(theme::CURSOR);
         let block_cursor = focused && matches!(frame.cursor.shape, CursorShape::Block);
 
@@ -429,6 +620,29 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        if let Some(hitbox) = layout.hitbox.take() {
+            window.set_cursor_style(CursorStyle::IBeam, &hitbox);
+            // Window-wide, not the element's: a drag goes on outside the
+            // pane, and autoscroll needs to hear it there.
+            let view = self.view.clone();
+            window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble && e.button == MouseButton::Left && hitbox.is_hovered(window) {
+                    view.update(cx, |v, cx| v.mouse_down(e, window, cx));
+                }
+            });
+            let view = self.view.clone();
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _window, cx| {
+                if phase == DispatchPhase::Bubble {
+                    view.update(cx, |v, cx| v.mouse_move(e, cx));
+                }
+            });
+            let view = self.view.clone();
+            window.on_mouse_event(move |e: &MouseUpEvent, phase, _window, cx| {
+                if phase == DispatchPhase::Bubble && e.button == MouseButton::Left {
+                    view.update(cx, |v, cx| v.mouse_up(e, cx));
+                }
+            });
+        }
         for quad in layout.backgrounds.drain(..) {
             window.paint_quad(quad);
         }
@@ -446,9 +660,33 @@ impl Element for TerminalElement {
         if let Some(c) = layout.cursor.take() {
             window.paint_quad(c);
         }
+        if let Some(t) = layout.thumb.take() {
+            window.paint_quad(t);
+        }
         let spent = layout.started.elapsed();
         self.view.update(cx, |v, _| v.record(spent));
     }
+}
+
+/// A 4pt overlay thumb at the right edge while the viewport is in history,
+/// sized and placed as the viewport is in everything kept.
+fn scroll_thumb(s: Scrollbar, bounds: Bounds<Pixels>) -> Option<gpui::PaintQuad> {
+    if s.at_bottom() || s.total == 0 {
+        return None;
+    }
+    let track = f32::from(bounds.size.height) - 4.0;
+    let h = (track * s.len as f32 / s.total as f32).max(24.0);
+    let top = (track - h) * s.offset as f32 / (s.total - s.len).max(1) as f32;
+    Some(
+        fill(
+            Bounds::new(
+                point(bounds.origin.x + bounds.size.width - px(6.), bounds.origin.y + px(2. + top)),
+                size(px(4.), px(h)),
+            ),
+            crate::tokens::alpha(theme::rgb(theme::FG), 0.35),
+        )
+        .corner_radii(px(2.)),
+    )
 }
 
 fn cell_fg(c: &Cell, default_fg: [u8; 3], default_bg: [u8; 3]) -> [u8; 3] {

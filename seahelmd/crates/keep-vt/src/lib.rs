@@ -15,6 +15,7 @@ mod handover;
 pub mod osc_scan;
 pub mod program_status;
 pub mod render;
+pub mod selection;
 
 pub use effects::{ClipboardAnswer, ClipboardReader, Device, Events, Facts};
 pub use handover::{CursorStyle, Keyboard};
@@ -559,6 +560,8 @@ pub struct Terminal {
     /// clipboard. Boxed so the address the library holds stays put when the
     /// terminal moves. None until asked for.
     effects: Option<Box<effects::Effects>>,
+    /// The mouse-selection gesture (`selection`), made on first use.
+    gesture: Option<selection::RawGesture>,
 }
 
 // The handle is owned exclusively; libghostty-vt forbids concurrent writes.
@@ -571,7 +574,7 @@ impl Terminal {
         if rc != ffi::SUCCESS {
             return Err(Error(rc));
         }
-        Ok(Self { raw, effects: None })
+        Ok(Self { raw, effects: None, gesture: None })
     }
 
     /// Feed bytes read from the PTY.
@@ -1183,6 +1186,7 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        self.free_gesture();
         unsafe { ffi::ghostty_terminal_free(self.raw) };
     }
 }
