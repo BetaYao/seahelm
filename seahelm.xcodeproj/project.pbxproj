@@ -67,6 +67,7 @@
 		1AECB57692A3125F28E7B7F6 /* VTPipelineBenchmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB28B1CB12CE417A892A04C4 /* VTPipelineBenchmarks.swift */; };
 		1BB8C6D16F033D0337FB2BAD /* CursorSessionTitleLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */; };
 		1DC2DFE8D14825AADBCFFD50 /* KeyChordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5764F920F03FDD91AA7E2E66 /* KeyChordTests.swift */; };
+		1E05FD91B3A657229935DC03 /* WorktreeSetupHook.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294AC8C0B6C60FB61E8A401B /* WorktreeSetupHook.swift */; };
 		1E892BABA6556F8D83173C96 /* InitialAgentTaskDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361B9AD515334FDA65348EA8 /* InitialAgentTaskDeliveryTests.swift */; };
 		1E992A5758BD000FADE4E084 /* WebhookEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F66DA28CC57BFA18891872D /* WebhookEvent.swift */; };
 		1E9E18DF38B9685E5EE65D23 /* SeahelmSkillInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3EAA643D3A58E42AE2B7CD /* SeahelmSkillInstaller.swift */; };
@@ -132,6 +133,7 @@
 		3DB03858C29C479B5A8E7885 /* MailBody.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A702B5B856603AEC1DAAFA /* MailBody.swift */; };
 		3DDD9C5476832B1A31EE5238 /* MergedPRLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A7D0D0FB11B64D9267C857F /* MergedPRLookup.swift */; };
 		3E87489ABDE7AF68B710C4B8 /* GmailMailPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = C687ACEF28BB0481292D8AAF /* GmailMailPoller.swift */; };
+		3F6D1110487BB5C3A752B220 /* WorktreeSetupHookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B83D387E480D6A58F4A9C7D7 /* WorktreeSetupHookTests.swift */; };
 		3FCB1E2EB9A36CFE3AA21F63 /* MergedPRLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A6A5C9293E818E242111A82 /* MergedPRLookupTests.swift */; };
 		40246B8D57009E03E8F737D7 /* TelegramBotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33734F601E5350F0D59C8596 /* TelegramBotAPI.swift */; };
 		40A381BEFFBC2C3848BF59F5 /* PaneProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9890C9BDCA01771964CF26FD /* PaneProgressBar.swift */; };
@@ -661,6 +663,7 @@
 		280B84339A7AE83C77426D07 /* PaneReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneReducer.swift; sourceTree = "<group>"; };
 		283A4874875DF5C3079C258A /* AgentRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryTests.swift; sourceTree = "<group>"; };
 		28A21327F80611EDF5E558A2 /* WorkspaceManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManagerTests.swift; sourceTree = "<group>"; };
+		294AC8C0B6C60FB61E8A401B /* WorktreeSetupHook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSetupHook.swift; sourceTree = "<group>"; };
 		295944779C17E43F062F7829 /* MessageConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageConfig.swift; sourceTree = "<group>"; };
 		29A07652F0DCD0488FA748B2 /* UpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateBanner.swift; sourceTree = "<group>"; };
 		29A4C276F3BE94AAAFAB8D11 /* PaneExecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneExecTests.swift; sourceTree = "<group>"; };
@@ -971,6 +974,7 @@
 		B73CEC83DFFADA6867B5DFBD /* PaneExecOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneExecOutput.swift; sourceTree = "<group>"; };
 		B767FA4381095CD7B0F537CF /* ZmxSessionRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZmxSessionRecovery.swift; sourceTree = "<group>"; };
 		B7A33515B716406497BF7E74 /* ShortcutHintBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHintBarTests.swift; sourceTree = "<group>"; };
+		B83D387E480D6A58F4A9C7D7 /* WorktreeSetupHookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSetupHookTests.swift; sourceTree = "<group>"; };
 		B841F51C5CE64F7FFA956EF3 /* SignalDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalDecoder.swift; sourceTree = "<group>"; };
 		B86D2BBA33C13BFA224F58D4 /* GlobalKeymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalKeymap.swift; sourceTree = "<group>"; };
 		B8816ECB0847ABFD594B1AB3 /* ChatNoticeBookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNoticeBookTests.swift; sourceTree = "<group>"; };
@@ -1454,6 +1458,7 @@
 				C122F14B425BC7F3DF1FEB8B /* WorktreeDiscovery.swift */,
 				3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */,
 				D0C6E483E617223564CD87CE /* WorktreeReturn.swift */,
+				294AC8C0B6C60FB61E8A401B /* WorktreeSetupHook.swift */,
 				ED6EF9DDF33CD3FBC2155391 /* WorktreeSnapshotter.swift */,
 			);
 			path = Git;
@@ -1826,6 +1831,7 @@
 				13AAE08210A45FF88284C7E2 /* WorktreePRStatusTests.swift */,
 				E48EF7634B86F69D2FCA6759 /* WorktreeReturnPlannerTests.swift */,
 				9DA8AD6F8AC7CDE47F86245A /* WorktreeReturnRunnerTests.swift */,
+				B83D387E480D6A58F4A9C7D7 /* WorktreeSetupHookTests.swift */,
 				63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */,
 				97096F35E0C4B14D1874C672 /* WorktreeSnapshotterTests.swift */,
 				517E6B353B84EA6AE224E0C1 /* WorktreeStatusAggregatorTests.swift */,
@@ -2430,6 +2436,7 @@
 				80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */,
 				E8E41A017C3C9EAA42E5CB40 /* WorktreeReturnPlannerTests.swift in Sources */,
 				5FC3252BFA86D110BFDCF34E /* WorktreeReturnRunnerTests.swift in Sources */,
+				3F6D1110487BB5C3A752B220 /* WorktreeSetupHookTests.swift in Sources */,
 				E855FF11BD4FE2723AE442AD /* WorktreeSidePanelViewControllerTests.swift in Sources */,
 				85197A128E0E3812C3B34508 /* WorktreeSnapshotterTests.swift in Sources */,
 				C444DD64D874C76934185DD6 /* WorktreeStatusAggregatorTests.swift in Sources */,
@@ -2760,6 +2767,7 @@
 				C33A3CB170F8BA3BB37273E5 /* WorktreePathNavigation.swift in Sources */,
 				2D9321574C48894375CADC4D /* WorktreeReturn.swift in Sources */,
 				B00E523253FF35D3D72AE4BE /* WorktreeRowHelpers.swift in Sources */,
+				1E05FD91B3A657229935DC03 /* WorktreeSetupHook.swift in Sources */,
 				75772A087B197B7F7050BC43 /* WorktreeShellActions.swift in Sources */,
 				73B16CF9CCB46AADB3214B8F /* WorktreeSidePanelViewController.swift in Sources */,
 				9CB20225E63262D49B89EFFB /* WorktreeSnapshotter.swift in Sources */,
