@@ -23,6 +23,9 @@ final class HostGatewayDecisions {
         /// `checked`, 0-based), and index `options.count` is Done.
         var multiSelect = false
         var checked: [Int] = []
+        /// The pane has been seen waiting since this question was raised. Only
+        /// then does leaving `waiting` mean the question is over.
+        var sawWaiting = false
     }
 
     private var open: [String: Decision] = [:]
@@ -54,7 +57,8 @@ final class HostGatewayDecisions {
         let seq = event["seq"] as? Int ?? 0
 
         if let q = event["question"] as? [String: Any] {
-            let d = Self.question(q, paneSessionKey: key, paneId: paneId, seq: seq)
+            var d = Self.question(q, paneSessionKey: key, paneId: paneId, seq: seq)
+            d.sawWaiting = event["status"] as? String == AgentStatus.waiting.rawValue
             lock.lock(); open[key] = d; lock.unlock()
             return .opened(d)
         }
@@ -85,7 +89,18 @@ final class HostGatewayDecisions {
         let expired: Bool
         switch open[key]?.kind {
         case "question":
-            expired = (event["status"] as? String).map { $0 != AgentStatus.waiting.rawValue } ?? false
+            // Raised while the pane still reads running: Claude Code's own
+            // status (OSC 7501) says "working" for a beat after AskUserQuestion,
+            // and a scan or hook landing in that beat used to clear the card the
+            // instant it arrived — on the web, a question that flashed and went.
+            // So "running" ends it only once the pane has been seen waiting.
+            // At rest, failed or gone, the question cannot still be on screen
+            // (Esc on it lands at idle); a new prompt or the turn's end ends it too.
+            let status = event["status"] as? String
+            if status == AgentStatus.waiting.rawValue { open[key]?.sawWaiting = true }
+            let atRest = [AgentStatus.idle, .error, .exited].map(\.rawValue).contains(status ?? "")
+            let movedOn = status == AgentStatus.running.rawValue && open[key]?.sawWaiting == true
+            expired = atRest || movedOn || event["user_prompt"] != nil || event["is_completion"] as? Bool == true
         case "suggest":
             expired = event["user_prompt"] != nil
         default:

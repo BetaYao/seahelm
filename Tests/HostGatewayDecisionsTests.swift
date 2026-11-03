@@ -22,6 +22,7 @@ final class HostGatewayDecisionsTests: XCTestCase {
     func testLeavingWaitingClearsIt() {
         let d = HostGatewayDecisions()
         _ = d.apply(event: questionEvent())
+        _ = d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.waiting.rawValue])
         let change = d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue])
         XCTAssertEqual(change, .cleared(paneSessionKey: "k1"))
         XCTAssertTrue(d.options(forPaneSessionKey: "k1").isEmpty)
@@ -200,6 +201,33 @@ extension HostGatewayDecisionsTests {
         _ = d.apply(event: questionEvent())
         XCTAssertEqual(d.replaceQuestion(paneSessionKey: "k1", card: nil), .cleared(paneSessionKey: "k1"))
         XCTAssertTrue(d.pending().isEmpty)
+    }
+}
+
+extension HostGatewayDecisionsTests {
+    /// Recorded live: the AskUserQuestion event lands while the pane still reads
+    /// Running (Claude's own status says working for a beat), and only the next
+    /// event says Waiting. A Running event in between must not clear the card.
+    func testAQuestionRaisedWhileRunningSurvivesUntilItIsWaitedOn() {
+        let d = HostGatewayDecisions()
+        var raised = questionEvent()
+        raised["status"] = AgentStatus.running.rawValue
+        guard case .opened = d.apply(event: raised) else { return XCTFail() }
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue]), .none,
+                       "cleared before the pane ever waited on it")
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.waiting.rawValue]), .none)
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.running.rawValue]),
+                       .cleared(paneSessionKey: "k1"), "answered: the pane moved on")
+    }
+
+    func testANewPromptOrTheEndOfTheTurnEndsAQuestion() {
+        let d = HostGatewayDecisions()
+        _ = d.apply(event: questionEvent())
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "user_prompt": "never mind"]),
+                       .cleared(paneSessionKey: "k1"))
+        _ = d.apply(event: questionEvent())
+        XCTAssertEqual(d.apply(event: ["pane_session_key": "k1", "status": AgentStatus.idle.rawValue, "is_completion": true]),
+                       .cleared(paneSessionKey: "k1"))
     }
 }
 
