@@ -162,7 +162,7 @@ final class FirstMateDockView: NSView {
         attention.attributedTitle = NSAttributedString(string: line, attributes: [
             .font: AppFont.mono(size: 11), .foregroundColor: SemanticColors.attention,
         ])
-        toolTip = "First Mate — \(word)\n\(line)"
+        toolTip = "First Mate — \(word)  (⌘J)\n\(line)"
 
         pauseButton.isHidden = state.activity == .off
         let paused = state.activity == .paused

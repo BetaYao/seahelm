@@ -51,6 +51,8 @@ class SeahelmWindow: NSWindow {
             mwc.toggleChromeCollapsed(); return true
         case .commandPalette:
             mwc.toggleCommandPalette(); return true
+        case .firstMate:
+            mwc.toggleFirstMate(); return true
         }
     }
 

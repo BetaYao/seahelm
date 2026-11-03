@@ -98,6 +98,16 @@ enum MenuBuilder {
         toggleSidebarItem.target = target
         viewMenu.addItem(toggleSidebarItem)
 
+        // Window-level ⌘J (GlobalKeymap) reaches it first; the item is for finding it.
+        let firstMateItem = NSMenuItem(
+            title: "First Mate",
+            action: #selector(MainWindowController.toggleFirstMate),
+            keyEquivalent: "j"
+        )
+        firstMateItem.keyEquivalentModifierMask = .command
+        firstMateItem.target = target
+        viewMenu.addItem(firstMateItem)
+
         let closePaneItem = NSMenuItem(title: "Close Pane", action: #selector(MainWindowController.closePaneOrTab), keyEquivalent: "w")
         closePaneItem.keyEquivalentModifierMask = .command
         closePaneItem.target = target
