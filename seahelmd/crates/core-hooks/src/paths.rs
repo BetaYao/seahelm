@@ -14,16 +14,24 @@ fn is_sep(c: char) -> bool {
     c == '/' || (cfg!(windows) && c == '\\')
 }
 
-/// The separator to put between components. On Windows always `\`: paths
-/// reach the provider spelled both ways (`git worktree list` writes
-/// `C:/repo`, a hook's cwd is `C:\repo`, `fs::canonicalize` answers with
-/// backslashes), and they have to compare equal as strings.
-fn sep_for(_p: &str) -> char {
-    if cfg!(windows) {
+/// The separator to put between components. On Windows a path that is
+/// Windows-shaped — a drive or UNC root, or any `\` in it — is spelled with
+/// `\` throughout: it reaches the provider both ways (`git worktree list`
+/// writes `C:/repo`, a hook's cwd is `C:\repo`, `fs::canonicalize` answers
+/// with backslashes) and has to compare equal as a string. A path made only
+/// of `/` (what agents running under MSYS or WSL report) keeps `/`.
+fn sep_for(p: &str) -> char {
+    if cfg!(windows) && (p.contains('\\') || has_drive(p)) {
         '\\'
     } else {
         '/'
     }
+}
+
+/// `C:` at the start.
+fn has_drive(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
 }
 
 /// The root a path starts from (`/`, `C:\`, `\\`), or "" for a relative one.
@@ -101,8 +109,8 @@ pub(crate) fn standardize(p: &str) -> String {
         }
     }
     let body = parts.join(&sep.to_string());
-    // On Windows the root is spelled with the separator too (`C:/` → `C:\`).
-    let root = if cfg!(windows) { root.replace('/', "\\") } else { root.to_string() };
+    // A Windows root is spelled with the separator too (`C:/` → `C:\`).
+    let root = if sep == '\\' { root.replace('/', "\\") } else { root.to_string() };
     if root.is_empty() {
         body
     } else {
