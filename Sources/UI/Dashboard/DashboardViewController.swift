@@ -79,6 +79,8 @@ struct WorktreeRowInfo {
     var label: SessionLabel?
     /// Quiet for a day with nothing left to PR — see `WorktreeCleanupPolicy`.
     var isCleanupCandidate = false
+    /// The branch's newest PR on GitHub, with its CI and review (`WorktreePRStore`).
+    var prStatus: WorktreePRStatus?
 
     /// Rolled-up status for display/grouping. Computed once by the aggregator —
     /// the pane that changed status most recently — and carried here rather than

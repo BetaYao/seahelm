@@ -218,6 +218,8 @@
   .fm-meta{min-width:0;overflow:hidden;text-overflow:ellipsis}
   .fm-git{flex:none;font-size:var(--fs-cap);font-family:var(--mono)}
   .fm-git .add{color:var(--running)} .fm-git .del{color:var(--danger)} .fm-git .ab{color:var(--muted)}
+  .fm-pr{flex:none;color:var(--muted)} .fm-pr .ok{color:var(--running)} .fm-pr .bad{color:var(--danger)}
+  .fm-pr .wait{color:var(--attention)} .fm-pr.merged{color:#a371f7}
   .fm-msg{font-size:var(--fs-sub);line-height:20px;color:var(--text2);
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
   @media (min-width:761px){ .fm-msg{-webkit-line-clamp:1} }
@@ -2358,6 +2360,23 @@ function gitInfoHTML(g){
   const head = bits.join(' ');
   return head + (ab ? (head ? '  ' : '') + `<span class="ab">${ab}</span>` : '');
 }
+/** `#12 ✓ approved`, as the dashboard row draws it: CI as a mark, review only
+ *  when it decides something, and a PR that is no longer open says what
+ *  became of it. Empty when the branch has none. */
+function prBadgeHTML(pr){
+  if (!pr || !pr.number) return '';
+  const n = `#${esc(pr.number)}`;
+  const title = esc([`PR ${n}`, pr.state, pr.checks && `checks ${pr.checks}`,
+    pr.review && pr.review.replace('_', ' ')].filter(Boolean).join(' · '));
+  if (pr.state === 'merged') return `<span class="fm-pr merged" title="${title}">${n} merged</span>`;
+  if (pr.state === 'closed') return `<span class="fm-pr" title="${title}">${n} closed</span>`;
+  const mark = { passing: '<span class="ok">✓</span>', failing: '<span class="bad">✕</span>',
+                 pending: '<span class="wait">●</span>' }[pr.checks] || '';
+  const review = pr.review === 'approved' ? '<span class="ok">approved</span>'
+    : pr.review === 'changes_requested' ? '<span class="bad">changes</span>' : '';
+  return `<span class="fm-pr" title="${title}">${[n + (pr.state === 'draft' ? ' draft' : ''), mark, review]
+    .filter(Boolean).join(' ')}</span>`;
+}
 /** Status dot: a turning arc for running, a filled dot otherwise — haloed when
  *  it needs you. Decorative: the row spells the status out beside it. */
 function statusDotHTML(status, cls){
@@ -2410,6 +2429,8 @@ function buildFleet(){
       runningSince: (S.rowTimes.get(entry.path) || {}).running_since || null,
       lastActivityAt: (S.rowTimes.get(entry.path) || {}).last_activity_at || w.started_at || null,
       git: w.git || null,
+      // The branch's PR, its CI and review — fleet.groups, from the Mac.
+      pr: macRow.pr || null,
       paneCount: w.pane_count || entry.panes.length,
       panes: entry.panes,
     });
@@ -2569,6 +2590,7 @@ function renderTree(){
              ${label ? `<span class="fm-st" style="color:${labelColor}">${esc(label)}</span><span aria-hidden="true">·</span>` : ''}
              <span class="fm-meta">${esc(meta.join(' · '))}</span>
              <span class="fm-git">${gitInfoHTML(r.git)}</span>
+             ${prBadgeHTML(r.pr)}
            </span>
            ${msg ? `<span class="fm-msg">${esc(msg)}</span>` : ''}
          </span>`);

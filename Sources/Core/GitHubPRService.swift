@@ -148,6 +148,25 @@ final class GitHubPRService {
         return try await post(url, body: payload)
     }
 
+    // MARK: - GraphQL
+
+    /// One GraphQL request. Needs a token: GitHub's GraphQL API has no
+    /// anonymous access. Errors in the answer throw only when it carries no
+    /// data — a partial answer is still an answer.
+    func graphQL(_ query: String, variables: [String: Any]) async throws -> [String: Any] {
+        let url = URL(string: "\(baseURL)/graphql")!
+        let json = try await post(url, body: ["query": query, "variables": variables])
+        guard let object = json as? [String: Any] else {
+            throw GitHubAPIError.serverError(statusCode: 200, message: "unexpected GraphQL answer")
+        }
+        if object["data"] == nil || object["data"] is NSNull,
+           let errors = object["errors"] as? [[String: Any]] {
+            let message = errors.compactMap { $0["message"] as? String }.joined(separator: "; ")
+            throw GitHubAPIError.serverError(statusCode: 200, message: message)
+        }
+        return object
+    }
+
     // MARK: - Private networking
 
     private var authHeader: String {

@@ -280,6 +280,7 @@ class TabCoordinator {
             self.saveConfig()
         }
         WorktreeCleanupStore.shared.onChange = { [weak self] _ in self?.scheduleCleanupRepaint() }
+        WorktreePRStore.shared.onChange = { [weak self] in self?.scheduleCleanupRepaint() }
     }
 
     deinit { AgentRegistry.shared.onOutcome = nil }
@@ -545,6 +546,15 @@ class TabCoordinator {
                 probe: WorktreeCleanupStore.shared.probe(worktreePath: agent.worktreePath),
                 now: now)
 
+            // The branch's PR and its CI, from a per-repo cache refreshed in the
+            // background. Main and the integration checkout are not PR work.
+            let branch = worktreeInfoByPath[agent.worktreePath]?.branch ?? agent.branch
+            var prStatus: WorktreePRStatus?
+            if !isMain, !isIntegration, !branch.isEmpty {
+                WorktreePRStore.shared.refresh(worktreePath: agent.worktreePath, now: now)
+                prStatus = WorktreePRStore.shared.status(worktreePath: agent.worktreePath, branch: branch)
+            }
+
             // Git summary (diff size + ahead/behind). Served from an 8s cache;
             // kick an off-main refresh so the next build has fresh numbers.
             if changedWorktreePath == nil || changedWorktreePath == agent.worktreePath {
@@ -633,7 +643,8 @@ class TabCoordinator {
                 currentPaneRunningSince: currentPaneRunningSince,
                 panes: panes,
                 label: WorktreeLabelStore.shared.label(forWorktree: agent.worktreePath),
-                isCleanupCandidate: isCleanupCandidate
+                isCleanupCandidate: isCleanupCandidate,
+                prStatus: prStatus
             ))
         }
 
@@ -2346,9 +2357,11 @@ extension TabCoordinator {
         // grouping item itself, whose equality decides when the dashboard
         // regroups, and a title changes far more often than a group does.
         var words: [String: (title: String, subtitle: String)] = [:]
+        var prs: [String: WorktreePRStatus] = [:]
         for row in rows {
             words[row.worktreePath] = (row.rowTitle ?? PaneTitleResolver.shortenPath(row.worktreePath),
                                        row.rowSubtitle)
+            prs[row.worktreePath] = row.prStatus
         }
         return WorktreeGrouping
             .groups(items, mode: WorktreeGroupingMode(wire: mode), now: Date())
@@ -2359,6 +2372,9 @@ extension TabCoordinator {
                     if let path = item["worktree_path"] as? String, let row = words[path] {
                         item["title"] = row.title
                         item["subtitle"] = row.subtitle
+                    }
+                    if let path = item["worktree_path"] as? String, let pr = prs[path] {
+                        item["pr"] = pr.dict
                     }
                     return item
                 }
