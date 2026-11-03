@@ -143,6 +143,18 @@ enum SeahelmCliInstaller {
                     die("unknown wait: %s" % sub)
                 sys.exit(0 if r.get("matched") else 1)
 
+            if g == "propose":
+                # seahelm propose [--json '<doc>' | < doc.json]   (First Mate only)
+                # doc: {"summary": "...", "options": [{"label": "Start #88",
+                #       "action": "worktree.create", "params": {...}}]}
+                raw = opt(a, "--json")
+                if raw is None: raw = sys.stdin.read()
+                try:
+                    doc = json.loads(raw)
+                except Exception:
+                    die("propose needs a JSON document (see seahelm propose in the skill)")
+                print(json.dumps(call("autopilot.propose", doc), indent=2)); return
+
             if g == "worktree":
                 # seahelm worktree create --repo <path> --task <text> [--agent claudeCode]
                 # seahelm worktree delete <worktree-path>

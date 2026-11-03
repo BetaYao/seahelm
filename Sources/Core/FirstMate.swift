@@ -15,6 +15,9 @@ enum FirstMateActionKind: Equatable {
     /// First Mate wants to do something its policy says to ask about
     /// (`AutopilotCoordinator.gate`). `payload` is the approval id.
     case autopilotApproval
+    /// First Mate's recommendation with options (`seahelm propose`). `payload`
+    /// is the proposal id; picking an option runs that option's action.
+    case autopilotProposal
 }
 
 struct FirstMateAction: Equatable {

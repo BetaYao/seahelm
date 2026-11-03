@@ -143,6 +143,20 @@ struct AutomationConfig: Equatable {
             PR #{{pr}} ({{branch}}) has been merged. If the worktree has no uncommitted or \
             unpushed work and its panes are idle, delete it; otherwise say what is left.
             """),
+        // Off until the user turns it on: it wakes First Mate every weekday
+        // morning for every project, and that is not free.
+        AutomationRule(
+            name: "triage-issues", trigger: .schedule("0 9 * * 1-5"),
+            autonomy: [.startAgent: .ask],
+            brief: """
+            Morning triage for {{repo}}. With `gh issue list --state open --label P0,P1 \
+            --json number,title,labels,assignees,updatedAt` (and without the label filter if that \
+            finds nothing urgent), find the open issues most worth starting now. Skip any already \
+            being worked on — `seahelm pane list` shows the worktrees, and a branch or PR naming \
+            the issue counts. Pick at most three, say in one line each why, and offer them with \
+            `seahelm propose` so the user can start one with a tap.
+            """,
+            enabled: false),
     ])
 
     /// The level for `action` under `rule` (nil = a conversation, not a rule).
@@ -206,6 +220,9 @@ struct AutomationConfig: Equatable {
             case let on as [String: Any]:
                 guard let cron = on["schedule"] as? String else {
                     throw ParseError.rule(index: i, message: "`on` mapping needs `schedule`")
+                }
+                guard CronSchedule(cron) != nil else {
+                    throw ParseError.rule(index: i, message: "`\(cron)` is not a five-field cron expression")
                 }
                 trigger = .schedule(cron)
             default:

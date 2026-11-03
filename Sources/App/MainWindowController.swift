@@ -2877,6 +2877,12 @@ extension MainWindowController {
     /// Routes a suggestion chip tap. `integrationReport` chips run or decline the
     /// discard; all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
+        if order.action.kind == .autopilotProposal {
+            if let id = order.action.payload {
+                tabCoordinator.autopilot.resolveProposal(id, picked: optionText)
+            }
+            return
+        }
         if order.action.kind == .autopilotApproval {
             // The card goes as soon as it is answered; the coordinator runs the
             // call (off main) and tells First Mate how it went.
@@ -3424,12 +3430,13 @@ extension MainWindowController {
         let attachable = orders.filter { order in
             guard !(order.action.options ?? []).isEmpty else { return false }
             return FirstMateAction.isQuestionPayload(order.action.payload)
-                || order.action.kind == .autopilotApproval
+                || order.action.kind == .autopilotApproval || order.action.kind == .autopilotProposal
                 || !noticeBook.recent(pane: order.action.terminalID).isEmpty
         }
         for order in chatSeenCards.absorb(attachable) {
             // An approval is a stop like a question: First Mate waits on it.
-            if FirstMateAction.isQuestionPayload(order.action.payload) || order.action.kind == .autopilotApproval {
+            if FirstMateAction.isQuestionPayload(order.action.payload) || order.action.kind == .autopilotApproval
+                || order.action.kind == .autopilotProposal {
                 sendCardToChat(order)
             } else {
                 attachOptionsToNotice(order)
@@ -3790,6 +3797,9 @@ extension MainWindowController {
     func dismissOrder(_ order: PendingOrder) {
         if order.action.kind == .autopilotApproval, let id = order.action.payload {
             tabCoordinator.autopilot.resolveApproval(id, approved: false)
+        }
+        if order.action.kind == .autopilotProposal, let id = order.action.payload {
+            tabCoordinator.autopilot.resolveProposal(id, picked: AutopilotCoordinator.dismissLabel)
         }
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }

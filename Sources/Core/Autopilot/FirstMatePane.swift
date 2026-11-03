@@ -32,7 +32,7 @@ enum FirstMatePane {
     /// Bumped whenever `instructions` or `permissions` change, so an existing
     /// directory picks the new ones up. The files are seahelm's, not the user's:
     /// what the user says to keep goes in `standing-orders.md`, never touched.
-    static let version = 2
+    static let version = 3
 
     /// Write the managed files (when stale) and the standing orders (when absent).
     static func provision(at dir: String = directory) {
@@ -113,6 +113,12 @@ enum FirstMatePane {
       briefed on the task. Write the task as you would brief a colleague: what, why, where.
     - `seahelm worktree delete <worktree-path>` — remove a worktree that is done with.
     - `gh pr view <n>`, `gh pr checks <n>`, `gh run view <id> --log-failed` — find out why.
+    - `seahelm propose --json '<doc>'` — offer the user a choice as a card (island, Telegram);
+      picking an option runs that option's action, no second question. The document:
+      `{"summary": "Three issues worth starting", "options": [{"label": "Start #88 login 500",
+      "action": "worktree.create", "params": {"repo_path": "/path/to/repo", "prompt": "<brief>"}}]}`.
+      Up to five options; each action is one you could run yourself (`worktree.create`,
+      `worktree.delete`, `pane.run` with `pane_id` and `command`). You are told what was picked.
 
     Every action goes through seahelm's policy. An answer of `{"queued": "approval"}` means
     the user will decide; it is not an error. Say what you proposed and move on — seahelm
