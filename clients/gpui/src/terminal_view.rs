@@ -18,6 +18,10 @@ use gpui::{
 };
 use keep_vt::render::{Cell, CursorShape, Frame, Row, View, Width};
 use keep_vt::selection::{Autoscroll, Geometry, Pointer, Scroll, Scrollbar};
+use keep_vt::input::{
+    kitty, KeyAction, KeyEncoder, KeyInput, MouseAction, MouseButton as VtButton, MouseEncoder, MouseGeometry,
+    MouseInput,
+};
 use keep_vt::Terminal;
 
 use crate::keys;
@@ -55,6 +59,12 @@ pub struct TerminalView {
     marked: Option<String>,
     /// The cursor's cell last frame, where the IME's candidate window goes.
     ime_anchor: Option<Bounds<Pixels>>,
+    /// libghostty-vt's encoders, which follow the program's modes (Kitty
+    /// keyboard, modifyOtherKeys, mouse tracking and its format).
+    key_encoder: Option<KeyEncoder>,
+    mouse_encoder: Option<MouseEncoder>,
+    /// A button whose press went to the program, so its release does too.
+    reported_button: Option<VtButton>,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +114,9 @@ impl TerminalView {
             scrollbar: Scrollbar::default(),
             marked: None,
             ime_anchor: None,
+            key_encoder: KeyEncoder::new().ok(),
+            mouse_encoder: MouseEncoder::new().ok(),
+            reported_button: None,
         }
     }
 
@@ -187,13 +200,31 @@ impl TerminalView {
         Some(f(&mut grid.terminal))
     }
 
+    /// Encode a key under the terminal's modes.
+    fn encode_key(&mut self, ks: &gpui::Keystroke, action: KeyAction) -> Vec<u8> {
+        let Some(t) = keys::translate(ks) else { return Vec::new() };
+        let Some(session) = self.session.clone() else { return Vec::new() };
+        let Some(encoder) = self.key_encoder.as_mut() else { return Vec::new() };
+        let Ok(grid) = session.grid.lock() else { return Vec::new() };
+        encoder.encode(
+            &grid.terminal,
+            &KeyInput { key: t.key, mods: t.mods, action, text: t.text.as_deref(), unshifted: t.unshifted },
+        )
+    }
+
+    fn kitty_flags(&self) -> u8 {
+        self.with_terminal(|t| t.kitty_keyboard_flags()).unwrap_or(0)
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session.clone() else { return };
-        // Typed text is the input method's to deliver (`replace_text_in_range`).
-        if keys::is_text(&event.keystroke) {
+        let flags = self.kitty_flags();
+        // Typed text is the input method's to deliver (`replace_text_in_range`),
+        // unless the program asked for every key as an escape code and
+        // nothing is being composed.
+        if keys::is_text(&event.keystroke) && (flags & kitty::REPORT_ALL == 0 || self.marked.is_some()) {
             return;
         }
-        let app_cursor = session.grid.lock().map(|g| g.terminal.dec_mode(1)).unwrap_or(false);
         if crate::platform::is_app_shortcut(&event.keystroke.modifiers) {
             match event.keystroke.key.as_str() {
                 "v" => {
@@ -213,11 +244,30 @@ impl TerminalView {
                 _ => {}
             }
         }
-        if let Some(bytes) = keys::encode(&event.keystroke, app_cursor) {
+        let bytes = match keys::legacy_newline(&event.keystroke, flags) {
+            Some(b) => b.to_vec(),
+            None => {
+                let action = if event.is_held { KeyAction::Repeat } else { KeyAction::Press };
+                self.encode_key(&event.keystroke, action)
+            }
+        };
+        if !bytes.is_empty() {
             self.to_live_screen();
             session.send(&bytes);
             cx.stop_propagation();
             cx.notify();
+        }
+    }
+
+    /// Releases, for a program that asked for event types.
+    fn on_key_up(&mut self, event: &gpui::KeyUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.kitty_flags() & kitty::REPORT_EVENTS == 0 {
+            return;
+        }
+        let bytes = self.encode_key(&event.keystroke, KeyAction::Release);
+        if let (false, Some(session)) = (bytes.is_empty(), &self.session) {
+            session.send(&bytes);
+            cx.stop_propagation();
         }
     }
 
@@ -264,6 +314,17 @@ impl TerminalView {
             return;
         }
         self.scroll_rows -= rows as f32;
+        if !event.modifiers.shift && self.program_has_mouse() {
+            let button = if rows > 0 { VtButton::WheelUp } else { VtButton::WheelDown };
+            let mut out = Vec::new();
+            for _ in 0..rows.unsigned_abs().min(10) {
+                out.extend(self.encode_mouse(MouseAction::Press, Some(button), &event.modifiers, event.position, false));
+            }
+            if !out.is_empty() {
+                session.send(&out);
+            }
+            return;
+        }
         let alt = session.grid.lock().map(|g| g.terminal.alternate_screen().is_some()).unwrap_or(false);
         if alt {
             let key: &[u8] = if rows > 0 { b"\x1b[A" } else { b"\x1b[B" };
@@ -298,14 +359,57 @@ impl TerminalView {
     }
 
     /// A program that asked for the mouse gets it; shift selects anyway.
-    /// (Reporting the mouse to it is not done yet: the click is dropped.)
     fn program_has_mouse(&self) -> bool {
-        self.with_terminal(|t| [1000, 1002, 1003].iter().any(|&m| t.dec_mode(m))).unwrap_or(false)
+        self.with_terminal(|t| t.mouse_tracking()).unwrap_or(false)
+    }
+
+    /// Encode a mouse event under the program's tracking mode and format.
+    fn encode_mouse(
+        &mut self,
+        action: MouseAction,
+        button: Option<VtButton>,
+        modifiers: &gpui::Modifiers,
+        position: gpui::Point<Pixels>,
+        any_pressed: bool,
+    ) -> Vec<u8> {
+        let (Some(g), Some(session)) = (self.geom, self.session.clone()) else { return Vec::new() };
+        let Some(encoder) = self.mouse_encoder.as_mut() else { return Vec::new() };
+        let geometry = MouseGeometry {
+            screen_width: f32::from(g.bounds.size.width) as u32,
+            screen_height: f32::from(g.bounds.size.height) as u32,
+            cell_width: f32::from(g.cell.width).round() as u32,
+            cell_height: f32::from(g.cell.height).round() as u32,
+            padding: PADDING as u32,
+        };
+        let input = MouseInput {
+            action,
+            button,
+            mods: keys::mods(modifiers),
+            x: f32::from(position.x - g.bounds.origin.x),
+            y: f32::from(position.y - g.bounds.origin.y),
+            any_pressed,
+        };
+        let Ok(grid) = session.grid.lock() else { return Vec::new() };
+        encoder.encode(&grid.terminal, geometry, &input)
+    }
+
+    fn report_mouse(&mut self, bytes: Vec<u8>) {
+        if let (false, Some(session)) = (bytes.is_empty(), &self.session) {
+            session.send(&bytes);
+        }
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
         if !event.modifiers.shift && self.program_has_mouse() {
+            if let Some(b) = vt_button(event.button) {
+                let bytes = self.encode_mouse(MouseAction::Press, Some(b), &event.modifiers, event.position, true);
+                self.reported_button = Some(b);
+                self.report_mouse(bytes);
+            }
+            return;
+        }
+        if event.button != MouseButton::Left {
             return;
         }
         let Some(at) = self.pointer(event.position) else { return };
@@ -315,7 +419,16 @@ impl TerminalView {
         cx.notify();
     }
 
-    fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    fn mouse_move(&mut self, event: &MouseMoveEvent, hovered: bool, cx: &mut Context<Self>) {
+        // Motion for the program: while a reported button is held (it may
+        // leave the pane), or over the pane (any-event mode; the encoder
+        // drops what the mode does not report).
+        if self.selecting.is_none() && (self.reported_button.is_some() || hovered) && self.program_has_mouse() {
+            let held = self.reported_button;
+            let bytes = self.encode_mouse(MouseAction::Motion, held, &event.modifiers, event.position, held.is_some());
+            self.report_mouse(bytes);
+            return;
+        }
         if self.selecting.is_none() || event.pressed_button != Some(MouseButton::Left) {
             return;
         }
@@ -334,7 +447,16 @@ impl TerminalView {
         cx.notify();
     }
 
-    fn mouse_up(&mut self, _event: &MouseUpEvent, cx: &mut Context<Self>) {
+    fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if let Some(b) = self.reported_button.filter(|b| Some(*b) == vt_button(event.button)) {
+            self.reported_button = None;
+            let bytes = self.encode_mouse(MouseAction::Release, Some(b), &event.modifiers, event.position, false);
+            self.report_mouse(bytes);
+            return;
+        }
+        if event.button != MouseButton::Left {
+            return;
+        }
         let Some(at) = self.selecting.take() else { return };
         self.with_terminal(|t| t.select_release(Some((at.col, at.row))));
         cx.notify();
@@ -417,6 +539,7 @@ impl Render for TerminalView {
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_key_up(cx.listener(Self::on_key_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .size_full()
             .bg(theme::rgb(theme::bg()));
@@ -752,20 +875,22 @@ impl Element for TerminalElement {
             // Window-wide, not the element's: a drag goes on outside the
             // pane, and autoscroll needs to hear it there.
             let view = self.view.clone();
+            let over = hitbox.clone();
             window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
-                if phase == DispatchPhase::Bubble && e.button == MouseButton::Left && hitbox.is_hovered(window) {
+                if phase == DispatchPhase::Bubble && over.is_hovered(window) {
                     view.update(cx, |v, cx| v.mouse_down(e, window, cx));
                 }
             });
             let view = self.view.clone();
-            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _window, cx| {
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble {
-                    view.update(cx, |v, cx| v.mouse_move(e, cx));
+                    let hovered = hitbox.is_hovered(window);
+                    view.update(cx, |v, cx| v.mouse_move(e, hovered, cx));
                 }
             });
             let view = self.view.clone();
             window.on_mouse_event(move |e: &MouseUpEvent, phase, _window, cx| {
-                if phase == DispatchPhase::Bubble && e.button == MouseButton::Left {
+                if phase == DispatchPhase::Bubble {
                     view.update(cx, |v, cx| v.mouse_up(e, cx));
                 }
             });
@@ -802,6 +927,16 @@ impl Element for TerminalElement {
         window.handle_input(&focus, ElementInputHandler::new(layout.bounds, self.view.clone()), cx);
         let spent = layout.started.elapsed();
         self.view.update(cx, |v, _| v.record(spent));
+    }
+}
+
+/// The buttons a program can be told about.
+fn vt_button(b: MouseButton) -> Option<VtButton> {
+    match b {
+        MouseButton::Left => Some(VtButton::Left),
+        MouseButton::Right => Some(VtButton::Right),
+        MouseButton::Middle => Some(VtButton::Middle),
+        _ => None,
     }
 }
 
