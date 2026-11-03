@@ -759,6 +759,44 @@ class TerminalCoordinator {
         }
     }
 
+    /// Delete a worktree with nobody at the Mac to confirm — a First Mate action
+    /// the user approved on a card (island, Telegram, web) that listed what the
+    /// worktree holds. No sheet: one shown behind other windows, or not at all
+    /// without a main window, used to leave the delete hanging while the caller
+    /// was told it was under way. `completion` runs on main with what actually
+    /// happened: the directory gone, or why not.
+    func deleteWorktreeUnattended(_ info: WorktreeInfo,
+                                  completion: @escaping (Result<String, WorktreeUnattendedDeleteError>) -> Void) {
+        guard !info.isMainWorktree else { return completion(.failure(.refused("the main checkout is not deleted"))) }
+        guard !AgentRegistry.shared.hasRunningPane(inWorktree: info.path) else {
+            return completion(.failure(.refused("an agent is still running in it")))
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+            let assessment = WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
+                                                            branchName: info.branch, refreshBase: true)
+            let verdict = assessment.unattendedVerdict
+            guard verdict.allowed else {
+                DispatchQueue.main.async { completion(.failure(.refused(verdict.refusal ?? "it holds work"))) }
+                return
+            }
+            do {
+                let result = try WorktreeDeleter.deleteWorktree(
+                    worktreePath: info.path, repoPath: repoPath, branchName: info.branch,
+                    deleteBranch: assessment.deletesBranch, force: verdict.force, forceBranch: true)
+                DispatchQueue.main.async {
+                    self?.finalizeDeletedWorktree(info)
+                    guard !FileManager.default.fileExists(atPath: info.path) else {
+                        return completion(.failure(.failed("git reported it removed, but the directory is still there")))
+                    }
+                    completion(.success(result.branchWarning.map { "deleted; \($0)" } ?? "deleted"))
+                }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(.failed(error.localizedDescription))) }
+            }
+        }
+    }
+
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool,
                                        force: Bool, forceBranch: Bool? = nil,
                                        completion: (() -> Void)? = nil) {
@@ -858,3 +896,19 @@ extension TerminalCoordinator {
         return out
     }
 }
+
+/// Why an unattended delete did not happen.
+enum WorktreeUnattendedDeleteError: Error, Equatable {
+    /// It would lose something an approval cannot stand for, or must not be deleted.
+    case refused(String)
+    /// git failed, or the directory survived.
+    case failed(String)
+
+    var message: String {
+        switch self {
+        case .refused(let why): return "not deleted: \(why)"
+        case .failed(let why): return "delete failed: \(why)"
+        }
+    }
+}
+

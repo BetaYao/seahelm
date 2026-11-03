@@ -965,15 +965,24 @@ class TabCoordinator {
                     controlDataSource.autopilotDidRunHandler = { [weak self] method, result in
                         self?.autopilot.didRun(method: method, result: result)
                     }
-                    controlDataSource.deleteWorktreeHandler = { [weak self] path in
-                        guard let self else { return .failure(.unavailable) }
+                    controlDataSource.deleteWorktreeHandler = { [weak self] path, done in
+                        guard let self else { return done(.failure(.unavailable)) }
                         let wanted = WorktreeDiscovery.canonicalPath(path)
-                        guard self.allWorktrees.contains(where: {
+                        guard let item = self.allWorktrees.first(where: {
                             WorktreeDiscovery.canonicalPath($0.info.path) == wanted && !$0.info.isMainWorktree
-                        }) else { return .failure(.failed("not a worktree seahelm can delete")) }
-                        // The row's own Delete: its checks, and its sheet when work would be lost.
-                        self.dashboardDidRequestDeleteWorktree(path: path, window: NSApp.mainWindow)
-                        return .success(["worktree_path": path, "deleting": true])
+                        }) else { return done(.failure(.failed("not a worktree seahelm can delete"))) }
+                        // Unattended: approved on a card that showed what it holds,
+                        // so no sheet — and the answer is what happened, not "asked".
+                        self.dashboardVC?.setWorktreePending(path: item.info.path, pending: true)
+                        self.terminalCoordinator.deleteWorktreeUnattended(item.info) { [weak self] outcome in
+                            self?.dashboardVC?.setWorktreePending(path: item.info.path, pending: false)
+                            switch outcome {
+                            case .success(let note):
+                                done(.success(["worktree_path": path, "deleted": true, "note": note]))
+                            case .failure(let error):
+                                done(.failure(.failed(error.message)))
+                            }
+                        }
                     }
                     let autopilotRouter = ControlRouter(dataSource: controlDataSource)
                     self.autopilot.execute = { method, params in autopilotRouter.handle(method: method, params: params) }
