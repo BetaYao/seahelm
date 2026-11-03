@@ -109,10 +109,16 @@ enum FirstMatePane {
     - `seahelm pane read <pane> --source recent --lines 200` — what a pane shows.
     - `seahelm pane run <pane> <text>` — tell an agent something (types it and presses Enter).
       Only when its status is `Idle`; never interrupt a `Running` agent.
+    - `seahelm worktree create --repo <path> --task <text>` — a new worktree with an agent
+      briefed on the task. Write the task as you would brief a colleague: what, why, where.
+    - `seahelm worktree delete <worktree-path>` — remove a worktree that is done with.
     - `gh pr view <n>`, `gh pr checks <n>`, `gh run view <id> --log-failed` — find out why.
 
-    Every action goes through seahelm's policy. When it answers that an action was queued
-    for approval, that is not an error: say what you proposed and move on.
+    Every action goes through seahelm's policy. An answer of `{"queued": "approval"}` means
+    the user will decide; it is not an error. Say what you proposed and move on — seahelm
+    sends you a `[seahelm] The user approved/rejected …` message with the outcome later.
+    An action refused outright (`not available to First Mate`, `set to deny`, a budget) is
+    final: report it, do not look for another way to do the same thing.
 
     ## Rules of conduct
 

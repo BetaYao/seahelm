@@ -40,6 +40,11 @@ final class SeahelmControlDataSource: ControlDataSource {
     var createWorktreeHandler: ((String, AgentType, String, @escaping (String?) -> Void) -> Void)?
     /// Decline a pane's pending suggestion (main thread — it is UI state).
     var dismissDecisionHandler: ((String) -> Bool)?
+    /// First Mate's gated calls (main thread — the policy reads UI state).
+    var autopilotGateHandler: ((AutopilotAction, String, [String: Any]) -> AutopilotGate)?
+    /// A worktree's Delete, by path (main thread).
+    var deleteWorktreeHandler: ((String) -> Result<[String: Any], ControlCreateError>)?
+    var autopilotDidRunHandler: ((String, ControlResult) -> Void)?
     /// Answer a pane's open question card (main thread — it is UI state).
     var answerQuestionHandler: ((String, Int) -> [String: Any]?)?
     /// A remote client showed a pane (main thread — it redraws the fleet).
@@ -598,6 +603,25 @@ extension SeahelmControlDataSource {
             "worktree_path": path,
             "pane_session_key": SessionManager.persistentSessionName(for: path),
         ])
+    }
+
+    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate {
+        guard let h = autopilotGateHandler else { return .deny("First Mate is not running") }
+        var gate = AutopilotGate.deny("First Mate is not running")
+        runOnMain { gate = h(action, method, params) }
+        return gate
+    }
+
+    func autopilotDidRun(method: String, result: ControlResult) {
+        guard let h = autopilotDidRunHandler else { return }
+        runOnMain { h(method, result) }
+    }
+
+    func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> {
+        guard let h = deleteWorktreeHandler else { return .failure(.unavailable) }
+        var result: Result<[String: Any], ControlCreateError> = .failure(.unavailable)
+        runOnMain { result = h(path) }
+        return result
     }
 
     func dismissDecision(paneId: String) -> Bool {

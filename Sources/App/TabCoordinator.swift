@@ -956,6 +956,37 @@ class TabCoordinator {
                     controlDataSource.wakeHandler = { [weak self] stationId in
                         self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
                     }
+                    controlDataSource.autopilotGateHandler = { [weak self] action, method, params in
+                        self?.autopilot.gate(action: action, method: method, params: params)
+                            ?? .deny("First Mate is not running")
+                    }
+                    controlDataSource.autopilotDidRunHandler = { [weak self] method, result in
+                        self?.autopilot.didRun(method: method, result: result)
+                    }
+                    controlDataSource.deleteWorktreeHandler = { [weak self] path in
+                        guard let self else { return .failure(.unavailable) }
+                        let wanted = WorktreeDiscovery.canonicalPath(path)
+                        guard self.allWorktrees.contains(where: {
+                            WorktreeDiscovery.canonicalPath($0.info.path) == wanted && !$0.info.isMainWorktree
+                        }) else { return .failure(.failed("not a worktree seahelm can delete")) }
+                        // The row's own Delete: its checks, and its sheet when work would be lost.
+                        self.dashboardDidRequestDeleteWorktree(path: path, window: NSApp.mainWindow)
+                        return .success(["worktree_path": path, "deleting": true])
+                    }
+                    let autopilotRouter = ControlRouter(dataSource: controlDataSource)
+                    self.autopilot.execute = { method, params in autopilotRouter.handle(method: method, params: params) }
+                    self.autopilot.liveWorktrees = { [weak self] in Set(self?.allWorktrees.map(\.info.path) ?? []) }
+                    self.autopilot.onRequestApproval = { [weak self] id, summary in
+                        guard let self else { return }
+                        self.pendingOrders.enqueue(FirstMateAction(
+                            kind: .autopilotApproval, zone: .red, worktreePath: FirstMatePane.directory,
+                            branch: "", project: FirstMatePane.project,
+                            terminalID: self.autopilot.stationId ?? "", message: "First Mate asks: \(summary)",
+                            payload: id, options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
+                    }
+                    self.autopilot.onApprovalClosed = { [weak self] id in
+                        self?.pendingOrders.resolveAutopilotApproval(id)
+                    }
                     controlDataSource.dismissDecisionHandler = { [weak self] paneId in
                         // Station id or the stable session key — the queue keys off the
                         // former, remote callers usually hold the latter.

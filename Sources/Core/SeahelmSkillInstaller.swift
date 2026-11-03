@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v9 -->"
+    private static let versionMarker = "<!-- seahelm-skill v10 -->"
 
     static func skillContents() -> String {
         return """
@@ -77,6 +77,9 @@ enum SeahelmSkillInstaller {
                                                  # stream pane events as JSON lines (until killed)
         seahelm layout export                    # JSON: capture the current split layout as a template
         seahelm layout apply <file|->            # rebuild splits from a template (stdin with -)
+        seahelm worktree create --repo <path> --task <text> [--agent claudeCode]
+                                                 # new worktree + branch with an agent briefed on <text>
+        seahelm worktree delete <worktree-path>  # the row's Delete (asks first if work would be lost)
         ```
 
         Output contract: `run`/`send-*` print nothing; `read` prints raw text;
