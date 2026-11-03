@@ -72,6 +72,7 @@
 		1E9E18DF38B9685E5EE65D23 /* SeahelmSkillInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3EAA643D3A58E42AE2B7CD /* SeahelmSkillInstaller.swift */; };
 		1F121DE08BEE76DF3987C368 /* IntegrationBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8B57E510DFD6E674BE5080 /* IntegrationBuilder.swift */; };
 		1F17BE40E11A063D21FD2B1C /* ControlSocketServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536A8D31229E4F3D3D5D4DE8 /* ControlSocketServerTests.swift */; };
+		1F7BD72FCA78DB11EC3E2F19 /* WorktreePRStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED881940470971278D540FE /* WorktreePRStatus.swift */; };
 		1F8744F999963A2E2F376171 /* IslandRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 543222F7078995AB79534CD4 /* IslandRootView.swift */; };
 		2016934685236AC44DC4F54F /* UpdateDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8C45661088CE99AA27E805 /* UpdateDriver.swift */; };
 		20E2EBC04F95373F1C01B374 /* WorktreePathIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEA99C114F0948D9400F86C /* WorktreePathIndex.swift */; };
@@ -364,6 +365,7 @@
 		A56AD79B6223CC0089D6B6F6 /* SeahelmUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */; };
 		A5B666A67B06796F7E431A77 /* WatchFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */; };
 		A5F8DD0A3B1785C4F7861188 /* StationRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */; };
+		A5FF2CDF534F91F41450BF38 /* WorktreePRStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13AAE08210A45FF88284C7E2 /* WorktreePRStatusTests.swift */; };
 		A607EAC1ECC21293284C5CD4 /* OSC133Parser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */; };
 		A6ECE1CD32661EEAA08D012D /* FirstMateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96EE302F1479073676DB584 /* FirstMateTests.swift */; };
 		A7D36122AEE48C5F72C89C87 /* MediaPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFE8F526F75CD13158309C6 /* MediaPreviewView.swift */; };
@@ -605,6 +607,7 @@
 		0DCA172C011937C216A42CCE /* seahelmUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seahelmUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorOutcomeTests.swift; sourceTree = "<group>"; };
 		1300118EBD67FF59FD7D8BF5 /* GmailOAuthAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthAuthorization.swift; sourceTree = "<group>"; };
+		13AAE08210A45FF88284C7E2 /* WorktreePRStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePRStatusTests.swift; sourceTree = "<group>"; };
 		13C18BB4B4618D2F5F48B499 /* SeahelmCliInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmCliInstaller.swift; sourceTree = "<group>"; };
 		14DEB2B3541ED551726C6C96 /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
 		1502D5A8F1466C091FE1BC75 /* AgentImagePaste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentImagePaste.swift; sourceTree = "<group>"; };
@@ -878,6 +881,7 @@
 		8E004E8B96865467209D3F2D /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		8E895D84F1DB6343D08BAB30 /* PaneInfoDisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneInfoDisplayStatusTests.swift; sourceTree = "<group>"; };
 		8EA68D37F6726B55761155E3 /* AgentRegistryBackgroundBusyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryBackgroundBusyTests.swift; sourceTree = "<group>"; };
+		8ED881940470971278D540FE /* WorktreePRStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePRStatus.swift; sourceTree = "<group>"; };
 		8F029A5E271BDEEF49A54B1E /* TerminalTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTranscript.swift; sourceTree = "<group>"; };
 		902196E72A614F0FF9C90514 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
 		90BFD1E80754F390DB43E63A /* SeahelmHookInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstallerTests.swift; sourceTree = "<group>"; };
@@ -1316,6 +1320,7 @@
 				E9F931F9258E63CD7AD87773 /* WorktreeBaseBranchStore.swift */,
 				B18B71C7A49633D6D41985CC /* WorktreeFileIndex.swift */,
 				B3A006C6498F7AD6AC5AA0E6 /* WorktreeLabelStore.swift */,
+				8ED881940470971278D540FE /* WorktreePRStatus.swift */,
 				E1FA2EB699654E9A701124D1 /* WorktreeShellActions.swift */,
 				60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */,
 				6A141F8A22DEE7A3DDC6768A /* WorktreeTitleCache.swift */,
@@ -1812,6 +1817,7 @@
 				F3811788C3A0B0FC8B1CD711 /* WorktreeLabelStoreTests.swift */,
 				6C1E76E23951B9F8DB873E3C /* WorktreePathIndexTests.swift */,
 				4C97F6C22C29552377720F4D /* WorktreePathNavigationTests.swift */,
+				13AAE08210A45FF88284C7E2 /* WorktreePRStatusTests.swift */,
 				E48EF7634B86F69D2FCA6759 /* WorktreeReturnPlannerTests.swift */,
 				9DA8AD6F8AC7CDE47F86245A /* WorktreeReturnRunnerTests.swift */,
 				63F011748A6A508BC66F267E /* WorktreeSidePanelViewControllerTests.swift */,
@@ -2412,6 +2418,7 @@
 				54A772E67F151CB1257995CD /* WorktreeGitStatsTests.swift in Sources */,
 				2D473084E59DC7776E010F78 /* WorktreeGroupingTests.swift in Sources */,
 				41EF2CDA6CE72813A7736497 /* WorktreeLabelStoreTests.swift in Sources */,
+				A5FF2CDF534F91F41450BF38 /* WorktreePRStatusTests.swift in Sources */,
 				831980CBE1E33D059A978E82 /* WorktreePathIndexTests.swift in Sources */,
 				80C1779FA957EF77BB2331A1 /* WorktreePathNavigationTests.swift in Sources */,
 				E8E41A017C3C9EAA42E5CB40 /* WorktreeReturnPlannerTests.swift in Sources */,
@@ -2740,6 +2747,7 @@
 				3A5FD6063BF092FB51DC280A /* WorktreeGitStats.swift in Sources */,
 				86EB2D1A015733623B873AA9 /* WorktreeGrouping.swift in Sources */,
 				B0A155B245426D6B6CA2B29B /* WorktreeLabelStore.swift in Sources */,
+				1F7BD72FCA78DB11EC3E2F19 /* WorktreePRStatus.swift in Sources */,
 				20E2EBC04F95373F1C01B374 /* WorktreePathIndex.swift in Sources */,
 				C33A3CB170F8BA3BB37273E5 /* WorktreePathNavigation.swift in Sources */,
 				2D9321574C48894375CADC4D /* WorktreeReturn.swift in Sources */,

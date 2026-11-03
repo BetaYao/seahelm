@@ -81,9 +81,48 @@ final class DashboardOverviewView: NSView {
     fileprivate static let inkFaint: NSColor = SemanticColors.subtle
     fileprivate static let red        = NSColor(srgbRed: 0xe0/255, green: 0x7a/255, blue: 0x6a/255, alpha: 1)
     fileprivate static let emerald    = NSColor(srgbRed: 0x5f/255, green: 0xb8/255, blue: 0x7a/255, alpha: 1)
+    /// GitHub's own colour for a merged PR.
+    fileprivate static let violet     = NSColor(srgbRed: 0xa3/255, green: 0x71/255, blue: 0xf7/255, alpha: 1)
     /// A worktree that is ready to clean up has nothing left to ship, so what
     /// remains is Delete — the mark says so.
     static let cleanupSymbolName = "trash"
+
+    /// `#12 ✓ approved`: the number, then CI as a mark (✓ passing, ✕ failing,
+    /// ● running), then review only when it decides something. A PR that is
+    /// no longer open says what became of it instead.
+    static func prAttributed(_ pr: WorktreePRStatus?) -> NSAttributedString {
+        guard let pr else { return NSAttributedString() }
+        let font = RowView.gitFont
+        let result = NSMutableAttributedString()
+        func append(_ s: String, _ color: NSColor) {
+            result.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color]))
+        }
+        switch pr.state {
+        case .merged:
+            append("#\(pr.number) merged", DashboardOverviewView.violet)
+            return result
+        case .closed:
+            append("#\(pr.number) closed", DashboardOverviewView.inkFaint)
+            return result
+        case .draft:
+            append("#\(pr.number) draft", DashboardOverviewView.inkFaint)
+        case .open:
+            append("#\(pr.number)", DashboardOverviewView.inkDim)
+        }
+        switch pr.checks {
+        case .passing: append(" \u{2713}", DashboardOverviewView.emerald)
+        case .failing: append(" \u{2715}", DashboardOverviewView.red)
+        case .pending: append(" \u{25CF}", SemanticColors.attention)
+        case nil: break
+        }
+        switch pr.review {
+        case .approved: append(" approved", DashboardOverviewView.emerald)
+        case .changesRequested: append(" changes", DashboardOverviewView.red)
+        case .reviewRequired, nil: break
+        }
+        return result
+    }
+
 
     private let headerTitle = NSTextField(labelWithString: "First mate")
     private let headerSub = NSTextField(labelWithString: "")
@@ -920,6 +959,7 @@ final class DashboardOverviewView: NSView {
     }
     var revealedRowIDForTesting: String? { revealedRowID }
     func rowRuntimeTextForTesting(id: String) -> String? { rowViewsByID[id]?.runtimeTextForTesting }
+    func rowPRTextForTesting(id: String) -> String? { rowViewsByID[id]?.prTextForTesting }
     func rowTitleTextForTesting(id: String) -> String? { rowViewsByID[id]?.titleTextForTesting }
     func rowTitleFrameForTesting(id: String) -> NSRect? { rowViewsByID[id]?.titleFrameForTesting }
     var groupingButtonToolTipForTesting: String? { groupingButton.toolTip }
@@ -1236,6 +1276,9 @@ final class DashboardOverviewView: NSView {
         private let timeLabel: NSTextField
         private let branchLabel: NSTextField
         private let gitLabel: NSTextField
+        /// `#12 ✓` — the branch's PR, its CI and its review.
+        private let prLabel: NSTextField
+        private var prURL: String?
         private let paneCountLabel: NSTextField
         private let repositoryLabel: NSTextField?
         /// Whether the pointer is currently inside, so a selection change can
@@ -1305,6 +1348,7 @@ final class DashboardOverviewView: NSView {
             let branch = pane.thread.isEmpty ? pane.name : pane.thread
             self.branchLabel = Self.label(branch, DashboardOverviewView.inkDim, 11)
             self.gitLabel = NSTextField(labelWithString: "")
+            self.prLabel = NSTextField(labelWithString: "")
             self.paneCountLabel = Self.label(pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—",
                                              DashboardOverviewView.inkFaint, 10)
             if showsRepository {
@@ -1375,6 +1419,11 @@ final class DashboardOverviewView: NSView {
             }
             line2.addArrangedSubview(branchLabel)
             line2.addArrangedSubview(gitLabel)
+            prLabel.translatesAutoresizingMaskIntoConstraints = false
+            prLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            prLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+            prLabel.isHidden = true
+            line2.addArrangedSubview(prLabel)
             line2.addArrangedSubview(Self.spacer())
             line2.addArrangedSubview(paneCountLabel)
 
@@ -1430,7 +1479,10 @@ final class DashboardOverviewView: NSView {
         /// there are no changes and no divergence (or stats not yet resolved).
         /// Built once: `AppFont.mono` constructs a descriptor and resolves a font
         /// each call, and this ran per row per repaint.
-        private static let gitFont = AppFont.mono(size: 10)
+        fileprivate static let gitFont = AppFont.mono(size: 10)
+
+        private var renderedPR: WorktreePRStatus?
+        var prTextForTesting: String { prLabel.isHidden ? "" : prLabel.stringValue }
 
         static func gitInfoAttributed(_ stats: WorktreeGitStats?) -> NSAttributedString {
             guard let stats, !stats.isEmpty else { return NSAttributedString() }
@@ -1517,6 +1569,14 @@ final class DashboardOverviewView: NSView {
                 renderedGitStats = pane.gitStats
                 gitLabel.attributedStringValue = Self.gitInfoAttributed(pane.gitStats)
             }
+            if renderedPR != pane.prStatus {
+                renderedPR = pane.prStatus
+                prURL = pane.prStatus?.url
+                prLabel.attributedStringValue = DashboardOverviewView.prAttributed(pane.prStatus)
+                prLabel.toolTip = pane.prStatus?.summary
+                prLabel.setAccessibilityLabel(pane.prStatus?.summary)
+                prLabel.isHidden = pane.prStatus == nil
+            }
             Self.setText(paneCountLabel, pane.paneCount > 0 ? "\(pane.paneCount) panes" : "—")
             if let repositoryLabel, showsRepository {
                 let project = pane.project.isEmpty ? "Unknown project" : pane.project
@@ -1564,7 +1624,7 @@ final class DashboardOverviewView: NSView {
             pending = isPending
             applyDotVisibility()
             let alpha: CGFloat = isPending ? 0.55 : 1
-            for view in [titleLabel, timeLabel, branchLabel, gitLabel, paneCountLabel, ribbon] as [NSView] {
+            for view in [titleLabel, timeLabel, branchLabel, gitLabel, prLabel, paneCountLabel, ribbon] as [NSView] {
                 view.alphaValue = alpha
             }
             repositoryLabel?.alphaValue = alpha
@@ -1588,6 +1648,12 @@ final class DashboardOverviewView: NSView {
                 ("Copy Path", #selector(copyPathAction)),
             ] {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+            }
+            if prURL != nil, let number = renderedPR?.number {
+                let item = NSMenuItem(title: "Open Pull Request #\(number)",
+                                      action: #selector(openPullRequestAction), keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
             }
@@ -1641,6 +1707,11 @@ final class DashboardOverviewView: NSView {
         @objc private func revealInFinderAction() { WorktreeShellActions.revealInFinder(path) }
 
         @objc private func copyPathAction() { WorktreeShellActions.copyPath(path) }
+
+        @objc private func openPullRequestAction() {
+            guard let prURL, let url = URL(string: prURL) else { return }
+            NSWorkspace.shared.open(url)
+        }
 
         @objc private func deleteAction() {
             guard !pending else { return }
