@@ -1,0 +1,65 @@
+name: Windows
+
+# The Rust workspace (seahelmd and seahelm-core) on Windows: libghostty-vt
+# built with Zig against MSVC (it cannot be cross-compiled from macOS), then
+# the whole workspace's tests, including seahelmd's end-to-end Windows tests
+# (named pipes, ConPTY) and the pipe / process code ported from Keep.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "seahelmd/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "seahelmd/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: seahelmd workspace on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The Ghostty commit libghostty-vt is built from is pinned in
+      # build-vt.sh; it is the cache key, so a bump rebuilds.
+      - name: Resolve Ghostty commit
+        id: vt
+        run: |
+          c=$(sed -n 's/^COMMIT="\${GHOSTTY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' seahelmd/vendor/build-vt.sh)
+          [ -n "$c" ] || { echo "no pinned commit in build-vt.sh" >&2; exit 1; }
+          echo "commit=$c" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libghostty-vt
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: seahelmd/vendor/libghostty-vt-windows-x86_64
+          key: libghostty-vt-windows-x86_64-${{ steps.vt.outputs.commit }}
+
+      - name: Install Zig
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build libghostty-vt
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: seahelmd/vendor/build-vt.sh x86_64-windows-msvc seahelmd/vendor/libghostty-vt-windows-x86_64
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seahelmd
+
+      - name: Test
+        working-directory: seahelmd
+        run: cargo test --locked --workspace

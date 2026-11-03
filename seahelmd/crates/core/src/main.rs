@@ -78,19 +78,12 @@ fn ensure() -> Result<()> {
         return Ok(());
     }
     let exe = std::env::current_exe()?;
+    std::fs::create_dir_all(rpc::config_dir())?;
     let log = rpc::config_dir().join("core.log");
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log)?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("serve").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(log);
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    cmd.spawn()?;
+    seahelmd::platform::spawn_detached(&mut cmd)?;
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if rpc::call(&path, "core.ping", Value::Null).is_ok() {
