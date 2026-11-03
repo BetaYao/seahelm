@@ -517,6 +517,7 @@
 		E18EE9108046A7462E0ADDE8 /* AgentWorkLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCBB0F2D482AD76473F5BA3A /* AgentWorkLocationTests.swift */; };
 		E2066652132155948F7F9B1F /* SplitContainerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */; };
 		E2CE378761CC355AC0091ECC /* RepoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 755D82DD1EFBD20111AC9BF2 /* RepoPage.swift */; };
+		E3953181DAAE7EAF277D6B56 /* HelmWatermarkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB3D4D34A604401C09032CB /* HelmWatermarkView.swift */; };
 		E3B3F5D302481F3DF776ED95 /* ConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */; };
 		E3D53ACF213C8B44EA10A45D /* AgentType.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEC631B07301756615C755E6 /* AgentType.swift */; };
 		E46A1A608721E6D3C2DFA00F /* DoubleTapDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB46E04B9C586F82DE064E39 /* DoubleTapDetectorTests.swift */; };
@@ -623,6 +624,7 @@
 		0C2BF20167E8DC36DDF09077 /* WorktreeSidePanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidePanelViewController.swift; sourceTree = "<group>"; };
 		0D19639EE57241F8A021EBD2 /* PaneStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneStatus.swift; sourceTree = "<group>"; };
 		0D5FC7AAD7C1A63FAB4E534D /* ChatProgressReporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatProgressReporterTests.swift; sourceTree = "<group>"; };
+		0DB3D4D34A604401C09032CB /* HelmWatermarkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelmWatermarkView.swift; sourceTree = "<group>"; };
 		0DCA172C011937C216A42CCE /* seahelmUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seahelmUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorOutcomeTests.swift; sourceTree = "<group>"; };
 		1300118EBD67FF59FD7D8BF5 /* GmailOAuthAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOAuthAuthorization.swift; sourceTree = "<group>"; };
@@ -1884,6 +1886,7 @@
 				547579E82BBDAE0AFCCBB766 /* FirstMateDockView.swift */,
 				BD765F71D47755CEDEB6D620 /* FirstMateView.swift */,
 				3D002748AEBEA4297919DC48 /* FocusPanelView.swift */,
+				0DB3D4D34A604401C09032CB /* HelmWatermarkView.swift */,
 				78D1BBB07A2822E90114369F /* OverviewFocusModel.swift */,
 				4808E81C577D8BF32131B574 /* PreviewSetController.swift */,
 				0BE2B74AFEED5F242C1B2763 /* ProjectColor.swift */,
@@ -2634,6 +2637,7 @@
 				8103E9F323713DDD8EF66FD6 /* GmailRESTMailClient.swift in Sources */,
 				0334F26D1F43B1A6530D2D6A /* GrowingTextView.swift in Sources */,
 				3498F0F3D7028F811DF7DF34 /* HeadlessCommandHost.swift in Sources */,
+				E3953181DAAE7EAF277D6B56 /* HelmWatermarkView.swift in Sources */,
 				F446418FE70E2E34614F9CEA /* HookDecoder.swift in Sources */,
 				D65114CD26784E14FAA8D333 /* HookEventMerge.swift in Sources */,
 				90650F907FCC7FB24383A44D /* HooksChannel.swift in Sources */,

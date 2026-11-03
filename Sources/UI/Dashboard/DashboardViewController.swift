@@ -319,7 +319,7 @@ class DashboardViewController: NSViewController {
     private static let previewDebounce: TimeInterval = 0.12
 
     // Empty state
-    private let emptyStateView = NSView()
+    private let emptyStateView = HelmWatermarkView()
 
     // MARK: - First responder
 
@@ -784,9 +784,9 @@ class DashboardViewController: NSViewController {
 
     // MARK: - Setup: Empty State
 
-    /// With no worktrees the terminal side shows nothing at all — the fleet's
-    /// "Add project" row is the whole first-run UI. This blank view covers the
-    /// focus panel's slot so nothing stale shows through.
+    /// With no worktrees the terminal side shows only a faint dot-matrix helm —
+    /// the fleet's "Add project" tile is the whole first-run UI. The view covers
+    /// the focus panel's slot so nothing stale shows through.
     private func setupEmptyState() {
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.isHidden = true

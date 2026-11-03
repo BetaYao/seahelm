@@ -130,6 +130,8 @@ final class DashboardOverviewView: NSView {
     private let headerLine = NSView()
     private let scroll = NonFirstResponderScrollView()
     private let stack = FlippedStackView()
+    /// Empty fleet only: the "Add project" tile, centred over the scroll.
+    private let addProjectTile = AddProjectRowView()
 
     // Bottom shortcut cheat-strip (replaced the composer).
     let firstMateDock = FirstMateDockView()
@@ -282,6 +284,14 @@ final class DashboardOverviewView: NSView {
                                                object: scroll.contentView)
         addSubview(scroll)
 
+        addProjectTile.translatesAutoresizingMaskIntoConstraints = false
+        addProjectTile.isHidden = true
+        addProjectTile.onTap = { [weak self] in self?.onAddRepo?() }
+        addProjectTile.onHoverChanged = { [weak self] row, entered in
+            self?.rowHoverChanged(row, entered: entered)
+        }
+        addSubview(addProjectTile)
+
         // --- Integration banner (status / time groupings only) ---
         integrationBanner.orientation = .vertical
         integrationBanner.spacing = 3
@@ -316,7 +326,15 @@ final class DashboardOverviewView: NSView {
             firstMateDock.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+
+            addProjectTile.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            // A touch above true centre, where the eye lands.
+            addProjectTile.centerYAnchor.constraint(equalTo: scroll.centerYAnchor, constant: -24),
+            addProjectTile.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -30),
         ])
+        let tileWidth = addProjectTile.widthAnchor.constraint(equalToConstant: 200)
+        tileWidth.priority = .defaultHigh
+        tileWidth.isActive = true
         // Collapsed by default; height is the only thing that moves, so showing
         // and hiding it never reflows the rest of the column.
         integrationBannerHeight = integrationBanner.heightAnchor.constraint(equalToConstant: 0)
@@ -692,15 +710,8 @@ final class DashboardOverviewView: NSView {
 
         // An empty fleet is a first launch (or the last project closed): the one
         // thing to do is add a project, so the list says exactly that.
-        if groups.isEmpty {
-            let addRow = AddProjectRowView()
-            addRow.onTap = { [weak self] in self?.onAddRepo?() }
-            addRow.onHoverChanged = { [weak self] row, entered in
-                self?.rowHoverChanged(row, entered: entered)
-            }
-            stack.addArrangedSubview(addRow)
-            pin(addRow)
-        }
+        // The tile sits over the scroll, centred in it, rather than in the stack.
+        addProjectTile.isHidden = !groups.isEmpty
 
         if revealSelection, let selectedRow = rowViewsByID[selectedId] {
             layoutSubtreeIfNeeded()
@@ -1982,22 +1993,30 @@ final class DashboardOverviewView: NSView {
 }
 
 extension DashboardOverviewView {
-    /// The fleet's only row while it has no projects: `+ Add project`.
+    /// What the fleet shows while it has no projects: an icon-over-label tile,
+    /// centred in the list's space (not a row at the top of it).
     fileprivate final class AddProjectRowView: NSView, FleetHoverRow {
         var onTap: (() -> Void)?
         var onHoverChanged: ((FleetHoverRow, Bool) -> Void)?
         private var hovered = false
+        private let badge = NSView()
+        private let icon = NSImageView()
+        private let title = NSTextField(labelWithString: "Add project")
 
         private static let hoverFill = NSColor(name: nil) { appearance in
             appearance.isDark
                 ? NSColor.white.withAlphaComponent(0.05)
                 : NSColor.black.withAlphaComponent(0.04)
         }
+        private static let badgeFill = SemanticColors.accentAlpha15
+        private static let badgeFillHover = NSColor(name: nil) { a in
+            (a.isDark ? NSColor(hex: 0x1fc8da) : NSColor(hex: 0x0e9bb5)).withAlphaComponent(0.26)
+        }
 
         init() {
             super.init(frame: .zero)
             wantsLayer = true
-            layer?.cornerRadius = 8
+            layer?.cornerRadius = 12
             layer?.masksToBounds = true
             setAccessibilityElement(true)
             setAccessibilityRole(.button)
@@ -2005,28 +2024,58 @@ extension DashboardOverviewView {
             setAccessibilityIdentifier("dashboard.addProjectRow")
             toolTip = "Add a project folder"
 
-            let icon = NSImageView()
-            icon.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
-            icon.contentTintColor = DashboardOverviewView.inkDim
-            icon.translatesAutoresizingMaskIntoConstraints = false
-            icon.setContentHuggingPriority(.required, for: .horizontal)
+            badge.wantsLayer = true
+            badge.layer?.cornerRadius = 22
+            badge.translatesAutoresizingMaskIntoConstraints = false
 
-            let title = NSTextField(labelWithString: "Add project")
-            title.font = AppFont.mono(size: 12)
-            title.textColor = DashboardOverviewView.inkDim
+            icon.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 19, weight: .regular))
+            icon.contentTintColor = SemanticColors.accent
+            icon.translatesAutoresizingMaskIntoConstraints = false
+
+            title.font = AppFont.mono(size: 12.5)
+            title.textColor = DashboardOverviewView.ink
+            title.alignment = .center
             title.translatesAutoresizingMaskIntoConstraints = false
 
-            addSubview(icon)
+            let hint = NSTextField(labelWithString: "Open a git repository")
+            hint.font = AppFont.mono(size: 10.5)
+            hint.textColor = DashboardOverviewView.inkFaint
+            hint.alignment = .center
+            hint.translatesAutoresizingMaskIntoConstraints = false
+
+            addSubview(badge)
+            badge.addSubview(icon)
             addSubview(title)
+            addSubview(hint)
             NSLayoutConstraint.activate([
-                icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-                icon.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-                title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
-                title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-                title.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-                title.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+                badge.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+                badge.centerXAnchor.constraint(equalTo: centerXAnchor),
+                badge.widthAnchor.constraint(equalToConstant: 44),
+                badge.heightAnchor.constraint(equalToConstant: 44),
+                icon.centerXAnchor.constraint(equalTo: badge.centerXAnchor, constant: 1),
+                icon.centerYAnchor.constraint(equalTo: badge.centerYAnchor),
+
+                title.topAnchor.constraint(equalTo: badge.bottomAnchor, constant: 12),
+                title.centerXAnchor.constraint(equalTo: centerXAnchor),
+                hint.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
+                hint.centerXAnchor.constraint(equalTo: centerXAnchor),
+                hint.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+
+                widthAnchor.constraint(greaterThanOrEqualTo: title.widthAnchor, constant: 48),
+                widthAnchor.constraint(greaterThanOrEqualTo: hint.widthAnchor, constant: 48),
             ])
+            applyHoverStyle()
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyHoverStyle()
+        }
+
+        private func applyHoverStyle() {
+            layer?.backgroundColor = hovered ? resolvedCGColor(Self.hoverFill) : NSColor.clear.cgColor
+            badge.layer?.backgroundColor = resolvedCGColor(hovered ? Self.badgeFillHover : Self.badgeFill)
         }
         required init?(coder: NSCoder) { fatalError() }
 
@@ -2046,7 +2095,7 @@ extension DashboardOverviewView {
         func setHovered(_ hovered: Bool) {
             guard self.hovered != hovered else { return }
             self.hovered = hovered
-            layer?.backgroundColor = hovered ? resolvedCGColor(Self.hoverFill) : NSColor.clear.cgColor
+            applyHoverStyle()
         }
     }
 }
