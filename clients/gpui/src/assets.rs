@@ -1,5 +1,6 @@
 //! Icons, compiled in. Lucide (ISC) stands in for the SF Symbols the macOS
-//! app uses, which only Apple platforms may draw; `spinner-arc` is our own.
+//! app uses, which only Apple platforms may draw; `spinner-arc` and the
+//! Windows caption glyphs (`caption-*`) are our own.
 
 use std::borrow::Cow;
 
@@ -14,7 +15,7 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "contrast", "sailboat", "folder", "diff", "panel-left", "folder-plus", "group", "plus", "x",
     "git-merge", "ship-wheel", "chevron-right", "pause", "play", "share", "columns-2", "git-branch",
-    "trash-2", "spinner-arc", "merge",
+    "trash-2", "spinner-arc", "merge", "caption-min", "caption-max", "caption-restore", "caption-close",
 ];
 
 pub struct Assets;

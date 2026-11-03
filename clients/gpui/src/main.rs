@@ -10,6 +10,7 @@ mod core_client;
 mod fleet;
 mod fonts;
 mod keys;
+mod platform;
 mod session;
 mod terminal_view;
 mod theme;
@@ -19,7 +20,7 @@ mod workspace;
 use std::borrow::Cow;
 
 use gpui::{
-    point, prelude::*, px, size, App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions,
+    point, prelude::*, px, size, App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowDecorations, WindowOptions,
 };
 
 use terminal_view::TerminalView;
@@ -55,9 +56,14 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some("Seahelm".into()),
-                appears_transparent: true,
+                // macOS: the traffic lights over our header. Windows: no
+                // caption at all; the header draws its own buttons
+                // (`workspace::caption_buttons`). Linux: the window
+                // manager's decorations, header below them.
+                appears_transparent: !cfg!(target_os = "linux"),
                 traffic_light_position: Some(point(px(12.), px(13.))),
             }),
+            window_decorations: Some(WindowDecorations::Server),
             window_min_size: Some(size(px(600.), px(400.))),
             ..Default::default()
         };

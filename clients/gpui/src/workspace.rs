@@ -8,12 +8,13 @@ use std::time::Duration;
 use gpui::{
     div, percentage, prelude::*, px, svg, Animation, AnimationExt, App, ClickEvent, Context, Entity, FocusHandle,
     Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Rgba, SharedString,
-    Transformation, Window,
+    Transformation, Window, WindowControlArea,
 };
 
 use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
 use crate::fleet::{self, Dot, GitStats, Item, Snapshot};
+use crate::platform;
 use crate::session;
 use crate::terminal_view::TerminalView;
 use crate::theme;
@@ -284,7 +285,7 @@ impl Render for Workspace {
         if self.sidebar_visible {
             root = root.child(self.sidebar(width, window, cx));
         }
-        root = root.child(self.terminal_column(title, terminal, cx));
+        root = root.child(self.terminal_column(title, terminal, window.is_maximized(), cx));
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
@@ -314,6 +315,8 @@ impl Workspace {
         div()
             .h(px(HEADER_H))
             .flex_none()
+            .relative()
+            .child(drag_area())
             .flex()
             .flex_row()
             .items_center()
@@ -501,7 +504,13 @@ impl Workspace {
             .child(glyph("chevron-right", 10., if hover { tokens::ink() } else { tokens::ink_faint() }))
     }
 
-    fn terminal_column(&self, title: SharedString, terminal: Option<Entity<TerminalView>>, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn terminal_column(
+        &self,
+        title: SharedString,
+        terminal: Option<Entity<TerminalView>>,
+        maximized: bool,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let fg = theme::rgb(theme::FG);
         let memory = self.memory.map(format_memory).unwrap_or_default();
         let header = div()
@@ -512,7 +521,8 @@ impl Workspace {
             .flex_row()
             .items_center()
             .bg(theme::rgb(theme::BG))
-            .when(!self.sidebar_visible, |d| d.pl(px(82.)))
+            .child(drag_area())
+            .when(platform::MAC && !self.sidebar_visible, |d| d.pl(px(82.)))
             .child(div().ml(px(12.)).child(chrome_icon("share", false)))
             .child(div().ml(px(6.)).font_family(SYSTEM).text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_dim()).child(memory))
             .child(
@@ -535,7 +545,8 @@ impl Workspace {
                     ),
             )
             .child(div().flex_1())
-            .child(div().mr(px(8.)).child(icon_button("columns-2", tokens::alpha(fg, 0.55))));
+            .child(div().mr(px(8.)).child(icon_button("columns-2", tokens::alpha(fg, 0.55))))
+            .when(!platform::MAC, |d| d.child(caption_buttons(maximized)));
         let body = match terminal {
             Some(t) => div().flex_1().min_h_0().child(t),
             None => div().flex_1().bg(theme::rgb(theme::BG)),
@@ -592,8 +603,46 @@ fn glyph(name: &str, size: f32, colour: Rgba) -> gpui::Svg {
     svg().path(icon(name)).size(px(size * 1.2)).flex_none().text_color(colour)
 }
 
+/// Off macOS the client draws the titlebar, so a header is where the window
+/// is dragged from: a layer under the header's own controls (which occlude
+/// it, so a click on one is still a click). On macOS the window server
+/// drags from the transparent titlebar already.
+fn drag_area() -> impl IntoElement {
+    div().absolute().inset_0().when(!platform::MAC, |d| d.window_control_area(WindowControlArea::Drag))
+}
+
+/// Minimise, maximise / restore and close, Windows-sized (46×40), at the
+/// header's right end. The clicks are the platform's: each button is a
+/// window control area, answered in the window's hit test.
+fn caption_buttons(maximized: bool) -> impl IntoElement {
+    let fg = theme::rgb(theme::FG);
+    let button = |id: &'static str, glyph: &'static str, area: WindowControlArea| {
+        div()
+            .id(id)
+            .w(px(46.))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .occlude()
+            .window_control_area(area)
+            .child(svg().path(icon(glyph)).size(px(10.)).flex_none().text_color(tokens::alpha(fg, 0.8)))
+    };
+    div()
+        .h_full()
+        .flex()
+        .flex_row()
+        .child(button("caption-min", "caption-min", WindowControlArea::Min).hover(|s| s.bg(tokens::row_hover())))
+        .child(
+            button("caption-max", if maximized { "caption-restore" } else { "caption-max" }, WindowControlArea::Max)
+                .hover(|s| s.bg(tokens::row_hover())),
+        )
+        .child(button("caption-close", "caption-close", WindowControlArea::Close).hover(|s| s.bg(gpui::rgb(0xc42b1c))))
+}
+
 fn icon_button(name: &str, tint: Rgba) -> gpui::Div {
     div()
+        .occlude()
         .size(px(26.))
         .rounded(px(7.))
         .flex()

@@ -130,7 +130,7 @@ impl TerminalView {
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
         let app_cursor = session.grid.lock().map(|g| g.terminal.dec_mode(1)).unwrap_or(false);
-        if event.keystroke.modifiers.platform && event.keystroke.key == "v" {
+        if crate::platform::is_app_shortcut(&event.keystroke.modifiers) && event.keystroke.key == "v" {
             if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
                 self.paste(&text);
             }

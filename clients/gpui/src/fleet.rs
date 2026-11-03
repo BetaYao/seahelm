@@ -7,8 +7,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -153,14 +152,9 @@ pub fn relative_age(secs: f64) -> String {
     }
 }
 
-fn socket_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join(".config/seahelm/seahelm.sock")
-}
-
 /// One JSON-RPC call to the app.
 fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    let mut sock = UnixStream::connect(socket_path()).map_err(|e| format!("Seahelm is not running ({e})"))?;
+    let mut sock = crate::platform::connect(&crate::platform::app_socket()).map_err(|e| format!("Seahelm is not running ({e})"))?;
     sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
     let req = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
     let mut line = serde_json::to_vec(&req).map_err(|e| e.to_string())?;

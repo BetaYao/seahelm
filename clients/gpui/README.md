@@ -33,6 +33,20 @@ They are not the app's live sessions, because seahelmd sizes a session to
 its smallest viewer and attaching to the app's sessions would shrink its
 panes.
 
+### Windows and Linux
+
+What differs is in `src/platform.rs`: sessions and seahelm-core are reached
+over seahelmd's own transport (named pipes on Windows, the pipe names
+`seahelm-core` uses), the home directory is `%USERPROFILE%` when there is no
+`HOME`, the terminal face defaults to the bundled JetBrains Mono, and the
+app's shortcuts are ctrl+shift (paste is ctrl+shift+v) because ctrl belongs
+to the terminal. On Windows the window has no caption: the header is the
+drag area and draws minimise / maximise / close itself. On Linux the window
+manager decorates it. Windows CI builds and tests the client; the fleet
+column is still read from the macOS app, so off macOS it stays empty until
+the fleet comes from seahelm-core. Memory per session is read from `ps`, so
+it shows only on Unix.
+
 `SEAHELM_GPUI_STATS=1` prints, once a second: frames drawn, average and worst
 frame time, rows read from the grid, input MB/s, and how many whole-screen
 repaints the daemon has sent.
