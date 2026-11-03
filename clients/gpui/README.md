@@ -86,10 +86,14 @@ everything already queued, up to 256 KiB.
   folder button (`gpui-projects.json`); statuses from seahelm-core.
 - The group button cycles repository / status / activity grouping (app
   fleet only). The First Mate dock shows the app's First Mate state.
+- Dark and light (Catppuccin Mocha / Latte): starts as the system is; the
+  contrast button flips the chrome and every pane live, and programs that
+  asked (DEC 2031) are told.
 
 ## Not done yet
 
-- Light theme: the contrast button does nothing; the window is Mocha only.
+- Light theme fills (sidebar, rows, hairlines) are worked out from the
+  light semantic colours, not measured off the app as the dark ones were.
 - The side panels (Files, Changes), edit mode, sharing and the
   per-group buttons are the app's and do nothing here.
 - Diff stats are measured against the merge-base with the default branch.

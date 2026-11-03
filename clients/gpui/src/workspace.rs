@@ -373,7 +373,7 @@ impl Workspace {
         let (_, _, w, h) = self.body_bounds(window);
         let tree = self.panes.entry(id.to_string()).or_default().tree.clone();
         let several = tree.len() > 1;
-        let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::BG));
+        let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::bg()));
         for (leaf, r) in tree.frames() {
             let Some(view) = self.view_for(id, leaf, window, cx) else { continue };
             let mut pane = div()
@@ -445,6 +445,18 @@ impl Workspace {
             );
         }
         body.into_any_element()
+    }
+
+    /// The contrast button: dark ↔ light, the chrome and every pane.
+    fn toggle_theme(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        theme::set_dark(!theme::is_dark());
+        for panes in self.panes.values() {
+            for view in panes.views.values() {
+                view.update(cx, |v, cx| v.refresh_theme(cx));
+            }
+        }
+        window.refresh();
+        cx.notify();
     }
 
     /// The group button: repository → status → activity. The app does the
@@ -649,7 +661,7 @@ impl Workspace {
             .justify_end()
             .pr(px(8.))
             .gap(px(2.))
-            .child(chrome_icon("contrast", false))
+            .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
             .child(chrome_icon("sailboat", false))
             .child(chrome_icon("folder", false))
             .child(chrome_icon("diff", false))
@@ -864,7 +876,7 @@ impl Workspace {
         maximized: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let fg = theme::rgb(theme::FG);
+        let fg = theme::rgb(theme::fg());
         let memory = self.memory.map(format_memory).unwrap_or_default();
         let header = div()
             .h(px(HEADER_H))
@@ -873,7 +885,7 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .bg(theme::rgb(theme::BG))
+            .bg(theme::rgb(theme::bg()))
             .child(drag_area())
             .when(platform::MAC && !self.sidebar_visible, |d| d.pl(px(82.)))
             .child(div().ml(px(12.)).child(chrome_icon("share", false)))
@@ -908,9 +920,9 @@ impl Workspace {
             .when(!platform::MAC, |d| d.child(caption_buttons(maximized)));
         let body = match body {
             Some(b) => b,
-            None => div().flex_1().bg(theme::rgb(theme::BG)).into_any_element(),
+            None => div().flex_1().bg(theme::rgb(theme::bg())).into_any_element(),
         };
-        div().flex_1().min_w_0().h_full().flex().flex_col().bg(theme::rgb(theme::BG)).child(header).child(body)
+        div().flex_1().min_w_0().h_full().flex().flex_col().bg(theme::rgb(theme::bg())).child(header).child(body)
     }
 
     /// No width of its own: a 16pt strip over the seam, a 1pt line in it.
@@ -975,7 +987,7 @@ fn drag_area() -> impl IntoElement {
 /// header's right end. The clicks are the platform's: each button is a
 /// window control area, answered in the window's hit test.
 fn caption_buttons(maximized: bool) -> impl IntoElement {
-    let fg = theme::rgb(theme::FG);
+    let fg = theme::rgb(theme::fg());
     let button = |id: &'static str, glyph: &'static str, area: WindowControlArea| {
         div()
             .id(id)

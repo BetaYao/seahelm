@@ -15,7 +15,7 @@ use anyhow::{bail, Context, Result};
 use futures::channel::mpsc;
 use keep_vt::osc_scan::{Osc, Scanner};
 use keep_vt::program_status::{self, Command as ProgramCommand};
-use keep_vt::{Facts, Terminal};
+use keep_vt::Terminal;
 use seahelmd::proto::{self, Msg};
 
 use crate::theme;
@@ -129,14 +129,7 @@ fn new_terminal(cols: u16, rows: u16) -> Result<Terminal> {
     t.set_scrollback_limit(16 << 20).map_err(|e| anyhow::anyhow!("scrollback: {e}"))?;
     // Attached, the daemon hands every question to us: this grid answers as
     // the terminal the user is looking at.
-    t.act_as_terminal(Facts {
-        foreground: Some(theme::FG),
-        background: Some(theme::BG),
-        cursor: Some(theme::CURSOR),
-        palette: Some(theme::palette()),
-        dark: Some(true),
-        ..Facts::default()
-    })
+    t.act_as_terminal(theme::facts())
     .map_err(|e| anyhow::anyhow!("terminal: {e}"))?;
     Ok(t)
 }
@@ -269,6 +262,22 @@ impl Session {
         if let Ok(mut w) = self.writer.lock() {
             let _ = proto::write(&mut *w, &Msg::Input(bytes.to_vec()));
             let _ = w.flush();
+        }
+    }
+
+    /// The theme changed: the grid answers with the new colours, and a
+    /// program that asked to hear of it (DEC 2031) is told, as Ghostty
+    /// tells it: `CSI ? 997 ; 1 n` dark, `2` light.
+    pub fn apply_theme(&self) {
+        let notify = match self.grid.lock() {
+            Ok(mut g) => {
+                let _ = g.terminal.act_as_terminal(theme::facts());
+                g.terminal.dec_mode(2031)
+            }
+            Err(_) => false,
+        };
+        if notify {
+            self.send(if theme::is_dark() { b"\x1b[?997;1n" } else { b"\x1b[?997;2n" });
         }
     }
 

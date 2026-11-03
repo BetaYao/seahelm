@@ -143,6 +143,17 @@ impl TerminalView {
         }
     }
 
+    /// Repaint in the current theme: the grid takes the new colours and
+    /// the row cache starts over, since its cells hold resolved colours.
+    pub fn refresh_theme(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = &self.session {
+            session.apply_theme();
+        }
+        self.view = None;
+        self.rows.clear();
+        cx.notify();
+    }
+
     /// Bring `rows` up to date with the grid.
     fn sync(&mut self) {
         let Some(session) = self.session.clone() else { return };
@@ -408,9 +419,9 @@ impl Render for TerminalView {
             .on_key_down(cx.listener(Self::on_key_down))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .size_full()
-            .bg(theme::rgb(theme::BG));
+            .bg(theme::rgb(theme::bg()));
         if let Some(e) = &self.attach_error {
-            root = root.p(px(PADDING)).text_color(theme::rgb(theme::FG)).child(format!("cannot attach: {e}"));
+            root = root.p(px(PADDING)).text_color(theme::rgb(theme::fg())).child(format!("cannot attach: {e}"));
             return root.into_any_element();
         }
         root.child(TerminalElement { view: cx.entity() }).into_any_element()
@@ -609,7 +620,7 @@ impl Element for TerminalElement {
 
         // Scrolled back, the cursor is not where it is drawn.
         let cursor_cell = frame.cursor.at.filter(|_| frame.cursor.visible && v.scrollbar.at_bottom());
-        let cursor_colour = frame.cursor_colour.unwrap_or(theme::CURSOR);
+        let cursor_colour = frame.cursor_colour.unwrap_or(theme::cursor());
         let block_cursor = focused && matches!(frame.cursor.shape, CursorShape::Block);
 
         let mut text = String::with_capacity(256);
@@ -809,7 +820,7 @@ fn scroll_thumb(s: Scrollbar, bounds: Bounds<Pixels>) -> Option<gpui::PaintQuad>
                 point(bounds.origin.x + bounds.size.width - px(6.), bounds.origin.y + px(2. + top)),
                 size(px(4.), px(h)),
             ),
-            crate::tokens::alpha(theme::rgb(theme::FG), 0.35),
+            crate::tokens::alpha(theme::rgb(theme::fg()), 0.35),
         )
         .corner_radii(px(2.)),
     )
@@ -828,7 +839,7 @@ fn cell_fg(c: &Cell, default_fg: [u8; 3], default_bg: [u8; 3]) -> [u8; 3] {
 
 fn cell_bg(c: &Cell, default_fg: [u8; 3], default_bg: [u8; 3], selection: Option<(u16, u16)>, x: usize) -> Option<[u8; 3]> {
     if selection.is_some_and(|(a, b)| (a as usize..=b as usize).contains(&x)) {
-        return Some(theme::SELECTION_BG);
+        return Some(theme::selection_bg());
     }
     if c.inverse {
         return Some(c.fg.unwrap_or(default_fg));
