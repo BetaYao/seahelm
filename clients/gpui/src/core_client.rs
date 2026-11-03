@@ -3,19 +3,15 @@
 //! says which worktree it shows, and reads back each worktree's state.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
-/// `$SEAHELM_CORE_SOCKET`, else `~/.config/seahelm/core.sock`.
+/// `$SEAHELM_CORE_SOCKET`, else `~/.config/seahelm/core.sock` (a named
+/// pipe on Windows).
 pub fn socket() -> PathBuf {
-    if let Some(p) = std::env::var_os("SEAHELM_CORE_SOCKET") {
-        return PathBuf::from(p);
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join(".config/seahelm/core.sock")
+    crate::platform::core_socket()
 }
 
 /// `$SEAHELM_CORE_BIN`, then `seahelm-core` on PATH.
@@ -37,7 +33,7 @@ pub fn ensure() {
 }
 
 pub fn call(method: &str, params: Value) -> Result<Value, String> {
-    let mut stream = UnixStream::connect(socket()).map_err(|e| e.to_string())?;
+    let mut stream = crate::platform::connect(&socket()).map_err(|e| e.to_string())?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
     let mut line = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
         .map_err(|e| e.to_string())?;

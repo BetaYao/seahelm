@@ -3,17 +3,21 @@ name: Windows
 # The Rust workspace (seahelmd and seahelm-core) on Windows: libghostty-vt
 # built with Zig against MSVC (it cannot be cross-compiled from macOS), then
 # the whole workspace's tests, including seahelmd's end-to-end Windows tests
-# (named pipes, ConPTY) and the pipe / process code ported from Keep.
+# (named pipes, ConPTY) and the pipe / process code ported from Keep. Then
+# the GPUI client (clients/gpui, a workspace of its own) built and tested
+# against the same library.
 
 on:
   push:
     branches: [main]
     paths:
       - "seahelmd/**"
+      - "clients/gpui/**"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
       - "seahelmd/**"
+      - "clients/gpui/**"
       - ".github/workflows/windows.yml"
   workflow_dispatch:
 
@@ -58,10 +62,21 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: seahelmd
+          workspaces: |
+            seahelmd
+            clients/gpui
 
       # A hung daemon test should fail the job, not hold the runner for an hour.
       - name: Test
         timeout-minutes: 15
         working-directory: seahelmd
         run: cargo test --locked --workspace --no-fail-fast
+
+      # The client: the window itself is not exercised (no display), but it
+      # has to build with Windows' GPUI (DirectX) and the named-pipe
+      # transport, and its unit tests run.
+      - name: GPUI client
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: clients/gpui
+        run: cargo test --locked

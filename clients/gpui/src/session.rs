@@ -6,7 +6,6 @@
 //! by the reader for a parse and by the UI for `View::begin`.
 
 use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,7 +33,7 @@ pub struct Grid {
 pub struct Session {
     pub name: String,
     pub grid: Arc<Mutex<Grid>>,
-    writer: Arc<Mutex<UnixStream>>,
+    writer: Arc<Mutex<crate::platform::Stream>>,
     size: Mutex<(u16, u16)>,
     /// Bytes of output parsed so far, for the stats line.
     pub bytes_in: Arc<AtomicU64>,
@@ -52,7 +51,9 @@ pub fn daemon_binary() -> PathBuf {
     if let Some(bin) = std::env::var_os("SEAHELMD_BIN") {
         return PathBuf::from(bin);
     }
-    let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../seahelmd/target/release/seahelmd");
+    let built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../seahelmd/target/release")
+        .join(format!("seahelmd{}", std::env::consts::EXE_SUFFIX));
     if built.exists() {
         return built;
     }
@@ -90,6 +91,8 @@ pub fn ensure_in(name: &str, cmd: &[String], cwd: Option<&str>) -> Result<()> {
 }
 
 /// Resident memory of the session's program and everything under it.
+/// Read from `ps`, so Unix only for now.
+#[cfg(unix)]
 pub fn memory(name: &str) -> Option<u64> {
     let Ok(Msg::Text(info)) = seahelmd::client::request(name, &Msg::Info) else { return None };
     let root: u32 = info.split('\t').find_map(|f| f.strip_prefix("pid="))?.parse().ok()?;
@@ -114,6 +117,11 @@ pub fn memory(name: &str) -> Option<u64> {
         }
     }
     Some(total)
+}
+
+#[cfg(not(unix))]
+pub fn memory(_name: &str) -> Option<u64> {
+    None
 }
 
 fn new_terminal(cols: u16, rows: u16) -> Result<Terminal> {

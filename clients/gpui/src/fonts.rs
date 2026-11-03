@@ -1,9 +1,9 @@
 //! The terminal font: the one the macOS app's panes use, read from the same
-//! Ghostty config (`~/.config/seahelm/ghostty.conf`), else Menlo 13.
+//! Ghostty config (`~/.config/seahelm/ghostty.conf`), else Menlo 13 (JetBrains Mono
+//! off macOS).
 
 fn config_value(key: &str) -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let text = std::fs::read_to_string(std::path::Path::new(&home).join(".config/seahelm/ghostty.conf")).ok()?;
+    let text = std::fs::read_to_string(crate::platform::config_dir().join("ghostty.conf")).ok()?;
     parse(&text, key)
 }
 
@@ -23,7 +23,7 @@ fn parse(text: &str, key: &str) -> Option<String> {
 }
 
 pub fn terminal_family() -> String {
-    config_value("font-family").unwrap_or_else(|| "Menlo".into())
+    config_value("font-family").unwrap_or_else(|| crate::platform::default_terminal_font().into())
 }
 
 pub fn terminal_size() -> f32 {
