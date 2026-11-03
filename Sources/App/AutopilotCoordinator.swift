@@ -95,6 +95,12 @@ final class AutopilotCoordinator {
             var exists = SessionManager.sessionExists(name: name, backend: backend)
             if exists, !FirstMatePane.sessionIsCurrent() || (!young && !Self.agentIsRunning()) {
                 SessionManager.killSession(name, backend: backend)
+                // The kill lands asynchronously, and createDetachedSession
+                // declines a name that still lists — leaving no session at all.
+                let deadline = Date().addingTimeInterval(5)
+                while SessionManager.sessionExists(name: name, backend: backend), Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
                 exists = false
             }
             if !exists {
