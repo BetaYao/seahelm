@@ -401,6 +401,16 @@ final class HostGatewaySession {
     private static let paneStatusKeys = ["pane_id", "pane_session_key", "status", "old_status",
                                          "agent_type", "worktree_path", "last_message"]
 
+    /// Server → session: First Mate's state changed. Paired clients only — a
+    /// share link is one pane, and First Mate is not it.
+    func pushFirstMateState(_ state: [String: Any]) {
+        lock.lock()
+        let ready = authenticated
+        lock.unlock()
+        guard ready, currentSharedPane() == nil else { return }
+        enqueue(.text(HostGatewayFrame.encode(.notify(method: "autopilot.state", params: state))))
+    }
+
     /// Server → session: a MessageStream timeline item.
     func pushMessage(_ event: MessageEvent) {
         lock.lock()

@@ -9,6 +9,13 @@ private final class SessionFakeDataSource: ControlDataSource {
     /// What `answerQuestion` reports; nil = the Mac holds no card for the pane.
     var answerResult: [String: Any]?
     var answered: [(pane: String, index: Int)] = []
+    var firstMate: [String: Any]?
+    var firstMateAnswers: [(card: String, option: String)] = []
+    func firstMateState() -> [String: Any]? { firstMate }
+    func answerFirstMateCard(card: String, option: String) -> Bool {
+        firstMateAnswers.append((card, option))
+        return true
+    }
 
     func snapshotPanes() -> [PaneSnapshot] { panes }
     func answerQuestion(paneId: String, index: Int) -> [String: Any]? {
@@ -831,3 +838,39 @@ extension HostGatewaySessionTests {
         XCTAssertEqual(ds.sentKeys.first?.keys, ["down", "down", "enter"])
     }
 }
+
+extension HostGatewayShareSessionTests {
+    /// A share link is one pane; First Mate is not it, and its cards are not
+    /// the guest's to answer.
+    func testAShareLinkSeesNoFirstMate() {
+        let (s, ds, _) = session()
+        ds.firstMate = ["enabled": true, "pending": 1]
+        _ = s.handle(text: shareAuth())
+        _ = s.drainNotifications()
+        s.pushFirstMateState(["enabled": true])
+        XCTAssertTrue(s.drainNotifications().isEmpty, "state pushed to a guest")
+        let reply = s.handle(text: #"{"id":"x","method":"autopilot.answer","params":{"card":"c","option":"Approve"}}"#)
+        guard case .text(let text) = reply.first else { return XCTFail() }
+        XCTAssertTrue(text.contains("error"), text)
+        XCTAssertTrue(ds.firstMateAnswers.isEmpty)
+    }
+}
+
+extension HostGatewaySessionTests {
+    func testPairedClientsGetFirstMateAndCanAnswerItsCards() {
+        let (s, ds, _) = session()
+        ds.firstMate = ["enabled": true, "activity": "watching", "pending": 1,
+                        "cards": [["card": "autopilot-1", "options": ["Approve", "Reject"]]]]
+        _ = s.handle(text: authFrame())
+        _ = s.drainNotifications()
+        let state = s.handle(text: #"{"id":"st","method":"autopilot.state","params":{}}"#).map(decodeResponse).first
+        XCTAssertEqual((state?["result"] as? [String: Any])?["activity"] as? String, "watching")
+        s.pushFirstMateState(["enabled": true, "pending": 0])
+        let pushed = s.drainNotifications().map(decodeResponse)
+        XCTAssertEqual(pushed.first?["method"] as? String, "autopilot.state")
+        _ = s.handle(text: #"{"id":"a","method":"autopilot.answer","params":{"card":"autopilot-1","option":"Approve"}}"#)
+        XCTAssertEqual(ds.firstMateAnswers.first?.card, "autopilot-1")
+        XCTAssertEqual(ds.firstMateAnswers.first?.option, "Approve")
+    }
+}
+

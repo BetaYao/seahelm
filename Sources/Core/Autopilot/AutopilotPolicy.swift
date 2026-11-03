@@ -76,3 +76,8 @@ enum AutopilotGate: Equatable {
     case queued(String)
     case deny(String)
 }
+
+extension Notification.Name {
+    /// First Mate's remote state changed; `userInfo` is the state (`firstMateState`).
+    static let firstMateStateChanged = Notification.Name("seahelm.firstMateStateChanged")
+}

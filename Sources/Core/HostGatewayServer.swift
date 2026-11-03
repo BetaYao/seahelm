@@ -138,6 +138,7 @@ final class HostGatewayServer {
             self.frontBindAttemptsLeft = Self.frontBindAttempts
             self.subscribeToAgentEvents()
             self.subscribeToMessageStream()
+            self.subscribeToFirstMate()
             self.startPingTimer()
             self.startWebSocketListener()
         }
@@ -206,6 +207,21 @@ final class HostGatewayServer {
     }
 
     /// MessageStreamHub → every authenticated session as `pane.message` notifies.
+    private var firstMateToken: NSObjectProtocol?
+
+    /// First Mate's state, posted by the app on every change.
+    private func subscribeToFirstMate() {
+        guard firstMateToken == nil else { return }
+        firstMateToken = NotificationCenter.default.addObserver(
+            forName: .firstMateStateChanged, object: nil, queue: nil
+        ) { [weak self] note in
+            guard let self, let state = note.userInfo as? [String: Any] else { return }
+            self.queue.async {
+                for state0 in self.connections.values { state0.session.pushFirstMateState(state) }
+            }
+        }
+    }
+
     private func subscribeToMessageStream() {
         guard messageToken == nil else { return }
         messageToken = MessageStreamHub.shared.subscribe { [weak self] event in
