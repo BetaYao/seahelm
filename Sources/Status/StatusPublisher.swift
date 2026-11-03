@@ -61,8 +61,40 @@ class StatusPublisher {
         lowercasedPaneNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
     }
 
+    /// Stations scanned like any pane but outside the fleet: no split tree, no
+    /// worktree aggregator (so none of the fleet's notifications), still matched
+    /// by hooks. First Mate is the one.
+    private var pinned: [String: Station] = [:]
+
+    func pin(_ station: Station, worktreePath: String) {
+        lock.lock()
+        pinned[worktreePath] = station
+        surfaces[station.id] = station
+        worktreePaths[station.id] = worktreePath
+        if trackers[station.id] == nil { trackers[station.id] = DebouncedStatusTracker() }
+        let paths = Array(Set(worktreePaths.values))
+        lock.unlock()
+        webhookProvider.updateWorktrees(paths)
+    }
+
+    func unpin(worktreePath: String) {
+        lock.lock()
+        if let station = pinned.removeValue(forKey: worktreePath) {
+            surfaces.removeValue(forKey: station.id)
+            worktreePaths.removeValue(forKey: station.id)
+            removeTerminalStateLocked(station.id)
+        }
+        lock.unlock()
+    }
+
+    private func addPinnedLocked() {
+        for (path, station) in pinned {
+            surfaces[station.id] = station
+            worktreePaths[station.id] = path
+        }
+    }
+
     func start(trees: [String: SplitTree]) {
-        let inputWorktreePaths = Array(trees.keys)
         lock.lock()
         self.surfaces = [:]
         self.worktreePaths = [:]
@@ -74,6 +106,8 @@ class StatusPublisher {
                 }
             }
         }
+        addPinnedLocked()
+        let inputWorktreePaths = Array(trees.keys) + Array(pinned.keys)
         // Create trackers for each station
         for terminalID in self.surfaces.keys {
             if trackers[terminalID] == nil {
@@ -124,8 +158,8 @@ class StatusPublisher {
     }
 
     func updateSurfaces(_ trees: [String: SplitTree]) {
-        let inputWorktreePaths = Array(trees.keys)
         lock.lock()
+        let inputWorktreePaths = Array(trees.keys) + Array(pinned.keys)
         let oldSurfaceIDs = Set(self.surfaces.keys)
         let oldPaths = self.worktreePaths
         self.surfaces = [:]
@@ -138,6 +172,7 @@ class StatusPublisher {
                 }
             }
         }
+        addPinnedLocked()
         // Add trackers for new stations
         for terminalID in self.surfaces.keys {
             if trackers[terminalID] == nil {

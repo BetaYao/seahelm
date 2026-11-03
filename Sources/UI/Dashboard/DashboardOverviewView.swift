@@ -124,7 +124,7 @@ final class DashboardOverviewView: NSView {
     }
 
 
-    private let headerTitle = NSTextField(labelWithString: "First mate")
+    private let headerTitle = NSTextField(labelWithString: "Fleet")
     private let headerSub = NSTextField(labelWithString: "")
     private let groupingButton = NSButton()
     private let addRepoButton = NSButton()
@@ -134,7 +134,7 @@ final class DashboardOverviewView: NSView {
     private let stack = FlippedStackView()
 
     // Bottom shortcut cheat-strip (replaced the composer).
-    private let hintBar = ShortcutHintBar()
+    let firstMateDock = FirstMateDockView()
 
     private let groupingPreference: WorktreeGroupingPreference
     private let now: () -> Date
@@ -245,7 +245,7 @@ final class DashboardOverviewView: NSView {
         let headerIcon = NSTextField(labelWithString: "◍")
         headerIcon.font = AppFont.mono(size: 13)
         headerIcon.textColor = Self.sea
-        headerTitle.stringValue = "First mate"
+        headerTitle.stringValue = "Fleet"
         headerTitle.font = AppFont.mono(size: 12.5, weight: .bold)
         headerTitle.textColor = Self.ink
         headerSub.font = AppFont.mono(size: 11)
@@ -292,8 +292,8 @@ final class DashboardOverviewView: NSView {
         addSubview(integrationBanner)
 
         // --- Bottom shortcut strip ---
-        hintBar.onShowAllShortcuts = { [weak self] in self?.onShowAllShortcuts?() }
-        addSubview(hintBar)
+        firstMateDock.onShowAllShortcuts = { [weak self] in self?.onShowAllShortcuts?() }
+        addSubview(firstMateDock)
 
         NSLayoutConstraint.activate([
             headerRow.topAnchor.constraint(equalTo: topAnchor, constant: 13),
@@ -312,11 +312,11 @@ final class DashboardOverviewView: NSView {
             scroll.topAnchor.constraint(equalTo: integrationBanner.bottomAnchor, constant: 4),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: hintBar.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: firstMateDock.topAnchor),
 
-            hintBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hintBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hintBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            firstMateDock.leadingAnchor.constraint(equalTo: leadingAnchor),
+            firstMateDock.trailingAnchor.constraint(equalTo: trailingAnchor),
+            firstMateDock.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
         ])

@@ -94,6 +94,8 @@ class TabCoordinator {
     /// Nil until `init` builds it; only acts on repos that already have one.
     private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
+    /// First Mate: the LLM pane rules wake up (docs/first-mate-autopilot.md).
+    let autopilot = AutopilotCoordinator()
 
     /// Display name of the repo owning a given worktree path.
     func repoName(forWorktree path: String) -> String {
@@ -239,6 +241,12 @@ class TabCoordinator {
         )
         AgentRegistry.shared.onOutcome = { [weak self] outcome in
             guard let self else { return }
+            // First Mate is not a member of the fleet: none of the fleet's
+            // notifications, cards or rollups apply to its turns.
+            if FirstMatePane.isFirstMate(worktreePath: outcome.info.worktreePath) {
+                self.autopilot.firstMateOutcome(outcome)
+                return
+            }
             switch outcome.event.source {
             case .scan:
                 break
@@ -289,7 +297,11 @@ class TabCoordinator {
             self.saveConfig()
         }
         WorktreeCleanupStore.shared.onChange = { [weak self] _ in self?.scheduleCleanupRepaint() }
-        WorktreePRStore.shared.onChange = { [weak self] in self?.scheduleCleanupRepaint() }
+        WorktreePRStore.shared.onChange = { [weak self] in
+            guard let self else { return }
+            self.scheduleCleanupRepaint()
+            self.autopilot.observe(self.prObservations())
+        }
     }
 
     deinit { AgentRegistry.shared.onOutcome = nil }
@@ -492,6 +504,7 @@ class TabCoordinator {
     ///   reads its cached stats. A full rebuild (nil) refreshes all.
     func buildWorktreeRowInfos(changedWorktreePath: String? = nil) -> [WorktreeRowInfo] {
         let agents = AgentRegistry.shared.allPanes()
+            .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
         // Index once — the per-agent loop below used to re-filter the full agent
         // list and re-scan allWorktrees for every worktree (O(N²) per rebuild,
         // and this rebuilds on every single-worktree status change).
@@ -798,6 +811,7 @@ class TabCoordinator {
                 // Start polling for agent status
                 self.statusPublisher.start(trees: self.terminalCoordinator.stationManager.all)
                 self.updateStatusPollPreferences()
+                self.applyAutopilotConfig()
 
                 // Restore last session state (tab, worktree, pane)
                 self.restoreSessionState()
@@ -1803,7 +1817,7 @@ class TabCoordinator {
 
     func restoreSessionState() {
         // Restore selected agent card from config. Use commitWorktreeSelection
-        // (not selectPane) so the left "First mate" overview selection stays in
+        // (not selectPane) so the left fleet overview selection stays in
         // sync with the right-hand terminal — selectPane moves only the terminal,
         // leaving the overview highlight on the first row and mismatched on launch.
         if let savedPath = config.selectedWorktreePath {
@@ -2116,6 +2130,32 @@ class TabCoordinator {
         guard AgentRegistry.shared.pane(for: stationId)?.unseenCompletion == true else { return false }
         setUnseenCompletion(false, terminalID: stationId)
         return true
+    }
+
+    // MARK: - First Mate
+
+    /// Start, stop, pause or resume First Mate from config. Safe to call again.
+    func applyAutopilotConfig() {
+        autopilot.apply(enabled: config.autopilotEnabled, paused: config.autopilotPaused,
+                        backend: runtimeBackend)
+        if let station = autopilot.station {
+            statusPublisher.pin(station, worktreePath: FirstMatePane.directory)
+        } else {
+            statusPublisher.unpin(worktreePath: FirstMatePane.directory)
+        }
+    }
+
+    /// Every PR-able worktree with its branch's PR as last fetched. Main and the
+    /// integration checkout are not PR work.
+    func prObservations() -> [PRObservation] {
+        allWorktrees.compactMap { entry in
+            let info = entry.info
+            guard !info.isMainWorktree, !info.branch.isEmpty,
+                  !IntegrationWorktreeStore.shared.isIntegrationWorktree(info.path) else { return nil }
+            return PRObservation(worktreePath: info.path, repoPath: worktreeRepoCache[info.path] ?? info.path,
+                                 branch: info.branch,
+                                 pr: WorktreePRStore.shared.status(worktreePath: info.path, branch: info.branch))
+        }
     }
 
     /// The question card a pane is waiting on, if any.

@@ -3,8 +3,8 @@ import AppKit
 /// `?` keyboard cheat-sheet — a two-column modal (NORMAL · HELM open) over the
 /// dashboard. Bare-TUI styled. Click the scrim or press Esc to dismiss.
 ///
-/// The permanent bottom-of-column strip (`ShortcutHintBar`) is the teaser for
-/// this sheet; keep the two in sync when either list changes.
+/// Opened by `?`, or the `?` in the corner of the First Mate dock at the foot
+/// of the fleet column (which took the place of the old shortcut strip).
 final class KeyboardHelpOverlay: NSView {
 
     // Bare-TUI palette (prototype THEME.A)

@@ -65,7 +65,9 @@ final class SeahelmControlDataSource: ControlDataSource {
         // the same two snapshots.
         let memoryBySessionKey = includingMemory ? sessionMemoryBySessionKey() : [:]
 
-        return AgentRegistry.shared.allPanes().map { s in
+        return AgentRegistry.shared.allPanes()
+            .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
+            .map { s in
             let station = StationRegistry.shared.station(forId: s.id)
             let osc = station?.oscTitle ?? ""
             let title = osc.isEmpty ? (station?.persistedTitle ?? "") : osc

@@ -1,0 +1,105 @@
+import Foundation
+
+/// Where First Mate lives: one zmx session, one working directory, and the files
+/// seahelm keeps there. See docs/first-mate-autopilot.md §2.2.
+enum FirstMatePane {
+    static let sessionName = "seahelm-first-mate"
+    static let project = "First Mate"
+
+    static var directory: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/seahelm/first-mate").path
+    }
+    static var ledgerPath: String { directory + "/state.json" }
+    static var auditPath: String { directory + "/audit.jsonl" }
+    static var standingOrdersPath: String { directory + "/standing-orders.md" }
+
+    /// Whether a pane is First Mate rather than a member of the fleet.
+    static func isFirstMate(worktreePath: String) -> Bool { worktreePath == directory }
+
+    /// Bumped whenever `instructions` or `permissions` change, so an existing
+    /// directory picks the new ones up. The files are seahelm's, not the user's:
+    /// what the user says to keep goes in `standing-orders.md`, never touched.
+    static let version = 1
+
+    /// Write the managed files (when stale) and the standing orders (when absent).
+    static func provision(at dir: String = directory) {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: dir + "/.claude", withIntermediateDirectories: true)
+        let marker = "<!-- seahelm-first-mate v\(version) -->"
+        let claudeMD = dir + "/CLAUDE.md"
+        if (try? String(contentsOfFile: claudeMD, encoding: .utf8))?.contains(marker) != true {
+            try? (marker + "\n" + instructions).write(toFile: claudeMD, atomically: true, encoding: .utf8)
+        }
+        let settings = dir + "/.claude/settings.json"
+        if let data = try? JSONSerialization.data(withJSONObject: permissions, options: [.prettyPrinted, .sortedKeys]),
+           (try? Data(contentsOf: URL(fileURLWithPath: settings))) != data {
+            try? data.write(to: URL(fileURLWithPath: settings), options: .atomic)
+        }
+        let orders = dir + "/standing-orders.md"
+        if !fm.fileExists(atPath: orders) {
+            try? "# Standing orders\n\nWhat the user has asked First Mate to keep doing (or not doing).\n"
+                .write(toFile: orders, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Claude Code's own permission gate for this directory. seahelm enforces the
+    /// autonomy policy on its CLI, but an agent free to run any shell command
+    /// could step around it (`git worktree remove`, `gh pr merge`). So only reads
+    /// and `seahelm` itself run unasked; anything else stops at Claude's prompt,
+    /// which shows as First Mate needing you.
+    static let permissions: [String: Any] = [
+        "permissions": [
+            "allow": [
+                "Bash(seahelm:*)",
+                "Bash(gh pr view:*)", "Bash(gh pr list:*)", "Bash(gh pr checks:*)", "Bash(gh pr diff:*)",
+                "Bash(gh run view:*)", "Bash(gh run list:*)",
+                "Bash(gh issue view:*)", "Bash(gh issue list:*)",
+                "Bash(git -C:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
+                "Read", "Grep", "Glob",
+                "Edit(standing-orders.md)", "Write(standing-orders.md)",
+            ],
+            "deny": [
+                "Bash(gh pr merge:*)", "Bash(git push:*)", "Bash(git worktree remove:*)", "Bash(rm:*)",
+            ],
+        ],
+    ]
+
+    static let instructions = """
+    # You are First Mate
+
+    You supervise a fleet of coding agents running in seahelm, a terminal multiplexer.
+    The fleet is repos → worktrees → panes, each pane running an agent. You do not write
+    code yourself; you notice, decide, and direct.
+
+    ## How work reaches you
+
+    - **Events** arrive as messages that start with `[seahelm event]`. The header names the
+      trigger (`ci.failed`, `pr.merged`, …), the rule that matched, the repo, worktree,
+      branch and PR, and the autonomy for each action. The rule's brief follows. Several
+      events may arrive in one message, separated by `---`.
+    - **The user** talks to you directly. Their words outrank any event.
+
+    ## How you act
+
+    Use the `seahelm` CLI (see the seahelm skill) and read-only `gh`/`git`:
+
+    - `seahelm pane list` — every pane: id, worktree, agent, status.
+    - `seahelm pane read <pane> --source recent --lines 200` — what a pane shows.
+    - `seahelm pane run <pane> <text>` — tell an agent something (types it and presses Enter).
+      Only when its status is `Idle`; never interrupt a `Running` agent.
+    - `gh pr view <n>`, `gh pr checks <n>`, `gh run view <id> --log-failed` — find out why.
+
+    Every action goes through seahelm's policy. When it answers that an action was queued
+    for approval, that is not an error: say what you proposed and move on.
+
+    ## Rules of conduct
+
+    - Find out before you act: read the failure, read the pane, then decide.
+    - Tell an agent *what* broke and *where to look*, not how to fix it line by line.
+    - One event, one short report: what you saw, what you did, what is pending.
+    - Keep `standing-orders.md` up to date when the user says "remember …" or "from now on …",
+      and read it before acting on any event.
+    - Never run destructive commands. If something needs one, say so and stop.
+    """
+}

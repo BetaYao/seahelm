@@ -287,6 +287,9 @@ class DashboardViewController: NSViewController {
 
     // Fleet overview (spread First Mate). Full-bleed in .overview mode; can also
     // open as a 392pt left side panel over the terminal in .worktree mode.
+    /// First Mate's place at the foot of the fleet column.
+    var firstMateDock: FirstMateDockView { overviewView.firstMateDock }
+
     private lazy var overviewView: DashboardOverviewView = {
         let view = DashboardOverviewView()
         view.currentPaneTitleProvider = { [weak self] path in
@@ -378,7 +381,7 @@ class DashboardViewController: NSViewController {
         overviewView.onCloseProject = { [weak self] project in
             self?.dashboardDelegate?.dashboardDidRequestCloseRepo(project)
         }
-        // The bottom shortcut strip is a teaser for the full `?` cheat-sheet.
+        // The `?` in the First Mate dock opens the full cheat-sheet.
         overviewView.onShowAllShortcuts = { [weak self] in
             self?.toggleHelp()
         }
