@@ -477,6 +477,7 @@ dependencies = [
  "keep-vt",
  "libc",
  "portable-pty",
+ "windows-sys",
 ]
 
 [[package]]

@@ -6,7 +6,6 @@
 //! socket — when the program it runs exits.
 
 use std::io::Write;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -17,6 +16,7 @@ use anyhow::{Context, Result};
 use keep_vt::{Device, Facts};
 use portable_pty::CommandBuilder;
 
+use crate::platform::{Listener, Stream};
 use crate::proto::{self, Msg};
 use crate::session::Session;
 
@@ -85,7 +85,7 @@ pub fn serve(socket: &Path, name: &str, argv: &[String], hold: Option<Duration>)
     });
     let created = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
-    let listener = UnixListener::bind(socket).with_context(|| format!("bind {}", socket.display()))?;
+    let listener = Listener::bind(socket).with_context(|| format!("bind {}", socket.display()))?;
     {
         let lazy = Arc::clone(&lazy);
         let name = name.to_string();
@@ -131,7 +131,7 @@ pub fn serve(socket: &Path, name: &str, argv: &[String], hold: Option<Duration>)
     Ok(())
 }
 
-fn handle(stream: UnixStream, lazy: &Arc<Lazy>, name: &str, created: u64, start_dir: &str) {
+fn handle(stream: Stream, lazy: &Arc<Lazy>, name: &str, created: u64, start_dir: &str) {
     let mut reader = match stream.try_clone() {
         Ok(r) => r,
         Err(_) => return,
@@ -195,7 +195,7 @@ fn handle(stream: UnixStream, lazy: &Arc<Lazy>, name: &str, created: u64, start_
 /// An attached client: a pump thread carries the session's output to it, and
 /// this thread carries its keystrokes and size to the session. Only the pump
 /// writes to the socket and only this thread reads it.
-fn attached(mut reader: UnixStream, mut writer: UnixStream, session: &Arc<Session>, cols: u16, rows: u16) {
+fn attached(mut reader: Stream, mut writer: Stream, session: &Arc<Session>, cols: u16, rows: u16) {
     let (repaint, attachment) = match session.attach(cols, rows) {
         Ok(a) => a,
         Err(e) => {

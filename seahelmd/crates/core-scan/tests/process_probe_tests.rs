@@ -163,7 +163,9 @@ fn argv_reads_own_process() {
 fn argv_is_stable_when_a_buffer_is_reused_across_processes() {
     use std::process::Command;
     let padding = "Z".repeat(4096);
-    let mut long = Command::new("/bin/sh").args(["-c", &format!("sleep 5 # {padding}")]).spawn().unwrap();
+    // A compound command, so the shell stays: given a lone command, sh
+    // execs it, and the long argv is gone as soon as it does.
+    let mut long = Command::new("/bin/sh").args(["-c", &format!("sleep 5; : # {padding}")]).spawn().unwrap();
     let mut short = Command::new("sleep").arg("5").spawn().unwrap();
     let (lp, sp) = (long.id(), short.id());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
