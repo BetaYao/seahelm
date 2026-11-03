@@ -66,6 +66,53 @@ pub struct Snapshot {
     pub running: usize,
     /// Why there is no fleet, when there is none.
     pub error: Option<String>,
+    /// Read from git, not from the app.
+    pub local: bool,
+    /// The app's First Mate, when it has one.
+    pub first_mate: Option<FirstMate>,
+}
+
+/// `autopilot.state`, what the dock shows.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct FirstMate {
+    #[serde(default)]
+    pub enabled: bool,
+    /// The status word: "watching", "working", "needs you", "paused"…
+    #[serde(default)]
+    pub activity: String,
+    /// quiet / watching / working / wants_you: decides the colour.
+    #[serde(default)]
+    pub tone: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+/// How the fleet column groups worktrees (`WorktreeGroupingMode`; the
+/// pane mode is not offered: its sub-rows are not drawn here).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Grouping {
+    #[default]
+    Repository,
+    Status,
+    Activity,
+}
+
+impl Grouping {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Grouping::Repository => "repository",
+            Grouping::Status => "status",
+            Grouping::Activity => "activity",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Grouping::Repository => Grouping::Status,
+            Grouping::Status => Grouping::Activity,
+            Grouping::Activity => Grouping::Repository,
+        }
+    }
 }
 
 impl Snapshot {
@@ -169,10 +216,13 @@ fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value, St
     Ok(value.get_mut("result").map(serde_json::Value::take).unwrap_or(value))
 }
 
-pub fn read() -> Snapshot {
-    let groups = match call("fleet.groups", serde_json::json!({"mode": "repository"})) {
+/// The fleet: the macOS app's when it runs (it knows statuses, PRs,
+/// panes), else this machine's projects read straight from git
+/// ([`read_local`]), which is what Windows and Linux have.
+pub fn read(mode: Grouping) -> Snapshot {
+    let groups = match call("fleet.groups", serde_json::json!({"mode": mode.wire()})) {
         Ok(v) => v.get("groups").cloned().and_then(|g| serde_json::from_value::<Vec<Group>>(g).ok()),
-        Err(e) => return Snapshot { error: Some(e), ..Snapshot::default() },
+        Err(_) => return read_local(),
     };
     let Some(groups) = groups else {
         return Snapshot { error: Some("unexpected fleet.groups reply".into()), ..Snapshot::default() };
@@ -186,7 +236,116 @@ pub fn read() -> Snapshot {
         }
     }
     let running = groups.iter().flat_map(|g| &g.items).filter(|i| i.status == "Running").count();
-    Snapshot { groups, panes, running, error: None }
+    let first_mate = call("autopilot.state", serde_json::json!({})).ok().and_then(|v| serde_json::from_value(v).ok());
+    Snapshot { groups, panes, running, error: None, local: false, first_mate }
+}
+
+/// Whether the fleet came from git rather than the app: only then can this
+/// client add a project itself.
+pub fn is_local(s: &Snapshot) -> bool {
+    s.local
+}
+
+/// The projects this client knows without the app: the app's own list
+/// (`workspace_paths` in config.json, read only) and the ones added here
+/// (`gpui-projects.json`).
+pub fn local_projects() -> Vec<String> {
+    let dir = crate::platform::config_dir();
+    let mut out: Vec<String> = Vec::new();
+    let read = |name: &str, key: Option<&str>| -> Vec<String> {
+        let Ok(text) = std::fs::read_to_string(dir.join(name)) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
+        let list = match key {
+            Some(k) => v.get(k).cloned().unwrap_or_default(),
+            None => v,
+        };
+        serde_json::from_value(list).unwrap_or_default()
+    };
+    for p in read("config.json", Some("workspace_paths")).into_iter().chain(read(PROJECTS_FILE, None)) {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+const PROJECTS_FILE: &str = "gpui-projects.json";
+
+/// Add a project to this client's own list.
+pub fn add_local_project(path: &str) -> Result<(), String> {
+    let dir = crate::platform::config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(PROJECTS_FILE);
+    let mut list: Vec<String> =
+        std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    if !list.iter().any(|p| p == path) {
+        list.push(path.to_string());
+    }
+    let text = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(&file, text).map_err(|e| e.to_string())
+}
+
+/// `git worktree list --porcelain`: each worktree's path and branch.
+pub fn parse_worktrees(porcelain: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut path: Option<String> = None;
+    let mut branch = String::new();
+    for line in porcelain.lines().chain(std::iter::once("")) {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(p.to_string());
+            branch.clear();
+        } else if let Some(b) = line.strip_prefix("branch ") {
+            branch = b.trim_start_matches("refs/heads/").to_string();
+        } else if line == "detached" {
+            branch = "detached".into();
+        } else if line.is_empty() {
+            if let Some(p) = path.take() {
+                out.push((p, std::mem::take(&mut branch)));
+            }
+        }
+    }
+    out
+}
+
+/// The fleet from git alone: one group per project, its worktrees as rows,
+/// main first. Statuses are left to seahelm-core, which the workspace lays
+/// over every row it watches.
+pub fn read_local() -> Snapshot {
+    let projects = local_projects();
+    if projects.is_empty() {
+        return Snapshot {
+            local: true,
+            error: Some("No projects yet. Add one with the folder button above.".into()),
+            ..Snapshot::default()
+        };
+    }
+    let mut groups = Vec::new();
+    for project in projects {
+        let name = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or(&project).to_string();
+        let Some(list) = git(&project, &["worktree", "list", "--porcelain"]) else { continue };
+        let items: Vec<Item> = parse_worktrees(&list)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (path, branch))| {
+                let dir = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or(&path).to_string();
+                Item {
+                    id: path.clone(),
+                    title: if i == 0 { name.clone() } else { dir },
+                    subtitle: branch,
+                    repository: name.clone(),
+                    status: String::new(),
+                    worktree_path: path,
+                    is_main_worktree: i == 0,
+                    last_activity_at: None,
+                    running_since: None,
+                    unseen: false,
+                    pr: None,
+                }
+            })
+            .collect();
+        groups.push(Group { id: format!("repository:{name}"), title: name, items });
+    }
+    Snapshot { groups, local: true, ..Snapshot::default() }
 }
 
 fn git(path: &str, args: &[&str]) -> Option<String> {
@@ -245,5 +404,18 @@ mod tests {
         assert_eq!(item.dot(), Dot::Running);
         assert_eq!(item.time_label(112.0), "12s");
         assert_eq!(item.pr.as_ref().unwrap().number, 12);
+    }
+
+    #[test]
+    fn worktree_lists_parse() {
+        let porcelain = "worktree /r/main\nHEAD abc\nbranch refs/heads/main\n\nworktree /r/wt-a\nHEAD def\nbranch refs/heads/feat/a\n\nworktree /r/wt-b\nHEAD 123\ndetached\n";
+        assert_eq!(
+            parse_worktrees(porcelain),
+            vec![
+                ("/r/main".to_string(), "main".to_string()),
+                ("/r/wt-a".to_string(), "feat/a".to_string()),
+                ("/r/wt-b".to_string(), "detached".to_string()),
+            ]
+        );
     }
 }

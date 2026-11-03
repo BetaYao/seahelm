@@ -6,16 +6,17 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui::{
-    div, percentage, prelude::*, px, svg, Animation, AnimationExt, App, ClickEvent, Context, Entity, FocusHandle,
-    Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Rgba, SharedString,
-    Transformation, Window, WindowControlArea,
+    actions, div, percentage, prelude::*, px, svg, Animation, AnimationExt, App, ClickEvent, Context, Entity,
+    FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
+    Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
 };
 
 use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
-use crate::fleet::{self, Dot, GitStats, Item, Snapshot};
+use crate::fleet::{self, Dot, GitStats, Grouping, Item, Snapshot};
 use crate::platform;
 use crate::session;
+use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
 use crate::terminal_view::TerminalView;
 use crate::theme;
 use crate::tokens::{self, MONO, SYSTEM};
@@ -23,12 +24,65 @@ use crate::tokens::{self, MONO, SYSTEM};
 const SIDEBAR_DEFAULT: f32 = 300.0;
 const SIDEBAR_MIN: f32 = 200.0;
 const HEADER_H: f32 = 40.0;
+/// A split divider's grab strip, centred on its 1pt line.
+const DIVIDER_HIT: f32 = 16.0;
+
+actions!(
+    seahelm,
+    [SplitRight, SplitDown, ClosePane, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPaneDown]
+);
+
+/// The split shortcuts: the macOS app's on macOS; elsewhere ctrl+shift
+/// (ctrl alone is the terminal's), Terminator's letters for the splits.
+pub fn bind_keys(cx: &mut App) {
+    use gpui::KeyBinding;
+    if platform::MAC {
+        cx.bind_keys([
+            KeyBinding::new("cmd-d", SplitRight, None),
+            KeyBinding::new("cmd-shift-d", SplitDown, None),
+            KeyBinding::new("cmd-w", ClosePane, None),
+            KeyBinding::new("cmd-alt-left", FocusPaneLeft, None),
+            KeyBinding::new("cmd-alt-right", FocusPaneRight, None),
+            KeyBinding::new("cmd-alt-up", FocusPaneUp, None),
+            KeyBinding::new("cmd-alt-down", FocusPaneDown, None),
+        ]);
+    } else {
+        cx.bind_keys([
+            KeyBinding::new("ctrl-shift-e", SplitRight, None),
+            KeyBinding::new("ctrl-shift-o", SplitDown, None),
+            KeyBinding::new("ctrl-shift-w", ClosePane, None),
+            KeyBinding::new("ctrl-alt-left", FocusPaneLeft, None),
+            KeyBinding::new("ctrl-alt-right", FocusPaneRight, None),
+            KeyBinding::new("ctrl-alt-up", FocusPaneUp, None),
+            KeyBinding::new("ctrl-alt-down", FocusPaneDown, None),
+        ]);
+    }
+}
+
+/// A worktree's panes: the split tree, kept across launches, and a
+/// terminal per leaf, each on a seahelmd session of its own.
+#[derive(Default)]
+struct Panes {
+    tree: SplitTree,
+    views: HashMap<LeafId, Entity<TerminalView>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// A divider being dragged.
+struct SplitDrag {
+    worktree: String,
+    path: Vec<bool>,
+    axis: Axis,
+    area: Rect,
+}
 
 pub struct Workspace {
     fleet: Snapshot,
     git: HashMap<String, GitStats>,
     selected: Option<String>,
-    terminals: HashMap<String, Entity<TerminalView>>,
+    panes: HashMap<String, Panes>,
+    split_drag: Option<SplitDrag>,
+    grouping: Grouping,
     sidebar_width: f32,
     sidebar_visible: bool,
     dragging_divider: bool,
@@ -47,7 +101,12 @@ impl Workspace {
             fleet: Snapshot::default(),
             git: HashMap::new(),
             selected: None,
-            terminals: HashMap::new(),
+            panes: load_layouts()
+                .into_iter()
+                .map(|(id, tree)| (id, Panes { tree, ..Panes::default() }))
+                .collect(),
+            split_drag: None,
+            grouping: Grouping::default(),
             sidebar_width: SIDEBAR_DEFAULT,
             sidebar_visible: true,
             dragging_divider: false,
@@ -75,7 +134,8 @@ impl Workspace {
     /// The fleet, every two seconds, read off the main thread.
     fn poll_fleet(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
-            let snap = cx.background_executor().spawn(async { fleet::read() }).await;
+            let mode = this.read_with(cx, |w, _| w.grouping).unwrap_or_default();
+            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
             let alive = this
                 .update(cx, |w, cx| {
                     w.fleet = snap;
@@ -146,7 +206,7 @@ impl Workspace {
     /// The header's memory readout: the focused session's process tree.
     fn poll_memory(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
-            let name = this.read_with(cx, |w, _| w.selected.as_deref().map(session_name)).ok().flatten();
+            let name = this.read_with(cx, |w, _| w.focused_session()).ok().flatten();
             let bytes = match name {
                 Some(n) => cx.background_executor().spawn(async move { session::memory(&n) }).await,
                 None => None,
@@ -177,20 +237,34 @@ impl Workspace {
                 })
                 .detach();
         }
-        if let Some(term) = self.terminal_for(&id, cx) {
+        if let Some(term) = self.terminal_for(&id, window, cx) {
             window.focus(&term.focus_handle(cx));
         }
         cx.notify();
     }
 
-    /// The selected worktree's terminal, its session started in that
-    /// worktree on first use.
-    fn terminal_for(&mut self, id: &str, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
-        if let Some(t) = self.terminals.get(id) {
+    /// The session the focused pane of the selected worktree is on.
+    fn focused_session(&self) -> Option<String> {
+        let id = self.selected.as_deref()?;
+        let leaf = self.panes.get(id).map_or(0, |p| p.tree.focused);
+        Some(pane_session(id, leaf))
+    }
+
+    /// The worktree's focused terminal, its panes made on first use.
+    fn terminal_for(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+        let leaf = self.panes.entry(id.to_string()).or_default().tree.focused;
+        self.view_for(id, leaf, window, cx)
+    }
+
+    /// One pane's terminal: its session started in the worktree on first
+    /// use and registered with seahelm-core; focusing it (a click) makes it
+    /// the tree's focused pane.
+    fn view_for(&mut self, id: &str, leaf: LeafId, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+        if let Some(t) = self.panes.get(id).and_then(|p| p.views.get(&leaf)) {
             return Some(t.clone());
         }
         let item = self.fleet.find(id)?.clone();
-        let name = session_name(id);
+        let name = pane_session(id, leaf);
         if let Err(e) = session::ensure_in(&name, &[], Some(&item.worktree_path)) {
             eprintln!("seahelm-gpui: {e:#}");
         }
@@ -212,8 +286,215 @@ impl Workspace {
             v.font_size = px(crate::fonts::terminal_size());
             v
         });
-        self.terminals.insert(id.to_string(), view.clone());
+        let handle = view.focus_handle(cx);
+        let worktree = id.to_string();
+        let sub = cx.on_focus(&handle, window, move |w, _, cx| {
+            if let Some(p) = w.panes.get_mut(&worktree) {
+                if p.tree.focused != leaf && p.tree.leaves().contains(&leaf) {
+                    p.tree.focused = leaf;
+                    w.save_layouts();
+                    cx.notify();
+                }
+            }
+        });
+        let panes = self.panes.entry(id.to_string()).or_default();
+        panes.views.insert(leaf, view.clone());
+        panes._subscriptions.push(sub);
         Some(view)
+    }
+
+    fn save_layouts(&self) {
+        let layouts: HashMap<&String, &SplitTree> =
+            self.panes.iter().filter(|(_, p)| p.tree.len() > 1).map(|(id, p)| (id, &p.tree)).collect();
+        if let Ok(text) = serde_json::to_string(&layouts) {
+            let _ = std::fs::create_dir_all(platform::config_dir());
+            let _ = std::fs::write(layout_file(), text);
+        }
+    }
+
+    fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        let leaf = self.panes.entry(id.clone()).or_default().tree.split(axis);
+        self.save_layouts();
+        if let Some(v) = self.view_for(&id, leaf, window, cx) {
+            window.focus(&v.focus_handle(cx));
+        }
+        cx.notify();
+    }
+
+    /// Close the focused pane: its session ends with it (the app's cmd+w on
+    /// a split). The last pane of a worktree stays.
+    fn close_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        let Some(panes) = self.panes.get_mut(&id) else { return };
+        let leaf = panes.tree.focused;
+        if !panes.tree.remove(leaf) {
+            return;
+        }
+        panes.views.remove(&leaf);
+        let name = pane_session(&id, leaf);
+        cx.background_executor()
+            .spawn(async move {
+                let _ = core_client::call("pane.unregister", serde_json::json!({"pane": name}));
+                let _ = std::process::Command::new(session::daemon_binary()).args(["kill", &name]).output();
+            })
+            .detach();
+        self.save_layouts();
+        if let Some(v) = self.terminal_for(&id, window, cx) {
+            window.focus(&v.focus_handle(cx));
+        }
+        cx.notify();
+    }
+
+    fn focus_pane(&mut self, dir: Direction, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        let Some(next) = self.panes.get(&id).and_then(|p| p.tree.neighbour(dir)) else { return };
+        if let Some(p) = self.panes.get_mut(&id) {
+            p.tree.focused = next;
+        }
+        if let Some(v) = self.view_for(&id, next, window, cx) {
+            window.focus(&v.focus_handle(cx));
+        }
+        cx.notify();
+    }
+
+    /// The terminal body's place in the window: right of the fleet column,
+    /// under the header.
+    fn body_bounds(&self, window: &Window) -> (f32, f32, f32, f32) {
+        let size = window.viewport_size();
+        let x = if self.sidebar_visible { self.sidebar_width } else { 0.0 };
+        (x, HEADER_H, (f32::from(size.width) - x).max(1.0), (f32::from(size.height) - HEADER_H).max(1.0))
+    }
+
+    /// The selected worktree's panes, laid out from the tree's frames, with
+    /// their dividers and, when there are several, a wash over all but the
+    /// focused one.
+    fn panes_body(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let (_, _, w, h) = self.body_bounds(window);
+        let tree = self.panes.entry(id.to_string()).or_default().tree.clone();
+        let several = tree.len() > 1;
+        let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::BG));
+        for (leaf, r) in tree.frames() {
+            let Some(view) = self.view_for(id, leaf, window, cx) else { continue };
+            let mut pane = div()
+                .absolute()
+                .left(px(r.x * w))
+                .top(px(r.y * h))
+                .w(px(r.w * w))
+                .h(px(r.h * h))
+                .child(view);
+            if several && leaf != tree.focused {
+                pane = pane.child(div().absolute().inset_0().bg(tokens::inactive_wash()));
+            }
+            body = body.child(pane);
+        }
+        for d in tree.dividers() {
+            let worktree = id.to_string();
+            let path = d.path.clone();
+            let path2 = d.path.clone();
+            let (axis, area) = (d.axis, d.area);
+            let line = div().bg(tokens::hairline());
+            let strip = match d.axis {
+                Axis::Horizontal => div()
+                    .absolute()
+                    .left(px(d.at * w - DIVIDER_HIT / 2.))
+                    .top(px(d.area.y * h))
+                    .w(px(DIVIDER_HIT))
+                    .h(px(d.area.h * h))
+                    .flex()
+                    .justify_center()
+                    .cursor_col_resize()
+                    .child(line.w(px(1.)).h_full()),
+                Axis::Vertical => div()
+                    .absolute()
+                    .top(px(d.at * h - DIVIDER_HIT / 2.))
+                    .left(px(d.area.x * w))
+                    .h(px(DIVIDER_HIT))
+                    .w(px(d.area.w * w))
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .cursor_row_resize()
+                    .child(line.h(px(1.)).w_full()),
+            };
+            let dragging = self.split_drag.as_ref().is_some_and(|s| s.worktree == id && s.path == d.path);
+            body = body.child(
+                strip
+                    .id(SharedString::from(format!("split-{id}-{:?}", d.path)))
+                    .occlude()
+                    .when(dragging, |s| s.bg(tokens::alpha(tokens::accent(), 0.10)))
+                    .hover(|s| s.bg(tokens::alpha(tokens::accent(), 0.10)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |w, _: &MouseDownEvent, _, cx| {
+                            w.split_drag = Some(SplitDrag { worktree: worktree.clone(), path: path.clone(), axis, area });
+                            cx.notify();
+                        }),
+                    )
+                    .on_click(cx.listener(move |w, e: &ClickEvent, _, cx| {
+                        if e.click_count() == 2 {
+                            if let Some(id) = w.selected.clone() {
+                                if let Some(p) = w.panes.get_mut(&id) {
+                                    p.tree.equalize(&path2);
+                                }
+                                w.save_layouts();
+                                cx.notify();
+                            }
+                        }
+                    })),
+            );
+        }
+        body.into_any_element()
+    }
+
+    /// The group button: repository → status → activity. The app does the
+    /// grouping; a fleet read from git has only repositories.
+    fn cycle_grouping(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if fleet::is_local(&self.fleet) {
+            return;
+        }
+        self.grouping = self.grouping.next();
+        let mode = self.grouping;
+        cx.spawn(async move |this, cx| {
+            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
+            let _ = this.update(cx, |w, cx| {
+                if w.grouping == mode {
+                    w.fleet = snap;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The folder button: pick a directory and add it as a project. Only
+    /// when the fleet is this client's own (no app running): the app keeps
+    /// its own list.
+    fn add_project(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if !fleet::is_local(&self.fleet) {
+            return;
+        }
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add Project".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else { return };
+            let Some(path) = paths.first().map(|p| p.to_string_lossy().into_owned()) else { return };
+            if let Err(e) = fleet::add_local_project(&path) {
+                eprintln!("seahelm-gpui: add project: {e}");
+                return;
+            }
+            let mode = this.read_with(cx, |w, _| w.grouping).unwrap_or_default();
+            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
+            let _ = this.update(cx, |w, cx| {
+                w.fleet = snap;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn on_divider_down(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -222,6 +503,19 @@ impl Workspace {
     }
 
     fn on_mouse_move(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(drag) = &self.split_drag {
+            let (x0, y0, w, h) = self.body_bounds(window);
+            let ratio = match drag.axis {
+                Axis::Horizontal => (f32::from(e.position.x) - x0 - drag.area.x * w) / (drag.area.w * w).max(1.0),
+                Axis::Vertical => (f32::from(e.position.y) - y0 - drag.area.y * h) / (drag.area.h * h).max(1.0),
+            };
+            let (id, path) = (drag.worktree.clone(), drag.path.clone());
+            if let Some(p) = self.panes.get_mut(&id) {
+                p.tree.set_ratio(&path, ratio);
+            }
+            cx.notify();
+            return;
+        }
         if self.dragging_divider {
             let max = (f32::from(window.viewport_size().width) * 0.5).max(SIDEBAR_MIN);
             self.sidebar_width = f32::from(e.position.x).clamp(SIDEBAR_MIN, max);
@@ -230,6 +524,10 @@ impl Workspace {
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.split_drag.take().is_some() {
+            self.save_layouts();
+            cx.notify();
+        }
         if self.dragging_divider {
             self.dragging_divider = false;
             cx.notify();
@@ -240,6 +538,23 @@ impl Workspace {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
     }
+}
+
+/// A pane's session: the worktree's own for its first pane, numbered after
+/// it for the panes split from it.
+pub fn pane_session(worktree_id: &str, leaf: LeafId) -> String {
+    match leaf {
+        0 => session_name(worktree_id),
+        n => format!("{}-{n}", session_name(worktree_id)),
+    }
+}
+
+fn layout_file() -> std::path::PathBuf {
+    platform::config_dir().join("gpui-layout.json")
+}
+
+fn load_layouts() -> HashMap<String, SplitTree> {
+    std::fs::read_to_string(layout_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
 /// Our own session per worktree, in our own daemon directory: attaching to
@@ -262,10 +577,11 @@ impl Focusable for Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let terminal = self.selected.clone().and_then(|id| self.terminal_for(&id, cx));
-        let title: SharedString = match (&terminal, self.selected.as_deref().and_then(|id| self.fleet.find(id))) {
-            (_, Some(item)) => item.title.clone().into(),
-            _ => "Seahelm".into(),
+        let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
+        let body = selected.as_deref().map(|id| self.panes_body(id, window, cx));
+        let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
+            Some(item) => item.title.clone().into(),
+            None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
 
@@ -277,15 +593,25 @@ impl Render for Workspace {
             .flex_row()
             .font_family(MONO)
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up));
-        if self.dragging_divider {
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_action(cx.listener(|w, _: &SplitRight, window, cx| w.split(Axis::Horizontal, window, cx)))
+            .on_action(cx.listener(|w, _: &SplitDown, window, cx| w.split(Axis::Vertical, window, cx)))
+            .on_action(cx.listener(|w, _: &ClosePane, window, cx| w.close_pane(window, cx)))
+            .on_action(cx.listener(|w, _: &FocusPaneLeft, window, cx| w.focus_pane(Direction::Left, window, cx)))
+            .on_action(cx.listener(|w, _: &FocusPaneRight, window, cx| w.focus_pane(Direction::Right, window, cx)))
+            .on_action(cx.listener(|w, _: &FocusPaneUp, window, cx| w.focus_pane(Direction::Up, window, cx)))
+            .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)));
+        if self.dragging_divider || self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Horizontal) {
             root = root.cursor_col_resize();
         }
 
         if self.sidebar_visible {
             root = root.child(self.sidebar(width, window, cx));
         }
-        root = root.child(self.terminal_column(title, terminal, window.is_maximized(), cx));
+        if self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Vertical) {
+            root = root.cursor_row_resize();
+        }
+        root = root.child(self.terminal_column(title, body, window.is_maximized(), cx));
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
@@ -303,7 +629,7 @@ impl Workspace {
             .flex_col()
             .bg(tokens::sidebar_tint())
             .child(self.sidebar_header(cx))
-            .child(self.fleet_header())
+            .child(self.fleet_header(cx))
             .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
             .child(self.fleet_list(cx))
             .child(self.dock(cx))
@@ -330,7 +656,7 @@ impl Workspace {
             .child(chrome_icon("panel-left", false).id("toggle-sidebar").on_click(cx.listener(Self::toggle_sidebar)))
     }
 
-    fn fleet_header(&self) -> impl IntoElement {
+    fn fleet_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let n = self.fleet.worktree_count();
         let subtitle = if self.fleet.running > 0 { format!("{n} · {} running", self.fleet.running) } else { format!("{n}") };
         div()
@@ -344,8 +670,20 @@ impl Workspace {
             .child(div().text_size(px(12.5)).line_height(px(16.)).font_weight(FontWeight::BOLD).text_color(tokens::ink()).child("Fleet"))
             .child(div().text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_faint()).child(subtitle))
             .child(div().flex_1())
-            .child(glyph("folder-plus", 13., tokens::ink_dim()))
-            .child(glyph("group", 13., tokens::ink_dim()))
+            .child(
+                div()
+                    .id("add-project")
+                    .when(fleet::is_local(&self.fleet), |d| d.cursor_pointer())
+                    .on_click(cx.listener(Self::add_project))
+                    .child(glyph("folder-plus", 13., tokens::ink_dim())),
+            )
+            .child(
+                div()
+                    .id("grouping")
+                    .when(!fleet::is_local(&self.fleet), |d| d.cursor_pointer())
+                    .on_click(cx.listener(Self::cycle_grouping))
+                    .child(glyph("group", 13., if self.grouping == Grouping::Repository { tokens::ink_dim() } else { tokens::accent() })),
+            )
     }
 
     fn fleet_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -386,7 +724,8 @@ impl Workspace {
         }
         let item = &item;
         let selected = self.selected.as_deref() == Some(item.id.as_str());
-        let panes = self.fleet.panes.get(&item.worktree_path).copied().unwrap_or(0);
+        let ours = self.panes.get(&item.id).map_or(0, |p| p.views.len());
+        let panes = self.fleet.panes.get(&item.worktree_path).copied().unwrap_or(0).max(ours);
         let stats = self.git.get(&item.worktree_path);
         let id = item.id.clone();
 
@@ -464,7 +803,21 @@ impl Workspace {
     /// `─ ⎈ First Mate · state ──── ›` at the foot of the column.
     fn dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let hover = self.dock_hover;
-        let rule = || div().h(px(1.)).bg(tokens::dock_rule());
+        // The app's First Mate, as its dock says it (FirstMateDockView).
+        let (word, word_colour, wants_you) = match &self.fleet.first_mate {
+            Some(fm) if fm.enabled || !fm.activity.is_empty() => {
+                let colour = match fm.tone.as_str() {
+                    "watching" => tokens::accent(),
+                    "working" => tokens::running(),
+                    "wants_you" => tokens::attention(),
+                    _ => tokens::ink_faint(),
+                };
+                (fm.activity.clone(), colour, fm.tone == "wants_you")
+            }
+            _ => ("off".to_string(), tokens::ink_faint(), false),
+        };
+        let rule_colour = if wants_you { tokens::attention() } else { tokens::dock_rule() };
+        let rule = move || div().h(px(1.)).bg(rule_colour);
         div()
             .id("first-mate-dock")
             .flex_none()
@@ -498,7 +851,7 @@ impl Workspace {
                             .child("First Mate"),
                     )
                     .child(div().text_color(tokens::ink_faint()).child(" · "))
-                    .child(div().font_weight(FontWeight::MEDIUM).text_color(tokens::ink_faint()).child("off")),
+                    .child(div().font_weight(FontWeight::MEDIUM).text_color(word_colour).child(word)),
             )
             .child(rule().flex_1())
             .child(glyph("chevron-right", 10., if hover { tokens::ink() } else { tokens::ink_faint() }))
@@ -507,9 +860,9 @@ impl Workspace {
     fn terminal_column(
         &self,
         title: SharedString,
-        terminal: Option<Entity<TerminalView>>,
+        body: Option<gpui::AnyElement>,
         maximized: bool,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let fg = theme::rgb(theme::FG);
         let memory = self.memory.map(format_memory).unwrap_or_default();
@@ -545,11 +898,17 @@ impl Workspace {
                     ),
             )
             .child(div().flex_1())
-            .child(div().mr(px(8.)).child(icon_button("columns-2", tokens::alpha(fg, 0.55))))
+            .child(
+                div().mr(px(8.)).child(
+                    icon_button("columns-2", tokens::alpha(fg, 0.55))
+                        .id("split-right")
+                        .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.split(Axis::Horizontal, window, cx))),
+                ),
+            )
             .when(!platform::MAC, |d| d.child(caption_buttons(maximized)));
-        let body = match terminal {
-            Some(t) => div().flex_1().min_h_0().child(t),
-            None => div().flex_1().bg(theme::rgb(theme::BG)),
+        let body = match body {
+            Some(b) => b,
+            None => div().flex_1().bg(theme::rgb(theme::BG)).into_any_element(),
         };
         div().flex_1().min_w_0().h_full().flex().flex_col().bg(theme::rgb(theme::BG)).child(header).child(body)
     }
@@ -559,6 +918,7 @@ impl Workspace {
         let active = self.divider_hover || self.dragging_divider;
         div()
             .id("column-divider")
+            .occlude()
             .absolute()
             .top_0()
             .bottom_0()
