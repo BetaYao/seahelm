@@ -10,6 +10,8 @@ final class FirstMateDockView: NSView {
     var onShowAllShortcuts: (() -> Void)?
     /// Settings ▸ First Mate, from the dock's context menu.
     var onShowSettings: (() -> Void)?
+    /// The approvals badge: anchor view to show the waiting cards from.
+    var onShowApprovals: ((NSView) -> Void)?
     /// The history button: anchor view to show the log from.
     var onShowHistory: ((NSView) -> Void)?
 
@@ -18,7 +20,7 @@ final class FirstMateDockView: NSView {
     private let title = NSTextField(labelWithString: "First Mate")
     private let activity = NSTextField(labelWithString: "")
     private let latest = NSTextField(labelWithString: "")
-    private let badge = NSTextField(labelWithString: "")
+    private let badge = NSButton()
     private let pauseButton = NSButton()
     private let historyButton = NSButton()
     private let helpButton = NSButton()
@@ -56,8 +58,13 @@ final class FirstMateDockView: NSView {
         latest.lineBreakMode = .byTruncatingTail
         latest.maximumNumberOfLines = 1
         latest.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        badge.isBordered = false
         badge.font = AppFont.mono(size: 10, weight: .semibold)
-        badge.textColor = SemanticColors.attention
+        badge.contentTintColor = SemanticColors.attention
+        badge.target = self
+        badge.action = #selector(badgeClicked)
+        badge.toolTip = "Approve or decline what First Mate asked"
+        badge.refusesFirstResponder = true
         badge.isHidden = true
 
         for (button, symbol, tip, action) in [
@@ -115,7 +122,9 @@ final class FirstMateDockView: NSView {
         if state.queued > 0 { second = "\(state.queued) queued · " + second }
         latest.stringValue = second
         badge.isHidden = state.pendingApprovals == 0
-        badge.stringValue = "\(state.pendingApprovals) to approve"
+        badge.attributedTitle = NSAttributedString(string: "\(state.pendingApprovals) to approve", attributes: [
+            .font: AppFont.mono(size: 10, weight: .semibold), .foregroundColor: SemanticColors.attention,
+        ])
         pauseButton.isHidden = state.activity == .off
         let paused = state.activity == .paused
         pauseButton.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill",
@@ -154,6 +163,7 @@ final class FirstMateDockView: NSView {
     @objc private func settingsClicked() { onShowSettings?() }
     @objc private func pauseClicked() { onTogglePause?() }
     @objc private func historyClicked() { onShowHistory?(historyButton) }
+    @objc private func badgeClicked() { onShowApprovals?(badge) }
     @objc private func helpClicked() { onShowAllShortcuts?() }
 
     override func viewDidChangeEffectiveAppearance() {

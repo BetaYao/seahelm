@@ -74,6 +74,9 @@ class MainWindowController: NSWindowController {
     private weak var firstMateView: FirstMateView?
     /// First Mate's history while its popover is open; nil otherwise.
     private weak var firstMateHistory: FirstMateLogView?
+    /// The approvals popover's content while it is open; nil otherwise.
+    private weak var firstMateApprovals: FirstMateApprovalsView?
+    private weak var firstMateApprovalsPopover: NSPopover?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
@@ -3791,6 +3794,7 @@ extension MainWindowController {
         }
         dashboard.firstMateDock.onShowHistory = { [weak self] anchor in self?.showFirstMateHistory(from: anchor) }
         dashboard.firstMateDock.onShowSettings = { [weak self] in self?.showSettingsPage("firstMate") }
+        dashboard.firstMateDock.onShowApprovals = { [weak self] anchor in self?.showFirstMateApprovals(from: anchor) }
         // First Mate's answer to a chat goes back to that chat.
         autopilot.onReply = { [weak self] targets, text in
             for key in targets where key.hasPrefix("telegram:") {
@@ -3811,6 +3815,10 @@ extension MainWindowController {
         autopilot.onStateChange = { [weak self] state in
             guard let self else { return }
             self.dashboardVC?.firstMateDock.apply(state)
+            if let approvals = self.firstMateApprovals {
+                let waiting = self.firstMateCards()
+                if waiting.isEmpty { self.firstMateApprovalsPopover?.close() } else { approvals.show(waiting) }
+            }
             self.firstMateHistory?.show(autopilot.audit.recent())
         }
     }
@@ -3858,6 +3866,29 @@ extension MainWindowController {
             view.embed(self.tabCoordinator.autopilot.station)
             view.focusTerminal(self.tabCoordinator.autopilot.station)
         }
+    }
+
+    /// The cards First Mate is waiting on, oldest first.
+    fileprivate func firstMateCards() -> [PendingOrder] {
+        tabCoordinator.pendingOrders.all().filter {
+            $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal
+        }
+    }
+
+    /// The dock's badge: answer First Mate's cards without leaving the fleet.
+    fileprivate func showFirstMateApprovals(from anchor: NSView) {
+        let view = FirstMateApprovalsView(frame: NSRect(x: 0, y: 0, width: 440, height: 10))
+        view.show(firstMateCards())
+        view.onAnswer = { [weak self] order, label in self?.handleSuggestionTapped(order: order, optionText: label) }
+        let controller = NSViewController()
+        controller.view = view
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.contentSize = NSSize(width: 440, height: min(420, max(80, view.fittingSize.height)))
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        firstMateApprovals = view
+        firstMateApprovalsPopover = popover
     }
 
     fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
