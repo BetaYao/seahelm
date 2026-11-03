@@ -69,7 +69,7 @@ protocol ControlDataSource: AnyObject {
     func createWorktree(repoPath: String, agentType: AgentType, prompt: String)
         -> Result<[String: Any], ControlCreateError>
     /// Same, but optionally attaching per-pane memory. Opt-in because probing
-    /// means one `zmx list` plus a full process-table walk (argv included) —
+    /// means one `seahelmd list` plus a full process-table walk (argv included) —
     /// far too costly to put on every `pane.list`, which agents poll.
     func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot]
     /// Live split trees keyed by worktree path, so a remote client can mirror

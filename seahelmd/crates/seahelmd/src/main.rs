@@ -23,7 +23,7 @@ fn run() -> Result<()> {
             seahelmd::daemon::serve(&client::socket_path(name)?, name, argv, hold)?;
         }
         "run" => {
-            // As `zmx run`: the session is the user's shell, and the command is
+            // The session is the user's shell, and the command is
             // typed into it — so the session outlives the command, and running
             // on a live session is the same act as on a new one.
             let (name, cmd) = rest.split_first().ok_or_else(|| anyhow::anyhow!(USAGE))?;
@@ -70,7 +70,7 @@ fn run() -> Result<()> {
                     }
                     // Listening but not answering is a busy or wedged daemon.
                     // Its socket stays — removing it would orphan a session
-                    // that may yet come back — and the row says so, as zmx's do.
+                    // that may yet come back — and the row says so.
                     _ => println!("name={name}\tstatus=unreachable"),
                 }
             }
@@ -106,8 +106,8 @@ fn take_hold(args: &[String]) -> Result<(Option<std::time::Duration>, &[String])
     }
 }
 
-/// Quoted for a POSIX shell only when it has to be — the same rule zmx uses,
-/// so a command line typed by `run` reads the same from either.
+/// Quoted for a POSIX shell only when it has to be, so a command line typed
+/// by `run` reads as the user would have typed it.
 fn shell_quote(arg: &str) -> String {
     const SPECIAL: &[char] = &[
         ' ', '\t', '"', '\'', '\\', '$', '`', '!', '(', ')', '{', '}', '[', ']', '|', '&', ';', '<', '>', '?', '*',

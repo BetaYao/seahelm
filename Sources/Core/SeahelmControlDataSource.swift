@@ -69,7 +69,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func snapshotPanes(includingMemory: Bool) -> [PaneSnapshot] {
-        // Probe once for the whole list, not once per pane: `zmx list` and the
+        // Probe once for the whole list, not once per pane: `seahelmd list` and the
         // process-table walk are the expensive part, and every pane reads from
         // the same two snapshots.
         let memoryBySessionKey = includingMemory ? sessionMemoryBySessionKey() : [:]
@@ -108,14 +108,14 @@ final class SeahelmControlDataSource: ControlDataSource {
         }
     }
 
-    /// Resident memory per zmx session, keyed by session name (a pane's
-    /// `paneSessionKey`). Empty when zmx isn't the backend or the probe fails —
+    /// Resident memory per seahelmd session, keyed by session name (a pane's
+    /// `paneSessionKey`). Empty when seahelmd isn't the backend or the probe fails —
     /// memory is best-effort detail and must never break `pane.list`.
     private func sessionMemoryBySessionKey() -> [String: ProcessProbe.SessionMemory] {
-        guard let listOutput = ZmxLocator.listOutput() else {
+        guard let listOutput = SeahelmdLocator.listOutput() else {
             return [:]
         }
-        let sessions = SessionManager.parseZmxSessions(listOutput: listOutput)
+        let sessions = SessionManager.parseSeahelmdSessions(listOutput: listOutput)
             .filter { $0.pid != nil }
         guard !sessions.isEmpty else { return [:] }
         let procs = ProcessProbe.allProcesses()
@@ -150,7 +150,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         // heard. Deliver through the persistent session instead.
         guard station.canDeliverInput else {
             guard let key = station.paneSessionKey, !key.isEmpty, !text.isEmpty else { return false }
-            return ZmxChannel(paneSessionKey: key).sendPrompt(text)
+            return SeahelmdChannel(paneSessionKey: key).sendPrompt(text)
         }
         runOnMain {
             if !text.isEmpty { station.sendText(text) }
@@ -231,7 +231,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func forkPane(paneId: String, worktreePath: String?) -> Result<[String: Any], PaneForkError> {
-        // Waits for the fork's zmx session to come up, so a caller on main would wait on itself.
+        // Waits for the fork's seahelmd session to come up, so a caller on main would wait on itself.
         guard !Thread.isMainThread, let fork = forkHandler,
               let sid = station(for: paneId)?.id else { return .failure(.unknownPane) }
         let done = DispatchSemaphore(value: 0)
@@ -428,7 +428,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     /// Resolve a pane reference that may be a per-instance station id OR the
-    /// stable zmx session name agents receive as SEAHELM_PANE_ID.
+    /// stable seahelmd session name agents receive as SEAHELM_PANE_ID.
     /// Offer the command to the pane's shell and wait for it (`ShellRunIntegration`):
     /// check the shell is at its prompt, spool the command, press the widget's
     /// key, see whether the shell took it or found a draft, then wait for the
@@ -437,7 +437,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     func execInPane(paneId: String, command: String, timeout: TimeInterval) -> Result<[String: Any], PaneExecError> {
         guard !Thread.isMainThread else { return .failure(.unavailable) }
         guard let station = station(for: paneId) else { return .failure(.unknownPane) }
-        guard station.backend == "zmx", let session = station.paneSessionKey, !session.isEmpty else {
+        guard station.backend == "seahelmd", let session = station.paneSessionKey, !session.isEmpty else {
             return .failure(.noSession)
         }
         let fm = FileManager.default
@@ -460,7 +460,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         try? fm.removeItem(at: spool(.refused))
         guard fm.createFile(atPath: spool(.command).path, contents: Data(command.utf8),
                             attributes: [.posixPermissions: 0o600]),
-              ZmxChannel(paneSessionKey: session).sendRaw(ShellRunIntegration.triggerSequence) else {
+              SeahelmdChannel(paneSessionKey: session).sendRaw(ShellRunIntegration.triggerSequence) else {
             return abandon(.notTaken)
         }
 
@@ -491,7 +491,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard let status else { return .failure(.timedOut(seconds: Int(timeout.rounded()))) }
         let elapsed = Date().timeIntervalSince(started)
 
-        let history = ZmxChannel(paneSessionKey: session).readOutput(lines: Self.execHistoryLines) ?? ""
+        let history = SeahelmdChannel(paneSessionKey: session).readOutput(lines: Self.execHistoryLines) ?? ""
         let output = PaneExecOutput.extract(history: history, command: command, promptLines: claim.promptLines)
         return .success([
             "pane_id": station.id,

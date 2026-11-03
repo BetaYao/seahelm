@@ -6,17 +6,17 @@ Code only reports program status once that query is answered — so the only way
 to see what it would send is a terminal that answers. This is that terminal: a
 pty that replies to the probes an agent TUI sends at startup (7501, DA1/DA2,
 XTVERSION, kitty keyboard, DECRQM, OSC 10/11, CPR) and logs every OSC 7501
-sequence with its keys decoded. See docs/osc7501.md.
+sequence with its keys decoded.
 
-    osc7501_probe.py [--zmx SESSION] [--no-reply] [--timeout S] -- CMD...
+    osc7501_probe.py [--seahelmd SESSION] [--no-reply] [--timeout S] -- CMD...
 
-  --zmx SESSION  run CMD inside `zmx attach SESSION`, so the query and its reply
-                 cross zmx the way they do in a Seahelm pane
+  --seahelmd SESSION  run CMD inside `seahelmd attach SESSION`, so the query and its reply
+                 cross seahelmd the way they do in a Seahelm pane
   --no-reply     do not answer the 7501 query (baseline: expect no reports)
 
 It drives a Claude Code session: accept the folder-trust
 dialog, ask for one Bash call, approve the permission prompt, wait for the turn
-to finish, exit. Seahelm/zmx env is scrubbed from the child so its hooks cannot
+to finish, exit. Seahelm/seahelmd env is scrubbed from the child so its hooks cannot
 report into the live app.
 """
 import argparse
@@ -48,7 +48,7 @@ QUERIES = [
     ('cpr', re.compile(rb'\x1b\[6n'), b'\x1b[1;1R'),
 ]
 ANSI = re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*' + ST + rb'|\x1bP[^\x1b]*\x1b\\|\x1b.')
-SCRUB = ('SEAHELM_', 'ZMX_', 'TMUX', 'TERM_PROGRAM', 'CLAUDE')
+SCRUB = ('SEAHELM_', 'SEAHELMD_', 'TMUX', 'TERM_PROGRAM', 'CLAUDE')
 
 
 def decode_report(body: bytes) -> dict:
@@ -196,8 +196,8 @@ def drive_claude(t: Term, timeout):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--zmx', metavar='SESSION')
-    ap.add_argument('--zmx-bin', default=os.environ.get('ZMX', 'zmx'))
+    ap.add_argument('--seahelmd', metavar='SESSION')
+    ap.add_argument('--seahelmd-bin', default=os.environ.get('SEAHELMD', 'seahelmd'))
     ap.add_argument('--no-reply', action='store_true')
     ap.add_argument('--timeout', type=float, default=90)
     ap.add_argument('--watch', type=float, metavar='S',
@@ -206,9 +206,9 @@ def main():
     ap.add_argument('cmd', nargs=argparse.REMAINDER)
     a = ap.parse_args()
     cmd = a.cmd[1:] if a.cmd[:1] == ['--'] else a.cmd
-    if not cmd and not a.zmx:
-        ap.error('missing CMD (only --zmx may omit it, to attach to an existing session)')
-    argv = [a.zmx_bin, 'attach', a.zmx, *cmd] if a.zmx else cmd
+    if not cmd and not a.seahelmd:
+        ap.error('missing CMD (only --seahelmd may omit it, to attach to an existing session)')
+    argv = [a.seahelmd_bin, 'attach', a.seahelmd, *cmd] if a.seahelmd else cmd
 
     with open(a.log, 'w') as log:
         t = Term(argv, not a.no_reply, log)

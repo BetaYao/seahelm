@@ -2,7 +2,7 @@ import Foundation
 
 /// Delivers the worktree's opening brief to a freshly launched agent TUI.
 ///
-/// `zmx run` *types* the launch line into a shell. Embedding the task (or the
+/// `seahelmd run` *types* the launch line into a shell. Embedding the task (or the
 /// long `--append-system-prompt` string) there routinely truncates mid-quote and
 /// leaves bash stuck in readline — the agent never starts. So the session is
 /// spawned with a bare agent binary, and this type sends the task as the first
@@ -153,7 +153,7 @@ enum InitialAgentTaskDelivery {
     private static let queue = DispatchQueue(label: "seahelm.initial-task-delivery", qos: .userInitiated)
 
     /// A lookup for one delivery. It probes the process tree only until the agent
-    /// shows up — a probe forks `zmx list` — and reads the screen only after.
+    /// shows up — a probe forks `seahelmd list` — and reads the screen only after.
     static func liveLookup() -> PaneLookup {
         var runningAgent: AgentType?
         return { worktreePath in

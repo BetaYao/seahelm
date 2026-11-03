@@ -2,7 +2,7 @@ import Foundation
 
 /// A terminal capture, cleaned up enough to read as a conversation.
 ///
-/// `zmx history` hands back the pane's *screen*, not its transcript: an agent
+/// `seahelmd history` hands back the pane's *screen*, not its transcript: an agent
 /// TUI paints a startup banner above the conversation and a composer, a
 /// statusline and mode hints below it, and all of that comes back mixed in
 /// with what was actually said. On the desktop the furniture is the point —

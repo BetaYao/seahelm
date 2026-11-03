@@ -64,26 +64,26 @@ class SessionManagerTests: XCTestCase {
         XCTAssertNotEqual(SessionManager.indexedSessionName(base: base, index: 2), otherBase)
     }
 
-    func testParseZmxSessionNamesReadsNameEqualsFormat() {
+    func testParseSeahelmdSessionNamesReadsNameEqualsFormat() {
         let output = """
         name=seahelm-repo-main pid=123 cwd=/tmp/repo
         name=seahelm-repo-main-1 pid=456 cwd=/tmp/repo
         """
 
         XCTAssertEqual(
-            SessionManager.parseZmxSessionNames(listOutput: output),
+            SessionManager.parseSeahelmdSessionNames(listOutput: output),
             ["seahelm-repo-main", "seahelm-repo-main-1"]
         )
     }
 
-    func testOrphanZmxSessionNamesOnlyReturnsSeahelmSessionsNotInActiveSet() {
+    func testOrphanSeahelmdSessionNamesOnlyReturnsSeahelmSessionsNotInActiveSet() {
         let output = """
         name=seahelm-repo-main pid=123 clients=1 cwd=/tmp/repo
         name=seahelm-repo-main-1 pid=456 clients=0 cwd=/tmp/repo
         name=third-party pid=789 clients=0 cwd=/tmp/other
         """
 
-        let orphaned = SessionManager.orphanZmxSessionNames(
+        let orphaned = SessionManager.orphanSeahelmdSessionNames(
             activeSessionNames: ["seahelm-repo-main"],
             listOutput: output
         )
@@ -91,7 +91,7 @@ class SessionManagerTests: XCTestCase {
         XCTAssertEqual(orphaned, ["seahelm-repo-main-1"])
     }
 
-    func testOrphanZmxSessionNamesNeverReapsAttachedSessions() {
+    func testOrphanSeahelmdSessionNamesNeverReapsAttachedSessions() {
         // Regression: the orphan sweep force-killed sessions purely by name, so a
         // live pane (clients=1) whose name wasn't in the expected set got killed
         // mid-use — "Process exited. Press any key to close the terminal."
@@ -101,7 +101,7 @@ class SessionManagerTests: XCTestCase {
         name=seahelm-repo-detached\tpid=2\tclients=0\tstart_dir=/tmp/d
         """
 
-        let orphaned = SessionManager.orphanZmxSessionNames(
+        let orphaned = SessionManager.orphanSeahelmdSessionNames(
             activeSessionNames: [],   // neither is "expected"
             listOutput: output
         )
@@ -110,13 +110,13 @@ class SessionManagerTests: XCTestCase {
                        "a session with a live client must never be reaped as orphan")
     }
 
-    func testOrphanZmxSessionNamesHandlesLegacyAmuxPrefix() {
+    func testOrphanSeahelmdSessionNamesHandlesLegacyAmuxPrefix() {
         let output = """
         name=amux-repo-feature pid=123 clients=0 cwd=/tmp/repo
         name=seahelm-repo-other pid=456 clients=0 cwd=/tmp/other
         """
 
-        let orphaned = SessionManager.orphanZmxSessionNames(
+        let orphaned = SessionManager.orphanSeahelmdSessionNames(
             activeSessionNames: ["seahelm-repo-feature"],
             listOutput: output
         )
@@ -124,13 +124,13 @@ class SessionManagerTests: XCTestCase {
         XCTAssertEqual(orphaned, ["amux-repo-feature", "seahelm-repo-other"])
     }
 
-    func testOrphanZmxSessionNamesDoesNotReapActiveAmuxSession() {
+    func testOrphanSeahelmdSessionNamesDoesNotReapActiveAmuxSession() {
         let output = """
         name=amux-repo-feature pid=123 clients=1 cwd=/tmp/repo
         name=amux-repo-detached pid=456 clients=0 cwd=/tmp/other
         """
 
-        let orphaned = SessionManager.orphanZmxSessionNames(
+        let orphaned = SessionManager.orphanSeahelmdSessionNames(
             activeSessionNames: [],
             listOutput: output
         )
@@ -139,8 +139,8 @@ class SessionManagerTests: XCTestCase {
                        "amux- session with a live client must not be reaped")
     }
 
-    func testOrphanZmxSessionNamesNeverReapsUnreachableSessions() {
-        // Regression: a busy daemon that misses the `zmx list` control-socket
+    func testOrphanSeahelmdSessionNamesNeverReapsUnreachableSessions() {
+        // Regression: a busy daemon that misses the `seahelmd list` control-socket
         // probe reports `status=unreachable`/`err=…` with no `clients=` field.
         // The old guard read a missing clients count as 0 and reaped it, killing
         // the live pane mid-use. Only positively-idle, reachable sessions
@@ -151,7 +151,7 @@ class SessionManagerTests: XCTestCase {
           name=seahelm-repo-idle\tpid=4\tclients=0\tcreated=1\tstart_dir=/tmp/i
         """
 
-        let orphaned = SessionManager.orphanZmxSessionNames(
+        let orphaned = SessionManager.orphanSeahelmdSessionNames(
             activeSessionNames: [],   // none are "expected"
             listOutput: output
         )
@@ -168,7 +168,7 @@ class SessionManagerTests: XCTestCase {
     }
 
     func testReachabilityReportsWedgedDaemonUnreachable() {
-        // The shape `zmx list` takes after the volume holding the daemons drops
+        // The shape `seahelmd list` takes after the volume holding the daemons drops
         // out: the row survives, the socket survives, the daemon answers nothing.
         let output = "  name=seahelm-repo-main\terr=Timeout\tstatus=unreachable"
         XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .unreachable)
@@ -197,16 +197,16 @@ class SessionManagerTests: XCTestCase {
     /// merely missed a probe is worse than waiting for it.
     func testSessionExistsStaysPresenceOnlyForUnreachableRows() {
         let output = "  name=seahelm-repo-main\terr=Timeout\tstatus=unreachable"
-        XCTAssertTrue(SessionManager.parseZmxSessionNames(listOutput: output).contains("seahelm-repo-main"))
+        XCTAssertTrue(SessionManager.parseSeahelmdSessionNames(listOutput: output).contains("seahelm-repo-main"))
         XCTAssertEqual(SessionManager.reachability(of: "seahelm-repo-main", listOutput: output), .unreachable)
     }
 
     // MARK: - Session monitor parsing
 
-    func testParseZmxSessionsReadsEveryField() {
+    func testParseSeahelmdSessionsReadsEveryField() {
         let output = "  name=seahelm-repo-main\tpid=123\tclients=2\tcreated=1785228325\tstart_dir=/tmp/repo"
 
-        let sessions = SessionManager.parseZmxSessions(listOutput: output)
+        let sessions = SessionManager.parseSeahelmdSessions(listOutput: output)
 
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions[0].name, "seahelm-repo-main")
@@ -218,16 +218,16 @@ class SessionManagerTests: XCTestCase {
         XCTAssertFalse(sessions[0].isDetached)
     }
 
-    /// The monitor lists everything `zmx list` reports, including sessions the
+    /// The monitor lists everything `seahelmd list` reports, including sessions the
     /// user started by hand — hiding rows from a cleanup screen is the one thing
     /// it must not do. `isManaged` is what gates the kill buttons instead.
-    func testParseZmxSessionsIncludesUnmanagedSessions() {
+    func testParseSeahelmdSessionsIncludesUnmanagedSessions() {
         let output = """
           name=seahelm-repo-main\tpid=1\tclients=1
           name=my-own-session\tpid=2\tclients=1
         """
 
-        let sessions = SessionManager.parseZmxSessions(listOutput: output)
+        let sessions = SessionManager.parseSeahelmdSessions(listOutput: output)
 
         XCTAssertEqual(sessions.map(\.name), ["seahelm-repo-main", "my-own-session"])
         XCTAssertEqual(sessions.map(\.isManaged), [true, false])
@@ -235,8 +235,8 @@ class SessionManagerTests: XCTestCase {
 
     /// A missing `clients=` is unknown, not zero — the distinction is what keeps
     /// a busy-but-unreported session out of "Kill All Detached".
-    func testParseZmxSessionsKeepsMissingClientsNil() {
-        let sessions = SessionManager.parseZmxSessions(
+    func testParseSeahelmdSessionsKeepsMissingClientsNil() {
+        let sessions = SessionManager.parseSeahelmdSessions(
             listOutput: "  name=seahelm-repo-busy\terr=Timeout\tstatus=unreachable")
 
         XCTAssertEqual(sessions.count, 1)
@@ -244,42 +244,42 @@ class SessionManagerTests: XCTestCase {
         XCTAssertFalse(sessions[0].isDetached)
     }
 
-    func testParseZmxSessionsKeepsSpacesInStartDir() {
-        let sessions = SessionManager.parseZmxSessions(
+    func testParseSeahelmdSessionsKeepsSpacesInStartDir() {
+        let sessions = SessionManager.parseSeahelmdSessions(
             listOutput: "  name=seahelm-a\tpid=1\tclients=0\tstart_dir=/tmp/my repo/wt")
 
         XCTAssertEqual(sessions[0].startDir, "/tmp/my repo/wt")
         XCTAssertTrue(sessions[0].isDetached)
     }
 
-    func testParseZmxSessionsIgnoresBlankLines() {
-        XCTAssertTrue(SessionManager.parseZmxSessions(listOutput: "\n  \n").isEmpty)
+    func testParseSeahelmdSessionsIgnoresBlankLines() {
+        XCTAssertTrue(SessionManager.parseSeahelmdSessions(listOutput: "\n  \n").isEmpty)
     }
 
     // MARK: - Orphan attach clients
 
     private static let daemonPath = "/App/Contents/Resources/bin/seahelmd"
 
-    private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String) -> SessionManager.ZmxProcess {
-        SessionManager.ZmxProcess(pid: pid, ppid: ppid, command: cmd)
+    private func proc(_ pid: Int32, _ ppid: Int32, _ cmd: String) -> SessionManager.SeahelmdProcess {
+        SessionManager.SeahelmdProcess(pid: pid, ppid: ppid, command: cmd)
     }
 
-    private func client(_ pid: Int32, _ ppid: Int32, _ session: String = "seahelm-a") -> SessionManager.ZmxProcess {
+    private func client(_ pid: Int32, _ ppid: Int32, _ session: String = "seahelm-a") -> SessionManager.SeahelmdProcess {
         proc(pid, ppid, "\(Self.daemonPath) attach \(session)")
     }
 
-    private func daemon(_ pid: Int32, _ session: String = "seahelm-a") -> SessionManager.ZmxProcess {
+    private func daemon(_ pid: Int32, _ session: String = "seahelm-a") -> SessionManager.SeahelmdProcess {
         proc(pid, 1, "\(Self.daemonPath) __serve \(session) -- /bin/zsh -lic claude")
     }
 
     /// The login wrapper Station spawns each pane through. Its command line names
     /// the daemon binary but quotes it, so it must not read as a client itself.
     private static let loginWrapper =
-        "/usr/bin/login -flp me /bin/bash -c exec -l /usr/bin/env -u ZMX_SESSION 'SEAHELMD_FACTS=fg=cdd6f4 bg=1e1e2e' '\(daemonPath)' attach seahelm-a"
+        "/usr/bin/login -flp me /bin/bash -c exec -l /usr/bin/env 'SEAHELMD_FACTS=fg=cdd6f4 bg=1e1e2e' '\(daemonPath)' attach seahelm-a"
 
     /// The shape a pane actually has: app → login → client, and the session's
     /// daemon on its own (setsid, adopted by launchd) → shell.
-    private func livePaneTree() -> [SessionManager.ZmxProcess] {
+    private func livePaneTree() -> [SessionManager.SeahelmdProcess] {
         [
             proc(79811, 1, "/App/Contents/MacOS/Seahelm"),
             proc(95359, 79811, Self.loginWrapper),
@@ -290,29 +290,29 @@ class SessionManagerTests: XCTestCase {
     }
 
     func testLivePaneReapsNothing() {
-        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: livePaneTree()), [],
+        XCTAssertEqual(SessionManager.orphanSeahelmdClientPids(processes: livePaneTree()), [],
                        "nothing is orphaned while the app is alive")
     }
 
     /// Daemons are re-parented to launchd by design; that never makes one an orphan.
     func testDaemonsAreNeverReaped() {
-        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: [daemon(95363), proc(95364, 95363, "-zsh")]), [])
+        XCTAssertEqual(SessionManager.orphanSeahelmdClientPids(processes: [daemon(95363), proc(95364, 95363, "-zsh")]), [])
     }
 
     /// A session held for its pane has no program yet — no shell pid to walk up
     /// from — and its daemon must still be safe.
     func testHeldSessionDaemonIsNeverReaped() {
-        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: [daemon(500, "seahelm-held")]), [])
+        XCTAssertEqual(SessionManager.orphanSeahelmdClientPids(processes: [daemon(500, "seahelm-held")]), [])
     }
 
     func testOrphanClientIsReaped() {
         let processes = livePaneTree() + [client(300, 1)]
-        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: processes), [300])
+        XCTAssertEqual(SessionManager.orphanSeahelmdClientPids(processes: processes), [300])
     }
 
     func testClientWithLiveParentIsKept() {
         let processes = livePaneTree() + [client(300, 9478)]
-        XCTAssertEqual(SessionManager.orphanZmxClientPids(processes: processes), [])
+        XCTAssertEqual(SessionManager.orphanSeahelmdClientPids(processes: processes), [])
     }
 
     func testParsePsOutputKeepsEveryRowAndFlagsAttachClients() {
@@ -323,7 +323,7 @@ class SessionManagerTests: XCTestCase {
           303     1 claude --resume seahelmd attach
           304     1 /usr/bin/login -flp me /bin/bash -c exec -l /usr/bin/env '/App/bin/seahelmd' attach seahelm-a
         """
-        let parsed = SessionManager.parseZmxProcesses(psOutput: ps)
+        let parsed = SessionManager.parseSeahelmdProcesses(psOutput: ps)
         XCTAssertEqual(parsed.map(\.pid), [300, 301, 302, 303, 304])
         XCTAssertEqual(
             parsed.filter(\.isAttachClient).map(\.pid), [300],

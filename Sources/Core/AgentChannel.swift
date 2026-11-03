@@ -17,7 +17,7 @@ protocol AgentChannel: AnyObject {
 }
 
 enum AgentChannelType: String {
-    case zmx        // Default: read/write via zmx commands
+    case seahelmd        // Default: read/write via seahelmd commands
     case hooks      // Claude Code hooks: structured events via webhook + backend input channel
 }
 

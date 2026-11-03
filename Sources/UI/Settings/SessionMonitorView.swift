@@ -1,15 +1,15 @@
 import AppKit
 
-/// Live view of `zmx list`, with a way to kill sessions.
+/// Live view of `seahelmd list`, with a way to kill sessions.
 ///
-/// zmx daemons outlive the app, so a session can survive every UI that pointed
+/// seahelmd daemons outlive the app, so a session can survive every UI that pointed
 /// at it — closed panes, deleted worktrees, a crashed launch. The periodic
 /// orphan sweep in `AppDelegate` only reaps what it can *prove* is idle and
 /// deliberately fails closed, which is right for an automatic job but leaves a
 /// tail of sessions nothing will ever clean up. This is the manual half.
 ///
 /// It shows unmanaged sessions too (anything without the seahelm prefix) so the
-/// list matches `zmx list` exactly — a cleanup screen that quietly omits rows is
+/// list matches `seahelmd list` exactly — a cleanup screen that quietly omits rows is
 /// worse than no screen — but it will not offer to kill them.
 final class SessionMonitorView: NSView {
     private let tableView = NSTableView()
@@ -18,7 +18,7 @@ final class SessionMonitorView: NSView {
     private let killButton = NSButton()
     private let killDetachedButton = NSButton()
 
-    private var sessions: [ZmxSessionInfo] = []
+    private var sessions: [SeahelmdSessionInfo] = []
 
     /// Sessions the running app is actively using; they get a marker so a kill
     /// that would yank a live pane is at least an informed one.
@@ -119,7 +119,7 @@ final class SessionMonitorView: NSView {
     // MARK: - Data
 
     func reload() {
-        guard ZmxLocator.isAvailable else {
+        guard SeahelmdLocator.isAvailable else {
             sessions = []
             tableView.reloadData()
             summaryLabel.stringValue = "seahelmd not found — no persistent sessions."
@@ -127,11 +127,11 @@ final class SessionMonitorView: NSView {
             return
         }
 
-        // `zmx list` talks to every daemon's control socket, so it can block for
+        // `seahelmd list` talks to every daemon's control socket, so it can block for
         // a beat when one is busy. Off the main thread; the window stays live.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = ZmxLocator.listOutput() ?? ""
-            let parsed = SessionManager.parseZmxSessionsWithProcessMemory(listOutput: output)
+            let output = SeahelmdLocator.listOutput() ?? ""
+            let parsed = SessionManager.parseSeahelmdSessionsWithProcessMemory(listOutput: output)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.sessions = parsed
@@ -159,7 +159,7 @@ final class SessionMonitorView: NSView {
         killDetachedButton.isEnabled = sessions.contains { $0.isManaged && $0.isDetached }
     }
 
-    private func selectedSessions() -> [ZmxSessionInfo] {
+    private func selectedSessions() -> [SeahelmdSessionInfo] {
         tableView.selectedRowIndexes.compactMap { index in
             sessions.indices.contains(index) ? sessions[index] : nil
         }
@@ -180,7 +180,7 @@ final class SessionMonitorView: NSView {
 
     /// Killing a session kills the agent running inside it, so this always asks
     /// — and says so louder when the app is still using one of them.
-    private func kill(_ targets: [ZmxSessionInfo], reason: String) {
+    private func kill(_ targets: [SeahelmdSessionInfo], reason: String) {
         let killable = targets.filter(\.isManaged)
         guard !killable.isEmpty else { return }
 
@@ -198,10 +198,10 @@ final class SessionMonitorView: NSView {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         for session in killable {
-            SessionManager.killSession(session.name, backend: "zmx")
+            SessionManager.killSession(session.name, backend: "seahelmd")
         }
         // killSession is async on a utility queue; give the daemons a moment to
-        // go away before asking zmx who is left, or the list looks unchanged.
+        // go away before asking seahelmd who is left, or the list looks unchanged.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.reload() }
     }
 }
@@ -279,7 +279,7 @@ extension SessionMonitorView: NSTableViewDataSource, NSTableViewDelegate {
         return String(format: "%.1f GB", mb / 1024)
     }
 
-    private static func memoryTooltip(for session: ZmxSessionInfo) -> String? {
+    private static func memoryTooltip(for session: SeahelmdSessionInfo) -> String? {
         guard session.processMemoryBytes != nil || session.agentMemoryBytes != nil else { return nil }
         var parts: [String] = []
         if let agent = session.agentMemoryBytes, agent > 0 {

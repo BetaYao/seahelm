@@ -123,7 +123,7 @@ enum AgentType: String, Codable, CaseIterable {
     }
 
     /// Binary + optional yolo flag only. Used when the command is *typed* into
-    /// a PTY (`zmx run`): long quoted argv (task text, `--append-system-prompt`)
+    /// a PTY (`seahelmd run`): long quoted argv (task text, `--append-system-prompt`)
     /// gets truncated mid-line and leaves the shell waiting on an unclosed
     /// quote. The initial task is injected afterward via
     /// `InitialAgentTaskDelivery`; suggest guidance is already written into the

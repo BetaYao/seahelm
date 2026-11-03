@@ -1,7 +1,7 @@
 import Foundation
 
 /// A persisted reference to an agent's native session, used to relaunch the
-/// agent with its own resume flag after a backend session is recreated (zmx
+/// agent with its own resume flag after a backend session is recreated (seahelmd
 /// recovery, reboot, or restore into a missing session).
 ///
 /// The reference value (a session id or a session file path) is treated as
@@ -193,7 +193,7 @@ struct AgentSessionRef: Codable, Equatable {
     /// `forkArgv` as a shell command line, every token single-quoted, with
     /// `extraArgs` (a yolo flag, say) appended. `promptFile`, when given, holds
     /// the fork's first message: it is read (and removed) by the shell rather
-    /// than spelled out, because `zmx run` types the command line into the
+    /// than spelled out, because `seahelmd run` types the command line into the
     /// session's tty and the line discipline cuts input past 1024 bytes
     /// (MAX_CANON) — the launch wrapper alone comes close.
     func forkCommandLine(extraArgs: [String] = [], promptFile: String? = nil) -> String? {

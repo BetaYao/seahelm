@@ -3,9 +3,9 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var mainWindowController: MainWindowController?
 
-    /// Periodically sweeps zmx sessions whose worktree no longer exists.
+    /// Periodically sweeps seahelmd sessions whose worktree no longer exists.
     private var orphanCleanupTimer: Timer?
-    /// How often to clean up orphan zmx sessions (5 minutes).
+    /// How often to clean up orphan seahelmd sessions (5 minutes).
     private let orphanCleanupInterval: TimeInterval = 300
 
     /// True when the process is hosting XCTest. The unit tests exercise types
@@ -29,8 +29,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
         NotificationManager.shared.soundPreference = config.notificationSound
 
-        cleanOrphanZmxSessions()
-        scheduleOrphanZmxCleanup()
+        cleanOrphanSeahelmdSessions()
+        scheduleOrphanSeahelmdCleanup()
 
         let mode = ThemeMode(rawValue: config.themeMode) ?? .system
         ThemeMode.applyAppearance(mode)
@@ -81,35 +81,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         GhosttyBridge.shared.initialize()
 
-        // Before any pane restores: an agent still running in a zmx session
-        // from before seahelmd would otherwise run beside its resumed self.
-        // Never from a UI-test app, which shares the machine's real sessions.
-        if !ProcessInfo.processInfo.arguments.contains("-SeahelmUITesting") {
-            LegacyZmxSessions.endAll()
-        }
-
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
         mainWindowController?.startGmailMailChannel(config: config.gmailMail)
     }
 
-    /// Schedule periodic cleanup of zmx sessions whose worktree no longer exists.
-    private func scheduleOrphanZmxCleanup() {
+    /// Schedule periodic cleanup of seahelmd sessions whose worktree no longer exists.
+    private func scheduleOrphanSeahelmdCleanup() {
         orphanCleanupTimer?.invalidate()
         orphanCleanupTimer = Timer.scheduledTimer(
             withTimeInterval: orphanCleanupInterval,
             repeats: true
         ) { [weak self] _ in
-            self?.cleanOrphanZmxSessions()
+            self?.cleanOrphanSeahelmdSessions()
         }
     }
 
-    /// Sweep orphan zmx sessions on a background queue. Config is reloaded each
+    /// Sweep orphan seahelmd sessions on a background queue. Config is reloaded each
     /// call; only sessions not attached to current panes are eligible.
-    private func cleanOrphanZmxSessions() {
+    private func cleanOrphanSeahelmdSessions() {
         // The live-pane set is walked off `allWorktrees` and its split trees,
         // which the main thread mutates on discovery/create/delete — so snapshot
-        // it here (both callers are already on main) and send only the zmx
+        // it here (both callers are already on main) and send only the seahelmd
         // probing to the background queue.
         guard let controller = mainWindowController else {
             NSLog("[App] Skipping orphan session cleanup — main window not ready")
@@ -123,8 +116,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         DispatchQueue.global(qos: .utility).async {
-            guard ZmxLocator.isAvailable else { return }
-            let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
+            guard SeahelmdLocator.isAvailable else { return }
+            let cleaned = SessionManager.cleanupOrphanSeahelmdSessions(activeSessionNames: activeSessionNames)
             if !cleaned.isEmpty {
                 NSLog("[App] Cleaned %d orphan session(s)", cleaned.count)
             }
@@ -139,7 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 20-70% CPU indefinitely, so each restart adds a few more.
             // `cleanupWedgedVolumeSessions` already reaps wedged attaches; this
             // pass catches ppid==1 orphans from prior app instances.
-            let clients = SessionManager.cleanupOrphanZmxClients()
+            let clients = SessionManager.cleanupOrphanSeahelmdClients()
             if !clients.isEmpty {
                 NSLog("[App] Killed %d orphan attach client process(es)", clients.count)
             }

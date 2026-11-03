@@ -145,7 +145,7 @@ fn a_late_attach_sees_exactly_what_an_early_one_saw() {
 #[test]
 fn leaving_the_full_screen_program_restores_the_history_under_it() {
     // The repaint must carry the main screen too, or the shell's history is
-    // gone when the program exits — the case zmx's repaint does not cover.
+    // gone when the program exits.
     let dir = Dir::new();
     let script = "printf 'kept-before\\n'; sleep 0.8; printf '\\033[?1049hFULL'; sleep 1.5; printf '\\033[?1049lback-marker\\n'; sleep 30";
     dir.cli(&["new", "alt", "bash", "--norc", "-c", script], &[]);
@@ -225,7 +225,7 @@ fn when_the_program_exits_the_client_hears_it_and_the_session_is_gone() {
 }
 
 #[test]
-fn run_types_the_command_into_the_session_shell_quoted_as_zmx_does() {
+fn run_types_the_command_into_the_session_shell_quoted() {
     let dir = Dir::new();
     // A new session is the user's shell, and the command is typed into it.
     dir.cli(&["run", "typed", "echo", "first run"], &[("SHELL", "/bin/bash")]);

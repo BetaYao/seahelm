@@ -2,7 +2,7 @@ import Foundation
 
 /// Communication channel for Claude Code via Hooks.
 /// Receives structured events through the control socket,
-/// sends commands via backend channel (zmx by default).
+/// sends commands via backend channel (seahelmd by default).
 class HooksChannel: AgentChannel {
     let channelType: AgentChannelType = .hooks
     let supportsStructuredEvents = true
@@ -13,8 +13,8 @@ class HooksChannel: AgentChannel {
     /// Accumulated hook events for this agent session
     private(set) var events: [HookEvent] = []
 
-    init(paneSessionKey: String, backend: String = "zmx") {
-        self.transport = ZmxChannel(paneSessionKey: paneSessionKey)
+    init(paneSessionKey: String, backend: String = "seahelmd") {
+        self.transport = SeahelmdChannel(paneSessionKey: paneSessionKey)
     }
 
     // MARK: - AgentChannel

@@ -7,10 +7,10 @@ import Foundation
 /// stays in the namespace but every `stat()` blocks forever. That is what
 /// beachballed Seahelm after an external disk dropped — path compares and
 /// dashboard sort keys hit the dead mount on the main thread, while timers kept
-/// spawning `git` / `zmx` against it.
+/// spawning `git` / `seahelmd` against it.
 ///
 /// This monitor fences those volume roots (see `VolumeFence`), stops refresh
-/// work against them, force-kills wedged zmx sessions, and unfences on remount
+/// work against them, force-kills wedged seahelmd sessions, and unfences on remount
 /// so panes can recover.
 final class VolumePresenceMonitor {
     static let shared = VolumePresenceMonitor()
@@ -164,7 +164,7 @@ final class VolumePresenceMonitor {
         DispatchQueue.global(qos: .utility).async {
             let cleaned = SessionManager.cleanupWedgedVolumeSessions()
             if !cleaned.isEmpty {
-                NSLog("[VolumePresence] Cleaned %d wedged zmx session(s) on %@", cleaned.count, root)
+                NSLog("[VolumePresence] Cleaned %d wedged seahelmd session(s) on %@", cleaned.count, root)
             }
         }
     }

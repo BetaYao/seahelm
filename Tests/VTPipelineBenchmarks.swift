@@ -72,7 +72,7 @@ final class VTPipelineBenchmarks: XCTestCase {
         text.reserveCapacity(targetBytes + 4096)
         var i = 0
         while text.utf8.count < targetBytes {
-            // The spinner line, repainted in place — the shape that made `zmx
+            // The spinner line, repainted in place — the shape that made `seahelmd
             // attach` necessary in the first place.
             text += "\u{1B}[2K\r\u{1B}[38;5;244m\(spinner[i % spinner.count]) Thinking\u{2026}\u{1B}[0m"
             if i % 7 == 0 {
@@ -126,9 +126,9 @@ final class VTPipelineBenchmarks: XCTestCase {
         // A flush interval long enough that the timer never wins mid-loop: the
         // 48KB threshold and the final explicit flush decide the frame count, so
         // the measurement does not move with how fast the machine runs the loop.
-        let manager = ZmxVTAttachManager(
+        let manager = SeahelmdVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { _ in "/usr/bin/true" },
+            seahelmdPath: { _ in "/usr/bin/true" },
             attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             flushInterval: 3600,
@@ -186,7 +186,7 @@ final class VTPipelineBenchmarks: XCTestCase {
 
         // Frame at the same 48KB the manager flushes at under load, since that is
         // where the bandwidth actually goes.
-        let frames = Self.chunked(corpus, size: ZmxVTTiming.maxChunkBytes)
+        let frames = Self.chunked(corpus, size: SeahelmdVTTiming.maxChunkBytes)
 
         var legacy = 0, binary = 0, deflated = 0
         for chunk in frames {
@@ -240,8 +240,8 @@ final class VTPipelineBenchmarks: XCTestCase {
     // MARK: - Keystroke echo RTT
 
     /// A pipe that loops stdin straight back to stdout, standing in for
-    /// `zmx-attach.py` + the session. Same kernel round trip, without needing a
-    /// live zmx session — so what is left in the number is the manager's flush
+    /// `seahelmd-attach.py` + the session. Same kernel round trip, without needing a
+    /// live seahelmd session — so what is left in the number is the manager's flush
     /// coalescing plus the gateway's socket path, which is the part we change.
     private final class EchoVTAttachedProcess: VTAttachedProcess {
         private let pipe = Pipe()
@@ -269,7 +269,7 @@ final class VTPipelineBenchmarks: XCTestCase {
         let proc = EchoVTAttachedProcess()
 
         func spawn(python3: String, scriptPath: String, sessionKey: String,
-                   rows: Int, cols: Int, zmxPath: String) throws -> VTAttachedProcess {
+                   rows: Int, cols: Int, seahelmdPath: String) throws -> VTAttachedProcess {
             proc
         }
     }
@@ -338,15 +338,15 @@ final class VTPipelineBenchmarks: XCTestCase {
         let key = "bench-echo"
 
         let spawner = EchoVTProcessSpawner()
-        let manager = ZmxVTAttachManager(
+        let manager = SeahelmdVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { _ in "/usr/bin/true" },
+            seahelmdPath: { _ in "/usr/bin/true" },
             attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             // Real flush interval: it is the thing under measurement. Snapshot
             // idle is shortened only to get the benchmark to its live phase.
             snapshotIdle: 0.05,
-            flushInterval: TimeInterval(ZmxVTTiming.flushMs) / 1000,
+            flushInterval: TimeInterval(SeahelmdVTTiming.flushMs) / 1000,
             queue: DispatchQueue(label: "bench.vt.echo"))
 
         let server = HostGatewayServer(
@@ -403,7 +403,7 @@ final class VTPipelineBenchmarks: XCTestCase {
                 + "  p90 \(Self.ms(pct(xs, 0.90)))  min \(Self.ms(xs[0]))"
         }
         print("\n" + row("typing", typing) + "\n" + row("sustained", sustained)
-              + "\n[VT echo] coalescing window \(ZmxVTTiming.flushMs) ms"
+              + "\n[VT echo] coalescing window \(SeahelmdVTTiming.flushMs) ms"
               + " \u{2014} bounds `sustained`; `typing` should sit well under it\n")
 
         // Only catches total breakage \u{2014} the printed numbers are the product.

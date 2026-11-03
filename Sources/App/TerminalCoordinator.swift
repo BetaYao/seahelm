@@ -16,10 +16,10 @@ protocol TerminalCoordinatorDelegate: AnyObject {
 class TerminalCoordinator {
     weak var delegate: TerminalCoordinatorDelegate?
     var config: Config
-    /// Resolved runtime backend ("zmx" or "local"). Set by MainWindowController
-    /// after zmx availability is checked; starts at "zmx" so early tree restore
+    /// Resolved runtime backend ("seahelmd" or "local"). Set by MainWindowController
+    /// after seahelmd availability is checked; starts at "seahelmd" so early tree restore
     /// attaches persistent sessions before the async resolution lands.
-    var runtimeBackend: String = "zmx"
+    var runtimeBackend: String = "seahelmd"
     let stationManager = StationManager()
     var controlSocketServer: ControlSocketServer?
 
@@ -339,7 +339,7 @@ class TerminalCoordinator {
     /// What a close request means for the tree as it stands: drop one leaf, or —
     /// when the focused leaf is the tree's only leaf — end the worktree's whole
     /// session. Pure so the policy is testable without stations or a window; the
-    /// last-leaf case kills a live zmx session, which is why it also gets the
+    /// last-leaf case kills a live seahelmd session, which is why it also gets the
     /// confirmation in `closeFocusedPane`.
     enum ClosePlan {
         case closeLeaf
@@ -376,7 +376,7 @@ class TerminalCoordinator {
     }
 
     /// Closing the tree's only pane ends the worktree's terminal session — the
-    /// zmx session is killed, and with it whatever the shell is still running —
+    /// seahelmd session is killed, and with it whatever the shell is still running —
     /// so it asks first. The worktree on disk is untouched.
     private func confirmCloseLastPane(container: SplitContainerView, tree: SplitTree) {
         let name = URL(fileURLWithPath: tree.worktreePath).lastPathComponent
@@ -399,7 +399,7 @@ class TerminalCoordinator {
         }
     }
 
-    /// Tear down a worktree's session once its last pane is closed: kill the zmx
+    /// Tear down a worktree's session once its last pane is closed: kill the seahelmd
     /// session, drop the tree, and forget the saved layout so a later click on
     /// the fleet row starts a fresh session instead of restoring a dead pane.
     /// The mirror of `finalizeDeletedWorktree`, minus the git deletion.
@@ -426,7 +426,7 @@ class TerminalCoordinator {
     private func closeFocusedLeaf(container: SplitContainerView, tree: SplitTree) {
         guard let closed = tree.closeFocusedLeaf() else { return }
 
-        // Kill zmx session
+        // Kill seahelmd session
         SessionManager.killSession(closed.paneSessionKey, backend: runtimeBackend)
         config.agentSessions.removeValue(forKey: closed.paneSessionKey)
 
@@ -466,7 +466,7 @@ class TerminalCoordinator {
 
     /// Close a specific pane (by station id) in the active container. Returns
     /// false if the pane isn't there. Reuses the focused-close teardown path
-    /// (kills the zmx session, destroys the station, re-lays out). Main thread.
+    /// (kills the seahelmd session, destroys the station, re-lays out). Main thread.
     @discardableResult
     func closePane(targetStationId: String) -> Bool {
         guard let container = activeSplitContainer(), let tree = container.tree,
@@ -492,7 +492,7 @@ class TerminalCoordinator {
 
     // MARK: - Sleep / Wake
 
-    /// Sleep a pane by station id — frees its ghostty surface while the zmx
+    /// Sleep a pane by station id — frees its ghostty surface while the seahelmd
     /// session keeps running. Unlike close/focus this is not limited to the
     /// active container: the panes worth sleeping are the ones off screen.
     /// Main thread. Returns the ids actually slept ([] = nothing eligible).

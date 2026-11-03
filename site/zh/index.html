@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Seahelm &mdash; 为 coding agent 准备的原生 macOS 工作台</title>
-<meta name="description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
+<meta name="description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，seahelmd 保持会话。">
 <link rel="canonical" href="https://www.seahelm.dev/zh/">
 <link rel="alternate" hreflang="en" href="https://www.seahelm.dev/">
 <link rel="alternate" hreflang="zh-Hans" href="https://www.seahelm.dev/zh/">
@@ -17,7 +17,7 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 <meta property="og:title" content="Seahelm &mdash; 多个 agent 在跑，你自己掌舵">
-<meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
+<meta property="og:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，seahelmd 保持会话。">
 <meta property="og:image" content="https://www.seahelm.dev/og.zh.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -25,7 +25,7 @@
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Seahelm &mdash; 多个 agent 在跑，你自己掌舵">
-<meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，zmx 保持会话。">
+<meta name="twitter:description" content="Seahelm 是一个为 coding agent、git worktree 和并行开发准备的原生 macOS 工作台。每个 worktree 一行，每个 split pane 一个 agent —— Ghostty 引擎渲染，seahelmd 保持会话。">
 <meta name="twitter:image" content="https://www.seahelm.dev/og.zh.png">
 
 <meta name="theme-color" content="#f4f9fb">
@@ -263,7 +263,7 @@
           <text x="550" y="198" class="svg-t2">feat/x</text>
           <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
           <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
-          <text x="914" y="231" class="svg-note" text-anchor="end">Station 与 zmx 会话都留着</text>
+          <text x="914" y="231" class="svg-note" text-anchor="end">Station 与 seahelmd 会话都留着</text>
           <text x="914" y="250" class="svg-lbl" text-anchor="end">占位 pane 被销毁</text>
 
           <defs>
@@ -276,7 +276,7 @@
       <figcaption>
         pane 跟着它的 agent 走。Claude Code 建一个 worktree 然后在里面干活；每一条 hook 消息都带着
         <code>cwd</code>，于是 Seahelm 按<em>最长</em>前缀匹配 worktree，把那一个 pane 整体挪过去 ——
-        它的 Ghostty surface 和 zmx 会话都原样保留 —— 而不是在旁边另起一个跟它无关的。
+        它的 Ghostty surface 和 seahelmd 会话都原样保留 —— 而不是在旁边另起一个跟它无关的。
         两道闸门保证这件事不跑偏：目标必须属于同一个仓库；而且任何一次搬迁之后，自动跟随会停十分钟，
         因为 agent 干活时 <code>cwd</code> 是来回跳的。
       </figcaption>
@@ -546,7 +546,7 @@
     <div class="pair">
       <figure>
         <div class="fig-frame">
-          <svg viewBox="0 0 640 300" role="img" aria-label="持久化边界：app 的窗口和 Metal surface 在退出时被丢弃，而持有 PTY 和 agent 进程的 zmx 会话、以及磁盘上的 git worktree 都活了下来，重启后按名字重新挂接">
+          <svg viewBox="0 0 640 300" role="img" aria-label="持久化边界：app 的窗口和 Metal surface 在退出时被丢弃，而持有 PTY 和 agent 进程的 seahelmd 会话、以及磁盘上的 git worktree 都活了下来，重启后按名字重新挂接">
             <rect x="20" y="28" width="600" height="76" rx="7" class="svg-box"/>
             <text x="34" y="54" class="svg-t">seahelm.app</text>
             <text x="34" y="80" class="svg-t2">窗口 &middot; SplitTree &middot; Station &middot; Metal surface</text>
@@ -556,7 +556,7 @@
             <text x="606" y="130" class="svg-note" text-anchor="end">你退出 app &middot; 机器重启</text>
 
             <rect x="20" y="148" width="600" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-            <text x="34" y="174" class="svg-t">zmx 会话 &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
+            <text x="34" y="174" class="svg-t">seahelmd 会话 &nbsp;seahelm-&lt;repo&gt;-&lt;worktree&gt;</text>
             <text x="34" y="200" class="svg-t2">PTY &middot; shell &middot; agent 进程，还在想</text>
             <text x="606" y="174" class="svg-lbl" text-anchor="end" fill="var(--run)">存活</text>
 
@@ -575,7 +575,7 @@
           </svg>
         </div>
         <figcaption>
-          会话活得比 app 久。每个分屏叶子都占用一个以其 worktree 命名的 zmx 会话；创建三秒后有一次健康检查，
+          会话活得比 app 久。每个分屏叶子都占用一个以其 worktree 命名的 seahelmd 会话；创建三秒后有一次健康检查，
           发现是坏的就重建。退出、重启、再打开 —— agent 还在你离开时的位置上，话说到一半。
         </figcaption>
       </figure>
@@ -587,7 +587,7 @@
         所以二十个 pane 的舰队，开销大约只相当于三个。</p>
         <h3>构建于</h3>
         <p>终端引擎用 <a class="linkout" href="https://ghostty.org">Ghostty</a>，以 C xcframework 链接进来 ——
-        会话持久化用 <a class="linkout" href="https://zmx.sh">zmx</a> —— 自动更新用 Sparkle&nbsp;2，
+        会话持久化用自研的 <code>seahelmd</code> 守护进程 —— 自动更新用 Sparkle&nbsp;2，
         但渲染成页面内的横幅，而不是它自带的模态弹窗。</p>
       </div>
     </div>
@@ -623,7 +623,7 @@
           <text x="222" y="104" class="svg-t2">一轮进行中</text>
 
           <rect x="392" y="48" width="170" height="86" rx="7" class="svg-box"/>
-          <text x="408" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  fix/zmx</text>
+          <text x="408" y="78" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  fix/seahelmd</text>
           <text x="408" y="104" class="svg-t2">HEAD + 改动</text>
 
           <rect x="1000" y="48" width="300" height="86" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
@@ -771,7 +771,7 @@
       </div>
       <p class="foot-meta">
         Seahelm &mdash; sea + helm，海与舵。需要 macOS 14.0 Sonoma 或更高版本，支持 Apple silicon 与 Intel。<br>
-        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; zmx &middot; 247 个 Swift 文件，分四层。
+        Swift 5.10 &middot; AppKit &middot; Ghostty &middot; seahelmd &middot; 247 个 Swift 文件，分四层。
       </p>
     </footer>
   </div>

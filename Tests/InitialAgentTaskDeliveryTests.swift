@@ -165,7 +165,7 @@ final class BareLaunchCommandTests: XCTestCase {
             }
             XCTAssertFalse(cmd.contains("--append-system-prompt"), agent.rawValue)
             XCTAssertFalse(cmd.contains(AgentType.suggestInstruction), agent.rawValue)
-            XCTAssertFalse(cmd.contains("'"), "\(agent.rawValue) must stay unquoted for zmx typing: \(cmd)")
+            XCTAssertFalse(cmd.contains("'"), "\(agent.rawValue) must stay unquoted for seahelmd typing: \(cmd)")
         }
     }
 

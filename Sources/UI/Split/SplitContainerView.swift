@@ -685,7 +685,7 @@ private final class AsleepPaneView: NSView {
 // MARK: - StationDelegate (session recovery re-embed)
 
 extension SplitContainerView: StationDelegate {
-    /// A station recreated its surface (e.g. zmx recovery). Re-register the new
+    /// A station recreated its surface (e.g. seahelmd recovery). Re-register the new
     /// view for its leaf and relayout so input reaches the live surface.
     func stationDidRecover(_ station: Station) {
         guard let view = station.view else { return }

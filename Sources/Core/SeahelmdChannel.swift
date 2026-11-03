@@ -1,25 +1,25 @@
 import Foundation
 
-/// Fallback channel: communicates with any agent via zmx commands.
+/// Fallback channel: communicates with any agent via seahelmd commands.
 /// Works with any CLI tool — no agent-side support needed.
-class ZmxChannel: AgentChannel {
-    let channelType: AgentChannelType = .zmx
+class SeahelmdChannel: AgentChannel {
+    let channelType: AgentChannelType = .seahelmd
     let paneSessionKey: String
 
     init(paneSessionKey: String) {
         self.paneSessionKey = paneSessionKey
     }
 
-    /// Send a text command via zmx run.
+    /// Send a text command via seahelmd run.
     func sendCommand(_ command: String) {
-        let args = [ZmxLocator.executable(), "run", paneSessionKey, command]
-        runZmx(args)
+        let args = [SeahelmdLocator.executable(), "run", paneSessionKey, command]
+        runSeahelmd(args)
     }
 
-    /// Read the last N lines of terminal output via zmx history.
+    /// Read the last N lines of terminal output via seahelmd history.
     func readOutput(lines: Int = 50) -> String? {
-        let args = [ZmxLocator.executable(), "history", paneSessionKey]
-        guard let output = runZmxWithOutput(args) else {
+        let args = [SeahelmdLocator.executable(), "history", paneSessionKey]
+        guard let output = runSeahelmdWithOutput(args) else {
             return nil
         }
         guard lines > 0 else {
@@ -50,16 +50,16 @@ class ZmxChannel: AgentChannel {
     /// escape sequences go through here.
     func sendRaw(_ text: String) -> Bool {
         guard !paneSessionKey.isEmpty, !text.isEmpty else { return false }
-        return runZmxChecked([ZmxLocator.executable(), "send", paneSessionKey, text])
+        return runSeahelmdChecked([SeahelmdLocator.executable(), "send", paneSessionKey, text])
     }
 
     /// The Return, always as a write of its own — see `sendPrompt`.
     func submit() -> Bool {
         guard !paneSessionKey.isEmpty else { return false }
-        return runZmxChecked([ZmxLocator.executable(), "send", paneSessionKey, "\r"])
+        return runSeahelmdChecked([SeahelmdLocator.executable(), "send", paneSessionKey, "\r"])
     }
 
-    private func runZmxChecked(_ args: [String]) -> Bool {
+    private func runSeahelmdChecked(_ args: [String]) -> Bool {
         ProcessRunner.capture(executable: URL(fileURLWithPath: "/usr/bin/env"),
                               arguments: args, timeout: Self.commandTimeout).succeeded
     }
@@ -72,23 +72,23 @@ class ZmxChannel: AgentChannel {
         return TerminalTranscript.clean(raw)
     }
 
-    /// Deadline for one zmx call. zmx talks to a local socket, so anything past
+    /// Deadline for one seahelmd call. seahelmd talks to a local socket, so anything past
     /// this means the session is wedged, not slow.
     static let commandTimeout: TimeInterval = 15
-    /// `zmx history` can be huge; we only need the latest viewport-ish slice for
+    /// `seahelmd history` can be huge; we only need the latest viewport-ish slice for
     /// status detection. Keeping this small prevents transient polling spikes
     /// from retaining tens of MB per pane.
     static let historyCaptureLimit = 256 * 1024
 
-    private func runZmx(_ args: [String]) {
+    private func runSeahelmd(_ args: [String]) {
         // Output already goes to /dev/null, so there is no pipe to fill — but
-        // still bound the wait so a wedged zmx can't park the caller's thread.
+        // still bound the wait so a wedged seahelmd can't park the caller's thread.
         ProcessRunner.runSync(args, timeout: Self.commandTimeout)
     }
 
-    /// `zmx history` dumps a pane's entire scrollback — hundreds of KB is normal
+    /// `seahelmd history` dumps a pane's entire scrollback — hundreds of KB is normal
     /// — so this must never read the pipe only after the child exits.
-    private func runZmxWithOutput(_ args: [String]) -> String? {
+    private func runSeahelmdWithOutput(_ args: [String]) -> String? {
         let result = ProcessRunner.capture(
             executable: URL(fileURLWithPath: "/usr/bin/env"),
             arguments: args,
@@ -96,7 +96,7 @@ class ZmxChannel: AgentChannel {
             maxCapturedBytes: Self.historyCaptureLimit
         )
         if result.timedOut {
-            NSLog("[ZmxChannel] Timed out reading: \(args.joined(separator: " "))")
+            NSLog("[SeahelmdChannel] Timed out reading: \(args.joined(separator: " "))")
             return nil
         }
         return result.stdout.isEmpty ? nil : result.stdout

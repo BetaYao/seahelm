@@ -5,7 +5,7 @@ import Foundation
 struct PendingWorktreeTransfer {
     /// Canonical path of the worktree the agent moved into.
     let worktreePath: String
-    /// Stable pane id (zmx session name from SEAHELM_PANE_ID) of the pane whose
+    /// Stable pane id (seahelmd session name from SEAHELM_PANE_ID) of the pane whose
     /// agent moved. The transfer moves this pane alone, never its siblings.
     let paneId: String
     let recordedAt: Date

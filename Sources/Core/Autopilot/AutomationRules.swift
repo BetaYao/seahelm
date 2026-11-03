@@ -1,7 +1,7 @@
 import Foundation
 import Yams
 
-/// What First Mate may do on its own. See docs/first-mate-autopilot.md §2.4.
+/// What First Mate may do on its own.
 enum AutopilotAction: String, CaseIterable, Codable {
     /// Type into another pane (`seahelm pane run/send`).
     case messagePane = "message_pane"
@@ -282,7 +282,7 @@ struct AutomationConfig: Equatable {
             return r
         }
         let body = (try? Yams.dump(object: root, sortKeys: true)) ?? ""
-        return "# First Mate rules — docs/first-mate-autopilot.md\n" + body
+        return "# First Mate rules\n" + body
     }
 
     /// Write this config as the repo's file.

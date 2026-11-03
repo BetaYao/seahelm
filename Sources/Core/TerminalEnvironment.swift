@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Panes opened through a Ghostty surface get this for free, which is why the
 /// gap below only ever shows up in installed builds. The detached launch path
-/// (`SessionManager.createDetachedSession`) spawns `zmx run` straight from the
+/// (`SessionManager.createDetachedSession`) spawns `seahelmd run` straight from the
 /// app process, bypassing Ghostty entirely — so it inherits whatever launched
 /// Seahelm. From a terminal that is a full environment; from Finder/launchd it
 /// is `PATH`, `HOME`, `USER`, `SHELL` and little else, with **no `TERM` at

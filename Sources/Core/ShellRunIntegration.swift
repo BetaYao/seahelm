@@ -119,8 +119,8 @@ enum ShellRunIntegration {
     # Managed by Seahelm; rewritten on launch. Reports whether this shell is at
     # its prompt and lets `seahelm pane exec` run a command here, only at an
     # empty primary prompt.
-    if [[ -z "${_seahelm_run_id-}" && -n "${SEAHELM_PANE_ID:-${ZMX_SESSION-}}" ]]; then
-        'builtin' 'typeset' -g _seahelm_run_id="${SEAHELM_PANE_ID:-$ZMX_SESSION}"
+    if [[ -z "${_seahelm_run_id-}" && -n "${SEAHELM_PANE_ID:-${SEAHELMD_SESSION-}}" ]]; then
+        'builtin' 'typeset' -g _seahelm_run_id="${SEAHELM_PANE_ID:-$SEAHELMD_SESSION}"
         'builtin' 'typeset' -g _seahelm_run_base="${SEAHELM_RUN_DIR:-$HOME/.config/seahelm/run}/$_seahelm_run_id"
         'builtin' 'typeset' -gi _seahelm_run_seq=0
         'builtin' 'zmodload' -F zsh/files b:zf_rm 2>/dev/null
@@ -173,7 +173,7 @@ enum ShellRunIntegration {
 enum PaneExecError: Error, Equatable {
     case unavailable
     case unknownPane
-    /// Not a zmx pane: there is no session to hand the command to.
+    /// Not a seahelmd pane: there is no session to hand the command to.
     case noSession
     /// Something is running in the pane (or a TUI holds the screen).
     case notAtPrompt

@@ -163,7 +163,7 @@ struct KeyChord: Equatable {
 
     // MARK: - As bytes
 
-    /// What a legacy xterm sends for this key, for writing straight into a zmx
+    /// What a legacy xterm sends for this key, for writing straight into a seahelmd
     /// session. Nil for a combination with no legacy encoding (ctrl+5).
     var bytes: String? {
         let esc = "\u{1b}"

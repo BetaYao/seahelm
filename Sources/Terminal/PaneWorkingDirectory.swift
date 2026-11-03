@@ -46,18 +46,18 @@ enum PaneWorkingDirectory {
                worktreePath: worktreePath)
     }
 
-    /// The working directory of a zmx session's shell — the one `pwd` would
+    /// The working directory of a seahelmd session's shell — the one `pwd` would
     /// print in that pane.
     ///
-    /// Costs one `zmx list` (a few milliseconds) and one syscall, paid once per
+    /// Costs one `seahelmd list` (a few milliseconds) and one syscall, paid once per
     /// split rather than on the status poll: it is the only moment anyone needs
     /// the answer, and reading it per pane per cycle would be work nothing looks
     /// at.
     static func probeSessionCwd(paneSessionKey: String) -> String? {
         guard !paneSessionKey.isEmpty,
-              let listing = ZmxLocator.listOutput(),
+              let listing = SeahelmdLocator.listOutput(),
               let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey,
-                                                zmxListOutput: listing) else { return nil }
+                                                seahelmdListOutput: listing) else { return nil }
         return cwd(ofPid: pid)
     }
 

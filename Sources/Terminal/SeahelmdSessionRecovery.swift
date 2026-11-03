@@ -1,13 +1,13 @@
 import Foundation
 
-/// Process-management helpers for zmx session recovery: seeding a fresh
+/// Process-management helpers for seahelmd session recovery: seeding a fresh
 /// session, deciding when to recover, and force-killing stale daemons.
 /// These are subprocess/filesystem concerns, kept separate from Station's
 /// surface lifecycle.
-enum ZmxSessionRecovery {
-    /// What to do when a Ghostty surface's `zmx attach` client has exited.
+enum SeahelmdSessionRecovery {
+    /// What to do when a Ghostty surface's `seahelmd attach` client has exited.
     ///
-    /// Important: client disconnect ≠ session death. zmx keeps the daemon (and
+    /// Important: client disconnect ≠ session death. seahelmd keeps the daemon (and
     /// any agent inside) alive with `clients=0`. Force-killing a still-living
     /// session on client exit was wiping agents across app restarts.
     enum Plan: Equatable {
@@ -18,18 +18,18 @@ enum ZmxSessionRecovery {
         case recreate
     }
 
-    /// Seed a zmx session running `agentCommandLine` if one doesn't already
+    /// Seed a seahelmd session running `agentCommandLine` if one doesn't already
     /// exist, blocking (briefly) until it comes up. Safe no-op when the session
     /// is already alive. Call off the main thread.
     static func seedSessionIfMissing(name: String, cwd: String, agentCommandLine: String) {
-        guard !SessionManager.sessionExists(name: name, backend: "zmx") else { return }
-        // `zmx run` blocks for the agent's whole lifetime, so spawn it detached
+        guard !SessionManager.sessionExists(name: name, backend: "seahelmd") else { return }
+        // `seahelmd run` blocks for the agent's whole lifetime, so spawn it detached
         // and wait only for the session to register.
         Thread.detachNewThread {
             SessionManager.createDetachedSession(
-                name: name, backend: "zmx", cwd: cwd, agentCommandLine: agentCommandLine)
+                name: name, backend: "seahelmd", cwd: cwd, agentCommandLine: agentCommandLine)
         }
-        _ = SessionManager.waitUntilSessionExists(name: name, backend: "zmx", timeoutSeconds: 5)
+        _ = SessionManager.waitUntilSessionExists(name: name, backend: "seahelmd", timeoutSeconds: 5)
     }
 
     /// Decide how to recover after a health check.
@@ -39,9 +39,9 @@ enum ZmxSessionRecovery {
     /// session's control socket stopped answering.
     ///
     /// That second trigger is why this takes reachability rather than a bare
-    /// "does it exist" bool. When the volume holding the zmx binary drops out,
+    /// "does it exist" bool. When the volume holding the seahelmd binary drops out,
     /// every daemon on it wedges in a spin loop — the process is still there, the
-    /// socket file is still there, `zmx list` still prints the row, it just says
+    /// socket file is still there, `seahelmd list` still prints the row, it just says
     /// `status=unreachable` and nothing can ever attach to it again. Meanwhile the
     /// attach clients hang instead of exiting, so `processExited` stays false.
     /// Read together those two said "healthy session, live client" about a pane
@@ -63,26 +63,26 @@ enum ZmxSessionRecovery {
         }
     }
 
-    /// Kill a zmx session, force-killing the daemon process and removing the
-    /// socket file if the graceful `zmx kill` fails (e.g. unreachable session).
+    /// Kill a seahelmd session, force-killing the daemon process and removing the
+    /// socket file if the graceful `seahelmd kill` fails (e.g. unreachable session).
     static func forceKillSession(_ paneSessionKey: String) {
         // Try graceful kill first, on a short leash. The sessions most in need of
         // force-killing are exactly the ones whose daemon has stopped reading its
         // socket, and a graceful kill against one of those sits out the default
         // 60s deadline — per pane, on a path the user is waiting behind.
         ProcessRunner.runSync(
-            [ZmxLocator.executable(), "kill", paneSessionKey],
+            [SeahelmdLocator.executable(), "kill", paneSessionKey],
             timeout: gracefulKillTimeout
         )
 
-        // Check if session is still alive by parsing `zmx list`. Exact name match:
+        // Check if session is still alive by parsing `seahelmd list`. Exact name match:
         // a `contains("name=seahelm-foo")` also matches the row for the adjacent
         // pane `seahelm-foo-1`.
-        guard let listOutput = ProcessRunner.output([ZmxLocator.executable(), "list"]) else { return }
-        let stillAlive = SessionManager.parseZmxSessionNames(listOutput: listOutput).contains(paneSessionKey)
+        guard let listOutput = ProcessRunner.output([SeahelmdLocator.executable(), "list"]) else { return }
+        let stillAlive = SessionManager.parseSeahelmdSessionNames(listOutput: listOutput).contains(paneSessionKey)
         guard stillAlive else { return }
 
-        NSLog("ZmxSessionRecovery: zmx session '%@' still alive after kill — force cleaning", paneSessionKey)
+        NSLog("SeahelmdSessionRecovery: seahelmd session '%@' still alive after kill — force cleaning", paneSessionKey)
 
         // Find and kill the processes holding the session's socket
         if let socketDir = socketDir(forSession: paneSessionKey) {
@@ -99,7 +99,7 @@ enum ZmxSessionRecovery {
                     .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
                 for pid in pids {
                     kill(pid, SIGKILL)
-                    NSLog("ZmxSessionRecovery: sent SIGKILL to zmx pid %d holding '%@'", pid, paneSessionKey)
+                    NSLog("SeahelmdSessionRecovery: sent SIGKILL to seahelmd pid %d holding '%@'", pid, paneSessionKey)
                 }
                 // Brief wait for the processes to exit
                 if !pids.isEmpty { usleep(100_000) } // 100ms
@@ -109,11 +109,11 @@ enum ZmxSessionRecovery {
         }
     }
 
-    /// Deadline for the graceful `zmx kill` attempt before falling back to SIGKILL.
+    /// Deadline for the graceful `seahelmd kill` attempt before falling back to SIGKILL.
     private static let gracefulKillTimeout: TimeInterval = 5
 
     /// The directory holding `paneSessionKey`'s socket.
     private static func socketDir(forSession paneSessionKey: String) -> String? {
-        ZmxLocator.socketDir()
+        SeahelmdLocator.socketDir()
     }
 }

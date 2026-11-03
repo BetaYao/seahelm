@@ -1,7 +1,7 @@
 import Foundation
 
-/// Where First Mate lives: one zmx session, one working directory, and the files
-/// seahelm keeps there. See docs/first-mate-autopilot.md §2.2.
+/// Where First Mate lives: one seahelmd session, one working directory, and the files
+/// seahelm keeps there.
 enum FirstMatePane {
     static let sessionName = "seahelm-first-mate"
     static let project = "First Mate"

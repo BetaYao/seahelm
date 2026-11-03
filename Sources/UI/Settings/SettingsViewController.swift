@@ -93,7 +93,7 @@ extension SettingsDelegate {
 /// Settings, as a sidebar of pages built from `SettingsChrome` groups.
 ///
 /// Pages are built on first visit and cached: the session monitor shells out to
-/// `zmx list` and the pairing page mints a secret, and neither should happen
+/// `seahelmd list` and the pairing page mints a secret, and neither should happen
 /// just because someone opened Settings to change a path.
 class SettingsViewController: NSViewController {
     weak var settingsDelegate: SettingsDelegate?
@@ -121,7 +121,7 @@ class SettingsViewController: NSViewController {
               keywords: ["qr", "remote", "browser", "gateway", "pair",
                          "port", "tunnel", "wss", "cloudflare", "web"]),
         .init(id: "sessions", title: "Sessions", symbol: "rectangle.stack",
-              keywords: ["session", "seahelmd", "zmx", "cleanup", "kill", "detached", "orphan"]),
+              keywords: ["session", "seahelmd", "cleanup", "kill", "detached", "orphan"]),
     ])
     private let contentScroll = NSScrollView()
     var pages: [String: NSView] = [:]
@@ -254,7 +254,7 @@ class SettingsViewController: NSViewController {
             page.topAnchor.constraint(equalTo: contentScroll.contentView.topAnchor),
         ])
 
-        // Revisiting shows what zmx reports *now*, not what it reported when the
+        // Revisiting shows what seahelmd reports *now*, not what it reported when the
         // page was first built.
         if id == "sessions" {
             sessionMonitor.activeSessionNames = settingsDelegate?.settingsActiveSessionNames(self) ?? []

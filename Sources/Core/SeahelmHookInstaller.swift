@@ -30,11 +30,11 @@ enum SeahelmHookInstaller {
         # Tag the event with our stable pane id so seahelm can attribute it to the
         # exact pane (e.g. to transfer only that pane when it creates a worktree).
         # Session names are [A-Za-z0-9_-], so no JSON escaping is needed.
-        # ZMX_SESSION holds the same value SessionManager exports as SEAHELM_PANE_ID,
+        # SEAHELMD_SESSION holds the same value SessionManager exports as SEAHELM_PANE_ID,
         # and panes predating that export still have it — keep this fallback
         # identical to seahelm-suggest's, so events from both paths land on the
         # same pane.
-        pid="${SEAHELM_PANE_ID:-${ZMX_SESSION:-}}"
+        pid="${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}"
         prefix=""
         [ -n "$pid" ] && prefix="$prefix"'"seahelm_pane_id":"'"$pid"'",'
         [ -n "$src" ] && prefix="$prefix"'"seahelm_source":"'"$src"'",'

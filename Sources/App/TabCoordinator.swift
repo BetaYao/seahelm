@@ -31,7 +31,7 @@ class TabCoordinator {
     /// until it is revoked or runs out, not until the next settings change.
     let shareLinks = ShareLinkStore()
     private var pairRateLimiter: PairRateLimiter?
-    private var zmxVTAttachManager: ZmxVTAttachManager?
+    private var seahelmdVTAttachManager: SeahelmdVTAttachManager?
     /// The live control data source. Also the pane lookup + write channel the
     /// Telegram rule engine and Host Gateway dispatch through.
     private(set) var mqttDataSource: ControlDataSource?
@@ -94,7 +94,7 @@ class TabCoordinator {
     /// Nil until `init` builds it; only acts on repos that already have one.
     private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
-    /// First Mate: the LLM pane rules wake up (docs/first-mate-autopilot.md).
+    /// First Mate: the LLM pane rules wake up.
     let autopilot = AutopilotCoordinator()
 
     /// Display name of the repo owning a given worktree path.
@@ -1107,8 +1107,8 @@ class TabCoordinator {
         let limiter = PairRateLimiter()
         pairRateLimiter = limiter
 
-        let vt = ZmxVTAttachManager()
-        zmxVTAttachManager = vt
+        let vt = SeahelmdVTAttachManager()
+        seahelmdVTAttachManager = vt
         let server = HostGatewayServer(
             config: hgConfig,
             router: ControlRouter(dataSource: dataSource),
@@ -1129,7 +1129,7 @@ class TabCoordinator {
     private func stopHostGateway() {
         hostGatewayServer?.stop()
         hostGatewayServer = nil
-        zmxVTAttachManager = nil
+        seahelmdVTAttachManager = nil
         pairingCodeLive = nil
         pairRateLimiter = nil
     }
@@ -1210,7 +1210,7 @@ class TabCoordinator {
     // MARK: - Worktree Auto-Discovery (via Agent Hooks)
 
     /// Persist an agent resume ref and apply it to the live station so a
-    /// mid-session zmx recovery can relaunch the agent. Called on the main thread.
+    /// mid-session seahelmd recovery can relaunch the agent. Called on the main thread.
     ///
     /// Routed to the *emitting* pane's own station (via `paneId`, the hook's
     /// SEAHELM_PANE_ID = the pane's session name). Applying it to the worktree's
@@ -1369,7 +1369,7 @@ class TabCoordinator {
               let located = terminalCoordinator.stationManager.locate(stationId: stationId) else {
             return .failure(.unknownPane)
         }
-        guard runtimeBackend == "zmx", let key = station.paneSessionKey, !key.isEmpty else {
+        guard runtimeBackend == "seahelmd", let key = station.paneSessionKey, !key.isEmpty else {
             return .failure(.noPersistentBackend)
         }
         guard let ref = terminalCoordinator.config.agentSessions[key] else { return .failure(.noSession) }
@@ -1389,7 +1389,7 @@ class TabCoordinator {
 
     /// Fork a pane's conversation into another worktree: stop the original
     /// turn (Esc — the pane, its process and its session all stay), start
-    /// `claude --resume <id> --fork-session` in a fresh zmx session in the
+    /// `claude --resume <id> --fork-session` in a fresh seahelmd session in the
     /// destination, and file a new pane on that session there. The fork waits
     /// at its prompt, unless `continueTask` gives it a first message to carry
     /// on. `reveal` brings the fork on screen and focuses it.
@@ -1419,7 +1419,7 @@ class TabCoordinator {
         let backend = runtimeBackend
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             Thread.sleep(forTimeInterval: PaneFork.interruptSettleDelay)
-            // A name no live tree claims *and* no zmx session holds: a session left
+            // A name no live tree claims *and* no seahelmd session holds: a session left
             // behind by a closed pane would otherwise be attached to as-is.
             var name = ""
             DispatchQueue.main.sync {
@@ -1440,7 +1440,7 @@ class TabCoordinator {
         }
     }
 
-    /// File a new pane on an already-running zmx session in `destination`, and
+    /// File a new pane on an already-running seahelmd session in `destination`, and
     /// bring it on screen. A placeholder the worktree was standing on is retired
     /// rather than split beside. Returns the new station id.
     private func installForkedPane(sessionName: String, in destination: WorktreeInfo, reveal: Bool) -> String {
@@ -1481,7 +1481,7 @@ class TabCoordinator {
     }
 
     /// Lift one pane out of its current worktree and into `destination`, keeping
-    /// its Station, its zmx session and the agent inside it alive.
+    /// its Station, its seahelmd session and the agent inside it alive.
     ///
     /// Moves that one pane, never the whole tree: a worktree's other panes have
     /// their own agents doing their own work, and re-homing them because a sibling
@@ -1524,7 +1524,7 @@ class TabCoordinator {
         // dashboard builds its cards from live panes — leaving it with none would
         // remove the card outright, not show an empty one. `replacementTree`
         // claims a *free* session name: the departed pane kept the worktree's
-        // canonical one, and reusing it would point both panes at one live zmx
+        // canonical one, and reusing it would point both panes at one live seahelmd
         // session. The undo stays lossless either way, since moving the pane back
         // adopts it into whatever tree is there rather than replacing it.
         terminalCoordinator.config.splitLayouts.removeValue(forKey: sourcePath)
@@ -1588,7 +1588,7 @@ class TabCoordinator {
 
     /// Whether a worktree's only pane is still the placeholder seahelm stood up for
     /// it. Every clause is a reason not to throw a terminal away: `autoCreated`
-    /// excludes panes restored from a saved layout (their zmx sessions may hold
+    /// excludes panes restored from a saved layout (their seahelmd sessions may hold
     /// work, and an unpainted attach looks empty); `showsOnlyPrompt == true`
     /// excludes both a used pane and one whose contents we cannot read; the rest
     /// exclude a pane something has already happened in. Pure, because a rule that
@@ -2360,10 +2360,10 @@ class TabCoordinator {
     }
 
     /// Session names currently attached to panes that exist in the live split
-    /// trees. Cleanup code uses this as the source of truth: if a zmx session is
+    /// trees. Cleanup code uses this as the source of truth: if a seahelmd session is
     /// not in this set, no pane is using it right now.
     func livePaneSessionNames() -> Set<String> {
-        guard runtimeBackend == "zmx" else { return [] }
+        guard runtimeBackend == "seahelmd" else { return [] }
         guard allConfiguredReposAreRepresented() else {
             NSLog("[TabCoordinator] Withholding live pane sessions — a configured repo has no worktrees")
             return []

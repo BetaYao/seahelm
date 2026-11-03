@@ -1,7 +1,7 @@
 import AppKit
 
 /// Settings ▸ First Mate: the switch, the user's default per action, the
-/// standing orders, and each repo's rules (docs/first-mate-autopilot.md).
+/// standing orders, and each repo's rules.
 ///
 /// The global part saves like every other setting. A repo's rules are a file in
 /// that repo, written only by "Save to repo".

@@ -2,17 +2,17 @@ import Foundation
 
 /// Identifies which agent runs in a pane by walking the process tree, instead of
 /// scraping the agent's name off the screen. The pane's persistent session runs
-/// under the zmx daemon (not our Ghostty child), so the entry point is the
-/// session's shell pid from `zmx list`; from there we enumerate descendants and
+/// under the seahelmd daemon (not our Ghostty child), so the entry point is the
+/// session's shell pid from `seahelmd list`; from there we enumerate descendants and
 /// match their argv against each manifest's `process` block, penetrating generic
 /// runtimes (node → codex).
 enum ProcessProbe {
 
     // MARK: - Pure matching (unit-tested)
 
-    /// Extract `pid=<N>` for `paneSessionKey` from `zmx list` output, or nil.
-    static func sessionPid(paneSessionKey: String, zmxListOutput: String) -> Int32? {
-        for line in zmxListOutput.split(separator: "\n") {
+    /// Extract `pid=<N>` for `paneSessionKey` from `seahelmd list` output, or nil.
+    static func sessionPid(paneSessionKey: String, seahelmdListOutput: String) -> Int32? {
+        for line in seahelmdListOutput.split(separator: "\n") {
             let s = String(line)
             guard field(s, "name=") == paneSessionKey else { continue }
             if let pidStr = field(s, "pid="), let pid = Int32(pidStr) { return pid }
@@ -79,7 +79,7 @@ enum ProcessProbe {
 
     // MARK: - System probe (macOS, isolated)
 
-    /// Full identification for a live session: read the session pid from zmx,
+    /// Full identification for a live session: read the session pid from seahelmd,
     /// enumerate its descendants, and match against the manifest store.
     static func identifyAgent(paneSessionKey: String) -> String? {
         probeSession(paneSessionKey: paneSessionKey).agentId
@@ -87,15 +87,15 @@ enum ProcessProbe {
 
     /// Everything a probe needs from the system, captured once and shared by every
     /// pane in a poll cycle. Both halves are identical for all panes, and paying
-    /// for them per pane — one `zmx list` fork plus one full process walk each —
+    /// for them per pane — one `seahelmd list` fork plus one full process walk each —
     /// was what pinned a core with the app idle.
     struct ProbeContext {
-        let zmxListOutput: String
+        let seahelmdListOutput: String
         let table: [Proc]
 
         static func capture() -> ProbeContext? {
-            guard let out = ZmxLocator.listOutput() else { return nil }
-            return ProbeContext(zmxListOutput: out, table: processTable())
+            guard let out = SeahelmdLocator.listOutput() else { return nil }
+            return ProbeContext(seahelmdListOutput: out, table: processTable())
         }
     }
 
@@ -124,7 +124,7 @@ enum ProcessProbe {
         context: ProbeContext
     ) -> SessionProbe {
         guard let root = sessionPid(paneSessionKey: paneSessionKey,
-                                    zmxListOutput: context.zmxListOutput) else {
+                                    seahelmdListOutput: context.seahelmdListOutput) else {
             return .miss
         }
         // argv is read only for this session's own descendants — a handful —
@@ -151,7 +151,7 @@ enum ProcessProbe {
         return !pm.execNames.isEmpty || !pm.argvContains.isEmpty
     }
 
-    /// Aggregate memory under a zmx session root. `totalBytes` includes the root
+    /// Aggregate memory under a seahelmd session root. `totalBytes` includes the root
     /// process (usually the session shell) and all descendants. `agentBytes`
     /// includes any recognized agent process and its children, so Claude Code's
     /// node/helper subprocesses are counted with the agent rather than only the
@@ -251,8 +251,8 @@ enum ProcessProbe {
     /// — the read that used to pin a core. A headline figure only needs the tree
     /// shape (sysctl) and an rss map (one `ps`), so this stays cheap enough to
     /// sit on a UI refresh.
-    static func sessionResidentBytes(paneSessionKey: String, zmxListOutput: String) -> UInt64? {
-        guard let root = sessionPid(paneSessionKey: paneSessionKey, zmxListOutput: zmxListOutput) else {
+    static func sessionResidentBytes(paneSessionKey: String, seahelmdListOutput: String) -> UInt64? {
+        guard let root = sessionPid(paneSessionKey: paneSessionKey, seahelmdListOutput: seahelmdListOutput) else {
             return nil
         }
         let rss = residentBytesByPid()

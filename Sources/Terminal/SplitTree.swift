@@ -1,7 +1,7 @@
 import Foundation
 
 /// Manages a split-pane tree for a single worktree.
-/// Each leaf corresponds to one Station + zmx session.
+/// Each leaf corresponds to one Station + seahelmd session.
 class SplitTree {
     private(set) var root: SplitNode
     var focusedId: String
@@ -64,7 +64,7 @@ class SplitTree {
     }
 
     /// Insert an existing leaf beside the focused one, keeping its Station and
-    /// zmx session. The mirror of `removeLeaf`: together they move a live pane
+    /// seahelmd session. The mirror of `removeLeaf`: together they move a live pane
     /// between trees without recreating it, which is the whole point — the agent
     /// running in that pane must survive the move.
     @discardableResult
@@ -89,9 +89,9 @@ class SplitTree {
     }
 
     /// Build a tree for `worktreePath` whose only leaf is one lifted out of
-    /// another tree, keeping its live Station and zmx session.
+    /// another tree, keeping its live Station and seahelmd session.
     ///
-    /// The adopted leaf keeps the session name it was created with — zmx has no
+    /// The adopted leaf keeps the session name it was created with — seahelmd has no
     /// rename, so the running pane stays addressable only by its original name —
     /// while `baseSessionName` is derived from the destination, so panes split off
     /// later are named after the worktree they actually live in.

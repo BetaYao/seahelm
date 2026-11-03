@@ -197,7 +197,7 @@ enum ProcessRunner {
     }
 
     /// Default deadline for the short lookups here. `output` takes an explicit
-    /// one because its callers range from `zmx list` to a user's whole test suite.
+    /// one because its callers range from `seahelmd list` to a user's whole test suite.
     static let lookupTimeout: TimeInterval = 10
 
     /// Resolve a command using the user's login shell PATH.
@@ -309,7 +309,7 @@ enum ProcessRunner {
 
     /// Run a command synchronously, waiting for exit. Logs errors.
     /// When `currentDirectory` is set, the child inherits that cwd — needed for
-    /// `zmx run`, whose session shell starts in the creator's working directory.
+    /// `seahelmd run`, whose session shell starts in the creator's working directory.
     static func runSync(_ args: [String], currentDirectory: String? = nil, timeout: TimeInterval = 60) {
         let result = capture(
             executable: URL(fileURLWithPath: "/usr/bin/env"),

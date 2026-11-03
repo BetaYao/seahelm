@@ -2,7 +2,7 @@ import Foundation
 
 /// What a control-socket call from First Mate is allowed to be. seahelm, not
 /// the model, enforces this: the router asks before dispatching anything First
-/// Mate sends (docs/first-mate-autopilot.md §2.4).
+/// Mate sends.
 enum AutopilotPolicy {
     enum Class: Equatable {
         /// Reads and waits: always allowed.

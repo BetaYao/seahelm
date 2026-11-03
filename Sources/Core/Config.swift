@@ -48,7 +48,7 @@ struct Config: Codable {
     var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
-    /// First Mate (docs/first-mate-autopilot.md): off until the user turns it on.
+    /// First Mate: off until the user turns it on.
     var autopilotEnabled: Bool
     /// Turned on but holding: events are recorded, nothing is handed over.
     var autopilotPaused: Bool
@@ -256,7 +256,7 @@ struct Config: Codable {
 
     static func load() -> Config {
         // Pretend a fresh install: no repos to restore means no stations, and so
-        // no `zmx attach` into sessions the live app is already driving.
+        // no `seahelmd attach` into sessions the live app is already driving.
         if DebugFlags.forceEmptyState {
             var empty = Config()
             empty.onboardingCompleted = true
@@ -293,7 +293,7 @@ struct Config: Codable {
 
     /// Older split panes used `<base>-N`. That can equal another worktree's
     /// base name when its directory ends in `-N`, making both cards attach the
-    /// same zmx session. Keep the true base owner on its existing session and
+    /// same seahelmd session. Keep the true base owner on its existing session and
     /// move only the colliding extra pane to the collision-proof `--pane-N`
     /// namespace. Non-colliding legacy panes are deliberately left untouched.
     @discardableResult
@@ -484,7 +484,7 @@ struct AgentMemoryGuardConfig: Codable, Equatable {
 
 /// Policy for reclaiming the render cost of panes nobody is looking at. Only
 /// the ghostty surface goes away (Metal drawables, screen buffer, the four
-/// per-surface threads) — the zmx session and the agent inside it keep running,
+/// per-surface threads) — the seahelmd session and the agent inside it keep running,
 /// and the pane comes back through the placeholder's Wake button.
 struct AutoSleepConfig: Codable, Equatable {
     var enabled: Bool

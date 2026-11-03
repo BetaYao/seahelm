@@ -49,7 +49,7 @@ final class KeyChordTests: XCTestCase {
         XCTAssertNil(KeyChord("up")?.text)
     }
 
-    /// The zmx fallback writes these straight into the session.
+    /// The seahelmd fallback writes these straight into the session.
     func testLegacyBytes() {
         XCTAssertEqual(KeyChord("esc")?.bytes, "\u{1b}")
         XCTAssertEqual(KeyChord("ctrl+c")?.bytes, "\u{03}")

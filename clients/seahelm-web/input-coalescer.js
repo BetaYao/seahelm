@@ -3,7 +3,7 @@
 // The naive version arms a timer on the first keystroke and sends when it
 // fires, which makes every burst start with a full window of latency for no
 // gain: there was nothing to coalesce it with. The Mac already avoids that in
-// the other direction — ZmxVTAttachManager tracks time since its last flush so
+// the other direction — SeahelmdVTAttachManager tracks time since its last flush so
 // an idle pane answers immediately — and this is the same policy pointing the
 // other way, which is the direction a person actually feels.
 //

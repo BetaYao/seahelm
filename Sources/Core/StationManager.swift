@@ -5,7 +5,7 @@ class StationManager {
     private var trees: [String: SplitTree] = [:]
     /// Stations this manager stood up itself, in this run — `tree(for:)` and
     /// `replacementTree`. Deliberately not `registerTree`: a layout restored from
-    /// config may have its panes attached to zmx sessions with work still in them,
+    /// config may have its panes attached to seahelmd sessions with work still in them,
     /// and an empty-looking viewport is no proof otherwise before the attach has
     /// painted. Only a pane on this list is a candidate for being discarded.
     private var autoCreatedStationIds: Set<String> = []
@@ -40,7 +40,7 @@ class StationManager {
         trees[path]
     }
 
-    /// Every zmx session name a live tree currently claims.
+    /// Every seahelmd session name a live tree currently claims.
     var claimedSessionNames: Set<String> {
         Set(trees.values.flatMap { $0.allLeaves.map(\.paneSessionKey) }.filter { !$0.isEmpty })
     }
@@ -48,7 +48,7 @@ class StationManager {
     /// Stand up a fresh tree for a worktree whose panes have all left.
     ///
     /// It must not simply take `persistentSessionName(for:)` the way `tree(for:)`
-    /// does: the pane that moved away kept that exact name — zmx has no rename —
+    /// does: the pane that moved away kept that exact name — seahelmd has no rename —
     /// so the replacement would attach to the live session the departed agent is
     /// still running in, and both panes would drive the same terminal. Claims the
     /// first free `<base>`, `<base>--pane-1`, `<base>--pane-2` … instead.
@@ -154,7 +154,7 @@ class StationManager {
     }
 
     /// Lift one leaf out of its tree and install it as the whole tree for
-    /// `toPath`, keeping the Station and its zmx session alive.
+    /// `toPath`, keeping the Station and its seahelmd session alive.
     ///
     /// Returns nil when the station is unknown. When the leaf is the last one in
     /// its tree, the source tree is *unkeyed* (not destroyed — its stations move

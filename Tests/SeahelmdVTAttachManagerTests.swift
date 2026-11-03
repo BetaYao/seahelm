@@ -24,7 +24,7 @@ final class FakeVTAttachedProcess: VTAttachedProcess {
     func terminate() {
         terminated = true
         // Match Process.terminate(): the handler is not invoked synchronously
-        // on the caller. Firing it here while ZmxVTAttachManager holds queue.sync
+        // on the caller. Firing it here while SeahelmdVTAttachManager holds queue.sync
         // re-enters the serial queue and can deinit on that thread.
         terminationHandler = nil
     }
@@ -51,7 +51,7 @@ final class RecordingVTProcessSpawner: VTProcessSpawning {
         sessionKey: String,
         rows: Int,
         cols: Int,
-        zmxPath: String
+        seahelmdPath: String
     ) throws -> VTAttachedProcess {
         requests.append(VTProcessSpawnRequest(
             python3: python3,
@@ -59,7 +59,7 @@ final class RecordingVTProcessSpawner: VTProcessSpawning {
             sessionKey: sessionKey,
             rows: rows,
             cols: cols,
-            zmxPath: zmxPath))
+            seahelmdPath: seahelmdPath))
         guard let proc = nextProcess else {
             throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "no fake process"])
         }
@@ -69,7 +69,7 @@ final class RecordingVTProcessSpawner: VTProcessSpawning {
 
 // MARK: - Tests
 
-final class ZmxVTAttachManagerTests: XCTestCase {
+final class SeahelmdVTAttachManagerTests: XCTestCase {
     private var fakeClock = Date(timeIntervalSince1970: 1_000_000)
     private var notifications: [(method: String, params: [String: Any])] = []
 
@@ -77,15 +77,15 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         spawner: RecordingVTProcessSpawner,
         sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { _ in (rows: 40, cols: 100) },
         leaseTTL: TimeInterval = 5,
-        snapshotIdle: TimeInterval = TimeInterval(ZmxVTTiming.snapshotIdleMs) / 1000,
-        snapshotMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotMaxMs) / 1000,
-        snapshotSettleMax: TimeInterval = TimeInterval(ZmxVTTiming.snapshotSettleMaxMs) / 1000,
-        queue: DispatchQueue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.test")
-    ) -> ZmxVTAttachManager {
-        let mgr = ZmxVTAttachManager(
+        snapshotIdle: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotIdleMs) / 1000,
+        snapshotMax: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotMaxMs) / 1000,
+        snapshotSettleMax: TimeInterval = TimeInterval(SeahelmdVTTiming.snapshotSettleMaxMs) / 1000,
+        queue: DispatchQueue = DispatchQueue(label: "com.seahelm.SeahelmdVTAttachManager.test")
+    ) -> SeahelmdVTAttachManager {
+        let mgr = SeahelmdVTAttachManager(
             processSpawner: spawner,
-            zmxPath: { _ in "/fake/zmx" },
-            attachScriptPath: { "/fake/zmx-attach.py" },
+            seahelmdPath: { _ in "/fake/seahelmd" },
+            attachScriptPath: { "/fake/seahelmd-attach.py" },
             sessionSize: sessionSize,
             now: { [unowned self] in self.fakeClock },
             leaseTTL: leaseTTL,
@@ -114,7 +114,7 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         XCTAssertEqual(spawner.requests[0].sessionKey, "seahelm-repo-feat")
         XCTAssertEqual(spawner.requests[0].rows, 40)
         XCTAssertEqual(spawner.requests[0].cols, 100)
-        XCTAssertEqual(spawner.requests[0].zmxPath, "/fake/zmx")
+        XCTAssertEqual(spawner.requests[0].seahelmdPath, "/fake/seahelmd")
         XCTAssertEqual(spawner.requests[0].python3, "/usr/bin/python3")
     }
 
@@ -125,10 +125,10 @@ final class ZmxVTAttachManagerTests: XCTestCase {
 
         let result = mgr.open(paneSessionKey: "missing")
 
-        XCTAssertEqual(result["cols"] as? Int, ZmxVTTiming.defaultCols)
-        XCTAssertEqual(result["rows"] as? Int, ZmxVTTiming.defaultRows)
-        XCTAssertEqual(spawner.requests[0].cols, ZmxVTTiming.defaultCols)
-        XCTAssertEqual(spawner.requests[0].rows, ZmxVTTiming.defaultRows)
+        XCTAssertEqual(result["cols"] as? Int, SeahelmdVTTiming.defaultCols)
+        XCTAssertEqual(result["rows"] as? Int, SeahelmdVTTiming.defaultRows)
+        XCTAssertEqual(spawner.requests[0].cols, SeahelmdVTTiming.defaultCols)
+        XCTAssertEqual(spawner.requests[0].rows, SeahelmdVTTiming.defaultRows)
     }
 
     func testSnapshotThenLiveDataNotifications() {
@@ -281,10 +281,10 @@ final class ZmxVTAttachManagerTests: XCTestCase {
     }
 
     func testDeinitFromManagerQueueDoesNotTrap() {
-        let queue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.deinit-test")
+        let queue = DispatchQueue(label: "com.seahelm.SeahelmdVTAttachManager.deinit-test")
         let spawner = RecordingVTProcessSpawner()
         spawner.nextProcess = FakeVTAttachedProcess()
-        var mgr: ZmxVTAttachManager? = makeManager(spawner: spawner, queue: queue)
+        var mgr: SeahelmdVTAttachManager? = makeManager(spawner: spawner, queue: queue)
         weak var weakMgr = mgr
         _ = mgr!.open(paneSessionKey: "p1")
 
@@ -300,11 +300,11 @@ final class ZmxVTAttachManagerTests: XCTestCase {
     }
 
     func testDeinitAfterAttachExitOnQueueDoesNotTrap() {
-        let queue = DispatchQueue(label: "com.seahelm.ZmxVTAttachManager.exit-deinit-test")
+        let queue = DispatchQueue(label: "com.seahelm.SeahelmdVTAttachManager.exit-deinit-test")
         let spawner = RecordingVTProcessSpawner()
         let fake = FakeVTAttachedProcess()
         spawner.nextProcess = fake
-        var mgr: ZmxVTAttachManager? = makeManager(spawner: spawner, queue: queue)
+        var mgr: SeahelmdVTAttachManager? = makeManager(spawner: spawner, queue: queue)
         weak var weakMgr = mgr
         _ = mgr!.open(paneSessionKey: "p1")
         fake.fireTermination()
@@ -322,6 +322,6 @@ final class ZmxVTAttachManagerTests: XCTestCase {
         let output = """
         name=seahelm-a-feat\tpid=4242\tclients=1
         """
-        XCTAssertEqual(ProcessProbe.sessionPid(paneSessionKey: "seahelm-a-feat", zmxListOutput: output), 4242)
+        XCTAssertEqual(ProcessProbe.sessionPid(paneSessionKey: "seahelm-a-feat", seahelmdListOutput: output), 4242)
     }
 }

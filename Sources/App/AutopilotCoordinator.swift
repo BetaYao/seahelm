@@ -2,7 +2,7 @@ import AppKit
 
 /// Runs First Mate: keeps its session alive, turns PR changes into events,
 /// matches them to each repo's rules, and hands the prompts to First Mate when
-/// it is free. Main thread. See docs/first-mate-autopilot.md.
+/// it is free. Main thread.
 final class AutopilotCoordinator {
     /// What the dock and First Mate's view draw.
     struct State: Equatable {
@@ -180,7 +180,7 @@ final class AutopilotCoordinator {
         }
     }
 
-    private var backend = "zmx"
+    private var backend = "seahelmd"
     /// When this run last launched the session. Its agent waits for a client to
     /// attach before it starts (up to ~10s), so a session this young is not
     /// judged by whether the agent is there yet.
@@ -229,7 +229,7 @@ final class AutopilotCoordinator {
     }
 
     /// Whether an AI agent is running in the session's process tree. Not the
-    /// `zmx run` client that launched it: that client is reaped as an orphan
+    /// `seahelmd run` client that launched it: that client is reaped as an orphan
     /// whenever the app restarts, while the agent lives on in the daemon.
     private static func agentIsRunning() -> Bool {
         AgentType.fromManifestId(ProcessProbe.probeSession(paneSessionKey: FirstMatePane.sessionName).agentId)
