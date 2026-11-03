@@ -68,29 +68,57 @@ final class AutopilotCoordinator {
         AgentRegistry.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
                                       project: FirstMatePane.project, startedAt: Date(),
                                       paneSessionKey: FirstMatePane.sessionName, backend: backend)
+        self.backend = backend
+        ensureSession()
+    }
+
+    private var backend = "zmx"
+    /// When this run last launched the session. Its agent waits for a client to
+    /// attach before it starts (up to ~10s), so a session this young is not
+    /// judged by whether the agent is there yet.
+    private var launchedAt: Date?
+
+    /// Make sure the session exists and is hosting First Mate's agent, then call
+    /// back on main. A session can be there without its agent — an exit, or a
+    /// plain shell re-created by an attach after the session was lost — and a
+    /// bare shell is not First Mate: it is replaced. So is a session launched by
+    /// an older seahelm (before the permission flag, say).
+    func ensureSession(then done: (() -> Void)? = nil) {
+        let backend = self.backend
         // The agent is started with its own permission gate (`.claude/settings.json`
         // in its directory), never with the yolo flag: seahelm's policy covers its
         // CLI, Claude's covers the rest of the shell.
         let command = FirstMatePane.launchCommand
+        let young = launchedAt.map { Date().timeIntervalSince($0) < 60 } ?? false
         DispatchQueue.global(qos: .userInitiated).async {
-            var exists = SessionManager.sessionExists(name: FirstMatePane.sessionName, backend: backend)
-            if exists, !FirstMatePane.sessionIsCurrent() {
-                // Launched by an older seahelm (say, before the permission flag):
-                // replace it rather than keep running under the old terms.
-                SessionManager.killSession(FirstMatePane.sessionName, backend: backend)
+            let name = FirstMatePane.sessionName
+            var exists = SessionManager.sessionExists(name: name, backend: backend)
+            if exists, !FirstMatePane.sessionIsCurrent() || (!young && !Self.agentIsRunning()) {
+                SessionManager.killSession(name, backend: backend)
                 exists = false
             }
             if !exists {
                 FirstMatePane.markSessionCurrent()
+                DispatchQueue.main.async { [weak self] in self?.launchedAt = Date() }
                 DispatchQueue.global(qos: .userInitiated).async {
-                    SessionManager.createDetachedSession(name: FirstMatePane.sessionName, backend: backend,
+                    SessionManager.createDetachedSession(name: name, backend: backend,
                                                          cwd: FirstMatePane.directory, agentCommandLine: command)
                 }
-                _ = SessionManager.waitUntilSessionExists(name: FirstMatePane.sessionName,
-                                                          backend: backend, timeoutSeconds: 5)
+                _ = SessionManager.waitUntilSessionExists(name: name, backend: backend, timeoutSeconds: 5)
             }
-            DispatchQueue.main.async { [weak self] in self?.refreshActivity() }
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshActivity()
+                done?()
+            }
         }
+    }
+
+    /// Whether an AI agent is running in the session's process tree. Not the
+    /// `zmx run` client that launched it: that client is reaped as an orphan
+    /// whenever the app restarts, while the agent lives on in the daemon.
+    private static func agentIsRunning() -> Bool {
+        AgentType.fromManifestId(ProcessProbe.probeSession(paneSessionKey: FirstMatePane.sessionName).agentId)
+            .isAIAgent
     }
 
     private func stop() {

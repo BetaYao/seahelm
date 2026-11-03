@@ -2260,9 +2260,11 @@ class TabCoordinator {
             NSLog("[TabCoordinator] Withholding live pane sessions — a configured repo has no worktrees")
             return []
         }
-        let names = allWorktrees.flatMap { entry in
+        var names = allWorktrees.flatMap { entry in
             entry.tree?.allLeaves.map(\.paneSessionKey) ?? []
         }
+        // First Mate has no split tree, so the sweep would take it for an orphan.
+        if autopilot.station != nil { names.append(FirstMatePane.sessionName) }
         return Set(names.filter { !$0.isEmpty })
     }
 

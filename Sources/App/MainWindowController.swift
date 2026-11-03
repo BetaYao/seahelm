@@ -3770,13 +3770,24 @@ extension MainWindowController {
         view.onTurnOn = { [weak self] in
             guard let self else { return }
             self.setAutopilot(enabled: true, paused: false)
-            self.firstMateView?.embed(self.tabCoordinator.autopilot.station)
+            self.tabCoordinator.autopilot.ensureSession { [weak self] in
+                self?.firstMateView?.embed(self?.tabCoordinator.autopilot.station)
+            }
         }
         dashboardVC.showCenterOverlay(view, title: "First Mate")
         firstMateView = view
-        view.embed(tabCoordinator.autopilot.station)
         view.showLog(tabCoordinator.autopilot.audit.recent())
-        view.focusTerminal(tabCoordinator.autopilot.station)
+        guard tabCoordinator.autopilot.station != nil else {
+            view.embed(nil)
+            return
+        }
+        // Attach only once the session is known to hold the agent: attaching to a
+        // missing session would make zmx start an empty shell under that name.
+        tabCoordinator.autopilot.ensureSession { [weak self, weak view] in
+            guard let self, let view, view.superview != nil else { return }
+            view.embed(self.tabCoordinator.autopilot.station)
+            view.focusTerminal(self.tabCoordinator.autopilot.station)
+        }
     }
 
     fileprivate func setAutopilot(enabled: Bool, paused: Bool) {
