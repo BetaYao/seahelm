@@ -1,8 +1,8 @@
 import Foundation
 
-/// Installs Seahelm hook bridge + per-agent integrations for the onboarding wizard
-/// and subsequent launches filtered by `enabledHookAgents`.
-enum OnboardingHookInstaller {
+/// Installs the Seahelm hook bridge + per-agent integrations at launch, filtered
+/// by `enabledHookAgents` (empty installs all of them).
+enum AgentHookInstaller {
     /// Shared bridge pieces needed whenever any agent hooks are enabled.
     static func installSharedBridge() {
         SeahelmHookInstaller.ensureInstalled()
@@ -10,10 +10,7 @@ enum OnboardingHookInstaller {
         SeahelmCliInstaller.ensureInstalled()
     }
 
-    /// One installed component and whether it landed. The onboarding wizard shows
-    /// these on its final step — hook installation used to be entirely silent, so
-    /// a failure (unwritable `~/.claude/settings.json`, say) looked identical to
-    /// success right up until status detection quietly didn't work.
+    /// One installed component and whether it landed.
     struct InstallStep {
         let name: String
         let detail: String

@@ -39,7 +39,7 @@ class NotificationManager: NSObject {
     /// 0 disables the gate (deliver on the edge). Injected from config.
     var stabilityDelay: TimeInterval = 1.0
 
-    /// Sound preference from onboarding / settings: `default`, `defaultCritical`, `none`.
+    /// Sound preference from settings: `default`, `defaultCritical`, `none`.
     var soundPreference: String = "default"
 
     /// Latest observed status per key, updated on *every* edge (not just
@@ -50,7 +50,7 @@ class NotificationManager: NSObject {
 
     private override init() {
         super.init()
-        // Permission is requested from onboarding or the first delivery path.
+        // Permission is requested at launch or on the first delivery path.
         configureCategories()
     }
 

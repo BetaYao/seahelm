@@ -870,9 +870,6 @@ class MainWindowController: NSWindowController {
         let dashboard = DashboardViewController()
         dashboard.integrationEnabled = config.integrationEnabled
         dashboard.dashboardDelegate = self
-        dashboard.hasWorkspaces = { [weak self] in
-            !(self?.tabCoordinator.config.workspacePaths.isEmpty ?? true)
-        }
 dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
@@ -2121,10 +2118,6 @@ extension MainWindowController: DashboardDelegate {
         guard let path = pendingReturnPath else { return }
         pendingReturnPath = nil
         dashboardVC?.setWorktreePending(path: path, pending: false)
-    }
-
-    func dashboardDidRequestAddProject() {
-        tabCoordinator.addRepoViaOpenPanel(window: window)
     }
 
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {

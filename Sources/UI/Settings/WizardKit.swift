@@ -1,12 +1,10 @@
 import AppKit
 
-/// Shared palette + controls for the onboarding wizard.
+/// Shared palette + controls for setup wizards (the Telegram one in Settings).
 ///
-/// Everything here resolves through `SemanticColors`, so the wizard wears the
-/// same skin as the app and re-themes live when the user picks an appearance in
-/// step 3. (The old wizard was a fixed white design, which made picking "Dark"
-/// feel like it hadn't done anything.)
-enum OnboardingStyle {
+/// Everything here resolves through `SemanticColors`, so a wizard wears the
+/// same skin as the app and re-themes live with it.
+enum WizardStyle {
     static var accent: NSColor { SemanticColors.accent }
     static var background: NSColor { Theme.background }
     static var panel: NSColor { SemanticColors.panel }
@@ -69,7 +67,7 @@ enum OnboardingStyle {
 extension NSImage {
     /// Flat-tinted copy — SF Symbols embedded as text attachments ignore the
     /// button's `contentTintColor`, so they must be baked to the right color.
-    func onboardingTinted(with color: NSColor) -> NSImage {
+    func wizardTinted(with color: NSColor) -> NSImage {
         let copy = NSImage(size: size, flipped: false) { rect in
             self.draw(in: rect)
             color.set()
@@ -84,21 +82,21 @@ extension NSImage {
 /// Views that need to repaint when the effective appearance flips. AppKit only
 /// re-resolves dynamic `NSColor`s automatically for things it draws itself; our
 /// layer-backed panels cache `CGColor`s and must be told.
-protocol OnboardingThemeReactive: NSView {
+protocol WizardThemeReactive: NSView {
     func applyTheme()
 }
 
 extension NSView {
     /// Walk the subtree and re-apply theme colors after an appearance change.
-    func onboardingApplyThemeRecursively() {
-        (self as? OnboardingThemeReactive)?.applyTheme()
-        for sub in subviews { sub.onboardingApplyThemeRecursively() }
+    func wizardApplyThemeRecursively() {
+        (self as? WizardThemeReactive)?.applyTheme()
+        for sub in subviews { sub.wizardApplyThemeRecursively() }
     }
 }
 
 /// Flat rounded card with optional hover/selected states and an optional
 /// corner check badge shown while selected.
-final class OnboardingPanel: NSView, OnboardingThemeReactive {
+final class WizardPanel: NSView, WizardThemeReactive {
     var isSelected = false { didSet { applyTheme() } }
     var onClick: (() -> Void)?
     /// When true, a filled accent check circle appears top-right on selection.
@@ -111,12 +109,12 @@ final class OnboardingPanel: NSView, OnboardingThemeReactive {
 
     private var hovering = false
     private var trackingArea: NSTrackingArea?
-    private let badge = OnboardingCheckBadge()
+    private let badge = WizardCheckBadge()
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = OnboardingStyle.cornerRadius
+        layer?.cornerRadius = WizardStyle.cornerRadius
         layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         badge.isHidden = true
@@ -167,16 +165,16 @@ final class OnboardingPanel: NSView, OnboardingThemeReactive {
 
     func applyTheme() {
         let bg: NSColor = isSelected
-            ? OnboardingStyle.panelSelected
-            : (hovering && onClick != nil ? OnboardingStyle.panelHover : OnboardingStyle.panel)
+            ? WizardStyle.panelSelected
+            : (hovering && onClick != nil ? WizardStyle.panelHover : WizardStyle.panel)
         layer?.backgroundColor = resolvedCGColor(bg)
         layer?.borderColor = resolvedCGColor(
-            isSelected ? OnboardingStyle.strokeSelected
-                : (hovering && onClick != nil ? SemanticColors.cardBorderHover : OnboardingStyle.stroke)
+            isSelected ? WizardStyle.strokeSelected
+                : (hovering && onClick != nil ? SemanticColors.cardBorderHover : WizardStyle.stroke)
         )
         layer?.borderWidth = isSelected ? 1.5 : 1
         if isSelected && showsSelectionGlow {
-            layer?.shadowColor = resolvedCGColor(OnboardingStyle.accent)
+            layer?.shadowColor = resolvedCGColor(WizardStyle.accent)
             layer?.shadowOpacity = 0.22
             layer?.shadowRadius = 10
             layer?.shadowOffset = .zero
@@ -188,7 +186,7 @@ final class OnboardingPanel: NSView, OnboardingThemeReactive {
 }
 
 /// Filled accent circle with a checkmark.
-final class OnboardingCheckBadge: NSView, OnboardingThemeReactive {
+final class WizardCheckBadge: NSView, WizardThemeReactive {
     private let check = NSImageView()
 
     init() {
@@ -219,13 +217,13 @@ final class OnboardingCheckBadge: NSView, OnboardingThemeReactive {
     }
 
     func applyTheme() {
-        layer?.backgroundColor = resolvedCGColor(OnboardingStyle.accent)
-        check.contentTintColor = OnboardingStyle.inkOnAccent(for: effectiveAppearance)
+        layer?.backgroundColor = resolvedCGColor(WizardStyle.accent)
+        check.contentTintColor = WizardStyle.inkOnAccent(for: effectiveAppearance)
     }
 }
 
 /// Accent-filled pill primary button with an optional ⌘↩ keycap chip.
-final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
+final class WizardPrimaryButton: NSButton, WizardThemeReactive {
     private var hovering = false
     /// Extra trailing room for the keycap chip drawn into the title.
     var showsShortcut = true { didSet { applyTheme() } }
@@ -289,10 +287,10 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
     }
 
     func applyTheme() {
-        let ink = OnboardingStyle.inkOnAccent(for: effectiveAppearance)
+        let ink = WizardStyle.inkOnAccent(for: effectiveAppearance)
         let fill = isEnabled
-            ? OnboardingStyle.accent.withAlphaComponent(hovering ? 0.85 : 1)
-            : OnboardingStyle.accent.withAlphaComponent(0.35)
+            ? WizardStyle.accent.withAlphaComponent(hovering ? 0.85 : 1)
+            : WizardStyle.accent.withAlphaComponent(0.35)
         layer?.backgroundColor = resolvedCGColor(fill)
         let composed = NSMutableAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
@@ -311,7 +309,7 @@ final class OnboardingPrimaryButton: NSButton, OnboardingThemeReactive {
 
 /// Flat bordered button — the wizard's stand-in for `NSButton(bezelStyle:.rounded)`,
 /// whose stock chrome fought the custom cards in the previous design.
-final class OnboardingSecondaryButton: NSButton, OnboardingThemeReactive {
+final class WizardSecondaryButton: NSButton, WizardThemeReactive {
     private var hovering = false
     var text = "" { didSet { applyTheme() } }
     /// Optional leading SF Symbol drawn into the title.
@@ -369,15 +367,15 @@ final class OnboardingSecondaryButton: NSButton, OnboardingThemeReactive {
             hovering && isEnabled ? SemanticColors.panel2 : NSColor.clear
         )
         layer?.borderColor = resolvedCGColor(
-            (hovering && isEnabled ? SemanticColors.cardBorderHover : OnboardingStyle.stroke)
+            (hovering && isEnabled ? SemanticColors.cardBorderHover : WizardStyle.stroke)
                 .withAlphaComponent(alpha)
         )
-        let ink = OnboardingStyle.textPrimary.withAlphaComponent(alpha)
+        let ink = WizardStyle.textPrimary.withAlphaComponent(alpha)
         let composed = NSMutableAttributedString()
         if let symbol,
            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                .withSymbolConfiguration(.init(pointSize: 11, weight: .medium, scale: .small))?
-               .onboardingTinted(with: ink) {
+               .wizardTinted(with: ink) {
             let attachment = NSTextAttachment()
             attachment.image = image
             composed.append(NSAttributedString(attachment: attachment))
@@ -392,7 +390,7 @@ final class OnboardingSecondaryButton: NSButton, OnboardingThemeReactive {
 }
 
 /// Borderless link-style button in the accent color.
-final class OnboardingLinkButton: NSButton, OnboardingThemeReactive {
+final class WizardLinkButton: NSButton, WizardThemeReactive {
     var text: String { didSet { applyTheme() } }
     private let size: CGFloat
 
@@ -418,18 +416,18 @@ final class OnboardingLinkButton: NSButton, OnboardingThemeReactive {
     func applyTheme() {
         attributedTitle = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: size, weight: .medium),
-            .foregroundColor: OnboardingStyle.accent,
+            .foregroundColor: WizardStyle.accent,
         ])
     }
 }
 
 /// Rounded tile holding an SF Symbol, tinted by `tint`.
-final class OnboardingIconTile: NSView, OnboardingThemeReactive {
+final class WizardIconTile: NSView, WizardThemeReactive {
     private let image = NSImageView()
     private let tint: () -> NSColor
 
     init(symbol: String, side: CGFloat = 34, pointSize: CGFloat = 15,
-         tint: @escaping () -> NSColor = { OnboardingStyle.accent }) {
+         tint: @escaping () -> NSColor = { WizardStyle.accent }) {
         self.tint = tint
         super.init(frame: .zero)
         wantsLayer = true
@@ -471,7 +469,7 @@ final class OnboardingIconTile: NSView, OnboardingThemeReactive {
 }
 
 /// Small dot + label chip reporting the live state of a permission or install.
-final class OnboardingStatusPill: NSView, OnboardingThemeReactive {
+final class WizardStatusPill: NSView, WizardThemeReactive {
     enum State {
         case ok(String)
         case pending(String)
@@ -485,8 +483,8 @@ final class OnboardingStatusPill: NSView, OnboardingThemeReactive {
 
         var color: NSColor {
             switch self {
-            case .ok: return OnboardingStyle.ok
-            case .pending: return OnboardingStyle.warn
+            case .ok: return WizardStyle.ok
+            case .pending: return WizardStyle.warn
             case .failed: return SemanticColors.danger
             }
         }
@@ -495,7 +493,7 @@ final class OnboardingStatusPill: NSView, OnboardingThemeReactive {
     var state: State = .pending("Checking…") { didSet { applyTheme() } }
 
     private let dot = NSView()
-    private let label = OnboardingStyle.label("", size: 11.5, weight: .medium)
+    private let label = WizardStyle.label("", size: 11.5, weight: .medium)
 
     init() {
         super.init(frame: .zero)
@@ -540,9 +538,9 @@ final class OnboardingStatusPill: NSView, OnboardingThemeReactive {
 }
 
 /// A pill toggle row: title + subtitle on the left, switch on the right.
-final class OnboardingToggleRow: NSView {
+final class WizardToggleRow: NSView {
     let toggle = NSSwitch()
-    private let panel = OnboardingPanel()
+    private let panel = WizardPanel()
 
     var isOn: Bool {
         get { toggle.state == .on }
@@ -554,10 +552,10 @@ final class OnboardingToggleRow: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         panel.showsSelectionGlow = false
 
-        let icon = OnboardingIconTile(symbol: symbol, side: 30, pointSize: 13, tint: tint)
-        let titleLabel = OnboardingStyle.label(title, size: 13, weight: .semibold)
-        let subtitleLabel = OnboardingStyle.label(subtitle, size: 11.5,
-                                                  color: OnboardingStyle.textSecondary)
+        let icon = WizardIconTile(symbol: symbol, side: 30, pointSize: 13, tint: tint)
+        let titleLabel = WizardStyle.label(title, size: 13, weight: .semibold)
+        let subtitleLabel = WizardStyle.label(subtitle, size: 11.5,
+                                                  color: WizardStyle.textSecondary)
         toggle.translatesAutoresizingMaskIntoConstraints = false
         toggle.controlSize = .small
 
@@ -585,9 +583,4 @@ final class OnboardingToggleRow: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
-}
-
-/// Document view for scrollers, so short content hugs the top rather than the bottom.
-final class OnboardingFlippedView: NSView {
-    override var isFlipped: Bool { true }
 }

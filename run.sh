@@ -6,21 +6,14 @@ CLEAN_RESTART=0
 APP_ARGS=()
 
 usage() {
-  echo "Usage: $0 [--clean-restart] [--onboarding]"
+  echo "Usage: $0 [--clean-restart]"
   echo "  --clean-restart    Remove local build cache before rebuilding"
-  echo "  --onboarding       Force the first-launch wizard, even once it's been completed"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean-restart)
       CLEAN_RESTART=1
-      shift
-      ;;
-    --onboarding)
-      # Does NOT reset onboardingCompleted — the wizard runs over the live
-      # config and writes back to it, so this is safe to use on a real setup.
-      APP_ARGS+=(--show-onboarding)
       shift
       ;;
     -h|--help)

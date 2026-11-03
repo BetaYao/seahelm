@@ -116,9 +116,8 @@ enum ClaudeHooksSetup {
     ///
     /// Returns whether Claude ends up configured — true when it already was,
     /// false only when a write that was needed failed. Not "was it modified":
-    /// `OnboardingHookInstaller` shows this as the wizard's `ok:` tick, so
-    /// reporting "unchanged" as failure made an already-working install look
-    /// broken to the user.
+    /// `AgentHookInstaller` reports this as the step's `ok`, so "unchanged"
+    /// must not read as failure.
     @discardableResult
     static func ensureHooksConfigured() -> Bool {
         let settingsPath = NSString("~/.claude/settings.json").expandingTildeInPath

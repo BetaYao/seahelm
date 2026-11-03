@@ -2,7 +2,6 @@ import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var mainWindowController: MainWindowController?
-    private var onboardingController: OnboardingWindowController?
 
     /// Periodically sweeps zmx sessions whose worktree no longer exists.
     private var orphanCleanupTimer: Timer?
@@ -22,10 +21,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Register bundled JetBrains Mono before any view builds its fonts.
         AppFont.registerBundledFonts()
 
-        // Categories / delegate only — permission is requested in onboarding or later.
+        // Categories / delegate only — permission is requested in bootstrap below.
         _ = NotificationManager.shared
 
-        let config = Config.load()
+        var config = Config.load()
         NotificationManager.shared.cooldown = config.notifications.cooldown
         NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
         NotificationManager.shared.soundPreference = config.notificationSound
@@ -44,47 +43,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.mainWindowController?.tabCoordinator.startBranchRefreshTimer()
         }
 
-        // `--render-onboarding <dir>` renders the wizard steps to PNGs and
-        // exits — headless design iteration.
-        if let idx = CommandLine.arguments.firstIndex(of: "--render-onboarding"),
-           CommandLine.arguments.count > idx + 1 {
-            OnboardingWindowController.renderSnapshots(to: CommandLine.arguments[idx + 1])
-            exit(0)
-        }
-
         Analytics.initialize()
         Analytics.trackAppStarted(worktreeCount: Analytics.knownWorktreeCount(from: config))
 
-        // `--show-onboarding` forces the wizard for design iteration without
-        // resetting config (finishing it still saves normally).
-        if !config.onboardingCompleted || CommandLine.arguments.contains("--show-onboarding") {
-            let wizard = OnboardingWindowController(config: config)
-            wizard.onComplete = { [weak self] updated in
-                Analytics.trackOnboardingCompleted()
-                self?.onboardingController = nil
-                self?.bootstrapMainApp(config: updated)
-            }
-            onboardingController = wizard
-            wizard.show()
-            return
+        // There is no first-launch wizard: a fresh config opens straight on the
+        // main window. The one choice the wizard used to ask for — which agent a
+        // new worktree starts — is taken from what is on PATH instead. (Not under
+        // a UI-test config, which is not the file this would write.)
+        if !config.onboardingCompleted, !CommandLine.arguments.contains("-UITestConfig") {
+            config.defaultAgent = AgentDetector
+                .preferredDefault(from: AgentDetector.scan()).rawValue
+            config.onboardingCompleted = true
+            config.saveNow()
         }
 
         bootstrapMainApp(config: config)
     }
 
-    /// Hooks, stores, channels, Ghostty, and main window — after onboarding (or immediately).
+    /// Hooks, stores, channels, Ghostty, and main window.
     private func bootstrapMainApp(config: Config) {
-        OnboardingHookInstaller.installForLaunch(config: config)
+        AgentHookInstaller.installForLaunch(config: config)
         NSAppearance.current = NSApp.effectiveAppearance
 
         TodoStore.shared.load()
         IdeaStore.shared.load()
         NotificationHistory.shared.load()
 
-        // Existing users who skipped the wizard still need a permission prompt once.
-        if config.onboardingCompleted {
-            NotificationManager.shared.requestPermission()
-        }
+        NotificationManager.shared.requestPermission()
 
         // Telegram is the phone-side remote-control transport.
         if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
@@ -165,8 +150,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let window = mainWindowController?.window {
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
-        } else if let window = onboardingController?.window {
-            window.makeKeyAndOrderFront(nil)
         }
         return false
     }
@@ -176,8 +159,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Bring existing window to front instead of creating a new one
         if let window = mainWindowController?.window {
             window.deminiaturize(nil)
-            window.makeKeyAndOrderFront(nil)
-        } else if let window = onboardingController?.window {
             window.makeKeyAndOrderFront(nil)
         }
     }

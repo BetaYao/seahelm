@@ -61,15 +61,15 @@ final class TelegramSetupWizard: NSViewController {
 
     // Chrome
     private let dots = NSStackView()
-    private let titleLabel = OnboardingStyle.label("", size: 19, weight: .semibold)
+    private let titleLabel = WizardStyle.label("", size: 19, weight: .semibold)
     private let content = NSView()
-    private let backButton = OnboardingSecondaryButton(text: "Back")
-    private let cancelButton = OnboardingSecondaryButton(text: "Cancel")
-    private let primaryButton = OnboardingPrimaryButton()
+    private let backButton = WizardSecondaryButton(text: "Back")
+    private let cancelButton = WizardSecondaryButton(text: "Cancel")
+    private let primaryButton = WizardPrimaryButton()
 
     // Step 2
     private let tokenTextView = NSTextView()
-    private let tokenStatus = OnboardingStatusPill()
+    private let tokenStatus = WizardStatusPill()
     private var validateWork: DispatchWorkItem?
     /// Bumped per validation so a slow reply for an old token cannot overwrite
     /// the verdict on the one now in the box.
@@ -77,11 +77,11 @@ final class TelegramSetupWizard: NSViewController {
 
     // Step 3
     private let qrView = QRCodeView(side: 168)
-    private let codeLabel = OnboardingStyle.monoLabel("", size: 19, weight: .semibold,
-                                                      color: OnboardingStyle.textPrimary)
-    private let pairStatus = OnboardingStatusPill()
-    private let expiryLabel = OnboardingStyle.label("", size: 11,
-                                                    color: OnboardingStyle.textFaint)
+    private let codeLabel = WizardStyle.monoLabel("", size: 19, weight: .semibold,
+                                                      color: WizardStyle.textPrimary)
+    private let pairStatus = WizardStatusPill()
+    private let expiryLabel = WizardStyle.label("", size: 11,
+                                                    color: WizardStyle.textFaint)
     private var expiryTimer: Timer?
 
     init(services: TelegramSetupServices) {
@@ -215,7 +215,7 @@ final class TelegramSetupWizard: NSViewController {
         for (index, dot) in dots.arrangedSubviews.enumerated() {
             let done = index <= step.rawValue
             dot.layer?.backgroundColor = view.resolvedCGColor(
-                done ? OnboardingStyle.accent : OnboardingStyle.stroke)
+                done ? WizardStyle.accent : WizardStyle.stroke)
             // The current step's dot stretches into a capsule, so the position
             // in the flow reads without counting.
             for c in dot.constraints where c.firstAttribute == .width {
@@ -227,12 +227,12 @@ final class TelegramSetupWizard: NSViewController {
     // MARK: - Step 1: create the bot
 
     private func buildCreateBotStep() -> NSView {
-        let blurb = OnboardingStyle.wrappingLabel(
+        let blurb = WizardStyle.wrappingLabel(
             "Telegram makes bots, not seahelm — @BotFather is the bot that makes bots. "
             + "It takes about a minute, and the bot is yours: its token stays on this Mac "
             + "and no traffic goes through us.", size: 12.5)
 
-        let panel = OnboardingPanel()
+        let panel = WizardPanel()
         panel.showsSelectionGlow = false
         let rows = NSStackView(views: [
             instructionRow(1, "Open @BotFather in Telegram."),
@@ -254,12 +254,12 @@ final class TelegramSetupWizard: NSViewController {
             rows.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -16),
         ])
 
-        let open = OnboardingSecondaryButton(text: "Open @BotFather", symbol: "arrow.up.forward.app")
+        let open = WizardSecondaryButton(text: "Open @BotFather", symbol: "arrow.up.forward.app")
         open.target = self
         open.action = #selector(openBotFatherClicked)
 
-        let hint = OnboardingStyle.label("Copies /newbot to the clipboard on the way.",
-                                         size: 11, color: OnboardingStyle.textFaint)
+        let hint = WizardStyle.label("Copies /newbot to the clipboard on the way.",
+                                         size: 11, color: WizardStyle.textFaint)
 
         let openRow = NSStackView(views: [open, hint])
         openRow.orientation = .horizontal
@@ -272,7 +272,7 @@ final class TelegramSetupWizard: NSViewController {
     // MARK: - Step 2: the token
 
     private func buildTokenStep() -> NSView {
-        let blurb = OnboardingStyle.wrappingLabel(
+        let blurb = WizardStyle.wrappingLabel(
             "Paste BotFather's reply — the whole message is fine, the token will be picked "
             + "out of it. It is checked against Telegram as soon as it looks complete.",
             size: 12.5)
@@ -282,7 +282,7 @@ final class TelegramSetupWizard: NSViewController {
         tokenTextView.isAutomaticQuoteSubstitutionEnabled = false
         tokenTextView.isAutomaticDashSubstitutionEnabled = false
         tokenTextView.drawsBackground = false
-        tokenTextView.textColor = OnboardingStyle.textPrimary
+        tokenTextView.textColor = WizardStyle.textPrimary
         tokenTextView.textContainerInset = NSSize(width: 8, height: 8)
         tokenTextView.delegate = self
         tokenTextView.setAccessibilityIdentifier("telegram.setup.token")
@@ -303,7 +303,7 @@ final class TelegramSetupWizard: NSViewController {
         scroll.documentView = tokenTextView
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let box = OnboardingPanel()
+        let box = WizardPanel()
         box.showsSelectionGlow = false
         box.addSubview(scroll)
         NSLayoutConstraint.activate([
@@ -314,7 +314,7 @@ final class TelegramSetupWizard: NSViewController {
             scroll.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -1),
         ])
 
-        let paste = OnboardingSecondaryButton(text: "Paste", symbol: "doc.on.clipboard")
+        let paste = WizardSecondaryButton(text: "Paste", symbol: "doc.on.clipboard")
         paste.target = self
         paste.action = #selector(pasteTokenClicked)
 
@@ -337,23 +337,23 @@ final class TelegramSetupWizard: NSViewController {
         let session = session ?? TelegramPairingSession()
         self.session = session
 
-        let blurb = OnboardingStyle.wrappingLabel(
+        let blurb = WizardStyle.wrappingLabel(
             "Point your phone's camera at the code. Telegram opens on your bot with a Start "
             + "button — tap it, and this Mac learns who you are. Nobody else can use the bot.",
             size: 12.5)
 
         qrView.payload = deepLink(code: session.code)
 
-        let orLabel = OnboardingStyle.label("Or send this code to \(botHandle):", size: 11.5,
-                                            color: OnboardingStyle.textSecondary)
+        let orLabel = WizardStyle.label("Or send this code to \(botHandle):", size: 11.5,
+                                            color: WizardStyle.textSecondary)
         codeLabel.stringValue = formatted(session.code)
 
-        let openTelegram = OnboardingSecondaryButton(text: "Open in Telegram",
+        let openTelegram = WizardSecondaryButton(text: "Open in Telegram",
                                                      symbol: "arrow.up.forward.app")
         openTelegram.target = self
         openTelegram.action = #selector(openDeepLinkClicked)
 
-        let newCode = OnboardingLinkButton(title: "New code", size: 11.5)
+        let newCode = WizardLinkButton(title: "New code", size: 11.5)
         newCode.target = self
         newCode.action = #selector(newCodeClicked)
 
@@ -384,11 +384,11 @@ final class TelegramSetupWizard: NSViewController {
 
     private func buildDoneStep() -> NSView {
         let who = pairResult?.displayName ?? "your account"
-        let headline = OnboardingStyle.wrappingLabel(
+        let headline = WizardStyle.wrappingLabel(
             "\(botHandle) is paired with \(who). Agent notifications go to that chat, and "
             + "anything you send it steers the fleet.", size: 12.5)
 
-        let panel = OnboardingPanel()
+        let panel = WizardPanel()
         panel.showsSelectionGlow = false
         let rows = NSStackView(views: [
             instructionRow(nil, "Send ", mono: "/status", trailing: " to see what is running."),
@@ -408,11 +408,11 @@ final class TelegramSetupWizard: NSViewController {
             rows.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -16),
         ])
 
-        let toggleRow = OnboardingToggleRow(
+        let toggleRow = WizardToggleRow(
             title: "Connect at launch",
             subtitle: "Bring the bridge up whenever seahelm starts.",
             symbol: "bolt.horizontal",
-            tint: { OnboardingStyle.accent })
+            tint: { WizardStyle.accent })
         toggleRow.isOn = autoConnect
         toggleRow.toggle.target = self
         toggleRow.toggle.action = #selector(autoConnectChanged(_:))
@@ -663,8 +663,8 @@ final class TelegramSetupWizard: NSViewController {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = spacing
-        for view in views where view is NSTextField || view is OnboardingPanel
-            || view is OnboardingToggleRow {
+        for view in views where view is NSTextField || view is WizardPanel
+            || view is WizardToggleRow {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
@@ -692,10 +692,10 @@ final class TelegramSetupWizard: NSViewController {
 
         let marker: NSTextField
         if let number {
-            marker = OnboardingStyle.monoLabel("\(number)", size: 11.5, weight: .semibold,
-                                               color: OnboardingStyle.accent)
+            marker = WizardStyle.monoLabel("\(number)", size: 11.5, weight: .semibold,
+                                               color: WizardStyle.accent)
         } else {
-            marker = OnboardingStyle.label("•", size: 12.5, color: OnboardingStyle.accent)
+            marker = WizardStyle.label("•", size: 12.5, color: WizardStyle.accent)
         }
         marker.setContentHuggingPriority(.required, for: .horizontal)
         marker.widthAnchor.constraint(equalToConstant: 12).isActive = true
@@ -715,11 +715,11 @@ final class TelegramSetupWizard: NSViewController {
     private func sentence(_ leading: String, mono: String?, trailing: String) -> NSAttributedString {
         let body: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12.5),
-            .foregroundColor: OnboardingStyle.textSecondary,
+            .foregroundColor: WizardStyle.textSecondary,
         ]
         let code: [NSAttributedString.Key: Any] = [
             .font: AppFont.mono(size: 12, weight: .medium),
-            .foregroundColor: OnboardingStyle.textPrimary,
+            .foregroundColor: WizardStyle.textPrimary,
         ]
         let out = NSMutableAttributedString(string: leading, attributes: body)
         if let mono {
