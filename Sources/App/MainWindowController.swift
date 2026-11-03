@@ -3761,7 +3761,6 @@ extension MainWindowController {
             return
         }
         let view = FirstMateView()
-        view.onSend = { [weak self] text in self?.tabCoordinator.autopilot.sendUserMessage(text) }
         view.onTurnOn = { [weak self] in
             guard let self else { return }
             self.setAutopilot(enabled: true, paused: false)
@@ -3771,7 +3770,7 @@ extension MainWindowController {
         firstMateView = view
         view.embed(tabCoordinator.autopilot.station)
         view.showLog(tabCoordinator.autopilot.audit.recent())
-        if tabCoordinator.autopilot.station != nil { view.focusInput() }
+        view.focusTerminal(tabCoordinator.autopilot.station)
     }
 
     fileprivate func setAutopilot(enabled: Bool, paused: Bool) {

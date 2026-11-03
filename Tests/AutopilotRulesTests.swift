@@ -180,6 +180,24 @@ final class FirstMatePaneTests: XCTestCase {
                       "a stale managed file is rewritten")
     }
 
+    func testFirstMateNeverInheritsABypass() throws {
+        XCTAssertTrue(FirstMatePane.launchCommand.contains("--permission-mode default"))
+        XCTAssertFalse(FirstMatePane.launchCommand.contains("dangerously"))
+        let permissions = FirstMatePane.permissions["permissions"] as? [String: Any]
+        XCTAssertEqual(permissions?["defaultMode"] as? String, "default")
+    }
+
+    func testAnOldSessionIsNotCurrent() {
+        let dir = NSTemporaryDirectory() + "fmv-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        XCTAssertFalse(FirstMatePane.sessionIsCurrent(at: dir))
+        try? "1".write(toFile: dir + "/.session-version", atomically: true, encoding: .utf8)
+        XCTAssertFalse(FirstMatePane.sessionIsCurrent(at: dir))
+        FirstMatePane.markSessionCurrent(at: dir)
+        XCTAssertTrue(FirstMatePane.sessionIsCurrent(at: dir))
+    }
+
     func testDockSaysWhatFirstMateIsDoing() {
         let dock = FirstMateDockView()
         var state = AutopilotCoordinator.State()

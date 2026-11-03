@@ -13,6 +13,18 @@ enum FirstMatePane {
     static var ledgerPath: String { directory + "/state.json" }
     static var auditPath: String { directory + "/audit.jsonl" }
     static var standingOrdersPath: String { directory + "/standing-orders.md" }
+    /// The `version` the live session was launched under. A session outlives the
+    /// app, so a fix to how First Mate is started only reaches it by replacing it.
+    static var sessionVersionPath: String { directory + "/.session-version" }
+
+    static func sessionIsCurrent(at dir: String = directory) -> Bool {
+        (try? String(contentsOfFile: dir + "/.session-version", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == String(version)
+    }
+
+    static func markSessionCurrent(at dir: String = directory) {
+        try? String(version).write(toFile: dir + "/.session-version", atomically: true, encoding: .utf8)
+    }
 
     /// Whether a pane is First Mate rather than a member of the fleet.
     static func isFirstMate(worktreePath: String) -> Bool { worktreePath == directory }
@@ -20,7 +32,7 @@ enum FirstMatePane {
     /// Bumped whenever `instructions` or `permissions` change, so an existing
     /// directory picks the new ones up. The files are seahelm's, not the user's:
     /// what the user says to keep goes in `standing-orders.md`, never touched.
-    static let version = 1
+    static let version = 2
 
     /// Write the managed files (when stale) and the standing orders (when absent).
     static func provision(at dir: String = directory) {
@@ -43,6 +55,12 @@ enum FirstMatePane {
         }
     }
 
+    /// Starts First Mate's agent. `--permission-mode default` because a user-level
+    /// `defaultMode: bypassPermissions` (common among people who run many agents)
+    /// would otherwise switch the gate below off; a CLI flag outranks every
+    /// settings file.
+    static let launchCommand = "claude --permission-mode default"
+
     /// Claude Code's own permission gate for this directory. seahelm enforces the
     /// autonomy policy on its CLI, but an agent free to run any shell command
     /// could step around it (`git worktree remove`, `gh pr merge`). So only reads
@@ -50,6 +68,9 @@ enum FirstMatePane {
     /// which shows as First Mate needing you.
     static let permissions: [String: Any] = [
         "permissions": [
+            // Belt to the launch flag's braces: this project's settings outrank
+            // the user's, so a bypass set there does not reach First Mate.
+            "defaultMode": "default",
             "allow": [
                 "Bash(seahelm:*)",
                 "Bash(gh pr view:*)", "Bash(gh pr list:*)", "Bash(gh pr checks:*)", "Bash(gh pr diff:*)",

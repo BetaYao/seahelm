@@ -1,16 +1,14 @@
 import AppKit
 
 /// First Mate over the terminal side (docs/first-mate-autopilot.md §3): its own
-/// terminal, the audit timeline beside it, and a line to talk to it. Shown in
-/// the dashboard's center overlay, so the fleet stays in view on the left.
-final class FirstMateView: NSView, NSTextFieldDelegate {
-    var onSend: ((String) -> Void)?
+/// terminal — which is where you talk to it — and the audit timeline beside it.
+/// Shown in the dashboard's center overlay, so the fleet stays in view on the left.
+final class FirstMateView: NSView {
     var onTurnOn: (() -> Void)?
 
     private let terminalContainer = NSView()
     private let logView = NSTextView()
     private let logScroll = NSScrollView()
-    private let input = NSTextField()
     private let offPanel = NSStackView()
     private let divider = NSView()
 
@@ -39,12 +37,6 @@ final class FirstMateView: NSView, NSTextFieldDelegate {
         divider.wantsLayer = true
         divider.translatesAutoresizingMaskIntoConstraints = false
 
-        input.placeholderString = "Tell First Mate something…"
-        input.font = AppFont.mono(size: 12)
-        input.delegate = self
-        input.translatesAutoresizingMaskIntoConstraints = false
-        input.setAccessibilityIdentifier("firstMate.input")
-
         let headline = NSTextField(wrappingLabelWithString: """
         First Mate is off.
 
@@ -67,11 +59,11 @@ final class FirstMateView: NSView, NSTextFieldDelegate {
         offPanel.translatesAutoresizingMaskIntoConstraints = false
         offPanel.isHidden = true
 
-        for v in [terminalContainer, divider, logScroll, input, offPanel] as [NSView] { addSubview(v) }
+        for v in [terminalContainer, divider, logScroll, offPanel] as [NSView] { addSubview(v) }
         NSLayoutConstraint.activate([
             terminalContainer.topAnchor.constraint(equalTo: topAnchor),
             terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            terminalContainer.bottomAnchor.constraint(equalTo: input.topAnchor, constant: -8),
+            terminalContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
             divider.topAnchor.constraint(equalTo: topAnchor),
             divider.bottomAnchor.constraint(equalTo: terminalContainer.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: terminalContainer.trailingAnchor),
@@ -81,9 +73,6 @@ final class FirstMateView: NSView, NSTextFieldDelegate {
             logScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             logScroll.bottomAnchor.constraint(equalTo: terminalContainer.bottomAnchor),
             logScroll.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.34),
-            input.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            input.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            input.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
             offPanel.centerXAnchor.constraint(equalTo: centerXAnchor),
             offPanel.centerYAnchor.constraint(equalTo: centerYAnchor),
             offPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
@@ -96,7 +85,7 @@ final class FirstMateView: NSView, NSTextFieldDelegate {
     func embed(_ station: Station?) {
         let on = station != nil
         offPanel.isHidden = on
-        for v in [terminalContainer, divider, logScroll, input] as [NSView] { v.isHidden = !on }
+        for v in [terminalContainer, divider, logScroll] as [NSView] { v.isHidden = !on }
         guard let station else { return }
         if station.view == nil {
             _ = station.create(in: terminalContainer, workingDirectory: FirstMatePane.directory,
@@ -136,14 +125,10 @@ final class FirstMateView: NSView, NSTextFieldDelegate {
         logView.scrollToEndOfDocument(nil)
     }
 
-    func focusInput() { window?.makeFirstResponder(input) }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
-        let text = input.stringValue
-        input.stringValue = ""
-        onSend?(text)
-        return true
+    /// Keyboard to First Mate's terminal, as selecting a worktree does for its pane.
+    func focusTerminal(_ station: Station?) {
+        guard let view = station?.view else { return }
+        DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(view) }
     }
 
     @objc private func turnOnClicked() { onTurnOn?() }

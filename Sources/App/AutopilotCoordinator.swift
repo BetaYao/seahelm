@@ -71,9 +71,17 @@ final class AutopilotCoordinator {
         // The agent is started with its own permission gate (`.claude/settings.json`
         // in its directory), never with the yolo flag: seahelm's policy covers its
         // CLI, Claude's covers the rest of the shell.
-        let command = AgentType.claudeCode.bareLaunchCommand(agentYolo: false) ?? "claude"
+        let command = FirstMatePane.launchCommand
         DispatchQueue.global(qos: .userInitiated).async {
-            if !SessionManager.sessionExists(name: FirstMatePane.sessionName, backend: backend) {
+            var exists = SessionManager.sessionExists(name: FirstMatePane.sessionName, backend: backend)
+            if exists, !FirstMatePane.sessionIsCurrent() {
+                // Launched by an older seahelm (say, before the permission flag):
+                // replace it rather than keep running under the old terms.
+                SessionManager.killSession(FirstMatePane.sessionName, backend: backend)
+                exists = false
+            }
+            if !exists {
+                FirstMatePane.markSessionCurrent()
                 DispatchQueue.global(qos: .userInitiated).async {
                     SessionManager.createDetachedSession(name: FirstMatePane.sessionName, backend: backend,
                                                          cwd: FirstMatePane.directory, agentCommandLine: command)
