@@ -252,10 +252,27 @@ final class AutopilotCoordinator {
     }
 
     private func handle(_ event: AutopilotEvent, now: Date) {
+        // A merge seen while First Mate is off stays unhandled: turned on later,
+        // the worktree it left behind is still something to clean up.
+        guard enabled else { return }
         if event.trigger == .prMerged, let pr = event.pr {
             ledger.markMergeHandled(AutopilotLedger.mergedKey(repoPath: event.repoPath, pr: pr.number))
         }
-        guard enabled else { return }
+        // A worktree event carries what is actually in the worktree, measured
+        // here (off main: git) rather than left to First Mate to describe.
+        if event.facts == nil, event.trigger == .prMerged || event.trigger == .ciFailed {
+            let path = event.worktreePath
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                var facts = WorktreeFacts.probe(worktreePath: path)
+                facts.busyPanes = WorktreeFacts.busyPanes(worktreePath: path)
+                DispatchQueue.main.async {
+                    var measured = event
+                    measured.facts = facts
+                    self?.handle(measured, now: now)
+                }
+            }
+            return
+        }
         let loaded = config(forRepo: event.repoPath)
         guard let config = loaded.config else {
             audit.append(.init(at: now, kind: .skipped, worktreePath: event.worktreePath, pr: event.pr?.number,
@@ -274,6 +291,7 @@ final class AutopilotCoordinator {
                                pr: event.pr?.number,
                                text: "\(event.trigger.eventName) · \(Self.shortName(event.worktreePath))"
                                    + (event.pr.map { " · PR #\($0.number)" } ?? "")
+                                   + (event.facts.map { " — \($0.summary)" } ?? "")
                                    + (quiet ? " (quiet hours — queued)" : "")))
             queue.append(d)
         }

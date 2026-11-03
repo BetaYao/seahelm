@@ -155,6 +155,7 @@
 		47759F5CFF91DF5045DB4658 /* PaneWorkingDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730849EDAF323B0D541E397C /* PaneWorkingDirectoryTests.swift */; };
 		478A900B42820F9CAC0829BF /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = 3C22FD399E95F8A453F40C3A /* ghostty */; };
 		478BA84CC6F98EA5F7F73B73 /* QRCodeRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D89A6016405AEDB17C3FB5E /* QRCodeRenderer.swift */; };
+		486379E525AC8903C9AE37DA /* WorktreeFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B057C74925A119F30F4564 /* WorktreeFacts.swift */; };
 		489D78C033D8B6E4A47DD497 /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B417FD281AFB3860433F468F /* UsageSummaryStoreTests.swift */; };
 		49042D7BD42C4FB04002DAAC /* libcurl.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 34E0E7E3509A350A7EBB5189 /* libcurl.tbd */; };
 		498DDC59CBB6DB32CB865CDC /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */; };
@@ -859,6 +860,7 @@
 		762E7115E9FB9B88ECD72CE5 /* HookEventMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookEventMerge.swift; sourceTree = "<group>"; };
 		777994FF5519110FAD559388 /* Region.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Region.swift; sourceTree = "<group>"; };
 		77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoStore.swift; sourceTree = "<group>"; };
+		77B057C74925A119F30F4564 /* WorktreeFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeFacts.swift; sourceTree = "<group>"; };
 		7842E00A1A18C4FAD50AF0ED /* HostGatewaySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewaySession.swift; sourceTree = "<group>"; };
 		78D1BBB07A2822E90114369F /* OverviewFocusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewFocusModel.swift; sourceTree = "<group>"; };
 		798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMode.swift; sourceTree = "<group>"; };
@@ -1916,6 +1918,7 @@
 				648402D6DD3D504D1A665DEA /* AutopilotPolicy.swift */,
 				68A2D55FFF84820EF8F4CA29 /* CronSchedule.swift */,
 				66DD1AFCDE04EC9197395A08 /* FirstMatePane.swift */,
+				77B057C74925A119F30F4564 /* WorktreeFacts.swift */,
 			);
 			path = Autopilot;
 			sourceTree = "<group>";
@@ -2826,6 +2829,7 @@
 				B0AF97B3F50FA1567DBD5CD9 /* WorktreeCreator.swift in Sources */,
 				D27F424356DE8B506B1C7C05 /* WorktreeDeleter.swift in Sources */,
 				56D7FA05EEF91495A4DCED81 /* WorktreeDiscovery.swift in Sources */,
+				486379E525AC8903C9AE37DA /* WorktreeFacts.swift in Sources */,
 				AE927CAE3FE5828509595FC2 /* WorktreeFileIndex.swift in Sources */,
 				3A5FD6063BF092FB51DC280A /* WorktreeGitStats.swift in Sources */,
 				86EB2D1A015733623B873AA9 /* WorktreeGrouping.swift in Sources */,

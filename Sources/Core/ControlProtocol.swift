@@ -309,6 +309,11 @@ final class ControlRouter {
             case .forbidden:
                 return .error(code: ControlError.autopilotRefused, message: "\(method) is not available to First Mate")
             case .gated(let action):
+                // A card that would delete a worktree shows what is in it, as measured.
+                var params = params
+                if action == .deleteWorktree, let facts = AutopilotPolicy.facts(forDeleting: params) {
+                    params[AutopilotPolicy.factsKey] = facts
+                }
                 switch dataSource?.autopilotGate(action: action, method: method, params: params)
                     ?? .deny("First Mate is not running") {
                 case .allow:
@@ -528,8 +533,14 @@ final class ControlRouter {
             }
 
         case "autopilot.propose":
-            let summary = (params["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var summary = (params["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let options = params["options"] as? [[String: Any]] ?? []
+            // Whatever First Mate wrote, a delete on offer carries the measured facts.
+            for option in options where option["action"] as? String == "worktree.delete" {
+                guard let p = option["params"] as? [String: Any], let facts = AutopilotPolicy.facts(forDeleting: p),
+                      let path = p["worktree_path"] as? String else { continue }
+                summary += "\n\(URL(fileURLWithPath: path).lastPathComponent): \(facts)"
+            }
             guard !summary.isEmpty, !options.isEmpty else {
                 return .error(code: ControlError.invalidParams, message: "summary and options are required")
             }

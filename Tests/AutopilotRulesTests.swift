@@ -235,3 +235,61 @@ final class FirstMatePaneTests: XCTestCase {
         XCTAssertTrue(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .action, text: "x")))
     }
 }
+
+final class WorktreeFactsTests: XCTestCase {
+    func testStatusAndShortstatParse() {
+        let status = " D pnpm-lock.yaml\n M AGENTS.md\nD  config/x.env\n?? CLAUDE.md\n"
+        let s = WorktreeFacts.parseStatus(status)
+        XCTAssertEqual(s.changed, 3)
+        XCTAssertEqual(s.deleted, 2)
+        XCTAssertEqual(s.untracked, 1)
+        let stat = WorktreeFacts.parseShortstat(" 41 files changed, 16 insertions(+), 47942 deletions(-)\n")
+        XCTAssertEqual(stat.insertions, 16)
+        XCTAssertEqual(stat.deletions, 47942)
+        XCTAssertEqual(WorktreeFacts.parseShortstat(" 1 file changed, 2 deletions(-)").insertions, 0)
+    }
+
+    /// The case that slipped past First Mate's own summary: 41 files, mostly deletions.
+    func testSummarySaysWhatIsThere() {
+        let f = WorktreeFacts(changedFiles: 40, deletedFiles: 40, untrackedFiles: 1, insertions: 16,
+                              deletions: 47942, unpushedCommits: 0, busyPanes: 0)
+        XCTAssertEqual(f.summary, "41 files uncommitted (+16 −47942; 40 deleted, 1 untracked) · every commit is on a remote · panes idle")
+        XCTAssertFalse(f.isClean)
+        XCTAssertEqual(WorktreeFacts(unpushedCommits: 0).summary, "nothing uncommitted · every commit is on a remote · panes idle")
+        XCTAssertTrue(WorktreeFacts(unpushedCommits: 0).isClean)
+    }
+
+    func testProbeMeasuresARealWorktree() throws {
+        let dir = NSTemporaryDirectory() + "facts-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        func git(_ args: String...) { _ = GitProcess.run(args, in: dir) }
+        git("init", "-q"); git("config", "user.email", "t@t"); git("config", "user.name", "t")
+        try "a\nb\n".write(toFile: dir + "/kept.txt", atomically: true, encoding: .utf8)
+        try "x\n".write(toFile: dir + "/gone.txt", atomically: true, encoding: .utf8)
+        git("add", "."); git("commit", "-qm", "one")
+        try FileManager.default.removeItem(atPath: dir + "/gone.txt")
+        try "new\n".write(toFile: dir + "/fresh.txt", atomically: true, encoding: .utf8)
+        let f = WorktreeFacts.probe(worktreePath: dir)
+        XCTAssertEqual(f.changedFiles, 1)
+        XCTAssertEqual(f.deletedFiles, 1)
+        XCTAssertEqual(f.untrackedFiles, 1)
+        XCTAssertEqual(f.deletions, 1)
+        XCTAssertEqual(f.unpushedCommits, 1, "no remote at all: the one commit is on none")
+    }
+
+    func testTheEventPromptCarriesTheFacts() {
+        var event = AutopilotEvent(trigger: .prMerged, repoPath: "/r", worktreePath: "/w", branch: "b",
+                                   pr: WorktreePRStatus(number: 5, url: "u", state: .merged, checks: nil, review: nil))
+        event.facts = WorktreeFacts(changedFiles: 2, insertions: 3, deletions: 4, unpushedCommits: 0, busyPanes: 1)
+        let prompt = AutopilotEngine.prompt(rule: AutomationConfig.builtIn.rules[1], event: event, config: .builtIn)
+        XCTAssertTrue(prompt.contains("facts (measured by seahelm"), prompt)
+        XCTAssertTrue(prompt.contains("2 files uncommitted (+3 −4) · every commit is on a remote · 1 pane busy"), prompt)
+    }
+
+    func testADeleteCardShowsTheFacts() {
+        let text = AutopilotPolicy.describe(method: "worktree.delete",
+                                            params: ["worktree_path": "/wt/x", AutopilotPolicy.factsKey: "nothing uncommitted"])
+        XCTAssertEqual(text, "Delete worktree x — nothing uncommitted")
+    }
+}
