@@ -32,6 +32,20 @@ class SplitContainerView: NSView, DividerDelegate {
 
     override var isFlipped: Bool { true }
 
+    /// A divider's grip is 16pt wide and overlaps both panes by half of it. Panes
+    /// are re-added on top whenever they come back into the container (worktree
+    /// switch, zoom, an overlay closing), so by subview order a pane would win the
+    /// click inside the grip while the divider's own tracking area — which fires
+    /// under other views — still lights it and shows the resize cursor: a handle
+    /// that will not drag. Dividers are asked first, whatever the order.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        for divider in dividers.values where !divider.isHidden && divider.frame.contains(local) {
+            return divider
+        }
+        return super.hitTest(point)
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = true

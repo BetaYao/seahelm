@@ -573,6 +573,7 @@
 		FAA6371DC6AF759AC571414B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57EF78A5043DF5162290DDE4 /* StatusPublisher.swift */; };
 		FAF2ABF4372E190D0A42EE2A /* HostGatewayConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDF8548571F540C914ACA11E /* HostGatewayConfigTests.swift */; };
 		FB0F579F23F5FBCAEE4FB294 /* PairRateLimiterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9D36C4513804B095CBABA5 /* PairRateLimiterTests.swift */; };
+		FB538CB2F85F4B42B656D236 /* SplitDividerDragTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F145FCE5CBBB808D55FE2ED /* SplitDividerDragTests.swift */; };
 		FB6A28074D9ADC1B5DB97F53 /* StationHealthCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C0F7D7F30A3F031DC191AFF /* StationHealthCheckTests.swift */; };
 		FBB5DF751FCBF459971307E2 /* ChatProgressReporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5FC7AAD7C1A63FAB4E534D /* ChatProgressReporterTests.swift */; };
 		FC2829917F91412C222E569F /* TelegramChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371F0BC6C00D849566000118 /* TelegramChannel.swift */; };
@@ -883,6 +884,7 @@
 		7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitConfirmation.swift; sourceTree = "<group>"; };
 		7E4B1DF4150360B756C4539C /* OnboardingAgentStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAgentStepView.swift; sourceTree = "<group>"; };
 		7E584B1D165D21C28521196B /* GitHubReturnPRClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubReturnPRClient.swift; sourceTree = "<group>"; };
+		7F145FCE5CBBB808D55FE2ED /* SplitDividerDragTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDividerDragTests.swift; sourceTree = "<group>"; };
 		7F2C37E0232BF78E7DCFAAC4 /* WorktreeDeleter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleter.swift; sourceTree = "<group>"; };
 		7F4985A21CB0E9D8B4708E26 /* AgentRegistryWebhookPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryWebhookPathTests.swift; sourceTree = "<group>"; };
 		7FB76BDD5A8BB0E59DA78D13 /* GrowingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowingTextView.swift; sourceTree = "<group>"; };
@@ -1812,6 +1814,7 @@
 				B279C16584685A92BC4AB782 /* SplitContainerDropTests.swift */,
 				E960699EF752C67ED06FF552 /* SplitContainerLayoutTests.swift */,
 				27B42EEB25FF49236DBABA03 /* SplitContainerRecoveryTests.swift */,
+				7F145FCE5CBBB808D55FE2ED /* SplitDividerDragTests.swift */,
 				B64B6D9AE47DFBCFCF626885 /* SplitNodeTests.swift */,
 				95F52B822BB29970B0615304 /* StackedWorktreeBaseTests.swift */,
 				1C0F7D7F30A3F031DC191AFF /* StationHealthCheckTests.swift */,
@@ -2437,6 +2440,7 @@
 				0D033767DF0C228D08E7ED2C /* SplitContainerDropTests.swift in Sources */,
 				E2066652132155948F7F9B1F /* SplitContainerLayoutTests.swift in Sources */,
 				01BC534B1823141012EAAAE3 /* SplitContainerRecoveryTests.swift in Sources */,
+				FB538CB2F85F4B42B656D236 /* SplitDividerDragTests.swift in Sources */,
 				BE5BDE49F57C10D9024D8379 /* SplitNodeTests.swift in Sources */,
 				0F42CE97488379120CBB967A /* StackedWorktreeBaseTests.swift in Sources */,
 				FB6A28074D9ADC1B5DB97F53 /* StationHealthCheckTests.swift in Sources */,
