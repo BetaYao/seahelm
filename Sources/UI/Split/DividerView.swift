@@ -146,7 +146,10 @@ class DividerView: NSView {
         isDragging = true
         isHovered = true
         applyLineColor()
-        dragStartPoint = convert(event.locationInWindow, from: nil)
+        // Window coordinates, not this view's: the divider moves under the drag,
+        // and a point measured against a frame that is itself moving fed each
+        // step's motion back into the next — the seam shook.
+        dragStartPoint = event.locationInWindow
         dragStartRatio = currentRatio
         resizeCursor.set()
         delegate?.dividerDidBeginDrag(splitNodeId)
@@ -154,12 +157,13 @@ class DividerView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard isDragging, parentSplitSize > 0 else { return }
-        let point = convert(event.locationInWindow, from: nil)
+        let point = event.locationInWindow
         let delta: CGFloat
         if axis == .horizontal {
             delta = point.x - dragStartPoint.x
         } else {
-            // Match historical sign in the flipped split container.
+            // Window y grows upward; the split container is flipped, so dragging
+            // down (y falling) grows the first, upper pane.
             delta = -(point.y - dragStartPoint.y)
         }
         let ratioDelta = delta / parentSplitSize
