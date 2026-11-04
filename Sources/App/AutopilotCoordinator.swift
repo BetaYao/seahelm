@@ -116,8 +116,22 @@ final class AutopilotCoordinator {
     private(set) var agent: AgentType = .claudeCode
 
     func apply(enabled: Bool, paused: Bool, backend: String, agent: AgentType = .claudeCode,
-               defaults: AutonomyMap = AutomationConfig.defaultAutonomy) {
+               defaults: AutonomyMap = AutomationConfig.defaultAutonomy, ownerCore: Bool = false) {
         self.paused = paused
+        // seahelm-core owns First Mate: this app only shows it. The local one
+        // stops (its session is left; the core replaces it, its stamp being
+        // another's) and the core's is followed instead.
+        if enabled && ownerCore {
+            if self.enabled {
+                self.enabled = false
+                stop()
+            }
+            self.agent = agent
+            if !remote { startRemote(backend: backend) }
+            refreshActivity()
+            return
+        }
+        if remote { stopRemote() }
         if defaults != self.defaults {
             self.defaults = defaults
             configs.removeAll()
@@ -192,6 +206,20 @@ final class AutopilotCoordinator {
     /// bare shell is not First Mate: it is replaced. So is a session launched by
     /// an older seahelm (before the permission flag, say).
     func ensureSession(then done: (() -> Void)? = nil) {
+        if remote {
+            // The core's session: never created or replaced from here. Wait
+            // for it to exist — attaching to a missing one would start an
+            // empty shell under its name.
+            let backend = self.backend
+            DispatchQueue.global(qos: .userInitiated).async {
+                let ok = SessionManager.waitUntilSessionExists(name: FirstMatePane.sessionName, backend: backend, timeoutSeconds: 5)
+                DispatchQueue.main.async { [weak self] in
+                    self?.refreshActivity()
+                    if ok { done?() }
+                }
+            }
+            return
+        }
         let backend = self.backend
         // The agent is started with its own permission gate (`.claude/settings.json`
         // in its directory), never with the yolo flag: seahelm's policy covers its
@@ -357,6 +385,14 @@ final class AutopilotCoordinator {
     @discardableResult
     func sendUserMessage(_ text: String, replyTo: String? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if remote {
+            guard remoteRunning, !trimmed.isEmpty else { return false }
+            if let replyTo, !replyTargets.contains(replyTo) { replyTargets.append(replyTo) }
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = CoreSocketClient.call("autopilot.say", ["text": trimmed])
+            }
+            return true
+        }
         guard enabled, !trimmed.isEmpty, let id = station?.id else { return false }
         userSpoke = true
         if let replyTo, !replyTargets.contains(replyTo) { replyTargets.append(replyTo) }
@@ -368,7 +404,7 @@ final class AutopilotCoordinator {
     /// Chats waiting on First Mate's answer, and where it is sent.
     private var replyTargets: [String] = []
     var onReply: ((_ targets: [String], _ text: String) -> Void)?
-    var isRunning: Bool { enabled && station != nil }
+    var isRunning: Bool { (enabled || (remote && remoteRunning)) && station != nil }
 
     private func send(_ text: String, to id: String) {
         awaitingTurn = true
@@ -442,6 +478,10 @@ final class AutopilotCoordinator {
 
     /// The user answered an approval card.
     func resolveApproval(_ id: String, approved: Bool) {
+        if remote {
+            answerRemote(id, option: approved ? Self.approveLabel : Self.rejectLabel)
+            return
+        }
         guard let approval = approvals.removeValue(forKey: id) else { return }
         state.pendingApprovals = approvals.count + proposals.count
         onApprovalClosed?(id)
@@ -516,6 +556,10 @@ final class AutopilotCoordinator {
 
     /// The user picked an option on a proposal card (or dismissed it).
     func resolveProposal(_ id: String, picked label: String) {
+        if remote {
+            answerRemote(id, option: label)
+            return
+        }
         guard let proposal = proposals.removeValue(forKey: id) else { return }
         state.pendingApprovals = approvals.count + proposals.count
         onApprovalClosed?(id)
@@ -572,7 +616,7 @@ final class AutopilotCoordinator {
     // MARK: - State
 
     private func refreshActivity() {
-        guard enabled, let id = station?.id else { state.activity = .off; return }
+        guard enabled || (remote && remoteRunning), let id = station?.id else { state.activity = .off; return }
         state.watching = repoPaths().count
         if paused { state.activity = .paused; return }
         let pane = AgentRegistry.shared.pane(for: id)
@@ -611,6 +655,135 @@ final class AutopilotCoordinator {
     }
 
     private static func shortName(_ path: String) -> String { URL(fileURLWithPath: path).lastPathComponent }
+
+    // MARK: - Following the core's First Mate
+
+    /// seahelm-core runs First Mate (`autopilot_owner: "core"`); this app
+    /// shows its state and cards and answers through it.
+    private(set) var remote = false
+    /// The core says First Mate is running.
+    private var remoteRunning = false
+    private var remoteTimer: Timer?
+    /// The core's First Mate cards on offer here, by approval/proposal id.
+    private var remoteCards: Set<String> = []
+    /// How far into `audit.jsonl` this app has read (the core writes it).
+    private var auditOffset: UInt64 = 0
+
+    private func startRemote(backend: String) {
+        remote = true
+        self.backend = backend
+        state.activity = .starting
+        // A Station on the core's session, so First Mate's view can show its
+        // terminal and the status publisher tracks it.
+        let station = Station()
+        station.paneSessionKey = FirstMatePane.sessionName
+        station.backend = backend
+        self.station = station
+        StationRegistry.shared.register(station)
+        AgentRegistry.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
+                                      project: FirstMatePane.project, startedAt: Date(),
+                                      paneSessionKey: FirstMatePane.sessionName, backend: backend)
+        auditOffset = (try? FileManager.default.attributesOfItem(atPath: FirstMatePane.auditPath))?[.size] as? UInt64 ?? 0
+        remoteTimer?.invalidate()
+        remoteTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.pollRemote() }
+        pollRemote()
+    }
+
+    private func stopRemote() {
+        remoteTimer?.invalidate()
+        remoteTimer = nil
+        for id in remoteCards { onApprovalClosed?(id) }
+        remoteCards = []
+        state.pendingApprovals = 0
+        if let station {
+            AgentRegistry.shared.unregister(terminalID: station.id)
+            StationRegistry.shared.unregister(station.id)
+        }
+        station = nil
+        remote = false
+        remoteRunning = false
+        replyTargets = []
+    }
+
+    /// The core's First Mate as of now, off main; then cards and the audit
+    /// lines it wrote since the last look, on main.
+    private func pollRemote() {
+        let auditPath = FirstMatePane.auditPath
+        let offset = auditOffset
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let reply = CoreSocketClient.call("autopilot.state")
+            let (entries, next) = Self.readAudit(path: auditPath, from: offset)
+            DispatchQueue.main.async {
+                guard let self, self.remote else { return }
+                self.auditOffset = next
+                // As if appended here: the dock's headline and the phone's
+                // action lines hang off `onAppend`.
+                for entry in entries { self.audit.onAppend?(entry) }
+                guard case .success(let state) = reply else {
+                    self.remoteRunning = false
+                    self.refreshActivity()
+                    return
+                }
+                self.applyRemote(state)
+            }
+        }
+    }
+
+    /// Mirror the core's First Mate cards into this app's queue (island,
+    /// Telegram, web all read it), keyed by their approval/proposal id.
+    func applyRemote(_ remoteState: [String: Any]) {
+        remoteRunning = remoteState["enabled"] as? Bool ?? false
+        let cards = remoteState["cards"] as? [[String: Any]] ?? []
+        var seen = Set<String>()
+        for card in cards {
+            guard let id = card["card"] as? String, !id.isEmpty else { continue }
+            seen.insert(id)
+            guard !remoteCards.contains(id) else { continue }
+            remoteCards.insert(id)
+            let message = card["message"] as? String ?? ""
+            let options = card["options"] as? [String] ?? []
+            if card["kind"] as? String == "proposal" {
+                onRequestProposal?(id, Self.stripping("First Mate suggests: ", from: message), options)
+            } else {
+                onRequestApproval?(id, Self.stripping("First Mate asks: ", from: message))
+            }
+        }
+        for id in remoteCards.subtracting(seen) { onApprovalClosed?(id) }
+        remoteCards = seen
+        state.pendingApprovals = seen.count
+        refreshActivity()
+    }
+
+    private func answerRemote(_ id: String, option: String) {
+        remoteCards.remove(id)
+        state.pendingApprovals = remoteCards.count
+        onApprovalClosed?(id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = CoreSocketClient.call("autopilot.answer", ["card": id, "option": option])
+        }
+    }
+
+    private static func stripping(_ prefix: String, from text: String) -> String {
+        text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : text
+    }
+
+    /// Complete lines of `path` past `offset`, and where the next read starts.
+    /// A file shorter than `offset` was replaced: read it from the top.
+    static func readAudit(path: String, from offset: UInt64) -> ([AutopilotAudit.Entry], UInt64) {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return ([], 0) }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = offset > size ? 0 : offset
+        guard size > start else { return ([], size) }
+        try? handle.seek(toOffset: start)
+        let data = handle.readDataToEndOfFile()
+        guard let lastNewline = data.lastIndex(of: 0x0A) else { return ([], start) }
+        let complete = data[data.startIndex...lastNewline]
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let entries = complete.split(separator: 0x0A).compactMap { try? decoder.decode(AutopilotAudit.Entry.self, from: Data($0)) }
+        return (entries, start + UInt64(complete.count))
+    }
 
     /// A repo's rules, re-read when the file changes.
     private func config(forRepo repoPath: String) -> (config: AutomationConfig?, error: String?) {
