@@ -174,7 +174,8 @@ argv on macOS, Linux and Windows. The root pid comes from the daemon's
 | `rollup` | WorktreeStatusAggregator (175) + PaneStatus | Both rollup rules, last activity |
 | `notify` | NotificationManager.shouldNotify | Decision only: fingerprint dedupe, 30s cooldown, 1s stability gate. Clients deliver |
 | `events` | EventHub (55) | 500-entry ring, `events_after` replay, `events.subscribe` |
-| `rpc` | ControlProtocol / SeahelmControlDataSource (status methods) | `pane.list`, `pane.explain`, `pane.seen`, `pane.wait_agent_status`, `hook`, `suggest`, `events.subscribe` |
+| `rpc` | ControlProtocol / SeahelmControlDataSource (status methods) | `pane.list`, `pane.explain`, `pane.seen`, `pane.wait_agent_status`, `hook`, `suggest`, `events.subscribe`; `pr.list` (M7) |
+| `pr` | WorktreePRStatus.swift (WorktreePRStore, WorktreePRStatusParser) | `crates/core/src/pr.rs`; curl transport, see M7 |
 
 ### What stays in clients
 
@@ -264,6 +265,9 @@ right.
 | M4 | Shadow mode in place: hooks reach the core (first forwarded by the app, now sent by the bridge itself, see M6), and `seahelm-core shadow --follow-app` mirrors the app's panes into the core and logs every disagreement that outlasts 8 s to `~/.config/seahelm/core-shadow.jsonl`. |
 | M5 | The GPUI client starts the core, registers the panes it opens, reports what it shows, and takes each worktree's dot from the core where the core has one. The installers and the Rust `seahelm-hook` are ported (`seahelm-core-hooks::install`, `src/bin/seahelm-hook.rs`); nothing installs them yet, since the app still installs its own shim. |
 | M6 | Hooks reach the core with no app in between. The app's `seahelm-hook` (v7) sends each payload to `core.sock` as well as `seahelm.sock`, and the app no longer forwards (`CoreHookForwarder` is gone, so nothing arrives twice). Without the app, `seahelm-core install-hooks` wires Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`, `[features].hooks`) to `seahelm-core hook <source>`, a bridge with the shim's contract (the `wire` splice, no stdout, exit 0, 2 s watchdog) that talks to the core's socket or, on Windows, its named pipe. It leaves an event alone when it already runs `seahelm-hook`, migrates its own entry when the exe moves, and never touches anyone else's. |
+| M7 | PR and CI status in the core (`crates/core/src/pr.rs`, ported from the app's `WorktreePRStore` / `WorktreePRStatusParser`, tests ported by name). Per repository, at most once a minute, the 30 most recently updated PRs (head branch, state, draft, review decision, head commit's check rollup) through `curl` to GitHub's GraphQL API, the request in a config on stdin so the token is not in argv; PRs from forks skipped; filed by branch. Token: `$GITHUB_TOKEN`, `$GH_TOKEN`, else `gh auth token`; none means no request. A failed request keeps the last answer and retries after five minutes. It runs on its own thread with its own lock (`core-pr`, every 15 s), so GitHub never holds the registry. Worktrees watched: those `worktrees.set` lists plus every registered pane's; each branch is re-read every tick. `worktree.list` stays as it was (worktrees with panes only) and gains `pr` on those entries; every watched worktree with a PR is in the new `pr.list` (`{prs: [{worktree_path, repo, branch, pr}]}`), so a client that reads only `worktree.list` sees no new rows. `pr` is the app's `fleet.groups` item shape: `{number, url, state: open\|draft\|merged\|closed, checks?: passing\|failing\|pending, review?: approved\|changes_requested\|review_required}`, checks and review only while open or draft. The GPUI client lists its fleet with `worktrees.set` and draws the app's badge from `pr.list`. |
+| M8 | The core logs what it decides (`~/.config/seahelm/core-events.jsonl`: status changes, notices, closes, moves, unseen completions, each with its wall-clock time; a scratch core on `$SEAHELM_CORE_SOCKET` logs beside its socket). The GPUI client follows `events.subscribe`: status changes refresh its rows at once, `pane.notice` becomes a banner (osascript / notify-send / a WinRT toast), and it reports its window's activation with `client.visible`. Windows: the core and the bridge use named pipes (`\\.\pipe\seahelm-core-<user>`), built and tested in Windows CI. `scripts/ab/` records a stretch of the app and the GPUI client used side by side and reports on it. |
+| M9 | Claude's and Codex's rate limits and today's tokens (the app's `Sources/Usage`) are a core service. `usage.summary` returns both snapshots (`rate_limit`, `weekly_rate_limit`, `today_tokens`, `updated_at`, `is_stale`) and the readouts (`segments`: `label`, `percent_text`, `severity`, `reset_text`). A thread of its own refreshes them every 60 s, and each field falls back to its last reading for 10 min (`crates/core/src/usage.rs`; the providers' and store's tests are ported by name). Claude's figures come only from the statusline payload cache: `~/Library/Caches/seahelm/claude-statusline.json` on macOS, so the app's bridge keeps feeding it; `$XDG_CACHE_HOME/seahelm` on Linux; `%LOCALAPPDATA%\seahelm\cache` on Windows. Codex's come from `codex app-server` and `~/.codex/sessions`. Without the app, `install-hooks` also wraps Claude's `statusLine` in `seahelm-core statusline -- '<original>'` (`statusline.rs`), which caches a payload that carries rate limits, then runs the original on the same bytes and passes its output and status through. The original command stays in the settings after `--`; the app's bridge is left alone. The GPUI client shows the readout at the foot of the fleet column. |
 
 Found while porting, beyond the table above:
 
@@ -272,14 +276,17 @@ Found while porting, beyond the table above:
   GPUI client uses), so the root is now read too, and set aside only when it
   is a shell. A login shell's argv0 (`-zsh`) now counts as a shell.
 - A core started by a client that ignores SIGTERM inherited that and could
-  not be stopped. `serve` restores the default handlers.
+  not be stopped. `serve` restores the default handlers, and unblocks
+  SIGTERM and SIGINT: a blocked mask survives exec as well, so a core the
+  GPUI client started would not stop on SIGTERM.
 
 Still open:
 
-- **Windows.** The core listens on a Unix socket. On Windows it needs the
-  same named-pipe server that seahelmd's own Windows port needs (see the port
-  assessment: keep's `pipe.rs`). The hook binary's Windows client side is
-  written but untested.
+- **Windows.** The core serves a named pipe (seahelmd's platform layer), and
+  CI builds and tests it there, but none of this has been tried on a Windows
+  desktop. Untested there: the hook bridge; the statusline tee, which runs
+  the original command through `cmd /C` while Claude Code on Windows may use
+  Git Bash; and `codex app-server` through an npm `.cmd` shim.
 - **The app as a client of the core.** The app still decides status itself
   (the core gets hooks from the bridge, not from the app). Moving its consumers over (rows, island,
   notifications, Telegram, First Mate) is a separate plan, to be written once

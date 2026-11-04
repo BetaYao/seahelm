@@ -16,6 +16,8 @@ pub fn waiting() -> Rgba { rgb(pick(0x5b93f0, 0x2563eb)) }
 pub fn idle() -> Rgba { rgb(pick(0x557170, 0x8a93a1)) }
 pub fn danger() -> Rgba { rgb(pick(0xe84635, 0xdc2626)) }
 pub fn attention() -> Rgba { rgb(pick(0xe0a458, 0xd08706)) }
+/// A merged PR (the app's violet).
+pub fn merged() -> Rgba { rgb(pick(0xa371f7, 0x8250df)) }
 pub fn diff_add() -> Rgba { rgb(pick(0x5fb87a, 0x1f9d63)) }
 pub fn diff_del() -> Rgba { rgb(pick(0xe07a6a, 0xdc2626)) }
 /// Toolbar glyph tint (`#888888`).
