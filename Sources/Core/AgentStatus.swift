@@ -34,7 +34,7 @@ enum AgentStatus: String, Codable {
         }
     }
 
-    /// Text glyph for notifications, the island, and AgentRegistry markdown — plain
+    /// Text glyph for notifications, the island, and Fleet markdown — plain
     /// characters that read well inline (distinct from the dashboard `glyph`).
     var icon: String {
         switch self {
@@ -57,5 +57,32 @@ enum AgentStatus: String, Codable {
         case .exited:   return "Dormant"
         case .unknown:  return "Unknown"
         }
+    }
+}
+
+extension AgentStatus {
+    /// Rollup priority. `waiting` (agent blocked on the user) ranks highest so it
+    /// bubbles to the worktree badge — it is the state most in need of attention.
+    var priority: UInt8 {
+        switch self {
+        case .waiting: return 6
+        case .error:   return 5
+        case .exited:  return 4
+        case .running: return 3
+        case .idle:    return 2
+        case .unknown: return 1
+        }
+    }
+
+    var isUrgent: Bool {
+        self == .error || self == .waiting
+    }
+
+    var isActive: Bool {
+        self == .running || self == .waiting
+    }
+
+    static func highestPriority(_ statuses: [AgentStatus]) -> AgentStatus {
+        statuses.max(by: { $0.priority < $1.priority }) ?? .unknown
     }
 }

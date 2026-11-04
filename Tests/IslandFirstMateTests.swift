@@ -3,10 +3,8 @@ import XCTest
 
 /// The island's two pages (the surfaces design, states 2 and 3).
 final class IslandFirstMateTests: XCTestCase {
-    private func order(_ id: String) -> PendingOrder {
-        PendingOrder(id: id, action: FirstMateAction(
-            kind: .suggestNextOrder, zone: .red, worktreePath: "/w", branch: "b", project: "p",
-            terminalID: "t", message: "Next?", options: ["go"]))
+    private func order(_ id: String) -> Card {
+        Card(id: id, kind: .suggestion, terminalID: "t", worktreePath: "/w", message: "Next?", options: ["go"])
     }
 
     func testOpensOnTheCardsWhenAnyWaitElseOnTheConversation() {

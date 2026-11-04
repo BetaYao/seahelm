@@ -46,16 +46,12 @@ final class RecordingVTProcessSpawner: VTProcessSpawning {
     var nextProcess: FakeVTAttachedProcess?
 
     func spawn(
-        python3: String,
-        scriptPath: String,
         sessionKey: String,
         rows: Int,
         cols: Int,
         seahelmdPath: String
     ) throws -> VTAttachedProcess {
         requests.append(VTProcessSpawnRequest(
-            python3: python3,
-            scriptPath: scriptPath,
             sessionKey: sessionKey,
             rows: rows,
             cols: cols,
@@ -85,7 +81,6 @@ final class SeahelmdVTAttachManagerTests: XCTestCase {
         let mgr = SeahelmdVTAttachManager(
             processSpawner: spawner,
             seahelmdPath: { _ in "/fake/seahelmd" },
-            attachScriptPath: { "/fake/seahelmd-attach.py" },
             sessionSize: sessionSize,
             now: { [unowned self] in self.fakeClock },
             leaseTTL: leaseTTL,
@@ -115,7 +110,6 @@ final class SeahelmdVTAttachManagerTests: XCTestCase {
         XCTAssertEqual(spawner.requests[0].rows, 40)
         XCTAssertEqual(spawner.requests[0].cols, 100)
         XCTAssertEqual(spawner.requests[0].seahelmdPath, "/fake/seahelmd")
-        XCTAssertEqual(spawner.requests[0].python3, "/usr/bin/python3")
     }
 
     func testDefaultGeometryWhenSessionSizeUnavailable() {

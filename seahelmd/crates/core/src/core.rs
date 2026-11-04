@@ -71,6 +71,10 @@ struct State {
     /// "on screen" for unseen completion.
     visible: HashSet<String>,
     app_active: bool,
+    /// What each client (`client.visible {client}`) shows, and whether it is
+    /// in front. `visible` / `app_active` are their union: a pane is on
+    /// screen when any client in front shows it.
+    clients: HashMap<String, (HashSet<String>, bool)>,
     /// The newest location each pane's agent reported (`pane.location`).
     locations: HashMap<String, Value>,
     /// Each worktree's title as the app's rows read it (session summary,
@@ -138,6 +142,7 @@ impl Core {
                 synced: HashSet::new(),
                 visible: HashSet::new(),
                 app_active: false,
+                clients: HashMap::new(),
                 locations: HashMap::new(),
                 worktree_titles: HashMap::new(),
                 session_refs,
@@ -343,10 +348,14 @@ impl Core {
             }
             "client.visible" => {
                 let mut st = self.lock();
-                st.visible = strings(&p, "worktrees").into_iter().collect();
-                st.app_active = p.get("app_active").and_then(Value::as_bool).unwrap_or(true);
-                if st.app_active {
-                    let shown: Vec<String> = st.visible.iter().cloned().collect();
+                let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
+                let shows: HashSet<String> = strings(&p, "worktrees").into_iter().collect();
+                let active = p.get("app_active").and_then(Value::as_bool).unwrap_or(true);
+                st.clients.insert(client, (shows.clone(), active));
+                st.app_active = st.clients.values().any(|(_, a)| *a);
+                st.visible = st.clients.values().filter(|(_, a)| *a).flat_map(|(w, _)| w.iter().cloned()).collect();
+                if active {
+                    let shown: Vec<String> = shows.into_iter().collect();
                     for wt in shown {
                         st.registry.mark_worktree_seen(&wt);
                     }
@@ -362,6 +371,7 @@ impl Core {
                 Ok(json!({"seen": seen}))
             }
             "pane.list" | "session.snapshot" => {
+                let detail = p.get("detail").and_then(Value::as_bool).unwrap_or(false);
                 let st = self.lock();
                 // Each pane's `#n` too, minted on first sight: every surface
                 // shows the core's numbers.
@@ -373,6 +383,9 @@ impl Core {
                         let mut v = st.pane_json(&p.id)?;
                         if p.id != fm_policy::SESSION {
                             v["handle"] = json!(handles.handle(&p.id));
+                        }
+                        if detail {
+                            v["info"] = seahelm_core_registry::events::pane_detail(p);
                         }
                         Some(v)
                     })
@@ -405,6 +418,19 @@ impl Core {
             "agent.sessions" => {
                 let st = self.lock();
                 Ok(json!({"agent_sessions": st.session_refs}))
+            }
+            // A pane closed for good: its session name may be reused, and must
+            // not resume the agent it used to hold.
+            "agent.forget" => {
+                let Some(key) = str_param(&p, "pane_session_key") else {
+                    return Reply::Value(Err(RpcError::invalid_params("pane_session_key required")));
+                };
+                let mut st = self.lock();
+                let forgot = st.session_refs.remove(&key).is_some();
+                if forgot {
+                    st.save_session_refs();
+                }
+                Ok(json!({"forgot": forgot}))
             }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "usage.summary" => Ok(crate::usage::summary(now)),
@@ -498,6 +524,19 @@ impl Core {
                 let pane = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
                 let rows: Vec<Value> = st.messages.snapshot(pane.as_deref()).iter().map(|m| m.to_json()).collect();
                 Ok(json!({"messages": rows, "seq": st.messages.seq()}))
+            }
+            // What happened since `after_seq`, for a client that was away; null
+            // when the gap is not known (ahead of the hub: start over).
+            "message.replay" => {
+                let Some(after) = p.get("after_seq").and_then(Value::as_u64) else {
+                    return Reply::Value(Err(RpcError::invalid_params("after_seq required")));
+                };
+                let st = self.lock();
+                Ok(match st.messages.replay(after) {
+                    None => json!({"replay": null, "seq": st.messages.seq()}),
+                    Some(r) => json!({"replay": {"messages": r.messages.iter().map(|m| m.to_json()).collect::<Vec<_>>(),
+                                                  "truncated": r.truncated}, "seq": st.messages.seq()}),
+                })
             }
             "message.history" => {
                 let Some(pane) = str_param(&p, "pane_session_key").or_else(|| str_param(&p, "pane_id")) else {
@@ -668,7 +707,7 @@ impl Core {
     }
 
     pub fn spawn_event_log(self: &Arc<Self>, path: PathBuf) {
-        const LOGGED: [&str; 5] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed"];
+        const LOGGED: [&str; 8] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed", "pane.location", "agent.session", "worktree.discovered"];
         const ROLL_AT: u64 = 20 << 20;
         let core = Arc::clone(self);
         let _ = std::thread::Builder::new().name("seahelm-core-event-log".into()).spawn(move || {
@@ -1043,6 +1082,9 @@ impl State {
             seen.insert(key.clone());
             let branch = str_param(p, "branch").unwrap_or_default();
             let project = str_param(p, "project").unwrap_or_default();
+            if self.registry.pane(&key).is_some() {
+                self.registry.set_alias(&key, str_param(p, "pane_id"));
+            }
             match self.registry.pane(&key).map(|i| i.worktree_path.clone()) {
                 Some(old) if old == worktree => {}
                 Some(_) => {
@@ -1268,10 +1310,22 @@ impl State {
             let out = self.provider.handle(&ev, now, &mut hooks::provider::probe_worktree_root);
             if let Some(loc) = &out.pane_location {
                 if let Some(pane) = self.registry.resolve(Some(&loc.pane), "") {
-                    self.locations.insert(
-                        pane,
-                        json!({"worktree": loc.worktree, "location": loc.location, "created_by_agent": loc.created_by_agent, "at": now}),
-                    );
+                    let entry = json!({"worktree": loc.worktree, "location": loc.location, "created_by_agent": loc.created_by_agent, "at": now});
+                    // Pushed when it moves, so a client acts on it without polling
+                    // `pane.locations`.
+                    let moved = self.locations.get(&pane).map(|old| (&old["worktree"], &old["location"])) != Some((&entry["worktree"], &entry["location"]));
+                    if moved {
+                        let public = self.registry.pane(&pane).map(|i| i.public_id().to_string()).unwrap_or_else(|| pane.clone());
+                        self.registry.publish(json!({
+                            "type": "pane.location",
+                            "pane_id": public,
+                            "pane_session_key": pane,
+                            "worktree": loc.worktree,
+                            "location": loc.location,
+                            "created_by_agent": loc.created_by_agent,
+                        }));
+                    }
+                    self.locations.insert(pane, entry);
                 }
             }
             if let Some(r) = &out.session_ref {
@@ -1282,10 +1336,18 @@ impl State {
                 };
                 if let (Some(key), Ok(v)) = (key, serde_json::to_value(&r.session_ref)) {
                     if self.session_refs.get(&key) != Some(&v) {
+                        // Pushed, so the client that recreates the pane's session
+                        // resumes the agent without asking.
+                        self.registry.publish(json!({"type": "agent.session", "pane_session_key": key, "ref": v}));
                         self.session_refs.insert(key, v);
                         self.save_session_refs();
                     }
                 }
+            }
+            if let Some((path, pane)) = &out.new_worktree {
+                // An agent is working in a worktree nobody tracks yet: the
+                // client that owns the fleet's layout picks it up.
+                self.registry.publish(json!({"type": "worktree.discovered", "worktree_path": path, "pane_session_key": pane}));
             }
             let kind = hooks::decode::decode(&ev, now);
             let last_assistant_message = ev

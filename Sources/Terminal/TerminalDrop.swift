@@ -88,7 +88,7 @@ enum TerminalDrop {
     static func deliver(_ content: Content, to station: Station) {
         guard case .files(let urls) = content,
               urls.contains(where: AgentImagePaste.isImage),
-              AgentImagePaste.supports(AgentRegistry.shared.pane(for: station.id)?.agentType) else {
+              AgentImagePaste.supports(Fleet.shared.pane(for: station.id)?.agentType) else {
             station.sendText(text(for: content))
             return
         }

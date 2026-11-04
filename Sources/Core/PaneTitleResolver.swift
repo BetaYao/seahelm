@@ -155,7 +155,7 @@ enum PaneTitleResolver {
     /// or when the title is just the pane's directory.
     ///
     /// Public because the click→title fast path resolves straight from a
-    /// `Station` (no AgentRegistry round-trip — its snapshots trail the poll cycle).
+    /// `Station` (no Fleet round-trip — its snapshots trail the poll cycle).
     static func displayOscTitle(_ raw: String?, worktreePath: String, pwd: String = "") -> String? {
         guard let raw else { return nil }
         let stripped = raw.drop { ch in

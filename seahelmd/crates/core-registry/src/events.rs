@@ -70,6 +70,33 @@ impl EventHub {
     }
 }
 
+/// Everything a client draws for a pane: `pane.list {detail: true}` adds
+/// it to each pane, and `pane.status_changed` / `pane.updated` carry it as
+/// `info`, so one event is enough to redraw a row.
+pub fn pane_detail(p: &PaneInfo) -> Value {
+    json!({
+        "status": p.status.as_str(),
+        "display_status": p.display_status().as_str(),
+        "agent_type": agent_type_str(p.agent_type),
+        "last_message": p.last_message,
+        "last_assistant_message": p.last_assistant_message,
+        "last_assistant_message_at": p.last_assistant_message_at,
+        "last_user_prompt": p.last_user_prompt,
+        "last_user_prompt_at": p.last_user_prompt_at,
+        "command_line": p.command_line,
+        "round_duration": p.round_duration,
+        "started_at": p.started_at,
+        "tasks": p.tasks,
+        "activity_events": p.activity_events,
+        "scan_status": p.scan_status.as_str(),
+        "hook_status": p.hook_status.as_str(),
+        "program_status": p.program_status.as_str(),
+        "program_state": p.program_state.map(|s| format!("{s:?}").to_lowercase()),
+        "background_busy": p.background_busy,
+        "unseen": p.unseen_completion,
+    })
+}
+
 /// The fields every pane event starts with.
 fn base(kind: &str, seq: u64, pane: &PaneInfo) -> Map<String, Value> {
     let mut m = Map::new();
@@ -97,6 +124,12 @@ pub fn outcome_event(o: &Outcome) -> Value {
         agent_type_str(o.info.agent_type).into(),
     );
     d.insert("last_message".into(), o.info.last_message.clone().into());
+    d.insert("info".into(), pane_detail(&o.info));
+    // The event itself (kind and source, serde's shape), so a client can
+    // hand its consumers the same event the core decided on.
+    if let Ok(ev) = serde_json::to_value(&o.event) {
+        d.insert("event".into(), ev);
+    }
     // Only a completion carries the agent's real final prose; gating on the
     // flag stops unrelated events re-sending stale prose left on the snapshot.
     if o.is_completion_signal {

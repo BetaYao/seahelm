@@ -80,20 +80,13 @@ protocol ControlDataSource: AnyObject {
     func worktreeGroups(mode: String) -> [[String: Any]]?
     /// Decline a pane's open suggestion. False if there was nothing to decline.
     func dismissDecision(paneId: String) -> Bool
-    /// First Mate wants to do something gated (`AutopilotPolicy`). Decides
-    /// whether it runs now, waits for the user, or is refused.
-    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate
     /// Remove a worktree the way its row's Delete does (with that path's checks).
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError>
-    /// A gated call from First Mate went through; what it returned.
-    func autopilotDidRun(method: String, result: ControlResult)
     /// First Mate as a remote client draws it: on or off, what it is doing, its
     /// pane, and the cards waiting on the user. Nil when there is no First Mate.
     func firstMateState() -> [String: Any]?
     /// The user answered one of First Mate's cards from a remote client.
     func answerFirstMateCard(card: String, option: String) -> Bool
-    /// First Mate offers the user a choice; each option is an action to run if picked.
-    func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult
     /// Answer row `index` of a pane's open question card, the way a tap on the
     /// card answers it. nil when the pane has no card to answer; otherwise
     /// `card` is the question still standing afterwards (a multi-select one
@@ -108,7 +101,6 @@ protocol ControlDataSource: AnyObject {
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
     /// into the shared event sink. Hook delivery is fire-and-forget; Stop hooks
     /// are observation-only and never return a continuation/block decision.
-    func ingestHook(json: [String: Any])
 
     // MARK: Phase 2 — write channel + wait (default no-ops so read-only
     // conformers/fakes keep compiling).
@@ -303,40 +295,11 @@ final class ControlRouter {
         let meta = params["_meta"] as? [String: Any]
         let caller = (meta?["caller"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let note = meta?["note"] as? String
-        var gatedForFirstMate = false
-        if method == "autopilot.propose", !AutopilotPolicy.isFirstMate(caller: caller) {
-            return .error(code: ControlError.autopilotRefused, message: "only First Mate proposes")
-        }
-        if AutopilotPolicy.isFirstMate(caller: caller) {
-            switch AutopilotPolicy.classify(method: method) {
-            case .open:
-                break
-            case .forbidden:
-                return .error(code: ControlError.autopilotRefused, message: "\(method) is not available to First Mate")
-            case .gated(let action):
-                // A card that would delete a worktree shows what is in it, as measured.
-                var params = params
-                if action == .deleteWorktree, let facts = AutopilotPolicy.facts(forDeleting: params) {
-                    params[AutopilotPolicy.factsKey] = facts
-                }
-                switch dataSource?.autopilotGate(action: action, method: method, params: params)
-                    ?? .deny("First Mate is not running") {
-                case .allow:
-                    gatedForFirstMate = true
-                case .queued(let card):
-                    return .ok(["queued": "approval", "card": card,
-                                "message": "Queued for the user's approval; nothing ran yet."])
-                case .deny(let reason):
-                    return .error(code: ControlError.autopilotRefused, message: reason)
-                }
-            }
-        }
         if let caller, Self.presenceMethods.contains(method),
            let target = params["pane_id"] as? String, !target.isEmpty {
             dataSource?.notePresence(callerPaneId: caller, targetPaneId: target, note: note)
         }
         let result = dispatch(method: method, params: params)
-        if gatedForFirstMate { dataSource?.autopilotDidRun(method: method, result: result) }
         if let caller, method == "pane.split", case .ok(let created) = result,
            let newPane = created["pane_id"] as? String {
             dataSource?.notePresence(callerPaneId: caller, targetPaneId: newPane, note: note)
@@ -365,13 +328,6 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
             }
             return .ok(["text": text])
-
-        case "hook":
-            // Raw webhook-shaped payload (parity with the HTTP webhook body).
-            // Hook delivery is deliberately fire-and-forget: a Stop hook reports
-            // the final response but cannot block the agent into another turn.
-            dataSource?.ingestHook(json: params)
-            return .ok([:])
 
         case "pane.send_text", "pane.run":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
@@ -552,21 +508,6 @@ final class ControlRouter {
             }
             return .ok(["answered": true])
 
-        case "autopilot.propose":
-            var summary = (params["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let options = params["options"] as? [[String: Any]] ?? []
-            // Whatever First Mate wrote, a delete on offer carries the measured facts.
-            for option in options where option["action"] as? String == "worktree.delete" {
-                guard let p = option["params"] as? [String: Any], let facts = AutopilotPolicy.facts(forDeleting: p),
-                      let path = p["worktree_path"] as? String else { continue }
-                summary += "\n\(URL(fileURLWithPath: path).lastPathComponent): \(facts)"
-            }
-            guard !summary.isEmpty, !options.isEmpty else {
-                return .error(code: ControlError.invalidParams, message: "summary and options are required")
-            }
-            return dataSource?.autopilotPropose(summary: summary, options: options)
-                ?? .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-
         case "worktree.delete":
             let path = (params["worktree_path"] as? String) ?? ""
             guard !path.isEmpty else {
@@ -667,26 +608,6 @@ final class ControlRouter {
 
         case "pane.wait_agent_status", "wait.agent_status":
             return waitAgentStatus(params: params)
-
-        case "suggest":
-            guard let options = params["options"] as? [String], !options.isEmpty else {
-                return .error(code: ControlError.invalidParams, message: "options required")
-            }
-            var payload: [String: Any] = [
-                "source": "seahelm-suggest",
-                "event": "suggest",
-                "cwd": params["cwd"] as? String ?? "",
-                "session_id": params["pane_id"] as? String ?? "cli",
-                "data": ["options": options],
-            ]
-            if let paneId = params["pane_id"] as? String {
-                payload["pane_id"] = paneId
-                // Also expose under the bridge's canonical key so WebhookEvent.paneId
-                // is populated — the Stop→suggest turn correlation keys off paneId.
-                payload["seahelm_pane_id"] = paneId
-            }
-            _ = dataSource?.ingestHook(json: payload)
-            return .ok(["accepted": true])
 
         default:
             return .error(code: ControlError.methodNotFound, message: "unknown method: \(method)")
@@ -835,16 +756,9 @@ final class ControlRouter {
 /// source with no window to mirror simply reports nothing to mirror.
 extension ControlDataSource {
     func dismissDecision(paneId: String) -> Bool { false }
-    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate {
-        .deny("First Mate is not running")
-    }
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
-    func autopilotDidRun(method: String, result: ControlResult) {}
     func firstMateState() -> [String: Any]? { nil }
     func answerFirstMateCard(card: String, option: String) -> Bool { false }
-    func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult {
-        .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-    }
     func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
     func markPaneSeen(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }

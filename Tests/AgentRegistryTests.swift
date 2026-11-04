@@ -1,11 +1,11 @@
 import XCTest
 @testable import seahelm
 
-/// Tests for AgentRegistry singleton.
+/// Tests for Fleet singleton.
 /// Note: We avoid creating Station instances in tests because they
 /// require Ghostty/Metal initialization. Instead we test the data management
 /// logic by registering agents and verifying queries.
-final class AgentRegistryTests: XCTestCase {
+final class FleetTests: XCTestCase {
 
     /// Helper: register a test agent without a real surface.
     /// Returns the terminal ID (surface.id) for use in subsequent calls.
@@ -15,7 +15,7 @@ final class AgentRegistryTests: XCTestCase {
         startedAt: Date? = nil
     ) -> String {
         let surface = Station()
-        AgentRegistry.shared.register(
+        Fleet.shared.register(
             station: surface, worktreePath: path, branch: branch, project: project,
             startedAt: startedAt
         )
@@ -25,14 +25,14 @@ final class AgentRegistryTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Clear shared state between tests
-        for agent in AgentRegistry.shared.allPanes() {
-            AgentRegistry.shared.unregister(terminalID: agent.id)
+        for agent in Fleet.shared.allPanes() {
+            Fleet.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
-        for agent in AgentRegistry.shared.allPanes() {
-            AgentRegistry.shared.unregister(terminalID: agent.id)
+        for agent in Fleet.shared.allPanes() {
+            Fleet.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
     }
@@ -42,7 +42,7 @@ final class AgentRegistryTests: XCTestCase {
     func testRegisterAndQuery() {
         let tid = registerTestPane(path: "/tmp/repo/main", project: "MyProject")
 
-        let agents = AgentRegistry.shared.allPanes()
+        let agents = Fleet.shared.allPanes()
         XCTAssertEqual(agents.count, 1)
         XCTAssertEqual(agents[0].id, tid)
         XCTAssertEqual(agents[0].worktreePath, "/tmp/repo/main")
@@ -54,172 +54,56 @@ final class AgentRegistryTests: XCTestCase {
 
     func testUnregister() {
         let tid = registerTestPane(path: "/tmp/repo/main")
-        AgentRegistry.shared.unregister(terminalID: tid)
+        Fleet.shared.unregister(terminalID: tid)
 
-        XCTAssertEqual(AgentRegistry.shared.allPanes().count, 0)
-        XCTAssertNil(AgentRegistry.shared.pane(for: tid))
-        XCTAssertNil(AgentRegistry.shared.pane(forWorktree: "/tmp/repo/main"))
+        XCTAssertEqual(Fleet.shared.allPanes().count, 0)
+        XCTAssertNil(Fleet.shared.pane(for: tid))
+        XCTAssertNil(Fleet.shared.pane(forWorktree: "/tmp/repo/main"))
     }
 
     func testUnregisterCleansUpBackendsByPath() {
         let surface = Station()
-        AgentRegistry.shared.register(
+        Fleet.shared.register(
             station: surface, worktreePath: "/tmp/test-repo/main",
             branch: "main", project: "test", startedAt: nil,
             paneSessionKey: "seahelm-test-main", backend: "seahelmd"
         )
 
-        AgentRegistry.shared.unregister(terminalID: surface.id)
+        Fleet.shared.unregister(terminalID: surface.id)
 
-        XCTAssertNil(AgentRegistry.shared.pane(for: surface.id))
-        XCTAssertNil(AgentRegistry.shared.pane(forWorktree: "/tmp/test-repo/main"))
+        XCTAssertNil(Fleet.shared.pane(for: surface.id))
+        XCTAssertNil(Fleet.shared.pane(forWorktree: "/tmp/test-repo/main"))
     }
 
     // MARK: - Status Updates
 
-    func testUpdateStatus() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
 
-        AgentRegistry.shared.updateStatus(
-            terminalID: tid,
-            status: .running,
-            lastMessage: "Editing file.swift",
-            roundDuration: 30.0
-        )
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.status, .running)
-        XCTAssertEqual(agent?.lastMessage, "Editing file.swift")
-        XCTAssertEqual(agent?.roundDuration, 30.0)
-    }
-
-    func testUpdateStatusForUnknownID() {
-        // Should not crash when updating non-existent terminal ID
-        AgentRegistry.shared.updateStatus(
-            terminalID: "nonexistent-id",
-            status: .running,
-            lastMessage: "test",
-            roundDuration: 0
-        )
-        XCTAssertNil(AgentRegistry.shared.pane(for: "nonexistent-id"))
-    }
 
     // MARK: - Detection Updates (type upgrade rules)
 
-    func testUpdateDetectionFromUnknown() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
 
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .claudeCode)
-    }
 
-    func testUpdateDetectionAIAgentCannotDemoteToShellTask() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
 
-        // Set to AI agent first
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
-        // Attempt to demote to shell task — should be blocked
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
 
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .claudeCode)
-    }
 
-    func testUpdateDetectionAIAgentCanUpgradeToAnotherAIAgent() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
-
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .codex)
-        // Another AI agent should be allowed
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .claudeCode)
-    }
-
-    func testUpdateDetectionShellTaskCanBeReplaced() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
-
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
-        // Shell task can be replaced by any type
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .claudeCode)
-    }
-
-    func testUpdateDetectionShellTaskCanBeReplacedByShellTask() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
-
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .make)
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .make)
-    }
-
-    func testUpdateDetectionIgnoresUnknownType() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
-
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .unknown)
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.agentType, .unknown)
-    }
-
-    func testUpdateDetectionSetsCommandLine() {
-        let tid = registerTestPane(path: "/tmp/repo/main")
-
-        AgentRegistry.shared.updateDetection(terminalID: tid, commandLine: "brew install ffmpeg", agentType: .brew)
-
-        let agent = AgentRegistry.shared.pane(for: tid)
-        XCTAssertEqual(agent?.commandLine, "brew install ffmpeg")
-        XCTAssertEqual(agent?.agentType, .brew)
-    }
 
     // MARK: - Worktree Lookup
 
     func testAgentForWorktree() {
         let tid = registerTestPane(path: "/tmp/repo/main")
 
-        let agent = AgentRegistry.shared.pane(forWorktree: "/tmp/repo/main")
+        let agent = Fleet.shared.pane(forWorktree: "/tmp/repo/main")
         XCTAssertNotNil(agent)
         XCTAssertEqual(agent?.id, tid)
         XCTAssertEqual(agent?.worktreePath, "/tmp/repo/main")
     }
 
     func testAgentForWorktreeReturnsNilForUnknown() {
-        XCTAssertNil(AgentRegistry.shared.pane(forWorktree: "/nonexistent"))
+        XCTAssertNil(Fleet.shared.pane(forWorktree: "/nonexistent"))
     }
 
-    /// The guard that decides whether it is safe to touch a worktree's files —
-    /// reaping it, or resetting an integration checkout onto a fresh fold — used
-    /// to read `pane(forWorktree:)`, i.e. only the *first* registered pane. A
-    /// split whose second pane was mid-turn therefore reported idle.
-    func testHasRunningPaneSeesANonFirstPane() {
-        registerTestPane(path: "/tmp/repo/split", branch: "feature")
-        let second = registerTestPane(path: "/tmp/repo/split", branch: "feature")
 
-        AgentRegistry.shared.updateStatus(terminalID: second, status: .running,
-                                          lastMessage: "", roundDuration: 0)
-
-        XCTAssertNotEqual(AgentRegistry.shared.pane(forWorktree: "/tmp/repo/split")?.status, .running,
-                          "precondition: the first pane is the idle one")
-        XCTAssertTrue(AgentRegistry.shared.hasRunningPane(inWorktree: "/tmp/repo/split"))
-    }
-
-    func testHasRunningPaneIsFalseWhenEveryPaneIsIdle() {
-        let first = registerTestPane(path: "/tmp/repo/quiet")
-        let second = registerTestPane(path: "/tmp/repo/quiet")
-        AgentRegistry.shared.updateStatus(terminalID: first, status: .idle,
-                                          lastMessage: "", roundDuration: 0)
-        AgentRegistry.shared.updateStatus(terminalID: second, status: .idle,
-                                          lastMessage: "", roundDuration: 0)
-
-        XCTAssertFalse(AgentRegistry.shared.hasRunningPane(inWorktree: "/tmp/repo/quiet"))
-        XCTAssertFalse(AgentRegistry.shared.hasRunningPane(inWorktree: "/nonexistent"))
-    }
 
     // MARK: - Ordering
 
@@ -228,7 +112,7 @@ final class AgentRegistryTests: XCTestCase {
         let tidB = registerTestPane(path: "/b", branch: "b")
         let tidC = registerTestPane(path: "/c", branch: "c")
 
-        let ids = AgentRegistry.shared.allPanes().map { $0.id }
+        let ids = Fleet.shared.allPanes().map { $0.id }
         XCTAssertEqual(ids, [tidA, tidB, tidC])
     }
 
@@ -238,9 +122,9 @@ final class AgentRegistryTests: XCTestCase {
         registerTestPane(path: "/c", branch: "c")
 
         // reorder accepts worktree paths
-        AgentRegistry.shared.reorder(paths: ["/c", "/a", "/b"])
+        Fleet.shared.reorder(paths: ["/c", "/a", "/b"])
 
-        let worktreePaths = AgentRegistry.shared.allPanes().map { $0.worktreePath }
+        let worktreePaths = Fleet.shared.allPanes().map { $0.worktreePath }
         XCTAssertEqual(worktreePaths, ["/c", "/a", "/b"])
     }
 
@@ -251,7 +135,7 @@ final class AgentRegistryTests: XCTestCase {
         registerTestPane(path: "/repo2/main", branch: "main", project: "Repo2")
         registerTestPane(path: "/repo1/feature", branch: "feature", project: "Repo1")
 
-        let repo1Agents = AgentRegistry.shared.panesForProject("Repo1")
+        let repo1Agents = Fleet.shared.panesForProject("Repo1")
         XCTAssertEqual(repo1Agents.count, 2)
         XCTAssertTrue(repo1Agents.allSatisfy { $0.project == "Repo1" })
     }
@@ -262,7 +146,7 @@ final class AgentRegistryTests: XCTestCase {
         let fiveMinutesAgo = Date().addingTimeInterval(-300)
         let tid = registerTestPane(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
 
-        let agent = AgentRegistry.shared.pane(for: tid)!
+        let agent = Fleet.shared.pane(for: tid)!
         XCTAssertGreaterThan(agent.totalDuration, 299)
         XCTAssertLessThan(agent.totalDuration, 302)
     }
@@ -270,44 +154,12 @@ final class AgentRegistryTests: XCTestCase {
     func testTotalDurationZeroWhenNoStartedAt() {
         let tid = registerTestPane(path: "/tmp/repo/main", startedAt: nil)
 
-        let agent = AgentRegistry.shared.pane(for: tid)!
+        let agent = Fleet.shared.pane(for: tid)!
         XCTAssertEqual(agent.totalDuration, 0)
     }
 
     // MARK: - 1:N Worktree Index
 
-    func testWorktreeIndexStoresMultipleTerminals() {
-        let head = AgentRegistry.shared
-        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
-        head.registerTerminalID("test-t2", forWorktree: "/test/repo/main")
 
-        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
-        XCTAssertEqual(ids, ["test-t1", "test-t2"])
 
-        // Cleanup
-        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
-        head.unregisterTerminalID("test-t2", forWorktree: "/test/repo/main")
-    }
-
-    func testUnregisterRemovesFromWorktreeIndex() {
-        let head = AgentRegistry.shared
-        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
-        head.registerTerminalID("test-t2", forWorktree: "/test/repo/main")
-        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
-
-        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
-        XCTAssertEqual(ids, ["test-t2"])
-
-        // Cleanup
-        head.unregisterTerminalID("test-t2", forWorktree: "/test/repo/main")
-    }
-
-    func testUnregisterLastTerminalRemovesWorktreeEntry() {
-        let head = AgentRegistry.shared
-        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
-        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
-
-        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
-        XCTAssertEqual(ids, [])
-    }
 }

@@ -75,18 +75,6 @@ pub fn core_socket() -> PathBuf {
     config_dir().join("core.sock")
 }
 
-/// The app's control socket (`$SEAHELM_SOCKET_PATH`, else
-/// `~/.config/seahelm/seahelm.sock`; on Windows `\\.\pipe\seahelm-<user>`,
-/// where the hook shim sends too).
-pub fn app_socket() -> PathBuf {
-    if let Some(p) = std::env::var_os("SEAHELM_SOCKET_PATH") {
-        return PathBuf::from(p);
-    }
-    #[cfg(windows)]
-    return PathBuf::from(format!(r"\\.\pipe\seahelm-{}", user()));
-    #[cfg(not(windows))]
-    config_dir().join("seahelm.sock")
-}
 
 /// Serve until the listener fails. Binding is the caller's (`bind`), so it
 /// can tell "already running" apart from "cannot listen".

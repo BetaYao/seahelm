@@ -138,9 +138,12 @@ final class IntegrationCoordinatorTests: XCTestCase {
         private let box: Box
         final class Box { var rounds = 0; var reports: [IntegrationRunReport] = [] }
 
-        func transition(from old: AgentStatus, to new: AgentStatus) -> StatusTransition {
-            StatusTransition(worktreePath: "/repo/agent", branch: "b", project: "p", terminalID: "t",
-                             oldStatus: old, newStatus: new, holdSeconds: 0, isCompletionSignal: true)
+        func transition(from old: AgentStatus, to new: AgentStatus) -> PaneChange {
+            var info = PaneInfo(id: "t", worktreePath: "/repo/agent", agentType: .claudeCode, project: "p",
+                                branch: "b", status: new, lastMessage: "", commandLine: nil, roundDuration: 0,
+                                startedAt: nil, station: nil, channel: nil, taskProgress: TaskProgress())
+            info.status = new
+            return PaneChange(info: info, oldStatus: old, newStatus: new, isCompletion: true, seq: 0)
         }
 
         /// The coalesce window plus room for the background hop back. A case

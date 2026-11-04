@@ -64,7 +64,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testWorktreeDidDeleteRemovesFromList() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
         let info = WorktreeInfo(path: "/tmp/test-wt", branch: "feature", commitHash: "", isMainWorktree: false)
         let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", stationId: "surface-1", paneSessionKey: "test")
@@ -175,7 +174,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesRemovesDeletedWorktree() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
@@ -202,7 +200,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesKeepsWorktreeStillOnDisk() throws {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         // Real directories — the guard's evidence is the filesystem, not the string.
@@ -233,7 +230,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesHandlesAddedAndDeletedInSameScan() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
@@ -292,39 +288,14 @@ final class TabCoordinatorTests: XCTestCase {
         coordinator.allWorktrees.append((info: infoB, tree: treeB))
         coordinator.worktreeRepoCache[infoB.path] = "/tmp/repo-b"
 
+        // First Mate's session is the core's and always protected.
         XCTAssertEqual(coordinator.livePaneSessionNames(),
-                       ["seahelm-repo-a-main", "seahelm-repo-b-main"])
+                       ["seahelm-repo-a-main", "seahelm-repo-b-main", FirstMatePane.sessionName])
     }
     // MARK: - Holding a completion until the agent has spoken
 
-    /// The bug: a completion edge can beat the answer it is supposed to quote.
-    /// On a real turn the notice went out nine seconds before the model wrote
-    /// its final message, so the phone got a shell command where the answer
-    /// should have been — and the answer, arriving after the status had left
-    /// `running`, was never announced at all.
-    func testAScreenCompletionWaitsWhileTheHooksSayRunning() {
-        XCTAssertTrue(TabCoordinator.shouldWaitForCompletion(newStatus: .idle, hookStatus: .running))
-    }
 
-    /// The agent has said it is done, so there is nothing to wait for — this is
-    /// the edge that carries the answer.
-    func testTheAgentsOwnCompletionGoesOutAtOnce() {
-        XCTAssertFalse(TabCoordinator.shouldWaitForCompletion(newStatus: .idle, hookStatus: .idle))
-    }
 
-    /// A pane seen only through the screen has no second witness. Holding its
-    /// completions would delay every one of them to wait for nothing.
-    func testAScanOnlyPaneNeverWaits() {
-        XCTAssertFalse(TabCoordinator.shouldWaitForCompletion(newStatus: .idle, hookStatus: .unknown))
-    }
 
-    /// Only a completion. A pane that stopped to ask something has its question
-    /// in hand already, and an error is worth saying immediately.
-    func testOnlyACompletionWaits() {
-        for status: AgentStatus in [.waiting, .error, .running] {
-            XCTAssertFalse(TabCoordinator.shouldWaitForCompletion(
-                newStatus: status, hookStatus: .running), status.rawValue)
-        }
-    }
 
 }

@@ -425,10 +425,10 @@ class GhosttyBridge {
     /// moved, feed that to the status pipeline. Child records and re-reports of
     /// the same thing do not touch the pane's status.
     private static func applyProgramStatus(_ station: Station, _ body: (inout ProgramStatusStore) -> Void) {
-        let (before, after) = station.updateProgramStatus(body)
-        guard before?.report != after?.report else { return }
-        AgentRegistry.shared.ingest(NormalizedEvent(
-            terminalID: station.id, source: .osc7501, kind: .programStatus(after)))
+        // The records stay on the station (the island and chrome read them);
+        // the status they imply is seahelm-core's to decide, from the
+        // daemon's copy (CoreStatusFeed).
+        _ = station.updateProgramStatus(body)
     }
 
     /// Resolve the Station owning an action's target surface, if any.

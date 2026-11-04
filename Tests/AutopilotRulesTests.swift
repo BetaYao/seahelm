@@ -198,42 +198,7 @@ final class FirstMatePaneTests: XCTestCase {
         XCTAssertTrue(FirstMatePane.sessionIsCurrent(at: dir))
     }
 
-    func testDockSaysWhatIsTrueNow() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        var state = AutopilotCoordinator.State()
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "Off — click to set it up")
 
-        state.activity = .idle
-        state.watching = 3
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "3 projects · CI & merges")
-        state.latest = "ci.failed · wt-a · PR #7"
-        state.latestAt = now.addingTimeInterval(-12 * 60)
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "12m ago · ci.failed · wt-a · PR #7")
-        state.latestAt = now.addingTimeInterval(-7 * 3600)
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "3 projects · CI & merges",
-                       "an old event is not news")
-
-        state.activity = .thinking
-        state.doing = "gh run view 123 --log-failed"
-        state.queued = 2
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "2 queued · gh run view 123 --log-failed")
-        XCTAssertEqual(FirstMateStateText.tone(state), .working)
-
-        state.activity = .idle
-        state.queued = 0
-        state.pendingApprovals = 1
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "1 waiting for your approval")
-        XCTAssertEqual(FirstMateStateText.tone(state), .wantsYou)
-        state.activity = .needsYou
-        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "Waiting for your answer in its terminal")
-    }
-
-    /// What the user said is not news to them.
-    func testTheUsersOwnWordsAreNotTheHeadline() {
-        XCTAssertFalse(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .message, text: "hi")))
-        XCTAssertFalse(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .delivered, text: "x")))
-        XCTAssertTrue(AutopilotCoordinator.isNotable(.init(at: Date(), kind: .action, text: "x")))
-    }
 }
 
 final class WorktreeFactsTests: XCTestCase {
@@ -287,11 +252,6 @@ final class WorktreeFactsTests: XCTestCase {
         XCTAssertTrue(prompt.contains("2 files uncommitted (+3 −4) · every commit is on a remote · 1 pane busy"), prompt)
     }
 
-    func testADeleteCardShowsTheFacts() {
-        let text = AutopilotPolicy.describe(method: "worktree.delete",
-                                            params: ["worktree_path": "/wt/x", AutopilotPolicy.factsKey: "nothing uncommitted"])
-        XCTAssertEqual(text, "Delete worktree x — nothing uncommitted")
-    }
 }
 
 final class FirstMateAgentTests: XCTestCase {

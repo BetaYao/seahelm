@@ -1,0 +1,14 @@
+[package]
+name = "seahelm-cli"
+description = "`seahelm`: drive the macOS app from inside a pane (split, run, exec, read, wait) over its control socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "seahelm"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }

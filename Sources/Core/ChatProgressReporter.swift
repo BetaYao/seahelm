@@ -127,7 +127,7 @@ final class ChatProgressReporter {
 
     // MARK: - Ingest
 
-    func ingest(_ outcome: IngestOutcome, now: Date = Date()) {
+    func ingest(_ outcome: PaneChange, now: Date = Date()) {
         guard let (paneKey, handle) = identify(outcome.info) else { return }
 
         track(outcome, paneKey: paneKey, handle: handle, now: now)
@@ -202,7 +202,7 @@ final class ChatProgressReporter {
 
     // MARK: - Board
 
-    private func track(_ outcome: IngestOutcome, paneKey: String, handle: Int, now: Date) {
+    private func track(_ outcome: PaneChange, paneKey: String, handle: Int, now: Date) {
         switch outcome.newStatus {
         case .running where !Self.endsTurn(outcome):
             if var entry = board[paneKey], !entry.waiting {
@@ -360,8 +360,8 @@ final class ChatProgressReporter {
     /// Every way a turn can stop counts, not just a clean finish: an agent that
     /// errored or is waiting on a question is no longer working, and leaving
     /// "running Bash" over a question is worse than saying nothing at all.
-    static func endsTurn(_ outcome: IngestOutcome) -> Bool {
-        if outcome.isCompletionSignal { return true }
+    static func endsTurn(_ outcome: PaneChange) -> Bool {
+        if outcome.isCompletion { return true }
         // A pane that has exited is not coming back to finish the turn.
         if outcome.newStatus == .exited { return true }
         guard outcome.statusChanged else { return false }

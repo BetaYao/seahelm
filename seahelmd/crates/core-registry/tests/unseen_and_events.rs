@@ -145,14 +145,29 @@ fn registry_events_match_the_swift_shapes() {
         T0,
     )
     .unwrap();
+    let mut ev = o.to_event();
+    // The whole pane rides along, so one event redraws a row.
+    let info = ev.as_object_mut().unwrap().remove("info").unwrap();
+    let event = ev.as_object_mut().unwrap().remove("event").unwrap();
+    // The event the core decided on, in core-types' serde shape: what a
+    // client hands its own consumers.
+    assert_eq!(event["source"], json!({"type": "hook", "name": "claude-code"}));
+    assert_eq!(event["kind"]["kind"], "user_prompt");
+    assert_eq!(info["status"], "Unknown");
+    assert_eq!(info["last_user_prompt"], "<pasted_content id=\"1\">\nfix it\n</pasted_content id=\"1\">");
+    assert_eq!(info["hook_status"], "Running");
+    assert_eq!(info["tasks"], json!([]));
+    assert_eq!(info["unseen"], false);
     assert_eq!(
-        o.to_event(),
+        ev,
         json!({"type": "pane.updated", "seq": 1, "pane_id": "s", "pane_session_key": "s",
                "status": "Unknown", "old_status": "Unknown", "agent_type": "unknown",
                "worktree_path": "/wt", "last_message": "", "user_prompt": "fix it"})
     );
     let o = hook(&mut r, "s", question("which?", &["a", "b"]), T0 + 1.0).unwrap();
     let ev = o.to_event();
+    assert_eq!(ev["event"]["kind"]["kind"], "question");
+    assert_eq!(ev["event"]["kind"]["flags"]["multi_select"], false);
     assert_eq!(ev["type"], "pane.status_changed");
     assert_eq!(ev["status"], "Waiting");
     assert_eq!(

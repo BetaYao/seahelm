@@ -6,7 +6,7 @@ struct PaneRef: Equatable {
     let handle: Int
     /// The key the handle was minted for — see `PaneHandleRegistry.key`.
     let handleKey: String
-    /// Station id, AgentRegistry's key for the live pane.
+    /// Station id, Fleet's key for the live pane.
     let id: String
     /// `SEAHELM_PANE_ID`. Empty for a local (non-seahelmd) pane.
     let sessionKey: String

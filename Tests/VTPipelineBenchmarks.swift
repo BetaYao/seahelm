@@ -129,7 +129,6 @@ final class VTPipelineBenchmarks: XCTestCase {
         let manager = SeahelmdVTAttachManager(
             processSpawner: spawner,
             seahelmdPath: { _ in "/usr/bin/true" },
-            attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             flushInterval: 3600,
             queue: DispatchQueue(label: "bench.vt.amplification"))
@@ -268,7 +267,7 @@ final class VTPipelineBenchmarks: XCTestCase {
     private final class EchoVTProcessSpawner: VTProcessSpawning {
         let proc = EchoVTAttachedProcess()
 
-        func spawn(python3: String, scriptPath: String, sessionKey: String,
+        func spawn(sessionKey: String,
                    rows: Int, cols: Int, seahelmdPath: String) throws -> VTAttachedProcess {
             proc
         }
@@ -341,7 +340,6 @@ final class VTPipelineBenchmarks: XCTestCase {
         let manager = SeahelmdVTAttachManager(
             processSpawner: spawner,
             seahelmdPath: { _ in "/usr/bin/true" },
-            attachScriptPath: { "/dev/null" },
             sessionSize: { _ in (rows: 40, cols: 120) },
             // Real flush interval: it is the thing under measurement. Snapshot
             // idle is shortened only to get the benchmark to its live phase.

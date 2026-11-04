@@ -571,7 +571,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
         // Click→title fast path: announce from the view itself so every host
         // (repo tab, dashboard focus panel) hears it — `onFocusAcquired` is only
-        // wired by SplitContainerView, and the AgentRegistry path trails the 2s poll.
+        // wired by SplitContainerView, and the Fleet path trails the 2s poll.
         if let station {
             NotificationCenter.default.post(name: .paneDidAcquireFocus, object: station)
         }
@@ -1255,9 +1255,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
         return 0
     }
 
-    /// The worktree this pane belongs to, if AgentRegistry knows one.
+    /// The worktree this pane belongs to, if Fleet knows one.
     private var worktreeRoot: String? {
-        guard let station, let path = AgentRegistry.shared.pane(for: station.id)?.worktreePath,
+        guard let station, let path = Fleet.shared.pane(for: station.id)?.worktreePath,
               !path.isEmpty else { return nil }
         return path
     }
@@ -1285,7 +1285,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     /// Directories a relative path is resolved against, most specific first.
     private func pathResolutionBases() -> [String?] {
-        let worktreePath = station.map { AgentRegistry.shared.pane(for: $0.id)?.worktreePath } ?? nil
+        let worktreePath = station.map { Fleet.shared.pane(for: $0.id)?.worktreePath } ?? nil
         return [station?.pwd, worktreePath, station?.initialWorkingDirectory]
     }
 

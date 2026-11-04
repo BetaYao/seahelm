@@ -2,9 +2,6 @@ import Foundation
 
 protocol WorktreeStatusDelegate: AnyObject {
     func worktreeStatusDidUpdate(_ status: WorktreeStatus)
-    func paneStatusDidChange(worktreePath: String, paneIndex: Int,
-                             oldStatus: AgentStatus, newStatus: AgentStatus,
-                             lastMessage: String)
 }
 
 /// Thread safety: All methods must be called on the main queue.
@@ -34,6 +31,23 @@ class WorktreeStatusAggregator {
     func lastActivity(for worktreePath: String) -> Date? {
         lastActivityAt[worktreePath]
     }
+
+    /// Every worktree's panes as the layout has them now: new panes are
+    /// registered (in leaf order), panes that went are dropped.
+    func sync(trees: [String: SplitTree]) {
+        var now: [String: String] = [:]
+        for (path, tree) in trees {
+            for (index, leaf) in tree.allLeaves.enumerated() {
+                now[leaf.stationId] = path
+                registerTerminal(leaf.stationId, worktreePath: path, leafIndex: index)
+            }
+        }
+        for (id, path) in synced where now[id] != path {
+            unregisterTerminal(id, worktreePath: path)
+        }
+        synced = now
+    }
+    private var synced: [String: String] = [:]
 
     func registerTerminal(_ terminalID: String, worktreePath: String, leafIndex: Int) {
         terminalToWorktree[terminalID] = worktreePath
@@ -106,16 +120,6 @@ class WorktreeStatusAggregator {
             backgroundBusy: backgroundBusy
         )
         paneStates[terminalID] = newPaneState
-
-        if statusChanged, let oldStatus = oldPaneState?.status {
-            delegate?.paneStatusDidChange(
-                worktreePath: worktreePath,
-                paneIndex: paneIndex,
-                oldStatus: oldStatus,
-                newStatus: status,
-                lastMessage: lastMessage
-            )
-        }
 
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }

@@ -71,19 +71,12 @@ final class IntegrationCoordinator {
     }
 
     /// An agent status outcome. Only the edge out of `.running` schedules work.
-    func handle(_ outcome: IngestOutcome) {
+    func handle(_ outcome: PaneChange) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard outcome.statusChanged,
               outcome.oldStatus == .running,
               outcome.newStatus != .running else { return }
         schedule(worktreePath: outcome.info.worktreePath)
-    }
-
-    /// Exposed for the same edge arriving as a plain transition.
-    func handle(_ transition: StatusTransition) {
-        dispatchPrecondition(condition: .onQueue(.main))
-        guard transition.oldStatus == .running, transition.newStatus != .running else { return }
-        schedule(worktreePath: transition.worktreePath)
     }
 
     private func schedule(worktreePath: String) {

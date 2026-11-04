@@ -22,7 +22,7 @@ extension StationDelegate {
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
 /// Each worktree gets one Station instance.
 class Station {
-    /// Unique identifier for this terminal instance (used as primary key in AgentRegistry)
+    /// Unique identifier for this terminal instance (used as primary key in Fleet)
     let id: String = UUID().uuidString
 
     /// The NSView that Ghostty renders into (layer-backed, Metal)
@@ -689,17 +689,6 @@ class Station {
         return SeahelmdChannel(paneSessionKey: paneSessionKey).readOutput(lines: lines)
     }
 
-    /// Get the process status for status detection
-    var processStatus: ProcessStatus {
-        ghosttyLock.lock()
-        defer { ghosttyLock.unlock() }
-        guard let surface else { return .unknown }
-        if ghostty_surface_process_exited(surface) {
-            // We don't have the exit code from ghostty, so assume exited
-            return .exited
-        }
-        return .running
-    }
 
     // MARK: - Seahelmd Session Recovery
 
@@ -742,7 +731,7 @@ class Station {
             paneSessionKey: paneSessionKey,
             container: container,
             workingDirectory: workingDirectory,
-            processExited: processStatus == .exited,
+            processExited: processExited,
             confirmUnreachable: true
         )
     }

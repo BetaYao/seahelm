@@ -25,8 +25,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         _ = NotificationManager.shared
 
         var config = Config.load()
-        NotificationManager.shared.cooldown = config.notifications.cooldown
-        NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
         NotificationManager.shared.soundPreference = config.notificationSound
 
         cleanOrphanSeahelmdSessions()
@@ -74,7 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Telegram is the phone-side remote-control transport.
         if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
             let channel = TelegramChannel(config: telegramConfig)
-            AgentRegistry.shared.registerChannel(channel)
+            ChannelHub.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] Telegram bridge connecting (\(telegramConfig.allowedUsers.count) allowed users)")
         }

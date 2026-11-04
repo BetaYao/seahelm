@@ -157,7 +157,7 @@ enum InitialAgentTaskDelivery {
     static func liveLookup() -> PaneLookup {
         var runningAgent: AgentType?
         return { worktreePath in
-            guard let pane = AgentRegistry.shared.panes(forWorktree: worktreePath).first,
+            guard let pane = Fleet.shared.panes(forWorktree: worktreePath).first,
                   let station = StationRegistry.shared.station(forId: pane.id) ?? pane.station,
                   let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return nil }
             if runningAgent == nil {
@@ -181,7 +181,7 @@ enum InitialAgentTaskDelivery {
         // scan that can lag the agent's start, and an unknown agent gets its
         // images typed as paths instead of attached.
         DispatchQueue.main.async {
-            AgentRegistry.shared.sendCommand(to: paneId, command: text, submitWithAttachments: true, agentType: agent)
+            PaneInput.shared.sendCommand(to: paneId, command: text, submitWithAttachments: true, agentType: agent)
         }
     }
 

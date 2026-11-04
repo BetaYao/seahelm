@@ -52,19 +52,18 @@ final class ChatProgressReporterTests: XCTestCase {
     }
 
     private func outcome(_ info: PaneInfo, statusChanged: Bool = false,
-                         newStatus: AgentStatus = .running, completion: Bool = false) -> IngestOutcome {
-        IngestOutcome(info: info, statusChanged: statusChanged, oldStatus: .running,
-                      newStatus: newStatus, holdSeconds: 0, isCompletionSignal: completion,
-                      event: NormalizedEvent(terminalID: paneId, source: .hook("claude-code"),
-                                             kind: .toolUse(tool("Bash"))))
+                         newStatus: AgentStatus = .running, completion: Bool = false) -> PaneChange {
+        // A change is an edge exactly when the status moved.
+        let old: AgentStatus = statusChanged ? (newStatus == .running ? .idle : .running) : newStatus
+        return PaneChange(info: info, oldStatus: old, newStatus: newStatus, isCompletion: completion, seq: 0)
     }
 
-    private func ingest(_ o: IngestOutcome, at offset: TimeInterval) {
+    private func ingest(_ o: PaneChange, at offset: TimeInterval) {
         reporter.ingest(o, now: start.addingTimeInterval(offset))
     }
 
     /// One tool event on a running pane.
-    private func working(_ toolName: String = "Bash", _ detail: String = "") -> IngestOutcome {
+    private func working(_ toolName: String = "Bash", _ detail: String = "") -> PaneChange {
         outcome(pane(activity: [tool(toolName, detail)]))
     }
 

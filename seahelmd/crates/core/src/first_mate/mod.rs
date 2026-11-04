@@ -8,10 +8,10 @@
 //! (gate, propose, state, say) and waits for the answer; outcomes of First
 //! Mate's pane and answered cards arrive without a reply.
 //!
-//! The core runs First Mate only when `config.json` says
-//! `autopilot_enabled: true` and `autopilot_owner: "core"`, and only while
-//! it holds `first-mate/owner.lock`: two First Mates would handle every CI
-//! failure twice.
+//! First Mate lives in the core and nowhere else (docs/app-reads-core.md).
+//! The core runs it when `config.json` says `autopilot_enabled: true`, and
+//! only while it holds `first-mate/owner.lock`: two cores would handle every
+//! CI failure twice.
 
 pub mod clock;
 pub mod cron;
@@ -52,8 +52,6 @@ pub const REFUSED: i64 = -32040;
 pub struct UserConfig {
     pub enabled: bool,
     pub paused: bool,
-    /// `autopilot_owner: "core"`: the core runs First Mate, the app does not.
-    pub owner_core: bool,
     pub agent: Agent,
     pub defaults: Autonomy,
     pub agent_yolo: bool,
@@ -75,7 +73,6 @@ impl UserConfig {
         UserConfig {
             enabled: b("autopilot_enabled"),
             paused: b("autopilot_paused"),
-            owner_core: v.get("autopilot_owner").and_then(Value::as_str) == Some("core"),
             agent: Agent::from_config(v.get("autopilot_agent").and_then(Value::as_str).unwrap_or("claudeCode")),
             defaults: rules::defaults_overriding(&autonomy),
             agent_yolo: b("agent_yolo"),
@@ -303,7 +300,7 @@ impl FirstMate {
         }
         let switched = config.agent != self.config.agent;
         self.config = config;
-        let want = self.config.enabled && self.config.owner_core;
+        let want = self.config.enabled;
         if want && !self.running {
             self.start();
         } else if !want && self.running {
@@ -864,13 +861,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_needs_the_core_as_owner() {
+    fn config_reads_switch_agent_and_defaults() {
         let c = UserConfig::parse(r#"{"autopilot_enabled": true, "autopilot_autonomy": {"delete_worktree": "deny"}, "autopilot_agent": "codex"}"#);
-        assert!(c.enabled && !c.owner_core);
+        assert!(c.enabled);
         assert_eq!(c.agent, Agent::Codex);
         assert_eq!(c.defaults.get(&Action::DeleteWorktree), Some(&Level::Deny));
         assert_eq!(c.defaults.get(&Action::MessagePane), Some(&Level::Auto));
-        assert!(UserConfig::parse(r#"{"autopilot_enabled": true, "autopilot_owner": "core"}"#).owner_core);
     }
 
     #[test]

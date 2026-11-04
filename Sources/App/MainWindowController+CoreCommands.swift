@@ -3,15 +3,15 @@ import AppKit
 /// The command language, run by seahelm-core (`command.run`): the Helm line,
 /// Telegram, mail and a chat button all come through here. The app keeps
 /// who each conversation talks to (`CommandSessionStore`, or the desktop's
-/// selection), passes it in, and applies what comes back. When the core does
-/// not answer, the app's own executor runs the line instead.
+/// selection), passes it in, and applies what comes back. The language is the
+/// core's alone: when the core does not answer, the line is not run.
 extension MainWindowController {
     func routeCommand(_ text: String, surface: CommandSurface, reply: @escaping (CommandReply) -> Void) {
         var context: [String: Any] = [
             "desktop": surface.isDesktop,
             // First Mate running here: what is for it comes back to hand over.
             // (When the core runs First Mate, the core uses its own first.)
-            "first_mate_here": tabCoordinator.autopilot.isRunning,
+            "first_mate_here": tabCoordinator.firstMate.isRunning,
         ]
         if let binding = coreBinding(for: surface) { context["binding"] = binding }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -29,8 +29,8 @@ extension MainWindowController {
                     NSLog("[Command] \(surfaceName): seahelm-core refused it")
                     reply(.error(message))
                 case .failure(let failure):
-                    NSLog("[Command] \(surfaceName): seahelm-core did not answer (\(failure)); the app ran it")
-                    self.commandExecutor.run(text, surface: surface, reply: reply)
+                    NSLog("[Command] \(surfaceName): seahelm-core did not answer (\(failure))")
+                    reply(.error("seahelm-core is not running — commands are the core's. Try again in a moment."))
                 }
             }
         }

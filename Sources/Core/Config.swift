@@ -26,7 +26,6 @@ struct Config: Codable {
     /// from agent hook events; used to relaunch the agent (e.g. `claude
     /// --resume <id>`) when a backend session is recreated instead of falling
     /// back to a plain shell.
-    var agentSessions: [String: AgentSessionRef]
     /// Pairing identity for Host Gateway (`root_secret` / `mac_id`). Broker
     /// fields are legacy and ignored — MQTT publisher was removed.
     /// Pairing identity. The JSON key stays `mqtt` — see `PairingIdentity`.
@@ -36,7 +35,6 @@ struct Config: Codable {
     /// in Keychain, so this remains safe to serialize to config.json.
     var gmailMail: GmailMailConfig?
     var hostGateway: HostGatewayConfig?
-    var firstMate: FirstMateConfig
     /// Whether the integration checkout exists as a concept at all: its button,
     /// its banner, its panel, `/integrate`, and the automatic rounds. Off hides
     /// the feature entirely without deleting any checkout already on disk.
@@ -107,12 +105,10 @@ struct Config: Codable {
         case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
-        case agentSessions = "agent_sessions"
         case pairing = "mqtt"
         case telegram
         case gmailMail = "gmail_mail"
         case hostGateway = "host_gateway"
-        case firstMate
         case notifications
         case islandEnabled = "island_enabled"
         case autopilotEnabled = "autopilot_enabled"
@@ -153,12 +149,10 @@ struct Config: Codable {
         selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
-        agentSessions = [:]
         pairing = nil
         telegram = nil
         gmailMail = nil
         hostGateway = nil
-        firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
         autopilotEnabled = false
@@ -202,12 +196,10 @@ struct Config: Codable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
-        agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
         pairing = try container.decodeIfPresent(PairingIdentity.self, forKey: .pairing)
         telegram = try container.decodeIfPresent(TelegramConfig.self, forKey: .telegram)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
         hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)
-        firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false

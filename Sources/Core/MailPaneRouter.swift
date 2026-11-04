@@ -74,7 +74,7 @@ final class MailPaneRouter {
             isDesktop: false,
             commander: sender)
         let subject = message.header("subject") ?? ""
-        // The executor walks AgentRegistry, which belongs to main. Replies may
+        // The executor walks Fleet, which belongs to main. Replies may
         // land later — `/new` answers twice — and each is its own mail.
         DispatchQueue.main.async { [weak self] in
             route(body, surface) { reply in

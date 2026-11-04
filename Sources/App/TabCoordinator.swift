@@ -52,7 +52,7 @@ class TabCoordinator {
     private(set) lazy var chatProgress: ChatProgressReporter = {
         let reporter = ChatProgressReporter(sessions: commandSessions)
         reporter.send = { chatId, text, done in
-            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
             ) { messageId in
                 // The bridge reports the id from its own send queue; the
@@ -61,20 +61,20 @@ class TabCoordinator {
             }
         }
         reporter.edit = { chatId, messageId, text in
-            AgentRegistry.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
+            ChannelHub.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
                                                content: text)
         }
         reporter.remove = { chatId, messageId in
-            AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
+            ChannelHub.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
         }
         reporter.draft = { chatId, text, canStop in
-            AgentRegistry.shared.draftInChannel("telegram", chatId: chatId,
+            ChannelHub.shared.draftInChannel("telegram", chatId: chatId,
                                                 draftId: ChatProgressReporter.boardDraftId,
                                                 content: text, canStop: canStop)
         }
         // Rows are appended on main, in order with the outcomes that start and
         // end the turn they belong to.
-        _ = MessageStreamHub.shared.subscribe { [weak reporter] message in
+        _ = CoreMessages.shared.subscribe { [weak reporter] message in
             reporter?.ingest(message)
         }
         return reporter
@@ -95,7 +95,7 @@ class TabCoordinator {
     private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
     /// First Mate: the LLM pane rules wake up.
-    let autopilot = AutopilotCoordinator()
+    let firstMate = FirstMateLink()
 
     /// Display name of the repo owning a given worktree path.
     func repoName(forWorktree path: String) -> String {
@@ -117,7 +117,6 @@ class TabCoordinator {
 
     // References provided by MainWindowController
     var terminalCoordinator: TerminalCoordinator!
-    var statusPublisher: StatusPublisher!
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
     /// Set by the window: start a worktree (task, repo, agent) the way the
@@ -127,13 +126,10 @@ class TabCoordinator {
     /// Answers a question card as a tap on it would (owner-set: the window
     /// controller drives the dialog). Remote clients answer through this so a
     /// multi-select or multi-question ask behaves as it does on the desktop.
-    var questionAnswerer: ((PendingOrder, String) -> Void)?
     /// Answers one of First Mate's cards as a tap on it would (owner-set).
-    var firstMateCardAnswerer: ((PendingOrder, String) -> Void)?
     // First Mate — status-transition engine + red-zone queue + green-zone watch
-    let pendingOrders = PendingOrdersQueue()
-    let watchFeed = WatchFeed()
-    private(set) var firstMate: FirstMateCoordinator!
+    /// The core's cards, as the island, Telegram and the web show them.
+    let cards = CardDeck()
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -156,10 +152,6 @@ class TabCoordinator {
     private func saveConfig() {
         if let tc = terminalCoordinator {
             config.splitLayouts = tc.config.splitLayouts
-            // TerminalCoordinator is the authoritative holder of agentSessions
-            // (restore/close/delete all live there). Sync before saving so this
-            // coordinator's copy doesn't clobber it.
-            config.agentSessions = tc.config.agentSessions
         }
         // MainWindow owns chrome layout; when saving from here, those fields on
         // `config` may be stale — leave them alone unless the caller updated them.
@@ -168,24 +160,6 @@ class TabCoordinator {
 
     init(config: Config) {
         self.config = config
-        let fmConfig = config.firstMate
-        let orders = pendingOrders
-        let feed = watchFeed
-        firstMate = FirstMateCoordinator(
-            config: fmConfig,
-            queue: orders,
-            notify: { action in
-                // Watch feed only. The pane status path (deliverPaneStatusChange)
-                // already notified on the same running → waiting/error edge; a
-                // second NotificationManager call here used a different cooldown
-                // key ("wt:" vs "tid:") and re-bannered the same episode ~30s
-                // later. First Mate watches are now a feed record, not a banner.
-                feed.record(action)
-            },
-            runInspection: { [weak self] action in
-                self?.runFirstMateInspection(action)
-            }
-        )
         integration = IntegrationCoordinator(
             isEnabled: { [weak self] in
                 guard let self else { return false }
@@ -209,8 +183,8 @@ class TabCoordinator {
                 self?.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.worktrees ?? []
             },
             integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
-            isCheckoutBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) },
-            isWorktreeBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) },
+            isCheckoutBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) },
+            isWorktreeBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) },
             lastPublished: { IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: $0) },
             onReport: { [weak self] report, repo in
                 IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
@@ -219,58 +193,24 @@ class TabCoordinator {
                         commit, forCheckout: report.integrationWorktreePath)
                 }
                 guard report.needsAttention else { return }
-                // upsert, not enqueue: the key is (checkout, kind), so an
-                // enqueue would pin the card to the *first* round's summary
-                // while the side panel moved on with every later one — the two
-                // surfaces reading one round is the whole point of panelState.
-                // An unchanged report compares equal and does not re-pop.
-                self?.pendingOrders.upsert(
-                    FirstMateAction(
-                        kind: .integrationReport,
-                        zone: .red,
-                        worktreePath: report.integrationWorktreePath,
-                        branch: "",
-                        project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
-                        terminalID: "",
-                        message: report.summary,
-                        // The repo to re-run against: the card's own path is the
-                        // checkout, and resolving back from it is a guess.
-                        payload: repo,
-                        options: report.cardOptions
-                    )
-                )
+                // One card per checkout: the core keeps the latest round's
+                // (its key is worktree and kind), as the side panel does.
+                guard let options = report.cardOptions, !options.isEmpty else { return }
+                self?.cards.raise(kind: .report, worktreePath: report.integrationWorktreePath,
+                                  project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
+                                  message: report.summary, options: options,
+                                  // The repo to re-run against: the card's path is the checkout.
+                                  payload: repo)
             }
         )
-        AgentRegistry.shared.onOutcome = { [weak self] outcome in
+        Fleet.shared.onChange = { [weak self] outcome in
             guard let self else { return }
-            // First Mate is not a member of the fleet: none of the fleet's
-            // notifications, cards or rollups apply to its turns.
-            if FirstMatePane.isFirstMate(worktreePath: outcome.info.worktreePath) {
-                self.autopilot.firstMateOutcome(outcome)
-                return
-            }
-            switch outcome.event.source {
-            case .scan:
-                break
-            case .hook, .mcp, .shell, .osc7501:
-                self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
-            }
-            if outcome.info.unseenCompletion,
-               UnseenCompletion.clears(newStatus: outcome.newStatus) {
-                self.setUnseenCompletion(false, terminalID: outcome.info.id)
-            }
-            self.firstMate?.handle(outcome)
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
             self.chatProgress.ingest(outcome)
-            if outcome.isCompletionSignal {
-                self.completionSignals[outcome.info.id, default: 0] += 1
-                self.deliverAgentCompletion(outcome)
-            }
-            // Feed the worktree aggregator from AgentRegistry's arbitrated status
-            // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
-            // "running" that the scan-only path misses when the viewport text is
-            // static (agent thinking; only the OSC-title spinner animates).
+            // Completions and notices are the core's to decide: `pane.notice`
+            // (handleCoreNotice).
+            // The worktree rows roll up their panes' statuses.
             self.statusAggregator?.agentDidUpdate(
                 terminalID: outcome.info.id,
                 status: outcome.newStatus,
@@ -287,6 +227,11 @@ class TabCoordinator {
                                                object: nil, queue: .main) { [weak self] _ in
             self?.markVisiblePanesSeen()
         }
+        // Leaving the app makes nothing on screen: finished turns stay unseen.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.reportVisibility()
+        }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
@@ -302,11 +247,10 @@ class TabCoordinator {
         WorktreePRStore.shared.onChange = { [weak self] in
             guard let self else { return }
             self.scheduleCleanupRepaint()
-            self.autopilot.observe(self.prObservations())
         }
     }
 
-    deinit { AgentRegistry.shared.onOutcome = nil }
+    deinit { Fleet.shared.onChange = nil }
 
     private var cleanupRepaintScheduled = false
 
@@ -343,7 +287,6 @@ class TabCoordinator {
 
     func updateStatusPollPreferences() {
         // Dashboard is always active (no separate repo tabs), so no preferred filtering.
-        statusPublisher.setPreferredPaths([])
     }
 
     func openRepoTab(repoPath: String, completion: (() -> Void)? = nil) {
@@ -431,7 +374,7 @@ class TabCoordinator {
         if configChanged { saveConfig() }
 
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
         return tabIndex
@@ -505,7 +448,7 @@ class TabCoordinator {
     ///   only that worktree kicks an async git-stats refresh; every card still
     ///   reads its cached stats. A full rebuild (nil) refreshes all.
     func buildWorktreeRowInfos(changedWorktreePath: String? = nil) -> [WorktreeRowInfo] {
-        let agents = AgentRegistry.shared.allPanes()
+        let agents = Fleet.shared.allPanes()
             .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
         // Index once — the per-agent loop below used to re-filter the full agent
         // list and re-scan allWorktrees for every worktree (O(N²) per rebuild,
@@ -528,7 +471,7 @@ class TabCoordinator {
             } ?? [station]
 
             let ws = statusAggregator.status(for: agent.worktreePath)
-            // Every pane's AgentRegistry status, in leaf order — these draw the per-pane
+            // Every pane's Fleet status, in leaf order — these draw the per-pane
             // dots. The worktree's own status is NOT derived from them here: the
             // aggregator already picked the most recently changed pane, and
             // re-deriving it would let the row and the tab badge disagree.
@@ -570,12 +513,11 @@ class TabCoordinator {
                 probe: WorktreeCleanupStore.shared.probe(worktreePath: agent.worktreePath),
                 now: now)
 
-            // The branch's PR and its CI, from a per-repo cache refreshed in the
-            // background. Main and the integration checkout are not PR work.
+            // The branch's PR and its CI, as seahelm-core last fetched them.
+            // Main and the integration checkout are not PR work.
             let branch = worktreeInfoByPath[agent.worktreePath]?.branch ?? agent.branch
             var prStatus: WorktreePRStatus?
             if !isMain, !isIntegration, !branch.isEmpty {
-                WorktreePRStore.shared.refresh(worktreePath: agent.worktreePath, now: now)
                 prStatus = WorktreePRStore.shared.status(worktreePath: agent.worktreePath, branch: branch)
             }
 
@@ -613,7 +555,7 @@ class TabCoordinator {
 
             // Per-pane rows for the expanded "Group by Pane" mode. Aligned to
             // paneStations (leaf order); title/status come from each pane's own
-            // AgentRegistry pane, so sibling panes read distinctly.
+            // Fleet pane, so sibling panes read distinctly.
             let worktreePanes = agentsByWorktree[agent.worktreePath] ?? []
             let panes: [PaneDisplayInfo] = paneStations.map { paneStation in
                 let panePane = worktreePanes.first(where: { $0.id == paneStation.id })
@@ -791,7 +733,7 @@ class TabCoordinator {
                     self.delegate?.tabCoordinator(self, worktreesDidVanish: Array(vanished))
                 }
 
-                // Register all agents with AgentRegistry
+                // Register all agents with Fleet
                 for (info, _) in allWorktreeInfos {
                     let repo = self.worktreeRepoCache[info.path] ?? WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
@@ -800,7 +742,7 @@ class TabCoordinator {
                     self.registerPanes(of: info, project: proj, startedAt: started)
                 }
                 if !cardOrder.isEmpty {
-                    AgentRegistry.shared.reorder(paths: cardOrder)
+                    Fleet.shared.reorder(paths: cardOrder)
                 }
 
                 self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
@@ -811,7 +753,7 @@ class TabCoordinator {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(trees: self.terminalCoordinator.stationManager.all)
+                self.statusAggregator.sync(trees: self.terminalCoordinator.stationManager.all)
                 self.updateStatusPollPreferences()
                 self.applyAutopilotConfig()
 
@@ -823,89 +765,52 @@ class TabCoordinator {
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
-                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath, _ in
-                        // Discover the card; do not move the pane — the chrome
-                        // title shows when its agent is away from the filed worktree.
-                        self?.handleNewWorktreeFromHook(worktreePath)
-                    }
-                    self.statusPublisher.webhookProvider.onPaneWorktreeResolved = { [weak self] paneId, worktreePath, cwd, createdByAgent in
-                        self?.noteAgentLocation(paneId: paneId, worktreePath: worktreePath, cwd: cwd,
-                                                createdByAgent: createdByAgent)
-                    }
-                    self.statusPublisher.webhookProvider.onAgentSessionResolved = { [weak self] worktreePath, paneId, ref in
-                        self?.recordAgentSession(worktreePath: worktreePath, paneId: paneId, ref: ref)
-                    }
-                    // Shared inbound-event sink, serialized so the webhook and the
-                    // control socket can both feed it without racing event handling.
-                    let eventQueue = DispatchQueue(label: "seahelm.event-sink")
-                    let handleEvent: (WebhookEvent) -> Void = { [weak self] event in
-                      eventQueue.sync {
+                    // What hooks tell, seahelm-core has made sense of: where each
+                    // agent works, worktrees agents start in, resume references.
+                    CoreClient.shared.observe { [weak self] event in
                         guard let self else { return }
-                        // Track per-worktree background-task state (subagent/shell/cron).
-                        AgentRegistry.shared.updateBackgroundBusy(from: event)
-                        // Drop a (voluntary) suggestion while background work is still running —
-                        // the agent will auto-resume, so it isn't a real end-of-turn yet.
-                        if event.event == .suggest, AgentRegistry.shared.isBackgroundBusy(cwd: event.cwd) {
-                            NSLog("[suggest] DROP background-busy — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                            return
+                        switch event {
+                        case .worktreeDiscovered(let path, _):
+                            // Discover the card; the pane stays where it is filed.
+                            self.handleNewWorktreeFromHook(path)
+                        case .location(let id, let worktree, let location, let created):
+                            self.noteAgentLocation(terminalID: id, worktreePath: worktree, cwd: location,
+                                                   createdByAgent: created)
+                        case .session(let key, let ref):
+                            StationRegistry.shared.station(forSessionName: key)?.agentSessionRef = AgentSessionRef(dict: ref)
+                        default:
+                            break
                         }
-                        if event.event == .suggest {
-                            NSLog("[suggest] pass gate1 (not background-busy) — cwd=\(event.cwd) paneId=\(event.paneId ?? "nil")")
-                        }
-                        // Cursor has no last_assistant_message on stop. Always stash
-                        // afterAgentResponse `text` as the card summary — even when the
-                        // agent forgot the sentinel and already emitted options via a
-                        // Shell-invoked seahelm-suggest (that path leaves message="Shell").
-                        // Harvest options from the sentinel only when present.
-                        if event.event == .assistantResponse,
-                           let text = event.data?["text"] as? String {
-                            let prose = StopHookResponder.stripSentinel(from: text)
-                            if let tid = AgentRegistry.shared.noteAssistantMessage(
-                                cwd: event.cwd, paneId: event.paneId, message: prose) {
-                                self.pendingOrders.refreshSuggestMessage(
-                                    terminalID: tid, message: prose)
-                            }
-                            if let options = StopHookResponder.parseSuggestions(from: text) {
-                                let suggestEvent = WebhookEvent(
-                                    source: "seahelm-suggest", sessionId: event.sessionId,
-                                    event: .suggest, cwd: event.cwd, timestamp: nil,
-                                    data: ["options": options], paneId: event.paneId)
-                                self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
-                                AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                            }
-                        }
-                        // Claude and Codex carry the final response on Stop.
-                        // Harvest inline options from that passive event without
-                        // asking the agent for a second turn.
-                        if event.event == .agentStop,
-                           let msg = event.data?["last_assistant_message"] as? String,
-                           let options = StopHookResponder.parseSuggestions(from: msg) {
-                            AgentRegistry.shared.noteAssistantMessage(
-                                cwd: event.cwd, paneId: event.paneId,
-                                message: StopHookResponder.stripSentinel(from: msg))
-                            let suggestEvent = WebhookEvent(
-                                source: "seahelm-suggest", sessionId: event.sessionId,
-                                event: .suggest, cwd: event.cwd, timestamp: nil,
-                                data: ["options": options], paneId: event.paneId)
-                            self.statusPublisher.webhookProvider.handleEvent(suggestEvent)
-                            AgentRegistry.shared.handleWebhookEvent(suggestEvent)
-                        }
-                        self.statusPublisher.webhookProvider.handleEvent(event)
-                        AgentRegistry.shared.handleWebhookEvent(event)
-                        // TODO: Enable when webhook→TODO matching logic is implemented
-                        // AgentRegistry.shared.updateTodoFromWebhook(event)
-                      }
                     }
-                    // Local control socket is the sole inbound transport: reads
-                    // (snapshot/read) + the shared event sink for hook/suggest.
-                    // (The HTTP webhook was retired once the socket path was
-                    // verified end-to-end.)
-                    let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
+                    let controlDataSource = SeahelmControlDataSource()
                     // seahelm-core watches what the app shows and runs the command
                     // language; see CoreLink.
-                    CoreLink.shared.panes = { [weak controlDataSource] in controlDataSource?.snapshotPanes().map(\.dict) ?? [] }
+                    CoreLink.shared.panes = { [weak controlDataSource] in
+                        controlDataSource?.snapshotPanes().map(\.dict) ?? []
+                    }
                     CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
                     CoreLink.shared.start()
+                    // What every pane is doing comes from the core, and so do
+                    // the notices and unseen completions.
+                    CoreClient.shared.observe { [weak self] event in
+                        guard let self else { return }
+                        switch event {
+                        case .notice(let notice, let terminalID):
+                            self.handleCoreNotice(notice, terminalID: terminalID)
+                        case .unseen(let terminalID, let unseen):
+                            self.setUnseenCompletion(unseen, terminalID: terminalID)
+                        case .connected(true):
+                            self.reportVisibility()
+                        case .raw(let ev):
+                            // The app's own subscribers (the web, MQTT, the control
+                            // socket) hear the core's events as the core sent them.
+                            EventHub.shared.publish(seq: (ev["seq"] as? NSNumber)?.uint64Value ?? 0, event: ev)
+                        default:
+                            break
+                        }
+                    }
+                    self.cards.start()
+                    CoreClient.shared.start()
                     self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
                     self.mailPaneRouter?.route = self.commandRoute
                     if let account = self.config.gmailMail?.accountEmail {
@@ -963,13 +868,6 @@ class TabCoordinator {
                     controlDataSource.wakeHandler = { [weak self] stationId in
                         self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
                     }
-                    controlDataSource.autopilotGateHandler = { [weak self] action, method, params in
-                        self?.autopilot.gate(action: action, method: method, params: params)
-                            ?? .deny("First Mate is not running")
-                    }
-                    controlDataSource.autopilotDidRunHandler = { [weak self] method, result in
-                        self?.autopilot.didRun(method: method, result: result)
-                    }
                     controlDataSource.deleteWorktreeHandler = { [weak self] path, done in
                         guard let self else { return done(.failure(.unavailable)) }
                         let wanted = WorktreeDiscovery.canonicalPath(path)
@@ -989,62 +887,31 @@ class TabCoordinator {
                             }
                         }
                     }
-                    let autopilotRouter = ControlRouter(dataSource: controlDataSource)
-                    self.autopilot.execute = { method, params in autopilotRouter.handle(method: method, params: params) }
-                    self.autopilot.liveWorktrees = { [weak self] in Set(self?.allWorktrees.map(\.info.path) ?? []) }
-                    self.autopilot.repoPaths = { [weak self] in self?.config.workspacePaths ?? [] }
-                    self.autopilot.onRequestApproval = { [weak self] id, summary in
-                        guard let self else { return }
-                        self.pendingOrders.enqueue(FirstMateAction(
-                            kind: .autopilotApproval, zone: .red, worktreePath: FirstMatePane.directory,
-                            branch: "", project: FirstMatePane.project,
-                            terminalID: self.autopilot.stationId ?? "", message: "First Mate asks: \(summary)",
-                            payload: id, options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
-                    }
-                    controlDataSource.firstMateStateHandler = { [weak self] in self?.firstMateRemoteState() }
-                    controlDataSource.firstMateAnswerHandler = { [weak self] card, option in
-                        guard let self, let order = self.firstMateCards().first(where: { $0.action.payload == card }),
-                              (order.action.options ?? []).contains(option) else { return false }
-                        self.firstMateCardAnswerer?(order, option)
-                        return true
-                    }
-                    controlDataSource.autopilotProposeHandler = { [weak self] summary, options in
-                        self?.autopilot.propose(summary: summary, options: options)
-                            ?? .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-                    }
-                    self.autopilot.onRequestProposal = { [weak self] id, summary, labels in
-                        guard let self else { return }
-                        self.pendingOrders.enqueue(FirstMateAction(
-                            kind: .autopilotProposal, zone: .red, worktreePath: FirstMatePane.directory,
-                            branch: "", project: FirstMatePane.project,
-                            terminalID: self.autopilot.stationId ?? "", message: "First Mate suggests: \(summary)",
-                            payload: id, options: labels))
-                    }
-                    self.autopilot.onApprovalClosed = { [weak self] id in
-                        self?.pendingOrders.resolveAutopilotApproval(id)
+                    controlDataSource.firstMateStateHandler = { FirstMateLink.remoteState() ?? ["enabled": false] }
+                    controlDataSource.firstMateAnswerHandler = { card, option in
+                        if case .success = CoreSocketClient.call("autopilot.answer", ["card": card, "option": option]) { return true }
+                        return false
                     }
                     controlDataSource.dismissDecisionHandler = { [weak self] paneId in
                         // Station id or the stable session key — the queue keys off the
                         // former, remote callers usually hold the latter.
                         guard let self else { return false }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        return self.pendingOrders.dismissSuggestion(terminalID: stationId)
+                        guard let card = self.cards.cards.first(where: { $0.kind == .suggestion && $0.terminalID == stationId })
+                        else { return false }
+                        self.cards.dismiss(card)
+                        return true
                     }
                     controlDataSource.paneSeenHandler = { [weak self] paneId in
                         self?.markPaneSeen(paneId: paneId) ?? false
                     }
                     controlDataSource.answerQuestionHandler = { [weak self] paneId, index in
-                        guard let self, let answer = self.questionAnswerer else { return nil }
+                        guard let self else { return nil }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        guard let order = self.questionOrder(terminalID: stationId) else { return nil }
-                        let labels = order.action.answerLabels
-                        guard index < labels.count else { return ["answered": false] }
-                        answer(order, labels[index])
-                        var result: [String: Any] = ["answered": true]
-                        if let still = self.questionOrder(terminalID: stationId) {
-                            result["card"] = Self.questionCard(still.action)
-                        }
-                        return result
+                        guard let card = self.cards.question(terminalID: stationId) else { return nil }
+                        guard index < card.labels.count else { return ["answered": false] }
+                        self.cards.answer(card, label: card.labels[index])
+                        return ["answered": true]
                     }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]
@@ -1208,37 +1075,12 @@ class TabCoordinator {
         if configChanged { saveConfig() }
 
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
     // MARK: - Worktree Auto-Discovery (via Agent Hooks)
 
-    /// Persist an agent resume ref and apply it to the live station so a
-    /// mid-session seahelmd recovery can relaunch the agent. Called on the main thread.
-    ///
-    /// Routed to the *emitting* pane's own station (via `paneId`, the hook's
-    /// SEAHELM_PANE_ID = the pane's session name). Applying it to the worktree's
-    /// primary station instead let sibling agents in one worktree stomp a single
-    /// shared ref, so the primary pane's resolved title flipped to whichever
-    /// agent hooked last. Persisting under the pane's own session name also lets
-    /// restore reapply it — `config.agentSessions` is read back keyed by
-    /// `leaf.paneSessionKey`, which the old worktree-scoped key never matched.
-    /// Falls back to the primary station / worktree name for legacy hooks that
-    /// carry no paneId.
-    private func recordAgentSession(worktreePath: String, paneId: String?, ref: AgentSessionRef) {
-        let station = paneId.flatMap { StationRegistry.shared.station(forSessionName: $0) }
-            ?? terminalCoordinator.stationManager.primaryStation(forPath: worktreePath)
-        station?.agentSessionRef = ref
-        // Prefer the resolved pane's own session name (matches restore); fall back
-        // to the raw paneId, then the worktree-scoped name.
-        let key = station?.paneSessionKey ?? paneId
-            ?? SessionManager.persistentSessionName(for: worktreePath)
-        // Write to the authoritative (TerminalCoordinator) copy, then persist.
-        guard terminalCoordinator.config.agentSessions[key] != ref else { return }
-        terminalCoordinator.config.agentSessions[key] = ref
-        saveConfig()
-    }
 
     private func handleNewWorktreeFromHook(_ worktreePath: String) {
         WorktreeDiscovery.findRepoRootAsync(from: worktreePath) { [weak self] repoRoot in
@@ -1306,8 +1148,8 @@ class TabCoordinator {
 
     /// Record where a pane's agent last reported itself. Does not move the pane;
     /// refresh the chrome title so a mismatch can show as an "away" suffix.
-    private func noteAgentLocation(paneId: String, worktreePath: String?, cwd: String, createdByAgent: Bool) {
-        guard let station = StationRegistry.shared.station(forSessionName: paneId) else { return }
+    private func noteAgentLocation(terminalID: String, worktreePath: String?, cwd: String, createdByAgent: Bool) {
+        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
         let next = Station.HookLocation(worktreePath: worktreePath, cwd: cwd)
         let prev = station.hookLocation
         let changed = prev?.worktreePath != next.worktreePath || prev?.cwd != next.cwd
@@ -1377,7 +1219,7 @@ class TabCoordinator {
         guard runtimeBackend == "seahelmd", let key = station.paneSessionKey, !key.isEmpty else {
             return .failure(.noPersistentBackend)
         }
-        guard let ref = terminalCoordinator.config.agentSessions[key] else { return .failure(.noSession) }
+        guard let ref = AgentSessionRef.forPane(key) else { return .failure(.noSession) }
         guard ref.supportsFork else { return .failure(.unsupportedAgent) }
         let filed = located.tree.worktreePath
         guard let target = PaneFork.target(explicit: explicit, filedWorktree: filed,
@@ -1460,7 +1302,7 @@ class TabCoordinator {
         let repoRoot = worktreeRepoCache[destination.path] ?? ""
         let project = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
             ?? URL(fileURLWithPath: repoRoot).lastPathComponent
-        AgentRegistry.shared.register(station: station, worktreePath: destination.path,
+        Fleet.shared.register(station: station, worktreePath: destination.path,
                                       branch: destination.branch, project: project, startedAt: Date(),
                                       paneSessionKey: sessionName, backend: runtimeBackend)
         if let idx = allWorktrees.firstIndex(where: { $0.info.path == destination.path }) {
@@ -1473,7 +1315,7 @@ class TabCoordinator {
 
         dashboardVC?.invalidateSplitContainer(forPath: destination.path)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(manager.all)
+        statusAggregator.sync(trees: manager.all)
 
         // Selecting the worktree embeds its container, which creates the surface;
         // focus has to wait for that.
@@ -1515,7 +1357,7 @@ class TabCoordinator {
         // Re-attribute rather than unregister+register: the agent in this pane is
         // still running, and rebuilding its entry would reset its status, timers
         // and event log to those of a freshly opened pane.
-        _ = AgentRegistry.shared.rehome(terminalID: stationId, to: destination.path,
+        _ = Fleet.shared.rehome(terminalID: stationId, to: destination.path,
                                         branch: destination.branch, project: project)
 
         if let idx = allWorktrees.firstIndex(where: { $0.info.path == destination.path }) {
@@ -1545,7 +1387,7 @@ class TabCoordinator {
                 let sourceRepo = worktreeRepoCache[sourcePath] ?? repoRoot
                 let sourceProject = workspaceManager.tabs.first(where: { $0.repoPath == sourceRepo })?.displayName
                     ?? URL(fileURLWithPath: sourceRepo).lastPathComponent
-                AgentRegistry.shared.register(
+                Fleet.shared.register(
                     station: replacement, worktreePath: sourcePath, branch: sourceInfo.branch,
                     project: sourceProject, startedAt: Date(),
                     paneSessionKey: replacement.paneSessionKey.flatMap { $0.isEmpty ? nil : $0 },
@@ -1561,7 +1403,7 @@ class TabCoordinator {
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
         // The surface set changed on both sides — and a retired placeholder is
         // gone from the registry, so the poller must stop holding on to it.
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         return true
     }
 
@@ -1573,7 +1415,7 @@ class TabCoordinator {
         let manager = terminalCoordinator.stationManager
         guard let leaf = manager.soleLeaf(atPath: worktreePath),
               let station = StationRegistry.shared.station(forId: leaf.stationId) else { return false }
-        let pane = AgentRegistry.shared.pane(for: leaf.stationId)
+        let pane = Fleet.shared.pane(for: leaf.stationId)
         guard Self.isPlaceholderPane(autoCreated: manager.wasAutoCreated(stationId: leaf.stationId),
                                      agentType: pane?.agentType ?? .unknown,
                                      status: pane?.status ?? .unknown,
@@ -1582,10 +1424,10 @@ class TabCoordinator {
 
         NSLog("[TabCoordinator] Retiring placeholder pane \(leaf.stationId) in \(worktreePath)")
         manager.removeTree(forPath: worktreePath)
-        AgentRegistry.shared.unregister(terminalID: leaf.stationId)
+        Fleet.shared.unregister(terminalID: leaf.stationId)
         if !leaf.paneSessionKey.isEmpty {
             SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
-            terminalCoordinator.config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
+            AgentSessionRef.forget(leaf.paneSessionKey)
         }
         terminalCoordinator.config.splitLayouts.removeValue(forKey: worktreePath)
         return true
@@ -1631,16 +1473,16 @@ class TabCoordinator {
         // taking just the first leaked the rest for the app's lifetime), and
         // let go of what each was bound to first — the pane is as gone as one
         // somebody closed, and only this path knows why.
-        for terminalID in AgentRegistry.shared.terminalIDs(forWorktree: info.path) {
+        for terminalID in Fleet.shared.terminalIDs(forWorktree: info.path) {
             delegate?.tabCoordinator(self, paneDidEnd: terminalID, reason: "the worktree was deleted")
-            AgentRegistry.shared.unregister(terminalID: terminalID)
+            Fleet.shared.unregister(terminalID: terminalID)
         }
         WorktreeTitleCache.shared.evict(worktreePath: info.path)
         WorktreeGitStatsCache.shared.evict(worktreePath: info.path)
         WorktreeCleanupStore.shared.evict(worktreePath: info.path)
         dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -1652,7 +1494,7 @@ class TabCoordinator {
     func worktreeSessionDidEnd(_ path: String) {
         dashboardVC?.invalidateSplitContainer(forPath: path)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
@@ -1668,14 +1510,14 @@ class TabCoordinator {
             terminalCoordinator.stationManager.removeTree(forPath: worktree.path)
 
             // Unregister EVERY pane of the worktree, not just the first pane.
-            let ids = AgentRegistry.shared.terminalIDs(forWorktree: worktree.path)
+            let ids = Fleet.shared.terminalIDs(forWorktree: worktree.path)
             if ids.isEmpty, let primaryStation {
                 delegate?.tabCoordinator(self, paneDidEnd: primaryStation.id, reason: "the repo was closed")
-                AgentRegistry.shared.unregister(terminalID: primaryStation.id)
+                Fleet.shared.unregister(terminalID: primaryStation.id)
             } else {
                 for id in ids {
                     delegate?.tabCoordinator(self, paneDidEnd: id, reason: "the repo was closed")
-                    AgentRegistry.shared.unregister(terminalID: id)
+                    Fleet.shared.unregister(terminalID: id)
                 }
             }
             WorktreeTitleCache.shared.evict(worktreePath: worktree.path)
@@ -1704,7 +1546,7 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestClearContentContainer(self)
 
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         switchToTab(0)
     }
@@ -1738,7 +1580,7 @@ class TabCoordinator {
 
     private var branchRefreshTick = 0
     /// Every 2nd tick of the 5s timer, i.e. 10s. This is the *only* thing that
-    /// advances the seconds-resolution elapsed labels (AgentRegistry stopped fanning
+    /// advances the seconds-resolution elapsed labels (Fleet stopped fanning
     /// out on roundDuration ticks), so a slower cadence reads as a frozen
     /// counter. `buildWorktreeRowInfos` is cache-served and the render it
     /// feeds is now incremental, so the tick is cheap enough to keep at 10s.
@@ -1767,11 +1609,11 @@ class TabCoordinator {
             self.refreshBranches()
             // Re-evaluate worktree-tab idle collapse even when nothing changed.
             self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
-            // AgentRegistry no longer fans out on roundDuration ticks (see
+            // Fleet no longer fans out on roundDuration ticks (see
             // displayedStateUnchanged), so elapsed-time and activity-age labels
             // are advanced here at a gentle cadence while anything is running.
             let refreshElapsed = Self.shouldRefreshDashboardElapsedTime(tick: self.branchRefreshTick)
-                && AgentRegistry.shared.allPanes().contains(where: { $0.status == .running })
+                && Fleet.shared.allPanes().contains(where: { $0.status == .running })
             if refreshElapsed || Self.shouldRefreshCleanupMarks(tick: self.branchRefreshTick) {
                 self.dashboardVC?.updatePanes(self.buildWorktreeRowInfos())
             }
@@ -1862,7 +1704,7 @@ class TabCoordinator {
 
         workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.stationManager.all)
+        statusAggregator.sync(trees: terminalCoordinator.stationManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         return true
     }
@@ -1950,7 +1792,7 @@ class TabCoordinator {
     /// which is what made a Telegram command take 40s to answer: `handleInbound`
     /// hops to main and could not get a turn.
     ///
-    /// The edges are already de-duplicated upstream — `AgentRegistry` drops
+    /// The edges are already de-duplicated upstream — `Fleet` drops
     /// unchanged scans, `WorktreeStatusAggregator` drops unchanged rollups — so
     /// the fix is not more filtering but batching: note which worktrees changed
     /// and repaint once.
@@ -1981,186 +1823,6 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
-    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
-        // Cache miss means a synchronous `git rev-parse` (up to 5s on a wedged
-        // repo) — resolve off-thread, then deliver the notification on main.
-        guard let repoPath = worktreeRepoCache[worktreePath] else {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let resolved = WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.worktreeRepoCache[worktreePath] = resolved
-                    self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
-                                                 oldStatus: oldStatus, newStatus: newStatus,
-                                                 lastMessage: lastMessage, repoPath: resolved)
-                }
-            }
-            return
-        }
-        deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
-                                oldStatus: oldStatus, newStatus: newStatus,
-                                lastMessage: lastMessage, repoPath: repoPath)
-    }
-
-    /// How many times each pane's agent has reported finishing a turn. Only
-    /// the count matters: a held screen-edge compares it against what it saw
-    /// on the way in, and any change means the agent got there first.
-    private var completionSignals: [String: Int] = [:]
-
-    /// The agent's own “I have finished” — the only event that carries what
-    /// it actually said.
-    ///
-    /// The status edge is not enough on its own, and one real turn shows why.
-    /// Replayed from the event log for pane #64: seq 52714 is a
-    /// `Running → Idle` status change; the agent's completion, the one carrying
-    /// `final_message`, is seq 52763 — forty-nine events later. The status never
-    /// left `Idle` in between, so no second edge existed to announce it and the
-    /// answer never reached the phone at all. What went instead was the screen's
-    /// idea of the pane at 52714, which was a shell command.
-    ///
-    /// So a completion announces itself. `NotificationManager` still decides
-    /// whether it is worth saying — the turn fingerprint is what keeps this from
-    /// repeating an edge that already went out with the same words.
-    private func deliverAgentCompletion(_ outcome: IngestOutcome) {
-        let path = outcome.info.worktreePath
-        let paneIndex = statusAggregator?.status(for: path)?
-            .panes.first { $0.terminalID == outcome.info.id }?.paneIndex ?? 1
-        deliverPaneStatusChange(worktreePath: path, paneIndex: paneIndex,
-                                // The agent has just said the turn is over, which
-                                // is the transition — whatever the rollup thinks.
-                                oldStatus: .running, newStatus: .idle,
-                                lastMessage: outcome.info.lastMessage,
-                                repoPath: worktreeRepoCache[path] ?? path,
-                                agentReportedEnd: true)
-    }
-    /// Whether a completion is worth holding because the agent has not said it
-    /// is finished.
-    ///
-    /// A completion notice is mostly the agent's own answer, and the answer can
-    /// arrive *after* the edge that announces it. Measured on a real turn: the
-    /// notice went out at 09:06:32 and the model wrote its answer at 09:06:40.99
-    /// — nine seconds later. The screen had gone quiet while it was composing,
-    /// the scan read quiet as finished, and the notice quoted the only other
-    /// thing on the pane, a shell command. Worse, when the real Stop landed the
-    /// status was no longer `running`, so `shouldNotify` refused it and the
-    /// answer never reached the phone at all — leaving the wrong message with
-    /// the right buttons stapled underneath it.
-    ///
-    /// The signal is the *disagreement*, not the empty text. `pane explain` on
-    /// the pane above said it all: `hook_status: running`, `decided_by: screen`.
-    /// The agent's own hooks still had the turn open; only the screen thought it
-    /// was over. So hold while the two disagree, and let the agent settle it —
-    /// its Stop is what carries the answer.
-    ///
-    /// `hookStatus == .running` is also what keeps this off panes that report no
-    /// hooks at all: theirs is `.unknown`, the screen is the only witness they
-    /// have, and holding their completions would delay every one for nothing.
-    static func shouldWaitForCompletion(newStatus: AgentStatus, hookStatus: AgentStatus) -> Bool {
-        newStatus == .idle && hookStatus == .running
-    }
-
-    /// Whether the program itself said this `.idle` is not a completion. OSC 7501
-    /// tells the two apart: `done` is a finished piece of work, `idle` is at rest —
-    /// what Claude Code reports the moment it starts (right after its SessionStart
-    /// hook has flipped the pane to running) and after an interrupt. Announcing
-    /// those as "finished" sent a banner for every agent launched.
-    static func programSaysAtRest(newStatus: AgentStatus, programState: ProgramStatusReport.State?) -> Bool {
-        newStatus == .idle && programState == .idle
-    }
-
-    /// How long to hold such a completion, and how often to look again. Each
-    /// pass re-reads the pane, so the wait ends the moment the agent's own Stop
-    /// lands — the full window is only spent when it never does.
-    static let proseRetryInterval: TimeInterval = 1.5
-    static let proseAttempts = 10
-
-    private func deliverPaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus,
-                                         newStatus: AgentStatus, lastMessage: String, repoPath: String,
-                                         attemptsLeft: Int = TabCoordinator.proseAttempts,
-                                         agentReportedEnd: Bool = false) {
-        let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-        let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
-            ?? URL(fileURLWithPath: repoPath).lastPathComponent
-        let worktreeStatus = statusAggregator.status(for: worktreePath)
-        let paneCount = worktreeStatus?.panes.count ?? 1
-        let paneStatus = worktreeStatus?.panes.first(where: { $0.paneIndex == paneIndex })
-        let terminalID = paneStatus?.terminalID ?? ""
-        let lastUserPrompt = paneStatus?.lastUserPrompt ?? ""
-        // The agent's final prose (Stop hook) — the most informative body line;
-        // without it completed panes surface placeholder labels like
-        // "Processing prompt".
-        let pane = AgentRegistry.shared.pane(for: terminalID)
-        let lastAssistantMessage = pane?.lastAssistantMessage ?? ""
-        // Did the agent report this itself, or did the screen scan infer it? Only
-        // an agent-reported state is trusted enough to correct a banner already
-        // sent inside the cooldown window — see `NotificationManager.shouldNotify`.
-        let source: NotificationManager.NotificationSource =
-            pane?.hookStatus == newStatus ? .agent : .scan
-
-        // One line per delivery decision. This bug was diagnosed by reconstructing
-        // it from Claude's transcript timestamps against the notification history
-        // — two files that only happen to line up. The inputs are cheap to say.
-        NSLog("[notify] pane=\(terminalID.suffix(8)) \(oldStatus.rawValue)→\(newStatus.rawValue) " +
-              "hook=\(pane?.hookStatus.rawValue ?? "no-pane") prose=\(lastAssistantMessage.count) " +
-              "source=\(source == .agent ? "agent" : "scan") attempts=\(attemptsLeft) " +
-              "reportedEnd=\(agentReportedEnd)")
-
-        if Self.programSaysAtRest(newStatus: newStatus, programState: pane?.programState) { return }
-
-        if attemptsLeft > 0,
-           Self.shouldWaitForCompletion(newStatus: newStatus,
-                                        hookStatus: pane?.hookStatus ?? .unknown) {
-            let signalsSeen = completionSignals[terminalID] ?? 0
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.proseRetryInterval) { [weak self] in
-                guard let self else { return }
-                // Back to work in the meantime: this completion was never one.
-                // Whatever the agent is doing now will announce itself.
-                guard AgentRegistry.shared.pane(for: terminalID)?.status != .running else { return }
-                // The agent finished while we held this and said so itself, with
-                // the words this edge never had. That one has already gone out.
-                guard (self.completionSignals[terminalID] ?? 0) == signalsSeen else { return }
-                self.deliverPaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex,
-                                             oldStatus: oldStatus, newStatus: newStatus,
-                                             lastMessage: lastMessage, repoPath: repoPath,
-                                             attemptsLeft: attemptsLeft - 1)
-            }
-            return
-        }
-
-        // A pending order card (AskUserQuestion / suggestion) for this pane
-        // already surfaces the "needs input" state in the island and cockpit —
-        // a banner + history entry on top of the card is the same event shown
-        // twice. Errors and completions still notify.
-        if newStatus == .waiting, !terminalID.isEmpty,
-           pendingOrders.all().contains(where: { $0.action.terminalID == terminalID }) {
-            return
-        }
-
-        if UnseenCompletion.marks(oldStatus: oldStatus, newStatus: newStatus),
-           !terminalID.isEmpty, !isWorktreeOnScreen(worktreePath) {
-            setUnseenCompletion(true, terminalID: terminalID)
-        }
-
-        NotificationManager.shared.notify(
-            worktreePath: worktreePath,
-            workspaceName: workspaceName,
-            branch: branch,
-            paneIndex: paneIndex,
-            paneCount: paneCount,
-            terminalID: terminalID,
-            oldStatus: oldStatus,
-            newStatus: newStatus,
-            lastMessage: lastMessage,
-            lastUserPrompt: lastUserPrompt,
-            lastAssistantMessage: lastAssistantMessage,
-            lastAssistantMessageAt: pane?.lastAssistantMessageAt,
-            lastUserPromptAt: pane?.lastUserPromptAt,
-            isTargetVisible: isPaneFocused(worktreePath: worktreePath, terminalID: terminalID),
-            source: source,
-            agentReportedEnd: agentReportedEnd
-        )
-    }
-
     /// Whether this worktree is the one currently shown in the dashboard (all its
     /// panes are on screen). Combined with app-frontmost in `NotificationManager`
     /// to decide whether a system banner would be redundant, and by the island /
@@ -2177,86 +1839,79 @@ class TabCoordinator {
 
     /// Set a pane's unseen completion and redraw the fleet if it changed.
     func setUnseenCompletion(_ unseen: Bool, terminalID: String) {
-        guard AgentRegistry.shared.setUnseenCompletion(unseen, terminalID: terminalID) else { return }
+        guard let pane = Fleet.shared.pane(for: terminalID), pane.unseenCompletion != unseen else { return }
+        Fleet.shared.apply(terminalID: terminalID, info: ["unseen": unseen], isCompletion: false, seq: 0)
         dashboardVC?.updatePanes(buildWorktreeRowInfos())
     }
 
     /// The worktree on screen has been looked at: every pane of it is on show.
     /// Called when the selection changes and when the app comes to the front.
     func markVisiblePanesSeen() {
-        guard NSApp.isActive, let path = dashboardVC?.activeSplitContainer?.tree?.worktreePath else { return }
-        for pane in AgentRegistry.shared.allPanes() where pane.worktreePath == path && pane.unseenCompletion {
-            setUnseenCompletion(false, terminalID: pane.id)
-        }
+        reportVisibility()
     }
+
+    /// Tell the core what is on screen (`client.visible`): it marks a pane's
+    /// finished turn unseen only when its worktree is not, and clears the mark
+    /// once it is shown in front.
+    func reportVisibility() {
+        let shown = dashboardVC?.activeSplitContainer?.tree?.worktreePath
+        let params: [String: Any] = ["client": "macos", "worktrees": shown.map { [$0] } ?? [],
+                                     "app_active": NSApp.isActive]
+        DispatchQueue.global(qos: .userInitiated).async { _ = CoreSocketClient.call("client.visible", params) }
+    }
+
+    /// The core decided a pane's edge is worth telling the user
+    /// (`pane.notice`, the notification policy in `core-registry`): show it.
+    func handleCoreNotice(_ n: [String: Any], terminalID: String?) {
+        let path = n["worktree_path"] as? String ?? ""
+        let newStatus = CoreDecode.status(n["new_status"]) ?? .idle
+        let id = terminalID ?? ""
+        NSLog("[notify] core notice pane=\(id.suffix(8)) \(n["old_status"] as? String ?? "")→\(newStatus.rawValue) " +
+              "worktree=\(URL(fileURLWithPath: path).lastPathComponent)")
+        // A pending card for this pane already shows that it needs input.
+        if newStatus == .waiting, !id.isEmpty,
+           cards.cards.contains(where: { $0.terminalID == id }) {
+            return
+        }
+        let repoPath = worktreeRepoCache[path] ?? path
+        let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+        NotificationManager.shared.show(
+            worktreePath: path,
+            workspaceName: workspaceName,
+            branch: allWorktrees.first(where: { $0.info.path == path })?.info.branch ?? "",
+            paneIndex: n["pane_index"] as? Int ?? 1,
+            paneCount: n["pane_count"] as? Int ?? 1,
+            terminalID: id,
+            newStatus: newStatus,
+            lastMessage: n["last_message"] as? String ?? "",
+            lastUserPrompt: n["last_user_prompt"] as? String ?? "",
+            lastAssistantMessage: n["last_assistant_message"] as? String ?? "",
+            isTargetVisible: id.isEmpty ? (n["is_target_visible"] as? Bool ?? false)
+                : isPaneFocused(worktreePath: path, terminalID: id))
+    }
+
+
 
     /// A remote client opened a pane: its finished turn has been seen there.
     /// Station id or the stable session key, as remote callers hold either.
     func markPaneSeen(paneId: String) -> Bool {
         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-        guard AgentRegistry.shared.pane(for: stationId)?.unseenCompletion == true else { return false }
-        setUnseenCompletion(false, terminalID: stationId)
+        guard let pane = Fleet.shared.pane(for: stationId), pane.unseenCompletion else { return false }
+        // The core owns the mark; it clears it and says so (`pane.unseen_changed`).
+        let key = pane.station?.paneSessionKey ?? paneId
+        DispatchQueue.global(qos: .userInitiated).async { _ = CoreSocketClient.call("pane.seen", ["pane_id": key]) }
         return true
     }
 
     // MARK: - First Mate
 
-    /// The approval and proposal cards First Mate is waiting on, oldest first.
-    func firstMateCards() -> [PendingOrder] {
-        pendingOrders.all().filter { $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal }
-    }
-
-    /// First Mate as a remote client draws it (`autopilot.state`).
-    func firstMateRemoteState(now: Date = Date()) -> [String: Any] {
-        let state = autopilot.state
-        let (word, _) = FirstMateStateText.describe(state.activity)
-        let tone: String
-        switch FirstMateStateText.tone(state) {
-        case .quiet: tone = "quiet"
-        case .watching: tone = "watching"
-        case .working: tone = "working"
-        case .wantsYou: tone = "wants_you"
-        }
-        var out: [String: Any] = [
-            "enabled": autopilot.isRunning,
-            "activity": word,
-            "tone": tone,
-            "detail": FirstMateStateText.detailLine(state, now: now),
-            "pending": state.pendingApprovals,
-            "agent": autopilot.agent.rawValue,
-        ]
-        if let station = autopilot.station, let pane = AgentRegistry.shared.pane(for: station.id) {
-            out["pane"] = [
-                "pane_id": station.id, "pane_session_key": FirstMatePane.sessionName,
-                "worktree_path": FirstMatePane.directory, "project": FirstMatePane.project, "branch": "",
-                "agent_type": pane.agentType.rawValue, "status": pane.status.rawValue,
-                "last_message": pane.lastMessage, "title": FirstMatePane.project,
-                "display_title": FirstMatePane.project, "first_mate": true,
-            ] as [String: Any]
-        }
-        out["cards"] = firstMateCards().map { order -> [String: Any] in
-            [
-                "card": order.action.payload ?? "",
-                "kind": order.action.kind == .autopilotProposal ? "proposal" : "approval",
-                "message": order.action.message,
-                "options": order.action.options ?? [],
-            ]
-        }
-        return out
-    }
 
     /// Start, stop, pause or resume First Mate from config. Safe to call again.
     func applyAutopilotConfig() {
-        autopilot.apply(enabled: config.autopilotEnabled, paused: config.autopilotPaused,
-                        backend: runtimeBackend,
-                        agent: AgentType(rawValue: config.autopilotAgent) ?? .claudeCode,
-                        defaults: AutomationConfig.defaults(overriding: config.autopilotAutonomy),
-                        ownerCore: config.autopilotRunsInCore)
-        if let station = autopilot.station {
-            statusPublisher.pin(station, worktreePath: FirstMatePane.directory)
-        } else {
-            statusPublisher.unpin(worktreePath: FirstMatePane.directory)
-        }
+        // The core reads First Mate's settings from config.json itself; the
+        // app follows what it reports.
+        firstMate.start()
     }
 
     /// Every PR-able worktree with its branch's PR as last fetched. Main and the
@@ -2272,26 +1927,11 @@ class TabCoordinator {
         }
     }
 
-    /// The question card a pane is waiting on, if any.
-    private func questionOrder(terminalID: String) -> PendingOrder? {
-        pendingOrders.all().first {
-            FirstMateAction.isQuestionPayload($0.action.payload) && $0.action.terminalID == terminalID
-        }
-    }
 
-    /// A question card in the remote clients' shape (`HostGatewayDecisions`).
-    static func questionCard(_ action: FirstMateAction) -> [String: Any] {
-        var card: [String: Any] = ["prompt": action.message, "options": action.options ?? []]
-        if action.questionFlags.multiSelect {
-            card["multi_select"] = true
-            card["checked"] = action.questionFlags.checked.sorted()
-        }
-        return card
-    }
 
-    /// Register every pane of a worktree's tree with AgentRegistry — not just the first.
+    /// Register every pane of a worktree's tree with Fleet — not just the first.
     /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID
-    /// (`AgentRegistry.handleWebhookEvent` only accepts a station that is a known agent),
+    /// (`Fleet.handleWebhookEvent` only accepts a station that is a known agent),
     /// so its events — and any suggestion chip tapped for it — silently fall back
     /// to the worktree's FIRST pane. Restored splits are the common case: every
     /// pane comes back through here on launch, not through the split path.
@@ -2301,7 +1941,7 @@ class TabCoordinator {
         guard let tree = terminalCoordinator.stationManager.tree(forPath: info.path) else { return }
         for leaf in tree.allLeaves {
             guard let station = StationRegistry.shared.station(forId: leaf.stationId) else { continue }
-            AgentRegistry.shared.register(
+            Fleet.shared.register(
                 station: station, worktreePath: info.path, branch: info.branch,
                 project: project, startedAt: startedAt,
                 paneSessionKey: runtimeBackend == "local" ? nil : leaf.paneSessionKey,
@@ -2337,7 +1977,7 @@ class TabCoordinator {
             .contains(where: { $0.stationId == stationId }) == true {
             return true
         }
-        guard let worktreePath = AgentRegistry.shared.pane(for: stationId)?.worktreePath else {
+        guard let worktreePath = Fleet.shared.pane(for: stationId)?.worktreePath else {
             return false
         }
         dashboardVC?.selectPane(byWorktreePath: worktreePath, focusTerminal: false)
@@ -2377,8 +2017,8 @@ class TabCoordinator {
         var names = allWorktrees.flatMap { entry in
             entry.tree?.allLeaves.map(\.paneSessionKey) ?? []
         }
-        // First Mate has no split tree, so the sweep would take it for an orphan.
-        if autopilot.station != nil { names.append(FirstMatePane.sessionName) }
+        // First Mate's session is the core's: never the app's to sweep.
+        names.append(FirstMatePane.sessionName)
         return Set(names.filter { !$0.isEmpty })
     }
 
@@ -2457,86 +2097,6 @@ extension TabCoordinator {
     /// whatever pre-commit hooks the repo installs.
     static let autoCommitTimeout: TimeInterval = 5 * 60
 
-    /// Run inspectionCommands in the worktree dir on a background queue,
-    /// then notify with the combined output. autoReview is stubbed — the
-    /// auto-launch mechanism lives in MainWindowController and requires
-    /// backend/session context not available here (DONE_WITH_CONCERNS).
-    func runFirstMateInspection(_ action: FirstMateAction) {
-        let commands = config.firstMate.inspectionCommands
-        let worktreePath = action.worktreePath
-        let isAutoCommit = action.kind == .autoCommit
-        guard !commands.isEmpty || isAutoCommit else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self else { return }
-            var results: [String] = []
-            var firstFailedCmd: String? = nil
-            for cmd in commands {
-                // A user-configured inspection command is a whole test/lint run:
-                // unbounded output (which is why it must not be read only after
-                // exit) and minutes of runtime, so it gets a far wider deadline
-                // than the quick lookups.
-                let rawOutput = ProcessRunner.output(
-                    ["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"],
-                    timeout: Self.inspectionCommandTimeout
-                )
-                if rawOutput == nil && firstFailedCmd == nil { firstFailedCmd = cmd }
-                results.append("[\(cmd)]\n\(rawOutput ?? "(failed)")")
-            }
-            let combined = results.joined(separator: "\n---\n")
-            let passed = firstFailedCmd == nil
-
-            var commitResult: String? = nil
-            if isAutoCommit {
-                // `add -A` walks the whole tree and `commit` runs the repo's
-                // pre-commit hooks, so neither fits the default quick-lookup
-                // deadline.
-                _ = ProcessRunner.output(
-                    ["git", "-C", worktreePath, "add", "-A"],
-                    timeout: Self.autoCommitTimeout
-                )
-                let commitOut = ProcessRunner.output(
-                    ["git", "-C", worktreePath, "commit", "-m", "seahelm: auto-commit after agent completion"],
-                    timeout: Self.autoCommitTimeout
-                )
-                commitResult = commitOut != nil ? "auto-commit succeeded" : "auto-commit: nothing to commit or failed"
-            }
-
-            DispatchQueue.main.async {
-                if !combined.isEmpty {
-                    NotificationManager.shared.notify(
-                        worktreePath: worktreePath,
-                        workspaceName: action.project,
-                        branch: action.branch,
-                        oldStatus: .running,
-                        newStatus: .idle,
-                        lastMessage: combined,
-                        isTargetVisible: self.isWorktreeVisible(worktreePath)
-                    )
-                }
-                // Record inspection result in watch feed
-                var watchMsg: String
-                if let cr = commitResult {
-                    watchMsg = cr
-                } else if passed {
-                    watchMsg = self.config.firstMate.autoReview
-                        ? "Inspection passed · review ready (launch manually)"
-                        : "Inspection passed"
-                } else {
-                    watchMsg = "Inspection failed: \(firstFailedCmd!)"
-                }
-                let watchAction = FirstMateAction(
-                    kind: isAutoCommit ? .autoCommit : .inspect,
-                    zone: passed ? .green : .red,
-                    worktreePath: action.worktreePath,
-                    branch: action.branch,
-                    project: action.project,
-                    terminalID: action.terminalID,
-                    message: watchMsg
-                )
-                self.watchFeed.record(watchAction)
-            }
-        }
-    }
 }
 
 private extension String {

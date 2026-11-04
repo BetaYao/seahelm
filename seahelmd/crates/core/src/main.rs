@@ -3,8 +3,6 @@
 //!   seahelm-core [serve]          run the service (one per user)
 //!   seahelm-core ensure           start it unless it is running; exit once it answers
 //!   seahelm-core call METHOD [JSON]   one JSON-RPC call, for scripts and debugging
-//!   seahelm-core shadow [--follow-app] [--seconds N]
-//!                                 compare our verdicts with the macOS app's
 //!   seahelm-core hook [SOURCE]    an agent's hook command: stdin JSON to the core
 //!   seahelm-core install-hooks    wire Claude Code and Codex hooks to `hook`,
 //!                                 and Claude's statusline to `statusline`
@@ -25,7 +23,6 @@ mod install;
 mod poller;
 mod pr;
 mod rpc;
-mod shadow;
 mod statusline;
 mod usage;
 
@@ -58,8 +55,6 @@ fn run() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
-        "shadow" => shadow::run(rest),
-        "compare-messages" => shadow::compare_messages(rest),
         // The `seahelm` words First Mate's instructions use, on the core.
         "cli" => std::process::exit(cli::run(rest)),
         // Never an error, never output: an agent runs this on every event.

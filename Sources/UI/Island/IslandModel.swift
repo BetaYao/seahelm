@@ -79,7 +79,7 @@ final class IslandModel {
     /// Suggestions waiting on the user to pick an option. This is the island's
     /// only attention signal — status notifications go to Notification Center
     /// and are not mirrored here.
-    var orders: [PendingOrder] = [] {
+    var orders: [Card] = [] {
         didSet {
             // The last card dealt with: First Mate's conversation takes over
             // (without taking the keyboard — `pendingCommandFocus` stays put).
@@ -115,39 +115,16 @@ final class IslandModel {
     /// a healthy one looks like, which is why this has to be said out loud.
     var controlChannelWarning: String?
 
-    /// The cards the island draws, newest first.
-    ///
-    /// `suggestNextOrder` covers an agent's next-step chips and its questions
-    /// alike — they share the kind and differ by payload. An integration report
-    /// only belongs here when it has an option to act on; routine reports such
-    /// as excluded conflicts stay available in the checkout's status surface
-    /// without interrupting the user.
-    static func newestSuggestions(from orders: [PendingOrder]) -> [PendingOrder] {
-        Array(orders.lazy
-            .filter {
-                switch $0.action.kind {
-                case .suggestNextOrder, .autopilotApproval, .autopilotProposal:
-                    return true
-                case .integrationReport:
-                    return !($0.action.options ?? []).isEmpty
-                default:
-                    return false
-                }
-            }
-            .reversed())
+    /// The cards the island draws, newest first. A report only when it has
+    /// something to decide; routine rounds stay in the checkout's status.
+    static func newestSuggestions(from cards: [Card]) -> [Card] {
+        Array(cards.filter { $0.kind != .report || !$0.options.isEmpty }.reversed())
     }
 
-    /// Whether newly-arrived cards are worth opening the island for.
-    ///
-    /// A card with nothing to decide is a notice and waits to be found. That
-    /// separates the two integration rounds worth telling apart: one that
-    /// dropped a conflicting worktree says so and stays put — it happens on
-    /// every round while two worktrees touch the same file — while one held
-    /// back, whose only way forward destroys what is in the checkout, pops.
-    /// Agent suggestions and questions always carry options, so this changes
-    /// nothing for them.
-    static func shouldOpen(for fresh: [PendingOrder]) -> Bool {
-        fresh.contains { !($0.action.options ?? []).isEmpty }
+    /// Whether newly-arrived cards are worth opening the island for: one with
+    /// nothing to decide is a notice and waits to be found.
+    static func shouldOpen(for fresh: [Card]) -> Bool {
+        fresh.contains { !$0.options.isEmpty }
     }
 
     /// Screen geometry, set by the panel controller.
@@ -165,11 +142,11 @@ final class IslandModel {
 
     // Wired by MainWindowController.
     var onNavigate: ((_ worktreePath: String, _ paneIndex: Int?) -> Void)?
-    var onOptionTapped: ((_ order: PendingOrder, _ optionText: String) -> Void)?
+    var onOptionTapped: ((_ card: Card, _ optionText: String) -> Void)?
     /// Jump to the pane that raised a suggestion without resolving the card.
-    var onRevealSuggestion: ((_ order: PendingOrder) -> Void)?
+    var onRevealSuggestion: ((_ card: Card) -> Void)?
     /// Dismiss a suggestion card without acting on it.
-    var onDismissOrder: ((_ order: PendingOrder) -> Void)?
+    var onDismissOrder: ((_ card: Card) -> Void)?
     /// Bridge command submit (same handler as the First Mate composer).
     var onSubmitCommand: ((String) -> Void)?
     /// `/ @ #` autocomplete source — same provider as the cockpit composer.

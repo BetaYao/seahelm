@@ -1,17 +1,17 @@
 import Foundation
 
 enum SeahelmSuggestInstaller {
-    private static let versionMarker = "# seahelm-suggest v4"
+    private static let versionMarker = "# seahelm-suggest v5"
 
     static func scriptContents() -> String {
         return """
         #!/bin/sh
         \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
         # Usage: seahelm-suggest "option one" "option two" ...
-        # Reports suggested next steps to seahelm's control socket; shows as one
+        # Reports suggested next steps to seahelm-core; shows as one
         # tool-call line, never raw XML.
         set -u
-        sock="${SEAHELM_SOCKET_PATH:-$HOME/.config/seahelm/seahelm.sock}"
+        sock="${SEAHELM_CORE_SOCKET:-$HOME/.config/seahelm/core.sock}"
         # SEAHELMD_SESSION is the same value SessionManager exports as SEAHELM_PANE_ID
         # (the backend session name). Panes created before that export exists still
         # carry it, so it rescues them: without a pane id this reports under the

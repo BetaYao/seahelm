@@ -51,8 +51,10 @@ if command -v xcrun >/dev/null; then
   SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
   [ -n "$SDKROOT" ] && export SDKROOT
 fi
-cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd -p seahelm-core --target "$TRIPLE"
+cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd -p seahelm-core -p seahelm-cli --target "$TRIPLE"
 TARGET_DIR="${CARGO_TARGET_DIR:-$CRATE/target}"
 mkdir -p "$(dirname "$DEST")"
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelmd" "$DEST"
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-core" "$(dirname "$DEST")/seahelm-core"
+# The `seahelm` command line, which the app installs as ~/.local/bin/seahelm.
+install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm" "$(dirname "$DEST")/seahelm"

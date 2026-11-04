@@ -30,8 +30,6 @@ protocol VTAttachedProcess: AnyObject {
 
 protocol VTProcessSpawning {
     func spawn(
-        python3: String,
-        scriptPath: String,
         sessionKey: String,
         rows: Int,
         cols: Int,
@@ -40,8 +38,6 @@ protocol VTProcessSpawning {
 }
 
 struct VTProcessSpawnRequest: Equatable {
-    let python3: String
-    let scriptPath: String
     let sessionKey: String
     let rows: Int
     let cols: Int
@@ -93,21 +89,18 @@ final class LiveVTAttachedProcess: VTAttachedProcess {
 }
 
 final class DefaultVTProcessSpawner: VTProcessSpawning {
+    /// `seahelmd pipe <session> <rows> <cols>`: the session's raw VT stream
+    /// on stdout and stdin to its input, at the session's own size (attaching
+    /// at another could resize it under the Mac).
     func spawn(
-        python3: String,
-        scriptPath: String,
         sessionKey: String,
         rows: Int,
         cols: Int,
         seahelmdPath: String
     ) throws -> VTAttachedProcess {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: python3)
-        process.arguments = [scriptPath, sessionKey, String(rows), String(cols)]
-
-        var env = ProcessInfo.processInfo.environment
-        env["SEAHELMD"] = seahelmdPath
-        process.environment = env
+        process.executableURL = URL(fileURLWithPath: seahelmdPath)
+        process.arguments = ["pipe", sessionKey, String(rows), String(cols)]
 
         let outPipe = Pipe()
         let inPipe = Pipe()
@@ -155,7 +148,6 @@ final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
 
     private let processSpawner: VTProcessSpawning
     private let seahelmdPath: (String) -> String
-    private let attachScriptPath: () -> String?
     private let sessionSize: (String) -> (rows: Int, cols: Int)?
     private let now: () -> Date
     private let leaseTTL: TimeInterval
@@ -171,7 +163,6 @@ final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
     init(
         processSpawner: VTProcessSpawning = DefaultVTProcessSpawner(),
         seahelmdPath: @escaping (String) -> String = { _ in SeahelmdLocator.executable() },
-        attachScriptPath: @escaping () -> String? = { SeahelmdVTAttachManager.bundledAttachScriptPath() },
         sessionSize: @escaping (String) -> (rows: Int, cols: Int)? = { SeahelmdVTAttachManager.defaultSessionSize(for: $0) },
         now: @escaping () -> Date = Date.init,
         leaseTTL: TimeInterval = TimeInterval(SeahelmdVTTiming.leaseTTLMs) / 1000,
@@ -183,7 +174,6 @@ final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
     ) {
         self.processSpawner = processSpawner
         self.seahelmdPath = seahelmdPath
-        self.attachScriptPath = attachScriptPath
         self.sessionSize = sessionSize
         self.now = now
         self.leaseTTL = leaseTTL
@@ -289,10 +279,6 @@ final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
 
     // MARK: Geometry
 
-    static func bundledAttachScriptPath() -> String? {
-        Bundle.main.url(forResource: "seahelmd-attach", withExtension: "py")?.path
-    }
-
     static func defaultSessionSize(for paneSessionKey: String) -> (rows: Int, cols: Int)? {
         guard let listOutput = SeahelmdLocator.listOutput() else { return nil }
         guard let pid = ProcessProbe.sessionPid(paneSessionKey: paneSessionKey, seahelmdListOutput: listOutput) else {
@@ -324,15 +310,10 @@ final class SeahelmdVTAttachManager: HostGatewayVTAttaching {
         }
 
         let geometry = Self.resolvedGeometry(for: paneSessionKey, lookup: sessionSize)
-        guard let scriptPath = attachScriptPath() else {
-            return ["ok": false, "error": "seahelmd-attach.py not bundled"]
-        }
 
         let proc: VTAttachedProcess
         do {
             proc = try processSpawner.spawn(
-                python3: "/usr/bin/python3",
-                scriptPath: scriptPath,
                 sessionKey: paneSessionKey,
                 rows: geometry.rows,
                 cols: geometry.cols,

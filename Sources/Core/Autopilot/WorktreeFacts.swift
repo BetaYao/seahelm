@@ -84,6 +84,6 @@ struct WorktreeFacts: Equatable {
 
     /// Busy = running or waiting on someone, in any pane filed under `path`.
     static func busyPanes(worktreePath path: String) -> Int {
-        AgentRegistry.shared.panes(forWorktree: path).filter { $0.status == .running || $0.status == .waiting }.count
+        Fleet.shared.panes(forWorktree: path).filter { $0.status == .running || $0.status == .waiting }.count
     }
 }

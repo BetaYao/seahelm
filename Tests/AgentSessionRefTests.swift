@@ -130,20 +130,7 @@ final class AgentSessionRefTests: XCTestCase {
         XCTAssertEqual(ref, back)
     }
 
-    func testConfigRoundTripCarriesAgentSessions() throws {
-        var config = Config()
-        config.agentSessions["seahelm-repo-main"] = AgentSessionRef(agent: "claude", sessionId: uuid)
-        let data = try JSONEncoder().encode(config)
-        let back = try JSONDecoder().decode(Config.self, from: data)
-        XCTAssertEqual(back.agentSessions["seahelm-repo-main"]?.sessionId, uuid)
-    }
 
-    func testConfigBackwardCompatMissingKey() throws {
-        // Old config without agent_sessions decodes to an empty map.
-        let json = #"{"workspace_paths":[]}"#.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Config.self, from: json)
-        XCTAssertEqual(config.agentSessions, [:])
-    }
 
     func testClaudeForkCommandQuotesEveryToken() {
         let ref = AgentSessionRef(agent: "claude", sessionId: uuid)!

@@ -39,7 +39,7 @@ class SeahelmdChannel: AgentChannel {
     /// The Return is a second write on purpose: an agent TUI treats a `\r` that
     /// arrives in the same burst as the pasted text as a literal newline rather
     /// than a submit, so the prompt would sit in the composer forever. Same
-    /// reasoning as `AgentRegistry.sendCommand`.
+    /// reasoning as `Fleet.sendCommand`.
     func sendPrompt(_ text: String) -> Bool {
         guard !text.isEmpty, sendRaw(text) else { return false }
         Thread.sleep(forTimeInterval: Station.enterSubmitDelay)

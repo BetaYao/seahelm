@@ -563,19 +563,19 @@ struct ConversationItem: Identifiable, Equatable {
 
 /// A pending suggest/question order rendered as a card with option chips.
 private struct SuggestionCard: View {
-    let order: PendingOrder
+    let order: Card
     let onOption: (String) -> Void
     let onDismiss: () -> Void
     /// Blank-area tap: jump to the raising pane without resolving the card.
     let onReveal: () -> Void
 
     private var isQuestion: Bool {
-        FirstMateAction.isQuestionPayload(order.action.payload)
+        order.isAgentQuestion
     }
     /// An integration round, which belongs to a repo rather than to a pane:
     /// no agent raised it and there is no branch behind it.
     private var isIntegration: Bool {
-        order.action.kind == .integrationReport
+        order.kind == .report
     }
 
     private var icon: String {
@@ -589,11 +589,11 @@ private struct SuggestionCard: View {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .foregroundStyle(isIntegration ? .orange : .yellow)
-                Text(order.action.project)
+                Text(order.project)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
-                if !order.action.branch.isEmpty {
-                    Text(order.action.branch)
+                if !order.branch.isEmpty {
+                    Text(order.branch)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
                 } else if isIntegration {
@@ -613,15 +613,15 @@ private struct SuggestionCard: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onDismiss() }
             }
-            if !order.action.message.isEmpty {
-                Text(order.action.message)
+            if !order.message.isEmpty {
+                Text(order.message)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Options keep their own taps so they don't bubble to onReveal.
-            OptionList(options: order.action.answerLabels, onTap: onOption)
+            OptionList(options: order.labels, onTap: onOption)
         }
         .padding(12)
         .background(

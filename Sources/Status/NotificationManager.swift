@@ -5,7 +5,7 @@ extension Notification.Name {
     static let navigateToWorktree = Notification.Name("seahelm.navigateToWorktree")
     static let repoViewDidChangeFocusedPane = Notification.Name("seahelm.repoViewDidChangeFocusedPane")
     /// Posted by `GhosttyNSView.becomeFirstResponder` with the `Station` as
-    /// object — the synchronous click→title path, independent of AgentRegistry polling.
+    /// object — the synchronous click→title path, independent of Fleet polling.
     static let paneDidAcquireFocus = Notification.Name("seahelm.paneDidAcquireFocus")
 }
 
@@ -13,40 +13,8 @@ extension Notification.Name {
 class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
-    /// Which channel a status change came from. The agent reporting its own stop
-    /// (hook) is worth more than the screen scan inferring one: the scan cannot
-    /// tell a thinking pause from a finished turn, so an agent-reported completion
-    /// is allowed to correct a scan-derived banner inside the cooldown window.
-    enum NotificationSource { case scan, agent }
-
-    /// What was last announced for a key: when, by whom, and *which turn* it was.
-    /// The turn identity is what stops one completion being announced twice.
-    private struct Delivery {
-        let at: Date
-        let source: NotificationSource
-        /// Identifies the turn being announced — see `turnFingerprint`.
-        let turn: String
-    }
-
-    private var lastNotified: [String: Delivery] = [:]
-
-    /// Minimum seconds between delivered notifications for the same key. Injected
-    /// from `Config.notifications` at startup.
-    var cooldown: TimeInterval = 30
-
-    /// Stability gate: after a qualifying edge, hold the notification this long
-    /// and only deliver if the status is still the same when the timer fires.
-    /// 0 disables the gate (deliver on the edge). Injected from config.
-    var stabilityDelay: TimeInterval = 1.0
-
     /// Sound preference from settings: `default`, `defaultCritical`, `none`.
     var soundPreference: String = "default"
-
-    /// Latest observed status per key, updated on *every* edge (not just
-    /// qualifying ones) so a pending fire can tell the agent moved on.
-    private var latestStatus: [String: AgentStatus] = [:]
-    /// In-flight stability timers, keyed by cooldownKey.
-    private var pendingFires: [String: Timer] = [:]
 
     private override init() {
         super.init()
@@ -122,122 +90,6 @@ class NotificationManager: NSObject {
         default:
             return forError ? .defaultCritical : .default
         }
-    }
-
-    /// Eligibility gate: only fire on a `running → (waiting | error | idle)` edge,
-    /// and not more than once per `cooldown` per key. `cooldownKey` is a
-    /// namespaced pane- or worktree-level identity (see
-    /// `cooldownKey(terminalID:worktreePath:)`), so the pane and worktree call
-    /// paths can never collide in `lastNotified`.
-    ///
-    /// Pure predicate — it does NOT consume the cooldown. Cooldown is recorded
-    /// only when a notification is actually *delivered* (`recordDelivery`), so a
-    /// notification held by the stability gate and then dropped does not burn the
-    /// cooldown window.
-    /// `source` says who reported this change (see `NotificationSource`): an
-    /// agent-reported event may overtake a still-warm scan-derived one, because
-    /// that earlier banner was quite possibly wrong — a thinking pause read as a
-    /// finished turn. It gets that right exactly once per window: two
-    /// agent-reported events really are two events, and the cooldown is what keeps
-    /// a blocked-then-resumed Stop pair from bannering twice.
-    func shouldNotify(cooldownKey: String, oldStatus: AgentStatus, newStatus: AgentStatus,
-                      source: NotificationSource = .scan, turn: String = "",
-                      now: Date = Date()) -> Bool {
-        let last = lastNotified[cooldownKey]
-        return Self.shouldNotify(
-            oldStatus: oldStatus, newStatus: newStatus, source: source, turn: turn,
-            lastDelivery: last.map { (at: $0.at, source: $0.source, turn: $0.turn) },
-            cooldown: cooldown, now: now)
-    }
-
-    /// Pure core of the eligibility gate — extracted so the cooldown/override
-    /// policy is testable without the shared instance's accumulated deliveries.
-    ///
-    /// A turn is announced at most once. A finished pane keeps moving: Claude Code
-    /// compacts its conversation, a shell it left running paints, a monitor ticks —
-    /// each of those retakes the screen, and when the screen settles the status
-    /// makes another running → idle edge out of the *same* completion. Judged on
-    /// timing alone those repeats look legitimate (minutes apart, well past the
-    /// cooldown), so they were delivered: the same banner, carrying the same
-    /// now-stale text, arriving long after the agent actually finished. Identity,
-    /// not timing, is what tells them apart.
-    static func shouldNotify(oldStatus: AgentStatus, newStatus: AgentStatus,
-                             source: NotificationSource, turn: String,
-                             lastDelivery: (at: Date, source: NotificationSource, turn: String)?,
-                             cooldown: TimeInterval, now: Date) -> Bool {
-        guard oldStatus == .running else { return false }
-        guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
-        guard let last = lastDelivery else { return true }
-        // Already announced, however long ago. An empty fingerprint identifies
-        // nothing, so it never matches itself.
-        if !turn.isEmpty, turn == last.turn { return false }
-        if now.timeIntervalSince(last.at) < cooldown {
-            return source == .agent && last.source == .scan
-        }
-        return true
-    }
-
-    /// Identifies the turn a notification is about: its outcome plus the words it
-    /// would show. Two edges carrying the same answer to the same prompt are the
-    /// same completion seen twice, whatever the status did in between.
-    static func turnFingerprint(status: AgentStatus, lastAssistantMessage: String,
-                                lastMessage: String, lastUserPrompt: String) -> String {
-        let body = lastAssistantMessage.isEmpty ? lastMessage : lastAssistantMessage
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        return "\(status.rawValue)|\(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))|\(trimmed)"
-    }
-
-    /// Whether the agent's prose can be read as the answer to the prompt the
-    /// pane is holding.
-    ///
-    /// A completion notice says "finished" and then quotes the agent. When an
-    /// order lands and the agent has not spoken since, that quote is the answer
-    /// to the *previous* order — and announcing it puts a reply to "hi" under a
-    /// heading that names the order after it, out of order and, on a phone,
-    /// indistinguishable from the agent having answered. Worse, the turn
-    /// fingerprint carries the prompt, so the new prompt made a *new*
-    /// fingerprint out of the *old* words and walked straight through the
-    /// once-per-turn gate: the same answer, sent twice.
-    ///
-    /// Only the agent's own prose is held to this. A pane with none — anything
-    /// read off the screen rather than reported — has nothing to be out of
-    /// order with, and blocking it would silence every agent that reports no
-    /// hooks at all. The real completion arrives moments later with a fresh
-    /// timestamp and announces itself then.
-    static func answersCurrentPrompt(lastAssistantMessage: String,
-                                     assistantAt: Date?, promptAt: Date?) -> Bool {
-        guard !lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let promptAt, let assistantAt else { return true }
-        return assistantAt >= promptAt
-    }
-
-    /// Whether a pending (delayed) notification for `targetStatus` should still
-    /// fire, given the latest observed status for its key. Pure — extracted so the
-    /// stability-gate decision is unit-testable without a live Timer.
-    static func shouldDeliverPending(targetStatus: AgentStatus, latestStatus: AgentStatus?) -> Bool {
-        latestStatus == targetStatus
-    }
-
-    /// Whether a notification waits out `stabilityDelay` before going out.
-    ///
-    /// The gate is there for the screen scan, which reads a thinking pause as a
-    /// finished turn and has to be given a moment to take it back. An agent that
-    /// reported the end of its turn itself (its Stop) has nothing to take back:
-    /// a status that is `running` again a moment later is the *next* turn, not
-    /// this one resuming. Holding it anyway lost the answer whenever the next
-    /// turn came quickly — a scheduled task or a queued prompt starts within the
-    /// second, the pending fire saw `running`, and the reply never reached the
-    /// chat that asked for it.
-    static func usesStabilityGate(stabilityDelay: TimeInterval, terminalID: String,
-                                  agentReportedEnd: Bool) -> Bool {
-        stabilityDelay > 0 && !terminalID.isEmpty && !agentReportedEnd
-    }
-
-    /// Prefer a stable per-pane key (terminalID) when we have one, otherwise fall
-    /// back to the worktree. Namespaced so the two never alias.
-    private static func cooldownKey(terminalID: String, worktreePath: String) -> String {
-        terminalID.isEmpty ? "wt:\(worktreePath)" : "tid:\(terminalID)"
     }
 
     static func formatTitle(status: AgentStatus, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int) -> String {
@@ -437,10 +289,10 @@ class NotificationManager: NSObject {
     /// a transport, a relay, or push certificates — the IM app already has all
     /// three.
     ///
-    /// Hung off `deliver` rather than off AgentRegistry's ingest so the chat message
+    /// Hung off `deliver` rather than off Fleet's ingest so the chat message
     /// inherits this type's gating: the running → done edge, the per-key
     /// cooldown, and the stability delay that swallows an idle flicker mid-turn.
-    /// The AgentRegistry broadcast this replaced had none of those, and never fired on
+    /// The Fleet broadcast this replaced had none of those, and never fired on
     /// completion at all.
     ///
     /// Fires on every edge that earns a banner, whether or not the banner is
@@ -536,105 +388,15 @@ class NotificationManager: NSObject {
                           branch: branch, lastMessage: lastMessage)
     }
 
-    /// The single notification entry point for the whole app.
-    ///
-    /// Behaviour:
-    ///  - Gated by `shouldNotify` (running → waiting/error/idle, per-key cooldown).
-    ///  - **Always** records to the in-app `NotificationHistory`.
-    ///  - Posts a macOS system notification unless the target is already visible
-    ///    to the user, i.e. the app is frontmost AND `isTargetVisible` (the
-    ///    worktree is the one currently on screen). If you're looking at a
-    ///    *different* worktree — even in the foreground — the banner still fires
-    ///    so you learn another agent needs you.
-    ///
-    /// - Parameters:
-    ///   - terminalID: stable per-pane id used for the cooldown key; pass "" for
-    ///     worktree-level callers (First Mate, inspection).
-    ///   - paneIndex/paneCount: 1-based; `paneCount > 1` adds a `[Pane N]` label
-    ///     and records the pane in history so a click can mark just that pane read.
-    ///   - isTargetVisible: whether this worktree is the one currently shown.
-    ///   - source: who reported the change — the agent's own hook, or the screen
-    ///     scan inferring it. Only the former may correct a banner already sent
-    ///     inside the cooldown window.
-    ///   - agentReportedEnd: the agent itself said this turn is over (its Stop),
-    ///     so the stability gate is skipped — see `usesStabilityGate`.
-    func notify(
-        worktreePath: String,
-        workspaceName: String,
-        branch: String,
-        paneIndex: Int = 1,
-        paneCount: Int = 1,
-        terminalID: String = "",
-        oldStatus: AgentStatus,
-        newStatus: AgentStatus,
-        lastMessage: String,
-        lastUserPrompt: String = "",
-        lastAssistantMessage: String = "",
-        lastAssistantMessageAt: Date? = nil,
-        lastUserPromptAt: Date? = nil,
-        isTargetVisible: Bool = false,
-        source: NotificationSource = .scan,
-        agentReportedEnd: Bool = false
-    ) {
-        let key = Self.cooldownKey(terminalID: terminalID, worktreePath: worktreePath)
-
-        // Track the latest observed status for this key on *every* edge so a
-        // pending stability timer can detect the agent moved on (e.g. an idle
-        // flicker that flips back to running mid-turn).
-        latestStatus[key] = newStatus
-
-        guard Self.answersCurrentPrompt(lastAssistantMessage: lastAssistantMessage,
-                                        assistantAt: lastAssistantMessageAt,
-                                        promptAt: lastUserPromptAt) else { return }
-
-        let turn = Self.turnFingerprint(status: newStatus, lastAssistantMessage: lastAssistantMessage,
-                                        lastMessage: lastMessage, lastUserPrompt: lastUserPrompt)
-        guard shouldNotify(cooldownKey: key, oldStatus: oldStatus, newStatus: newStatus,
-                           source: source, turn: turn) else { return }
-
-        // The delivery closure captures the fully-formed payload. Invoked either
-        // immediately or when the stability timer fires and the status still holds.
-        let deliver = { [weak self] in
-            guard let self else { return }
-            self.lastNotified[key] = Delivery(at: Date(), source: source, turn: turn)
-            self.deliver(
-                worktreePath: worktreePath,
-                workspaceName: workspaceName,
-                branch: branch,
-                paneIndex: paneIndex,
-                paneCount: paneCount,
-                terminalID: terminalID,
-                newStatus: newStatus,
-                lastMessage: lastMessage,
-                lastUserPrompt: lastUserPrompt,
-                lastAssistantMessage: lastAssistantMessage,
-                isTargetVisible: isTargetVisible
-            )
-        }
-
-        // The stability gate only applies to the pane path, which has a live
-        // status stream to cancel against. First Mate / inspection callers pass
-        // terminalID == "" and never update `latestStatus`, so a timer there would
-        // just add latency and always fire — deliver those immediately. So is an
-        // agent-reported end of turn, which no later status can take back.
-        pendingFires[key]?.invalidate()
-        pendingFires[key] = nil
-        guard Self.usesStabilityGate(stabilityDelay: stabilityDelay, terminalID: terminalID,
-                                     agentReportedEnd: agentReportedEnd) else {
-            deliver()
-            return
-        }
-
-        let targetStatus = newStatus
-        let timer = Timer.scheduledTimer(withTimeInterval: stabilityDelay, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.pendingFires[key] = nil
-            guard Self.shouldDeliverPending(targetStatus: targetStatus, latestStatus: self.latestStatus[key]) else {
-                return
-            }
-            deliver()
-        }
-        pendingFires[key] = timer
+    /// A notice seahelm-core already decided on (`pane.notice`): history,
+    /// banner and the chat mirror, with no decision of the app's own.
+    func show(worktreePath: String, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int,
+              terminalID: String, newStatus: AgentStatus, lastMessage: String, lastUserPrompt: String,
+              lastAssistantMessage: String, isTargetVisible: Bool) {
+        deliver(worktreePath: worktreePath, workspaceName: workspaceName, branch: branch,
+                paneIndex: paneIndex, paneCount: paneCount, terminalID: terminalID, newStatus: newStatus,
+                lastMessage: lastMessage, lastUserPrompt: lastUserPrompt,
+                lastAssistantMessage: lastAssistantMessage, isTargetVisible: isTargetVisible)
     }
 
     /// Builds and posts the notification (in-app history + optional system

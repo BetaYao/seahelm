@@ -46,7 +46,7 @@ final class MailPaneObserver {
 
     init(sessions: CommandSessionStore, intentStore: OutboundMailIntentStore = OutboundMailIntentStore()) { self.sessions = sessions; self.intentStore = intentStore }
 
-    func ingest(_ outcome: IngestOutcome) {
+    func ingest(_ outcome: PaneChange) {
         let key = outcome.info.station?.paneSessionKey ?? ""
         guard !key.isEmpty else { return }
         // Every mail thread talking to this pane hears it, each in its own thread.
@@ -54,17 +54,17 @@ final class MailPaneObserver {
             .filter { $0.surface == "mail" }
         guard !threads.isEmpty else { return }
         let kind: OutboundMailIntent.Kind?
-        if outcome.isCompletionSignal { kind = .completion }
+        if outcome.isCompletion { kind = .completion }
         else if outcome.statusChanged && outcome.newStatus == .waiting { kind = .waiting }
         else if outcome.statusChanged && outcome.newStatus == .error { kind = .error }
         // A turn that simply ends. Agents that report a Stop hook raise
-        // `isCompletionSignal`; the rest just fall back to resting, and without
+        // `isCompletion`; the rest just fall back to resting, and without
         // this their answer never left the pane — which is the whole point of
         // having mailed them.
         else if outcome.statusChanged && outcome.oldStatus == .running && outcome.newStatus == .idle { kind = .completion }
         else { kind = nil }
         guard let kind else { return }
-        let text = outcome.isCompletionSignal ? outcome.info.lastAssistantMessage : outcome.info.lastMessage
+        let text = outcome.isCompletion ? outcome.info.lastAssistantMessage : outcome.info.lastMessage
         let body = MailContentRedactor.summary(text.isEmpty ? "Seahelm pane status: \(outcome.newStatus.groupLabel)." : text)
         for thread in threads {
             let id = "\(key):\(outcome.seq):\(kind.rawValue):\(thread.id)"
