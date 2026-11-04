@@ -75,6 +75,13 @@ struct Geom {
     rows: u16,
 }
 
+/// `SEAHELM_GPUI_KEYS=1`: log each key, what it encodes to, and what the
+/// input method commits.
+fn debug_keys() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SEAHELM_GPUI_KEYS").is_some())
+}
+
 /// A monotonic clock for the gesture's double-click timing.
 fn now_ns() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
@@ -219,6 +226,9 @@ impl TerminalView {
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session.clone() else { return };
         let flags = self.kitty_flags();
+        if debug_keys() {
+            eprintln!("key_down {:?} text={} flags={flags}", event.keystroke, keys::is_text(&event.keystroke));
+        }
         // Typed text is the input method's to deliver (`replace_text_in_range`),
         // unless the program asked for every key as an escape code and
         // nothing is being composed.
@@ -251,6 +261,9 @@ impl TerminalView {
                 self.encode_key(&event.keystroke, action)
             }
         };
+        if debug_keys() {
+            eprintln!("  -> {bytes:?}");
+        }
         if !bytes.is_empty() {
             self.to_live_screen();
             session.send(&bytes);
@@ -592,6 +605,9 @@ impl EntityInputHandler for TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.marked = None;
+        if debug_keys() {
+            eprintln!("ime commit {text:?}");
+        }
         if !text.is_empty() {
             self.to_live_screen();
             if let Some(session) = &self.session {

@@ -83,6 +83,9 @@ pub struct Workspace {
     panes: HashMap<String, Panes>,
     split_drag: Option<SplitDrag>,
     grouping: Grouping,
+    /// Nothing has had the keyboard yet: the first frame with a terminal
+    /// gives it the focused pane, so typing works without a click.
+    needs_focus: bool,
     sidebar_width: f32,
     sidebar_visible: bool,
     dragging_divider: bool,
@@ -107,6 +110,7 @@ impl Workspace {
                 .collect(),
             split_drag: None,
             grouping: Grouping::default(),
+            needs_focus: true,
             sidebar_width: SIDEBAR_DEFAULT,
             sidebar_visible: true,
             dragging_divider: false,
@@ -352,6 +356,7 @@ impl Workspace {
         if let Some(p) = self.panes.get_mut(&id) {
             p.tree.focused = next;
         }
+        self.save_layouts();
         if let Some(v) = self.view_for(&id, next, window, cx) {
             window.focus(&v.focus_handle(cx));
         }
@@ -591,6 +596,12 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
         let body = selected.as_deref().map(|id| self.panes_body(id, window, cx));
+        if self.needs_focus {
+            if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
+                window.focus(&view.focus_handle(cx));
+                self.needs_focus = false;
+            }
+        }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
             Some(item) => item.title.clone().into(),
             None => "Seahelm".into(),
@@ -604,8 +615,6 @@ impl Render for Workspace {
             .flex()
             .flex_row()
             .font_family(MONO)
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_action(cx.listener(|w, _: &SplitRight, window, cx| w.split(Axis::Horizontal, window, cx)))
             .on_action(cx.listener(|w, _: &SplitDown, window, cx| w.split(Axis::Vertical, window, cx)))
             .on_action(cx.listener(|w, _: &ClosePane, window, cx| w.close_pane(window, cx)))
@@ -622,6 +631,34 @@ impl Render for Workspace {
         }
         if self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Vertical) {
             root = root.cursor_row_resize();
+        }
+        // While a divider is dragged, follow the pointer window-wide: the
+        // dividers occlude what is under them (so a drag never starts a
+        // selection), which also hides them from the root's own hover-bound
+        // move and up listeners.
+        if self.dragging_divider || self.split_drag.is_some() {
+            let this = cx.entity();
+            root = root.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        let on_move = this.clone();
+                        window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+                            if phase == gpui::DispatchPhase::Bubble {
+                                on_move.update(cx, |w, cx| w.on_mouse_move(e, window, cx));
+                            }
+                        });
+                        let on_up = this.clone();
+                        window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
+                            if phase == gpui::DispatchPhase::Bubble {
+                                on_up.update(cx, |w, cx| w.on_mouse_up(e, window, cx));
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_0(),
+            );
         }
         root = root.child(self.terminal_column(title, body, window.is_maximized(), cx));
         if self.sidebar_visible {
