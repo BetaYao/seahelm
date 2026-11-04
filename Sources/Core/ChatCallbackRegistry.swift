@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Every button on a chat surface resolves to one of these. `command` is the
 /// general case — the button is a line the tapper could have typed, and it runs
-/// through the same `CommandExecutor` as if they had. The card cases are the
+/// through the command language (seahelm-core) as if they had. The card cases are the
 /// exception: a First Mate option is answered by driving the pane's TUI, not by
 /// a verb, so it names the card and the option instead.
 enum ChatCallbackAction: Equatable {
@@ -14,8 +14,6 @@ enum ChatCallbackAction: Equatable {
     case suggestionOption(orderId: String, index: Int)
     /// Clear a First Mate card without answering it.
     case dismissSuggestion(orderId: String)
-    /// Withdraw the confirmation this chat was asked — the Cancel beside `/yes`.
-    case cancelPending
 }
 
 /// Mints the short tokens chat buttons carry.
@@ -67,8 +65,6 @@ final class ChatCallbackRegistry {
             switch button.effect {
             case .line(let line):
                 return MessageButton(label: button.label, token: mint(.command(line)))
-            case .cancelPending:
-                return MessageButton(label: button.label, token: mint(.cancelPending))
             }
         }
     }
@@ -99,7 +95,7 @@ final class ChatCallbackRegistry {
 
     private static func orderId(of action: ChatCallbackAction) -> String? {
         switch action {
-        case .command, .cancelPending: return nil
+        case .command: return nil
         case .suggestionOption(let orderId, _): return orderId
         case .dismissSuggestion(let orderId): return orderId
         }

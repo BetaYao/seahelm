@@ -1,16 +1,5 @@
 import Foundation
 
-/// An action that asked first and is waiting for `/yes`.
-struct PendingAction: Equatable {
-    static let lifetime: TimeInterval = 60
-
-    /// The line to run on confirmation — already carrying `force`.
-    let line: ParsedLine
-    let summary: String
-    let expiresAt: Date
-
-    var isExpired: Bool { Date() >= expiresAt }
-}
 
 /// One surface's conversation with the fleet: which pane it is talking to.
 ///
@@ -70,7 +59,7 @@ struct CommandSession: Codable, Equatable {
     }
 }
 
-/// Persists sessions; holds pending confirmations in memory only.
+/// Persists sessions.
 final class CommandSessionStore {
     static let defaultURL = Config.configDir.appendingPathComponent("command-sessions.json")
     /// The mail bindings this store replaced; imported once, then ignored.
@@ -80,7 +69,6 @@ final class CommandSessionStore {
     private let url: URL?
     private let queue = DispatchQueue(label: "seahelm.command-sessions")
     private var sessions: [String: CommandSession] = [:]
-    private var pending: [String: PendingAction] = [:]
 
     init(url: URL? = CommandSessionStore.defaultURL, legacyMailURL: URL? = CommandSessionStore.legacyMailURL) {
         self.url = url
@@ -247,21 +235,8 @@ final class CommandSessionStore {
 
     // MARK: - Pending confirmations
 
-    func setPending(_ action: PendingAction, for key: String) {
-        queue.sync { pending[key] = action }
-    }
 
-    func clearPending(for key: String) {
-        queue.sync { _ = pending.removeValue(forKey: key) }
-    }
 
-    /// The live pending action, removed. Nil when there is none or it expired.
-    func takePending(for key: String) -> PendingAction? {
-        queue.sync {
-            guard let action = pending.removeValue(forKey: key), !action.isExpired else { return nil }
-            return action
-        }
-    }
 
     // MARK: - Persistence
 
