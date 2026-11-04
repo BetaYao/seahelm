@@ -15,6 +15,7 @@ use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
 use crate::notify;
 use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
+use crate::gateway_page::GatewayPage;
 use crate::platform;
 use crate::session;
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
@@ -118,6 +119,9 @@ pub struct Workspace {
     first_mate_view: Option<Entity<TerminalView>>,
     /// The running spinner's step (see `SPIN_STEP`).
     spin_phase: u8,
+    /// Remote access (seahelm-gateway's settings) is in the main area.
+    gateway_open: bool,
+    gateway_page: Entity<GatewayPage>,
 }
 
 impl Workspace {
@@ -152,6 +156,8 @@ impl Workspace {
             first_mate_view: None,
             spin_phase: 0,
             window_active: true,
+            gateway_open: false,
+            gateway_page: cx.new(GatewayPage::new),
         };
         Self::poll_core(cx);
         Self::listen_core(cx);
@@ -564,6 +570,7 @@ impl Workspace {
     /// The dock opens the workbench over the main area, or closes it.
     fn toggle_first_mate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.first_mate_open = !self.first_mate_open;
+        self.set_gateway_open(false, cx);
         notify::log(if self.first_mate_open { "first_mate.open" } else { "first_mate.close" }, serde_json::json!({}));
         if self.first_mate_open {
             if let Some(view) = self.first_mate_terminal(cx) {
@@ -573,6 +580,27 @@ impl Workspace {
             self.refocus_terminal(window, cx);
         }
         cx.notify();
+    }
+
+    /// The share button opens Remote access over the main area, or closes it.
+    fn toggle_gateway(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let open = !self.gateway_open;
+        if open {
+            self.first_mate_open = false;
+        }
+        self.set_gateway_open(open, cx);
+        notify::log(if open { "gateway.open" } else { "gateway.close" }, serde_json::json!({}));
+        if !open {
+            self.refocus_terminal(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn set_gateway_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.gateway_open != open {
+            self.gateway_open = open;
+            self.gateway_page.update(cx, |p, cx| p.set_visible(open, cx));
+        }
     }
 
     /// First Mate's terminal, attached only once its session is up:
@@ -810,8 +838,10 @@ impl Workspace {
     }
 
     fn select(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        // Picking a worktree is leaving First Mate; its session lives on.
+        // Picking a worktree is leaving First Mate (its session lives on)
+        // and Remote access.
         self.first_mate_open = false;
+        self.set_gateway_open(false, cx);
         self.selected = Some(id.clone());
         // On screen in a frontmost window: a turn that ends here is seen.
         self.report_visible(window.is_window_active(), cx);
@@ -1178,7 +1208,9 @@ impl Focusable for Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
-        let body = if self.first_mate_open {
+        let body = if self.gateway_open {
+            Some(div().flex_1().min_h_0().flex().child(self.gateway_page.clone()).into_any_element())
+        } else if self.first_mate_open {
             Some(self.workbench(cx))
         } else {
             selected.as_deref().map(|id| self.panes_body(id, window, cx))
@@ -1193,19 +1225,20 @@ impl Render for Workspace {
             })
             .detach();
         }
-        if self.needs_focus {
+        if self.needs_focus && !self.gateway_open {
             if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
                 window.focus(&view.focus_handle(cx));
                 self.needs_focus = false;
             }
         }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
+            _ if self.gateway_open => "Remote access".into(),
             _ if self.first_mate_open => "First Mate".into(),
             Some(item) => item.title.clone().into(),
             None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
-        let cards = if self.first_mate_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
+        let cards = if self.first_mate_open || self.gateway_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
 
         let mut root = div()
             .id("workspace")
@@ -1298,7 +1331,7 @@ impl Workspace {
             .pr(px(8.))
             .gap(px(2.))
             .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
-            .child(chrome_icon("sailboat", false))
+            .child(chrome_icon("share", self.gateway_open).id("toggle-gateway").on_click(cx.listener(Self::toggle_gateway)))
             .child(chrome_icon("folder", false))
             .child(chrome_icon("diff", false))
             .child(chrome_icon("panel-left", false).id("toggle-sidebar").on_click(cx.listener(Self::toggle_sidebar)))
@@ -1496,7 +1529,21 @@ impl Workspace {
                     ),
             )
             .child(div().flex_1())
-            .when(self.first_mate_open, |d| {
+            .when(self.gateway_open, |d| {
+                d.child(
+                    div()
+                        .id("close-gateway")
+                        .mr(px(12.))
+                        .px(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(14.))
+                        .text_color(tokens::alpha(fg, 0.55))
+                        .hover(|s| s.text_color(fg))
+                        .child("×")
+                        .on_click(cx.listener(Self::toggle_gateway)),
+                )
+            })
+            .when(self.first_mate_open && !self.gateway_open, |d| {
                 d.child(
                     div()
                         .id("close-first-mate")
@@ -1510,7 +1557,7 @@ impl Workspace {
                         .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx))),
                 )
             })
-            .when(!self.first_mate_open, |d| {
+            .when(!self.first_mate_open && !self.gateway_open, |d| {
                 d.child(
                     div().mr(px(8.)).child(
                         icon_button("columns-2", tokens::alpha(fg, 0.55))

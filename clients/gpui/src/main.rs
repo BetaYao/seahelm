@@ -9,12 +9,15 @@ mod assets;
 mod core_client;
 mod fleet;
 mod fonts;
+mod gateway_client;
+mod gateway_page;
 mod keys;
 mod notify;
 mod platform;
 mod session;
 mod split;
 mod terminal_view;
+mod text_input;
 mod theme;
 mod tokens;
 mod workspace;
@@ -60,6 +63,7 @@ fn main() {
         // does; the contrast button flips it.
         theme::set_dark(!matches!(cx.window_appearance(), gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight));
         workspace::bind_keys(cx);
+        text_input::bind_keys(cx);
         let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
