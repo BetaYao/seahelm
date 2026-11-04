@@ -2956,14 +2956,14 @@ extension MainWindowController {
                 let selectedIndex = StationRegistry.shared.station(forId: order.action.terminalID)
                     .flatMap { $0.readViewportText() }
                     .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) } ?? 0
-                AgentRegistry.shared.answerChoiceByArrows(
+                PaneInput.shared.answerChoiceByArrows(
                     to: order.action.terminalID, index: idx, from: selectedIndex)
             }
         } else if order.action.payload == FirstMateAction.askUserQuestionPayload {
             answerAgentQuestion(order: order, label: optionText)
             return
         } else {
-            AgentRegistry.shared.sendCommand(to: order.action.terminalID, command: optionText)
+            PaneInput.shared.sendCommand(to: order.action.terminalID, command: optionText)
         }
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }
@@ -2982,13 +2982,13 @@ extension MainWindowController {
         let optionCount = action.options?.count ?? 0
 
         if flags.multiSelect, tapped == optionCount {
-            AgentRegistry.shared.pressKeys(to: action.terminalID, keys: ["right"])
+            PaneInput.shared.pressKeys(to: action.terminalID, keys: ["right"])
             advanceAgentQuestion(order)
             return
         }
         guard tapped < optionCount else { return }
         let from = currentChoiceRow(terminalID: action.terminalID) ?? flags.cursor
-        AgentRegistry.shared.answerChoiceByArrows(to: action.terminalID, index: tapped, from: from)
+        PaneInput.shared.answerChoiceByArrows(to: action.terminalID, index: tapped, from: from)
         guard flags.multiSelect else {
             advanceAgentQuestion(order)
             return
@@ -3029,7 +3029,7 @@ extension MainWindowController {
             guard let self else { return }
             let screen = self.paneScreen(terminalID: terminalID) ?? ""
             if screen.contains("Ready to submit your answers?") {
-                AgentRegistry.shared.pressKeys(to: terminalID, keys: ["enter"])
+                PaneInput.shared.pressKeys(to: terminalID, keys: ["enter"])
             } else {
                 self.confirmQuestionReview(terminalID: terminalID, attemptsLeft: attemptsLeft - 1)
             }
@@ -3116,7 +3116,7 @@ extension MainWindowController: CommandHost {
 
     func sendText(paneId: String, text: String) -> Bool {
         guard AgentRegistry.shared.pane(for: paneId) != nil else { return false }
-        AgentRegistry.shared.sendCommand(to: paneId, command: text)
+        PaneInput.shared.sendCommand(to: paneId, command: text)
         return true
     }
 

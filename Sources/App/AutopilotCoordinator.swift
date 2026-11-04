@@ -408,7 +408,7 @@ final class AutopilotCoordinator {
 
     private func send(_ text: String, to id: String) {
         awaitingTurn = true
-        AgentRegistry.shared.sendCommand(to: id, command: text, submitWithAttachments: true,
+        PaneInput.shared.sendCommand(to: id, command: text, submitWithAttachments: true,
                                          agentType: agent)
     }
 

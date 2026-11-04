@@ -181,7 +181,7 @@ enum InitialAgentTaskDelivery {
         // scan that can lag the agent's start, and an unknown agent gets its
         // images typed as paths instead of attached.
         DispatchQueue.main.async {
-            AgentRegistry.shared.sendCommand(to: paneId, command: text, submitWithAttachments: true, agentType: agent)
+            PaneInput.shared.sendCommand(to: paneId, command: text, submitWithAttachments: true, agentType: agent)
         }
     }
 

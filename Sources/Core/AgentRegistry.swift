@@ -77,10 +77,7 @@ class AgentRegistry {
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
     private var worktreeIndex: [String: [String]] = [:]
-    /// Strong references to channels (keyed by terminal ID)
-    private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
-    /// External channels (Telegram, future: Slack, etc.) — keyed by channelId
     private let lock = NSLock()
 
     /// Monotonic event sequence, incremented under `lock` on every ingest.
@@ -122,8 +119,7 @@ class AgentRegistry {
         // Create a default channel if we have a session name
         var channel: AgentChannel?
         if let paneSessionKey = paneSessionKey {
-            channel = SeahelmdChannel(paneSessionKey: paneSessionKey)
-            channels[terminalID] = channel
+            channel = PaneInput.shared.attach(terminalID: terminalID, paneSessionKey: paneSessionKey)
         }
         backendsByPath[worktreePath] = backend
 
@@ -171,7 +167,7 @@ class AgentRegistry {
             }
         }
         agents.removeValue(forKey: terminalID)
-        channels.removeValue(forKey: terminalID)
+        PaneInput.shared.detach(terminalID: terminalID)
         orderedIDs.removeAll { $0 == terminalID }
         statusEnteredAt.removeValue(forKey: terminalID)
         hookRunningSince.removeValue(forKey: terminalID)
@@ -729,15 +725,6 @@ class AgentRegistry {
 
         let worktreePath = info.worktreePath
 
-        // Upgrade channel for supported hook-based agents.
-        if agentType == .claudeCode || agentType == .codex {
-            let backend = backendsByPath[worktreePath] ?? "seahelmd"
-            if let seahelmd = channels[terminalID] as? SeahelmdChannel {
-                let hooks = HooksChannel(paneSessionKey: seahelmd.paneSessionKey, backend: backend)
-                channels[terminalID] = hooks
-                info.channel = hooks
-            }
-        }
 
         var changed = false
 
@@ -764,14 +751,6 @@ class AgentRegistry {
             if allowed && currentType != agentType {
                 info.agentType = agentType
                 changed = true
-
-                // Upgrade channel for supported hook-based agents.
-                if (agentType == .claudeCode || agentType == .codex),
-                   let seahelmd = channels[terminalID] as? SeahelmdChannel {
-                    let hooks = HooksChannel(paneSessionKey: seahelmd.paneSessionKey)
-                    channels[terminalID] = hooks
-                    info.channel = hooks
-                }
             }
         }
 
@@ -847,135 +826,6 @@ class AgentRegistry {
     /// Resolve a cwd to the worktree path it belongs to. Caller must hold `lock`.
     private func worktreePathLocked(forCwd cwd: String) -> String? {
         worktreeIndex.first { cwd == $0.key || cwd.hasPrefix($0.key + "/") }?.key
-    }
-
-    /// Send a command to a specific agent.
-    /// Prefer typing into the live terminal surface (exactly like the user) so no control-channel
-    /// artifacts leak into the command line. Fall back to the control channel
-    /// only when the surface isn't available (e.g. pane not currently rendered).
-    /// Send a command to a specific agent.
-    /// - Parameter submitWithAttachments: When the command peels to images,
-    ///   default behaviour leaves them in the composer (Telegram / mail — let
-    ///   the operator add a note). Pass `true` for automated first-brief
-    ///   delivery after a new worktree launch so the agent actually starts.
-    /// - Parameter agentType: The agent the caller knows is in the pane, for when
-    ///   the registry has not caught up — it learns the type from a screen scan,
-    ///   and an agent it does not know yet gets images typed as paths.
-    func sendCommand(to terminalID: String, command: String, submitWithAttachments: Bool = false,
-                     agentType: AgentType? = nil) {
-        let station = StationRegistry.shared.station(forId: terminalID)
-        // `canDeliverInput`, not merely "a Station exists" — the two come apart
-        // for any pane whose tab has not been opened in this run, and that gap
-        // is what silently swallowed every message sent to a backgrounded pane
-        // from Telegram, mail, and the control socket alike.
-        if let station, station.canDeliverInput {
-            let agent = agentType ?? pane(for: terminalID)?.agentType
-            let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
-            // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
-            // Images land in the composer; Enter only when the caller opts in
-            // (fresh worktree brief). Plain text still auto-sends.
-            if !images.isEmpty, AgentImagePaste.supports(agent) {
-                DispatchQueue.main.async {
-                    AgentImagePaste.attach(images, to: station) { notAttached in
-                        var rest = prose
-                        if !notAttached.isEmpty {
-                            let paths = notAttached.map { ShellEscape.backslash($0.path) }
-                                .joined(separator: " ")
-                            rest = [prose, paths].filter { !$0.isEmpty }.joined(separator: "\n")
-                        }
-                        if !rest.isEmpty {
-                            station.sendText(rest)
-                        }
-                        if submitWithAttachments {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
-                                station.sendEnterKey()
-                            }
-                        }
-                    }
-                }
-                return
-            }
-            // Agents without image-paste: paths stay as text. Submit only when
-            // asked (same policy as the paste path above).
-            if !images.isEmpty {
-                DispatchQueue.main.async {
-                    if submitWithAttachments {
-                        Self.submitTypedInput(command, on: station)
-                    } else {
-                        station.sendText(command)
-                    }
-                }
-                return
-            }
-            DispatchQueue.main.async {
-                Self.submitTypedInput(command, on: station)
-            }
-            return
-        }
-
-        let sessionKey = station?.paneSessionKey ?? ""
-        lock.lock()
-        let channel = channels[terminalID]
-        lock.unlock()
-        // Channel sends spawn a subprocess (seahelmd/tmux) and wait for it — callers
-        // are mostly main-thread interaction sites, so keep it off-thread.
-        DispatchQueue.global(qos: .userInitiated).async {
-            // `seahelmd send` in preference to the registered channel's `seahelmd run`.
-            if !sessionKey.isEmpty, SeahelmdChannel(paneSessionKey: sessionKey).sendPrompt(command) { return }
-            channel?.sendCommand(command)
-        }
-    }
-
-    /// Type `text` then Return after `enterSubmitDelay`. Used for prose-only
-    /// orders; image/attachment delivery never calls this.
-    private static func submitTypedInput(_ text: String, on station: Station) {
-        guard !text.isEmpty else { return }
-        station.sendText(text)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Station.enterSubmitDelay) {
-            station.sendEnterKey()
-        }
-    }
-
-    /// Answer an on-screen choice dialog by arrow keys: Down × index, then Return.
-    /// For agent TUIs without digit shortcuts (opencode's question tool) — their
-    /// `selectedIndex` defaults to the first row for native question tools, while
-    /// viewport-discovered prompts pass their currently highlighted row.
-    func answerChoiceByArrows(to terminalID: String, index: Int, from selectedIndex: Int = 0) {
-        let offset = index - selectedIndex
-        pressKeys(to: terminalID,
-                  keys: Array(repeating: offset >= 0 ? "down" : "up", count: abs(offset)) + ["enter"])
-    }
-
-    /// Press named keys in a pane (`Station.pressKeysOnSurface`). Same
-    /// surface-versus-session split as `sendCommand`: a pane whose tab was never
-    /// opened gets the bytes through seahelmd, or the keys would vanish while looking
-    /// like they were pressed.
-    func pressKeys(to terminalID: String, keys: [String]) {
-        guard let station = StationRegistry.shared.station(forId: terminalID) else { return }
-        guard station.canDeliverInput else {
-            guard let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return }
-            DispatchQueue.global(qos: .userInitiated).async {
-                _ = Station.pressKeys(keys, viaSession: sessionKey)
-            }
-            return
-        }
-        DispatchQueue.main.async { station.pressKeysOnSurface(keys) }
-    }
-
-    /// Read recent output from a specific agent
-    func readOutput(from terminalID: String, lines: Int = 50) -> String? {
-        lock.lock()
-        let channel = channels[terminalID]
-        lock.unlock()
-
-        return channel?.readOutput(lines: lines)
-    }
-
-    /// Get the channel for a specific agent (for direct access)
-    func channel(for terminalID: String) -> AgentChannel? {
-        lock.lock()
-        defer { lock.unlock() }
-        return channels[terminalID]
     }
 
     /// Route a webhook event to the appropriate HooksChannel. The exact pane the
@@ -1074,9 +924,6 @@ class AgentRegistry {
         // gets the same hook from the bridge (CoreStatusFeed). Routing,
         // session refs and transcript prose above stay here for now.
         _ = event2
-        if let hooks = channel(for: tid) as? HooksChannel {
-            hooks.handleWebhookEvent(event)
-        }
     }
 
     /// The prose an agent wrote between tool calls never comes through a hook —
