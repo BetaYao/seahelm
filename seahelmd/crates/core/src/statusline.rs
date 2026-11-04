@@ -188,6 +188,12 @@ mod tests {
 
     const EXE: &str = "/opt/seahelm/bin/seahelm-core";
 
+    /// The exe as the installer writes it: bare where a shell reads it as
+    /// one word, double-quoted on Windows (`install::quote`).
+    fn exe(path: &str) -> String {
+        crate::install::quote(path)
+    }
+
     fn read(p: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
     }
@@ -205,7 +211,7 @@ mod tests {
         let v = read(&s);
         assert_eq!(v["model"], "opus");
         assert_eq!(v["statusLine"]["padding"], 0);
-        assert_eq!(command(&s), format!("{EXE} statusline -- 'bash ~/.claude/my status.sh'"));
+        assert_eq!(command(&s), format!("{} statusline -- 'bash ~/.claude/my status.sh'", exe(EXE)));
         assert_eq!(parse_ours(&command(&s)).unwrap(), "bash ~/.claude/my status.sh");
     }
 
@@ -214,7 +220,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = dir.path().join(".claude").join("settings.json");
         assert_eq!(install(&s, Path::new(EXE)).unwrap(), Outcome::Written);
-        assert_eq!(read(&s)["statusLine"], json!({"type": "command", "command": format!("{EXE} statusline")}));
+        assert_eq!(read(&s)["statusLine"], json!({"type": "command", "command": format!("{} statusline", exe(EXE))}));
     }
 
     #[test]
@@ -255,7 +261,7 @@ mod tests {
         std::fs::write(&s, r#"{"statusLine":{"type":"command","command":"ccline"}}"#).unwrap();
         install(&s, Path::new(EXE)).unwrap();
         assert_eq!(install(&s, Path::new("/new/place/seahelm-core")).unwrap(), Outcome::Written);
-        assert_eq!(command(&s), "/new/place/seahelm-core statusline -- 'ccline'");
+        assert_eq!(command(&s), format!("{} statusline -- 'ccline'", exe("/new/place/seahelm-core")));
     }
 
     #[test]
