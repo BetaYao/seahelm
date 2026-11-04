@@ -75,6 +75,13 @@ pub fn pane_send_text(core: &Core, p: &Value) -> RpcResult {
         return Err(RpcError::invalid_params("text required"));
     }
     send(&id, text.as_bytes())?;
+    // `enter: true` submits it, the Return as a write of its own a beat
+    // later (as `pane.run`): a TUI reading the text and the Return in one
+    // read can take the Return as part of a paste and not submit.
+    if p.get("enter").and_then(Value::as_bool).unwrap_or(false) {
+        std::thread::sleep(SUBMIT_DELAY);
+        send(&id, b"\r")?;
+    }
     Ok(json!({"sent": true, "pane_id": id}))
 }
 
