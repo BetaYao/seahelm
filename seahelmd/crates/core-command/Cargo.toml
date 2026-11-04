@@ -1,0 +1,15 @@
+[package]
+name = "seahelm-core-command"
+description = "The command language every seahelm surface speaks (/go #3, /order, @worktree), parsed and run by seahelm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+seahelm-core-types = { path = "../core-types" }
+seahelm-core-messages = { path = "../core-messages" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"

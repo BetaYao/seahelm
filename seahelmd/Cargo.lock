@@ -423,6 +423,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "libc",
+ "seahelm-core-command",
  "seahelm-core-hooks",
  "seahelm-core-messages",
  "seahelm-core-registry",
@@ -434,6 +435,16 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "windows-sys",
+]
+
+[[package]]
+name = "seahelm-core-command"
+version = "0.0.1"
+dependencies = [
+ "seahelm-core-messages",
+ "seahelm-core-types",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
