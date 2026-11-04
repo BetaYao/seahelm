@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/keep-vt", "crates/seahelmd", "crates/core-types", "crates/core-hooks", "crates/core-scan", "crates/core-registry", "crates/core-messages", "crates/core-command", "crates/core"]
+members = ["crates/keep-vt", "crates/seahelmd", "crates/core-types", "crates/core-hooks", "crates/core-scan", "crates/core-registry", "crates/core-messages", "crates/core-command", "crates/core", "crates/cli"]
 
 [workspace.package]
 version = "0.0.1"

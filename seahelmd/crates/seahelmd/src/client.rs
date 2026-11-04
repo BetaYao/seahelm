@@ -83,6 +83,51 @@ fn spawn_daemon(name: &str, argv: &[String], hold: Option<std::time::Duration>) 
     Ok(())
 }
 
+/// Attach as a pipe, not a terminal: the session's raw VT stream on stdout
+/// (a repaint first, as a clear and the screen), stdin written to its input,
+/// at a size the caller gives, since there is no terminal to measure. For a
+/// client that renders the stream itself (the web viewer): no raw mode, no
+/// detach key, no resizing. Ends with the session; a closed stdin only stops
+/// the input.
+pub fn pipe(name: &str, cols: u16, rows: u16) -> Result<()> {
+    let stream = connect(name)?;
+    let mut sock_in = stream.try_clone()?;
+    let mut sock_out = stream.try_clone()?;
+    proto::write(&mut sock_out, &Msg::Attach { cols, rows })?;
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdin.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if proto::write(&mut sock_out, &Msg::Input(buf[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let mut out = std::io::stdout();
+    loop {
+        match proto::read(&mut sock_in) {
+            Ok(Some(Msg::Repaint(data))) => {
+                let _ = out.write_all(b"\x1b[H\x1b[2J");
+                let _ = out.write_all(&data);
+                let _ = out.flush();
+            }
+            Ok(Some(Msg::Output(data))) => {
+                if out.write_all(&data).and_then(|_| out.flush()).is_err() {
+                    return Ok(());
+                }
+            }
+            Ok(Some(Msg::Error(e))) => bail!(e),
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => return Ok(()),
+        }
+    }
+}
+
 /// Attach this terminal to the session until it ends or Ctrl-\ is pressed.
 pub fn attach(name: &str) -> Result<()> {
     let stream = connect(name)?;

@@ -1,280 +1,49 @@
 import Foundation
 
-/// Installs `~/.local/bin/seahelm`, the agent-facing CLI wrapper around the
-/// control socket. Agents (and humans) call e.g. `seahelm pane run <id> npm test`
-/// instead of hand-crafting JSON and piping it through `nc -U`. The script is
-/// pure python3 (present wherever the CLTs/agent runtimes are) and talks the same
-/// newline-delimited JSON protocol as ControlSocketServer.
+/// Installs `~/.local/bin/seahelm`, the command line agents (and people) use
+/// from inside a pane: `seahelm pane run <id> npm test`, `seahelm pane split`,
+/// `seahelm wait agent-status …`. It is a Rust program (`seahelmd/crates/cli`)
+/// bundled beside seahelmd as Contents/Resources/bin/seahelm, copied into
+/// place on launch whenever the bundled one differs; it replaced a Python
+/// script that used to be written there.
 enum SeahelmCliInstaller {
-    private static let versionMarker = "# seahelm-cli v11"
-
-    static func scriptContents() -> String {
-        return #"""
-        #!/usr/bin/env python3
-        \#(versionMarker) — managed by seahelm. Do not edit; overwritten on launch.
-        import sys, os, json, socket
-
-        SOCK = os.environ.get("SEAHELM_SOCKET_PATH") or os.path.expanduser("~/.config/seahelm/seahelm.sock")
-
-        def die(msg, code=2):
-            sys.stderr.write("seahelm: " + msg + "\n"); sys.exit(code)
-
-        NOTE = None
-
-        def call(method, params, timeout=40.0, exit_codes=None):
-            # Who is calling, so the pane being acted on can show it. Display only.
-            me = os.environ.get("SEAHELM_PANE_ID")
-            if me:
-                params = dict(params, _meta={"caller": me, "note": NOTE} if NOTE else {"caller": me})
-            try:
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                s.settimeout(timeout)
-                s.connect(SOCK)
-                s.sendall((json.dumps({"id": "cli", "method": method, "params": params}) + "\n").encode())
-                buf = b""
-                while b"\n" not in buf:
-                    chunk = s.recv(65536)
-                    if not chunk:
-                        break
-                    buf += chunk
-                s.close()
-            except Exception as e:
-                die("socket error: %s (is seahelm running?)" % e)
-            try:
-                obj = json.loads(buf.split(b"\n", 1)[0])
-            except Exception:
-                die("bad response")
-            if "error" in obj:
-                err = obj["error"]
-                die(err.get("message", "error"), (exit_codes or {}).get(err.get("code"), 2))
-            return obj.get("result", {})
-
-        def opt(a, name, default=None):
-            return a[a.index(name) + 1] if name in a and a.index(name) + 1 < len(a) else default
-
-        def has(a, name):
-            return name in a
-
-        def main():
-            global NOTE
-            argv = sys.argv[1:]
-            # seahelm --note "running the tests" pane run #12 make test
-            # Global, before the group, so it never mixes with a command's own args.
-            while argv[:1] == ["--note"]:
-                if len(argv) < 2: die("--note needs a value")
-                NOTE = argv[1]; argv = argv[2:]
-            if not argv:
-                die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration> ...", 2)
-            g = argv[0]; a = argv[1:]
-
-            if g == "ping":
-                call("ping", {}); print("pong"); return
-
-            if g == "memory":
-                print(json.dumps(call("app.memory", {}), indent=2)); return
-
-            if g == "session" and a[:1] == ["snapshot"]:
-                print(json.dumps(call("session.snapshot", {}).get("panes", []), indent=2)); return
-
-            if g == "events":
-                # seahelm events [--after N] [--pane P] [--type T ...]
-                params = {}
-                if has(a, "--after"): params["events_after"] = int(opt(a, "--after"))
-                if has(a, "--pane"): params["pane_id"] = opt(a, "--pane")
-                types = [a[i + 1] for i, x in enumerate(a) if x == "--type" and i + 1 < len(a)]
-                if types: params["types"] = types
-                try:
-                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    s.connect(SOCK)
-                    s.sendall((json.dumps({"id": "cli", "method": "events.subscribe", "params": params}) + "\n").encode())
-                    for line in s.makefile("r"):
-                        line = line.strip()
-                        if line:
-                            print(line, flush=True)
-                except KeyboardInterrupt:
-                    pass
-                except Exception as e:
-                    die("socket error: %s" % e)
-                return
-
-            if g == "integration":
-                # seahelm integration status [path]
-                # Defaults to the cwd's repo: an agent asking "did my work get
-                # folded in?" is asking about the repo it is standing in.
-                if a and a[0] not in ("status",):
-                    die("unknown integration subcommand: %s" % a[0])
-                rest = a[1:] if a else []
-                path = rest[0] if rest and not rest[0].startswith("--") else (
-                    None if has(rest, "--all") else os.getcwd())
-                p = {"path": path} if path else {}
-                print(json.dumps(call("integration.status", p).get("checkouts", []), indent=2)); return
-
-            if g == "layout":
-                if not a: die("usage: seahelm layout <export|apply [file|-]>")
-                if a[0] == "export":
-                    print(json.dumps(call("layout.export", {}), indent=2)); return
-                if a[0] == "apply":
-                    raw = sys.stdin.read() if len(a) < 2 or a[1] == "-" else open(a[1]).read()
-                    try:
-                        doc = json.loads(raw)
-                    except Exception:
-                        die("invalid layout JSON")
-                    call("layout.apply", {"root": doc.get("root", doc)}); return
-                die("unknown layout subcommand: %s" % a[0])
-
-            if g == "wait":
-                if not a: die("usage: seahelm wait <output|agent-status> <pane> ...")
-                sub = a[0]; rest = a[1:]
-                if not rest: die("pane id required")
-                pane = rest[0]
-                tmo = int(opt(rest, "--timeout", "30000"))
-                if sub == "output":
-                    m = opt(rest, "--match");
-                    if m is None: die("--match required")
-                    p = {"pane_id": pane, "match": m, "timeout_ms": tmo,
-                         "source": opt(rest, "--source", "recent"), "regex": has(rest, "--regex")}
-                    r = call("wait.output", p, timeout=tmo / 1000 + 10)
-                elif sub == "agent-status":
-                    st = opt(rest, "--status")
-                    if st is None: die("--status required")
-                    r = call("wait.agent_status", {"pane_id": pane, "status": st, "timeout_ms": tmo},
-                             timeout=tmo / 1000 + 10)
-                else:
-                    die("unknown wait: %s" % sub)
-                sys.exit(0 if r.get("matched") else 1)
-
-            if g == "propose":
-                # seahelm propose [--json '<doc>' | < doc.json]   (First Mate only)
-                # doc: {"summary": "...", "options": [{"label": "Start #88",
-                #       "action": "worktree.create", "params": {...}}]}
-                raw = opt(a, "--json")
-                if raw is None: raw = sys.stdin.read()
-                try:
-                    doc = json.loads(raw)
-                except Exception:
-                    die("propose needs a JSON document (see seahelm propose in the skill)")
-                print(json.dumps(call("autopilot.propose", doc), indent=2)); return
-
-            if g == "worktree":
-                # seahelm worktree create --repo <path> --task <text> [--agent claudeCode]
-                # seahelm worktree delete <worktree-path>
-                # From First Mate these may come back {"queued": "approval"}: the
-                # user decides, and First Mate is told the outcome.
-                if not a: die("usage: seahelm worktree <create|delete> ...")
-                sub = a[0]; rest = a[1:]
-                if sub == "create":
-                    repo = opt(rest, "--repo"); task = opt(rest, "--task")
-                    if not repo or not task:
-                        die("usage: seahelm worktree create --repo <path> --task <text> [--agent claudeCode]")
-                    p = {"repo_path": os.path.abspath(os.path.expanduser(repo)), "prompt": task,
-                         "agent_type": opt(rest, "--agent", "claudeCode")}
-                    print(json.dumps(call("worktree.create", p, timeout=120), indent=2)); return
-                if sub == "delete":
-                    if not rest: die("usage: seahelm worktree delete <worktree-path>")
-                    p = {"worktree_path": os.path.abspath(os.path.expanduser(rest[0]))}
-                    print(json.dumps(call("worktree.delete", p), indent=2)); return
-                die("unknown worktree subcommand: %s" % sub)
-
-            if g == "pane":
-                if not a: die("usage: seahelm pane <list|read|run|send-text|send-keys|split|close|focus|move|explain|zoom|options|sleep|wake> ...")
-                sub = a[0]; rest = a[1:]
-                if sub == "list":
-                    print(json.dumps(call("pane.list", {}).get("panes", []), indent=2)); return
-                if sub == "read":
-                    if not rest: die("pane id required")
-                    r = call("pane.read", {"pane_id": rest[0], "source": opt(rest, "--source", "visible"),
-                                           "lines": int(opt(rest, "--lines", "100"))})
-                    sys.stdout.write(r.get("text", "")); return
-                if sub == "run":
-                    if len(rest) < 2: die("usage: seahelm pane run <pane> <command...>")
-                    call("pane.run", {"pane_id": rest[0], "command": " ".join(rest[1:])}); return
-                if sub == "exec":
-                    # seahelm pane exec <pane> [--timeout MS] <command...>
-                    # Runs only at an empty zsh prompt; exits with the command's code.
-                    usage = "usage: seahelm pane exec <pane> [--timeout MS] <command...>"
-                    if len(rest) < 2: die(usage)
-                    pane, cmd, tmo = rest[0], rest[1:], 30000
-                    if cmd[:1] == ["--timeout"]:
-                        if len(cmd) < 3: die(usage)
-                        tmo, cmd = int(cmd[1]), cmd[2:]
-                    r = call("pane.exec", {"pane_id": pane, "command": " ".join(cmd), "timeout_ms": tmo},
-                             timeout=tmo / 1000 + 15, exit_codes={-32024: 124})
-                    out = r.get("output", "")
-                    if out: sys.stdout.write(out if out.endswith("\n") else out + "\n")
-                    code = r.get("exit_code")
-                    sys.exit(code if isinstance(code, int) else 1)
-                if sub == "send-text":
-                    if len(rest) < 2: die("usage: seahelm pane send-text <pane> <text...>")
-                    call("pane.send_text", {"pane_id": rest[0], "text": " ".join(rest[1:])}); return
-                if sub == "send-keys":
-                    if len(rest) < 2: die("usage: seahelm pane send-keys <pane> <key...>")
-                    call("pane.send_keys", {"pane_id": rest[0], "keys": rest[1:]}); return
-                if sub == "close":
-                    if not rest: die("usage: seahelm pane close <pane>")
-                    call("pane.close", {"pane_id": rest[0]}); return
-                if sub == "focus":
-                    if not rest: die("usage: seahelm pane focus <pane>")
-                    call("pane.focus", {"pane_id": rest[0]}); return
-                if sub == "move":
-                    if len(rest) < 2: die("usage: seahelm pane move <pane> <worktree-path>")
-                    print(json.dumps(call("pane.move", {"pane_id": rest[0], "worktree_path": rest[1]}))); return
-                if sub == "fork":
-                    # seahelm pane fork <pane> [worktree-path]
-                    if not rest: die("usage: seahelm pane fork <pane> [worktree-path]")
-                    p = {"pane_id": rest[0]}
-                    if len(rest) > 1: p["worktree_path"] = rest[1]
-                    print(json.dumps(call("pane.fork", p))); return
-                if sub in ("sleep", "wake"):
-                    # seahelm pane sleep <pane> | seahelm pane sleep --all
-                    pane = rest[0] if rest and not rest[0].startswith("--") else None
-                    if not pane and not has(rest, "--all"):
-                        die("usage: seahelm pane %s <pane>|--all" % sub)
-                    p = {"pane_id": pane} if pane else {"all": True}
-                    print(json.dumps(call("pane." + sub, p))); return
-                if sub == "explain":
-                    if not rest: die("usage: seahelm pane explain <pane>")
-                    print(json.dumps(call("pane.explain", {"pane_id": rest[0]}), indent=2)); return
-                if sub == "options":
-                    if not rest: die("usage: seahelm pane options <pane>")
-                    print(json.dumps(call("pane.options", {"pane_id": rest[0]}).get("options", []), indent=2)); return
-                if sub == "zoom":
-                    pane = rest[0] if rest and not rest[0].startswith("--") else None
-                    mode = "on" if has(rest, "--on") else ("off" if has(rest, "--off") else "toggle")
-                    p = {"mode": mode}
-                    if pane: p["pane_id"] = pane
-                    print(json.dumps(call("pane.zoom", p))); return
-                if sub == "split":
-                    # optional positional pane id (a token not starting with --)
-                    pane = rest[0] if rest and not rest[0].startswith("--") else None
-                    p = {"direction": opt(rest, "--direction", "right"), "focus": not has(rest, "--no-focus")}
-                    if pane: p["pane_id"] = pane
-                    print(call("pane.split", p).get("pane_id", "")); return
-                die("unknown pane subcommand: %s" % sub)
-
-            die("unknown command: %s" % g)
-
-        main()
-        """#
+    /// The bundled program, else `$SEAHELM_CLI_BIN` (tests, dev builds).
+    static var bundled: URL? {
+        if let env = ProcessInfo.processInfo.environment["SEAHELM_CLI_BIN"], !env.isEmpty {
+            return URL(fileURLWithPath: env)
+        }
+        guard let url = Bundle.main.url(forResource: "seahelm", withExtension: nil, subdirectory: "bin"),
+              FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+        return url
     }
 
     @discardableResult
     static func ensureInstalled() -> Bool {
         let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
-        return ensureInstalled(binDirectory: bin)
+        return ensureInstalled(binDirectory: bin, from: bundled)
     }
 
+    /// Copy `source` to `<binDirectory>/seahelm` unless the same bytes are
+    /// already there. True when it wrote.
     @discardableResult
-    static func ensureInstalled(binDirectory: URL) -> Bool {
-        let scriptURL = binDirectory.appendingPathComponent("seahelm")
-        let desired = scriptContents()
-        if let existing = try? String(contentsOf: scriptURL, encoding: .utf8),
-           existing.contains(versionMarker), existing == desired {
+    static func ensureInstalled(binDirectory: URL, from source: URL?) -> Bool {
+        guard let source, let desired = try? Data(contentsOf: source) else {
+            NSLog("[SeahelmCliInstaller] no bundled seahelm CLI")
             return false
         }
+        let target = binDirectory.appendingPathComponent("seahelm")
+        if let existing = try? Data(contentsOf: target), existing == desired { return false }
         do {
             try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
-            try desired.write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+            // Write beside it and rename: a CLI mid-run keeps its inode.
+            let staged = binDirectory.appendingPathComponent(".seahelm.new")
+            try desired.write(to: staged, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
+            if FileManager.default.fileExists(atPath: target.path) {
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: staged)
+            } else {
+                try FileManager.default.moveItem(at: staged, to: target)
+            }
             return true
         } catch {
             NSLog("[SeahelmCliInstaller] Failed to install: \(error)")

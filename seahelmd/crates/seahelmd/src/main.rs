@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use seahelmd::client;
 use seahelmd::proto::Msg;
 
-const USAGE: &str = "usage: seahelmd <run|attach> <name> [cmd...] | new [--hold SECS] <name> [--] cmd... | list | send <name> <text> | history <name> | snapshot <name> | kill <name> | version";
+const USAGE: &str = "usage: seahelmd <run|attach> <name> [cmd...] | new [--hold SECS] <name> [--] cmd... | list | send <name> <text> | history <name> | snapshot <name> | pipe <name> <rows> <cols> | kill <name> | version";
 
 fn main() {
     if let Err(e) = run() {
@@ -46,6 +46,12 @@ fn run() -> Result<()> {
             if !client::ensure_held(name, cmd, hold)? {
                 bail!("session {name} already exists");
             }
+        }
+        // `pipe NAME ROWS COLS`: the raw stream on stdout, stdin to the input.
+        "pipe" => {
+            let (name, size) = rest.split_first().ok_or_else(|| anyhow::anyhow!(USAGE))?;
+            let num = |i: usize, default: u16| size.get(i).and_then(|s| s.parse().ok()).unwrap_or(default);
+            client::pipe(name, num(1, 80), num(0, 24))?;
         }
         "attach" => {
             let (name, cmd) = rest.split_first().ok_or_else(|| anyhow::anyhow!(USAGE))?;

@@ -23,7 +23,6 @@
 		069BA91DFCD8158F008EDDFA /* MailHTMLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBF763CE6B932E7040E0DF7 /* MailHTMLTests.swift */; };
 		06C7A49B721C8DDA99DF3A07 /* WorktreeCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42CF4AFB6294DD79DF57446C /* WorktreeCleanupTests.swift */; };
 		06CF922E9ABD675BEC1F7502 /* SidebarHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */; };
-		07473F7F0F5521BD65593572 /* seahelmd-attach.py in Resources */ = {isa = PBXBuildFile; fileRef = 3B59D0D4820E80E2282D0D0A /* seahelmd-attach.py */; };
 		07CF15A7463B32D0FA558782 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18A2E8441934257374C57B2 /* CoreTests.swift */; };
 		07D61705F36F11CF9B8CF316 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA00190FE1317EED4BDFA0D /* ProcessRunner.swift */; };
 		0828C3010E294CFD37CFFE70 /* EventHubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 911314F4B91E512511E3FC21 /* EventHubTests.swift */; };
@@ -648,7 +647,6 @@
 		39DD3FFFF216C576CFDC7683 /* XCUIElementExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUIElementExtensions.swift; sourceTree = "<group>"; };
 		3A09155A1FFCC67267E9F246 /* EditorTheme+Seahelm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorTheme+Seahelm.swift"; sourceTree = "<group>"; };
 		3A85CAE555196AE450DDD90E /* WorktreeCreatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorTests.swift; sourceTree = "<group>"; };
-		3B59D0D4820E80E2282D0D0A /* seahelmd-attach.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seahelmd-attach.py"; sourceTree = "<group>"; };
 		3B5EDEA60EDE0A220FADBA04 /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
 		3B8BB5725BBA721E41CF23CF /* WorktreeGitStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeGitStats.swift; sourceTree = "<group>"; };
 		3C22FD399E95F8A453F40C3A /* ghostty */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ghostty; path = Resources/ghostty; sourceTree = SOURCE_ROOT; };
@@ -1268,7 +1266,6 @@
 			isa = PBXGroup;
 			children = (
 				E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */,
-				3B59D0D4820E80E2282D0D0A /* seahelmd-attach.py */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -2013,7 +2010,6 @@
 				478A900B42820F9CAC0829BF /* ghostty in Resources */,
 				A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */,
 				E4C319ACAC1EE3D055B48264 /* licenses in Resources */,
-				07473F7F0F5521BD65593572 /* seahelmd-attach.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

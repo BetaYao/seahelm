@@ -150,7 +150,7 @@ stale statuses, and comes back by itself on reconnect.
 | `WorktreePRStore` and parser | 245 |
 | `Sources/Usage/` providers | ~700 of 874 |
 | `CommandExecutor` fallback (`Sources/Core/Command/`) | to be counted |
-| The shadow comparator, `compare-messages`, `scripts/ab/` | Rust and scripts |
+| The shadow comparator, `compare-messages`, `scripts/ab/` | Rust and scripts (gone) |
 
 The manifests (`Sources/Status/Manifests/*.json`) live in the core's tree
 from then on. User overrides in `~/.config/seahelm/agents/` keep working,
