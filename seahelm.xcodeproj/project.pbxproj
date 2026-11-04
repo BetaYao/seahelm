@@ -112,7 +112,6 @@
 		34295E2A78AAF5B432E08698 /* PiExtensionInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5477C17977F4C27B7B01CB /* PiExtensionInstallerTests.swift */; };
 		346BF50E3F02C947F8D62DB5 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 887D8D47490B9D11BC6072DA /* JetBrainsMono-Regular.ttf */; };
 		3498F0F3D7028F811DF7DF34 /* HeadlessCommandHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEA86B38AB3BEE8AA18906A /* HeadlessCommandHost.swift */; };
-		34A84FCDA0C5817D83A34C83 /* CoreHookForwarder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023ECB7136B04118305743EE /* CoreHookForwarder.swift */; };
 		34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */; };
 		350E1C39CF2682EBE1BC9E3D /* TerminalTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F029A5E271BDEEF49A54B1E /* TerminalTranscript.swift */; };
 		35A6DB4DA447049F72CAA83D /* VolumePresenceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927530C926CA58BD88B3AB91 /* VolumePresenceMonitor.swift */; };
@@ -605,7 +604,6 @@
 		00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardOverviewView.swift; sourceTree = "<group>"; };
 		0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeController.swift; sourceTree = "<group>"; };
 		01DB279E827314DBFA97331B /* ChatCallbackRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatCallbackRegistryTests.swift; sourceTree = "<group>"; };
-		023ECB7136B04118305743EE /* CoreHookForwarder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreHookForwarder.swift; sourceTree = "<group>"; };
 		03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstallerTests.swift; sourceTree = "<group>"; };
 		03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedPathAtClickTests.swift; sourceTree = "<group>"; };
 		04AB034D22AB8AD81A9FA9DD /* IslandShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandShapes.swift; sourceTree = "<group>"; };
@@ -1242,7 +1240,6 @@
 				4F0C5FB141D86ECC0B6D8E66 /* Config.swift */,
 				42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */,
 				59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */,
-				023ECB7136B04118305743EE /* CoreHookForwarder.swift */,
 				CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */,
 				B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */,
 				2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */,
@@ -2582,7 +2579,6 @@
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,
-				34A84FCDA0C5817D83A34C83 /* CoreHookForwarder.swift in Sources */,
 				7ACF6662D8BF575309E8EE64 /* CronSchedule.swift in Sources */,
 				CD7B83DE0BC3FB6951DF81C9 /* CurlClient.swift in Sources */,
 				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,
