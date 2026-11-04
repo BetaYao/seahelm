@@ -299,6 +299,7 @@ impl Cli {
 
 // MARK: - the socket
 
+#[cfg(unix)]
 fn socket_path() -> std::path::PathBuf {
     match std::env::var("SEAHELM_SOCKET_PATH") {
         Ok(p) if !p.is_empty() => p.into(),
@@ -429,6 +430,8 @@ mod tests {
         assert_eq!(opt(&a, "--missing"), None);
     }
 
+    // The CLI drives the macOS app; its paths are Unix paths.
+    #[cfg(unix)]
     #[test]
     fn paths_are_made_absolute() {
         assert!(absolute("rel/x").ends_with("/rel/x"));
