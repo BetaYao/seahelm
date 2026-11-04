@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod daemon;
+pub mod inherited;
 pub mod platform;
 pub mod proto;
 pub mod session;

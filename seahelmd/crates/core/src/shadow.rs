@@ -158,13 +158,17 @@ pub fn compare_messages(args: &[String]) -> Result<()> {
         m
     };
     let (app, core) = (by_key(&app), by_key(&core));
+    // Tool rows exist only from hooks the core saw live; after a restart it
+    // reads replies back from transcripts but not the tools between them.
+    // Compare only what it watched.
+    let core_started = rpc::call(&rpc::core_socket(), "core.ping", json!({})).ok().and_then(|v| v.get("started_at").and_then(Value::as_f64)).unwrap_or(0.0);
     let mut log = std::fs::OpenOptions::new().create(true).append(true).open(rpc::config_dir().join("core-messages-shadow.jsonl"))?;
     let (mut matched, mut only_app, mut only_core) = (0usize, 0usize, 0usize);
     for (key, core_rows) in &core {
         let Some(app_rows) = app.get(key) else { continue };
         // The stretch both have watched: from the later of the two first rows.
         let first = |rows: &Vec<Value>| rows.iter().filter_map(|r| r.get("ts").and_then(Value::as_f64)).fold(f64::MAX, f64::min);
-        let from = since_arg.map(|s| seahelm_core_types::now() - s).unwrap_or_else(|| first(app_rows).max(first(core_rows)));
+        let from = since_arg.map(|s| seahelm_core_types::now() - s).unwrap_or_else(|| first(app_rows).max(first(core_rows)).max(core_started));
         let a = signatures(app_rows, from);
         let c = signatures(core_rows, from);
         if a.is_empty() && c.is_empty() {
