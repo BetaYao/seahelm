@@ -1,6 +1,6 @@
 # Cards and First Mate in seahelm-core
 
-Status: phases 1 (cards in the core, GPUI card strip), 2 (First Mate in the core) and 3 (the app follows the core's First Mate) done; 4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
+Status: phases 1 (cards in the core, GPUI card strip), 2 (First Mate in the core), 3 (the app follows the core's First Mate) and 4 (the GPUI workbench) done. Decided 2026-11-04: seahelm-core owns First Mate, and every
 "something waits on you" item is one card model, served by the core. The
 macOS island, Telegram, seahelm-web and the GPUI client are renderers.
 
@@ -161,6 +161,28 @@ not running) keeps its own First Mate, as today.
 - Scope: only First Mate's cards come from the core so far. Agent questions
   and suggestions stay the app's own until the app takes its statuses from
   the core (a separate plan); integration reports likewise.
+## As built (phase 4, GPUI)
+
+The surfaces design (`docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md`)
+states 1 and 4 for GPUI:
+
+- The fleet column's foot is First Mate's dock (it replaces the usage strip):
+  ⎈, its state (from `autopilot.state`; "In the macOS app" when the core
+  does not own it but the session is up, "Core offline" without a core),
+  the 5h usage per provider, and how many cards wait.
+- Clicking it puts the workbench in the main area: First Mate's real
+  terminal on the left (attached only once `seahelm-first-mate` exists,
+  never created from here; an empty state says why it is not there), every
+  card on the right in its own scrolling column, each naming its project and
+  worktree. No second chat input: the terminal is the conversation.
+- A card is not done when clicked: it shows "Sending…" until the core takes
+  it off the list (`cards.changed`), and a failure stays on the card with
+  the reason ("Already answered elsewhere" for a stale id) to try again.
+  Without a core nothing can be answered.
+- The header's × or picking any worktree closes the workbench; First Mate's
+  session keeps running. Esc stays with the terminal.
+- Not yet: a draggable divider between the two columns (the card column is a
+  fixed 340pt).
 
 ## Phases (one PR each)
 
