@@ -359,7 +359,20 @@ impl Core {
             }
             "pane.list" | "session.snapshot" => {
                 let st = self.lock();
-                let panes: Vec<Value> = st.registry.panes().filter_map(|p| st.pane_json(&p.id)).collect();
+                // Each pane's `#n` too, minted on first sight: every surface
+                // shows the core's numbers.
+                let mut handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
+                let panes: Vec<Value> = st
+                    .registry
+                    .panes()
+                    .filter_map(|p| {
+                        let mut v = st.pane_json(&p.id)?;
+                        if p.id != fm_policy::SESSION {
+                            v["handle"] = json!(handles.handle(&p.id));
+                        }
+                        Some(v)
+                    })
+                    .collect();
                 Ok(json!({"panes": panes}))
             }
             "pane.explain" | "agent.explain" => {
@@ -504,6 +517,7 @@ impl Core {
                 let context = seahelm_core_command::Context {
                     desktop: ctx.get("desktop").and_then(Value::as_bool).unwrap_or(false),
                     binding: ctx.get("binding").and_then(seahelm_core_command::Binding::from_json),
+                    first_mate_here: ctx.get("first_mate_here").and_then(Value::as_bool).unwrap_or(false),
                 };
                 Ok(seahelm_core_command::run(&text, &context, &crate::command::CoreHost(&self)).to_json())
             }

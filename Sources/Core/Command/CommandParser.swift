@@ -52,6 +52,8 @@ enum CommandParser {
             guard let token = firstToken(rest) else {
                 return .failure(.missingArgument(verb: "go", what: "a `#pane` or `@worktree`"))
             }
+            // The core's language: First Mate is one of the places to go.
+            if token.lowercased() == "mate" { return .success(.mate(nil)) }
             return goTarget(token, index: index).map(Command.go)
 
         case "show":

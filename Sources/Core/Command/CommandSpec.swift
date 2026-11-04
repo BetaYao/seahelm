@@ -31,72 +31,30 @@ struct CommandSpec: Equatable {
 }
 
 enum CommandSpecs {
+    /// The language as cut on 2026-11-04 (docs/command-redesign.md §0): run by
+    /// seahelm-core (`command.run`); this table names it for the Helm menu,
+    /// Telegram's command list and the mail signature.
     static let all: [CommandSpec] = [
+        CommandSpec(
+            verb: "go", usage: "/go #pane | @worktree | mate",
+            summary: "Talk to a pane, a worktree's pane, or First Mate from now on",
+            detail: "Changes who this conversation talks to: anything you say without a slash goes there. `/go mate` talks to First Mate. Bare `/go` says who it is now. Only this conversation changes."),
         CommandSpec(
             verb: "new", usage: "/new [@repo] <task>",
             summary: "Start a worktree with an agent on the task, and talk to it",
-            detail: "Creates a worktree in the repo (the first one when `@repo` is left out), starts an agent on the task, and binds this conversation to the new pane, so what you say next goes to it."),
+            detail: "Creates a worktree in the repo (the first one when `@repo` is left out), starts an agent on the task, and talks to it from now on."),
         CommandSpec(
-            verb: "go", usage: "/go #pane | @worktree",
-            summary: "Talk to this pane from now on",
-            detail: "Binds this conversation to a pane, or to a worktree's pane. Only this conversation changes: a phone's `/go` does not move the desktop. On the desktop it selects the pane."),
+            verb: "status", usage: "/status",
+            summary: "The fleet, with handles",
+            detail: "Every pane, grouped by repo and worktree, with its `#handle`, status and title; worktrees without a pane too. Marks the one you are talking to."),
         CommandSpec(
             verb: "show", usage: "/show [#pane]",
-            summary: "Read a pane's recent output",
-            detail: "The pane's session transcript, latest message and recent tool activity. Read-only — it does not change who you are talking to. Bare `/show` reads the bound pane."),
-        CommandSpec(
-            verb: "order", usage: "/order #pane <text>",
-            summary: "Send one pane a message without switching to it",
-            detail: "Types the text into that pane and presses Enter. Your binding stays where it was."),
-        CommandSpec(
-            verb: "broadcast", usage: "/broadcast <text>",
-            summary: "Send every pane the same message",
-            detail: "Lists the panes it would reach and asks first.",
-            confirms: true),
-        CommandSpec(
-            verb: "status", usage: "/status [worktrees|repos]",
-            summary: "The fleet, with handles",
-            detail: "Bare `/status` lists every pane, grouped by repo and worktree, with its `#handle`, status and title, and marks the one you are talking to. `worktrees` and `repos` list the tiers above."),
-        CommandSpec(
-            verb: "return", usage: "/return [@worktree]",
-            summary: "Finish a worktree: ship what it has, then delete it",
-            detail: "`/return @worktree` measures the branch against its base on origin. Nothing to ship — clean, every change already merged — and it deletes the worktree and branch outright. Otherwise it says what it will do and asks: commit any uncommitted changes, push the branch, open a PR on GitHub (skipped with a note when there is no token or origin is not GitHub), then delete. A step failing leaves the worktree in place. It refuses while an agent is running there. Bare `/return` does this for every linked worktree but only deletes the ones with nothing to ship; the rest are listed with their plans. A repo's main worktree cannot be returned; `/forget @repo` drops the repo instead.",
-            confirms: true),
-        CommandSpec(
-            verb: "forget", usage: "/forget @repo",
-            summary: "Stop tracking a repo; its worktrees stay on disk",
-            detail: "Removes the repo from seahelm and kills its persisted sessions. Nothing on disk is touched.",
-            confirms: true),
-        CommandSpec(
-            verb: "integrate", usage: "/integrate [full]",
-            summary: "Run one integration round for the current repo",
-            detail: "Folds every worktree in the repo onto trunk and checks the result out in the integration worktree. `full` keeps conflicting worktrees with markers instead of dropping them. If local edits in the checkout hold the round back, it asks before discarding them.",
-            confirms: true),
-        CommandSpec(
-            verb: "idea", usage: "/idea <text>",
-            summary: "Capture an idea",
-            detail: "Adds it to the idea list with this conversation as its source."),
-        CommandSpec(
-            verb: "feedback", usage: "/feedback <text>",
-            summary: "Open a GitHub issue for seahelm",
-            detail: "Opens a pre-filled issue in the browser."),
+            summary: "What a pane is doing",
+            detail: "The pane's latest turn and its reply. Read-only. Bare `/show` reads the pane you are talking to."),
         CommandSpec(
             verb: "help", usage: "/help [command]",
             summary: "This list; with a command, its details",
             detail: "You are reading it."),
-        CommandSpec(
-            verb: "yes", usage: "/yes",
-            summary: "Go ahead with the action that just asked",
-            detail: "Confirms the pending action in this conversation. It expires after 60 seconds, and any other message cancels it. Appending `force` to a command skips the question — for scripts and mail, where a round trip is slow."),
-        CommandSpec(
-            verb: "mate", usage: "/mate [text]",
-            summary: "Talk to First Mate",
-            detail: "Leaves the pane this chat was talking to; from now on anything you say without a command goes to First Mate, the agent that watches the fleet. With text, says it straight away. `/go #n` talks to a pane again."),
-        CommandSpec(
-            verb: "add", usage: "/add",
-            summary: "Add a repo (desktop only)",
-            detail: "Opens the file picker. There is no chat equivalent.",
-            desktopOnly: true),
     ]
 
     /// Old spellings the parser still accepts for one release. Not listed.
@@ -108,7 +66,7 @@ enum CommandSpecs {
     }
 
     static let addressing = "`#7` is a pane. `@branch` (or `@repo/branch`) is a worktree; `@repo` is a repo."
-    static let proseLine = "Anything without a slash goes to the pane you are talking to."
+    static let proseLine = "Anything without a slash goes to whoever you are talking to."
 
     /// The full table, as `/help` prints it. A chat leaves out what only the
     /// desktop can run.

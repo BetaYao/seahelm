@@ -173,6 +173,7 @@
 		506FABB5322B42EDC75221F8 /* HostGatewayFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FFC00EE90A3DAECD6396FC /* HostGatewayFrame.swift */; };
 		50C0E2D95435EA0741D4BFE4 /* HostGatewayFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBC709BF6C114756E9794146 /* HostGatewayFrameTests.swift */; };
 		5136C9D66B753F63E5BC83AD /* PanelCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B953D23003F184833FA1CFBA /* PanelCoordinator.swift */; };
+		515E36096E84ADA4B993292D /* MainWindowController+CoreCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F0A7807373C25701CCA9DEC /* MainWindowController+CoreCommands.swift */; };
 		521E7261EC9F82ABA72C2FEC /* StatusPublisherThreadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B9E6C47E654692C3AC6D42 /* StatusPublisherThreadTests.swift */; };
 		52CD930C527CB7F3B358EB6D /* FirstMateCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */; };
 		530E129D3A9FD6FF86F57C94 /* WorkspaceManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A21327F80611EDF5E558A2 /* WorkspaceManagerTests.swift */; };
@@ -199,6 +200,7 @@
 		5B7C12A03AE9A5017FA79E62 /* MailHTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 366D03974E15A858BE536AE1 /* MailHTML.swift */; };
 		5B886E1FEAC1891962201C01 /* GmailMailConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17703086C94D05EDA9B85B21 /* GmailMailConfigTests.swift */; };
 		5BFD525836B15C48CC54A5D8 /* WatchFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0982B809334A31181947736 /* WatchFeed.swift */; };
+		5C3CE6E920FCD269B78A538A /* CoreLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F971AB18377E05CD6FF08499 /* CoreLink.swift */; };
 		5D6CF18A7384A74B640EFAAC /* WorktreeStatusAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4775959C72857610AC1F12DC /* WorktreeStatusAggregator.swift */; };
 		5DEB3FBD2ED30FCAA6BA00C1 /* ChatProgressReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51A16B0468001FB40538FB2 /* ChatProgressReporter.swift */; };
 		5E77C3E6AA55F970F5DD877E /* HostGatewayDecisions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 399B19A39BB25DDA3D401B60 /* HostGatewayDecisions.swift */; };
@@ -222,6 +224,7 @@
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
 		68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */; };
 		68D65BDE5D099778712E3917 /* PaneFork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6998FB62AF2E5F47766D9447 /* PaneFork.swift */; };
+		68EE7F997049E86535F47612 /* CoreSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FC2706C44152879AA81099 /* CoreSocketClient.swift */; };
 		69C021D47F0CD0650E986C43 /* HookEventMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
 		6A917794A3A0BEF0217579FA /* TelegramInitData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31C2470C1A80AF0E0B825BA /* TelegramInitData.swift */; };
@@ -372,6 +375,7 @@
 		A36D6F5375FBE77728D7A1FD /* ShareLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */; };
 		A3C6B5F047EBF420EA393C13 /* TodoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */; };
 		A4511021DEF08E77298E6F09 /* IntegrationStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811DF1463E1F5D6EFC56F68A /* IntegrationStatusStore.swift */; };
+		A4AFD84FFBDFAD26FF53F119 /* CoreLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26B91DC57FC93DE36F017EA1 /* CoreLinkTests.swift */; };
 		A56AD79B6223CC0089D6B6F6 /* SeahelmUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E2397B00081F3F0861460E /* SeahelmUITestCase.swift */; };
 		A5B666A67B06796F7E431A77 /* WatchFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */; };
 		A5F8DD0A3B1785C4F7861188 /* StationRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */; };
@@ -665,6 +669,7 @@
 		256BB7C447703DD227B69806 /* IntegrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationCoordinator.swift; sourceTree = "<group>"; };
 		258A1C3E5F11466A79C1CAF3 /* ClaudeUsageSummaryProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageSummaryProvider.swift; sourceTree = "<group>"; };
 		25EFA7CF17FDB6436453EA50 /* CommandFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandFormatter.swift; sourceTree = "<group>"; };
+		26B91DC57FC93DE36F017EA1 /* CoreLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreLinkTests.swift; sourceTree = "<group>"; };
 		26EFCABEFB8EEA92A8B6FA13 /* ClaudeStatuslineBridgeInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeStatuslineBridgeInstaller.swift; sourceTree = "<group>"; };
 		27117C2D2A6DF78BFACD7E05 /* Array+SafeIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Array+SafeIndex.swift"; sourceTree = "<group>"; };
 		27293C9549D95350D5CA8E80 /* DiffReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffReviewView.swift; sourceTree = "<group>"; };
@@ -803,11 +808,13 @@
 		5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceOptionParserTests.swift; sourceTree = "<group>"; };
 		5E8C45661088CE99AA27E805 /* UpdateDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateDriver.swift; sourceTree = "<group>"; };
 		5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorHooksSetupTests.swift; sourceTree = "<group>"; };
+		5F0A7807373C25701CCA9DEC /* MainWindowController+CoreCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MainWindowController+CoreCommands.swift"; sourceTree = "<group>"; };
 		5FE8A11E17EFB437EEA5C2A2 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		5FF03037A58F3583369D621C /* DashboardOverviewGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardOverviewGroupingTests.swift; sourceTree = "<group>"; };
 		60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStore.swift; sourceTree = "<group>"; };
 		6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTitleResolver.swift; sourceTree = "<group>"; };
 		619D80FEC996D2F42E2E8A3B /* SeahelmdLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmdLocator.swift; sourceTree = "<group>"; };
+		61FC2706C44152879AA81099 /* CoreSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSocketClient.swift; sourceTree = "<group>"; };
 		6207F1F7B2A126A6C5D69E91 /* FileTreeOutlineControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineControllerTests.swift; sourceTree = "<group>"; };
 		6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryTests.swift; sourceTree = "<group>"; };
 		63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneStatusTests.swift; sourceTree = "<group>"; };
@@ -1160,6 +1167,7 @@
 		F88D1AA083189266856E9B02 /* GmailAccessToken.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailAccessToken.swift; sourceTree = "<group>"; };
 		F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		F94DD13F50BE3F52F6B4B0B0 /* AutopilotRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotRulesTests.swift; sourceTree = "<group>"; };
+		F971AB18377E05CD6FF08499 /* CoreLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreLink.swift; sourceTree = "<group>"; };
 		FAFF4D1021558298332264D5 /* DebugFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugFlags.swift; sourceTree = "<group>"; };
 		FB5A39B8771184C83A422E99 /* AgentChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChannel.swift; sourceTree = "<group>"; };
 		FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTitleLookup.swift; sourceTree = "<group>"; };
@@ -1240,6 +1248,8 @@
 				4F0C5FB141D86ECC0B6D8E66 /* Config.swift */,
 				42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */,
 				59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */,
+				F971AB18377E05CD6FF08499 /* CoreLink.swift */,
+				61FC2706C44152879AA81099 /* CoreSocketClient.swift */,
 				CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */,
 				B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */,
 				2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */,
@@ -1460,6 +1470,7 @@
 				798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */,
 				D56E02C4A6D726C18E655451 /* main.swift */,
 				63F65EEAACEE71D08FEF9313 /* MainWindowController.swift */,
+				5F0A7807373C25701CCA9DEC /* MainWindowController+CoreCommands.swift */,
 				5C7DEDB939A0ACE4EFC367F6 /* MenuBuilder.swift */,
 				B953D23003F184833FA1CFBA /* PanelCoordinator.swift */,
 				7E3016038B5EAC23288651C6 /* QuitConfirmation.swift */,
@@ -1684,6 +1695,7 @@
 				E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */,
 				4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */,
 				536A8D31229E4F3D3D5D4DE8 /* ControlSocketServerTests.swift */,
+				26B91DC57FC93DE36F017EA1 /* CoreLinkTests.swift */,
 				2BC2F6A0D652584CD189EF89 /* CurlClientTests.swift */,
 				5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */,
 				201D21B0CA40F70C2EDF3073 /* CursorSessionTitleLookupTests.swift */,
@@ -2259,7 +2271,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nRES=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin\"\n\"${SRCROOT}/scripts/build-seahelmd.sh\" \"${RES}/seahelmd\"\nif [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  # Release builds need a secure timestamp for notarization; skip it in\n  # Debug so local builds don't pay a network round-trip per sign.\n  TS=\"--timestamp\"\n  [ \"${CONFIGURATION:-Debug}\" = \"Debug\" ] && TS=\"--timestamp=none\"\n  codesign --force --options runtime $TS \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \"${RES}/seahelmd\"\nfi\n";
+			shellScript = "set -euo pipefail\nRES=\"${CODESIGNING_FOLDER_PATH}/Contents/Resources/bin\"\n\"${SRCROOT}/scripts/build-seahelmd.sh\" \"${RES}/seahelmd\"\nif [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  # Release builds need a secure timestamp for notarization; skip it in\n  # Debug so local builds don't pay a network round-trip per sign.\n  TS=\"--timestamp\"\n  [ \"${CONFIGURATION:-Debug}\" = \"Debug\" ] && TS=\"--timestamp=none\"\n  codesign --force --options runtime $TS \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \"${RES}/seahelmd\" \"${RES}/seahelm-core\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -2312,6 +2324,7 @@
 				34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */,
 				C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */,
 				1F17BE40E11A063D21FD2B1C /* ControlSocketServerTests.swift in Sources */,
+				A4AFD84FFBDFAD26FF53F119 /* CoreLinkTests.swift in Sources */,
 				6EF0D3A70734647087C77BD7 /* CurlClientTests.swift in Sources */,
 				B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */,
 				0B486DC8922CD428C8D48A90 /* CursorSessionTitleLookupTests.swift in Sources */,
@@ -2579,6 +2592,8 @@
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,
+				5C3CE6E920FCD269B78A538A /* CoreLink.swift in Sources */,
+				68EE7F997049E86535F47612 /* CoreSocketClient.swift in Sources */,
 				7ACF6662D8BF575309E8EE64 /* CronSchedule.swift in Sources */,
 				CD7B83DE0BC3FB6951DF81C9 /* CurlClient.swift in Sources */,
 				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,
@@ -2670,6 +2685,7 @@
 				3DB03858C29C479B5A8E7885 /* MailBody.swift in Sources */,
 				5B7C12A03AE9A5017FA79E62 /* MailHTML.swift in Sources */,
 				010013ADD3241CB34AD1A70C /* MailPaneRouter.swift in Sources */,
+				515E36096E84ADA4B993292D /* MainWindowController+CoreCommands.swift in Sources */,
 				D41BF448B2DB04958D4C1B01 /* MainWindowController.swift in Sources */,
 				EE61D03E90AEC25A247BE3C9 /* ManifestEngine.swift in Sources */,
 				BC68C2573F261A3777F97617 /* ManifestStore.swift in Sources */,

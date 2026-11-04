@@ -30,6 +30,10 @@ pub struct Context {
     /// The desktop: its binding is its selection.
     pub desktop: bool,
     pub binding: Option<Binding>,
+    /// First Mate runs on the caller's side (the macOS app still owns it):
+    /// what is for First Mate comes back in `Outcome::first_mate` for the
+    /// caller to hand over, instead of going to the core's.
+    pub first_mate_here: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,15 +103,17 @@ pub struct Outcome {
     pub reply: Reply,
     /// Who the conversation talks to from now on; unchanged when None.
     pub binding: Option<Binding>,
+    /// Text for First Mate, when it runs on the caller's side.
+    pub first_mate: Option<String>,
 }
 
 impl Outcome {
     fn just(reply: Reply) -> Self {
-        Outcome { reply, binding: None }
+        Outcome { reply, binding: None, first_mate: None }
     }
 
     fn bind(reply: Reply, binding: Binding) -> Self {
-        Outcome { reply, binding: Some(binding) }
+        Outcome { reply, binding: Some(binding), first_mate: None }
     }
 
     pub fn to_json(&self) -> Value {
@@ -119,6 +125,9 @@ impl Outcome {
         if let Some(b) = &self.binding {
             v["binding"] = b.to_json();
         }
+        if let Some(t) = &self.first_mate {
+            v["first_mate"] = json!(t);
+        }
         v
     }
 }
@@ -126,6 +135,24 @@ impl Outcome {
 pub const NOT_BOUND: &str = "Not talking to anyone yet. `/status` to see the panes, then `/go #n` — or `/new <task>` to start one.";
 
 /// Run one line for one conversation.
+/// First Mate is there to talk to: the core's, or the caller's.
+fn mate_available(ctx: &Context, host: &dyn Host) -> bool {
+    host.first_mate_available() || ctx.first_mate_here
+}
+
+/// Say `text` to First Mate: to the core's when it runs, else back to the
+/// caller in `out`. False when there is none.
+fn mate_say(ctx: &Context, host: &dyn Host, text: &str, out: &mut Option<String>) -> bool {
+    if host.first_mate_available() {
+        return host.say_to_first_mate(text);
+    }
+    if ctx.first_mate_here {
+        *out = Some(text.to_string());
+        return true;
+    }
+    false
+}
+
 pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
     let index = host.fleet();
     let command = match parse::parse(text, &index) {
@@ -142,7 +169,7 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
             },
         })),
         Command::Go(Some(Go::FirstMate)) => {
-            if !host.first_mate_available() {
+            if !mate_available(ctx, host) {
                 return Outcome::just(Reply::err("First Mate is off. Turn it on in Settings ▸ First Mate."));
             }
             Outcome::bind(Reply::ok("Talking to First Mate. `/go #n` talks to a pane again."), Binding::FirstMate)
@@ -186,7 +213,7 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
         Command::Status => {
             let (bound, rebind) = bound_pane(ctx, &index);
             let reply = Reply { text: format::status(&index, bound.as_ref()), is_error: false, buttons: format::pane_buttons(&index, bound.as_ref()) };
-            Outcome { reply, binding: rebind }
+            Outcome { reply, binding: rebind, first_mate: None }
         }
         Command::Show(named) => {
             let (pane, rebind) = match named {
@@ -197,7 +224,7 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
                 return Outcome::just(Reply::err(if ctx.binding == Some(Binding::FirstMate) { "Talking to First Mate: `/show #n` reads a pane." } else { NOT_BOUND }));
             };
             let text = format::pane_detail(&p, &host.activity(&p.key), host.transcript(&p.key).as_deref(), &host.messages(&p.key));
-            Outcome { reply: Reply::ok(text), binding: rebind }
+            Outcome { reply: Reply::ok(text), binding: rebind, first_mate: None }
         }
         Command::Help(None) => Outcome::just(Reply::ok(spec::help())),
         Command::Help(Some(v)) => match spec::help_for(&v) {
@@ -211,12 +238,14 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
 /// gone sends nothing: guessing another is how an order lands in the wrong
 /// agent.
 fn say(text: &str, index: &FleetIndex, ctx: &Context, host: &dyn Host) -> Outcome {
+    let mut forward = None;
     if ctx.binding == Some(Binding::FirstMate) {
-        return Outcome::just(if host.say_to_first_mate(text) { Reply::ok("→ First Mate") } else { Reply::err("First Mate is off. `/go #n` talks to a pane.") });
+        let reply = if mate_say(ctx, host, text, &mut forward) { Reply::ok("→ First Mate") } else { Reply::err("First Mate is off. `/go #n` talks to a pane.") };
+        return Outcome { reply, binding: None, first_mate: forward };
     }
     let (pane, rebind) = bound_pane(ctx, index);
     if let Some(p) = pane {
-        return Outcome { reply: deliver(text, &p, host), binding: rebind };
+        return Outcome { reply: deliver(text, &p, host), binding: rebind, first_mate: None };
     }
     if matches!(ctx.binding, Some(Binding::Pane { .. })) {
         return Outcome::just(Reply::err("The pane this conversation was talking to isn't running — nothing sent. `/status` lists what is, `/go #n` picks one."));
@@ -225,8 +254,8 @@ fn say(text: &str, index: &FleetIndex, ctx: &Context, host: &dyn Host) -> Outcom
         return Outcome::just(Reply::err("No pane selected. Pick one on the dashboard, or `/new <task>`."));
     }
     // Nothing chosen: First Mate, when it is on, is who a chat talks to.
-    if host.say_to_first_mate(text) {
-        return Outcome::just(Reply::ok("→ First Mate"));
+    if mate_say(ctx, host, text, &mut forward) {
+        return Outcome { reply: Reply::ok("→ First Mate"), binding: None, first_mate: forward };
     }
     // One pane is no choice at all: talk to it, and say so once.
     if index.panes.len() == 1 {
@@ -306,7 +335,7 @@ mod tests {
     }
 
     fn chat(binding: Option<Binding>) -> Context {
-        Context { desktop: false, binding }
+        Context { desktop: false, binding, first_mate_here: false }
     }
 
     fn on(key: &str) -> Context {
@@ -340,6 +369,17 @@ mod tests {
         assert_eq!(*host.mate.borrow(), ["check CI", "what's red?"]);
         assert!(run("/go mate", &chat(None), &Fake::default()).reply.is_error);
         assert_eq!(run("hi", &chat(None), &Fake::default()).reply.text, NOT_BOUND);
+    }
+
+    #[test]
+    fn first_mate_on_the_callers_side_is_handed_back() {
+        let host = Fake::default();
+        let ctx = Context { first_mate_here: true, ..chat(None) };
+        assert_eq!(run("/go mate", &ctx, &host).binding, Some(Binding::FirstMate));
+        let o = run("what's red?", &Context { binding: Some(Binding::FirstMate), ..ctx.clone() }, &host);
+        assert_eq!((o.reply.text.as_str(), o.first_mate.as_deref()), ("→ First Mate", Some("what's red?")));
+        assert_eq!(o.to_json()["first_mate"], "what's red?");
+        assert_eq!(run("unbound", &ctx, &host).first_mate.as_deref(), Some("unbound"));
     }
 
     #[test]
