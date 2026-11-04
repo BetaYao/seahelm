@@ -5,13 +5,17 @@
 //!   seahelm-core call METHOD [JSON]   one JSON-RPC call, for scripts and debugging
 //!   seahelm-core shadow [--follow-app] [--seconds N]
 //!                                 compare our verdicts with the macOS app's
+//!   seahelm-core hook [SOURCE]    an agent's hook command: stdin JSON to the core
+//!   seahelm-core install-hooks    wire Claude Code and Codex hooks to `hook`
 //!   seahelm-core version
 //!
 //! The service reads each registered pane's screen from its seahelmd session,
 //! takes the agents' lifecycle hooks, decides each pane's state, and serves it
 //! over `~/.config/seahelm/core.sock` (see docs/status-core-port.md).
 
+mod bridge;
 mod core;
+mod install;
 mod poller;
 mod rpc;
 mod shadow;
@@ -46,6 +50,12 @@ fn run() -> Result<()> {
             Ok(())
         }
         "shadow" => shadow::run(rest),
+        // Never an error, never output: an agent runs this on every event.
+        "hook" => {
+            bridge::run(rest);
+            Ok(())
+        }
+        "install-hooks" => install::run(rest),
         "version" => {
             println!("seahelm-core {}", env!("CARGO_PKG_VERSION"));
             Ok(())

@@ -5,8 +5,10 @@ final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
         let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v6"))
+        XCTAssertTrue(s.contains("seahelm-hook v7"))
         XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
+        XCTAssertTrue(s.contains("nc -U \"$core\""))     // and seahelm-core's, directly
+        XCTAssertTrue(s.contains("SEAHELM_CORE_SOCKET"))
         XCTAssertFalse(s.contains("block_b64"))          // Stop is observation-only
         XCTAssertFalse(s.contains("base64 -d"))
         XCTAssertFalse(s.contains("/webhook"))           // HTTP fallback removed
@@ -49,8 +51,9 @@ final class SeahelmHookInstallerTests: XCTestCase {
             let p = Process()
             p.executableURL = scriptURL
             p.arguments = args
+            // A dead core socket: the live core must not hear test events.
             p.environment = ["SEAHELM_SOCKET_PATH": sockPath, "SEAHELM_PANE_ID": "seahelm-repo-main",
-                             "PATH": "/usr/bin:/bin"]
+                             "SEAHELM_CORE_SOCKET": "/nonexistent/core.sock", "PATH": "/usr/bin:/bin"]
             let input = Pipe()
             p.standardInput = input
             p.standardOutput = Pipe()
@@ -71,6 +74,53 @@ final class SeahelmHookInstallerTests: XCTestCase {
         XCTAssertEqual(ds.captured.first?["seahelm_pane_id"] as? String, "seahelm-repo-main")
         XCTAssertNil(ds.captured.last?["seahelm_source"], "untagged call must not emit an empty source")
         XCTAssertEqual(ds.captured.last?["seahelm_pane_id"] as? String, "seahelm-repo-main")
+    }
+
+    /// v7: the same request goes to seahelm-core's socket as well, so the core
+    /// hears hooks with the app's socket absent (the app not running).
+    func testScriptReachesTheCoreWithoutTheApp() throws {
+        final class CapturingDS: ControlDataSource {
+            var captured: [[String: Any]] = []
+            func snapshotPanes() -> [PaneSnapshot] { [] }
+            func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
+            func ingestHook(json: [String: Any]) { captured.append(json) }
+        }
+
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("seahelm-hook-core-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let scriptURL = dir.appendingPathComponent("seahelm-hook")
+        try SeahelmHookInstaller.scriptContents().write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        // Something speaking the same line protocol stands in for the core.
+        let corePath = "/tmp/sh-core-\(UUID().uuidString.prefix(8)).sock"
+        let core = CapturingDS()
+        let server = ControlSocketServer(router: ControlRouter(dataSource: core), path: corePath)
+        server.start()
+        defer { server.stop() }
+        Thread.sleep(forTimeInterval: 0.1)
+
+        let p = Process()
+        p.executableURL = scriptURL
+        p.arguments = ["codex"]
+        p.environment = ["SEAHELM_SOCKET_PATH": "/nonexistent/seahelm.sock", "SEAHELM_CORE_SOCKET": corePath,
+                         "SEAHELMD_SESSION": "seahelm-repo-wt", "PATH": "/usr/bin:/bin"]
+        let input = Pipe()
+        p.standardInput = input
+        p.standardOutput = Pipe()
+        try p.run()
+        input.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/wt"}"#.utf8))
+        try? input.fileHandleForWriting.close()
+        p.waitUntilExit()
+
+        let deadline = Date().addingTimeInterval(2)
+        while core.captured.isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        XCTAssertEqual(p.terminationStatus, 0)
+        XCTAssertEqual(core.captured.count, 1)
+        XCTAssertEqual(core.captured.first?["seahelm_source"] as? String, "codex")
+        XCTAssertEqual(core.captured.first?["seahelm_pane_id"] as? String, "seahelm-repo-wt")
     }
 
     func testScriptIsValidSh() throws {
