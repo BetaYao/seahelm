@@ -262,6 +262,25 @@ impl Workspace {
                 let kind = ev.get("type").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
                 let get = |k: &str| ev.get(k).cloned().unwrap_or_default();
                 match kind.as_str() {
+                    // A core that restarted knows none of our panes and has
+                    // its cards afresh: register them all again and reload.
+                    core_client::CONNECTED => {
+                        let Ok(regs) = this.update(cx, |w, _| w.registrations()) else { break };
+                        let cards = cx
+                            .background_executor()
+                            .spawn(async move {
+                                for reg in regs {
+                                    if let Err(e) = core_client::call("pane.register", reg) {
+                                        eprintln!("seahelm-gpui: core pane.register: {e}");
+                                    }
+                                }
+                                core_client::cards()
+                            })
+                            .await;
+                        if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
+                            break;
+                        }
+                    }
                     "cards.changed" => {
                         let cards = core_client::parse_cards(&ev);
                         if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
@@ -816,6 +835,18 @@ impl Workspace {
         self.view_for(id, leaf, window, cx)
     }
 
+    /// Every pane with a terminal, as `pane.register` takes it.
+    fn registrations(&self) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        for (id, pane) in &self.panes {
+            let Some(item) = self.fleet.find(id) else { continue };
+            for leaf in pane.views.keys() {
+                out.push(registration(&pane_session(id, *leaf), item));
+            }
+        }
+        out
+    }
+
     /// One pane's terminal: its session started in the worktree on first
     /// use and registered with seahelm-core; focusing it (a click) makes it
     /// the tree's focused pane.
@@ -828,12 +859,7 @@ impl Workspace {
         if let Err(e) = session::ensure_in(&name, &[], Some(&item.worktree_path)) {
             eprintln!("seahelm-gpui: {e:#}");
         }
-        let reg = serde_json::json!({
-            "pane": name,
-            "worktree_path": item.worktree_path,
-            "project": item.repository,
-            "branch": item.branch,
-        });
+        let reg = registration(&name, &item);
         cx.background_executor()
             .spawn(async move {
                 if let Err(e) = core_client::call("pane.register", reg) {
@@ -1674,6 +1700,16 @@ fn group_header(title: &str, first: bool, can_integrate: bool) -> impl IntoEleme
 /// How often the running spinner steps, and in how many steps it turns.
 const SPIN_STEP: Duration = Duration::from_millis(200);
 const SPIN_STEPS: u8 = 8;
+
+/// One pane as `pane.register` takes it.
+fn registration(name: &str, item: &fleet::Item) -> serde_json::Value {
+    serde_json::json!({
+        "pane": name,
+        "worktree_path": item.worktree_path,
+        "project": item.repository,
+        "branch": item.branch,
+    })
+}
 
 fn status_dot(dot: Dot, spin_phase: u8) -> gpui::AnyElement {
     let text = |g: &'static str, c: Rgba| div().text_size(px(8.)).line_height(px(11.)).text_color(c).child(g).into_any_element();

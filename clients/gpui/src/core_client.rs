@@ -92,6 +92,9 @@ pub fn worktrees() -> std::collections::HashMap<String, WorktreeState> {
         .collect()
 }
 
+/// The event `subscribe` hands over on every (re)connect.
+pub const CONNECTED: &str = "core.connected";
+
 /// Follow the core's event stream (`events.subscribe`) on a thread of its
 /// own, handing each event to `tx`; reconnects (after the core restarts,
 /// say) with a growing pause. Ends when `tx` is closed.
@@ -106,6 +109,11 @@ pub fn subscribe(types: &[&str], tx: futures::channel::mpsc::UnboundedSender<Val
                 line.push(b'\n');
                 if stream.write_all(&line).is_ok() {
                     pause = Duration::from_secs(1);
+                    // Not the core's: says a (re)connect happened, so the
+                    // client can tell a restarted core what it lost.
+                    if tx.unbounded_send(json!({"type": CONNECTED})).is_err() {
+                        return;
+                    }
                     // The core pings every 15 s; a minute of silence is a dead core.
                     stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
                     for line in BufReader::new(stream).lines() {
