@@ -35,7 +35,6 @@ struct Config: Codable {
     /// in Keychain, so this remains safe to serialize to config.json.
     var gmailMail: GmailMailConfig?
     var hostGateway: HostGatewayConfig?
-    var firstMate: FirstMateConfig
     /// Whether the integration checkout exists as a concept at all: its button,
     /// its banner, its panel, `/integrate`, and the automatic rounds. Off hides
     /// the feature entirely without deleting any checkout already on disk.
@@ -110,7 +109,6 @@ struct Config: Codable {
         case telegram
         case gmailMail = "gmail_mail"
         case hostGateway = "host_gateway"
-        case firstMate
         case notifications
         case islandEnabled = "island_enabled"
         case autopilotEnabled = "autopilot_enabled"
@@ -155,7 +153,6 @@ struct Config: Codable {
         telegram = nil
         gmailMail = nil
         hostGateway = nil
-        firstMate = .default
         notifications = NotificationConfig()
         islandEnabled = true
         autopilotEnabled = false
@@ -203,7 +200,6 @@ struct Config: Codable {
         telegram = try container.decodeIfPresent(TelegramConfig.self, forKey: .telegram)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
         hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)
-        firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false

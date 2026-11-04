@@ -79,13 +79,6 @@ final class IntegrationCoordinator {
         schedule(worktreePath: outcome.info.worktreePath)
     }
 
-    /// Exposed for the same edge arriving as a plain transition.
-    func handle(_ transition: StatusTransition) {
-        dispatchPrecondition(condition: .onQueue(.main))
-        guard transition.oldStatus == .running, transition.newStatus != .running else { return }
-        schedule(worktreePath: transition.worktreePath)
-    }
-
     private func schedule(worktreePath: String) {
         guard isEnabled(),
               !worktreePath.isEmpty,

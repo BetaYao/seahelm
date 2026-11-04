@@ -126,11 +126,10 @@ class TabCoordinator {
     /// Answers a question card as a tap on it would (owner-set: the window
     /// controller drives the dialog). Remote clients answer through this so a
     /// multi-select or multi-question ask behaves as it does on the desktop.
-    var questionAnswerer: ((PendingOrder, String) -> Void)?
     /// Answers one of First Mate's cards as a tap on it would (owner-set).
-    var firstMateCardAnswerer: ((PendingOrder, String) -> Void)?
     // First Mate — status-transition engine + red-zone queue + green-zone watch
-    let pendingOrders = PendingOrdersQueue()
+    /// The core's cards, as the island, Telegram and the web show them.
+    let cards = CardDeck()
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -194,26 +193,14 @@ class TabCoordinator {
                         commit, forCheckout: report.integrationWorktreePath)
                 }
                 guard report.needsAttention else { return }
-                // upsert, not enqueue: the key is (checkout, kind), so an
-                // enqueue would pin the card to the *first* round's summary
-                // while the side panel moved on with every later one — the two
-                // surfaces reading one round is the whole point of panelState.
-                // An unchanged report compares equal and does not re-pop.
-                self?.pendingOrders.upsert(
-                    FirstMateAction(
-                        kind: .integrationReport,
-                        zone: .red,
-                        worktreePath: report.integrationWorktreePath,
-                        branch: "",
-                        project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
-                        terminalID: "",
-                        message: report.summary,
-                        // The repo to re-run against: the card's own path is the
-                        // checkout, and resolving back from it is a guess.
-                        payload: repo,
-                        options: report.cardOptions
-                    )
-                )
+                // One card per checkout: the core keeps the latest round's
+                // (its key is worktree and kind), as the side panel does.
+                guard let options = report.cardOptions, !options.isEmpty else { return }
+                self?.cards.raise(kind: .report, worktreePath: report.integrationWorktreePath,
+                                  project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
+                                  message: report.summary, options: options,
+                                  // The repo to re-run against: the card's path is the checkout.
+                                  payload: repo)
             }
         )
         Fleet.shared.onChange = { [weak self] outcome in
@@ -823,6 +810,7 @@ class TabCoordinator {
                             break
                         }
                     }
+                    self.cards.start()
                     CoreClient.shared.start()
                     self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
                     self.mailPaneRouter?.route = self.commandRoute
@@ -910,23 +898,21 @@ class TabCoordinator {
                         // former, remote callers usually hold the latter.
                         guard let self else { return false }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        return self.pendingOrders.dismissSuggestion(terminalID: stationId)
+                        guard let card = self.cards.cards.first(where: { $0.kind == .suggestion && $0.terminalID == stationId })
+                        else { return false }
+                        self.cards.dismiss(card)
+                        return true
                     }
                     controlDataSource.paneSeenHandler = { [weak self] paneId in
                         self?.markPaneSeen(paneId: paneId) ?? false
                     }
                     controlDataSource.answerQuestionHandler = { [weak self] paneId, index in
-                        guard let self, let answer = self.questionAnswerer else { return nil }
+                        guard let self else { return nil }
                         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        guard let order = self.questionOrder(terminalID: stationId) else { return nil }
-                        let labels = order.action.answerLabels
-                        guard index < labels.count else { return ["answered": false] }
-                        answer(order, labels[index])
-                        var result: [String: Any] = ["answered": true]
-                        if let still = self.questionOrder(terminalID: stationId) {
-                            result["card"] = Self.questionCard(still.action)
-                        }
-                        return result
+                        guard let card = self.cards.question(terminalID: stationId) else { return nil }
+                        guard index < card.labels.count else { return ["answered": false] }
+                        self.cards.answer(card, label: card.labels[index])
+                        return ["answered": true]
                     }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]
@@ -1991,7 +1977,7 @@ class TabCoordinator {
         // a banner + history entry on top of the card is the same event shown
         // twice. Errors and completions still notify.
         if newStatus == .waiting, !terminalID.isEmpty,
-           pendingOrders.all().contains(where: { $0.action.terminalID == terminalID }) {
+           cards.cards.contains(where: { $0.terminalID == terminalID }) {
             return
         }
 
@@ -2067,7 +2053,7 @@ class TabCoordinator {
               "worktree=\(URL(fileURLWithPath: path).lastPathComponent)")
         // A pending card for this pane already shows that it needs input.
         if newStatus == .waiting, !id.isEmpty,
-           pendingOrders.all().contains(where: { $0.action.terminalID == id }) {
+           cards.cards.contains(where: { $0.terminalID == id }) {
             return
         }
         let repoPath = worktreeRepoCache[path] ?? path
@@ -2104,10 +2090,6 @@ class TabCoordinator {
 
     // MARK: - First Mate
 
-    /// The approval and proposal cards First Mate is waiting on, oldest first.
-    func firstMateCards() -> [PendingOrder] {
-        pendingOrders.all().filter { $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal }
-    }
 
     /// Start, stop, pause or resume First Mate from config. Safe to call again.
     func applyAutopilotConfig() {
@@ -2129,22 +2111,7 @@ class TabCoordinator {
         }
     }
 
-    /// The question card a pane is waiting on, if any.
-    private func questionOrder(terminalID: String) -> PendingOrder? {
-        pendingOrders.all().first {
-            FirstMateAction.isQuestionPayload($0.action.payload) && $0.action.terminalID == terminalID
-        }
-    }
 
-    /// A question card in the remote clients' shape (`HostGatewayDecisions`).
-    static func questionCard(_ action: FirstMateAction) -> [String: Any] {
-        var card: [String: Any] = ["prompt": action.message, "options": action.options ?? []]
-        if action.questionFlags.multiSelect {
-            card["multi_select"] = true
-            card["checked"] = action.questionFlags.checked.sorted()
-        }
-        return card
-    }
 
     /// Register every pane of a worktree's tree with Fleet — not just the first.
     /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID

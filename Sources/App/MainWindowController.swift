@@ -117,6 +117,8 @@ class MainWindowController: NSWindowController {
     /// still has to reach the phone, and the phone must not be sent the same
     /// question twice because the desktop happened to re-pop it.
     private var chatSeenCards = SuggestionSeenSet()
+    /// The labels a chat was last shown for a card, to redraw its ticks.
+    private var chatCardLabels: [String: [String]] = [:]
     /// Where each card's buttons are drawn right now, so they can be taken down
     /// when the card goes — answered on the Mac, or the agent moved past it.
     private var cardButtonMessages: [String: [ChatNoticeBook.Ref]] = [:]
@@ -304,7 +306,7 @@ class MainWindowController: NSWindowController {
         // while it is actually expanded: a collapsed pill has said nothing.
         NotificationManager.shared.isCardOnScreen = { [weak self] terminalID in
             guard let self, self.islandController.model.isOpened else { return false }
-            return self.islandController.model.orders.contains { $0.action.terminalID == terminalID }
+            return self.islandController.model.orders.contains { $0.terminalID == terminalID }
         }
         // Pane-status banners go to Telegram with binding awareness: after
         // `/go #n` that chat only hears #n, not the rest of the fleet. Other
@@ -425,9 +427,6 @@ class MainWindowController: NSWindowController {
             [self?.config.telegram?.resolvedDefaultChatId].compactMap { $0 }
         }
         tabCoordinator.telegramConfigProvider = { [weak self] in self?.config.telegram }
-        tabCoordinator.questionAnswerer = { [weak self] order, label in
-            self?.handleSuggestionTapped(order: order, optionText: label)
-        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleNavigateToWorktree(_:)),
@@ -1217,7 +1216,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 forWorktree: checkoutPath
             )
             // A held-round card was about the state that was just discarded.
-            tabCoordinator.pendingOrders.resolveWorktree(path: checkoutPath)
+            tabCoordinator.cards.clear(worktreePath: checkoutPath)
         case .held(let reason, _):
             guard let window else { return }
             let alert = NSAlert()
@@ -1248,29 +1247,20 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// One card per checkout, keyed by the checkout rather than the repo so the
-    /// manual path and the automatic one address the same card instead of
-    /// stacking two. `upsert` because a later round supersedes an earlier one —
-    /// `enqueue` would leave the card reading whatever the first round said.
+    /// One card per checkout (the core keys it by worktree and kind), so the
+    /// manual path and the automatic one address the same card and a later
+    /// round replaces an earlier one.
     private func enqueueIntegrationReport(
         _ message: String,
         repoPath: String,
         checkoutPath: String,
         options: [String]? = nil
     ) {
-        tabCoordinator.pendingOrders.upsert(
-            FirstMateAction(
-                kind: .integrationReport,
-                zone: .red,
-                worktreePath: checkoutPath,
-                branch: "",
-                project: tabCoordinator.repoName(forWorktree: repoPath),
-                terminalID: "",
-                message: message,
-                payload: repoPath,
-                options: options
-            )
-        )
+        // A round with nothing to decide stays in the checkout's status.
+        guard let options, !options.isEmpty else { return }
+        tabCoordinator.cards.raise(kind: .report, worktreePath: checkoutPath,
+                                   project: tabCoordinator.repoName(forWorktree: repoPath),
+                                   message: message, options: options, payload: repoPath)
     }
 
     /// Outcome of an async Helm command, reported back so the caller can drop its
@@ -2276,8 +2266,11 @@ extension MainWindowController {
             self?.refreshIslandConversation()
         }
 
-        tabCoordinator.pendingOrders.addObserver { [weak self] in
+        tabCoordinator.cards.addObserver { [weak self] in
             self?.refreshIsland()
+        }
+        tabCoordinator.cards.onAnswered = { [weak self] card, option in
+            self?.cardAnswered(card, option: option)
         }
         // Push-driven: worktree status changes arrive via
         // tabCoordinatorRequestUpdateTitleBar. The timer is only a slow
@@ -2291,10 +2284,10 @@ extension MainWindowController {
 
     /// Jump to the pane that raised `order` without resolving the suggestion.
     /// Used when the user taps blank area on an Island suggestion card.
-    private func revealSuggestionPane(_ order: PendingOrder) {
-        let path = order.action.worktreePath
+    private func revealSuggestionPane(_ card: Card) {
+        let path = card.worktreePath
         tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: nil)
-        let terminalID = order.action.terminalID
+        let terminalID = card.terminalID
         // Embed/layout of the split container is deferred; focus after it lands.
         if !terminalID.isEmpty {
             DispatchQueue.main.async { [weak self] in
@@ -2314,15 +2307,14 @@ extension MainWindowController {
     /// Registered independently of the island so it still works with it disabled.
     private func setupSuggestionReveal() {
         guard NSClassFromString("XCTestCase") == nil else { return }
-        tabCoordinator.pendingOrders.addObserver { [weak self] in
+        tabCoordinator.cards.addObserver { [weak self] in
             self?.revealFirstMateForNewSuggestions()
         }
         revealFirstMateForNewSuggestions()
     }
 
     private func revealFirstMateForNewSuggestions() {
-        let suggestions = tabCoordinator.pendingOrders.all()
-            .filter { $0.action.kind == .suggestNextOrder }
+        let suggestions = tabCoordinator.cards.cards.filter { !$0.isFirstMates && $0.kind != .report }
         let fresh = revealedSuggestions.absorb(suggestions)
         // Only while frontmost: in the background the island already pops, and
         // re-opening the sidebar on a suggestion the user never saw arrive would
@@ -2331,7 +2323,7 @@ extension MainWindowController {
         // island's job, so revealing the current worktree's First Mate tab for
         // it would rearrange the window and still not show the card.
         guard NSApp.isActive else { return }
-        guard fresh.contains(where: { tabCoordinator.isWorktreeVisible($0.action.worktreePath) }) else { return }
+        guard fresh.contains(where: { tabCoordinator.isWorktreeVisible($0.worktreePath) }) else { return }
         guard chromeState.isCollapsed || chromeState.activePane != .firstMate else { return }
         // Layout only — first responder stays in the terminal so the reveal never
         // eats a keystroke mid-sentence.
@@ -2445,7 +2437,7 @@ extension MainWindowController {
         // Equality-gate every assignment: this runs on a 2s timer, and an
         // ungated @Observable set re-evaluates the SwiftUI island every tick
         // even when nothing changed.
-        let orders = IslandModel.newestSuggestions(from: tabCoordinator.pendingOrders.all())
+        let orders = IslandModel.newestSuggestions(from: tabCoordinator.cards.cards)
         if model.orders != orders { model.orders = orders }
 
         // A dead control channel is invisible everywhere else: the hooks fail
@@ -2461,12 +2453,12 @@ extension MainWindowController {
         // Notification Center's job. Frontmost, this yields to the First Mate
         // sidebar only for a card that sidebar is actually showing — a
         // suggestion raised in a worktree that isn't on screen pops here.
-        publishCardsToChat(tabCoordinator.pendingOrders.all())
+        publishCardsToChat(tabCoordinator.cards.cards)
 
         let fresh = islandSeenSuggestions.absorb(orders)
         if IslandModel.shouldOpen(for: fresh), !model.isOpened {
             let targetVisible = fresh.allSatisfy {
-                tabCoordinator.isWorktreeVisible($0.action.worktreePath)
+                tabCoordinator.isWorktreeVisible($0.worktreePath)
             }
             islandController.openForEvent(targetVisible: targetVisible)
         }
@@ -2874,7 +2866,7 @@ extension MainWindowController: TabCoordinatorDelegate {
 
     func tabCoordinator(_ coordinator: TabCoordinator, worktreesDidVanish paths: [String]) {
         for path in paths {
-            tabCoordinator.pendingOrders.resolveWorktree(path: path)
+            tabCoordinator.cards.clear(worktreePath: path)
             endChatBindings(forWorktreePath: path, reason: "the worktree was deleted")
         }
     }
@@ -2890,7 +2882,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
         // Sweep the worktree's cards before the UI drops it: deleting a worktree
         // takes every pane with it, so worktree-scoped cards are stale too.
-        tabCoordinator.pendingOrders.resolveWorktree(path: info.path)
+        tabCoordinator.cards.clear(worktreePath: info.path)
         endChatBindings(forWorktreePath: info.path, reason: "its worktree was deleted")
         worktreeDidDelete(info)
     }
@@ -2907,114 +2899,24 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 // MARK: - Bridge Actions
 
 extension MainWindowController {
-    /// Routes a suggestion chip tap. `integrationReport` chips run or decline the
-    /// discard; all other kinds forward the option text to the agent terminal.
-    func handleSuggestionTapped(order: PendingOrder, optionText: String) {
-        if order.action.kind == .integrationReport {
-            // The card is the only place the discard is offered, and it is the
-            // one irreversible step in the feature — so the option that takes
-            // it says so, and anything else just clears the card.
-            tabCoordinator.pendingOrders.resolve(id: order.id)
-            guard IntegrationRunReport.isDiscardOption(optionText) else { return }
-            // The repo travels on the card: its worktreePath is the checkout.
-            guard let repoPath = order.action.payload
-                ?? IntegrationWorktreeStore.shared.repoPath(forCheckout: order.action.worktreePath) else {
-                NSSound.beep()
-                return
-            }
-            runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: true)
-        } else if order.action.payload == FirstMateAction.screenChoicePayload {
-            // Permission prompts discovered from the viewport are not guaranteed
-            // to support digit shortcuts (Codex advertises y/p/esc). Drive the
-            // visible list relative to its current selected row instead.
-            if let idx = order.action.options?.firstIndex(of: optionText) {
-                let selectedIndex = StationRegistry.shared.station(forId: order.action.terminalID)
-                    .flatMap { $0.readViewportText() }
-                    .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) } ?? 0
-                PaneInput.shared.answerChoiceByArrows(
-                    to: order.action.terminalID, index: idx, from: selectedIndex)
-            }
-        } else if order.action.payload == FirstMateAction.askUserQuestionPayload {
-            answerAgentQuestion(order: order, label: optionText)
-            return
-        } else {
-            PaneInput.shared.sendCommand(to: order.action.terminalID, command: optionText)
-        }
-        tabCoordinator.pendingOrders.resolve(id: order.id)
+    /// A tapped option. The core answers every card itself (keys into the
+    /// agent's dialog, First Mate's ask, a card of ours back as
+    /// `card.answered`), then sends the cards again.
+    func handleSuggestionTapped(order card: Card, optionText: String) {
+        tabCoordinator.cards.answer(card, label: optionText)
     }
 
-    /// Answer an AskUserQuestion card in the agent's dialog. Arrow keys and
-    /// Return only (see `QuestionFlags`): a digit arrives as pasted text, which
-    /// the dialog ignores, so the Return after it picked whatever row the cursor
-    /// was on. opencode's question dialog takes the same keys.
-    ///
-    /// A multi-select tap toggles one row and leaves the card up, ticked, until
-    /// Done; anything else answers the question and moves the card on.
-    private func answerAgentQuestion(order: PendingOrder, label: String) {
-        let action = order.action
-        var flags = action.questionFlags
-        guard let tapped = action.answerLabels.firstIndex(of: label) else { return }
-        let optionCount = action.options?.count ?? 0
-
-        if flags.multiSelect, tapped == optionCount {
-            PaneInput.shared.pressKeys(to: action.terminalID, keys: ["right"])
-            advanceAgentQuestion(order)
+    /// One of the app's own cards was answered: a held integration round's
+    /// discard is the only one that acts.
+    fileprivate func cardAnswered(_ card: [String: Any], option: String?) {
+        guard card["kind"] as? String == "report", let option, IntegrationRunReport.isDiscardOption(option) else { return }
+        // The repo travels on the card: its worktree is the checkout.
+        guard let repoPath = card["payload"] as? String
+            ?? IntegrationWorktreeStore.shared.repoPath(forCheckout: card["worktree_path"] as? String ?? "") else {
+            NSSound.beep()
             return
         }
-        guard tapped < optionCount else { return }
-        let from = currentChoiceRow(terminalID: action.terminalID) ?? flags.cursor
-        PaneInput.shared.answerChoiceByArrows(to: action.terminalID, index: tapped, from: from)
-        guard flags.multiSelect else {
-            advanceAgentQuestion(order)
-            return
-        }
-        if flags.checked.contains(tapped) { flags.checked.remove(tapped) } else { flags.checked.insert(tapped) }
-        flags.cursor = tapped
-        tabCoordinator.pendingOrders.upsert(action.with(questionFlags: flags))
-    }
-
-    /// The question was answered: show the next one of a multi-question ask,
-    /// or — on the last — retire the card and confirm the review page.
-    private func advanceAgentQuestion(_ order: PendingOrder) {
-        let a = order.action
-        tabCoordinator.pendingOrders.resolve(id: order.id)
-        if let next = a.followups?.first {
-            tabCoordinator.pendingOrders.enqueue(FirstMateAction(
-                kind: a.kind, zone: a.zone, worktreePath: a.worktreePath,
-                branch: a.branch, project: a.project, terminalID: a.terminalID,
-                message: next.prompt, payload: a.payload, options: next.options,
-                followups: (a.followups?.count ?? 0) > 1 ? Array(a.followups!.dropFirst()) : nil,
-                questionFlags: next.flags))
-            return
-        }
-        if a.questionFlags.reviewAfter {
-            confirmQuestionReview(terminalID: a.terminalID, attemptsLeft: 6)
-        }
-    }
-
-    /// Every answer is in; the dialog now shows "Review your answers" with its
-    /// cursor on Submit. Press Return once that page is actually up — never
-    /// blind, since a Return that lands early would toggle or pick a row.
-    private func confirmQuestionReview(terminalID: String, attemptsLeft: Int) {
-        guard attemptsLeft > 0 else {
-            NSLog("[Question] review page never appeared for \(terminalID); left for the user")
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self else { return }
-            let screen = self.paneScreen(terminalID: terminalID) ?? ""
-            if screen.contains("Ready to submit your answers?") {
-                PaneInput.shared.pressKeys(to: terminalID, keys: ["enter"])
-            } else {
-                self.confirmQuestionReview(terminalID: terminalID, attemptsLeft: attemptsLeft - 1)
-            }
-        }
-    }
-
-    /// The highlighted row of the choice list on screen, when one can be read.
-    private func currentChoiceRow(terminalID: String) -> Int? {
-        paneScreen(terminalID: terminalID)
-            .flatMap { ChoiceOptionParser.parse($0).firstIndex(where: \.selected) }
+        runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: true)
     }
 
     /// What the pane shows: the live surface's viewport, or for a pane whose tab
@@ -3349,7 +3251,6 @@ extension MainWindowController {
     /// `reason` completes the sentence the far end is told, so it says what
     /// actually happened rather than the same line for every ending.
     func endChatBindings(forPaneId paneId: String, reason: String) {
-        tabCoordinator.pendingOrders.resolvePane(terminalID: paneId)
         for session in tabCoordinator.commandSessions.close(paneId: paneId) {
             retireChatBinding(session, reason: reason)
         }
@@ -3449,29 +3350,37 @@ extension MainWindowController {
     ///
     /// A suggestion whose notice has not come back with an id yet is left out
     /// of the seen set rather than dropped, so the next pass picks it up.
-    func publishCardsToChat(_ orders: [PendingOrder]) {
-        retireVanishedCardButtons(live: Set(orders.map(\.id)))
-
-        let attachable = orders.filter { order in
-            guard !(order.action.options ?? []).isEmpty else { return false }
-            return FirstMateAction.isQuestionPayload(order.action.payload)
-                || order.action.kind == .autopilotApproval || order.action.kind == .autopilotProposal
-                || !noticeBook.recent(pane: order.action.terminalID).isEmpty
+    func publishCardsToChat(_ cards: [Card]) {
+        retireVanishedCardButtons(live: Set(cards.map(\.id)))
+        // A multi-select question the user is ticking from a chat: its new
+        // ticks come back from the core; redraw them where it was shown.
+        for card in cards where card.multiSelect {
+            guard let refs = cardButtonMessages[card.id], chatCardLabels[card.id] != card.labels else { continue }
+            chatCardLabels[card.id] = card.labels
+            let buttons = optionButtons(for: card, dismissable: true)
+            for ref in refs {
+                ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
+                                             messageId: ref.messageId, buttons: buttons)
+            }
         }
-        for order in chatSeenCards.absorb(attachable) {
-            // An approval is a stop like a question: First Mate waits on it.
-            if FirstMateAction.isQuestionPayload(order.action.payload) || order.action.kind == .autopilotApproval
-                || order.action.kind == .autopilotProposal {
-                sendCardToChat(order)
+        let attachable = cards.filter { card in
+            guard !card.options.isEmpty else { return false }
+            return card.isAgentQuestion || card.isFirstMates || !noticeBook.recent(pane: card.terminalID).isEmpty
+        }
+        for card in chatSeenCards.absorb(attachable) {
+            // First Mate's asks stop it like a question stops an agent.
+            if card.isAgentQuestion || card.isFirstMates {
+                chatCardLabels[card.id] = card.labels
+                sendCardToChat(card)
             } else {
-                attachOptionsToNotice(order)
+                attachOptionsToNotice(card)
             }
         }
     }
 
     /// Add a suggestion's options to the completion notice they belong under.
-    private func attachOptionsToNotice(_ order: PendingOrder) {
-        let targets = noticeBook.recent(pane: order.action.terminalID)
+    private func attachOptionsToNotice(_ order: Card) {
+        let targets = noticeBook.recent(pane: order.terminalID)
         guard !targets.isEmpty else { return }
         let buttons = optionButtons(for: order)
         for target in targets {
@@ -3507,10 +3416,10 @@ extension MainWindowController {
     /// The card's options as buttons. `dismissable` adds a way to clear a card
     /// without answering it — worth offering on a question, which otherwise
     /// sits there, and not on a suggestion, where not tapping *is* declining.
-    private func optionButtons(for order: PendingOrder, dismissable: Bool = false) -> [MessageButton] {
+    private func optionButtons(for order: Card, dismissable: Bool = false) -> [MessageButton] {
         // Minted once and shared by every chat the card reaches: a token says
         // what the button means, not who tapped it.
-        var buttons = order.action.answerLabels.enumerated().map { index, label in
+        var buttons = order.labels.enumerated().map { index, label in
             MessageButton(label: label, token: ChatCallbackRegistry.shared.mint(
                 .suggestionOption(orderId: order.id, index: index)))
         }
@@ -3522,8 +3431,8 @@ extension MainWindowController {
         return buttons
     }
 
-    private func sendCardToChat(_ order: PendingOrder) {
-        let pane = Fleet.shared.pane(for: order.action.terminalID)
+    private func sendCardToChat(_ order: Card) {
+        let pane = Fleet.shared.pane(for: order.terminalID)
         let paneKey = pane.map {
             PaneHandleRegistry.key(sessionKey: $0.station?.paneSessionKey ?? "", paneId: $0.id)
         }
@@ -3542,8 +3451,8 @@ extension MainWindowController {
         let buttons = optionButtons(for: order, dismissable: true)
         let text = Self.questionCardText(
             handle: paneKey.map { PaneHandleRegistry.shared.handle(for: $0) },
-            project: order.action.project, branch: order.action.branch,
-            message: order.action.message, options: order.action.options ?? [])
+            project: order.project, branch: order.branch,
+            message: order.message, options: order.options)
         for chatId in ordered {
             ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text,
@@ -3562,11 +3471,8 @@ extension MainWindowController {
     /// Stable across a queue flicker. It deliberately names the card contents,
     /// not a transient event sequence, so rediscovering the same approval is
     /// the same Telegram packet.
-    static func questionCardPacketKey(_ order: PendingOrder) -> String {
-        let action = order.action
-        return [order.id, action.message, (action.options ?? []).joined(separator: "\u{1E}"),
-                action.questionFlags.askId]
-            .joined(separator: "\u{1F}")
+    static func questionCardPacketKey(_ card: Card) -> String {
+        [card.id, card.message, card.options.joined(separator: "\u{1E}")].joined(separator: "\u{1F}")
     }
 
 
@@ -3661,41 +3567,27 @@ extension MainWindowController {
             replyToChat(callback, "Cancelled.")
             return
         case .suggestionOption(let orderId, let index):
-            guard let order = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }),
-                  index < order.action.answerLabels.count else {
+            guard let card = tabCoordinator.cards.card(id: orderId), index < card.labels.count else {
                 replyToChat(callback, "That card is gone — the agent moved on.")
                 return
             }
-            let option = order.action.answerLabels[index]
-            // Retire first: answering the card re-enqueues the next question of
-            // a multi-part ask under the same id, and its fresh tokens must not
-            // be swept away by the resolve that follows.
-            ChatCallbackRegistry.shared.retire(orderId: orderId)
-            handleSuggestionTapped(order: order, optionText: option)
-            // A multi-select toggle leaves the same question up: redraw its ticks
-            // on every message that shows it, and say nothing — a reply per tick
-            // would bury the card.
-            if let live = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }),
-               live.action.questionFlags.multiSelect, live.action.message == order.action.message {
+            let option = card.labels[index]
+            handleSuggestionTapped(order: card, optionText: option)
+            // A multi-select tick leaves the question up; its new ticks are
+            // redrawn when the core sends the cards again. Say nothing: a reply
+            // per tick would bury the card.
+            if card.multiSelect, option != Card.doneLabel {
                 let tapped = ChatNoticeBook.Ref(chatId: callback.chatId, messageId: callback.messageId)
                 let known = cardButtonMessages[orderId]?.contains {
                     $0.chatId == tapped.chatId && $0.messageId == tapped.messageId
                 } ?? false
                 if !known { cardButtonMessages[orderId, default: []].append(tapped) }
-                let buttons = optionButtons(for: live, dismissable: true)
-                for ref in cardButtonMessages[orderId] ?? [] {
-                    ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
-                                                    messageId: ref.messageId, buttons: buttons)
-                }
                 return
             }
-            replyToChat(callback, "Picked **\(Self.pickedSummary(order.action, tapped: option))**.")
+            ChatCallbackRegistry.shared.retire(orderId: orderId)
+            replyToChat(callback, "Picked **\(Self.pickedSummary(card, tapped: option))**.")
         case .dismissSuggestion(let orderId):
-            if let order = tabCoordinator.pendingOrders.all().first(where: { $0.id == orderId }) {
-                dismissOrder(order)
-            } else {
-                tabCoordinator.pendingOrders.resolve(id: orderId)
-            }
+            if let card = tabCoordinator.cards.card(id: orderId) { dismissOrder(card) }
             replyToChat(callback, "Left it. The agent is still waiting — answer it on the Mac when you get there.")
         }
         // The card has been dealt with; its buttons must stop offering options
@@ -3721,10 +3613,10 @@ extension MainWindowController {
 
     /// What a tap answered, for the chat's "Picked …" line: Done on a
     /// multi-select card stands for the rows ticked before it.
-    static func pickedSummary(_ action: FirstMateAction, tapped: String) -> String {
-        guard action.questionFlags.multiSelect, tapped == FirstMateAction.questionDoneLabel else { return tapped }
-        let options = action.options ?? []
-        let picked = action.questionFlags.checked.sorted().compactMap { $0 < options.count ? options[$0] : nil }
+    static func pickedSummary(_ card: Card, tapped: String) -> String {
+        guard card.multiSelect, tapped == Card.doneLabel else { return tapped }
+        let options = card.options
+        let picked = card.checked.sorted().compactMap { $0 < options.count ? options[$0] : nil }
         return picked.isEmpty ? "nothing" : picked.joined(separator: ", ")
     }
 
@@ -3809,9 +3701,6 @@ extension MainWindowController {
                   let self, let chat = self.config.telegram?.resolvedDefaultChatId else { return }
             self.pushFirstMateLine("→ \(entry.text)", chatId: chat)
         }
-        tabCoordinator.firstMateCardAnswerer = { [weak self] order, option in
-            self?.handleSuggestionTapped(order: order, optionText: option)
-        }
         firstMate.onStateChange = { [weak self] _ in
             self?.refreshIslandFirstMate()
             // Remote clients (seahelm-web) draw the same First Mate: the core's.
@@ -3826,8 +3715,8 @@ extension MainWindowController {
 
     /// Waving a card away. For a First Mate approval that is a "no", and First
     /// Mate has to hear it — it is waiting on the answer.
-    func dismissOrder(_ order: PendingOrder) {
-        tabCoordinator.pendingOrders.resolve(id: order.id)
+    func dismissOrder(_ card: Card) {
+        tabCoordinator.cards.dismiss(card)
     }
 
     /// ⌘J, ⌃⌃ and View ▸ First Mate: First Mate's conversation in the island,
