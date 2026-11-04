@@ -83,6 +83,14 @@ def main():
             lasting[(a, c)] += float(r.get("seconds", r.get("lasted", 0)) or 0)
     if summaries:
         print(f"  latest shadow summary: {json.dumps(summaries[-1], ensure_ascii=False)[:300]}")
+    # The comparator prints its running agreement to its own log.
+    try:
+        with open(os.path.join(AB, "shadow.log")) as f:
+            agree = [l.strip() for l in f if "agree" in l]
+        if agree:
+            print(f"  {agree[-1].removeprefix('shadow: ')}")
+    except FileNotFoundError:
+        pass
     if pairs:
         print("  disagreements that outlasted the grace period (app → core):")
         for (a, c), n in pairs.most_common(10):
