@@ -90,6 +90,15 @@ fn main() {
                 cx.open_window(options, |_, cx| cx.new(Workspace::new)).expect("open window");
             }
         }
+        // The last window closed is the client done: with no Dock icon to
+        // bring a window back, staying up would only leave an invisible
+        // process. Sessions live on in seahelmd.
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         cx.activate(true);
     });
 }
