@@ -362,6 +362,7 @@ impl Core {
                 Ok(json!({"seen": seen}))
             }
             "pane.list" | "session.snapshot" => {
+                let detail = p.get("detail").and_then(Value::as_bool).unwrap_or(false);
                 let st = self.lock();
                 // Each pane's `#n` too, minted on first sight: every surface
                 // shows the core's numbers.
@@ -373,6 +374,9 @@ impl Core {
                         let mut v = st.pane_json(&p.id)?;
                         if p.id != fm_policy::SESSION {
                             v["handle"] = json!(handles.handle(&p.id));
+                        }
+                        if detail {
+                            v["info"] = seahelm_core_registry::events::pane_detail(p);
                         }
                         Some(v)
                     })
@@ -668,7 +672,7 @@ impl Core {
     }
 
     pub fn spawn_event_log(self: &Arc<Self>, path: PathBuf) {
-        const LOGGED: [&str; 5] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed"];
+        const LOGGED: [&str; 6] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed", "pane.location"];
         const ROLL_AT: u64 = 20 << 20;
         let core = Arc::clone(self);
         let _ = std::thread::Builder::new().name("seahelm-core-event-log".into()).spawn(move || {
@@ -1268,10 +1272,22 @@ impl State {
             let out = self.provider.handle(&ev, now, &mut hooks::provider::probe_worktree_root);
             if let Some(loc) = &out.pane_location {
                 if let Some(pane) = self.registry.resolve(Some(&loc.pane), "") {
-                    self.locations.insert(
-                        pane,
-                        json!({"worktree": loc.worktree, "location": loc.location, "created_by_agent": loc.created_by_agent, "at": now}),
-                    );
+                    let entry = json!({"worktree": loc.worktree, "location": loc.location, "created_by_agent": loc.created_by_agent, "at": now});
+                    // Pushed when it moves, so a client acts on it without polling
+                    // `pane.locations`.
+                    let moved = self.locations.get(&pane).map(|old| (&old["worktree"], &old["location"])) != Some((&entry["worktree"], &entry["location"]));
+                    if moved {
+                        let public = self.registry.pane(&pane).map(|i| i.public_id().to_string()).unwrap_or_else(|| pane.clone());
+                        self.registry.publish(json!({
+                            "type": "pane.location",
+                            "pane_id": public,
+                            "pane_session_key": pane,
+                            "worktree": loc.worktree,
+                            "location": loc.location,
+                            "created_by_agent": loc.created_by_agent,
+                        }));
+                    }
+                    self.locations.insert(pane, entry);
                 }
             }
             if let Some(r) = &out.session_ref {
