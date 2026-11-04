@@ -34,7 +34,6 @@ struct Config: Codable {
     /// acts on a repo that already has one — running `/integrate` once is what
     /// opts a repo in, so this is the off switch, not the on switch.
     var autoIntegrate: Bool
-    var notifications: NotificationConfig
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
     /// First Mate: off until the user turns it on.
@@ -46,11 +45,6 @@ struct Config: Codable {
     var autopilotAutonomy: [String: String]
     /// Which agent First Mate runs as (`AgentType` raw value; see `FirstMatePane.agents`).
     var autopilotAgent: String
-    /// Who runs First Mate: `"core"` hands it to seahelm-core (which then
-    /// owns its session, rules and cards; this app only shows it), anything
-    /// else keeps it here. See docs/first-mate-core.md.
-    var autopilotOwner: String?
-    var autopilotRunsInCore: Bool { autopilotOwner == "core" }
     var sidebarWidth: CGFloat
     /// Whether the chrome left column is collapsed. Survives relaunch with
     /// `sidebarActivePane` so First Mate / files / changes layout is restored.
@@ -96,13 +90,11 @@ struct Config: Codable {
         case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
-        case notifications
         case islandEnabled = "island_enabled"
         case autopilotEnabled = "autopilot_enabled"
         case autopilotPaused = "autopilot_paused"
         case autopilotAutonomy = "autopilot_autonomy"
         case autopilotAgent = "autopilot_agent"
-        case autopilotOwner = "autopilot_owner"
         case sidebarWidth = "sidebar_width"
         case sidebarCollapsed = "sidebar_collapsed"
         case sidebarActivePane = "sidebar_active_pane"
@@ -136,13 +128,11 @@ struct Config: Codable {
         selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
-        notifications = NotificationConfig()
         islandEnabled = true
         autopilotEnabled = false
         autopilotPaused = false
         autopilotAutonomy = [:]
         autopilotAgent = AgentType.claudeCode.rawValue
-        autopilotOwner = nil
         sidebarWidth = 300
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
@@ -179,13 +169,11 @@ struct Config: Codable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
-        notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
         autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
         autopilotAutonomy = try container.decodeIfPresent([String: String].self, forKey: .autopilotAutonomy) ?? [:]
         autopilotAgent = try container.decodeIfPresent(String.self, forKey: .autopilotAgent) ?? AgentType.claudeCode.rawValue
-        autopilotOwner = try container.decodeIfPresent(String.self, forKey: .autopilotOwner)
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
         sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)
@@ -539,31 +527,6 @@ struct WebhookConfig: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-    }
-}
-
-struct NotificationConfig: Codable {
-    /// Stability gate: after an agent settles into a terminal state (idle /
-    /// waiting / error), wait this many seconds before actually delivering the
-    /// notification. If the status changes again within the window the pending
-    /// notification is dropped — this kills the "flash done" false alarms that
-    /// slip through when waiting/error/visible-idle commit immediately. This is
-    /// a state-stability gate, not a rate limit. 0 disables it (fire on edge).
-    var stabilityDelay: TimeInterval = 1.0
-    /// Minimum seconds between delivered notifications for the same pane/worktree.
-    var cooldown: TimeInterval = 30
-
-    enum CodingKeys: String, CodingKey {
-        case stabilityDelay = "stability_delay"
-        case cooldown
-    }
-
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        stabilityDelay = try c.decodeIfPresent(TimeInterval.self, forKey: .stabilityDelay) ?? 1.0
-        cooldown = try c.decodeIfPresent(TimeInterval.self, forKey: .cooldown) ?? 30
     }
 }
 

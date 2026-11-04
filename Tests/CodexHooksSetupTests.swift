@@ -63,10 +63,11 @@ final class CodexHooksSetupTests: XCTestCase {
         let command = (stop?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
         let cmd = try XCTUnwrap(command)
 
-        // Both file descriptors are discarded because the bridge has no hook
-        // decision to return.
-        XCTAssertTrue(cmd.contains(">/dev/null 2>&1"),
-                      "bridge output must not reach Codex: \(cmd)")
+        // stdout carries the core's answer (a SessionStart's added context);
+        // stderr is discarded, and no login shell prints a profile into it.
+        XCTAssertTrue(cmd.contains("codex 2>/dev/null"), cmd)
+        XCTAssertFalse(cmd.contains(">/dev/null 2>&1"), cmd)
+        XCTAssertFalse(cmd.contains("-lc"), cmd)
         XCTAssertTrue(cmd.contains(SeahelmHookInstaller.scriptPath()), "must invoke the bridge by absolute path: \(cmd)")
     }
 
@@ -87,7 +88,7 @@ final class CodexHooksSetupTests: XCTestCase {
         let stop = hooks?["Stop"] as? [[String: Any]]
         let command = (stop?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String
         XCTAssertNotEqual(command, stale, "stale seahelm hook was left in place")
-        XCTAssertTrue(try XCTUnwrap(command).contains(">/dev/null 2>&1"))
+        XCTAssertTrue(try XCTUnwrap(command).contains("codex 2>/dev/null"))
     }
 
     func testEnsureHooksFeatureEnabledReplacesFalse() throws {

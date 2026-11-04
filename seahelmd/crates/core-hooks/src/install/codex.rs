@@ -11,14 +11,14 @@ use super::{command_word, parse_object, pretty_sorted, reconcile_file, Platform}
 
 pub const REQUIRED_EVENTS: [&str; 5] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
 
-/// The hook command. On Unix it is wrapped so that neither stream reaches
-/// Codex — no control-socket answer may be mistaken for a hook decision —
-/// and a failure is never Codex's (the text matches the Swift's). The
-/// binary itself writes nothing and always exits 0, so on Windows it runs
-/// bare, with no shell in between.
+/// The hook command. On Unix it is wrapped so that stderr never reaches
+/// Codex and a failure is never Codex's (the text matches the Swift's);
+/// stdout does, because it is the core's answer — only ever a
+/// SessionStart's added context. No login shell, so no profile can print
+/// into it. The binary always exits 0, so on Windows it runs bare.
 pub fn hook_command(hook_cmd: &Path, platform: Platform) -> String {
     match platform {
-        Platform::Unix => format!("/bin/sh -lc '{} codex >/dev/null 2>&1 || true'", command_word(hook_cmd, platform)),
+        Platform::Unix => format!("/bin/sh -c '{} codex 2>/dev/null || true'", command_word(hook_cmd, platform)),
         Platform::Windows => format!("{} codex", command_word(hook_cmd, platform)),
     }
 }
@@ -192,12 +192,16 @@ mod tests {
     }
 
     #[test]
-    fn test_hook_command_discards_bridge_output() {
+    fn test_hook_command_passes_only_stdout() {
         let dir = tempfile::tempdir().unwrap();
         let url = dir.path().join("hooks.json");
         assert!(ensure_json(&url));
         let cmd = first_command(&read_json(&url), "Stop");
-        assert!(cmd.contains(">/dev/null 2>&1"), "bridge output must not reach Codex: {cmd}");
+        // stdout is the bridge's answer (a SessionStart's added context), so
+        // it reaches Codex; stderr never does, and no login shell runs to
+        // print a profile's chatter into it.
+        assert!(cmd.contains("2>/dev/null") && !cmd.contains(">/dev/null 2>&1"), "{cmd}");
+        assert!(!cmd.contains("-lc"), "{cmd}");
         assert!(cmd.contains(HOOK), "must invoke the bridge by absolute path: {cmd}");
     }
 
@@ -210,7 +214,7 @@ mod tests {
         assert!(ensure_json(&url));
         let command = first_command(&read_json(&url), "Stop");
         assert_ne!(command, stale, "stale seahelm hook was left in place");
-        assert!(command.contains(">/dev/null 2>&1"));
+        assert!(command.contains("codex 2>/dev/null"));
     }
 
     #[test]

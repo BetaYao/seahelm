@@ -8,8 +8,8 @@ import Foundation
 /// return value is not consumed, so a blocking Stop-hook reverse trigger has no
 /// counterpart here. The only interceptive hook is
 /// `tool.execute.before` (throw to veto one tool call), which is the wrong
-/// shape. So the model calls a tool directly; `SuggestGuidanceWriter`'s
-/// AGENTS.md block is what tells it to.
+/// shape. So the model calls a tool directly, and the tool's own description
+/// is what tells it to (opencode takes no added context from a hook).
 ///
 /// The plugin shells out to the seahelm-suggest script rather than opening the
 /// socket itself: `SeahelmSuggestInstaller` rewrites that script on every launch

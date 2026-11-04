@@ -164,7 +164,6 @@ final class BareLaunchCommandTests: XCTestCase {
                 XCTFail("\(agent) should launch"); continue
             }
             XCTAssertFalse(cmd.contains("--append-system-prompt"), agent.rawValue)
-            XCTAssertFalse(cmd.contains(AgentType.suggestInstruction), agent.rawValue)
             XCTAssertFalse(cmd.contains("'"), "\(agent.rawValue) must stay unquoted for seahelmd typing: \(cmd)")
         }
     }
@@ -185,8 +184,6 @@ final class BareLaunchCommandTests: XCTestCase {
     }
 
     func testWithTaskStillAvailableForDirectExec() {
-        let cmd = AgentType.claudeCode.launchCommand(withTask: "hi", agentYolo: false)!
-        XCTAssertTrue(cmd.contains("--append-system-prompt"))
-        XCTAssertTrue(cmd.contains("'hi'"))
+        XCTAssertEqual(AgentType.claudeCode.launchCommand(withTask: "hi", agentYolo: false), "claude 'hi'")
     }
 }

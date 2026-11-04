@@ -51,8 +51,13 @@ if command -v xcrun >/dev/null; then
   SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
   [ -n "$SDKROOT" ] && export SDKROOT
 fi
-cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd -p seahelm-core -p seahelm-cli -p seahelm-gateway --target "$TRIPLE"
-TARGET_DIR="${CARGO_TARGET_DIR:-$CRATE/target}"
+# This checkout's own target dir, whatever CARGO_TARGET_DIR the shell has: a
+# target dir shared between checkouts (a worktree and the main one) handed a
+# build the other checkout's seahelmd library, and the core failed to compile
+# against it. SEAHELMD_TARGET_DIR overrides on purpose.
+export CARGO_TARGET_DIR="${SEAHELMD_TARGET_DIR:-$CRATE/target}"
+cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd -p seahelm-core -p seahelm-cli -p seahelm-gateway -p seahelm-core-hooks --bin seahelmd --bin seahelm-core --bin seahelm --bin seahelm-gateway --bin seahelm-hook --target "$TRIPLE"
+TARGET_DIR="$CARGO_TARGET_DIR"
 mkdir -p "$(dirname "$DEST")"
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelmd" "$DEST"
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-core" "$(dirname "$DEST")/seahelm-core"
@@ -60,3 +65,4 @@ install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-core" "$(dirname "$DEST")/se
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm" "$(dirname "$DEST")/seahelm"
 # Web access and Telegram (docs/seahelm-gateway-plan.md); the app starts it.
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-gateway" "$(dirname "$DEST")/seahelm-gateway"
+install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-hook" "$(dirname "$DEST")/seahelm-hook"

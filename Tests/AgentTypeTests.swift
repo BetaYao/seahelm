@@ -10,11 +10,9 @@ final class AgentTypeTests: XCTestCase {
     // pass or fail depending on whether the machine happened to have YOLO mode
     // on — they flipped mid-session when the running app rewrote its config.
 
-    func testClaudeLaunchInjectsSuggestInstruction() {
-        let cmd = AgentType.claudeCode.launchCommand(withTask: "fix the bug", agentYolo: false)!
-        XCTAssertTrue(cmd.hasPrefix("claude --append-system-prompt "))
-        XCTAssertTrue(cmd.contains(StopHookResponder.sentinel))   // inline sentinel, not a Bash call
-        XCTAssertTrue(cmd.hasSuffix("'fix the bug'"))   // task stays the positional arg
+    /// The suggestion guidance arrives through the SessionStart hook, not argv.
+    func testClaudeLaunchIsTheTaskAlone() {
+        XCTAssertEqual(AgentType.claudeCode.launchCommand(withTask: "fix the bug", agentYolo: false), "claude 'fix the bug'")
     }
 
     func testNonClaudeAgentNoInjection() {
@@ -23,10 +21,8 @@ final class AgentTypeTests: XCTestCase {
         XCTAssertEqual(cmd, "codex 'do x'")
     }
 
-    func testEmptyTaskStillInjectsForClaude() {
-        let cmd = AgentType.claudeCode.launchCommand(withTask: "  ", agentYolo: false)!
-        XCTAssertTrue(cmd.contains("--append-system-prompt"))
-        XCTAssertFalse(cmd.hasSuffix("''"))   // no empty positional task
+    func testEmptyTaskLaunchesBareClaude() {
+        XCTAssertEqual(AgentType.claudeCode.launchCommand(withTask: "  ", agentYolo: false), "claude")
     }
 
     func testYoloFlagIsAppendedWhenEnabled() {

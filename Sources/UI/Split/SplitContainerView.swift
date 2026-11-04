@@ -49,6 +49,11 @@ class SplitContainerView: NSView, DividerDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = true
+        // Exposed as a group of panes, so accessibility clients (VoiceOver,
+        // UI tests) see the layout at all: a plain NSView is skipped.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Terminal panes")
         setAccessibilityIdentifier("splitPane.container")
         // The container, not each pane, takes file drops — see "File drop" below.
         registerForDraggedTypes(TerminalDrop.acceptedTypes)
@@ -121,6 +126,9 @@ class SplitContainerView: NSView, DividerDelegate {
             CATransaction.setDisableActions(true)
             view.frame = frame
             CATransaction.commit()
+            view.setAccessibilityElement(true)
+            view.setAccessibilityRole(.group)
+            view.setAccessibilityLabel("Terminal")
             view.setAccessibilityIdentifier("splitPane.leaf.\(leaf.id)")
 
             // Keep tree.focusedId in sync when user clicks a pane directly
@@ -328,6 +336,8 @@ class SplitContainerView: NSView, DividerDelegate {
         } else {
             divider = DividerView(splitNodeId: id, axis: axis)
             divider.delegate = self
+            divider.setAccessibilityElement(true)
+            divider.setAccessibilityRole(.splitter)
             divider.setAccessibilityIdentifier("splitPane.divider.\(id)")
             addSubview(divider)
             dividers[id] = divider

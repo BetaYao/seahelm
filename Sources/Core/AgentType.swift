@@ -85,26 +85,9 @@ enum AgentType: String, Codable, CaseIterable {
     /// (a positional argument, e.g. `claude 'fix the bug'`). Returns nil for
     /// non-AI / shell types (those are not auto-launched). The task is
     /// shell-escaped because the result is interpreted by a POSIX shell.
-    /// Instruction injected into the agent's system prompt so it emits next-step
-    /// suggestions itself as the last action of a turn, without an extra
-    /// round-trip through a blocking Stop hook.
-    static let suggestInstruction =
-        "End every response with one final PLAIN-TEXT line formatted exactly as " +
-        "`\(StopHookResponder.sentinel) first option | second option`, giving 2-5 short " +
-        "imperative next-step options (a few words each) separated by ` | `. seahelm turns " +
-        "that line into clickable buttons for the user. Make it the LAST line of your " +
-        "message; do NOT run any tool or shell command to produce it."
-
-    /// Agent-specific flag that appends the inline suggestion guidance at launch.
-    /// Agents without this flag receive the same guidance through the worktree
-    /// instructions written by `SuggestGuidanceWriter`.
-    private var appendSystemPromptFlag: String? {
-        switch self {
-        case .claudeCode: return "--append-system-prompt"
-        default:          return nil
-        }
-    }
-
+    /// The guidance that makes an agent end its reply with suggestions is
+    /// not on its command line: seahelm-core hands it over as the SessionStart
+    /// hook's added context (`seahelm_core_hooks::suggest::GUIDANCE`).
     func launchCommand(withTask task: String) -> String? {
         launchCommand(withTask: task, agentYolo: Config.load().agentYolo)
     }
@@ -112,9 +95,6 @@ enum AgentType: String, Codable, CaseIterable {
     /// Testable overload — avoids Config.load() in unit tests.
     func launchCommand(withTask task: String, agentYolo: Bool) -> String? {
         guard var cmd = bareLaunchCommand(agentYolo: agentYolo) else { return nil }
-        if let flag = appendSystemPromptFlag {
-            cmd += " \(flag) \(ShellEscape.singleQuote(Self.suggestInstruction))"
-        }
         let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             cmd += " \(ShellEscape.singleQuote(trimmed))"
@@ -126,8 +106,7 @@ enum AgentType: String, Codable, CaseIterable {
     /// a PTY (`seahelmd run`): long quoted argv (task text, `--append-system-prompt`)
     /// gets truncated mid-line and leaves the shell waiting on an unclosed
     /// quote. The initial task is injected afterward via
-    /// `InitialAgentTaskDelivery`; suggest guidance is already written into the
-    /// worktree's `CLAUDE.md` / `AGENTS.md` by `SuggestGuidanceWriter`.
+    /// `InitialAgentTaskDelivery`.
     func bareLaunchCommand(agentYolo: Bool = Config.load().agentYolo) -> String? {
         guard let base = launchCommand else { return nil }
         var cmd = base

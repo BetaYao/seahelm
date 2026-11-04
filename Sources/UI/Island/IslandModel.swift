@@ -106,14 +106,9 @@ final class IslandModel {
     var onSendToFirstMate: ((String) -> Bool)?
     /// Stop First Mate's turn (Esc into its session).
     var onInterruptFirstMate: (() -> Void)?
-    /// Set when the control channel is down in a way the app cannot fix itself
-    /// — practically always a second live instance owning the socket path.
-    ///
-    /// It earns island space because it is invisible everywhere else: agent
-    /// hooks fail their `[ -S ]` guard and drop events without a word, so the
-    /// island simply goes quiet and looks idle. A quiet island is exactly what
-    /// a healthy one looks like, which is why this has to be said out loud.
-    var controlChannelWarning: String?
+    /// What is wrong that the user has to hear (`IslandWarning`): the core not
+    /// answering, or the control channel held by another instance.
+    var warning: IslandWarning?
 
     /// The cards the island draws, newest first. A report only when it has
     /// something to decide; routine rounds stay in the checkout's status.

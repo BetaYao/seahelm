@@ -5,14 +5,14 @@ class SplitPanePage {
 
     init(_ app: XCUIApplication) { self.app = app }
 
-    var container: XCUIElement { app.groups["splitPane.container"] }
+    var container: XCUIElement { app.descendants(matching: .any)["splitPane.container"] }
 
     var panes: XCUIElementQuery {
-        app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'splitPane.leaf.'"))
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'splitPane.leaf.'"))
     }
 
     var dividers: XCUIElementQuery {
-        app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'splitPane.divider.'"))
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'splitPane.divider.'"))
     }
 
     var paneCount: Int { panes.count }

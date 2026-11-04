@@ -229,7 +229,7 @@
 
     <figure>
       <div class="fig-frame">
-        <svg viewBox="0 0 940 300" role="img" aria-label="前后对比：agent 建了一个 worktree 并 cd 进去，它把自己的 pane 一起带了过去，目标处那个没人用的占位 pane 被销毁">
+        <svg viewBox="0 0 940 300" role="img" aria-label="前后对比：agent 新建一个 worktree 并在里面干活时，它的对话会被分叉到那里，原来的 pane 留在原处，当前这一轮被停下">
           <text x="10" y="30" class="svg-hd">之前</text>
           <text x="520" y="30" class="svg-hd">之后</text>
 
@@ -249,22 +249,25 @@
 
           <!-- transition -->
           <line x1="432" y1="160" x2="504" y2="160" class="svg-accent" marker-end="url(#ah-a)"/>
-          <text x="468" y="146" class="svg-lbl" text-anchor="middle">hook 带的 cwd</text>
-          <text x="468" y="182" class="svg-lbl" text-anchor="middle">moveLeaf</text>
+          <text x="468" y="146" class="svg-lbl" text-anchor="middle">git worktree add</text>
+          <text x="468" y="182" class="svg-lbl" text-anchor="middle">分叉</text>
 
           <!-- AFTER -->
           <rect x="520" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
           <rect x="536" y="68" width="378" height="90" rx="6" class="svg-box"/>
           <text x="550" y="92" class="svg-t2">main</text>
-          <rect x="552" y="104" width="162" height="42" rx="5" class="svg-box"/>
-          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+          <rect x="552" y="104" width="172" height="42" rx="5" class="svg-box"/>
+          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  claude</text>
+          <rect x="736" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="750" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+          <text x="914" y="88" class="svg-lbl" text-anchor="end">原 pane 保留 &middot; 本轮已停</text>
 
           <rect x="536" y="174" width="378" height="90" rx="6" class="svg-box"/>
           <text x="550" y="198" class="svg-t2">feat/x</text>
           <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
-          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
-          <text x="914" y="231" class="svg-note" text-anchor="end">Station 与 seahelmd 会话都留着</text>
-          <text x="914" y="250" class="svg-lbl" text-anchor="end">占位 pane 被销毁</text>
+          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude &middot; 分叉</text>
+          <text x="900" y="231" class="svg-note" text-anchor="end">--fork-session</text>
+          <text x="914" y="250" class="svg-lbl" text-anchor="end">占位 pane 被替换</text>
 
           <defs>
             <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -274,11 +277,11 @@
         </svg>
       </div>
       <figcaption>
-        pane 跟着它的 agent 走。Claude Code 建一个 worktree 然后在里面干活；每一条 hook 消息都带着
-        <code>cwd</code>，于是 Seahelm 按<em>最长</em>前缀匹配 worktree，把那一个 pane 整体挪过去 ——
-        它的 Ghostty surface 和 seahelmd 会话都原样保留 —— 而不是在旁边另起一个跟它无关的。
-        两道闸门保证这件事不跑偏：目标必须属于同一个仓库；而且任何一次搬迁之后，自动跟随会停十分钟，
-        因为 agent 干活时 <code>cwd</code> 是来回跳的。
+        活儿跟着 agent 走。Claude Code 建了一个 worktree 并进去干活时，seahelm-core 从它的工具调用里看出来
+        （先是 <code>git worktree add</code>，再是那个路径下的 <code>cd</code> 和编辑），App 就把这段对话<em>分叉</em>过去：
+        在新 worktree 下开一个自己的 pane，跑 <code>claude --resume --fork-session</code>，顶替那里的占位 pane。
+        原来的 pane 留在原处，这一轮被停下，会话完好。<code>cd</code> 进别人建的 worktree 只算串门：pane 标题会显示
+        agent 在哪，想分叉过去就点标题栏的分支按钮。
       </figcaption>
     </figure>
 

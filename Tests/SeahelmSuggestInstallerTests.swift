@@ -24,16 +24,8 @@ final class SeahelmSuggestInstallerTests: XCTestCase {
         XCTAssertTrue(script.contains("pane=\"${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}\""))
     }
 
-    /// The suggest and Stop-hook sides must resolve the pane id the SAME way —
-    /// if only one of them falls back, they key the turn differently and the
-    /// correlation breaks exactly as it did before.
-    func testPaneIdFallbackMatchesHookInstaller() {
-        let suggest = SeahelmSuggestInstaller.scriptContents()
-        let hook = SeahelmHookInstaller.scriptContents()
-        let fallback = "${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}"
-        XCTAssertTrue(suggest.contains(fallback))
-        XCTAssertTrue(hook.contains(fallback))
-    }
+    // The hook bridge resolves the pane the same way: seahelm-core-hooks'
+    // `wire::pane_id` (its test `the_pane_falls_back_to_the_seahelmd_session`).
 
     func testInstallWritesExecutableScript() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())

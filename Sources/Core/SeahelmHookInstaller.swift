@@ -1,61 +1,27 @@
 import Foundation
 
-/// Installs `~/.local/bin/seahelm-hook`, the command-hook bridge that reports
-/// agent hook events to seahelm-core, the only receiver of hooks
-/// (docs/app-reads-core.md): the app learns what they mean from the core.
-/// Stop is observation-only: the bridge never relays a block decision back to
-/// the agent.
+/// Installs `~/.local/bin/seahelm-hook`, the command hook every agent runs on
+/// every lifecycle event. It is a Rust program (`seahelm-core-hooks`'
+/// `seahelm-hook` binary, the same bridge as `seahelm-core hook`) bundled as
+/// Contents/Resources/bin/seahelm-hook and copied into place on launch
+/// whenever the bundled one differs; it replaced a `/bin/sh` + `nc -U` script.
+///
+/// It sends the payload to seahelm-core, the only receiver of hooks
+/// (docs/app-reads-core.md), and prints the core's answer, which is only
+/// ever a SessionStart's added context: the suggestion guidance, for an agent
+/// running in a seahelm pane. Stop is observation-only.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v8"
-
-    static func scriptContents() -> String {
-        return """
-        #!/bin/sh
-        \(versionMarker) — managed by seahelm. Do not edit; it is overwritten on launch.
-        # Command hook for Claude/Codex: reads the hook JSON on stdin, reports it to
-        # seahelm. Stop is reported like every other event and never blocks the
-        # agent into a second turn.
-        #
-        # Usage: seahelm-hook [<source>]   e.g. `seahelm-hook claude-code`
-        set -u
-        core="${SEAHELM_CORE_SOCKET:-${HOME:-}/.config/seahelm/core.sock}"
-
-        payload="$(cat)"
-        [ -n "$payload" ] || exit 0
-
-        # Which agent invoked us, declared by the installer that wired this hook.
-        # It has to be declared rather than sniffed: Claude Code's common payload
-        # base now carries agent_id/agent_type/duration_ms, the very keys that used
-        # to read as Codex-only, so every Claude tool hook was being typed as Codex.
-        src="${1:-}"
-
-        # Tag the event with our stable pane id so seahelm can attribute it to the
-        # exact pane (e.g. to transfer only that pane when it creates a worktree).
-        # Session names are [A-Za-z0-9_-], so no JSON escaping is needed.
-        # SEAHELMD_SESSION holds the same value SessionManager exports as SEAHELM_PANE_ID,
-        # and panes predating that export still have it — keep this fallback
-        # identical to seahelm-suggest's, so events from both paths land on the
-        # same pane.
-        pid="${SEAHELM_PANE_ID:-${SEAHELMD_SESSION:-}}"
-        prefix=""
-        [ -n "$pid" ] && prefix="$prefix"'"seahelm_pane_id":"'"$pid"'",'
-        [ -n "$src" ] && prefix="$prefix"'"seahelm_source":"'"$src"'",'
-        case "$payload" in
-          '{'*) [ -n "$prefix" ] && payload='{'"$prefix""${payload#\\{}" ;;
-        esac
-
-        # seahelm-core's socket, if it is there. Plain `nc -U` (Apple nc supports
-        # neither -N nor -w): it closes its write half on stdin EOF, the server
-        # acknowledges and closes. Discard the response; hook delivery is
-        # fire-and-forget.
-        command -v nc >/dev/null 2>&1 || exit 0
-        req='{"id":"h","method":"hook","params":'"$payload"'}'
-        if [ -S "$core" ]; then printf '%s\\n' "$req" | nc -U "$core" >/dev/null 2>&1 || true; fi
-        exit 0
-        """
+    /// The bundled program, else `$SEAHELM_HOOK_BIN` (tests, dev builds).
+    static var bundled: URL? {
+        if let env = ProcessInfo.processInfo.environment["SEAHELM_HOOK_BIN"], !env.isEmpty {
+            return URL(fileURLWithPath: env)
+        }
+        guard let url = Bundle.main.url(forResource: "seahelm-hook", withExtension: nil, subdirectory: "bin"),
+              FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+        return url
     }
 
-    /// Absolute path to the installed hook script (used by hook config).
+    /// Absolute path to the installed hook (used by hook config).
     static func scriptPath() -> String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/bin/seahelm-hook").path
@@ -64,24 +30,43 @@ enum SeahelmHookInstaller {
     @discardableResult
     static func ensureInstalled() -> Bool {
         let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
-        return ensureInstalled(binDirectory: bin)
+        return ensureInstalled(binDirectory: bin, from: bundled)
     }
 
     @discardableResult
-    static func ensureInstalled(binDirectory: URL) -> Bool {
-        let scriptURL = binDirectory.appendingPathComponent("seahelm-hook")
-        let desired = scriptContents()
-        if let existing = try? String(contentsOf: scriptURL, encoding: .utf8),
-           existing.contains(versionMarker), existing == desired {
+    static func ensureInstalled(binDirectory: URL, from source: URL?) -> Bool {
+        BundledBinary.install(source, as: "seahelm-hook", in: binDirectory)
+    }
+}
+
+/// Copies a program bundled under Contents/Resources/bin to a stable place
+/// (`~/.local/bin`), where agents' configs can name it whatever app build is
+/// running.
+enum BundledBinary {
+    /// Copy `source` to `<directory>/<name>` unless the same bytes are already
+    /// there. True when it wrote.
+    @discardableResult
+    static func install(_ source: URL?, as name: String, in directory: URL) -> Bool {
+        guard let source, let desired = try? Data(contentsOf: source) else {
+            NSLog("[BundledBinary] no bundled \(name)")
             return false
         }
+        let target = directory.appendingPathComponent(name)
+        if let existing = try? Data(contentsOf: target), existing == desired { return false }
         do {
-            try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
-            try desired.write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // Write beside it and rename: a copy mid-run keeps its inode.
+            let staged = directory.appendingPathComponent(".\(name).new")
+            try desired.write(to: staged, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
+            if FileManager.default.fileExists(atPath: target.path) {
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: staged)
+            } else {
+                try FileManager.default.moveItem(at: staged, to: target)
+            }
             return true
         } catch {
-            NSLog("[SeahelmHookInstaller] Failed to install: \(error)")
+            NSLog("[BundledBinary] Failed to install \(name): \(error)")
             return false
         }
     }

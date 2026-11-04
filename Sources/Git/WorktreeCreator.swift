@@ -105,9 +105,6 @@ enum WorktreeCreator {
         // branch's commits as its own changes.
         WorktreeBaseBranchStore.shared.set(baseBranch, forWorktree: worktreePath)
 
-        // Write seahelm-suggest guidance to worktree
-        SuggestGuidanceWriter.writeForWorktree(worktreePath)
-
         return WorktreeInfo(
             path: worktreePath,
             branch: branchName,

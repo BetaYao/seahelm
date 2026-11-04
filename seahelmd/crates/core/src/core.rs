@@ -285,6 +285,7 @@ impl Core {
         let result: RpcResult = match method {
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied()})),
             "hook" | "suggest" => {
+                let stdout = hook_stdout(method, &p);
                 // The prose the agent wrote since its last hook, read from its
                 // transcript without the lock, and put on the timeline before
                 // this hook's own rows: above the tool call it introduces.
@@ -314,7 +315,10 @@ impl Core {
                 if moved {
                     self.changed.notify_all();
                 }
-                Ok(json!({}))
+                Ok(match stdout {
+                    Some(out) => json!({"stdout": out}),
+                    None => json!({}),
+                })
             }
             "worktrees.set" => {
                 let paths: Vec<String> = strings(&p, "paths");
@@ -1564,6 +1568,22 @@ fn confirm_question_review(pane: String) {
     });
 }
 
+/// What a hook's bridge should print back to its agent: the suggestion
+/// guidance at a session start, for an agent running in a seahelm pane
+/// (hooks are installed for every session of the agent, seahelm's or not)
+/// whose hooks can take added context.
+fn hook_stdout(method: &str, p: &Value) -> Option<String> {
+    if method != "hook" {
+        return None;
+    }
+    let event = p.get("hook_event_name").and_then(Value::as_str)?;
+    if event != "SessionStart" && event != "sessionStart" {
+        return None;
+    }
+    str_param(p, "seahelm_pane_id").filter(|s| !s.is_empty())?;
+    hooks::suggest::session_start_output(p.get("seahelm_source").and_then(Value::as_str)?)
+}
+
 fn str_param(p: &Value, key: &str) -> Option<String> {
     p.get(key).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
 }
@@ -1602,5 +1622,30 @@ fn one_line(text: &str, max: usize) -> String {
         line.chars().take(max - 1).collect::<String>() + "…"
     } else {
         line.to_string()
+    }
+}
+
+#[cfg(test)]
+mod hook_stdout_tests {
+    use super::*;
+
+    #[test]
+    fn a_seahelm_pane_starting_a_session_is_told_about_suggestions() {
+        let p = json!({"hook_event_name": "SessionStart", "seahelm_pane_id": "seahelm-x", "seahelm_source": "claude-code"});
+        assert!(hook_stdout("hook", &p).unwrap().contains("additionalContext"));
+        let cursor = json!({"hook_event_name": "sessionStart", "seahelm_pane_id": "seahelm-x", "seahelm_source": "cursor"});
+        assert!(hook_stdout("hook", &cursor).unwrap().contains("additional_context"));
+    }
+
+    #[test]
+    fn nothing_is_printed_otherwise() {
+        // Outside seahelm: the hooks are global, the guidance is not.
+        assert_eq!(hook_stdout("hook", &json!({"hook_event_name": "SessionStart", "seahelm_source": "claude-code"})), None);
+        // Any other event: Stop's stdout would read as a decision.
+        assert_eq!(hook_stdout("hook", &json!({"hook_event_name": "Stop", "seahelm_pane_id": "p", "seahelm_source": "claude-code"})), None);
+        // An agent whose hooks take no context, or an unknown one.
+        assert_eq!(hook_stdout("hook", &json!({"hook_event_name": "SessionStart", "seahelm_pane_id": "p", "seahelm_source": "opencode"})), None);
+        assert_eq!(hook_stdout("hook", &json!({"hook_event_name": "SessionStart", "seahelm_pane_id": "p"})), None);
+        assert_eq!(hook_stdout("suggest", &json!({"hook_event_name": "SessionStart", "seahelm_pane_id": "p", "seahelm_source": "claude-code"})), None);
     }
 }

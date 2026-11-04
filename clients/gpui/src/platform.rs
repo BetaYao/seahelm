@@ -57,9 +57,9 @@ pub fn tool(name: &str, env: &str) -> PathBuf {
             return beside;
         }
     }
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../seahelmd/target"));
+    // This checkout's own seahelmd/target, not $CARGO_TARGET_DIR: a target
+    // dir shared between checkouts holds whichever one built last.
+    let target = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../seahelmd/target");
     for profile in ["release", "debug"] {
         let built = target.join(profile).join(&exe);
         if built.exists() {

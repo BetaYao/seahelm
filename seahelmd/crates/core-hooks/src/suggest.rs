@@ -39,6 +39,30 @@ pub fn strip_sentinel(message: &str) -> String {
     message.split('\n').filter(|l| !l.contains(SENTINEL)).collect::<Vec<_>>().join("\n").trim().to_string()
 }
 
+/// What an agent is told so it ends its replies with the marker: handed to
+/// it as added context at every session start (and after a `/clear` or a
+/// compaction, which are session starts too), so no repository's
+/// `CLAUDE.md` has to carry it.
+pub const GUIDANCE: &str = "You are running in a seahelm pane. When you finish a turn and can anticipate the \
+user's likely next steps, end your reply with one final plain-text line formatted exactly as:\n\n    \
+::seahelm-suggest:: first option | second option\n\nGive 2-5 short imperative phrases separated by ` | `. \
+seahelm turns that line into buttons the user can tap. Make it the LAST line of your message; do not run a \
+tool or shell command to produce it.";
+
+/// What a SessionStart hook prints so `source`'s agent reads [`GUIDANCE`]:
+/// each agent's own shape for added context. None for agents that take no
+/// context from a hook (they are told some other way, or not at all).
+pub fn session_start_output(source: &str) -> Option<String> {
+    let v = match source {
+        "claude-code" | "codex" => serde_json::json!({
+            "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": GUIDANCE}
+        }),
+        "cursor" => serde_json::json!({"additional_context": GUIDANCE}),
+        _ => return None,
+    };
+    Some(v.to_string())
+}
+
 /// Whether a Stop payload reports a background task still running. While
 /// one is, the agent will resume on its own, so the turn has not really
 /// ended.
@@ -53,6 +77,20 @@ pub fn has_running_background_task(data: &Map) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_start_output_per_agent() {
+        let claude: Value = serde_json::from_str(&session_start_output("claude-code").unwrap()).unwrap();
+        assert_eq!(claude["hookSpecificOutput"]["hookEventName"], "SessionStart");
+        assert!(claude["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains(SENTINEL));
+        let cursor: Value = serde_json::from_str(&session_start_output("cursor").unwrap()).unwrap();
+        assert!(cursor["additional_context"].as_str().unwrap().contains(SENTINEL));
+        assert!(session_start_output("codex").is_some());
+        assert_eq!(session_start_output("opencode"), None);
+        assert_eq!(session_start_output(""), None);
+        // The example line in the guidance parses as the real thing would.
+        assert_eq!(parse_suggestions(GUIDANCE), Some(vec!["first option".into(), "second option".into()]));
+    }
 
     #[test]
     fn test_parse_suggestions() {
