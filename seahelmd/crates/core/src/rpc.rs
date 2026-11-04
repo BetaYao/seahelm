@@ -27,6 +27,10 @@ impl RpcError {
         Self { code: -32602, message: message.into() }
     }
 
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self { code: -32603, message: message.into() }
+    }
+
     pub fn not_found(method: &str) -> Self {
         Self { code: -32601, message: format!("method not found: {method}") }
     }

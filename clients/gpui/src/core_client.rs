@@ -111,7 +111,8 @@ pub fn subscribe(types: &[&str], tx: futures::channel::mpsc::UnboundedSender<Val
                     for line in BufReader::new(stream).lines() {
                         let Ok(line) = line else { break };
                         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-                        if v.get("type").is_some() && tx.unbounded_send(v).is_err() {
+                        let Some(ev) = event_of(v) else { continue };
+                        if tx.unbounded_send(ev).is_err() {
                             return;
                         }
                     }
@@ -121,6 +122,66 @@ pub fn subscribe(types: &[&str], tx: futures::channel::mpsc::UnboundedSender<Val
             pause = (pause * 2).min(Duration::from_secs(30));
         }
     });
+}
+
+/// Something waiting on the user (`cards.list`, `cards.changed`): an agent's
+/// question or suggestion, a choice on screen, First Mate's asks.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct Card {
+    pub id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub pane_session_key: String,
+    #[serde(default)]
+    pub worktree_path: String,
+    #[serde(default)]
+    pub message: String,
+    /// What to show and tap, in order (ticks and Done on a multi-select).
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub fresh_at: f64,
+}
+
+pub fn parse_cards(v: &Value) -> Vec<Card> {
+    v.get("cards").and_then(Value::as_array).into_iter().flatten().filter_map(|c| serde_json::from_value(c.clone()).ok()).collect()
+}
+
+/// Every card on offer, oldest first; empty without a core.
+pub fn cards() -> Vec<Card> {
+    call("cards.list", json!({})).map(|v| parse_cards(&v)).unwrap_or_default()
+}
+
+/// Answer a card with its `index`th label; the core presses the keys.
+pub fn answer_card(id: &str, index: usize) -> Result<(), String> {
+    call("cards.answer", json!({"id": id, "index": index})).map(|_| ())
+}
+
+pub fn dismiss_card(id: &str) {
+    let _ = call("cards.dismiss", json!({"id": id}));
+}
+
+/// The event in one line of the stream: `{"method": "event", "params": {…}}`.
+/// Replies and pings are not events.
+fn event_of(mut line: Value) -> Option<Value> {
+    if line.get("method").and_then(Value::as_str) != Some("event") {
+        return None;
+    }
+    let ev = line.get_mut("params").map(Value::take)?;
+    ev.get("type").is_some().then_some(ev)
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[test]
+    fn events_come_in_their_envelope() {
+        let line = json!({"jsonrpc": "2.0", "method": "event", "params": {"type": "pane.notice", "seq": 3}});
+        assert_eq!(event_of(line).unwrap()["type"], "pane.notice");
+        assert!(event_of(json!({"jsonrpc": "2.0", "method": "ping"})).is_none());
+        assert!(event_of(json!({"jsonrpc": "2.0", "id": null, "result": {"subscribed": true}})).is_none());
+    }
 }
 
 /// A worktree's pull request, as the core files it (`pr.list`; the app's

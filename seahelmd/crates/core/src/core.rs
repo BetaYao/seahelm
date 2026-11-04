@@ -16,6 +16,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use seahelm_core_hooks as hooks;
+use seahelm_core_registry::cards::{Answer, CardKind, Cards, Input, Raise};
 use seahelm_core_registry::notify::{
     self, CompletionInput, CompletionSignals, CompletionStep, Decision, Notice, NotificationPolicy, NotifyRequest,
 };
@@ -72,6 +73,8 @@ struct State {
     /// Completions held while the hooks still say running (the app waits for
     /// the agent's final prose this way).
     retries: Vec<Retry>,
+    /// Everything waiting on the user (docs/first-mate-core.md).
+    cards: Cards,
 }
 
 /// A completion decision put off for `PROSE_RETRY_INTERVAL`.
@@ -125,6 +128,7 @@ impl Core {
                 policy: NotificationPolicy::new(),
                 signals: CompletionSignals::new(),
                 retries: Vec::new(),
+                cards: Cards::new(),
             }),
             changed: Condvar::new(),
             prs: PrStore::new(Box::new(pr::Live)),
@@ -303,10 +307,109 @@ impl Core {
             }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "usage.summary" => Ok(crate::usage::summary(now)),
+            "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
+            "cards.answer" => self.answer_card(&p, now),
+            "cards.dismiss" => {
+                let Some(id) = str_param(&p, "id") else {
+                    return Reply::Value(Err(RpcError::invalid_params("id required")));
+                };
+                self.with_change(|st| {
+                    let card = st.cards.get(&id).cloned();
+                    if !st.cards.remove(&id, now) {
+                        return Ok(json!({"ok": false}));
+                    }
+                    st.publish_cards();
+                    // A raised card's owner learns it was declined.
+                    if let Some(c) = card.filter(|c| raised(c.kind)) {
+                        st.registry.publish(json!({"type": "card.answered", "card": c.to_json(), "option": null}));
+                    }
+                    Ok(json!({"ok": true}))
+                })
+            }
+            "cards.raise" => {
+                let raise = Raise {
+                    kind: str_param(&p, "kind").and_then(|k| CardKind::parse(&k)).filter(|k| raised(*k)),
+                    pane: str_param(&p, "pane").unwrap_or_default(),
+                    worktree_path: str_param(&p, "worktree_path").unwrap_or_default(),
+                    branch: str_param(&p, "branch").unwrap_or_default(),
+                    project: str_param(&p, "project").unwrap_or_default(),
+                    message: str_param(&p, "message").unwrap_or_default(),
+                    options: strings(&p, "options"),
+                    payload: str_param(&p, "payload"),
+                };
+                if raise.kind.is_none() || raise.options.is_empty() {
+                    return Reply::Value(Err(RpcError::invalid_params("kind (report/approval/proposal) and options required")));
+                }
+                self.with_change(|st| {
+                    let id = st.cards.raise(raise, now);
+                    st.publish_cards();
+                    Ok(json!({"id": id}))
+                })
+            }
+            "cards.clear" => {
+                let Some(path) = str_param(&p, "worktree_path") else {
+                    return Reply::Value(Err(RpcError::invalid_params("worktree_path required")));
+                };
+                self.with_change(|st| {
+                    let cleared = st.cards.drop_worktree(&path, now);
+                    if cleared {
+                        st.publish_cards();
+                    }
+                    Ok(json!({"cleared": cleared}))
+                })
+            }
             "events.subscribe" => return self.subscribe(p),
             other => Err(RpcError::not_found(other)),
         };
         Reply::Value(result)
+    }
+
+    /// Run `f` under the lock and wake subscribers if it published anything.
+    fn with_change<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
+        let mut st = self.lock();
+        let before = st.registry.seq();
+        let out = f(&mut st);
+        let moved = st.registry.seq() != before;
+        drop(st);
+        if moved {
+            self.changed.notify_all();
+        }
+        out
+    }
+
+    /// `cards.answer {id, option | index}`: the queue moves on under the
+    /// lock; the keys go to the pane after it is released. A raised card's
+    /// answer goes to its owner as `card.answered`.
+    fn answer_card(&self, p: &Value, now: Timestamp) -> RpcResult {
+        let id = str_param(p, "id").ok_or_else(|| RpcError::invalid_params("id required"))?;
+        let answer: Result<Answer, RpcError> = self.with_change(|st| {
+            let card = st.cards.get(&id).cloned().ok_or_else(|| RpcError::invalid_params("no such card"))?;
+            let label = match (str_param(p, "option"), p.get("index").and_then(Value::as_u64)) {
+                (Some(o), _) => o,
+                (None, Some(i)) => card.labels().get(i as usize).cloned().ok_or_else(|| RpcError::invalid_params("index out of range"))?,
+                _ => return Err(RpcError::invalid_params("option or index required")),
+            };
+            let screen = st.panes.get(&card.pane).and_then(|s| s.snapshot.as_ref()).map(|s| s.viewport.clone());
+            let answer = st.cards.answer(&id, &label, screen.as_deref(), now).map_err(RpcError::invalid_params)?;
+            st.publish_cards();
+            if let Answer::Raised { card, option } = &answer {
+                st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option}));
+            }
+            Ok(answer)
+        });
+        match answer? {
+            Answer::Raised { .. } => Ok(json!({"ok": true, "raised": true})),
+            Answer::Keys { pane, inputs, confirm_review } => {
+                let sent = press(&pane, &inputs);
+                if confirm_review {
+                    confirm_question_review(pane);
+                }
+                match sent {
+                    Ok(()) => Ok(json!({"ok": true})),
+                    Err(e) => Err(RpcError::internal(format!("the pane did not take the answer: {e}"))),
+                }
+            }
+        }
     }
 
     /// `pane.wait_agent_status {pane_id, status, timeout}`: wait until the
@@ -507,6 +610,9 @@ impl State {
             self.aggregator.unregister_pane(pane, &wt);
         }
         self.registry.unregister(pane);
+        if self.cards.drop_pane(pane, now()) {
+            self.publish_cards();
+        }
         self.panes.remove(pane);
         self.synced.remove(pane);
     }
@@ -595,6 +701,11 @@ impl State {
     /// not on screen in a frontmost client, and announce it (`pane.notice`)
     /// if the notification policy lets it through.
     fn settle(&mut self, o: &Outcome, now: Timestamp) {
+        // Cards first: a pane whose question is on a card is not announced
+        // as waiting on top of it.
+        if self.cards.observe(o, now) {
+            self.publish_cards();
+        }
         self.aggregator.update(&o.info.id, PaneUpdate::from_pane(&o.info), now);
         self.registry.settle_unseen(o);
         self.signals.note(o);
@@ -616,7 +727,7 @@ impl State {
             agent_reported_end,
             attempts_left,
             worktree_on_screen: on_screen,
-            has_pending_card: false,
+            has_pending_card: self.cards.has_pane(pane),
             completion_signals: self.signals.count(pane),
         });
         match step {
@@ -670,6 +781,12 @@ impl State {
         }
     }
 
+    /// `cards.changed`: the whole list, so a renderer never has to merge.
+    fn publish_cards(&mut self) {
+        let cards = self.cards.to_json();
+        self.registry.publish(json!({"type": "cards.changed", "cards": cards}));
+    }
+
     fn publish_notice(&mut self, notice: Notice) {
         let alias = self.registry.pane(&notice.request.pane).and_then(|p| p.alias.clone());
         let Ok(mut v) = serde_json::to_value(&notice) else { return };
@@ -698,6 +815,16 @@ impl State {
             return;
         }
         for ev in hooks::sink::expand(event) {
+            // Late prose for a suggestion whose summary is tool chrome.
+            if ev.event == hooks::event::WebhookEventType::AssistantResponse {
+                if let (Some(text), Some(pane)) =
+                    (ev.data.get("text").and_then(Value::as_str), self.registry.resolve(ev.pane_id.as_deref(), &ev.cwd))
+                {
+                    if self.cards.refresh_suggestion(&pane, &hooks::suggest::strip_sentinel(text)) {
+                        self.publish_cards();
+                    }
+                }
+            }
             let out = self.provider.handle(&ev, now, &mut hooks::provider::probe_worktree_root);
             if let Some(loc) = &out.pane_location {
                 if let Some(pane) = self.registry.resolve(Some(&loc.pane), "") {
@@ -859,6 +986,49 @@ fn session_root_pid(name: &str) -> Option<u32> {
         Ok(Msg::Text(line)) => line.split('\t').find_map(|f| f.strip_prefix("pid=")).and_then(|p| p.parse().ok()),
         _ => None,
     }
+}
+
+/// Cards a client raises and answers itself; the core only carries them.
+fn raised(kind: CardKind) -> bool {
+    matches!(kind, CardKind::Report | CardKind::Approval | CardKind::Proposal)
+}
+
+/// Type into a pane's session: each input a write of its own, a Return
+/// held back a beat after what came before it.
+fn press(pane: &str, inputs: &[Input]) -> Result<()> {
+    for (i, input) in inputs.iter().enumerate() {
+        let bytes = match input {
+            Input::Bytes(b) => b.clone(),
+            Input::Submit => {
+                if i > 0 {
+                    std::thread::sleep(SUBMIT_DELAY);
+                }
+                "\r".to_string()
+            }
+        };
+        seahelmd::client::request(pane, &Msg::Send(bytes.into_bytes()))?;
+    }
+    Ok(())
+}
+
+const SUBMIT_DELAY: Duration = Duration::from_millis(80);
+
+/// Every answer of a multi-question ask is in and the dialog moves to
+/// "Review your answers" with its cursor on Submit. Press Return once that
+/// page is up, never blind: an early Return would pick a row.
+fn confirm_question_review(pane: String) {
+    let _ = std::thread::Builder::new().name("seahelm-core-review".into()).spawn(move || {
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(400));
+            let up = matches!(seahelmd::client::request(&pane, &Msg::Snapshot), Ok(Msg::Text(json))
+                if Snapshot::parse(&json).is_ok_and(|s| s.viewport.contains("Ready to submit your answers?")));
+            if up {
+                let _ = seahelmd::client::request(&pane, &Msg::Send(b"\r".to_vec()));
+                return;
+            }
+        }
+        eprintln!("seahelm-core: review page never appeared for {pane}; left for the user");
+    });
 }
 
 fn str_param(p: &Value, key: &str) -> Option<String> {
