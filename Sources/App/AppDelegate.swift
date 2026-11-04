@@ -74,7 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Telegram is the phone-side remote-control transport.
         if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
             let channel = TelegramChannel(config: telegramConfig)
-            AgentRegistry.shared.registerChannel(channel)
+            ChannelHub.shared.registerChannel(channel)
             channel.connect()
             NSLog("[App] Telegram bridge connecting (\(telegramConfig.allowedUsers.count) allowed users)")
         }

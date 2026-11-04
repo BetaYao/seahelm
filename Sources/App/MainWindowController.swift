@@ -321,7 +321,7 @@ class MainWindowController: NSWindowController {
         NotificationManager.shared.onDeliverExternal = { [weak self] status, title, subtitle, body, terminalID, bannerSuppressed in
             let text = Self.noticeText(icon: status.icon, title: title, subtitle: subtitle, body: body)
             if !bannerSuppressed {
-                AgentRegistry.shared.broadcast(text, format: .markdown, excluding: ["telegram"])
+                ChannelHub.shared.broadcast(text, format: .markdown, excluding: ["telegram"])
             }
             self?.notifyTelegramSessions(terminalID: terminalID, fleetSilenced: bannerSuppressed) { handle in
                 Self.noticeText(icon: status.icon, title: title, subtitle: subtitle, body: body, handle: handle)
@@ -331,19 +331,19 @@ class MainWindowController: NSWindowController {
         // initializer reads `statusPublisher`, and two lazy vars that reach
         // for each other recurse until the stack goes. Mail is wired in
         // `startGmailMailChannel`, after both exist.
-        AgentRegistry.shared.commandRoute = { [weak self] text, surface, reply in
+        ChannelHub.shared.commandRoute = { [weak self] text, surface, reply in
             self?.routeCommand(text, surface: surface, reply: reply)
         }
-        AgentRegistry.shared.ruleTriggerRoute = { [weak self] prompt, target in
+        ChannelHub.shared.ruleTriggerRoute = { [weak self] prompt, target in
             self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
         }
-        AgentRegistry.shared.callbackRoute = { [weak self] callback in
+        ChannelHub.shared.callbackRoute = { [weak self] callback in
             self?.handleChatCallback(callback)
         }
-        AgentRegistry.shared.draftStopRoute = { [weak self] chatId, _ in
+        ChannelHub.shared.draftStopRoute = { [weak self] chatId, _ in
             self?.stopBoundPane(chatId: chatId)
         }
-        AgentRegistry.shared.chatGoneRoute = { [weak self] chatId in
+        ChannelHub.shared.chatGoneRoute = { [weak self] chatId in
             self?.letGoOfGoneChat(chatId)
         }
         statusAggregator.delegate = self
@@ -2767,7 +2767,7 @@ extension MainWindowController: SettingsDelegate {
     /// successor that starts while it is still in flight is the 409 the error
     /// text blames on "a second seahelm running".
     private func restartTelegramBridge() {
-        AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
+        ChannelHub.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
         telegramChannel?.disconnect()
         telegramChannel = nil
         // A fresh save deserves a fresh alert, even for the same mistake.
@@ -2781,7 +2781,7 @@ extension MainWindowController: SettingsDelegate {
             // the channel is just silently dead.
             if case .error(let msg) = state { self?.presentTelegramError(msg) }
         }
-        AgentRegistry.shared.registerChannel(channel)
+        ChannelHub.shared.registerChannel(channel)
         channel.connect()
         telegramChannel = channel
         NSLog("[Settings] Telegram bridge reconnecting")
@@ -2793,7 +2793,7 @@ extension MainWindowController: SettingsDelegate {
                   onPaired: @escaping (TelegramPairingResult) -> Void) {
         // One poller per bot. Whatever is live has to go first, or Telegram
         // answers 409 and the QR on screen never resolves.
-        AgentRegistry.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
+        ChannelHub.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
         telegramChannel?.disconnect()
         telegramChannel = nil
         telegramPairingChannel?.disconnect()
@@ -3346,7 +3346,7 @@ extension MainWindowController: CommandHost {
         let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
             paneKey: paneKey, fleetListenerChatIds: fleet)
         for chatId in chats {
-            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
             ) { [weak self] messageId in
                 // Remembered so an agent's next-step options, which land a beat
@@ -3401,7 +3401,7 @@ extension MainWindowController {
     /// pointed at anything. Without it the next order typed there is the first
     /// anyone hears of it, hours later.
     private func noticeUnbound(_ session: CommandSession, reason: String) {
-        AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: session.id,
             content: "Unbound — \(reason). `/status` lists what is running, `/go #n` picks a pane.",
             format: .markdown))
@@ -3500,7 +3500,7 @@ extension MainWindowController {
         guard !targets.isEmpty else { return }
         let buttons = optionButtons(for: order)
         for target in targets {
-            AgentRegistry.shared.setButtons(channelId: "telegram", chatId: target.chatId,
+            ChannelHub.shared.setButtons(channelId: "telegram", chatId: target.chatId,
                                             messageId: target.messageId, buttons: buttons)
         }
         cardButtonMessages[order.id] = targets
@@ -3524,7 +3524,7 @@ extension MainWindowController {
     /// in one chat must not leave it on offer in another.
     private func retireCardButtons(_ orderId: String) {
         for ref in cardButtonMessages.removeValue(forKey: orderId) ?? [] {
-            AgentRegistry.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
+            ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
                                             messageId: ref.messageId, buttons: [])
         }
     }
@@ -3570,7 +3570,7 @@ extension MainWindowController {
             project: order.action.project, branch: order.action.branch,
             message: order.action.message, options: order.action.options ?? [])
         for chatId in ordered {
-            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text,
                 format: .markdown, buttons: buttons,
                 packetKey: Self.questionCardPacketKey(order))
@@ -3638,13 +3638,13 @@ extension MainWindowController {
         guard !session.closed, let key = session.boundPaneKey,
               let pane = fleetIndex().pane(handleKey: key),
               let station = StationRegistry.shared.station(forId: pane.id) else {
-            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId,
                 content: "Nothing to stop — this chat isn't talking to a running pane.", format: .markdown))
             return
         }
         let sent = station.interruptTurn()
-        AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId,
             content: sent ? "Stopped **\(CommandFormatter.target(pane))** (sent Esc)."
                           : "Couldn't reach **\(CommandFormatter.target(pane))** to stop it.",
@@ -3709,7 +3709,7 @@ extension MainWindowController {
                 if !known { cardButtonMessages[orderId, default: []].append(tapped) }
                 let buttons = optionButtons(for: live, dismissable: true)
                 for ref in cardButtonMessages[orderId] ?? [] {
-                    AgentRegistry.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
+                    ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
                                                     messageId: ref.messageId, buttons: buttons)
                 }
                 return
@@ -3739,7 +3739,7 @@ extension MainWindowController {
             if !known { cardButtonMessages[orderId, default: []].append(tapped) }
             retireCardButtons(orderId)
         } else {
-            AgentRegistry.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
+            ChannelHub.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
                                             messageId: callback.messageId, buttons: [])
         }
     }
@@ -3764,13 +3764,13 @@ extension MainWindowController {
 
     private func replyToChat(_ callback: InboundCallback, _ markdown: String,
                              buttons: [MessageButton] = []) {
-        AgentRegistry.shared.pushToChannel(callback.channelId, message: OutboundMessage(
+        ChannelHub.shared.pushToChannel(callback.channelId, message: OutboundMessage(
             channelId: callback.channelId, targetChatId: callback.chatId,
             content: markdown, format: .markdown, buttons: buttons))
     }
 
     private func clearChatButtons(_ callback: InboundCallback) {
-        AgentRegistry.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
+        ChannelHub.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
                                         messageId: callback.messageId, buttons: [])
     }
 }
@@ -3869,7 +3869,7 @@ extension MainWindowController {
     }
 
     fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
-        AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId, content: "⎈ First Mate\n\(text)", format: .markdown))
     }
 

@@ -1,13 +1,12 @@
 import Foundation
 
 /// Installs `~/.local/bin/seahelm-hook`, the command-hook bridge that reports
-/// agent hook events to seahelm's control socket and to seahelm-core's. The
-/// core takes them straight from here, so it hears them whether or not the
-/// app is running (the app no longer forwards them). Stop is
-/// observation-only: the bridge never relays a block decision back to the
-/// agent.
+/// agent hook events to seahelm-core, the only receiver of hooks
+/// (docs/app-reads-core.md): the app learns what they mean from the core.
+/// Stop is observation-only: the bridge never relays a block decision back to
+/// the agent.
 enum SeahelmHookInstaller {
-    static let versionMarker = "# seahelm-hook v7"
+    static let versionMarker = "# seahelm-hook v8"
 
     static func scriptContents() -> String {
         return """
@@ -19,7 +18,6 @@ enum SeahelmHookInstaller {
         #
         # Usage: seahelm-hook [<source>]   e.g. `seahelm-hook claude-code`
         set -u
-        sock="${SEAHELM_SOCKET_PATH:-${HOME:-}/.config/seahelm/seahelm.sock}"
         core="${SEAHELM_CORE_SOCKET:-${HOME:-}/.config/seahelm/core.sock}"
 
         payload="$(cat)"
@@ -46,13 +44,12 @@ enum SeahelmHookInstaller {
           '{'*) [ -n "$prefix" ] && payload='{'"$prefix""${payload#\\{}" ;;
         esac
 
-        # Unix control sockets: the app's, then seahelm-core's, each only if it
-        # is there. Plain `nc -U` (Apple nc supports neither -N nor -w): it closes
-        # its write half on stdin EOF, the server acknowledges and closes. Discard
-        # the response; hook delivery is fire-and-forget.
+        # seahelm-core's socket, if it is there. Plain `nc -U` (Apple nc supports
+        # neither -N nor -w): it closes its write half on stdin EOF, the server
+        # acknowledges and closes. Discard the response; hook delivery is
+        # fire-and-forget.
         command -v nc >/dev/null 2>&1 || exit 0
         req='{"id":"h","method":"hook","params":'"$payload"'}'
-        if [ -S "$sock" ]; then printf '%s\\n' "$req" | nc -U "$sock" >/dev/null 2>&1 || true; fi
         if [ -S "$core" ]; then printf '%s\\n' "$req" | nc -U "$core" >/dev/null 2>&1 || true; fi
         exit 0
         """

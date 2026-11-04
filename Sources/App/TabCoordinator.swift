@@ -52,7 +52,7 @@ class TabCoordinator {
     private(set) lazy var chatProgress: ChatProgressReporter = {
         let reporter = ChatProgressReporter(sessions: commandSessions)
         reporter.send = { chatId, text, done in
-            AgentRegistry.shared.pushToChannel("telegram", message: OutboundMessage(
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
                 channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
             ) { messageId in
                 // The bridge reports the id from its own send queue; the
@@ -61,14 +61,14 @@ class TabCoordinator {
             }
         }
         reporter.edit = { chatId, messageId, text in
-            AgentRegistry.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
+            ChannelHub.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
                                                content: text)
         }
         reporter.remove = { chatId, messageId in
-            AgentRegistry.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
+            ChannelHub.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
         }
         reporter.draft = { chatId, text, canStop in
-            AgentRegistry.shared.draftInChannel("telegram", chatId: chatId,
+            ChannelHub.shared.draftInChannel("telegram", chatId: chatId,
                                                 draftId: ChatProgressReporter.boardDraftId,
                                                 content: text, canStop: canStop)
         }

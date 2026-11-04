@@ -25,7 +25,7 @@ enum OpenCodePluginInstaller {
     /// ignored, with no error to notice.
     static func pluginContents() -> String {
         return """
-        \(versionMarker) v4 — managed by seahelm. Do not edit; it is overwritten on launch.
+        \(versionMarker) v5 — managed by seahelm. Do not edit; it is overwritten on launch.
         //
         // Registers a `seahelm_suggest` tool that reports next-step options to
         // seahelm's control socket, where they render as clickable buttons, and
@@ -41,7 +41,8 @@ enum OpenCodePluginInstaller {
         import { tool } from "@opencode-ai/plugin"
 
         const SCRIPT = `${process.env.HOME}/.local/bin/seahelm-suggest`
-        const SOCK = process.env.SEAHELM_SOCKET_PATH ?? `${process.env.HOME}/.config/seahelm/seahelm.sock`
+        // seahelm-core is the only receiver of hook events.
+        const SOCK = process.env.SEAHELM_CORE_SOCKET ?? `${process.env.HOME}/.config/seahelm/core.sock`
         // Same fallback chain as the suggest script: panes created before
         // SEAHELM_PANE_ID was exported still carry SEAHELMD_SESSION.
         const PANE = process.env.SEAHELM_PANE_ID ?? process.env.SEAHELMD_SESSION ?? ""

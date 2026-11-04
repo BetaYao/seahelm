@@ -20,7 +20,7 @@ final class AgentRegistryWebhookPathTests: XCTestCase {
             branch: "feat-test",
             project: "WebhookTestProject"
         )
-        AgentRegistry.shared.registerChannel(mockChannel)
+        ChannelHub.shared.registerChannel(mockChannel)
         AgentRegistry.shared.onOutcome = nil
     }
 
@@ -34,7 +34,7 @@ final class AgentRegistryWebhookPathTests: XCTestCase {
         AgentRegistry.shared.onOutcome = nil
         drainMainQueue()
         AgentRegistry.shared.unregister(terminalID: tid)
-        AgentRegistry.shared.unregisterAllExternalChannels()
+        ChannelHub.shared.unregisterAllExternalChannels()
         super.tearDown()
     }
 

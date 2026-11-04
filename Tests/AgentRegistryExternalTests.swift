@@ -28,7 +28,7 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        AgentRegistry.shared.unregisterAllExternalChannels()
+        ChannelHub.shared.unregisterAllExternalChannels()
         // Clean up any agents from other tests
         for agent in AgentRegistry.shared.allPanes() {
             AgentRegistry.shared.unregister(terminalID: agent.id)
@@ -36,7 +36,7 @@ final class AgentRegistryExternalTests: XCTestCase {
     }
 
     override func tearDown() {
-        AgentRegistry.shared.unregisterAllExternalChannels()
+        ChannelHub.shared.unregisterAllExternalChannels()
         for agent in AgentRegistry.shared.allPanes() {
             AgentRegistry.shared.unregister(terminalID: agent.id)
         }
@@ -55,14 +55,14 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     func testRegisterExternalChannel() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
+        ChannelHub.shared.registerChannel(ch)
         XCTAssertNotNil(ch.onMessage, "onMessage callback should be wired up")
     }
 
     func testUnregisterExternalChannel() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.unregisterChannel("mock-ch")
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.unregisterChannel("mock-ch")
         XCTAssertTrue(ch.disconnectCalled)
     }
 
@@ -70,8 +70,8 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     func testHelpCommand() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "/help"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "/help"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("/idea"))
@@ -80,8 +80,8 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     func testStatusCommandNoPanes() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "/status"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "/status"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("No panes"))
@@ -91,8 +91,8 @@ final class AgentRegistryExternalTests: XCTestCase {
     /// run) the headless executor still answers, with the unknown-command reply.
     func testListVerbIsGone() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "/list"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "/list"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("Unknown command"))
@@ -100,8 +100,8 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     func testIdeaCommand() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "/idea 做一个暗色模式"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "/idea 做一个暗色模式"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("做一个暗色模式"))
@@ -111,8 +111,8 @@ final class AgentRegistryExternalTests: XCTestCase {
     /// nothing to steer, so it points at `/new` rather than dumping help.
     func testNonCommandWithNoAgentPointsAtNew() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "hello"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "hello"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("/new"))
@@ -120,8 +120,8 @@ final class AgentRegistryExternalTests: XCTestCase {
 
     func testUnknownCommandShowsHelp() {
         let ch = MockExternalChannel()
-        AgentRegistry.shared.registerChannel(ch)
-        AgentRegistry.shared.handleInbound(makeMessage(content: "/foobar"))
+        ChannelHub.shared.registerChannel(ch)
+        ChannelHub.shared.handleInbound(makeMessage(content: "/foobar"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
         XCTAssertTrue(ch.sentMessages[0].content.contains("/help"))
@@ -132,10 +132,10 @@ final class AgentRegistryExternalTests: XCTestCase {
     func testBroadcastSendsToAllChannels() {
         let ch1 = MockExternalChannel(channelId: "ch-1")
         let ch2 = MockExternalChannel(channelId: "ch-2")
-        AgentRegistry.shared.registerChannel(ch1)
-        AgentRegistry.shared.registerChannel(ch2)
+        ChannelHub.shared.registerChannel(ch1)
+        ChannelHub.shared.registerChannel(ch2)
 
-        AgentRegistry.shared.broadcast("test alert")
+        ChannelHub.shared.broadcast("test alert")
 
         XCTAssertEqual(ch1.sentMessages.count, 1)
         XCTAssertEqual(ch1.sentMessages[0].content, "test alert")
