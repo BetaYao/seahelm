@@ -32,6 +32,18 @@ fn user() -> String {
     std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into())
 }
 
+/// seahelm-gateway's admin socket: `$SEAHELM_GATEWAY_SOCKET`, else what
+/// `seahelm-gateway serve` listens on (the gateway's `paths::gateway_socket`).
+pub fn gateway_socket() -> PathBuf {
+    if let Some(p) = std::env::var_os("SEAHELM_GATEWAY_SOCKET").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    #[cfg(windows)]
+    return PathBuf::from(format!(r"\\.\pipe\seahelm-gateway-{}", user()));
+    #[cfg(not(windows))]
+    config_dir().join("gateway.sock")
+}
+
 /// seahelm-core's socket: `$SEAHELM_CORE_SOCKET`, else what `seahelm-core
 /// serve` listens on (`seahelm-core`'s `rpc::core_socket`).
 pub fn core_socket() -> PathBuf {

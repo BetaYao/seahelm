@@ -46,7 +46,7 @@ pub fn ensure() {
 /// docs/seahelm-gateway-plan.md) unless it runs already. It does nothing
 /// until web access or Telegram is turned on in its settings
 /// (`seahelm-gateway call gateway.config.set …`).
-fn ensure_gateway() {
+pub fn ensure_gateway() {
     let gateway = crate::platform::tool("seahelm-gateway", "SEAHELM_GATEWAY_BIN");
     match std::process::Command::new(gateway).arg("ensure").status() {
         Ok(s) if s.success() => {}
@@ -56,7 +56,13 @@ fn ensure_gateway() {
 }
 
 pub fn call(method: &str, params: Value) -> Result<Value, String> {
-    let mut stream = crate::platform::connect(&socket()).map_err(|e| e.to_string())?;
+    call_at(&socket(), method, params)
+}
+
+/// One newline-delimited JSON-RPC call on `path` (the core's socket, or
+/// seahelm-gateway's admin one): the result, or the error as text.
+pub fn call_at(path: &std::path::Path, method: &str, params: Value) -> Result<Value, String> {
+    let mut stream = crate::platform::connect(path).map_err(|e| e.to_string())?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
     let mut line = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
         .map_err(|e| e.to_string())?;
