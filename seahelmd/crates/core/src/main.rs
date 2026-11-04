@@ -18,6 +18,7 @@
 mod actions;
 mod bridge;
 mod cli;
+mod command;
 mod core;
 mod first_mate;
 mod install;

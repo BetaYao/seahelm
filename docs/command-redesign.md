@@ -5,6 +5,25 @@
 实现与提案的差异：`/return` 不带参数时不走 `/yes`，而是像以前一样每个 worktree 出一张审批卡；桌面上的 `/integrate` 被本地改动卡住时由报告卡片提供"丢弃并重跑"，不再额外弹 sheet；`ParsedLine` 是提案里 `CommandLine` 的实际名字（后者和 Foundation 撞名）。
 `seahelm` CLI（控制 socket）不在范围内，它是给 agent 用的程序接口，只要求名词一致。
 
+## 0. 2026-11-04 精简（以此为准）
+
+命令语言砍到五个动词，没有任何需要确认的命令：
+
+| 写法 | 作用 |
+|---|---|
+| `任意文字` | 发给当前对话对象（某个 pane 或 First Mate） |
+| `/go #3` · `/go @worktree` · `/go mate` | 换对话对象；First Mate 也是对象之一；不带参数说出当前是谁 |
+| `/new [@repo] 任务` | 新建 worktree 并起 agent，然后跟它说话 |
+| `/status` | 一张表：按仓库、worktree 列出全部 pane 与编号，没有 pane 的 worktree 也列出 |
+| `/show [#3]` | 一个 pane 在做什么：最近一轮与回复；只读；不带参数读当前对象 |
+| `/help [命令]` | 以上 |
+
+去掉的：`/order`、`/broadcast`、`/return`、`/forget`、`/integrate`、`/idea`、`/feedback`、`/add`、`/yes`、`/mate`（并入 `/go mate`）、`/status` 的 `worktrees` / `repos` 范围，以及所有旧写法。批量操作、收尾清理交给 First Mate（`cleanup-merged` 规则本来就做这件事）；仓库管理和集成留在桌面界面上。没有需要确认的命令，所以会话里也不再有“等待 `/yes`”的状态，只剩“在跟谁说话”。
+
+按 core / gateway 的边界（`docs/first-mate-core.md`），解析与执行在 seahelm-core（`seahelmd/crates/core-command`，接口 `command.run {text, context: {desktop?, binding?}}`，返回回复文本、按钮，以及变化后的对话对象）；对话对象由调用方保存、每次随命令带入。`#n` 编号存在 core 的 `core-pane-handles.json`，首次启动时继承 App 的 `pane-handles.json`。
+
+下文第 1 节起是 2026-07 的原始设计，动词表以本节为准。App 内的实现（`Sources/Core/Command/`）尚未同步精简。
+
 ## 1. 现状的问题
 
 | # | 问题 | 现在的表现 |

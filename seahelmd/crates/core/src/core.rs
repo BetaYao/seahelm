@@ -45,6 +45,10 @@ pub struct Core {
     /// Where each transcript was read to; its own lock, so reading one never
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
+    /// Stable pane handles (`#n`) for the command language.
+    pub(crate) handles: Mutex<seahelm_core_command::Handles>,
+    /// Per worktree: its repo root and branch, and when they were read.
+    pub(crate) git_cache: Mutex<HashMap<String, (String, String, Instant)>>,
 }
 
 struct State {
@@ -146,6 +150,8 @@ impl Core {
             prs: PrStore::new(Box::new(pr::Live)),
             first_mate: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
+            handles: Mutex::new(seahelm_core_command::Handles::open(&handles_path(), Some(&rpc::config_dir().join("pane-handles.json")))),
+            git_cache: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -488,6 +494,19 @@ impl Core {
                 Ok(json!({"messages": rows.iter().map(|m| m.to_json()).collect::<Vec<_>>(), "has_more": more}))
             }
             "message.subscribe" => return self.subscribe_messages(p),
+            // The command language: `{text, context: {desktop?, binding?}}` →
+            // the reply and, when it changed, who the conversation talks to.
+            "command.run" => {
+                let Some(text) = str_param(&p, "text") else {
+                    return Reply::Value(Err(RpcError::invalid_params("text required")));
+                };
+                let ctx = p.get("context").cloned().unwrap_or_default();
+                let context = seahelm_core_command::Context {
+                    desktop: ctx.get("desktop").and_then(Value::as_bool).unwrap_or(false),
+                    binding: ctx.get("binding").and_then(seahelm_core_command::Binding::from_json),
+                };
+                Ok(seahelm_core_command::run(&text, &context, &crate::command::CoreHost(&self)).to_json())
+            }
             other => Err(RpcError::not_found(other)),
         };
         Reply::Value(result)
@@ -775,6 +794,27 @@ impl Core {
         }
     }
 
+    /// Every pane but First Mate's, with the title its screen shows.
+    pub fn pane_infos(&self) -> Vec<(seahelm_core_registry::PaneInfo, String)> {
+        let st = self.lock();
+        st.registry
+            .panes()
+            .filter(|p| p.id != fm_policy::SESSION)
+            .map(|p| {
+                let title = st.panes.get(&p.id).and_then(|s| s.snapshot.as_ref()).map(|s| s.title.clone()).unwrap_or_default();
+                (p.clone(), title)
+            })
+            .collect()
+    }
+
+    pub fn messages_of(&self, pane: &str) -> Vec<seahelm_core_messages::Message> {
+        self.lock().messages.snapshot(Some(pane))
+    }
+
+    pub fn first_mate(&self) -> Option<&crate::first_mate::Handle> {
+        self.first_mate.get()
+    }
+
     pub fn pane_status(&self, pane: &str) -> Option<AgentStatus> {
         self.lock().registry.pane(pane).map(|p| p.status)
     }
@@ -910,6 +950,15 @@ impl Core {
                 }
             }
         }))
+    }
+}
+
+/// The core's pane handles: beside a scratch core's socket, else
+/// `~/.config/seahelm/core-pane-handles.json`.
+fn handles_path() -> PathBuf {
+    match std::env::var_os("SEAHELM_CORE_SOCKET") {
+        Some(sock) => PathBuf::from(format!("{}.handles.json", sock.to_string_lossy())),
+        None => rpc::config_dir().join("core-pane-handles.json"),
     }
 }
 
