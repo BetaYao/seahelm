@@ -637,6 +637,17 @@ class NotificationManager: NSObject {
         pendingFires[key] = timer
     }
 
+    /// A notice seahelm-core already decided on (`pane.notice`): history,
+    /// banner and the chat mirror, with no decision of the app's own.
+    func show(worktreePath: String, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int,
+              terminalID: String, newStatus: AgentStatus, lastMessage: String, lastUserPrompt: String,
+              lastAssistantMessage: String, isTargetVisible: Bool) {
+        deliver(worktreePath: worktreePath, workspaceName: workspaceName, branch: branch,
+                paneIndex: paneIndex, paneCount: paneCount, terminalID: terminalID, newStatus: newStatus,
+                lastMessage: lastMessage, lastUserPrompt: lastUserPrompt,
+                lastAssistantMessage: lastAssistantMessage, isTargetVisible: isTargetVisible)
+    }
+
     /// Builds and posts the notification (in-app history + optional system
     /// banner). Assumes eligibility was already decided by `notify`.
     private func deliver(

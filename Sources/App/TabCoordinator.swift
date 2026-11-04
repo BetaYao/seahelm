@@ -255,18 +255,12 @@ class TabCoordinator {
             case .hook, .mcp, .shell, .osc7501:
                 self.statusPublisher.invalidateScanCache(terminalID: outcome.info.id)
             }
-            if outcome.info.unseenCompletion,
-               UnseenCompletion.clears(newStatus: outcome.newStatus) {
-                self.setUnseenCompletion(false, terminalID: outcome.info.id)
-            }
             self.firstMate?.handle(outcome)
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
             self.chatProgress.ingest(outcome)
-            if outcome.isCompletionSignal {
-                self.completionSignals[outcome.info.id, default: 0] += 1
-                self.deliverAgentCompletion(outcome)
-            }
+            // Completions and notices are the core's to decide: `pane.notice`
+            // (handleCoreNotice).
             // Feed the worktree aggregator from AgentRegistry's arbitrated status
             // (scan + hook + OSC), so the dashboard reflects hook/OSC-driven
             // "running" that the scan-only path misses when the viewport text is
@@ -286,6 +280,11 @@ class TabCoordinator {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             self?.markVisiblePanesSeen()
+        }
+        // Leaving the app makes nothing on screen: finished turns stay unseen.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.reportVisibility()
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
@@ -915,7 +914,17 @@ class TabCoordinator {
                     }
                     CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
                     CoreLink.shared.start()
-                    // What every pane is doing comes from the core.
+                    // What every pane is doing comes from the core, and so do
+                    // the notices and unseen completions.
+                    CoreStatusFeed.shared.onNotice = { [weak self] notice, terminalID in
+                        self?.handleCoreNotice(notice, terminalID: terminalID)
+                    }
+                    CoreStatusFeed.shared.onUnseen = { [weak self] unseen, terminalID in
+                        self?.setUnseenCompletion(unseen, terminalID: terminalID)
+                    }
+                    CoreStatusFeed.shared.onConnectionChange = { [weak self] up in
+                        if up { self?.reportVisibility() }
+                    }
                     CoreStatusFeed.shared.start()
                     self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
                     self.mailPaneRouter?.route = self.commandRoute
@@ -1993,6 +2002,8 @@ class TabCoordinator {
     }
 
     func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+        // Notices are the core's to decide (handleCoreNotice).
+        guard !Self.coreDecidesNotices else { return }
         // Cache miss means a synchronous `git rev-parse` (up to 5s on a wedged
         // repo) — resolve off-thread, then deliver the notification on main.
         guard let repoPath = worktreeRepoCache[worktreePath] else {
@@ -2195,18 +2206,61 @@ class TabCoordinator {
     /// The worktree on screen has been looked at: every pane of it is on show.
     /// Called when the selection changes and when the app comes to the front.
     func markVisiblePanesSeen() {
-        guard NSApp.isActive, let path = dashboardVC?.activeSplitContainer?.tree?.worktreePath else { return }
-        for pane in AgentRegistry.shared.allPanes() where pane.worktreePath == path && pane.unseenCompletion {
-            setUnseenCompletion(false, terminalID: pane.id)
-        }
+        reportVisibility()
     }
+
+    /// Tell the core what is on screen (`client.visible`): it marks a pane's
+    /// finished turn unseen only when its worktree is not, and clears the mark
+    /// once it is shown in front.
+    func reportVisibility() {
+        let shown = dashboardVC?.activeSplitContainer?.tree?.worktreePath
+        let params: [String: Any] = ["client": "macos", "worktrees": shown.map { [$0] } ?? [],
+                                     "app_active": NSApp.isActive]
+        DispatchQueue.global(qos: .userInitiated).async { _ = CoreSocketClient.call("client.visible", params) }
+    }
+
+    /// The core decided a pane's edge is worth telling the user
+    /// (`pane.notice`, the notification policy in `core-registry`): show it.
+    func handleCoreNotice(_ n: [String: Any], terminalID: String?) {
+        let path = n["worktree_path"] as? String ?? ""
+        let newStatus = CoreDecode.status(n["new_status"]) ?? .idle
+        let id = terminalID ?? ""
+        NSLog("[notify] core notice pane=\(id.suffix(8)) \(n["old_status"] as? String ?? "")→\(newStatus.rawValue) " +
+              "worktree=\(URL(fileURLWithPath: path).lastPathComponent)")
+        // A pending card for this pane already shows that it needs input.
+        if newStatus == .waiting, !id.isEmpty,
+           pendingOrders.all().contains(where: { $0.action.terminalID == id }) {
+            return
+        }
+        let repoPath = worktreeRepoCache[path] ?? path
+        let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+        NotificationManager.shared.show(
+            worktreePath: path,
+            workspaceName: workspaceName,
+            branch: allWorktrees.first(where: { $0.info.path == path })?.info.branch ?? "",
+            paneIndex: n["pane_index"] as? Int ?? 1,
+            paneCount: n["pane_count"] as? Int ?? 1,
+            terminalID: id,
+            newStatus: newStatus,
+            lastMessage: n["last_message"] as? String ?? "",
+            lastUserPrompt: n["last_user_prompt"] as? String ?? "",
+            lastAssistantMessage: n["last_assistant_message"] as? String ?? "",
+            isTargetVisible: id.isEmpty ? (n["is_target_visible"] as? Bool ?? false)
+                : isPaneFocused(worktreePath: path, terminalID: id))
+    }
+
+    /// The app's own completion and notice decisions are off.
+    static let coreDecidesNotices = true
 
     /// A remote client opened a pane: its finished turn has been seen there.
     /// Station id or the stable session key, as remote callers hold either.
     func markPaneSeen(paneId: String) -> Bool {
         let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-        guard AgentRegistry.shared.pane(for: stationId)?.unseenCompletion == true else { return false }
-        setUnseenCompletion(false, terminalID: stationId)
+        guard let pane = AgentRegistry.shared.pane(for: stationId), pane.unseenCompletion else { return false }
+        // The core owns the mark; it clears it and says so (`pane.unseen_changed`).
+        let key = pane.station?.paneSessionKey ?? paneId
+        DispatchQueue.global(qos: .userInitiated).async { _ = CoreSocketClient.call("pane.seen", ["pane_id": key]) }
         return true
     }
 

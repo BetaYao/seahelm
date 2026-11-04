@@ -753,7 +753,7 @@ impl Workspace {
         cx.background_executor()
             .spawn(async move {
                 let worktrees: Vec<String> = path.into_iter().collect();
-                let _ = core_client::call("client.visible", serde_json::json!({"worktrees": worktrees, "app_active": active}));
+                let _ = core_client::call("client.visible", serde_json::json!({"client": "gpui", "worktrees": worktrees, "app_active": active}));
             })
             .detach();
     }

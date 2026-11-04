@@ -71,6 +71,10 @@ struct State {
     /// "on screen" for unseen completion.
     visible: HashSet<String>,
     app_active: bool,
+    /// What each client (`client.visible {client}`) shows, and whether it is
+    /// in front. `visible` / `app_active` are their union: a pane is on
+    /// screen when any client in front shows it.
+    clients: HashMap<String, (HashSet<String>, bool)>,
     /// The newest location each pane's agent reported (`pane.location`).
     locations: HashMap<String, Value>,
     /// Each worktree's title as the app's rows read it (session summary,
@@ -138,6 +142,7 @@ impl Core {
                 synced: HashSet::new(),
                 visible: HashSet::new(),
                 app_active: false,
+                clients: HashMap::new(),
                 locations: HashMap::new(),
                 worktree_titles: HashMap::new(),
                 session_refs,
@@ -343,10 +348,14 @@ impl Core {
             }
             "client.visible" => {
                 let mut st = self.lock();
-                st.visible = strings(&p, "worktrees").into_iter().collect();
-                st.app_active = p.get("app_active").and_then(Value::as_bool).unwrap_or(true);
-                if st.app_active {
-                    let shown: Vec<String> = st.visible.iter().cloned().collect();
+                let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
+                let shows: HashSet<String> = strings(&p, "worktrees").into_iter().collect();
+                let active = p.get("app_active").and_then(Value::as_bool).unwrap_or(true);
+                st.clients.insert(client, (shows.clone(), active));
+                st.app_active = st.clients.values().any(|(_, a)| *a);
+                st.visible = st.clients.values().filter(|(_, a)| *a).flat_map(|(w, _)| w.iter().cloned()).collect();
+                if active {
+                    let shown: Vec<String> = shows.into_iter().collect();
                     for wt in shown {
                         st.registry.mark_worktree_seen(&wt);
                     }

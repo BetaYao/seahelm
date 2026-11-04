@@ -11,22 +11,27 @@ enum CoreDecode {
     /// Lay a pane's `info` over the app's snapshot. Identity, worktree,
     /// project and branch stay the app's: the app owns its layout.
     static func apply(_ info: [String: Any], to p: inout PaneInfo) {
+        // Only the keys given: `pane.unseen_changed` sends one.
+        func has(_ k: String) -> Bool { info.keys.contains(k) }
         if let s = status(info["status"]) { p.status = s }
         if let t = agentType(info["agent_type"]), t != .unknown { p.agentType = t }
-        p.lastMessage = info["last_message"] as? String ?? p.lastMessage
-        p.lastAssistantMessage = info["last_assistant_message"] as? String ?? p.lastAssistantMessage
-        p.lastAssistantMessageAt = date(info["last_assistant_message_at"])
-        p.lastUserPrompt = info["last_user_prompt"] as? String ?? p.lastUserPrompt
-        p.lastUserPromptAt = date(info["last_user_prompt_at"])
-        p.commandLine = info["command_line"] as? String
-        p.roundDuration = info["round_duration"] as? Double ?? 0
-        p.tasks = (info["tasks"] as? [[String: Any]] ?? []).compactMap(task)
-        p.activityEvents = (info["activity_events"] as? [[String: Any]] ?? []).compactMap(activity)
-        p.scanStatus = status(info["scan_status"]) ?? .unknown
-        p.hookStatus = status(info["hook_status"]) ?? .unknown
-        p.programStatus = status(info["program_status"]) ?? .unknown
-        p.programState = programState(info["program_state"] as? String)
-        p.backgroundBusy = info["background_busy"] as? Bool ?? false
+        if let v = info["last_message"] as? String { p.lastMessage = v }
+        if let v = info["last_assistant_message"] as? String { p.lastAssistantMessage = v }
+        if has("last_assistant_message_at") { p.lastAssistantMessageAt = date(info["last_assistant_message_at"]) }
+        if let v = info["last_user_prompt"] as? String { p.lastUserPrompt = v }
+        if has("last_user_prompt_at") { p.lastUserPromptAt = date(info["last_user_prompt_at"]) }
+        if has("command_line") { p.commandLine = info["command_line"] as? String }
+        if let v = info["round_duration"] as? Double { p.roundDuration = v }
+        if has("tasks") { p.tasks = (info["tasks"] as? [[String: Any]] ?? []).compactMap(task) }
+        if has("activity_events") {
+            p.activityEvents = (info["activity_events"] as? [[String: Any]] ?? []).compactMap(activity)
+        }
+        if has("scan_status") { p.scanStatus = status(info["scan_status"]) ?? .unknown }
+        if has("hook_status") { p.hookStatus = status(info["hook_status"]) ?? .unknown }
+        if has("program_status") { p.programStatus = status(info["program_status"]) ?? .unknown }
+        if has("program_state") { p.programState = programState(info["program_state"] as? String) }
+        if let v = info["background_busy"] as? Bool { p.backgroundBusy = v }
+        if let v = info["unseen"] as? Bool { p.unseenCompletion = v }
     }
 
     // MARK: the event

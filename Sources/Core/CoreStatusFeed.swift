@@ -16,9 +16,14 @@ final class CoreStatusFeed {
     /// Whether the event stream is up. Main thread.
     private(set) var connected = false
     var onConnectionChange: ((Bool) -> Void)?
+    /// A notice the core decided to give (`pane.notice`), with the app's pane
+    /// for it when it has one. Main thread.
+    var onNotice: (([String: Any], String?) -> Void)?
+    /// The core marked or cleared a pane's unseen completion. Main thread.
+    var onUnseen: ((Bool, String) -> Void)?
 
     private var thread: Thread?
-    private static let types = ["pane.status_changed", "pane.updated"]
+    private static let types = ["pane.status_changed", "pane.updated", "pane.notice", "pane.unseen_changed"]
 
     func start() {
         guard thread == nil else { return }
@@ -86,9 +91,25 @@ final class CoreStatusFeed {
     }
 
     private func deliver(_ ev: [String: Any]) {
-        guard let info = ev["info"] as? [String: Any] else { return }
         let key = ev["pane_session_key"] as? String ?? ""
         let alias = ev["pane_id"] as? String ?? ""
+        switch ev["type"] as? String {
+        case "pane.notice":
+            DispatchQueue.main.async { [weak self] in
+                self?.onNotice?(ev, Self.terminalID(session: key, alias: alias))
+            }
+            return
+        case "pane.unseen_changed":
+            let unseen = ev["unseen"] as? Bool ?? false
+            DispatchQueue.main.async { [weak self] in
+                guard let id = Self.terminalID(session: key, alias: alias) else { return }
+                self?.onUnseen?(unseen, id)
+            }
+            return
+        default:
+            break
+        }
+        guard let info = ev["info"] as? [String: Any] else { return }
         let changed = ev["type"] as? String == "pane.status_changed"
         let completion = ev["is_completion"] as? Bool ?? false
         let raw = ev["event"] as? [String: Any]
