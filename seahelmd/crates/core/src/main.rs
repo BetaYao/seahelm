@@ -96,6 +96,7 @@ fn serve() -> Result<()> {
         None => rpc::config_dir().join("core-events.jsonl"),
     };
     core.spawn_event_log(event_log);
+    core.spawn_titles();
     pr::spawn(Arc::clone(&core));
     usage::spawn();
     eprintln!("seahelm-core listening on {}", path.display());

@@ -21,7 +21,9 @@ alive() { [ -f "$ab/$1.pid" ] && kill -0 "$(cat "$ab/$1.pid")" 2>/dev/null; }
 case "${1:-status}" in
 start)
   alive recorder || { nohup python3 "$here/ab_record.py" >>"$ab/recorder.log" 2>&1 & echo $! >"$ab/recorder.pid"; }
-  alive shadow || { nohup "$core" shadow --follow-app >>"$ab/shadow.log" 2>&1 & echo $! >"$ab/shadow.pid"; }
+  # Restarted whenever it exits: it gives up when the core goes away (a
+  # core restart), and the comparison should outlive that.
+  alive shadow || { nohup sh -c "while :; do '$core' shadow --follow-app; sleep 3; done" >>"$ab/shadow.log" 2>&1 & echo $! >"$ab/shadow.pid"; }
   [ -f "$ab/state.json" ] || printf '{"started_at": %s}\n' "$(date +%s)" >"$ab/state.json"
   "$0" status ;;
 status)
@@ -32,7 +34,10 @@ status)
 report)
   shift; python3 "$here/ab_report.py" "$@" ;;
 stop)
-  for p in recorder shadow; do alive $p && kill "$(cat "$ab/$p.pid")" || true; rm -f "$ab/$p.pid"; done
+  for p in recorder shadow; do
+    if alive $p; then pid="$(cat "$ab/$p.pid")"; pkill -P "$pid" 2>/dev/null || true; kill "$pid" || true; fi
+    rm -f "$ab/$p.pid"
+  done
   "$0" status ;;
 *) echo "usage: $0 start|status|report|stop" >&2; exit 2 ;;
 esac

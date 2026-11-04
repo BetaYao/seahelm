@@ -15,8 +15,9 @@ pub struct Item {
     /// The worktree's path, which is also its id.
     pub id: String,
     pub title: String,
-    /// The branch.
+    /// The second line: the worktree's name ("main" for the main checkout).
     pub subtitle: String,
+    pub branch: String,
     pub repository: String,
     /// seahelm-core's status word ("Running", "Idle", …), empty when the
     /// core has no pane there.
@@ -217,13 +218,18 @@ pub fn read() -> Snapshot {
             .enumerate()
             .map(|(i, (path, branch))| Item {
                 id: path.clone(),
-                title: if i == 0 { name.clone() } else { base_name(&path) },
-                subtitle: branch,
+                // The app's rows: a session title from the core wins, else the
+                // branch; the second line is the worktree's name, "main" for
+                // the main checkout.
+                title: if branch.is_empty() || branch == "detached" { base_name(&path) } else { branch.clone() },
+                subtitle: if i == 0 { "main".to_string() } else { base_name(&path) },
+                branch: branch.clone(),
                 repository: name.clone(),
                 worktree_path: path,
                 ..Item::default()
             })
             .collect();
+        let items = by_creation(items);
         groups.push(Group { title: name, items });
     }
     Snapshot { groups, error: None }
@@ -270,6 +276,23 @@ pub fn regroup(groups: &[Group], mode: Grouping, now: f64) -> Vec<Group> {
     }
     out.retain(|g| !g.items.is_empty());
     out
+}
+
+/// The app's order: the main checkout first, then the rest oldest first by
+/// when their directory was made. A filesystem that keeps no creation time
+/// leaves git's order.
+fn by_creation(mut items: Vec<Item>) -> Vec<Item> {
+    if items.len() < 3 {
+        return items;
+    }
+    let rest = items.split_off(1);
+    let mut dated: Vec<(Option<std::time::SystemTime>, Item)> =
+        rest.into_iter().map(|i| (std::fs::metadata(&i.worktree_path).and_then(|m| m.created()).ok(), i)).collect();
+    if dated.iter().all(|(t, _)| t.is_some()) {
+        dated.sort_by_key(|(t, _)| *t);
+    }
+    items.extend(dated.into_iter().map(|(_, i)| i));
+    items
 }
 
 fn git(path: &str, args: &[&str]) -> Option<String> {
