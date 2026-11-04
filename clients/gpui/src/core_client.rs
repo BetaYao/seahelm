@@ -87,3 +87,72 @@ pub fn worktrees() -> std::collections::HashMap<String, WorktreeState> {
         })
         .collect()
 }
+
+/// One window of a provider's usage (`usage.summary` readouts): "5h", "42%",
+/// and how much is used ("ok", "warn", "critical").
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsageSegment {
+    pub label: String,
+    pub percent: String,
+    pub severity: String,
+}
+
+/// A provider's windows that have a reading; providers with none left out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsageReadout {
+    pub name: String,
+    pub segments: Vec<UsageSegment>,
+}
+
+/// Claude's and Codex's rate limits as the core reads them (`usage.summary`);
+/// empty when it has nothing, or is not running.
+pub fn usage() -> Vec<UsageReadout> {
+    let Ok(v) = call("usage.summary", json!({})) else { return Vec::new() };
+    parse_usage(&v)
+}
+
+pub fn parse_usage(v: &Value) -> Vec<UsageReadout> {
+    v.get("readouts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let segments: Vec<UsageSegment> = r
+                .get("segments")?
+                .as_array()?
+                .iter()
+                .filter_map(|s| {
+                    let percent = s.get("percent_text")?.as_str()?;
+                    (percent != "--").then(|| UsageSegment {
+                        label: s.get("label").and_then(Value::as_str).unwrap_or("").to_string(),
+                        percent: percent.to_string(),
+                        severity: s.get("severity").and_then(Value::as_str).unwrap_or("unknown").to_string(),
+                    })
+                })
+                .collect();
+            let name = r.get("name").and_then(Value::as_str)?.to_string();
+            (!segments.is_empty()).then_some(UsageReadout { name, segments })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    #[test]
+    fn windows_without_a_reading_are_left_out() {
+        let v = json!({"readouts": [
+            {"provider": "claude", "name": "Claude", "segments": [
+                {"label": "5h", "percent_text": "--", "severity": "unknown"},
+                {"label": "7d", "percent_text": "42%", "severity": "ok"}]},
+            {"provider": "codex", "name": "Codex", "segments": [
+                {"label": "quota", "percent_text": "--", "severity": "unknown"}]}
+        ]});
+        let r = parse_usage(&v);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].name, "Claude");
+        assert_eq!(r[0].segments, vec![UsageSegment { label: "7d".into(), percent: "42%".into(), severity: "ok".into() }]);
+        assert!(parse_usage(&json!({})).is_empty());
+    }
+}

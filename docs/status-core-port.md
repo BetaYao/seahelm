@@ -264,6 +264,7 @@ right.
 | M4 | Shadow mode in place: hooks reach the core (first forwarded by the app, now sent by the bridge itself, see M6), and `seahelm-core shadow --follow-app` mirrors the app's panes into the core and logs every disagreement that outlasts 8 s to `~/.config/seahelm/core-shadow.jsonl`. |
 | M5 | The GPUI client starts the core, registers the panes it opens, reports what it shows, and takes each worktree's dot from the core where the core has one. The installers and the Rust `seahelm-hook` are ported (`seahelm-core-hooks::install`, `src/bin/seahelm-hook.rs`); nothing installs them yet, since the app still installs its own shim. |
 | M6 | Hooks reach the core with no app in between. The app's `seahelm-hook` (v7) sends each payload to `core.sock` as well as `seahelm.sock`, and the app no longer forwards (`CoreHookForwarder` is gone, so nothing arrives twice). Without the app, `seahelm-core install-hooks` wires Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`, `[features].hooks`) to `seahelm-core hook <source>`, a bridge with the shim's contract (the `wire` splice, no stdout, exit 0, 2 s watchdog) that talks to the core's socket or, on Windows, its named pipe. It leaves an event alone when it already runs `seahelm-hook`, migrates its own entry when the exe moves, and never touches anyone else's. |
+| Usage | Claude's and Codex's rate limits and today's tokens (the app's `Sources/Usage`) are a core service. `usage.summary` returns both snapshots (`rate_limit`, `weekly_rate_limit`, `today_tokens`, `updated_at`, `is_stale`) and the readouts (`segments`: `label`, `percent_text`, `severity`, `reset_text`). A thread of its own refreshes them every 60 s, and each field falls back to its last reading for 10 min (`crates/core/src/usage.rs`; the providers' and store's tests are ported by name). Claude's figures come only from the statusline payload cache: `~/Library/Caches/seahelm/claude-statusline.json` on macOS, so the app's bridge keeps feeding it; `$XDG_CACHE_HOME/seahelm` on Linux; `%LOCALAPPDATA%\seahelm\cache` on Windows. Codex's come from `codex app-server` and `~/.codex/sessions`. Without the app, `install-hooks` also wraps Claude's `statusLine` in `seahelm-core statusline -- '<original>'` (`statusline.rs`), which caches a payload that carries rate limits, then runs the original on the same bytes and passes its output and status through. The original command stays in the settings after `--`; the app's bridge is left alone. The GPUI client shows the readout at the foot of the fleet column. |
 
 Found while porting, beyond the table above:
 
@@ -272,14 +273,17 @@ Found while porting, beyond the table above:
   GPUI client uses), so the root is now read too, and set aside only when it
   is a shell. A login shell's argv0 (`-zsh`) now counts as a shell.
 - A core started by a client that ignores SIGTERM inherited that and could
-  not be stopped. `serve` restores the default handlers.
+  not be stopped. `serve` restores the default handlers, and unblocks
+  SIGTERM and SIGINT: a blocked mask survives exec as well, so a core the
+  GPUI client started would not stop on SIGTERM.
 
 Still open:
 
-- **Windows.** The core listens on a Unix socket. On Windows it needs the
-  same named-pipe server that seahelmd's own Windows port needs (see the port
-  assessment: keep's `pipe.rs`). The hook binary's Windows client side is
-  written but untested.
+- **Windows.** The core serves a named pipe (seahelmd's platform layer), and
+  CI builds and tests it there, but none of this has been tried on a Windows
+  desktop. Untested there: the hook bridge; the statusline tee, which runs
+  the original command through `cmd /C` while Claude Code on Windows may use
+  Git Bash; and `codex app-server` through an npm `.cmd` shim.
 - **The app as a client of the core.** The app still decides status itself
   (the core gets hooks from the bridge, not from the app). Moving its consumers over (rows, island,
   notifications, Telegram, First Mate) is a separate plan, to be written once

@@ -95,6 +95,8 @@ pub struct Workspace {
     /// seahelm-core's view of the worktrees it has panes in; where it has
     /// one, it decides the row's dot.
     core: HashMap<String, WorktreeState>,
+    /// Claude's and Codex's rate limits (`usage.summary`), at the column's foot.
+    usage: Vec<core_client::UsageReadout>,
 }
 
 impl Workspace {
@@ -117,8 +119,10 @@ impl Workspace {
             focus: cx.focus_handle(),
             memory: None,
             core: HashMap::new(),
+            usage: Vec::new(),
         };
         Self::poll_core(cx);
+        Self::poll_usage(cx);
         Self::poll_fleet(cx);
         Self::poll_git(cx);
         Self::poll_memory(cx);
@@ -172,6 +176,31 @@ impl Workspace {
                     break;
                 }
                 cx.background_executor().timer(Duration::from_secs(2)).await;
+            }
+        })
+        .detach();
+    }
+
+    /// Usage, off the main thread: every 45 s, sooner while the core has
+    /// nothing yet (it reads both providers just after it starts).
+    fn poll_usage(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(5)).await;
+            let usage = cx.background_executor().spawn(async { core_client::usage() }).await;
+            let empty = usage.is_empty();
+            let alive = this
+                .update(cx, |w, cx| {
+                    if w.usage != usage {
+                        w.usage = usage;
+                        cx.notify();
+                    }
+                })
+                .is_ok();
+            if !alive {
+                break;
+            }
+            if !empty {
+                cx.background_executor().timer(Duration::from_secs(40)).await;
             }
         })
         .detach();
@@ -673,6 +702,51 @@ impl Workspace {
             .child(self.fleet_header(cx))
             .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
             .child(self.fleet_list(cx))
+            .when(!self.usage.is_empty(), |d| d.child(self.usage_foot()))
+    }
+
+    /// `─ Claude 5h 42% · 7d 18%   Codex 5h 12% ───` where the app's First
+    /// Mate dock sits: mono 11, muted, each percentage tinted by how much of
+    /// the window is used.
+    fn usage_foot(&self) -> impl IntoElement {
+        let rule = || div().h(px(1.)).bg(tokens::hairline());
+        let mut line = div().flex().flex_row().items_center().gap(px(6.)).child(rule().w(px(14.)).flex_none());
+        for (i, r) in self.usage.iter().enumerate() {
+            let mut group = div()
+                .flex()
+                .flex_row()
+                .flex_none()
+                .gap(px(4.))
+                .when(i > 0, |d| d.ml(px(6.)))
+                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink_dim()).child(r.name.clone()));
+            for (j, s) in r.segments.iter().enumerate() {
+                let tint = match s.severity.as_str() {
+                    "warn" => tokens::attention(),
+                    "critical" => tokens::danger(),
+                    _ => tokens::ink_dim(),
+                };
+                if j > 0 {
+                    group = group.child(div().text_color(tokens::ink_faint()).child("·"));
+                }
+                group = group
+                    .child(div().text_color(tokens::ink_faint()).child(s.label.clone()))
+                    .child(div().font_weight(FontWeight::MEDIUM).text_color(tint).child(s.percent.clone()));
+            }
+            line = line.child(group);
+        }
+        div()
+            .id("usage-foot")
+            .flex_none()
+            .mt(px(10.))
+            .mb(px(12.))
+            .mr(px(12.))
+            .ml(px(6.))
+            .px(px(6.))
+            .py(px(6.))
+            .overflow_hidden()
+            .text_size(px(11.))
+            .line_height(px(15.))
+            .child(line.child(rule().flex_1().min_w(px(8.))))
     }
 
     /// 40pt: the traffic lights' 70×14 slot on the left, the icon cluster on

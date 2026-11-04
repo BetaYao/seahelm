@@ -13,6 +13,9 @@
 //! an event that already runs the app's bridge (`seahelm-hook`) is left
 //! alone — that bridge reaches the core itself, and a second hook would
 //! deliver every event twice.
+//!
+//! It also wraps Claude Code's `statusLine` in `seahelm-core statusline`
+//! (see `statusline.rs`), so its rate limits reach `usage.summary`.
 
 use std::path::{Path, PathBuf};
 
@@ -44,8 +47,12 @@ pub fn run(_args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn home() -> PathBuf {
-    std::env::var_os("HOME")
+/// `$SEAHELM_HOME` (a stand-in home, for trying the installers on a copy),
+/// else `$HOME`, else `%USERPROFILE%`.
+pub fn home() -> PathBuf {
+    std::env::var_os("SEAHELM_HOME")
+        .filter(|h| !h.is_empty())
+        .or_else(|| std::env::var_os("HOME"))
         .filter(|h| !h.is_empty())
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
@@ -62,6 +69,8 @@ pub fn install(home: &Path, exe: &Path) -> Vec<String> {
     out.push(report("Codex hooks", &hooks, merge_file(&hooks, CODEX_EVENTS, &command(exe, "codex"))));
     let config = codex_dir.join("config.toml");
     out.push(report("Codex [features].hooks", &config, enable_codex_hooks(&config)));
+    // Claude's rate limits come only through its statusline (`statusline`).
+    out.push(report("Claude Code statusline", &claude, crate::statusline::install(&claude, exe)));
     out
 }
 
@@ -209,7 +218,7 @@ pub fn enable_codex_hooks(path: &Path) -> Result<Outcome> {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> Result<()> {
+pub fn write_atomic(path: &Path, text: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     }
